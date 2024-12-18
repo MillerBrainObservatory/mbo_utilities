@@ -21,10 +21,18 @@ echo "----------------"
 echo "GPU Info:"
 nvidia-smi || echo "No GPUs found"
 echo "----------------"
+
 tmpdir=$(mktemp -d /tmp/data_XXXXXX)
-rsync -av /lustre/fs4/mbo/scratch/mbo_data/lbm/high_res/plane* "$tmpdir/"
+batchdir="$tmpdir"/batch
+
+rsync -av $MBO_DATA/lbm/high_res/plane* "$tmpdir/"
 echo "Data staged in $tmpdir"
 echo "----------------"
 
 echo "Running lcp on transferred files"
-lcp "$tmpdir"/batch.pickle --create --run mcorr cnmf --max_shifts 20 20 --gSig_filt 3 3 --overlaps 4 4 --strides 14 14 --data_path "$tmpdir"/*.tif
+lcp "$batchdir"/batch.pickle --create --run mcorr cnmf --max_shifts 20 20 --gSig_filt 3 3 --overlaps 4 4 --strides 14 14 --data_path "$tmpdir"/*.tif
+
+tmp_dest=$(mktemp -d $SCRATCH/$USER/out_XX)
+mv "$batch_dir" "$tmp_dest"
+echo "Removing temporary directory $tmpdir"
+rm -rf "$tmpdir"
