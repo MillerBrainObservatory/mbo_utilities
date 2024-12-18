@@ -7,6 +7,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=256G
 #SBATCH --partition=hpc_a10_a
+
 hostname
 pwd
 echo "SLURM_NODELIST: $SLURM_NODELIST"
@@ -23,16 +24,33 @@ nvidia-smi || echo "No GPUs found"
 echo "----------------"
 
 tmpdir=$(mktemp -d /tmp/data_XXXXXX)
-batchdir="$tmpdir"/batch
 
-rsync -av $MBO_DATA/lbm/high_res/plane* "$tmpdir/"
+batchdir="$tmpdir/batch"
+mkdir -p "$batchdir"
+
+echo "----------------"
+rsync -av "$MBO_DATA/lbm/high_res/plane*" "$tmpdir/"
+
 echo "Data staged in $tmpdir"
 echo "----------------"
 
-echo "Running lcp on transferred files"
-lcp "$batchdir"/batch.pickle --create --run mcorr cnmf --max_shifts 20 20 --gSig_filt 3 3 --overlaps 4 4 --strides 14 14 --data_path "$tmpdir"/*.tif
+ls -la "$tmpdir"
 
-tmp_dest=$(mktemp -d $SCRATCH/$USER/out_XX)
-mv "$batch_dir" "$tmp_dest"
-echo "Removing temporary directory $tmpdir"
-rm -rf "$tmpdir"
+echo "Running lcp on transferred files"
+
+lcp "$batchdir/batch.pickle" --create --run mcorr cnmf --max_shifts 20 20 --gSig_filt 3 3 --overlaps 4 4 --strides 14 14 --data_path "$tmpdir"/*.tif
+
+echo "Contents of $tmpdir after lcp:"
+ls -lR "$tmpdir"
+
+tmp_dest="$SCRATCH/$USER/out"
+mkdir -p temp_dest
+
+echo "$tmp_dest"
+echo "Created!"
+
+ls -lR "$batchdir"
+
+cp -r "$batchdir" "$tmp_dest"
+
+echo "Complete!"
