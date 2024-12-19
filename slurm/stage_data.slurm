@@ -20,17 +20,8 @@ echo "Hostname: $(hostname)"
 echo "Current Directory: $(pwd)"
 echo "----------------"
 
-# Print system info for logs
-echo "CPU Info:"
-lscpu
-echo "----------------"
-
 echo "Memory Info:"
 free -h
-echo "----------------"
-
-echo "GPU Info:"
-nvidia-smi || echo "No GPUs found"
 echo "----------------"
 
 # Create a temporary working directory

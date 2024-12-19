@@ -1,0 +1,1 @@
+/ru-auth/local/home/foconnell/.bashrc
