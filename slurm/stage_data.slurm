@@ -12,6 +12,7 @@
 copydir="$MBO_DATA/lbm/high_res/raw/"
 outdir="~/caiman_data/hpc/"
 
+# Create a temporary directory to store raw files
 tmpdir=$(mktemp -d /tmp/data_XXXXXX)
 
 # Enable error handling and robust shell options
@@ -29,38 +30,62 @@ echo "Memory Info:"
 free -h
 echo "----------------"
 
-# cleanup on script exit
+# Cleanup on script exit
 # -----------------------------------------------------
 cleanup() {
-  echo "Cleaning up temporary directory $tmpdir"
-  rm -rf "$tmpdir"
+        echo "Cleaning up temporary directory $tmpdir"
+        rm -rf "$tmpdir"
 }
 trap cleanup EXIT
 
-# Stage data
+# Stage raw data into temporary directory
 # -----------------------------------------------------
-echo "Staging data to $tmpdir"
-rsync -av --include 'plane_*' --exclude '*' "$copydir" "$tmpdir/"
-echo "Successful staging."
+echo "Staging raw data from $copydir to $tmpdir"
+rsync -av --include '*/' --include 'plane_*' --exclude '*' "$copydir/" "$tmpdir/"
+echo "Data successfully staged to $tmpdir"
 
+echo "----------------"
+echo "Listing contents of staged data:"
 ls -la "$tmpdir"
+echo "----------------"
+
+# Create batch directory
+# -----------------------------------------------------
+echo "----------------"
+echo "Creating batch directory at $tmpdir/batch"
+mkdir -p "$tmpdir/batch"
+echo "----------------"
 
 # Run lcp on the staged files  
 # -----------------------------------------------------
+echo "----------------"
+echo "Running lcp on staged files..."
+lcp --batch_path "$tmpdir/batch/batch.pickle" --run mcorr cnmf \
+        --max_shifts 10 10 \
+        --K 150 \
+        --gSig_filt 0 0 \
+        --overlaps 4 4 \
+        --strides 14 14 \
+        --data_path "$tmpdir"
+echo "----------------"
 
-echo "Running lcp on transferred files..."
-lcp --batch_path "$tmpdir" --run mcorr cnmf \
-    --max_shifts 10 10 \
-    --K 150 \
-    --gSig_filt 0 0 \
-    --overlaps 4 4 \
-    --strides 14 14 \
-    --data_path "$tmpdir"
-
+# Transfer the results back to local machine
+# -----------------------------------------------------
 completion_time=$(date +"%Y-%m-%d_%H-%M-%S")
 tmp_dest="~/caiman_data/hpc/${completion_time}"
 
-rsync -av -e --exclude 'plane_*' --include '*' "ssh" "$tmpdir/" rbo:"$tmp_dest"
+echo "----------------"
+echo "Transferring results from $tmpdir to remote directory $tmp_dest"
+rsync -av -e "ssh" --exclude 'plane_*' --include '*' "$tmpdir/" rbo:"$tmp_dest"
+echo "Transfer complete."
+echo "----------------"
+
+# Final cleanup (only run if everything else succeeds)
+# -----------------------------------------------------
+echo "----------------"
+echo "Cleaning up temporary directory $tmpdir"
+rm -rf "$tmpdir"
 
 echo "Job Complete!"
+echo "----------------"
 
