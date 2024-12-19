@@ -9,8 +9,14 @@
 #SBATCH --mem=256G
 #SBATCH --partition=hpc_a10_a
 
+batchdir="$tmpdir/batch"
+
+tmpdir=$(mktemp -d /tmp/data_XXXXXX)
+mkdir -p "$batchdir"
+
 # Enable error handling and robust shell options
 set -euo pipefail
+
 
 echo "----------------"
 echo "Job Info"
@@ -25,7 +31,6 @@ free -h
 echo "----------------"
 
 # Create a temporary working directory
-tmpdir=$(mktemp -d /tmp/data_XXXXXX)
 echo "Temporary directory created at: $tmpdir"
 
 # Ensure cleanup happens on script exit
@@ -36,9 +41,6 @@ cleanup() {
 trap cleanup EXIT
 
 # Create a batch directory inside the temp directory
-batchdir="$tmpdir/batch"
-mkdir -p "$batchdir"
-echo "Batch directory created at: $batchdir"
 
 # Stage data from $MBO_DATA to the temporary directory
 echo "Staging data from $MBO_DATA/lbm/high_res/plane* to $tmpdir"
