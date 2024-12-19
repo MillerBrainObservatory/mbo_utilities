@@ -5,18 +5,17 @@
 #SBATCH --error=stage_data_%j.err
 #SBATCH --time=01:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=34
 #SBATCH --mem=256G
 #SBATCH --partition=hpc_a10_a
 
-batchdir="$tmpdir/batch"
+copydir="$MBO_DATA/lbm/high_res/raw/"
+outdir="~/caiman_data/hpc/"
 
 tmpdir=$(mktemp -d /tmp/data_XXXXXX)
-mkdir -p "$batchdir"
 
 # Enable error handling and robust shell options
 set -euo pipefail
-
 
 echo "----------------"
 echo "Job Info"
@@ -30,50 +29,38 @@ echo "Memory Info:"
 free -h
 echo "----------------"
 
-# Create a temporary working directory
-echo "Temporary directory created at: $tmpdir"
-
-# Ensure cleanup happens on script exit
+# cleanup on script exit
+# -----------------------------------------------------
 cleanup() {
   echo "Cleaning up temporary directory $tmpdir"
   rm -rf "$tmpdir"
 }
 trap cleanup EXIT
 
-# Create a batch directory inside the temp directory
+# Stage data
+# -----------------------------------------------------
+echo "Staging data to $tmpdir"
+rsync -av --include 'plane_*' --exclude '*' "$copydir" "$tmpdir/"
+echo "Successful staging."
 
-# Stage data from $MBO_DATA to the temporary directory
-echo "Staging data from $MBO_DATA/lbm/high_res/plane* to $tmpdir"
-rsync -av --include 'plane_*' --exclude '*' "${MBO_DATA%/}/lbm/high_res/" "$tmpdir/"
-
-echo "Data staged successfully in $tmpdir"
-echo "Contents of $tmpdir:"
 ls -la "$tmpdir"
 
-# Run lcp on the staged files
+# Run lcp on the staged files  
+# -----------------------------------------------------
+
 echo "Running lcp on transferred files..."
-lcp "$batchdir/batch.pickle" --create --run mcorr cnmf \
-    --max_shifts 20 20 \
-    --gSig_filt 3 3 \
+lcp --batch_path "$tmpdir" --run mcorr cnmf \
+    --max_shifts 10 10 \
+    --K 150 \
+    --gSig_filt 0 0 \
     --overlaps 4 4 \
     --strides 14 14 \
     --data_path "$tmpdir"
 
-echo "lcp processing complete."
-echo "Contents of $tmpdir after lcp:"
-ls -lR "$tmpdir"
-
-# Create destination directory on $SCRATCH
 completion_time=$(date +"%Y-%m-%d_%H-%M-%S")
-tmp_dest="$SCRATCH/$USER/${completion_time}"
-echo "Creating destination directory: $tmp_dest"
-mkdir -p "$tmp_dest"
+tmp_dest="~/caiman_data/hpc/${completion_time}"
 
-echo "Copying batch directory from $batchdir to $tmp_dest"
-cp -r "$batchdir" "$tmp_dest"
-
-echo "Final contents of destination directory $tmp_dest:"
-ls -lR "$tmp_dest"
+rsync -av -e --exclude 'plane_*' --include '*' "ssh" "$tmpdir/" rbo:"$tmp_dest"
 
 echo "Job Complete!"
 
