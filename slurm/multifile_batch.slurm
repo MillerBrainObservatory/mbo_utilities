@@ -1,15 +1,16 @@
 #!/bin/bash -l
 
+mkdir -p ~/logs
+
 #SBATCH --job-name=mcorr
-#SBATCH --output=stage_data_%j.out
-#SBATCH --error=stage_data_%j.err
-#SBATCH --time=01:00:00
+#SBATCH --output=~/logs/lcp_%x_%j.out
+#SBATCH --error=~/logs/lcp_%x_%j.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=34
 #SBATCH --mem=256G
 #SBATCH --partition=hpc_a10_a
 
-copydir="$MBO_DATA/lbm/high_res/raw/"
+copydir="$MBO_DATA/lbm/multifile/"
 outdir="~/caiman_data/hpc/"
 
 # Create a temporary directory to store raw files
@@ -43,18 +44,6 @@ trap cleanup EXIT
 echo "Staging raw data from $copydir to $tmpdir"
 rsync -av --include '*/' --include 'plane_*' --exclude '*' "$copydir/" "$tmpdir/"
 echo "Data successfully staged to $tmpdir"
-
-echo "----------------"
-echo "Listing contents of staged data:"
-ls -la "$tmpdir"
-echo "----------------"
-
-# Create batch directory
-# -----------------------------------------------------
-echo "----------------"
-echo "Creating batch directory at $tmpdir/batch"
-mkdir -p "$tmpdir/batch"
-echo "----------------"
 
 # Run lcp on the staged files  
 # -----------------------------------------------------
