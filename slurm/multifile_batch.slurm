@@ -1,16 +1,15 @@
 #!/bin/bash -l
 
-mkdir -p ~/logs
-
 #SBATCH --job-name=mcorr
-#SBATCH --output=~/logs/lcp_%x_%j.out
-#SBATCH --error=~/logs/lcp_%x_%j.err
+#SBATCH --output=logs/lcp_%x_%j.out
+#SBATCH --time=9:00:00
+#SBATCH --error=logs/lcp_%x_%j.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=34
 #SBATCH --mem=256G
 #SBATCH --partition=hpc_a10_a
 
-copydir="$MBO_DATA/lbm/multifile/"
+copydir="$SCRATCH/$USER/data/bi_hemi/zplanes/test/"
 outdir="~/caiman_data/hpc/"
 
 # Create a temporary directory to store raw files
@@ -45,17 +44,20 @@ echo "Staging raw data from $copydir to $tmpdir"
 rsync -av --include '*/' --include 'plane_*' --exclude '*' "$copydir/" "$tmpdir/"
 echo "Data successfully staged to $tmpdir"
 
+ls $tmpdir
+
 # Run lcp on the staged files  
 # -----------------------------------------------------
 echo "----------------"
 echo "Running lcp on staged files..."
-lcp --batch_path "$tmpdir/batch/batch.pickle" --run mcorr cnmf \
-        --max_shifts 10 10 \
-        --K 150 \
-        --gSig_filt 0 0 \
-        --overlaps 4 4 \
-        --strides 14 14 \
-        --data_path "$tmpdir"
+lcp --batch_path "$tmpdir/batch.pickle" --run mcorr cnmf \
+        --gSig 2 \
+        --gSiz 6 6 \
+        --rf 100 \
+        --stride 30 \
+        --K 10000 \
+        --data_path "$tmpdir/"
+
 echo "----------------"
 
 # Transfer the results back to local machine
