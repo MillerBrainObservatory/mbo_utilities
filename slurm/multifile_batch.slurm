@@ -1,13 +1,12 @@
 #!/bin/bash -l
 
-#SBATCH --job-name=mcorr
-#SBATCH --output=logs/lcp_%x_%j.out
-#SBATCH --time=9:00:00
-#SBATCH --error=logs/lcp_%x_%j.err
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=34
-#SBATCH --mem=256G
-#SBATCH --partition=hpc_a10_a
+#SBATCH --job-name=batch
+#SBATCH --output=logs/node_%x_%j.out
+#SBATCH --time=15:00:00 
+#SBATCH --error=logs/node_%x_%j.err
+#SBATCH --ntasks=2
+#SBATCH --cpus-per-task=36
+#SBATCH --partition=hpc_l40s
 
 copydir="$SCRATCH/$USER/data/bi_hemi/zplanes/test/"
 outdir="~/caiman_data/hpc/"
@@ -53,9 +52,9 @@ echo "Running lcp on staged files..."
 lcp --batch_path "$tmpdir/batch.pickle" --run mcorr cnmf \
         --gSig 2 \
         --gSiz 6 6 \
-        --rf 100 \
-        --stride 30 \
-        --K 10000 \
+        --rf 56 \
+        --stride 21 \
+        --K 500 \
         --data_path "$tmpdir/"
 
 echo "----------------"
@@ -67,7 +66,9 @@ tmp_dest="~/caiman_data/hpc/${completion_time}"
 
 echo "----------------"
 echo "Transferring results from $tmpdir to remote directory $tmp_dest"
-rsync -av -e "ssh" --exclude 'plane_*' --include '*' "$tmpdir/" rbo:"$tmp_dest"
+
+# This IP is not static, when we get a static IP this will no longer work.
+rsync -av -e "ssh -i ~/.ssh/id_rsa -o IdentitiesOnly=yes" --exclude 'plane_*' --include '*' "$tmpdir/" rbo@129.85.3.34:"$tmp_dest"
 echo "Transfer complete."
 echo "----------------"
 
