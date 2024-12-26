@@ -1,12 +1,12 @@
 #!/bin/bash -l
 
 #SBATCH --job-name=batch
-#SBATCH --output=logs/node_%x_%j.out
-#SBATCH --time=15:00:00 
-#SBATCH --error=logs/node_%x_%j.err
-#SBATCH --ntasks=2
-#SBATCH --cpus-per-task=36
-#SBATCH --partition=hpc_l40s
+#SBATCH -o logs/%j.out
+#SBATCH -e logs/%j.err
+#SBATCH -t 15:00:00 
+#SBATCH -p hpc_a10_a
+#SBATCH -c 8
+#SBATCH -n 1
 
 copydir="$SCRATCH/$USER/data/bi_hemi/zplanes/test/"
 outdir="~/caiman_data/hpc/"
@@ -17,11 +17,14 @@ tmpdir=$(mktemp -d /tmp/data_XXXXXX)
 # Enable error handling and robust shell options
 set -euo pipefail
 
+source ~/miniforge3/etc/profile.d/conda.sh
+
+conda activate lcp
+
 echo "----------------"
 echo "Job Info"
 echo "SLURM_NODELIST: $SLURM_NODELIST"
 echo "SLURM_JOB_ID: $SLURM_JOB_ID"
-echo "Hostname: $(hostname)"
 echo "Current Directory: $(pwd)"
 echo "----------------"
 
@@ -49,12 +52,12 @@ ls $tmpdir
 # -----------------------------------------------------
 echo "----------------"
 echo "Running lcp on staged files..."
-lcp --batch_path "$tmpdir/batch.pickle" --run mcorr cnmf \
+srun lcp --batch_path "$tmpdir/batch.pickle" --run mcorr \
         --gSig 2 \
         --gSiz 6 6 \
         --rf 56 \
         --stride 21 \
-        --K 500 \
+        --K 5 \
         --data_path "$tmpdir/"
 
 echo "----------------"
