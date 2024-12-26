@@ -1,14 +1,15 @@
 #!/bin/bash -l
 
 #SBATCH --job-name=batch
-#SBATCH -o logs/%j.out
-#SBATCH -e logs/%j.err
+#SBATCH -o test_%j.out
+#SBATCH -e test_%j.err
 #SBATCH -t 15:00:00 
-#SBATCH -p hpc_a10_a
-#SBATCH -c 8
-#SBATCH -n 1
+#SBATCH --mem=256G
+#SBATCH --ntasks=2
+#SBATCH --cpus-per-task=34
+#SBATCH --partition=hpc_a10_a
 
-copydir="$SCRATCH/$USER/data/bi_hemi/zplanes/test/"
+copydir="$SCRATCH/$USER/data/single_hemi/zplanes/"
 outdir="~/caiman_data/hpc/"
 
 # Create a temporary directory to store raw files
@@ -52,12 +53,12 @@ ls $tmpdir
 # -----------------------------------------------------
 echo "----------------"
 echo "Running lcp on staged files..."
-srun lcp --batch_path "$tmpdir/batch.pickle" --run mcorr \
+srun lcp --batch_path "$tmpdir/batch.pickle" --run mcorr cnmf \
         --gSig 2 \
-        --gSiz 6 6 \
+        --gSiz 4 4 \
         --rf 56 \
         --stride 21 \
-        --K 5 \
+        --K 750 \
         --data_path "$tmpdir/"
 
 echo "----------------"
@@ -65,7 +66,7 @@ echo "----------------"
 # Transfer the results back to local machine
 # -----------------------------------------------------
 completion_time=$(date +"%Y-%m-%d_%H-%M-%S")
-tmp_dest="~/caiman_data/hpc/${completion_time}"
+tmp_dest="~/caiman_data/hpc/${SLURM_JOB_ID}"
 
 echo "----------------"
 echo "Transferring results from $tmpdir to remote directory $tmp_dest"
