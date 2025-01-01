@@ -1,5 +1,3 @@
-#!/bin/bash -l
-
 #SBATCH --job-name=batch
 #SBATCH -o test_%j.out
 #SBATCH -e test_%j.err
@@ -30,6 +28,8 @@ set -euo pipefail
 source $SCRATCH/mbo_soft/miniforge3/etc/profile.d/conda.sh
 
 conda activate lcp
+
+start_time=$(date +%s)
 
 echo "----------------"
 echo "Job Info"
@@ -94,6 +94,10 @@ echo "----------------"
 echo "----------------"
 echo "Cleaning up temporary directory $tmpdir"
 rm -rf "$tmpdir"
+
+end_time=$(date +%s)
+elapsed_time=$((end_time - start_time))
+echo "Execution Time: $(date -u -d @${elapsed_time} +'%H hours, %M minutes, %S seconds')"
 
 echo "Job Complete!"
 echo "----------------"
