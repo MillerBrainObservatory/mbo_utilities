@@ -1,17 +1,19 @@
-#SBATCH --job-name=batch
+#!/bin/bash -l
+
+#SBATCH --job-name=l_40
 #SBATCH -o test_%j.out
 #SBATCH -e test_%j.err
 #SBATCH -t 15:00:00
-#SBATCH --mem=256G
+#SBATCH --mem=128G
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=34
-#SBATCH --partition=hpc_a10_a
+#SBATCH --cpus-per-task=28
+#SBATCH --partition=hpc_l40_a
 
 copydir="$SCRATCH/$USER/data/test"
 outdir="~/caiman_data/hpc"
 
 gSig_variants=(4 10)
-K_variants=(10 25)
+K_variants=(150 1000)
 
 echo "Parameters:"
 echo "gSig variants: ${gSig_variants[*]}"
@@ -97,7 +99,12 @@ rm -rf "$tmpdir"
 
 end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
-echo "Execution Time: $(date -u -d @${elapsed_time} +'%H hours, %M minutes, %S seconds')"
+
+hours=$((elapsed_time / 3600))
+minutes=$(((elapsed_time % 3600) / 60))
+seconds=$((elapsed_time % 60))
+
+echo "Execution Time: ${hours} hours, ${minutes} minutes, ${seconds} seconds"
 
 echo "Job Complete!"
 echo "----------------"
