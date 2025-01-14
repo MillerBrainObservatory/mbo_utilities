@@ -37,7 +37,7 @@ setuptools.setup(
     ],
     entry_points={
         "console_scripts": [
-            "mbo = utilties.python.:main",
+            "mbo = mbo_utilties.python.:main",
         ]
     },
 )
