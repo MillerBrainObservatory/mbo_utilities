@@ -1,2 +1,2 @@
-# utilities
-General shell utilities and environment/config files.
+# MBO utilities
+General python/shell utilities and environment/config files.
