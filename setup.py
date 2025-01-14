@@ -6,10 +6,11 @@ from pathlib import Path
 
 install_deps = [
     "tifffile",
-    "numpy>=1.24.3,<2.0",
-    "skimage",
+    "numpy",
+    "scikit-image",
     "fastplotlib[notebook]",
-    "click",
+    "scanreader @ git+https://github.com/atlab/scanreader.git@master#egg=scanreader",
+    "PyWavelets",
 ]
 
 with open(Path(__file__).parent / "README.md", "r", encoding="utf-8") as fh:
@@ -35,10 +36,10 @@ setuptools.setup(
         "Intended Audience :: Science/Research",
         "Programming Language :: Python :: 3 :: Only",
     ],
-    entry_points={
-        "console_scripts": [
-            "mbo = mbo_utilties.python.:main",
-        ]
-    },
+    # entry_points={
+    #     "console_scripts": [
+    #         "mbo = mbo_utilties.mbo_utilities:main",
+    #     ]
+    # },
 )
 
