@@ -25,7 +25,7 @@ setuptools.setup(
     author="Flynn OConnell",
     author_email="FlynnOConnell@gmail.com",
     license="",
-    url="https://github.com/millerbrainobservatory/utilities",
+    url="https://github.com/millerbrainobservatory/mbo_utilities",
     keywords="Conda Microscopy ScanImage multiROI Tiff Slurm",
     install_requires=install_deps,
     packages=setuptools.find_packages(exclude=["data", "data.*"]),
