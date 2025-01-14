@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools", "wheel", "versioneer[toml]"]
+build-backend = "setuptools.build_meta"
+
+[tool.versioneer]
+VCS = "git"
+style = "pep440"
+versionfile_source = "mbo_utilities/_version.py"
+versionfile_build = "mbo_utilities/_version.py"
+tag_prefix = "mbo-utilities-"
+parentdir_prefix = "mbo-utilities-"
+
