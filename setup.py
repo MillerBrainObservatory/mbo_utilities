@@ -9,6 +9,7 @@ install_deps = [
     "numpy>=1.24.3,<2.0",
     "skimage",
     "fastplotlib[notebook]",
+    "click",
 ]
 
 with open(Path(__file__).parent / "README.md", "r", encoding="utf-8") as fh:
