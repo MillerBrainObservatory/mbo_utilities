@@ -8,8 +8,8 @@ import warnings
 from pathlib import Path
 import numpy as np
 import zarr
-from scanreader import read_scan
-from scanreader.utils import listify_index
+from .scanreader import read_scan
+from .scanreader.utils import listify_index
 from .lcp_io import get_metadata, make_json_serializable
 
 import tifffile
