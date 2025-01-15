@@ -5,6 +5,8 @@ from pathlib import Path
 
 import numpy as np
 import fastplotlib as fpl
+from pprint import pprint
+from mbo_utilities.lcp_io import get_metadata
 from mbo_utilities.scanreader.exceptions import PathnameError, FieldDimensionMismatch
 from mbo_utilities.scanreader.core import scans, expand_wildcard
 
@@ -71,8 +73,6 @@ def add_args(parser: argparse.ArgumentParser):
     parser.add_argument('--path', type=str,
                         help='Path to a directory containing raw scanimage tiff files for a single session.')
     parser.add_argument('--version', action='store_true', help='Print the version of the package.')
-    # add help
-    parser.add_argument('--help', action='store_true')
     return parser
 
 def print_help():
@@ -96,11 +96,9 @@ def main():
         print("lbm_caiman_python v{}".format(mbo.__version__))
         return
 
-    if args.help:
-        print_help()
-        return
-
-    files = [str(f) for f in Path(args.path).glob('*.tif*')]
+    files = [str(f) for f in Path(args.path).expanduser().glob('*.tif*')]
+    metadata = get_metadata(files[0])
+    pprint(metadata)
     scan = read_scan(files, join_contiguous=True)
     iw = fpl.ImageWidget(scan, histogram_widget=False)
     iw.show()
