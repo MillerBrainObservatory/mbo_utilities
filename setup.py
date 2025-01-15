@@ -6,12 +6,12 @@ from pathlib import Path
 
 install_deps = [
     "tifffile",
-    "numpy",
     "scikit-image",
+    # "fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
     "fastplotlib[notebook]",
-    # "scanreader @ git+https://github.com/atlab/scanreader.git@master#egg=scanreader",
+    # "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
+    "glfw",
     "PyWavelets",
-    "zarr",
 ]
 
 with open(Path(__file__).parent / "README.md", "r", encoding="utf-8") as fh:
