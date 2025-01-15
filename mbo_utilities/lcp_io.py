@@ -73,7 +73,10 @@ def get_metadata(file: os.PathLike | str):
 
         num_rois = len(roi_group)
         num_planes = len(si["SI.hChannels.channelSave"])
-        scanfields = roi_group[0]["scanfields"]  # assuming single ROI scanfield configuration
+        try:
+            scanfields = roi_group[0]["scanfields"]  # assuming single ROI scanfield configuration
+        except KeyError:
+            scanfields = roi_group["scanfields"]
 
         # ROI metadata
         size_xy = scanfields["sizeXY"]
