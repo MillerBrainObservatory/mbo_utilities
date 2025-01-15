@@ -11,6 +11,8 @@ install_deps = [
     "fastplotlib[notebook]",
     "scanreader @ git+https://github.com/atlab/scanreader.git@master#egg=scanreader",
     "PyWavelets",
+    "zarr",
+    "dask",
 ]
 
 with open(Path(__file__).parent / "README.md", "r", encoding="utf-8") as fh:
@@ -36,10 +38,10 @@ setuptools.setup(
         "Intended Audience :: Science/Research",
         "Programming Language :: Python :: 3 :: Only",
     ],
-    # entry_points={
-    #     "console_scripts": [
-    #         "mbo = mbo_utilties.mbo_utilities:main",
-    #     ]
-    # },
+    entry_points={
+        "console_scripts": [
+            "mbo_utilities = mbo_utilities.main:main",
+        ]
+    },
 )
 
