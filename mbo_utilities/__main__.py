@@ -3,8 +3,8 @@ from pathlib import Path
 
 import numpy as np
 import fastplotlib as fpl
-from scanreader.exceptions import PathnameError, FieldDimensionMismatch
-from scanreader.core import scans, expand_wildcard
+from mbo_utilities.scanreader.exceptions import PathnameError, FieldDimensionMismatch
+from mbo_utilities.scanreader.core import scans, expand_wildcard
 
 
 def read_scan(pathnames, dtype=np.int16, join_contiguous=False):
@@ -66,7 +66,8 @@ def add_args(parser: argparse.ArgumentParser):
     argparse.ArgumentParser
         The parser with added arguments.
     """
-    parser.add_argument('--path', type=str, help='Path to a directory containing raw scanimage tiff files for a single session.')
+    parser.add_argument('--path', type=str,
+                        help='Path to a directory containing raw scanimage tiff files for a single session.')
     parser.add_argument('--version', action='store_true', help='Print the version of the package.')
     return parser
 
@@ -86,7 +87,10 @@ def main():
     scan = read_scan(files, join_contiguous=True)
     iw = fpl.ImageWidget(scan, histogram_widget=False)
     iw.show()
-    fpl.loop.run()
+    if fpl.__version__ == "0.2.0":
+        fpl.run()
+    elif fpl.__version__ == "0.3.0":
+        fpl.loop.run()
 
 
 if __name__ == '__main__':
