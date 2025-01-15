@@ -1,6 +1,7 @@
 """
 quick_metrics.py
 """
+from __future__ import annotations
 import numpy as np
 from skimage.restoration import estimate_sigma
 
