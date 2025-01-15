@@ -71,8 +71,19 @@ def add_args(parser: argparse.ArgumentParser):
     parser.add_argument('--path', type=str,
                         help='Path to a directory containing raw scanimage tiff files for a single session.')
     parser.add_argument('--version', action='store_true', help='Print the version of the package.')
+    # add help
+    parser.add_argument('--help', action='store_true')
     return parser
 
+def print_help():
+    msg = """
+    Usage: mbo [OPTIONS]
+    
+    Options:
+        --path TEXT     Path to a directory containing raw scanimage tiff files for a single session.
+        --version       Print the version of the package.
+        --help          Show this message and exit.
+    """
 
 def main():
     parser = argparse.ArgumentParser(description="Preview a scanimage imaging session.")
@@ -83,6 +94,10 @@ def main():
     if args.version:
         import mbo_utilities as mbo
         print("lbm_caiman_python v{}".format(mbo.__version__))
+        return
+
+    if args.help:
+        print_help()
         return
 
     files = [str(f) for f in Path(args.path).glob('*.tif*')]
