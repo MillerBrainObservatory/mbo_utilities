@@ -9,7 +9,7 @@ install_deps = [
     "numpy",
     "scikit-image",
     "fastplotlib[notebook]",
-    "scanreader @ git+https://github.com/atlab/scanreader.git@master#egg=scanreader",
+    # "scanreader @ git+https://github.com/atlab/scanreader.git@master#egg=scanreader",
     "PyWavelets",
     "zarr",
 ]
