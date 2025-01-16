@@ -10,6 +10,7 @@ install_deps = [
     "fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
     #"fastplotlib[notebook]",
     "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
+    "simplejpeg",
     "PySide6",
     "PyWavelets",
     "zarr",
