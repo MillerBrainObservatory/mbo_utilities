@@ -7,11 +7,14 @@ from pathlib import Path
 install_deps = [
     "tifffile",
     "scikit-image",
-    # "fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
-    "fastplotlib[notebook]",
-    # "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
+    "fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
+    #"fastplotlib[notebook]",
+    "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
     "PySide6",
     "PyWavelets",
+    "zarr",
+    "tqdm",
+    "fabric",
 ]
 
 with open(Path(__file__).parent / "README.md", "r", encoding="utf-8") as fh:
@@ -40,6 +43,7 @@ setuptools.setup(
     entry_points={
         "console_scripts": [
             "mbo = mbo_utilities.__main__:main",
+            "assemble = mbo_utilities.assembly:main",
         ]
     },
 )

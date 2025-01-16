@@ -8,9 +8,9 @@ import warnings
 from pathlib import Path
 import numpy as np
 import zarr
-from .scanreader import read_scan
-from .scanreader.utils import listify_index
-from .lcp_io import get_metadata, make_json_serializable
+from mbo_utilities.scanreader import read_scan
+from mbo_utilities.scanreader.utils import listify_index
+from mbo_utilities.lcp_io import get_metadata, make_json_serializable
 
 import tifffile
 import logging
@@ -370,15 +370,6 @@ def main():
                         default=":",  # all planes
                         help="Planes to read (0 based). Use slice notation like NumPy arrays (e.g., 1:5 gives planes "
                              "2 to 6")
-    parser.add_argument("--trimx",
-                        type=int,
-                        nargs=2,
-                        default=(0, 0),
-                        help="Number of x-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for left and right "
-                             "edges).")
-    parser.add_argument("--trimy", type=int, nargs=2, default=(0, 0),
-                        help="Number of y-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for top and bottom "
-                             "edges).")
     # Boolean Flags
     parser.add_argument("--metadata", action="store_true",
                         help="Print a dictionary of scanimage metadata for files at the given path.")

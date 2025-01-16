@@ -75,15 +75,6 @@ def add_args(parser: argparse.ArgumentParser):
     parser.add_argument('--version', action='store_true', help='Print the version of the package.')
     return parser
 
-def print_help():
-    msg = """
-    Usage: mbo [OPTIONS]
-    
-    Options:
-        --path TEXT     Path to a directory containing raw scanimage tiff files for a single session.
-        --version       Print the version of the package.
-        --help          Show this message and exit.
-    """
 
 def main():
     parser = argparse.ArgumentParser(description="Preview a scanimage imaging session.")
@@ -96,10 +87,12 @@ def main():
         print("lbm_caiman_python v{}".format(mbo.__version__))
         return
 
+    # Handle help
     files = [str(f) for f in Path(args.path).expanduser().glob('*.tif*')]
-    metadata = get_metadata(files[0])
-    pprint(metadata)
     scan = read_scan(files, join_contiguous=True)
+    # metadata = get_metadata(files[0])
+
+    # pprint(metadata)
     iw = fpl.ImageWidget(scan, histogram_widget=False)
     iw.show()
     if fpl.__version__ == "0.2.0":
