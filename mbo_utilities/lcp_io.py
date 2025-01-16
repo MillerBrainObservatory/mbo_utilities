@@ -73,14 +73,24 @@ def get_metadata(file: os.PathLike | str):
 
         num_rois = len(roi_group)
         num_planes = len(si["SI.hChannels.channelSave"])
-        try:
-            scanfields = roi_group[0]["scanfields"]  # assuming single ROI scanfield configuration
-        except KeyError:
-            scanfields = roi_group["scanfields"]
 
-        # ROI metadata
-        size_xy = scanfields["sizeXY"]
-        num_pixel_xy = scanfields["pixelResolutionXY"]
+        if num_rois > 1:
+            scanfields = [roi_group[i]["scanfields"] for i in range(num_rois)]
+            if not all([scanfields[0] == scanfield for scanfield in scanfields]):
+                raise ValueError("ROIs have different scanfields")
+
+            sizes = [roi_group[i]["scanfields"][i]["sizeXY"] for i in range(num_rois)]
+            num_pixel_xys = [roi_group[i]["scanfields"][i]["pixelResolutionXY"] for i in range(num_rois)]
+
+            # see if each item in sizes is the same
+            assert all([sizes[0] == size for size in sizes]), "ROIs have different sizes"
+            assert all([num_pixel_xys[0] == num_pixel_xy for num_pixel_xy in
+                        num_pixel_xys]), "ROIs have different pixel resolutions"
+            size_xy = sizes[0]
+            num_pixel_xy = num_pixel_xys[0]
+        else:
+            size_xy = [roi_group[0]["scanfields"]["sizeXY"]]
+            num_pixel_xy = [roi_group[0]["scanfields"]["pixelResolutionXY"]]
 
         # TIFF header-derived metadata
         sample_format = pages[0].dtype.name
@@ -92,7 +102,7 @@ def get_metadata(file: os.PathLike | str):
         # As of now, this is for a single ROI
         fov_x = round(objective_resolution * size_xy[0])
         fov_y = round(objective_resolution * size_xy[1])
-        fov_xy = (fov_x, int(fov_y / num_rois))
+        fov_xy = (fov_x, fov_y / num_rois)
 
         # Pixel resolution (dxy) calculation
         pixel_resolution = (fov_x / num_pixel_xy[0], fov_y / num_pixel_xy[1])
@@ -117,6 +127,7 @@ def get_metadata(file: os.PathLike | str):
         }
     else:
         raise ValueError(f"No metadata found in {file}.")
+
 
 
 def get_files_ext(base_dir, extension, max_depth) -> list:
