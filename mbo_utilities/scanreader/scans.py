@@ -766,7 +766,10 @@ class ScanMultiROI(NewerScan, BaseScan):
 
     def _create_rois(self):
         """Create scan rois from the configuration file. """
-        roi_infos = self.tiff_files[0].scanimage_metadata['RoiGroups']['imagingRoiGroup']['rois']
+        try:
+            roi_infos = self.tiff_files[0].scanimage_metadata['RoiGroups']['imagingRoiGroup']['rois']
+        except KeyError:
+            raise RuntimeError('This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata.')
         roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
         roi_infos = list(filter(lambda r: isinstance(r['zs'], (int, float, list)),
                                 roi_infos)) # discard empty/malformed ROIs
