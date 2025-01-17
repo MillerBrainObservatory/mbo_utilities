@@ -26,8 +26,7 @@ def add_args(parser: argparse.ArgumentParser):
     argparse.ArgumentParser
         The parser with added arguments.
     """
-    parser.add_argument('--path', type=str,
-                        help='Path to a directory containing raw scanimage tiff files for a single session.')
+    parser.add_argument('--path', type=str, help='Path to a directory containing raw scanimage tiff files for a single session.')
     parser.add_argument('--version', action='store_true', help='Print the version of the package.')
     return parser
 
@@ -44,9 +43,18 @@ def main():
         return
 
     # Handle help
-    files = [str(f) for f in Path(args.path).expanduser().glob('*.tif*')]
-    scan = read_scan(files, join_contiguous=True)
-    # metadata = get_metadata(files[0])
+    data_path = Path(args.path).expanduser()
+    if not data_path.exists():
+        raise FileNotFoundError(f"Path '{data_path}' does not exist as a file or directory.")
+    if data_path.is_dir():
+        files = [str(f) for f in data_path.glob('*.tif*')]
+        scan = read_scan(files, join_contiguous=True)
+        metadata = get_metadata(files[args.index])
+        pprint(metadata)
+        iw = fpl.ImageWidget(scan, histogram_widget=False)
+        iw.show()
+    else:
+        raise FileNotFoundError(f"Path '{data_path}' is not a directory.")
 
     # pprint(metadata)
     iw = fpl.ImageWidget(scan, histogram_widget=False)
