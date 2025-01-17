@@ -6,6 +6,10 @@ import numpy as np
 import tifffile
 from pathlib import Path
 
+from mbo_utilities.scanreader import scans
+from mbo_utilities.scanreader.core import expand_wildcard
+from mbo_utilities.scanreader.exceptions import PathnameError, FieldDimensionMismatch
+
 
 def make_json_serializable(obj):
     """Convert metadata to JSON serializable format."""
@@ -19,6 +23,50 @@ def make_json_serializable(obj):
         return obj.item()
     else:
         return obj
+
+
+def read_scan(pathnames, dtype=np.int16, join_contiguous=False):
+    """ Reads a ScanImage scan. """
+    # Expand wildcards
+    filenames = expand_wildcard(pathnames)
+    if len(filenames) == 0:
+        error_msg = 'Pathname(s) {} do not match any files in disk.'.format(pathnames)
+        raise PathnameError(error_msg)
+
+    scan = ScanMultiROIReordered(join_contiguous=join_contiguous)
+
+    # Read metadata and data (lazy operation)
+    scan.read_data(filenames, dtype=dtype)
+
+    return scan
+
+
+class ScanMultiROIReordered(scans.ScanMultiROI):
+    """
+    A subclass of ScanMultiROI that ignores the num_fields dimension
+    and reorders the output to [time, z, x, y].
+    """
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+
+        # Call the parent class's __getitem__ with the reordered key
+        item = super().__getitem__((0, key[2], key[3], key[1], key[0]))
+        if item.ndim == 2:
+            return item
+        elif item.ndim == 3:
+            return np.transpose(item, (2, 0, 1))
+        else:
+            raise FieldDimensionMismatch('ScanMultiROIReordered.__getitem__')
+
+    @property
+    def shape(self):
+        return self.num_frames, self.num_channels, self.field_heights[0], self.field_widths[0]
+
+    @property
+    def ndim(self):
+        return 4
 
 
 def get_metadata(file: os.PathLike | str):
@@ -75,12 +123,13 @@ def get_metadata(file: os.PathLike | str):
         num_planes = len(si["SI.hChannels.channelSave"])
 
         if num_rois > 1:
-            scanfields = [roi_group[i]["scanfields"] for i in range(num_rois)]
-            if not all([scanfields[0] == scanfield for scanfield in scanfields]):
-                raise ValueError("ROIs have different scanfields")
+            try:
+                sizes = [roi_group[i]["scanfields"][i]["sizeXY"] for i in range(num_rois)]
+                num_pixel_xys = [roi_group[i]["scanfields"][i]["pixelResolutionXY"] for i in range(num_rois)]
+            except KeyError:
+                sizes = [roi_group[i]["scanfields"]["sizeXY"] for i in range(num_rois)]
+                num_pixel_xys = [roi_group[i]["scanfields"]["pixelResolutionXY"] for i in range(num_rois)]
 
-            sizes = [roi_group[i]["scanfields"][i]["sizeXY"] for i in range(num_rois)]
-            num_pixel_xys = [roi_group[i]["scanfields"][i]["pixelResolutionXY"] for i in range(num_rois)]
 
             # see if each item in sizes is the same
             assert all([sizes[0] == size for size in sizes]), "ROIs have different sizes"
@@ -127,7 +176,6 @@ def get_metadata(file: os.PathLike | str):
         }
     else:
         raise ValueError(f"No metadata found in {file}.")
-
 
 
 def get_files_ext(base_dir, extension, max_depth) -> list:

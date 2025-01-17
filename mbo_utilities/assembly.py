@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import argparse
 import functools
+import time
 import os
 import time
 import warnings
 from pathlib import Path
 import numpy as np
 import zarr
-from mbo_utilities.scanreader import read_scan
 from mbo_utilities.scanreader.utils import listify_index
-from mbo_utilities.lcp_io import get_metadata, make_json_serializable
+from mbo_utilities.lcp_io import get_metadata, make_json_serializable, read_scan
 
 import tifffile
 import logging
@@ -310,15 +310,18 @@ def _save_data(scan, path, planes, frames, overwrite, file_extension, metadata):
         for idx, field in enumerate(scan.fields):
             for chan in planes:
                 if 'tif' in file_extension:
-                    arr = scan[idx, :, :, chan, frames]  # [y,x,T]
+                    arr = scan[idx, :, chan, :, :]  # [field, T, z, y, x]
                     logger.debug('arr shape:', arr.shape)
-                    file_writer(path, f'plane_{chan + 1}_roi_{idx + 1}', arr.T)
+                    file_writer(path, f'plane_{chan + 1}_roi_{idx + 1}', arr)
     else:
         for chan in planes:
             if 'tif' in file_extension:
-                arr = scan[:, :, :, chan, frames]  # [y,x,T]
+                start = time.time()
+                arr = scan[:, chan, :, :]  # [y,x,T]
+                stop = time.time()
+                print(f"Read plane_{chan + 1} data in {stop - start:.2f} seconds.")
                 logger.debug('arr shape:', arr.shape)
-                file_writer(path, f'plane_{chan + 1}', arr.T)
+                file_writer(path, f'plane_{chan + 1}', arr)
 
 
 def _get_file_writer(ext, overwrite, metadata=None):
@@ -341,7 +344,7 @@ def _write_tiff(path, name, data, overwrite=True, metadata=None):
     data = np.transpose(data.squeeze(), (0, 2, 1))
     tifffile.imwrite(filename, data, metadata=metadata)
     t_write_end = time.time() - t_write
-    logger.info(f"Data written in {t_write_end:.2f} seconds.")
+    print(f"Data written in {t_write_end:.2f} seconds.")
 
 
 def _write_zarr(path, name, data, metadata=None, overwrite=True):
@@ -476,4 +479,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
