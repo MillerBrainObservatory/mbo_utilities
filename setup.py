@@ -7,11 +7,14 @@ from pathlib import Path
 install_deps = [
     "tifffile",
     "scikit-image",
-    "fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
-    "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
-    "simplejpeg",
-    "PySide6",
+    #"fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
+    #"pygfx @ git+https://github.com/pygfx/pygfx.git@main",
+    #"simplejpeg",
     "PyWavelets",
+    # "qtpy",
+    # "pyqt6",
+    # "pyqt6.sip",
+    # "pyqtgraph",
     "dask",
     "zarr",
     "tqdm",
@@ -45,6 +48,7 @@ setuptools.setup(
         "console_scripts": [
             "mbo = mbo_utilities.__main__:main",
             "assemble = mbo_utilities.assembly:main",
+            "gui = mbo_utilities.gui.gui:main",
         ]
     },
 )
