@@ -6,9 +6,38 @@ import numpy as np
 import tifffile
 from pathlib import Path
 
+import dask.array as da
+import tqdm
+
 from mbo_utilities.scanreader import scans
 from mbo_utilities.scanreader.core import expand_wildcard
 from mbo_utilities.scanreader.exceptions import PathnameError, FieldDimensionMismatch
+
+
+def stack_from_files(files: list):
+    """Stacks a list of TIFF files into a Dask array. Can be 3D Tyx or 4D Tzyx.
+
+    Parameters
+    ----------
+    files : list
+        List of TIFF files to stack.
+
+    Returns
+    -------
+    dask.array.core.Array
+        Dask array of the stacked files.
+
+    """
+    lazy_arrays = []
+    for file in tqdm.tqdm(files, total=len(files), desc="Reading files"):
+        if Path(file).suffix not in [".tif", ".tiff"]:
+            continue
+        arr = tifffile.memmap(file)
+        dask_arr = da.from_array(arr, chunks="auto")
+        lazy_arrays.append(dask_arr)
+
+    zstack = da.stack(lazy_arrays, axis=1)
+    return zstack
 
 
 def make_json_serializable(obj):
@@ -130,7 +159,6 @@ def get_metadata(file: os.PathLike | str):
                 sizes = [roi_group[i]["scanfields"]["sizeXY"] for i in range(num_rois)]
                 num_pixel_xys = [roi_group[i]["scanfields"]["pixelResolutionXY"] for i in range(num_rois)]
 
-
             # see if each item in sizes is the same
             assert all([sizes[0] == size for size in sizes]), "ROIs have different sizes"
             assert all([num_pixel_xys[0] == num_pixel_xy for num_pixel_xy in
@@ -193,7 +221,7 @@ def get_files_ext(base_dir, extension, max_depth) -> list:
 
     Returns
     -------
-    list
+    list[str]
         A list of full file paths matching the given extension.
     """
     base_path = Path(base_dir).expanduser().resolve()
@@ -204,6 +232,6 @@ def get_files_ext(base_dir, extension, max_depth) -> list:
 
     return [
         str(file)
-        for file in base_path.rglob(f'*{extension}')
+        for file in base_path.rglob(f'*{extension}*')
         if len(file.relative_to(base_path).parts) <= max_depth + 1
     ]

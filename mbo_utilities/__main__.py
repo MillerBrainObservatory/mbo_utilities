@@ -3,12 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import numpy as np
 import fastplotlib as fpl
-from pprint import pprint
-from mbo_utilities.lcp_io import get_metadata, read_scan
-from mbo_utilities.scanreader.exceptions import PathnameError, FieldDimensionMismatch
-from mbo_utilities.scanreader.core import scans, expand_wildcard
+from mbo_utilities.lcp_io import read_scan, get_metadata
 
 
 def add_args(parser: argparse.ArgumentParser):
@@ -48,9 +44,9 @@ def main():
         raise FileNotFoundError(f"Path '{data_path}' does not exist as a file or directory.")
     if data_path.is_dir():
         files = [str(f) for f in data_path.glob('*.tif*')]
+        metadata = get_metadata(files[0])
         scan = read_scan(files, join_contiguous=True)
-        metadata = get_metadata(files[args.index])
-        pprint(metadata)
+        # pprint(metadata)
         iw = fpl.ImageWidget(scan, histogram_widget=False)
         iw.show()
     else:
@@ -59,11 +55,11 @@ def main():
     # pprint(metadata)
     iw = fpl.ImageWidget(scan, histogram_widget=False)
     iw.show()
-    if fpl.__version__ == "0.2.0":
-        fpl.run()
-    elif fpl.__version__ == "0.3.0":
-        fpl.loop.run()
 
 
 if __name__ == '__main__':
     main()
+    if fpl.__version__ == "0.2.0":
+        fpl.run()
+    elif fpl.__version__ == "0.3.0":
+        fpl.loop.run()
