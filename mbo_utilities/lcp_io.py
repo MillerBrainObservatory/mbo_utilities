@@ -29,15 +29,26 @@ def stack_from_files(files: list):
 
     """
     lazy_arrays = []
-    for file in tqdm.tqdm(files, total=len(files), desc="Reading files"):
-        if Path(file).suffix not in [".tif", ".tiff"]:
-            continue
-        arr = tifffile.memmap(file)
-        dask_arr = da.from_array(arr, chunks="auto")
-        lazy_arrays.append(dask_arr)
+    file = files[0]
+    tf = tifffile.TiffFile(file)
+    if tf.scanimage_metadata and tf.shaped_metadata is None:
+        raw_file = True
+    elif tf.scanimage_metadata and tf.shaped_metadata:
+        raw_file = False
+    else:
+        raise ValueError(f"Unable to determine if {file} is a raw ScanImage TIFF or a processed one.")
+    if raw_file:
+        return read_scan(files, join_contiguous=True)
+    else:
+        for file in tqdm.tqdm(files, total=len(files), desc="Reading files"):
+            if Path(file).suffix not in [".tif", ".tiff"]:
+                continue
+            arr = tifffile.memmap(file)
+            dask_arr = da.from_array(arr, chunks="auto")
+            lazy_arrays.append(dask_arr)
 
-    zstack = da.stack(lazy_arrays, axis=1)
-    return zstack
+        zstack = da.stack(lazy_arrays, axis=1)
+        return zstack
 
 
 def make_json_serializable(obj):
@@ -86,6 +97,8 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             return item
         elif item.ndim == 3:
             return np.transpose(item, (2, 0, 1))
+        elif item.ndim == 4:
+            return np.transpose(item, (3, 2, 0, 1))
         else:
             raise FieldDimensionMismatch('ScanMultiROIReordered.__getitem__')
 
@@ -96,6 +109,10 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
     @property
     def ndim(self):
         return 4
+
+    @property
+    def size(self):
+        return self.num_frames * self.num_channels * self.field_heights[0] * self.field_widths[0]
 
 
 def get_metadata(file: os.PathLike | str):
@@ -148,7 +165,12 @@ def get_metadata(file: os.PathLike | str):
         # Extract ROI and imaging metadata
         roi_group = meta["RoiGroups"]["imagingRoiGroup"]["rois"]
 
-        num_rois = len(roi_group)
+        if isinstance(roi_group, dict):
+            num_rois = 1
+            roi_group = [roi_group]
+        else:
+            num_rois = len(roi_group)
+
         num_planes = len(si["SI.hChannels.channelSave"])
 
         if num_rois > 1:
@@ -166,8 +188,8 @@ def get_metadata(file: os.PathLike | str):
             size_xy = sizes[0]
             num_pixel_xy = num_pixel_xys[0]
         else:
-            size_xy = [roi_group[0]["scanfields"]["sizeXY"]]
-            num_pixel_xy = [roi_group[0]["scanfields"]["pixelResolutionXY"]]
+            size_xy = [roi_group[0]["scanfields"]["sizeXY"]][0]
+            num_pixel_xy = [roi_group[0]["scanfields"]["pixelResolutionXY"]][0]
 
         # TIFF header-derived metadata
         sample_format = pages[0].dtype.name
