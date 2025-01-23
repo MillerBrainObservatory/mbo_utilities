@@ -45,7 +45,7 @@ setuptools.setup(
         "console_scripts": [
             "mbo = mbo_utilities.__main__:main",
             "assemble = mbo_utilities.assembly:main",
-            "gui = mbo_utilities.gui.gui:main",
+            "gui = mbo_utilities.gui.widgets:main",
         ]
     },
 )
