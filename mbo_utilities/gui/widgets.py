@@ -1,4 +1,3 @@
-import webbrowser
 import sys
 
 from pathlib import Path
@@ -37,6 +36,7 @@ def load_folder(path: str | Path):
         try:
             return stack_from_files(plane_folders)
         except Exception as e:
+            print('Reading raw scan. This could take ~5-30 seconds.')
             return read_scan(plane_folders, join_contiguous=True)
     else:
         print("No processed planeX folders in folder")
@@ -75,9 +75,9 @@ class LBMMainWindow(QMainWindow):
             data=data,
             histogram_widget=False,
         )
+        self.resize(1200, 1000)
         qwidget = self.image_widget.show()
         self.setCentralWidget(qwidget)
-        self.resize(self.image_widget.data[0].shape[-2], self.image_widget.data[0].shape[-1])
 
 
 class SummaryDataWidget(EdgeWindow):

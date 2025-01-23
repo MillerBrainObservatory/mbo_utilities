@@ -4,6 +4,8 @@ import argparse
 from pathlib import Path
 
 import fastplotlib as fpl
+
+from mbo_utilities import run_gui
 from mbo_utilities.lcp_io import read_scan
 
 
@@ -23,12 +25,15 @@ def add_args(parser: argparse.ArgumentParser):
         The parser with added arguments.
     """
     parser.add_argument('--path', type=str, help='Path to a directory containing raw scanimage tiff files for a single session.')
+    parser.add_argument('--gui', action='store_true', help='Path to a directory containing raw scanimage tiff files for a single session.')
     parser.add_argument('--version', action='store_true', help='Print the version of the package.')
     return parser
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Preview a scanimage imaging session.")
+    parser = argparse.ArgumentParser(description="Preview a scanimage imaging session."
+                                                 "This will display 3D [Tyx] or 4D [Tzyx] data in a GUI."
+                                                 "The path must be a directory containing raw or assembled scanimage tiff files.")
     parser = add_args(parser)
     args = parser.parse_args()
 
@@ -37,6 +42,9 @@ def main():
         import mbo_utilities as mbo
         print("lbm_caiman_python v{}".format(mbo.__version__))
         return
+
+    if args.gui:
+        run_gui()
 
     # Handle help
     data_path = Path(args.path).expanduser()
