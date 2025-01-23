@@ -7,14 +7,11 @@ from pathlib import Path
 install_deps = [
     "tifffile",
     "scikit-image",
-    #"fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
-    #"pygfx @ git+https://github.com/pygfx/pygfx.git@main",
-    #"simplejpeg",
+    "fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
+    "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
     "PyWavelets",
-    # "qtpy",
-    # "pyqt6",
-    # "pyqt6.sip",
-    # "pyqtgraph",
+    "qtpy"
+    "pyqt5",
     "dask",
     "zarr",
     "tqdm",
