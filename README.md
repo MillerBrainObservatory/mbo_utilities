@@ -3,9 +3,9 @@ General python/shell utilities and environment/config files.
 
 ## Installation
 ```bash
-conda create -n mbo_util python=3.10
+conda create -n mbo_util python=3.10 imgui-bundle
 conda activate mbo_util
-pip install mbo_utilities
+pip install git+https://github.com/MillerBrainObservatory/mbo_utilities.git@master
 ```
 
 ## Usage
