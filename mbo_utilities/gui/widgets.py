@@ -6,8 +6,10 @@ from qtpy.QtWidgets import QMainWindow, QFileDialog, QApplication
 from qtpy import QtGui, QtCore
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
+import dask.array as da
+from tqdm import tqdm
 
-from mbo_utilities import get_files_ext, stack_from_files
+from mbo_utilities import get_files_ext, stack_from_files, read_scan
 
 try:
     from imgui_bundle import imgui, icons_fontawesome_6 as fa
@@ -15,10 +17,11 @@ except ImportError:
     raise ImportError("Please install imgui via `conda install -c conda-forge imgui-bundle`")
 
 
-def load_dialog_folder():
+def load_dialog_folder(parent=None):
     dlg_kwargs = {
-        "parent": None,
-        "caption": "Open folder with z-planes",
+        "parent": parent,
+        "caption": "Open folder with raw data or with z-planes.",
+        "directory": str(Path().home()),
     }
     path = QFileDialog.getExistingDirectory(**dlg_kwargs)
     return load_folder(path)
@@ -31,7 +34,10 @@ def load_folder(path: str | Path):
         return
     plane_folders = get_files_ext(save_folder, ".tif", 2)
     if plane_folders:
-        return stack_from_files(plane_folders)
+        try:
+            return stack_from_files(plane_folders)
+        except Exception as e:
+            return read_scan(plane_folders, join_contiguous=True)
     else:
         print("No processed planeX folders in folder")
         return
@@ -69,23 +75,15 @@ class LBMMainWindow(QMainWindow):
             data=data,
             histogram_widget=False,
         )
-        self.menu_widget = MenuWidget(self.image_widget, size=50)
-        self.summary_widget = SummaryDataWidget(self.image_widget, size=50)
-
-        # gui = MenuWidget(self.image_widget, size=50)
-        gui = SummaryDataWidget(self.image_widget, size=50)
-
-        self.image_widget.figure.add_gui(gui)
         qwidget = self.image_widget.show()
         self.setCentralWidget(qwidget)
         self.resize(self.image_widget.data[0].shape[-2], self.image_widget.data[0].shape[-1])
-        print('Done!')
 
 
 class SummaryDataWidget(EdgeWindow):
-    def __init__(self, image_widget, size):
+    def __init__(self, image_widget, size, location):
         flags = imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_resize
-        super().__init__(figure=image_widget.figure, size=size, location="right", title="Preview Data",
+        super().__init__(figure=image_widget.figure, size=size, location=location, title="Preview Data",
                          window_flags=flags)
         self.image_widget = image_widget
 
@@ -114,62 +112,23 @@ class SummaryDataWidget(EdgeWindow):
             print("something changed")
 
     def mean_z(self):
-        mean_z_widget = fpl.ImageWidget(data=self.image_widget.data[0].mean(axis=1))
+        data = self.image_widget.data[0]
+        lazy_arr = da.empty_like(data)
+        for i in tqdm(range(data.shape[1]), desc="Calculating Mean Image for each z"):
+            lazy_arr[:, i, ...] = data[:, i, ...].mean(axis=1)
+
+        print("Showing mean z")
+        mean_z_widget = fpl.ImageWidget(data=lazy_arr, histogram_widget=False, figure_kwargs={"size": (1000, 800)})
         mean_z_widget.show()
 
-    def calculate_noise(self):
-        pass
-        # current_z = self.image_widget.current_index["z"]
-        # lazy_arr = self.image_widget.data[0]
-        # arr_z = lazy_arr[:, current_z, ...].T
-        # sn, _ = get_noise_fft(arr_z.compute())
-        # # setattr(self.image_widget.figure[0, 0], f"snr_{i}", sn)
-        # self.snr = sn
-        # self.image_widget.figure[0, 0].add_text(f"SNR: {sn:.2f}")
 
-
-class MenuWidget(EdgeWindow):
-    def __init__(self, image_widget, size):
-        flags = imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_resize
-        super().__init__(
-            figure=image_widget.figure,
-            size=size,
-            location="top",
-            title="Toolbar",
-            window_flags=flags,
-        )
-        self.image_widget = image_widget
-
-    def update(self):
-
-        if imgui.button("Documentation"):
-            webbrowser.open(
-                "https://millerbrainobservatory.github.io/LBM-CaImAn-Python/"
-            )
-
-        imgui.same_line()
-
-        imgui.push_font(self._fa_icons)
-        if imgui.button(label=fa.ICON_FA_FOLDER_OPEN):
-            print("Opening file dialog")
-            load_dialog_folder(self.image_widget)
-
-        imgui.pop_font()
-        if imgui.is_item_hovered(0):
-            imgui.set_tooltip("Open a file dialog to load data")
-
-        imgui.same_line()
-
-
-def run():
+def run_gui():
     app = QApplication(sys.argv)
     data = load_dialog_folder()
     main_window = LBMMainWindow(data)
     main_window.show()
     app.exec()
-    # fpl.loop.run()
 
 
 if __name__ == "__main__":
-    run()
-    # fpl.loop.run()
+    run_gui()
