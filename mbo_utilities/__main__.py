@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 import fastplotlib as fpl
-from mbo_utilities.lcp_io import read_scan, get_metadata
+from mbo_utilities.lcp_io import read_scan
 
 
 def add_args(parser: argparse.ArgumentParser):
@@ -44,15 +44,12 @@ def main():
         raise FileNotFoundError(f"Path '{data_path}' does not exist as a file or directory.")
     if data_path.is_dir():
         files = [str(f) for f in data_path.glob('*.tif*')]
-        metadata = get_metadata(files[0])
         scan = read_scan(files, join_contiguous=True)
-        # pprint(metadata)
         iw = fpl.ImageWidget(scan, histogram_widget=False)
         iw.show()
     else:
         raise FileNotFoundError(f"Path '{data_path}' is not a directory.")
 
-    # pprint(metadata)
     iw = fpl.ImageWidget(scan, histogram_widget=False)
     iw.show()
 
@@ -60,6 +57,6 @@ def main():
 if __name__ == '__main__':
     main()
     if fpl.__version__ == "0.2.0":
-        fpl.run()
+        raise NotImplementedError("fastplotlib version 0.2.0 does not support GUIs.")
     elif fpl.__version__ == "0.3.0":
-        fpl.loop.run()
+        fpl.loop.run_gui()
