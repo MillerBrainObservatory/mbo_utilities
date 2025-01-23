@@ -115,6 +115,39 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         return self.num_frames * self.num_channels * self.field_heights[0] * self.field_widths[0]
 
 
+def is_raw_scanimage(file: os.PathLike | str):
+    """
+    Check if a TIFF file is a raw ScanImage TIFF.
+
+    Parameters
+    ----------
+    file: os.PathLike
+        Path to the TIFF file.
+
+    Returns
+    -------
+    bool
+        True if the TIFF file is a raw ScanImage TIFF; False otherwise.
+    """
+    if not file:
+        return False
+
+    tiff_file = tifffile.TiffFile(file)
+    if (
+            hasattr(tiff_file, 'shaped_metadata')
+            and tiff_file.shaped_metadata is not None
+            and isinstance(tiff_file.shaped_metadata, (list, tuple))
+            and tiff_file.shaped_metadata
+            and tiff_file.shaped_metadata[0] not in ([], (), None)
+    ):
+        if 'image' in tiff_file.shaped_metadata[0]:
+            return True
+        else:
+            return False
+    else:
+        return False
+
+
 def get_metadata(file: os.PathLike | str):
     """
     Extract metadata from a TIFF file. This can be a raw ScanImage TIFF or one
@@ -135,21 +168,10 @@ def get_metadata(file: os.PathLike | str):
     ValueError
         If no metadata is found in the TIFF file. This can occur when the file is not a ScanImage TIFF.
     """
-    if not file:
-        return None
-
     tiff_file = tifffile.TiffFile(file)
-    if (
-            hasattr(tiff_file, 'shaped_metadata')
-            and tiff_file.shaped_metadata is not None
-            and isinstance(tiff_file.shaped_metadata, (list, tuple))
-            and tiff_file.shaped_metadata
-            and tiff_file.shaped_metadata[0] not in ([], (), None)
-    ):
-        if 'image' in tiff_file.shaped_metadata[0]:
-            return tiff_file.shaped_metadata[0]['image']
-
-    if hasattr(tiff_file, 'scanimage_metadata'):
+    if is_raw_scanimage(file):
+        return tiff_file.shaped_metadata[0]['image']
+    elif hasattr(tiff_file, 'scanimage_metadata'):
         meta = tiff_file.scanimage_metadata
         if meta is None:
             return None
@@ -158,9 +180,11 @@ def get_metadata(file: os.PathLike | str):
         if not si:
             print(f"No FrameData found in {file}.")
             return None
-
+        print("Reading tiff series data...")
         series = tiff_file.series[0]
+        print("Reading tiff pages...")
         pages = tiff_file.pages
+        print("Raw tiff fully read.")
 
         # Extract ROI and imaging metadata
         roi_group = meta["RoiGroups"]["imagingRoiGroup"]["rois"]
@@ -201,7 +225,7 @@ def get_metadata(file: os.PathLike | str):
         # As of now, this is for a single ROI
         fov_x = round(objective_resolution * size_xy[0])
         fov_y = round(objective_resolution * size_xy[1])
-        fov_xy = (fov_x, fov_y / num_rois)
+        fov_xy = (int(fov_x), int(fov_y / num_rois))
 
         # Pixel resolution (dxy) calculation
         pixel_resolution = (fov_x / num_pixel_xy[0], fov_y / num_pixel_xy[1])
