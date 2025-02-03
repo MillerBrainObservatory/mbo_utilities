@@ -369,5 +369,5 @@ def get_files_ext(base_dir, extension, max_depth) -> list:
     return [
         str(file)
         for file in base_path.rglob(f'*{extension}*')
-        if len(file.relative_to(base_path).parts) <= max_depth + 1
+        if len(file.relative_to(base_path).parts) <= max_depth
     ]

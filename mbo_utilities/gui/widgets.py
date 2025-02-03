@@ -8,7 +8,7 @@ from fastplotlib.ui import EdgeWindow
 import dask.array as da
 from tqdm import tqdm
 
-from mbo_utilities import get_files_ext, stack_from_files, read_scan
+from mbo_utilities import get_files_ext, stack_from_files, read_scan, is_raw_scanimage
 
 try:
     from imgui_bundle import imgui, icons_fontawesome_6 as fa
@@ -16,30 +16,37 @@ except ImportError:
     raise ImportError("Please install imgui via `conda install -c conda-forge imgui-bundle`")
 
 
-def load_dialog_folder(parent=None):
+def load_dialog_folder(parent=None, directory=None):
+    if directory is None:
+        directory = str(Path().home())
     dlg_kwargs = {
         "parent": parent,
-        "caption": "Open folder with raw data or with z-planes.",
-        "directory": str(Path().home()),
+        "caption": "Open folder with raw data OR with assembled z-planes (none session per folder).",
+        "directory": directory,
     }
     path = QFileDialog.getExistingDirectory(**dlg_kwargs)
-    return load_folder(path)
+    return load_data_path(path)
 
 
-def load_folder(path: str | Path):
+def load_data_path(path: str | Path):
+    """
+    Returns a scan or volume assembled from z-plane files.
+    The output is fed directly into a fastplotlib ImageWidget.
+    """
     save_folder = Path(path)
     if not save_folder.exists():
         print("Folder does not exist")
         return
     plane_folders = get_files_ext(save_folder, ".tif", 2)
     if plane_folders:
-        try:
-            return stack_from_files(plane_folders)
-        except Exception as e:
-            print('Reading raw scan. This could take ~5-30 seconds.')
+        if is_raw_scanimage(plane_folders[0]):
+            # load raw scanimage tiffs
             return read_scan(plane_folders, join_contiguous=True)
+        else:
+            # load assembled z-planes
+            return stack_from_files(plane_folders)
     else:
-        print("No processed planeX folders in folder")
+        print("No processed z-plane folders in folder")
         return
 
 
@@ -74,6 +81,7 @@ class LBMMainWindow(QMainWindow):
         self.image_widget = fpl.ImageWidget(
             data=data,
             histogram_widget=False,
+            graphic_kwargs={"vmin": -350, "vmax": 13000},
         )
         self.resize(1200, 1000)
         qwidget = self.image_widget.show()
@@ -122,9 +130,23 @@ class SummaryDataWidget(EdgeWindow):
         mean_z_widget.show()
 
 
-def run_gui():
+def parse_data_path(fpath):
+    data_path = Path(fpath).expanduser().resolve()
+    print(f"Reading data from '{data_path}'")
+    if not data_path.exists():
+        raise FileNotFoundError(f"Path '{data_path}' does not exist as a file or directory.")
+    if data_path.is_dir():
+        return load_data_path(data_path)
+    else:
+        raise FileNotFoundError(f"Path '{data_path}' is not a directory.")
+
+
+def run_gui(fpath=None):
     app = QApplication(sys.argv)
-    data = load_dialog_folder()
+    if fpath is None:
+        data = load_dialog_folder(parent=None, directory=None)
+    else:
+        data = load_data_path(fpath)
     main_window = LBMMainWindow(data)
     main_window.show()
     app.exec()
