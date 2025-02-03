@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import argparse
 import functools
-import time
 import os
 import time
 import warnings
 from pathlib import Path
 import numpy as np
-import zarr
+from tqdm import tqdm
+
 from mbo_utilities.scanreader.utils import listify_index
-from mbo_utilities.lcp_io import get_metadata, make_json_serializable, read_scan
+from mbo_utilities.lcp_io import get_metadata, make_json_serializable, read_scan, save_mp4
+from mbo_utilities.util import norm_minmax, extract_center_square
 
 import tifffile
 import logging
@@ -247,7 +248,9 @@ def save_as(
         frames=None,
         metadata=None,
         overwrite=True,
+        append_str='',
         ext='.tiff',
+        order=None,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -267,9 +270,16 @@ def save_as(
         Additional metadata to update the scan object's metadata. Default is `None`.
     overwrite : bool, optional
         Whether to overwrite existing files. Default is `True`.
+    append_str : str, optional
+        String to append to the file name. Default is `''`.
     ext : str, optional
         File extension for the saved data. Supported options are `'.tiff'` and `'.zarr'`.
         Default is `'.tiff'`.
+    order : list or tuple, optional
+        A list or tuple specifying the desired order of planes. If provided, the number of
+        elements in `order` must match the number of planes. Default is `None`.
+
+skip calculating centers if markersize=0, add colormap
 
     Raises
     ------
@@ -289,8 +299,15 @@ def save_as(
         planes = [planes]
     if frames is None:
         frames = list(range(scan.num_frames))
-    elif not isinstance(planes, (list, tuple)):
+    elif not isinstance(frames, (list, tuple)):
         frames = [frames]
+
+    if order is not None:
+        if len(order) != len(planes):
+            raise ValueError(
+                f"The length of the `order` ({len(order)}) does not match the number of planes ({len(planes)})."
+            )
+        planes = [planes[i] for i in order]
     if not metadata:
         metadata = {'si': scan.tiff_files[0].scanimage_metadata,
                     'image': make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))}
@@ -298,30 +315,29 @@ def save_as(
     if not savedir.exists():
         logger.debug(f"Creating directory: {savedir}")
         savedir.mkdir(parents=True)
-    _save_data(scan, savedir, planes, frames, overwrite, ext, metadata)
+    _save_data(scan, savedir, planes, frames, overwrite, ext, append_str, metadata)
 
 
-def _save_data(scan, path, planes, frames, overwrite, file_extension, metadata):
+def _save_data(scan, path, planes, frames, overwrite, file_extension, append_str, metadata):
     path.mkdir(parents=True, exist_ok=True)
-    print(f'Planes: {planes}')
 
     file_writer = _get_file_writer(file_extension, overwrite, metadata)
     if len(scan.fields) > 1:
+        print(f"Saving {len(scan.fields)} ROIs.")
         for idx, field in enumerate(scan.fields):
-            for chan in planes:
+            for chan in tqdm(planes, desc='Saving planes', total=len(planes)):
                 if 'tif' in file_extension:
-                    arr = scan[idx, :, chan, :, :]  # [field, T, z, y, x]
+                    arr = scan[idx, frames, chan, :, :]
                     logger.debug('arr shape:', arr.shape)
-                    file_writer(path, f'plane_{chan + 1}_roi_{idx + 1}', arr)
+                    file_writer(path, f'plane_{chan + 1}_roi_{idx + 1}{append_str}', arr)
     else:
-        for chan in planes:
+        print(f"Saving {len(planes)} planes.")
+        for chan in tqdm(planes, desc='Saving planes', total=len(planes)):
             if 'tif' in file_extension:
-                start = time.time()
-                arr = scan[:, chan, :, :]  # [y,x,T]
-                stop = time.time()
-                print(f"Read plane_{chan + 1} data in {stop - start:.2f} seconds.")
+                arr = scan[frames, chan, :, :]
                 logger.debug('arr shape:', arr.shape)
-                file_writer(path, f'plane_{chan + 1}', arr)
+                file_writer(path, f'plane_{chan + 1}{append_str}', arr)
+        print(f"Data successfully saved to {path}.")
 
 
 def _get_file_writer(ext, overwrite, metadata=None):
@@ -335,31 +351,45 @@ def _get_file_writer(ext, overwrite, metadata=None):
 
 def _write_tiff(path, name, data, overwrite=True, metadata=None):
     filename = Path(path / f'{name}.tiff')
+    fpath = Path(path) / 'summary_images'
+    fpath.mkdir(exist_ok=True, parents=True)
+    mean_filename = fpath / f'{name}_mean.tiff'
+    movie_filename = fpath / f'{name}.mp4'
     if filename.exists() and not overwrite:
         logger.warning(
             f'File already exists: {filename}. To overwrite, set overwrite=True (--overwrite in command line)')
         return
-    logger.info(f"Writing {filename}")
+    ####
+    print(f"Writing {filename}")
     t_write = time.time()
-    data = np.transpose(data.squeeze(), (0, 2, 1))
     tifffile.imwrite(filename, data, metadata=metadata)
+    ####
+    print(f"Writing {movie_filename}")
+    data = norm_minmax(data)
+    data = extract_center_square(data, 255)
+    save_mp4(str(movie_filename), data)
+    ####
+    data = np.mean(data, axis=0)
+    print(f"Writing {mean_filename}")
+    tifffile.imwrite(mean_filename, data, metadata=metadata)
     t_write_end = time.time() - t_write
     print(f"Data written in {t_write_end:.2f} seconds.")
 
 
 def _write_zarr(path, name, data, metadata=None, overwrite=True):
-    store = zarr.DirectoryStore(path)
-    root = zarr.group(store, overwrite=overwrite)
-    ds = root.create_dataset(name=name, data=data.squeeze(), overwrite=True)
-    if metadata:
-        ds.attrs['metadata'] = metadata
+    raise NotImplementedError("Zarr writing is not yet implemented.")
+    # store = zarr.DirectoryStore(path)
+    # root = zarr.group(store, overwrite=overwrite)
+    # ds = root.create_dataset(name=name, data=data.squeeze(), overwrite=True)
+    # if metadata:
+    #     ds.attrs['metadata'] = metadata
 
 
 def main():
     parser = argparse.ArgumentParser(description="CLI for processing ScanImage tiff files.")
     parser.add_argument("path",
                         type=str,
-                        nargs='?',  # Change this to make 'path' optional
+                        nargs='?',
                         default=None,
                         help="Path to the file or directory to process.")
     parser.add_argument("--frames",
@@ -386,7 +416,7 @@ def main():
                                                             "printed.")
     parser.add_argument("--overwrite", action='store_true', help="Overwrite existing files if saving data..")
     parser.add_argument("--tiff", action='store_false', help="Flag to save as .tiff. Default is True")
-    parser.add_argument("--zarr", action='store_true', help="Flag to save as .zarr. Default is False")
+    # parser.add_argument("--zarr", action='store_true', help="Flag to save as .zarr. Default is False")
     parser.add_argument("--assemble", action='store_true', help="Flag to assemble the each ROI into a single image.")
     parser.add_argument("--debug", action='store_true', help="Output verbose debug information.")
     parser.add_argument("--delete_first_frame", action='store_false', help="Flag to delete the first frame of the "
