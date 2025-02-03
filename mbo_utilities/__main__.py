@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import time
 from pathlib import Path
 
 import fastplotlib as fpl
 
 from mbo_utilities import run_gui
-from mbo_utilities.lcp_io import read_scan
 
 
 def add_args(parser: argparse.ArgumentParser):
