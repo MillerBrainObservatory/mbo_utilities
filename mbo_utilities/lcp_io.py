@@ -5,13 +5,103 @@ import os
 import numpy as np
 import tifffile
 from pathlib import Path
+import ffmpeg
 
 import dask.array as da
 import tqdm
+from matplotlib import cm
 
 from mbo_utilities.scanreader import scans
 from mbo_utilities.scanreader.core import expand_wildcard
 from mbo_utilities.scanreader.exceptions import PathnameError, FieldDimensionMismatch
+
+
+def save_mp4(fname: str | Path | np.ndarray, images, framerate=60, speedup=1, chunk_size=100, cmap="gray", win=7,
+             vcodec='libx264'):
+    """
+    Save a video from a 3D array or TIFF stack to `.mp4`.
+
+    Parameters
+    ----------
+    fname : str
+        Output video file name.
+    images : numpy.ndarray or str
+        Input 3D array (T x H x W) or a file path to a TIFF stack.
+    framerate : int, optional
+        Original framerate of the video, by default 60.
+    speedup : int, optional
+        Factor to increase the playback speed, by default 1 (no speedup).
+    chunk_size : int, optional
+        Number of frames to process and write in a single chunk, by default 100.
+    cmap : str, optional
+        Colormap to apply to the video frames, by default "gray".
+        Must be a valid Matplotlib colormap name.
+    win : int, optional
+        Temporal averaging window size. If `win > 1`, frames are averaged over
+        the specified window using convolution. By default, 7.
+    vcodec : str, optional
+        Video codec to use, by default 'libx264'.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the input file does not exist when `images` is provided as a file path.
+    ValueError
+        If `images` is not a valid 3D NumPy array or a file path to a TIFF stack.
+
+    Notes
+    -----
+    - The input array `images` must have the shape (T, H, W), where T is the number of frames,
+      H is the height, and W is the width.
+    - The `win` parameter performs temporal smoothing by averaging over adjacent frames.
+
+    Examples
+    --------
+    Save a video from a 3D NumPy array with a colormap and speedup:
+
+    >>> import numpy as np
+    >>> images = np.random.rand(100, 600, 576) * 255
+    >>> save_mp4('output.mp4', images, framerate=30, cmap='viridis', speedup=2)
+
+    Save a video with temporal averaging applied over a 5-frame window at 4x speed:
+
+    >>> save_mp4('output_smoothed.mp4', images, framerate=30, speedup=4, cmap='gray', win=5)
+
+    Save a video from a TIFF stack:
+
+    >>> save_mp4('output.mp4', 'path/to/stack.tiff', framerate=60, cmap='gray')
+    """
+    if isinstance(images, (str, Path)):
+        if Path(images).is_file():
+            images = tifffile.memmap(images)
+        else:
+            raise FileNotFoundError(f"File not found: {images}")
+
+    T, height, width = images.shape
+    colormap = cm.get_cmap(cmap)
+
+    if win and win > 1:
+        kernel = np.ones(win) / win
+        images = np.apply_along_axis(lambda x: np.convolve(x, kernel, mode='same'), axis=0, arr=images)
+
+    output_framerate = int(framerate * speedup)
+    process = (
+        ffmpeg
+        .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}', framerate=output_framerate)
+        .output(str(fname), pix_fmt='yuv420p', vcodec=vcodec, r=output_framerate)
+        .overwrite_output()
+        .run_async(pipe_stdin=True)
+    )
+
+    for start in range(0, T, chunk_size):
+        end = min(start + chunk_size, T)
+        chunk = images[start:end]
+        colored_chunk = (colormap(chunk)[:, :, :, :3] * 255).astype(np.uint8)
+        for frame in colored_chunk:
+            process.stdin.write(frame.tobytes())
+
+    process.stdin.close()
+    process.wait()
 
 
 def stack_from_files(files: list):
