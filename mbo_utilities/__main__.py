@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 import fastplotlib as fpl
@@ -24,8 +25,8 @@ def add_args(parser: argparse.ArgumentParser):
     argparse.ArgumentParser
         The parser with added arguments.
     """
-    parser.add_argument('--path', type=str, help='Path to a directory containing raw scanimage tiff files for a single session.')
-    parser.add_argument('--gui', action='store_true', help='Path to a directory containing raw scanimage tiff files for a single session.')
+    parser.add_argument('--path', type=str, default=None, help='Path to a directory containing raw scanimage tiff files for a single session.')
+    parser.add_argument('--gui', action='store_true', help='Run the GUI.')
     parser.add_argument('--version', action='store_true', help='Print the version of the package.')
     return parser
 
@@ -45,21 +46,19 @@ def main():
 
     if args.gui:
         run_gui()
-
-    # Handle help
-    data_path = Path(args.path).expanduser()
-    if not data_path.exists():
-        raise FileNotFoundError(f"Path '{data_path}' does not exist as a file or directory.")
-    if data_path.is_dir():
-        files = [str(f) for f in data_path.glob('*.tif*')]
-        scan = read_scan(files, join_contiguous=True)
-        iw = fpl.ImageWidget(scan, histogram_widget=False)
-        iw.show()
+        return
+    if not args.path or args.path == "":
+        run_gui()
+        return
     else:
-        raise FileNotFoundError(f"Path '{data_path}' is not a directory.")
-
-    iw = fpl.ImageWidget(scan, histogram_widget=False)
-    iw.show()
+        data_path = Path(args.path).expanduser().resolve()
+        print(f"Reading data from '{data_path}'")
+        if not data_path.exists():
+            raise FileNotFoundError(f"Path '{data_path}' does not exist as a file or directory.")
+        if data_path.is_dir():
+            run_gui(data_path)
+        else:
+            raise FileNotFoundError(f"Path '{data_path}' is not a directory.")
 
 
 if __name__ == '__main__':
@@ -67,4 +66,4 @@ if __name__ == '__main__':
     if fpl.__version__ == "0.2.0":
         raise NotImplementedError("fastplotlib version 0.2.0 does not support GUIs.")
     elif fpl.__version__ == "0.3.0":
-        fpl.loop.run_gui()
+        fpl.loop.run()
