@@ -11,6 +11,7 @@ install_deps = [
     "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
     "ipykernel",
     "jupyterlab",
+    "matplotlib",
     "ffmpeg-python",
     "PyWavelets",
     "qtpy",
