@@ -250,7 +250,7 @@ def get_metadata(file: os.PathLike | str):
         raise ValueError(f"No metadata found in {file}.")
 
 
-def get_files_ext(base_dir, str_contains="", max_depth=1, sorted=True) -> list | Path:
+def get_files(base_dir, str_contains="", max_depth=1, sorted=True) -> list | Path:
     """
     Recursively searches for files with a specific extension up to a given depth and stores their paths in a pickle file.
 
@@ -275,6 +275,9 @@ def get_files_ext(base_dir, str_contains="", max_depth=1, sorted=True) -> list |
         raise FileNotFoundError(f"Directory '{base_path}' does not exist.")
     if not base_path.is_dir():
         raise NotADirectoryError(f"'{base_path}' is not a directory.")
+    if max_depth == 0:
+        raise Warning("Max-depth of 0 is not allowed. Setting to 1.")
+        max_depth = 1
 
     files = [
         file for file in base_path.rglob(f'*{str_contains}*')
