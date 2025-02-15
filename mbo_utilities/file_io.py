@@ -77,7 +77,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         return self.num_frames * self.num_channels * self.field_heights[0] * self.field_widths[0]
 
 
-def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True, files_only=True) -> list | Path:
+def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> list | Path:
     """
     Recursively searches for files with a specific extension up to a given depth and stores their paths in a pickle file.
 
@@ -91,8 +91,6 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True, files
         The maximum depth of subdirectories to search.
     sort_ascending : bool, optional
         Whether to sort files alphanumerically by filename, with digits in ascending order (i.e. 1, 2, 10) (default is False).
-    files_only : bool, optional
-        If True, only files are returned. If False, directories are also included (default is True).
 
     Returns
     -------
@@ -111,7 +109,7 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True, files
     files = [
         file for file in base_path.rglob(f'*{str_contains}*')
         if len(file.relative_to(base_path).parts) <= max_depth
-        and (not files_only or file.is_file())
+        and file.is_file()
     ]
 
     if sort_ascending:
