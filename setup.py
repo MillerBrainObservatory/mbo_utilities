@@ -9,6 +9,8 @@ install_deps = [
     "scikit-image",
     "fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
     "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
+    "ipykernel",
+    "jupyterlab",
     "ffmpeg-python",
     "PyWavelets",
     "qtpy",
