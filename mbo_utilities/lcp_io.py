@@ -17,7 +17,7 @@ from mbo_utilities.scanreader import scans
 from mbo_utilities.scanreader.core import expand_wildcard
 
 def expand_wildcard(wildcard):
-    """ Expands a list of pathname patterns to form a sorted list of absolute filenames.
+    """ Expands a list of pathname patterns to form a sort_ascending list of absolute filenames.
 
     Args:
         wildcard: String or list of strings. Pathname pattern(s) to be extended with glob.
@@ -250,7 +250,7 @@ def get_metadata(file: os.PathLike | str):
         raise ValueError(f"No metadata found in {file}.")
 
 
-def get_files(base_dir, str_contains="", max_depth=1, sorted=True) -> list | Path:
+def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> list | Path:
     """
     Recursively searches for files with a specific extension up to a given depth and stores their paths in a pickle file.
 
@@ -262,7 +262,7 @@ def get_files(base_dir, str_contains="", max_depth=1, sorted=True) -> list | Pat
         The string that the file names should contain.
     max_depth : int
         The maximum depth of subdirectories to search.
-    sorted : bool, optional
+    sort_ascending : bool, optional
         Whether to sort files alphanumerically by filename, with digits in ascending order (i.e. 1, 2, 10) (default is False).
 
     Returns
@@ -284,7 +284,7 @@ def get_files(base_dir, str_contains="", max_depth=1, sorted=True) -> list | Pat
         if len(file.relative_to(base_path).parts) <= max_depth
     ]
 
-    if sorted:
+    if sort_ascending:
         def numerical_sort_key(path):
             match = re.search(r'\d+', path.name)
             return int(match.group()) if match else float('inf')

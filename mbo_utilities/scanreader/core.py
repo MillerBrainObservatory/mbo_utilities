@@ -65,7 +65,7 @@ def read_scan(pathnames, dtype=np.int16, join_contiguous=False):
     return scan
 
 def expand_wildcard(wildcard):
-    """ Expands a list of pathname patterns to form a sorted list of absolute filenames.
+    """ Expands a list of pathname patterns to form a sort_ascending list of absolute filenames.
 
     Args:
         wildcard: String or list of strings. Pathname pattern(s) to be extended with glob.
