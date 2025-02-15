@@ -1,6 +1,8 @@
 import sys
 
 from pathlib import Path
+import numpy as np
+
 from qtpy.QtWidgets import QMainWindow, QFileDialog, QApplication
 from qtpy import QtGui, QtCore
 import fastplotlib as fpl
@@ -9,6 +11,7 @@ import dask.array as da
 from tqdm import tqdm
 
 from mbo_utilities import get_files, stack_from_files, read_scan, is_raw_scanimage
+from mbo_utilities.file_io import ScanMultiROIReordered
 
 try:
     from imgui_bundle import imgui, icons_fontawesome_6 as fa
@@ -141,12 +144,17 @@ def parse_data_path(fpath):
         raise FileNotFoundError(f"Path '{data_path}' is not a directory.")
 
 
-def run_gui(fpath=None):
+def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray):
     app = QApplication(sys.argv)
-    if fpath is None:
+    if data_in is None:
         data = load_dialog_folder(parent=None, directory=None)
+    elif isinstance(data_in, ScanMultiROIReordered):
+        data = data_in
+    elif isinstance(data_in, (str, Path)):
+        data = load_data_path(data_in)
     else:
-        data = load_data_path(fpath)
+        raise TypeError(f"Unsupported data type: {type(data_in)}")
+
     main_window = LBMMainWindow(data)
     main_window.show()
     app.exec()
