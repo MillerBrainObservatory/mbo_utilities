@@ -1,10 +1,9 @@
-from .lcp_io import (
+from .file_io import (
     get_files,
     stack_from_files,
-    get_metadata,
     read_scan,
-    is_raw_scanimage,
 )
+from .metadata import is_raw_scanimage, get_metadata
 from .gui.widgets import run_gui
 
 from . import _version
@@ -13,8 +12,6 @@ __version__ = _version.get_versions()['version']
 __all__ = [
     'get_files',
     'stack_from_files',
-    'get_metadata',
     'read_scan',
-    'is_raw_scanimage',
     'run_gui',
 ]
