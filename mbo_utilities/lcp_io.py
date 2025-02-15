@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from os import path
 
 import numpy as np
 import tifffile
@@ -9,41 +8,11 @@ from pathlib import Path
 import ffmpeg
 import re
 
-import dask.array as da
-import tqdm
 from matplotlib import cm
 
 from mbo_utilities.scanreader import scans
 from mbo_utilities.scanreader.core import expand_wildcard
-
-def expand_wildcard(wildcard):
-    """ Expands a list of pathname patterns to form a sort_ascending list of absolute filenames.
-
-    Args:
-        wildcard: String or list of strings. Pathname pattern(s) to be extended with glob.
-
-    Returns:
-        A list of string. Absolute filenames.
-    """
-    if isinstance(wildcard, str):
-        wildcard_list = [wildcard]
-    elif isinstance(wildcard, (tuple, list)):
-        wildcard_list = wildcard
-    else:
-        error_msg = 'Expected string or list of strings, received {}'.format(wildcard)
-        raise TypeError(error_msg)
-
-    # Expand wildcards
-    rel_filenames = [glob(wildcard) for wildcard in wildcard_list]
-    rel_filenames = [item for sublist in rel_filenames for item in sublist]  # flatten list
-
-    # Make absolute filenames
-    abs_filenames = [path.abspath(filename) for filename in rel_filenames]
-
-    # Sort
-    sorted_filenames = sorted(abs_filenames, key=path.basename)
-
-    return sorted_filenames
+from mbo_utilities.util import norm_minmax
 
 
 def make_json_serializable(obj):
@@ -220,7 +189,7 @@ def get_metadata(file: os.PathLike | str):
         # As of now, this is for a single ROI
         fov_x = round(objective_resolution * size_xy[0])  # in microns
         fov_y = round(objective_resolution * size_xy[1])  # in microns
-        fov_roi_um = (fov_x, fov_y)                       # in microns
+        fov_roi_um = (fov_x, fov_y)  # in microns
         fov_xy = (int(fov_x), int(fov_y / num_rois))
         fov_px = (int(fov_x / num_pixel_xy[0]), int(fov_y / num_pixel_xy[1]))
 
@@ -341,6 +310,8 @@ def stack_from_files(files: list):
 
 
 def save_png(fname, data):
+    # TODO: move this to a separate module that imports matplotlib
+    import matplotlib.pyplot as plt
     plt.imshow(data)
     plt.axis('tight')
     plt.axis('off')
