@@ -106,10 +106,13 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> li
         print("Max-depth of 0 is not allowed. Setting to 1.")
         max_depth = 1
 
+    base_depth = len(base_path.parts)
+    pattern = f'*{str_contains}*' if str_contains else '*'
+
     files = [
-        file for file in base_path.rglob(f'*{str_contains}*')
-        if len(file.relative_to(base_path).parts) <= max_depth
-        and file.is_file()
+        file for file in base_path.rglob(pattern)
+        if len(file.parts) - base_depth <= max_depth
+           and file.is_file()
     ]
 
     if sort_ascending:
