@@ -8,7 +8,7 @@ from fastplotlib.ui import EdgeWindow
 import dask.array as da
 from tqdm import tqdm
 
-from mbo_utilities import get_files_ext, stack_from_files, read_scan, is_raw_scanimage
+from mbo_utilities import get_files, stack_from_files, read_scan, is_raw_scanimage
 
 try:
     from imgui_bundle import imgui, icons_fontawesome_6 as fa
@@ -37,7 +37,7 @@ def load_data_path(path: str | Path):
     if not save_folder.exists():
         print("Folder does not exist")
         return
-    plane_folders = get_files_ext(save_folder, ".tif", 2)
+    plane_folders = get_files(save_folder, ".tif", 2)
     if plane_folders:
         if is_raw_scanimage(plane_folders[0]):
             # load raw scanimage tiffs

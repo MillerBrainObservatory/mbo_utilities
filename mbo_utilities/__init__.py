@@ -1,5 +1,5 @@
 from .lcp_io import (
-    get_files_ext,
+    get_files,
     stack_from_files,
     get_metadata,
     read_scan,
@@ -11,7 +11,7 @@ from . import _version
 __version__ = _version.get_versions()['version']
 
 __all__ = [
-    'get_files_ext',
+    'get_files',
     'stack_from_files',
     'get_metadata',
     'read_scan',
