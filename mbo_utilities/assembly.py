@@ -1,17 +1,17 @@
-from __future__ import annotations
-
 import argparse
 import functools
 import os
 import time
 import warnings
 from pathlib import Path
+
+import lbm_caiman_python
 import numpy as np
+from scanreader.utils import listify_index
 from tqdm import tqdm
 
-from mbo_utilities.scanreader.utils import listify_index
-from mbo_utilities.lcp_io import get_metadata, make_json_serializable, read_scan, save_mp4
-from mbo_utilities.util import norm_minmax, extract_center_square
+import lbm_caiman_python.lcp_io
+from lbm_caiman_python.lcp_io import get_metadata, make_json_serializable
 
 import tifffile
 import logging
@@ -22,16 +22,6 @@ logger.setLevel(logging.WARNING)
 ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
 
 CHUNKS = {0: 'auto', 1: -1, 2: -1}
-
-# https://brainglobe.info/documentation/brainglobe-atlasapi/adding-a-new-atlas.html
-BRAINGLOBE_STRUCTURE_TEMPLATE = {
-    "acronym": "VIS",  # shortened name of the region
-    "id": 3,  # region id
-    "name": "visual cortex",  # full region name
-    "structure_id_path": [1, 2, 3],  # path to the structure in the structures hierarchy, up to current id
-    "rgb_triplet": [255, 255, 255],
-    # default color for visualizing the region, feel free to leave white or randomize it
-}
 
 # suppress warnings
 warnings.filterwarnings("ignore")
@@ -251,6 +241,7 @@ def save_as(
         append_str='',
         ext='.tiff',
         order=None,
+        image_size=None,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -278,8 +269,9 @@ def save_as(
     order : list or tuple, optional
         A list or tuple specifying the desired order of planes. If provided, the number of
         elements in `order` must match the number of planes. Default is `None`.
-
-skip calculating centers if markersize=0, add colormap
+    image_size : int, optional
+        Size of the image to save. Default is 255x255 pixel image. If the image is larger
+        than the movie dimensions, it will be cropped to fit. Expected dimensions are square.
 
     Raises
     ------
@@ -315,13 +307,13 @@ skip calculating centers if markersize=0, add colormap
     if not savedir.exists():
         logger.debug(f"Creating directory: {savedir}")
         savedir.mkdir(parents=True)
-    _save_data(scan, savedir, planes, frames, overwrite, ext, append_str, metadata)
+    _save_data(scan, savedir, planes, frames, overwrite, ext, append_str, metadata, image_size)
 
 
-def _save_data(scan, path, planes, frames, overwrite, file_extension, append_str, metadata):
+def _save_data(scan, path, planes, frames, overwrite, file_extension, append_str, metadata, image_size=None):
     path.mkdir(parents=True, exist_ok=True)
 
-    file_writer = _get_file_writer(file_extension, overwrite, metadata)
+    file_writer = _get_file_writer(file_extension, overwrite, metadata, image_size)
     if len(scan.fields) > 1:
         print(f"Saving {len(scan.fields)} ROIs.")
         for idx, field in enumerate(scan.fields):
@@ -334,22 +326,49 @@ def _save_data(scan, path, planes, frames, overwrite, file_extension, append_str
         print(f"Saving {len(planes)} planes.")
         for chan in tqdm(planes, desc='Saving planes', total=len(planes)):
             if 'tif' in file_extension:
-                arr = scan[frames, chan, :, :]
-                logger.debug('arr shape:', arr.shape)
-                file_writer(path, f'plane_{chan + 1}{append_str}', arr)
+
+                chunk_size = 10 * 1024 * 1024  # 10 MB
+
+                # Calculate the number of frames per chunk
+                nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
+                num_chunks = max(1, int(np.ceil(nbytes_chan / chunk_size)))
+                frames_per_chunk = max(1, scan.shape[0] // num_chunks)
+
+                name = f'plane_{chan + 1}{append_str}'
+                filename = Path(path) / f'{name}.tiff'
+
+                if filename.exists() and not overwrite:
+                    logger.warning(
+                        f'File already exists: {filename}. To overwrite, set overwrite=True (--overwrite in command line)')
+                    return
+
+                # Open TIFF file in append mode
+                with tifffile.TiffWriter(filename, bigtiff=True) as tif:
+                    with tqdm(total=num_chunks, desc='Saving chunks', position=0, leave=True) as pbar:
+                        for chunk in range(num_chunks):
+                            start = chunk * frames_per_chunk
+                            end = min((chunk + 1) * frames_per_chunk, scan.shape[0])
+                            data = scan[start:end, chan, :, :]  # Extract the chunk
+
+                            # Append the chunk to the existing file
+                            tif.write(data, metadata=metadata)
+
+                            pbar.update(1)
+
+                print(f"Data successfully saved to {filename}.")
         print(f"Data successfully saved to {path}.")
 
 
-def _get_file_writer(ext, overwrite, metadata=None):
+def _get_file_writer(ext, overwrite, metadata=None, image_size=None):
     if ext in ['.tif', '.tiff']:
-        return functools.partial(_write_tiff, overwrite=overwrite, metadata=metadata)
+        return functools.partial(_write_tiff, overwrite=overwrite, metadata=metadata, image_size=image_size)
     elif ext == '.zarr':
         return functools.partial(_write_zarr, overwrite=overwrite, metadata=metadata)
     else:
         raise ValueError(f'Unsupported file extension: {ext}')
 
 
-def _write_tiff(path, name, data, overwrite=True, metadata=None):
+def _write_tiff(path, name, data, overwrite=True, metadata=None, image_size=None):
     filename = Path(path / f'{name}.tiff')
     fpath = Path(path) / 'summary_images'
     fpath.mkdir(exist_ok=True, parents=True)
@@ -359,15 +378,28 @@ def _write_tiff(path, name, data, overwrite=True, metadata=None):
         logger.warning(
             f'File already exists: {filename}. To overwrite, set overwrite=True (--overwrite in command line)')
         return
+
     ####
     print(f"Writing {filename}")
     t_write = time.time()
     tifffile.imwrite(filename, data, metadata=metadata)
+
     ####
     print(f"Writing {movie_filename}")
-    data = norm_minmax(data)
-    data = extract_center_square(data, 255)
-    save_mp4(str(movie_filename), data)
+    data = lbm_caiman_python.norm_minmax(data)
+    if image_size:
+        if isinstance(image_size, (tuple, list)):
+            image_size = image_size[0]
+    else:
+        image_size = 255
+
+    # make sure image_size isnt larger than movie dimensions
+    if image_size > data.shape[1]:
+        image_size = data.shape[1]
+
+    data = lbm_caiman_python.extract_center_square(data, image_size)
+    lbm_caiman_python.lcp_io.save_mp4(str(movie_filename), data)
+
     ####
     data = np.mean(data, axis=0)
     print(f"Writing {mean_filename}")
@@ -403,6 +435,15 @@ def main():
                         default=":",  # all planes
                         help="Planes to read (0 based). Use slice notation like NumPy arrays (e.g., 1:5 gives planes "
                              "2 to 6")
+    parser.add_argument("--trimx",
+                        type=int,
+                        nargs=2,
+                        default=(0, 0),
+                        help="Number of x-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for left and right "
+                             "edges).")
+    parser.add_argument("--trimy", type=int, nargs=2, default=(0, 0),
+                        help="Number of y-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for top and bottom "
+                             "edges).")
     # Boolean Flags
     parser.add_argument("--metadata", action="store_true",
                         help="Print a dictionary of scanimage metadata for files at the given path.")
@@ -416,7 +457,7 @@ def main():
                                                             "printed.")
     parser.add_argument("--overwrite", action='store_true', help="Overwrite existing files if saving data..")
     parser.add_argument("--tiff", action='store_false', help="Flag to save as .tiff. Default is True")
-    # parser.add_argument("--zarr", action='store_true', help="Flag to save as .zarr. Default is False")
+    parser.add_argument("--zarr", action='store_true', help="Flag to save as .zarr. Default is False")
     parser.add_argument("--assemble", action='store_true', help="Flag to assemble the each ROI into a single image.")
     parser.add_argument("--debug", action='store_true', help="Output verbose debug information.")
     parser.add_argument("--delete_first_frame", action='store_false', help="Flag to delete the first frame of the "
@@ -450,10 +491,7 @@ def main():
         print(f'Found {len(files)} file(s) in {args.path}')
 
     if args.metadata:
-        t_metadata = time.time()
         metadata = get_metadata(files[0])
-        t_metadata_end = time.time() - t_metadata
-        print(f"Metadata read in {t_metadata_end:.2f} seconds.")
         print(f"Metadata for {files[0]}:")
         # filter out the verbose scanimage frame/roi metadata
         print_params({k: v for k, v in metadata.items() if k not in ['si', 'roi_info']})
@@ -468,7 +506,7 @@ def main():
         logger.info(f"Saving data to {savepath}.")
 
         t_scan_init = time.time()
-        scan = read_scan(files, join_contiguous=join_contiguous, )
+        scan = lbm_caiman_python.read_scan(files, join_contiguous=join_contiguous, )
         t_scan_init_end = time.time() - t_scan_init
         logger.info(f"--- Scan initialized in {t_scan_init_end:.2f} seconds.")
 
