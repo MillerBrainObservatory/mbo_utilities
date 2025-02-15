@@ -2,6 +2,7 @@ from .file_io import (
     get_files,
     stack_from_files,
     read_scan,
+    ScanMultiROIReordered,
 )
 from .metadata import is_raw_scanimage, get_metadata
 from .gui.widgets import run_gui
@@ -14,4 +15,5 @@ __all__ = [
     'stack_from_files',
     'read_scan',
     'run_gui',
+    'ScanMultiROIReordered',
 ]
