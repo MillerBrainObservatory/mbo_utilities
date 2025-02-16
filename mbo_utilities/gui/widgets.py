@@ -86,9 +86,10 @@ class LBMMainWindow(QMainWindow):
             histogram_widget=False,
             graphic_kwargs={"vmin": -350, "vmax": 13000},
         )
-        self.resize(1200, 1000)
-        qwidget = self.image_widget.show()
-        self.setCentralWidget(qwidget)
+        if self.image_widget.figure.canvas.__class__.__name__ == "QRenderCanvas":
+            self.resize(1000, 800)
+            qwidget = self.image_widget.show()
+            self.setCentralWidget(qwidget)
 
 
 class SummaryDataWidget(EdgeWindow):
@@ -144,7 +145,7 @@ def parse_data_path(fpath):
         raise FileNotFoundError(f"Path '{data_path}' is not a directory.")
 
 
-def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray):
+def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None):
     app = QApplication(sys.argv)
     if data_in is None:
         data = load_dialog_folder(parent=None, directory=None)
