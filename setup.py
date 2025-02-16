@@ -12,6 +12,7 @@ install_deps = [
     "imgui_bundle",
     "ipykernel",
     "jupyterlab",
+    "jupyter_rfb",
     "matplotlib",
     "ffmpeg-python",
     "PyWavelets",
