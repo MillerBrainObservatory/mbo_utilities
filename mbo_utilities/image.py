@@ -1,7 +1,5 @@
 import numpy as np
 
-from mbo_utilities.assembly import print
-
 
 def extract_center_square(images, size):
     """
