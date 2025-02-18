@@ -125,25 +125,6 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> li
     return [str(file) for file in files]
 
 
-def get_metrics_path(fname: Path) -> Path:
-    """
-    Get the path to the computed metrics file for a given data file.
-    Assumes the metrics file is to be stored in the same directory as the data file,
-    with the same name stem and a '_metrics.npz' suffix.
-
-    Parameters
-    ----------
-    fname : Path
-        The path to the input data file.
-
-    Returns
-    -------
-    metrics_path : Path
-        The path to the computed metrics file.
-    """
-    fname = Path(fname)
-    return fname.with_stem(fname.stem + '_metrics').with_suffix('.npz')
-
 
 def stack_from_files(files: list):
     """Stacks a list of TIFF files into a Dask array. Can be 3D Tyx or 4D Tzyx.
