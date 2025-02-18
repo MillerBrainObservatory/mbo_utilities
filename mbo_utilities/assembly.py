@@ -6,6 +6,7 @@ import warnings
 import logging
 from pathlib import Path
 import numpy as np
+import dask.array as da
 from tqdm import tqdm
 
 import tifffile
@@ -129,56 +130,52 @@ def save_as(
     if not savedir.exists():
         logger.debug(f"Creating directory: {savedir}")
         savedir.mkdir(parents=True)
-    _save_data(scan, savedir, planes, frames, overwrite, ext, append_str, metadata, image_size)
+    _save_data(scan, savedir, planes, overwrite, ext, append_str, metadata=metadata, image_size=None)
 
 
-def _save_data(scan, path, planes, frames, overwrite, file_extension, append_str, metadata, image_size=None):
+def _save_data(scan, path, planes, overwrite, file_extension, append_str, metadata, image_size=None):
+    start = time.time()
+    if '.' in file_extension:
+        file_extension = file_extension.split('.')[-1]
+
+    path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
 
-    file_writer = _get_file_writer(file_extension, overwrite, metadata, image_size)
-    if len(scan.fields) > 1:
-        print(f"Saving {len(scan.fields)} ROIs.")
-        for idx, field in enumerate(scan.fields):
-            for chan in tqdm(planes, desc='Saving planes', total=len(planes)):
-                if 'tif' in file_extension:
-                    arr = scan[idx, frames, chan, :, :]
-                    logger.debug('arr shape:', arr.shape)
-                    file_writer(path, f'plane_{chan + 1}_roi_{idx + 1}{append_str}', arr)
-    else:
-        print(f"Saving {len(planes)} planes.")
-        for chan in tqdm(planes, desc='Saving planes', total=len(planes)):
-            if 'tif' in file_extension:
+    for chan in planes:
+        print(f"Saving z-plane {chan + 1}...")
 
-                chunk_size = 10 * 1024 * 1024  # 10 MB
+        fname = path.joinpath(f"plane_{chan+1:02d}.{file_extension}")
+        if fname.exists():
+            fname.unlink()
 
-                # Calculate the number of frames per chunk
-                nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
-                num_chunks = max(1, int(np.ceil(nbytes_chan / chunk_size)))
-                frames_per_chunk = max(1, scan.shape[0] // num_chunks)
+        tifffile.imwrite(fname, da.zeros((scan.shape)), metadata=metadata)
+        tif = tifffile.memmap(fname)
 
-                name = f'plane_{chan + 1}{append_str}'
-                filename = Path(path) / f'{name}.tiff'
+        chunk_size = 10 * 1024 * 1024
+        nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
+        num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
 
-                if filename.exists() and not overwrite:
-                    logger.warning(
-                        f'File already exists: {filename}. To overwrite, set overwrite=True (--overwrite in command line)')
-                    return
+        base_frames_per_chunk = scan.shape[0] // num_chunks
+        extra_frames = scan.shape[0] % num_chunks
 
-                # Open TIFF file in append mode
-                with tifffile.TiffWriter(filename, bigtiff=True) as tif:
-                    with tqdm(total=num_chunks, desc='Saving chunks', position=0, leave=True) as pbar:
-                        for chunk in range(num_chunks):
-                            start = chunk * frames_per_chunk
-                            end = min((chunk + 1) * frames_per_chunk, scan.shape[0])
-                            data = scan[start:end, chan, :, :]  # Extract the chunk
+        if fname.exists() and not overwrite:
+            logger.warning(f'File already exists: {filename}. To overwrite, set overwrite=True (--overwrite in command line)')
+            return
 
-                            # Append the chunk to the existing file
-                            tif.write(data, metadata=metadata)
+        with tqdm(total=num_chunks, desc='Saving chunks', position=0, leave=True) as pbar:
+            start = 0
+            for i, chunk in enumerate(range(num_chunks)):
+                frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
+                end = start + frames_in_this_chunk
+                s = scan[start:end, chan, :, :]
+                tif[start:end, chan, :, :] = s
+                start = end
+                pbar.update(1)
 
-                            pbar.update(1)
+    print(f"Data successfully saved to {filename}.")
 
-                print(f"Data successfully saved to {filename}.")
-        print(f"Data successfully saved to {path}.")
+    elapsed_time = time.time() - start
+    print(f"Time elapsed: {int(elapsed_time // 60)} minutes {int(elapsed_time % 60)} seconds.")
 
 
 def _get_file_writer(ext, overwrite, metadata=None, image_size=None):
