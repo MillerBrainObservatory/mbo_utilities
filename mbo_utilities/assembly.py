@@ -145,10 +145,16 @@ def _save_data(scan, path, planes, overwrite, file_extension, append_str, metada
         print(f"Saving z-plane {chan + 1}...")
 
         fname = path.joinpath(f"plane_{chan+1:02d}.{file_extension}")
+
         if fname.exists():
             fname.unlink()
 
-        tifffile.imwrite(fname, da.zeros((scan.shape)), metadata=metadata)
+        z_shape = (scan.shape[0], scan.shape[2], scan.shape[3])
+        start_z = time.time()
+        tifffile.imwrite(fname, da.zeros(shape=z_shape), metadata=metadata)
+        end_z = time.time()
+        elapsed_time_z = end_z - start_z
+        print(f"Time elapsed to write empty tiff: {int(elapsed_time_z // 60)} minutes {int(elapsed_time_z % 60)} seconds.")
         tif = tifffile.memmap(fname)
 
         chunk_size = 10 * 1024 * 1024
@@ -168,11 +174,9 @@ def _save_data(scan, path, planes, overwrite, file_extension, append_str, metada
                 frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
                 end = start + frames_in_this_chunk
                 s = scan[start:end, chan, :, :]
-                tif[start:end, chan, :, :] = s
+                tif[start:end, :, :] = s
                 start = end
                 pbar.update(1)
-
-    print(f"Data successfully saved to {filename}.")
 
     elapsed_time = time.time() - start
     print(f"Time elapsed: {int(elapsed_time // 60)} minutes {int(elapsed_time % 60)} seconds.")
