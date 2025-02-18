@@ -8,7 +8,8 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities.image import extract_center_square
-from mbo_utilities.file_io import get_metadata, make_json_serializable, read_scan, save_mp4
+from mbo_utilities.file_io import  make_json_serializable, read_scan, save_mp4
+from mbo_utilities.metadata import get_metadata, is_raw_scanimage
 from mbo_utilities.util import norm_minmax
 from scanreader.utils import listify_index
 from tqdm import tqdm
