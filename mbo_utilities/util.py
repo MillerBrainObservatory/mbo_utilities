@@ -1,6 +1,19 @@
 import numpy as np
 
 
+def is_running_jupyter():
+    try:
+        from IPython import get_ipython
+        shell = get_ipython().__class__.__name__
+        if shell == 'ZMQInteractiveShell':  # are there other aliases for a jupyter shell
+            return True  # jupyterlab
+        elif shell == 'TerminalInteractiveShell':
+            return False  # ipython from terminal
+        else:
+            return False
+    except NameError:
+        return False
+
 def float2uint8(scan):
     """ Converts an scan (or image) from floats to uint8 (preserving the range)."""
     scan = (scan - scan.min()) / (scan.max() - scan.min())
