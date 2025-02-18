@@ -3,20 +3,18 @@ import functools
 import os
 import time
 import warnings
+import logging
 from pathlib import Path
-
 import numpy as np
+from tqdm import tqdm
+
+import tifffile
 
 from mbo_utilities.image import extract_center_square
 from mbo_utilities.file_io import  make_json_serializable, read_scan, save_mp4
 from mbo_utilities.metadata import get_metadata, is_raw_scanimage
 from mbo_utilities.util import norm_minmax
 from scanreader.utils import listify_index
-from tqdm import tqdm
-
-
-import tifffile
-import logging
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
