@@ -7,6 +7,7 @@ from .file_io import (
     save_mp4,
     scans,
 )
+from .assembly import save_as
 from .metadata import is_raw_scanimage, get_metadata
 from .gui.widgets import run_gui
 from .image import fix_scan_phase, return_scan_offset
@@ -36,4 +37,6 @@ __all__ = [
     'norm_minmax',
     'smooth_data',
     'float2uint8',
+    # assembly
+    'save_as',
 ]
