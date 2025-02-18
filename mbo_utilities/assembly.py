@@ -7,15 +7,19 @@ import logging
 from pathlib import Path
 import numpy as np
 import dask.array as da
-from tqdm import tqdm
 
 import tifffile
 
 from mbo_utilities.image import extract_center_square
 from mbo_utilities.file_io import  make_json_serializable, read_scan, save_mp4
 from mbo_utilities.metadata import get_metadata, is_raw_scanimage
-from mbo_utilities.util import norm_minmax
+from mbo_utilities.util import norm_minmax, is_running_jupyter
 from scanreader.utils import listify_index
+
+if is_running_jupyter():
+    from tqdm.notebook import tqdm
+else:
+    from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
@@ -58,13 +62,12 @@ def save_as(
         scan,
         savedir: os.PathLike,
         planes=None,
-        frames=None,
         metadata=None,
         overwrite=True,
         append_str='',
         ext='.tiff',
         order=None,
-        image_size=None,
+        trim: list=None,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -78,8 +81,6 @@ def save_as(
         Path to the directory where the data will be saved.
     planes : int, list, or tuple, optional
         Plane indices to save. If `None`, all planes are saved. Default is `None`.
-    frames : list or tuple, optional
-        Frame indices to save. If `None`, all frames are saved. Default is `None`.
     metadata : dict, optional
         Additional metadata to update the scan object's metadata. Default is `None`.
     overwrite : bool, optional
@@ -95,6 +96,7 @@ def save_as(
     image_size : int, optional
         Size of the image to save. Default is 255x255 pixel image. If the image is larger
         than the movie dimensions, it will be cropped to fit. Expected dimensions are square.
+
 
     Raises
     ------
@@ -112,10 +114,6 @@ def save_as(
         planes = list(range(scan.num_channels))
     elif not isinstance(planes, (list, tuple)):
         planes = [planes]
-    if frames is None:
-        frames = list(range(scan.num_frames))
-    elif not isinstance(frames, (list, tuple)):
-        frames = [frames]
 
     if order is not None:
         if len(order) != len(planes):
@@ -130,31 +128,31 @@ def save_as(
     if not savedir.exists():
         logger.debug(f"Creating directory: {savedir}")
         savedir.mkdir(parents=True)
+    start_time = time.time()
     _save_data(scan, savedir, planes, overwrite, ext, append_str, metadata=metadata, image_size=None)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Time elapsed: {int(elapsed_time // 60)} minutes {int(elapsed_time % 60)} seconds.")
 
 
 def _save_data(scan, path, planes, overwrite, file_extension, append_str, metadata, image_size=None):
-    start = time.time()
     if '.' in file_extension:
         file_extension = file_extension.split('.')[-1]
 
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
 
-    for chan in planes:
-        print(f"Saving z-plane {chan + 1}...")
-
-        fname = path.joinpath(f"plane_{chan+1:02d}.{file_extension}")
+    for chan in range(len(planes)):
+        fname = path.joinpath(f"plane_{chan+1:02d}{append_str}.{file_extension}")
 
         if fname.exists():
             fname.unlink()
 
-        z_shape = (scan.shape[0], scan.shape[2], scan.shape[3])
-        start_z = time.time()
-        tifffile.imwrite(fname, da.zeros(shape=z_shape), metadata=metadata)
-        end_z = time.time()
-        elapsed_time_z = end_z - start_z
-        print(f"Time elapsed to write empty tiff: {int(elapsed_time_z // 60)} minutes {int(elapsed_time_z % 60)} seconds.")
+        tifffile.imwrite(
+            fname,
+            da.zeros(shape=(scan.shape[0], scan.shape[2], scan.shape[3])),
+            metadata=metadata
+        )
         tif = tifffile.memmap(fname)
 
         chunk_size = 10 * 1024 * 1024
@@ -165,10 +163,10 @@ def _save_data(scan, path, planes, overwrite, file_extension, append_str, metada
         extra_frames = scan.shape[0] % num_chunks
 
         if fname.exists() and not overwrite:
-            logger.warning(f'File already exists: {filename}. To overwrite, set overwrite=True (--overwrite in command line)')
+            logger.warning(f'File already exists: {fname}. To overwrite, set overwrite=True (--overwrite in command line)')
             return
 
-        with tqdm(total=num_chunks, desc='Saving chunks', position=0, leave=True) as pbar:
+        with tqdm(total=num_chunks, desc=f'Saving plane {chan + 1}', position=0, leave=False) as pbar:
             start = 0
             for i, chunk in enumerate(range(num_chunks)):
                 frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
@@ -177,9 +175,6 @@ def _save_data(scan, path, planes, overwrite, file_extension, append_str, metada
                 tif[start:end, :, :] = s
                 start = end
                 pbar.update(1)
-
-    elapsed_time = time.time() - start
-    print(f"Time elapsed: {int(elapsed_time // 60)} minutes {int(elapsed_time % 60)} seconds.")
 
 
 def _get_file_writer(ext, overwrite, metadata=None, image_size=None):
