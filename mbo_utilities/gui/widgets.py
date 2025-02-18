@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 from mbo_utilities import get_files, stack_from_files, read_scan, is_raw_scanimage
 from mbo_utilities.file_io import ScanMultiROIReordered
+from mbo_utilities.util import is_running_jupyter
 
 try:
     from imgui_bundle import imgui, icons_fontawesome_6 as fa
@@ -19,18 +20,6 @@ except ImportError:
     raise ImportError("Please install imgui via `conda install -c conda-forge imgui-bundle`")
 
 
-def _is_running_in_jupyter():
-    try:
-        from IPython import get_ipython
-        shell = get_ipython().__class__.__name__
-        if shell == 'ZMQInteractiveShell':  # are there other aliases for a jupyter shell
-            return True  # jupyterlab
-        elif shell == 'TerminalInteractiveShell':
-            return False  # ipython from terminal
-        else:
-            return False
-    except NameError:
-        return False
 
 
 def load_dialog_folder(parent=None, directory=None):
@@ -175,7 +164,7 @@ def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = No
     else:
         raise TypeError(f"Unsupported data type: {type(data_in)}")
 
-    if _is_running_in_jupyter():
+    if is_running_jupyter():
         print("Running in Jupyter")
         # if running in jupyter, return the image widget to show in the notebook
         print("Creating image widget")
