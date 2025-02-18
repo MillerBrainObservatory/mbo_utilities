@@ -19,6 +19,20 @@ except ImportError:
     raise ImportError("Please install imgui via `conda install -c conda-forge imgui-bundle`")
 
 
+def _is_running_in_jupyter():
+    try:
+        from IPython import get_ipython
+        shell = get_ipython().__class__.__name__
+        if shell == 'ZMQInteractiveShell':  # are there other aliases for a jupyter shell
+            return True  # jupyterlab
+        elif shell == 'TerminalInteractiveShell':
+            return False  # ipython from terminal
+        else:
+            return False
+    except NameError:
+        return False
+
+
 def load_dialog_folder(parent=None, directory=None):
     if directory is None:
         directory = str(Path().home())
@@ -86,10 +100,10 @@ class LBMMainWindow(QMainWindow):
             histogram_widget=False,
             graphic_kwargs={"vmin": -350, "vmax": 13000},
         )
-        if self.image_widget.figure.canvas.__class__.__name__ == "QRenderCanvas":
-            self.resize(1000, 800)
-            qwidget = self.image_widget.show()
-            self.setCentralWidget(qwidget)
+        # if self.image_widget.figure.canvas.__class__.__name__ == "QRenderCanvas":
+        self.resize(1000, 800)
+        qwidget = self.image_widget.show()
+        self.setCentralWidget(qwidget)
 
 
 class SummaryDataWidget(EdgeWindow):
@@ -145,20 +159,40 @@ def parse_data_path(fpath):
         raise FileNotFoundError(f"Path '{data_path}' is not a directory.")
 
 
-def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None):
-    app = QApplication(sys.argv)
+def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None) -> None | fpl.ImageWidget:
+    # parse data
     if data_in is None:
+        print("No data provided, opening file dialog")
         data = load_dialog_folder(parent=None, directory=None)
     elif isinstance(data_in, ScanMultiROIReordered):
+        # if data is a ScanMultiROIReordered object, use it directly
+        print("Using ScanMultiROIReordered object")
         data = data_in
     elif isinstance(data_in, (str, Path)):
+        # if data is a string or Path, load it from the path
+        print("Loading data from path")
         data = load_data_path(data_in)
     else:
         raise TypeError(f"Unsupported data type: {type(data_in)}")
 
-    main_window = LBMMainWindow(data)
-    main_window.show()
-    app.exec()
+    if _is_running_in_jupyter():
+        print("Running in Jupyter")
+        # if running in jupyter, return the image widget to show in the notebook
+        print("Creating image widget")
+        image_widget = fpl.ImageWidget(
+            data=data,
+            histogram_widget=False,
+            graphic_kwargs={"vmin": -350, "vmax": 13000},
+        )
+        print("Running in Jupyter, returning image widget")
+        return image_widget
+    else:
+        # if running in a standalone script, set up the main window
+        app = QApplication(sys.argv)
+        main_window = LBMMainWindow(data)
+        main_window.show()
+        main_window.resize(1000, 800)
+        app.exec()
 
 
 if __name__ == "__main__":
