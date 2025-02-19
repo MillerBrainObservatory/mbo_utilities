@@ -35,7 +35,7 @@ def _params_from_metadata_caiman(metadata):
 
     # typical neuron ~16 microns
     gSig = round(16 / metadata["pixel_resolution"][0]) / 2
-    params["main"]["gSig"] = gSig
+    params["main"]["gSig"] = (int(gSig), int(gSig))
 
     gSiz = (4 * gSig + 1, 4 * gSig + 1)
     params["main"]["gSiz"] = gSiz
@@ -286,6 +286,10 @@ def get_metadata(file: os.PathLike | str):
         raise ValueError(f"No metadata found in {file}.")
 
 
-def params_from_metadata(metadata, pipeline="caiman"):
+def params_from_metadata(metadata, pipeline="caiman", ops=None):
     if pipeline == "caiman":
         return _params_from_metadata_caiman(metadata)
+    elif pipeline in ['suite2p', 's2p']:
+        if ops is None:
+            raise Value
+        return _params_from_metadata_suite2p(metadata)
