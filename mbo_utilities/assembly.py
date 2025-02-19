@@ -11,7 +11,7 @@ import dask.array as da
 import tifffile
 
 from .image import extract_center_square
-from .file_io import  make_json_serializable, read_scan, save_mp4
+from .file_io import  _make_json_serializable, read_scan, save_mp4
 from .metadata import get_metadata, is_raw_scanimage
 from .util import norm_minmax, is_running_jupyter
 from .scanreader.utils import listify_index
@@ -123,7 +123,7 @@ def save_as(
         planes = [planes[i] for i in order]
     if not metadata:
         metadata = {'si': scan.tiff_files[0].scanimage_metadata,
-                    'image': make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))}
+                    'image': _make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))}
 
     if not savedir.exists():
         logger.debug(f"Creating directory: {savedir}")
