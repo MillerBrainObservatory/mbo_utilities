@@ -2,6 +2,7 @@ import numpy as np
 
 
 def is_running_jupyter():
+    """Returns true if users environment is running Jupyter."""
     try:
         from IPython import get_ipython
         shell = get_ipython().__class__.__name__
