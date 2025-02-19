@@ -150,8 +150,9 @@ def _save_data(scan, path, planes, overwrite, file_extension, append_str, metada
 
         tifffile.imwrite(
             fname,
-            da.zeros(shape=(scan.shape[0], scan.shape[2], scan.shape[3])),
-            metadata=metadata
+            da.zeros(shape=(scan.shape[0], scan.shape[2], scan.shape[3]), dtype=scan.dtype),
+            metadata=metadata,
+            dtype='int16',
         )
         tif = tifffile.memmap(fname)
 
