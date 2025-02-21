@@ -13,12 +13,12 @@ from mbo_utilities.scanreader.core import expand_wildcard
 from mbo_utilities.util import norm_minmax
 
 
-def make_json_serializable(obj):
+def _make_json_serializable(obj):
     """Convert metadata to JSON serializable format."""
     if isinstance(obj, dict):
-        return {k: make_json_serializable(v) for k, v in obj.items()}
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
     elif isinstance(obj, list):
-        return [make_json_serializable(v) for v in obj]
+        return [_make_json_serializable(v) for v in obj]
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, (np.integer, np.floating)):
