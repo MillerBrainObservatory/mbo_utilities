@@ -135,6 +135,7 @@ def _params_from_metadata_suite2p(metadata, ops):
 
     # typical neuron ~16 microns
     ops['fs'] = metadata["frame_rate"]
+    ops['tau'] = 1.5
     ops['nplanes'] = 1
     ops["nchannels"] = 1
     ops['do_bidiphase'] = 0
@@ -286,10 +287,19 @@ def get_metadata(file: os.PathLike | str):
         raise ValueError(f"No metadata found in {file}.")
 
 
-def params_from_metadata(metadata, pipeline="caiman", ops=None):
-    if pipeline == "caiman":
+def params_from_metadata(metadata, ops=None):
+    """
+    Use metadata to get sensible default pipeline parameters.
+
+    Parameters
+    ----------
+    metadata : dict
+        Result of mbo.get_metadata()
+    ops : dict, optional
+        If provided, will return suite2p ops
+    """
+    if ops:
+        print('Ops provided. Setting pipeline to suite2p')
+        return _params_from_metadata_suite2p(metadata, ops)
+    else:
         return _params_from_metadata_caiman(metadata)
-    elif pipeline in ['suite2p', 's2p']:
-        if ops is None:
-            raise Value
-        return _params_from_metadata_suite2p(metadata)
