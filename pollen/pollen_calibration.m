@@ -1,27 +1,33 @@
-function pollen_calibration(filepath, dual_cavity, nx, ny, nc, nt, nz, fov_um, zoom, order, DZ)
-    % filepath = 'D:\W2_DATA\kbarber\2025-02-17\';
-    % dual_cavity = 0;
-    % fov_um = 1418;
-    % ny = 224;
-    % nx = 224;
-    % nc = 14;  
-    % nt = 1;
-    % nz = 81;
-    % zoom = 2;
-    % z_step_um = 5;
-    % order = (1:nc);
-    % pollen_calibration(filepath,dual_cavity,nx,ny,nc,nt,nz,fov_um,zoom,order,z_step_um);
-    clc;
-    
+function pollen_calibration(filepath, dual_cavity,z_step_um,order)
+    % filepath: file dialog will open to this location
+    % dual_cavity: 0 if single cavity, 1 if dual cavity
+    % z_step_um: distance between zplanes (um)
+    % order: order of zplanes, leave empty for original order
+    % pollen_calibration(filepath,0,5); single cavity, 5 um step size,
+    % original order (1:num_planes)
+
     [filename, filepath] = uigetfile('*.tif', 'Select file:', filepath, 'MultiSelect', 'off');
     if isequal(filename, 0)
         disp('User canceled file selection.');
         return;
     end
-    filename = filename(1:end-4);
+    
+    metadata = get_metadata([filepath filename]);
+    fov_um_x = metadata.fov(1);
+    fov_um_y = metadata.fov(2);
 
-    dx = fov_um/zoom/nx;
-    dy = fov_um/zoom/ny;
+    nx = metadata.tiff_length;
+    ny = metadata.tiff_width;
+    nz = metadata.num_frames;
+    nt = metadata.num_rois;
+    nc = metadata.num_planes;
+
+    if nargin < 4 || isempty(order)
+        order = 1:nc;
+    end
+
+    dx = fov_um_x/nx;
+    dy = fov_um_y/ny;
     
     vol = load_or_read_data(filepath, filename, ny, nx, nc, nt, nz);
     
@@ -32,10 +38,13 @@ function pollen_calibration(filepath, dual_cavity, nx, ny, nc, nt, nz, fov_um, z
     [xs, ys, Iz, III] = user_pollen_selection(vol);
     
     % 3. power vs z
-    [ZZ, zoi] = analyze_power_vs_z(Iz, filepath, DZ, order);
+    [ZZ, zoi, pp] = analyze_power_vs_z(Iz, filepath, z_step_um, order);
 
     % 4. analyze z
     analyze_z_positions(ZZ, zoi, order, filepath, dual_cavity)
+
+    % 5. exponential decay
+    fit_exp_decay(ZZ, zoi, order, filepath, dual_cavity, pp, z_step_um)
     
     % X, Y calibration
     calibrate_xy(xs, ys, III, filepath, dual_cavity,nx,ny,dx,dy);
@@ -43,14 +52,18 @@ end
 
 %% input data handling
 function vol = load_or_read_data(filepath, filename, ny, nx, nc, nt, nz)
-    if exist([filepath filename '.mat'], 'file') < 2
+    import ScanImageTiffReader.*    
+    fq = fullfile(filepath, filename);
+    disp(isfile(fq))
+    fname = filename(1:end-4);
+    if exist([filepath fname '.mat'], 'file') < 2
         disp('Loading TIFF Data...');
-        vol = ScanImageTiffReader([filepath filename '.tif']).data();
+        vol = ScanImageTiffReader([filepath fname '.tif']).data();
         vol = reshape(vol, ny, nx, nc, nt, nz);
         vol = vol - mean(vol(:));  % Normalize
         vol = mean(vol, 4);
         vol = reshape(vol, ny, nx, nc, nz);
-        save([filepath filename '.mat'], 'vol', '-v7.3');
+        save([filepath fname '.mat'], 'vol', '-v7.3');
     else
         disp('Loading Preprocessed Data...');
         load([filepath filename '.mat'], 'vol');
@@ -108,10 +121,12 @@ function [xs, ys, Iz, III] = user_pollen_selection(vol)
         ys(kk) = y;
         III(:,:,kk) = reshape(vol(indy-num:indy+num, indx-num:indx+num, kk, zoi), num*2+1, num*2+1);
     end
+    clear("gcf");
 end
 
 %% power vs z
-function [ZZ, zoi] = analyze_power_vs_z(Iz, filepath, DZ, order)
+function [ZZ, zoi, pp] = analyze_power_vs_z(Iz, filepath, DZ, order)
+    disp('running power vs z')
     amt = 10./DZ;
     nz = size(Iz, 2); 
     ZZ = fliplr((0:(nz-1)) * DZ);  
@@ -140,33 +155,104 @@ function [ZZ, zoi] = analyze_power_vs_z(Iz, filepath, DZ, order)
             'HorizontalAlignment', 'center', 'FontSize', 10, 'FontWeight', 'bold');
     end
     
-    % Save figure
     saveas(f99, [filepath 'pollen_calibration_pollen_signal_vs_z.fig']);
     hold off;
 end
 
+%% z-positions
 function analyze_z_positions(ZZ, zoi, order, filepath, dual_cavity)
-    Z0 = ZZ(zoi(order(1)));
-
+    disp('anayzing z-positions')
+    Z0 = ZZ(zoi(order(1)));  
     figure;
     hold on;
 
-    plot(1:(length(order)/2), ZZ(zoi(order(1:length(order)/2)))-Z0, 'bo');
-
     if dual_cavity
-        plot((length(order)/2)+1:length(order), ZZ(zoi(order((length(order)/2)+1:end)))-Z0, 'gsquare', 'Color', [0 0.5 0], 'MarkerSize', 6);
+        nc_half = length(order) / 2;
+
+        plot(1:nc_half, ZZ(zoi(order(1:nc_half))) - Z0, 'bo', 'MarkerSize', 6);
+
+        plot(nc_half+1:length(order), ZZ(zoi(order(nc_half+1:end))) - Z0, ...
+             'gsquare', 'Color', [0 0.5 0], 'MarkerSize', 6);
+
+        [ft2, goodness, ~] = fit((1:length(order))', ZZ(zoi(order))' - Z0, 'poly1');
+        bb = linspace(0, length(order) + 1, 101);
+        plot(bb, ft2(bb), 'k-');
+
+        legend('Data Cavity A', 'Data Cavity B', ...
+               ['Linear fit (r² = ' num2str(goodness.rsquare, 3) ')'], ...
+               'Location', 'NorthEast');
+
+    else
+        % single cavity - all beamlets in one plot
+        plot(1:length(order), ZZ(zoi(order)) - Z0, 'bo', 'MarkerSize', 6);
+
+        [ft2, goodness, ~] = fit((1:length(order))', ZZ(zoi(order))' - Z0, 'poly1');
+        bb = linspace(0, length(order) + 1, 101);
+        plot(bb, ft2(bb), 'k-');
+
+        legend('Beamlet Z positions', ...
+               ['Linear fit (r² = ' num2str(goodness.rsquare, 3) ')'], ...
+               'Location', 'NorthEast');
     end
 
-    [ft2, goodness, ~] = fit((1:length(order))', ZZ(zoi(order))'-Z0, 'poly1');
-    bb = linspace(0, length(order)+1, 101);
-    plot(bb, ft2(bb), 'k-');
-
+    % Formatting
     xlabel('Beam number');
     ylabel('Z position (\mum)');
-    legend('Data Cavity A', 'Data Cavity B', ['Linear fit (r² = ' num2str(goodness.rsquare, 3) ')'], 'Location', 'NorthEast');
+    grid(gca, 'on');
 
+    % Save figure
     saveas(gcf, [filepath 'pollen_calibration_z_vs_N.fig']);
+
     hold off;
+end
+
+function fit_exp_decay(ZZ, zoi, order, filepath, dual_cavity, pp, DZ)
+    z1 = ZZ(zoi(order(1:length(order)/2)));
+    p1 = sqrt(pp(order(1:length(order)/2)));
+
+    if ~dual_cavity
+        figure;
+        plot(z1, p1, 'bo', 'MarkerSize', 6);
+        xlabel('Z (\mum)');
+        ylabel('Power (a.u.)');
+        grid(gca, 'on');
+
+        [ft1, g1] = fit(z1', p1, 'exp1');
+
+        % Plot the fit
+        hold on;
+        plot(DZ * linspace(0, length(ZZ)-1, 1001), ft1(DZ * linspace(0, length(ZZ)-1, 1001)), 'r-');
+        legend(['Fit (l_s = ' num2str(1/ft1.b, 3) ' \mum)'], 'Location', 'NorthWest');
+        
+        saveas(gcf, [filepath 'pollen_calibration_power_linear.fig']);
+        hold off;
+
+    % Dual cavity case (separate fits)
+    else
+        z2 = ZZ(zoi(order(length(order)/2+1:end)));
+        p2 = sqrt(pp(order(length(order)/2+1:end)));
+
+        figure;
+        plot(z1, p1, 'bo', 'MarkerSize', 6);
+        hold on;
+        plot(z2, p2, 'bsquare', 'Color', [0 0.5 0], 'MarkerSize', 6);
+        xlabel('Z (\mum)');
+        ylabel('Power (a.u.)');
+        grid(gca, 'on');
+
+        [ft1, g1] = fit(z1', p1, 'exp1');
+        [ft2, g2] = fit(z2', p2, 'exp1');
+
+        plot(DZ * linspace(0, length(ZZ)-1, 1001), ft1(DZ * linspace(0, length(ZZ)-1, 1001)), 'r-');
+        plot(DZ * linspace(0, length(ZZ)-1, 1001), ft2(DZ * linspace(0, length(ZZ)-1, 1001)), 'k-');
+
+        legend('Data Cavity A', 'Data Cavity B', ...
+               ['Fit C1 (l_s = ' num2str(1/ft1.b, 3) ' \mum)'], ...
+               ['Fit C2 (l_s = ' num2str(1/ft2.b, 3) ' \mum)'], 'Location', 'NorthWest');
+
+        saveas(gcf, [filepath 'pollen_calibration_power_linear.fig']);
+        hold off;
+    end
 end
 
 %% x y offsets
@@ -195,9 +281,9 @@ function calibrate_xy(xs, ys, III, filepath, dual_cavity, nx, ny, dx, dy)
     grid(gca, 'on');
     axis equal;
     if dual_cavity
-        legend('Data Cavity A', 'Data Cavity B', 'Location', 'NorthEast');
+        legend('Beamlets Cavity A', 'Beamlets Cavity B', 'Location', 'NorthEast');
     else
-        legend('Data (single cavity)', 'Location', 'NorthEast');
+        legend('Beamlets (single cavity)', 'Location', 'NorthEast');
     end
     saveas(gcf, [filepath 'pollen_calibration_x_y_offsets.fig']);
 end
@@ -232,6 +318,7 @@ function correction = returnScanOffset2(Iin, dim)
     end
 end
 
+
 %% fix scan offset
 function dataOut = fixScanPhase(dataIn, offset, dim)
     [sy, sx, sc, sz] = size(dataIn);
@@ -247,4 +334,130 @@ function dataOut = fixScanPhase(dataIn, offset, dim)
             dataOut = dataIn;
         end
     end
+end
+
+function [metadata_out] = get_metadata(filename)
+% Extract metadata from a ScanImage TIFF file.
+%
+% Read and parse Tiff metadata stored in the .tiff header
+% and ScanImage metadata stored in the 'Artist' tag which contains roi sizes/locations and scanning configuration
+% details in a JSON format.
+%
+% Parameters
+% ----------
+% filename : char
+%     The full path to the TIFF file from which metadata will be extracted.
+%
+% Returns
+% -------
+% metadata_out : struct
+%     A struct containing metadata such as center and size of the scan field,
+%     pixel resolution, image dimensions, number of frames, frame rate, and
+%     additional roi data extracted from the TIFF file.
+%
+% Examples
+% --------
+% metadata = get_metadata("path/to/file.tif");
+%
+
+hTiff = Tiff(filename);
+[fpath, fname, ~] = fileparts(filename);
+
+% Metadata in JSON format stored by ScanImage in the 'Artist' tag
+roistr = hTiff.getTag('Artist');
+roistr(roistr == 0) = []; % Remove null termination from string
+mdata = jsondecode(roistr); % Decode JSON string to structure
+mdata = mdata.RoiGroups.imagingRoiGroup.rois; % Pull out a single roi, assumes they will always be the same
+num_rois = length(mdata); % only accurate way to determine the number of ROI's
+scanfields = mdata.scanfields;
+
+% roi (scanfield) metadata, gives us pixel sizes
+center_xy = scanfields.centerXY;
+size_xy = scanfields.sizeXY;
+num_pixel_xy = scanfields.pixelResolutionXY; % misleading name
+tic;
+
+% TIFF header data for additional metadata
+% getHeaderData() is a ScanImage utility that iterates through every
+
+[header, desc] = scanimage.util.private.getHeaderData(hTiff);
+toc
+sample_format = hTiff.getTag('SampleFormat'); % raw data type, scanimage uses int16
+
+switch sample_format
+    case 1
+        sample_format = 'uint16';
+    case 2
+        sample_format = 'int16';
+otherwise
+    error('Invalid image datatype')
+end
+
+% Needed to preallocate the raw images
+tiff_length = hTiff.getTag("ImageLength");
+tiff_width = hTiff.getTag("ImageWidth");
+
+% .. deprecated:: v1.8.0
+%
+%   hStackManager.framesPerSlice - only works for slow-stack aquisition
+%   hScan2D.logFramesPerFile - this only logs multi-file recordings,
+%   otherwise is set to 'Inf', which isn't useful for the primary use
+%   case of this variable that is preallocating an array to fill this image
+%   data
+%
+%   num_frames_total = header.SI.hStackManager.framesPerSlice; % the total number of frames for this imaging session
+%   num_frames_file = header.SI.hScan2D.logFramesPerFile; % integer, for split files only: how many images per file to capture before rolling over a new file.
+
+num_planes = length(header.SI.hChannels.channelSave); % an array of active channels: channels are where information from each light bead is stored
+num_frames = numel(desc) / num_planes;
+
+% .. deprecated:: v1.3.x
+%
+% hRoiManager.linesPerFrame - not captured for multi-roi recordings
+% lines_per_frame = header.SI.hRoiManager.linesPerFrame; % essentially gives our "raw roi width"
+
+num_lines_between_scanfields = round(header.SI.hScan2D.flytoTimePerScanfield / header.SI.hRoiManager.linePeriod);
+% uniform_sampling = header.SI.hScan2D.uniformSampling;
+
+% Calculate using frame rate and field-of-view
+line_period = header.SI.hRoiManager.linePeriod;
+scan_frame_period = header.SI.hRoiManager.scanFramePeriod;
+frame_rate = header.SI.hRoiManager.scanVolumeRate;
+objective_resolution = header.SI.objectiveResolution;
+
+fovx = round(objective_resolution * size_xy(1) * num_rois); % account for the x extent being a single roi
+fovy = round(objective_resolution * size_xy(2));
+fov_xy = [fovx fovy];
+
+fov_roi = round(objective_resolution * size_xy); % account for the x extent being a single roi
+pixel_resolution = mean(fov_roi ./ num_pixel_xy);
+
+% Number of pixels in X and Y
+roi_width_px = num_pixel_xy(1);
+roi_height_px = num_pixel_xy(2);
+
+metadata_out = struct( ...
+    'num_planes', num_planes, ...
+    'num_rois', num_rois, ...
+    'num_frames', num_frames, ...
+    'frame_rate', frame_rate, ...
+    'fov', fov_xy, ...  % in micron
+    'pixel_resolution', pixel_resolution, ...
+    'sample_format', sample_format, ...
+    'roi_width_px', roi_width_px, ...
+    'roi_height_px', roi_height_px,  ...
+    'tiff_length', tiff_length, ...
+    'tiff_width', tiff_width, ...
+    'raw_filename', fname, ...
+    'raw_filepath', fpath, ...
+    'raw_fullfile', filename, ...
+    ... %% used internally 
+    'num_lines_between_scanfields', num_lines_between_scanfields, ...
+    'center_xy', center_xy, ...
+    'line_period', line_period, ...
+    'scan_frame_period', scan_frame_period, ...
+    'size_xy', size_xy, ...
+    'objective_resolution', objective_resolution ...
+    );
+
 end
