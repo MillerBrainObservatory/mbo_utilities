@@ -375,13 +375,11 @@ scanfields = mdata.scanfields;
 center_xy = scanfields.centerXY;
 size_xy = scanfields.sizeXY;
 num_pixel_xy = scanfields.pixelResolutionXY; % misleading name
-tic;
 
 % TIFF header data for additional metadata
 % getHeaderData() is a ScanImage utility that iterates through every
 
 [header, desc] = scanimage.util.private.getHeaderData(hTiff);
-toc
 sample_format = hTiff.getTag('SampleFormat'); % raw data type, scanimage uses int16
 
 switch sample_format
