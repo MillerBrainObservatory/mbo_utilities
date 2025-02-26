@@ -142,7 +142,11 @@ def _save_data(scan, path, planes, overwrite, file_extension, append_str, metada
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
 
+<<<<<<< HEAD
     for chan in range(len(planes)):
+=======
+    for chan in planes:
+>>>>>>> pollen
         fname = path.joinpath(f"plane_{chan+1:02d}{append_str}.{file_extension}")
 
         if fname.exists():
