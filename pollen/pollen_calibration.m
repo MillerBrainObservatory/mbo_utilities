@@ -128,7 +128,7 @@ function [ZZ, zoi, pp] = analyze_power_vs_z(Iz, filepath, DZ, order)
     disp('running power vs z')
     amt = 10./DZ;
     nz = size(Iz, 2); 
-    ZZ = fliplr((0:(nz-1)) * DZ);  
+    ZZ = fliplr((0:(nz-1)) * DZ);
     
     f99 = figure(77);
     f99.OuterPosition = [670,800,570,510];
@@ -137,7 +137,7 @@ function [ZZ, zoi, pp] = analyze_power_vs_z(Iz, filepath, DZ, order)
     grid(gca, 'on');
     xlabel('Piezo Z (\mum)');
     ylabel('2p signal (a.u.)');
-    title('Power vs. Z-depth for Pollen Calibration');
+    title('Power vs. Z-depth');
 
     zoi = zeros(1, length(order));
     for ii = 1:length(order)
@@ -153,7 +153,14 @@ function [ZZ, zoi, pp] = analyze_power_vs_z(Iz, filepath, DZ, order)
         text(ZZ(zoi(i)), sqrt(pp(i)) + min(sqrt(pp))/2, num2str(find(order == i)), ...
             'HorizontalAlignment', 'center', 'FontSize', 10, 'FontWeight', 'bold');
     end
-    
+
+    %%
+    % hold on;
+    % for i = 1:numel(zoi)
+    %     text(ZZ(zoi(i)), sqrt(pp(i)) + 0.05 * max(sqrt(pp)), num2str(order(i)), ...
+    %         'HorizontalAlignment', 'center', 'FontSize', 10, 'FontWeight', 'bold');
+    % end
+  
     saveas(f99, [filepath 'pollen_calibration_pollen_signal_vs_z.fig']);
     hold off;
 end
@@ -196,6 +203,7 @@ function analyze_z_positions(ZZ, zoi, order, filepath, dual_cavity)
 
     % Formatting
     xlabel('Beam number');
+    % ylabel('Z position (/mum)');
     ylabel('Z position (\mum)');
     grid(gca, 'on');
 
@@ -205,11 +213,12 @@ function analyze_z_positions(ZZ, zoi, order, filepath, dual_cavity)
     hold off;
 end
 
+%% 
 function fit_exp_decay(ZZ, zoi, order, filepath, dual_cavity, pp, DZ)
-    z1 = ZZ(zoi(order(1:length(order)/2)));
-    p1 = sqrt(pp(order(1:length(order)/2)));
 
     if ~dual_cavity
+        z1 = ZZ(zoi(order(1:length(order))));
+        p1 = sqrt(pp(order(1:length(order))));
         figure;
         plot(z1, p1, 'bo', 'MarkerSize', 6);
         xlabel('Z (\mum)');
@@ -228,6 +237,8 @@ function fit_exp_decay(ZZ, zoi, order, filepath, dual_cavity, pp, DZ)
 
     % Dual cavity case (separate fits)
     else
+        z1 = ZZ(zoi(order(1:length(order)/2)));
+        p1 = sqrt(pp(order(1:length(order)/2)));
         z2 = ZZ(zoi(order(length(order)/2+1:end)));
         p2 = sqrt(pp(order(length(order)/2+1:end)));
 
@@ -317,7 +328,6 @@ function correction = returnScanOffset2(Iin, dim)
     end
 end
 
-
 %% fix scan offset
 function dataOut = fixScanPhase(dataIn, offset, dim)
     [sy, sx, sc, sz] = size(dataIn);
@@ -335,6 +345,7 @@ function dataOut = fixScanPhase(dataIn, offset, dim)
     end
 end
 
+%% metadata from file
 function [metadata_out] = get_metadata(filename)
 % Extract metadata from a ScanImage TIFF file.
 %
