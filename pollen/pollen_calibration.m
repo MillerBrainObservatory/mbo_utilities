@@ -53,8 +53,7 @@ end
 %% input data handling
 function vol = load_or_read_data(filepath, filename, ny, nx, nc, nt, nz)
     import ScanImageTiffReader.*    
-    fq = fullfile(filepath, filename);
-    disp(isfile(fq))
+    
     fname = filename(1:end-4);
     if exist([filepath fname '.mat'], 'file') < 2
         disp('Loading TIFF Data...');
@@ -66,7 +65,7 @@ function vol = load_or_read_data(filepath, filename, ny, nx, nc, nt, nz)
         save([filepath fname '.mat'], 'vol', '-v7.3');
     else
         disp('Loading Preprocessed Data...');
-        load([filepath filename '.mat'], 'vol');
+        load([filepath fname '.mat'], 'vol');
     end
 end
 
