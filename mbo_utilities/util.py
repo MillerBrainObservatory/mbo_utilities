@@ -32,6 +32,32 @@ def norm_minmax(images):
     return (images - images.min()) / (images.max() - images.min())
 
 
+def norm_percentile(image, low_p=1, high_p=98):
+    """
+    Normalizes an image using percentile-based contrast stretching.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image array to be normalized.
+    low_p : float, optional
+        Lower percentile for normalization (default is 1).
+    high_p : float, optional
+        Upper percentile for normalization (default is 98).
+
+    Returns
+    -------
+    np.ndarray
+        Normalized image with values scaled between 0 and 1.
+
+    Notes
+    -----
+    - This method enhances contrast by clipping extreme pixel values.
+    - Percentile-based normalization is useful for images with outliers.
+    """
+    p_low, p_high = np.percentile(image, (low_p, high_p))
+    return np.clip((image - p_low) / (p_high - p_low), 0, 1)
+
 def match_array_size(arr1, arr2, mode="trim"):
     """
     Adjusts two arrays to have the same shape by either trimming or padding them.
