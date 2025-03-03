@@ -180,7 +180,7 @@ def is_raw_scanimage(file: os.PathLike | str):
         return False
 
 
-def get_metadata(file: os.PathLike | str):
+def get_metadata(file: os.PathLike | str, verbose=False):
     """
     Extract metadata from a TIFF file. This can be a raw ScanImage TIFF or one
     processed via [lbm_caiman_python.save_as()](#save_as).
@@ -189,6 +189,8 @@ def get_metadata(file: os.PathLike | str):
     ----------
     file: os.PathLike
         Path to the TIFF file.
+    verbose: bool
+        If true, returns an extended version of the metadata with all scanimage attributes.
 
     Returns
     -------
@@ -263,7 +265,7 @@ def get_metadata(file: os.PathLike | str):
 
         pixel_resolution = (fov_x / num_pixel_xy[0], fov_y / num_pixel_xy[1])
 
-        return {
+        metadata= {
             "num_planes": num_planes,
             "num_frames": int(len(pages) / num_planes),
             "fov": fov_xy,  # in microns
@@ -283,6 +285,11 @@ def get_metadata(file: os.PathLike | str):
             "sample_format": sample_format,
             "objective_resolution": objective_resolution,
         }
+        if verbose:
+            metadata["all"] = meta
+            return metadata
+        else:
+            return metadata
     else:
         raise ValueError(f"No metadata found in {file}.")
 
