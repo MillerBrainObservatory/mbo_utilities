@@ -122,7 +122,7 @@ def return_scan_offset(image_in, nvals: int = 8):
     if len(image_in.shape) == 3:
         image_in = np.mean(image_in, axis=0)
     elif len(image_in.shape) == 4:
-        image_in = np.mean(np.mean(image_in, axis=0), axis=0)
+        raise AttributeError("Input image must be 2D or 3D.")
 
     n = nvals
 
@@ -165,89 +165,152 @@ def return_scan_offset(image_in, nvals: int = 8):
     correction_index = np.argmax(r)
     return lags[correction_index]
 
+# def fix_scan_phase(
+#         data_in: np.ndarray,
+#         offset: int,
+# ):
+#     """
+#     Corrects the scan phase of the data based on a given offset along a specified dimension.
+#
+#     Parameters:
+#     -----------
+#     dataIn : ndarray
+#         The input data of shape (sy, sx, sc, sz).
+#     offset : int
+#         The amount of offset to correct for.
+#
+#     Returns:
+#     --------
+#     ndarray
+#         The data with corrected scan phase, of shape (sy, sx, sc, sz).
+#     """
+#     dims = data_in.shape
+#     ndim = len(dims)
+#     if ndim == 2:
+#         sy, sx = data_in.shape
+#         data_out = np.zeros_like(data_in)
+#
+#         if offset > 0:
+#             # Shift even df left and odd df right by 'offset'
+#             data_out[0::2, :sx - offset] = data_in[0::2, offset:]
+#             data_out[1::2, offset:] = data_in[1::2, :sx - offset]
+#         elif offset < 0:
+#             offset = abs(offset)
+#             # Shift even df right and odd df left by 'offset'
+#             data_out[0::2, offset:] = data_in[0::2, :sx - offset]
+#             data_out[1::2, :sx - offset] = data_in[1::2, offset:]
+#         else:
+#             print("Phase = 0, no correction applied.")
+#             return data_in
+#
+#         return data_out
+#     if ndim == 4:
+#         st, sc, sy, sx = data_in.shape
+#         if offset != 0:
+#             data_out = np.zeros((st, sc, sy, sx + abs(offset)))
+#         else:
+#             print("Phase = 0, no correction applied.")
+#             return data_in
+#
+#         if offset > 0:
+#             data_out[:, :, 0::2, :sx] = data_in[:, :, 0::2, :]
+#             data_out[:, :, 1::2, offset: offset + sx] = data_in[:, :, 1::2, :]
+#             data_out = data_out[:, :, :, : sx + offset]
+#         elif offset < 0:
+#             offset = abs(offset)
+#             data_out[:, :, 0::2, offset: offset + sx] = data_in[:, :, 0::2, :]
+#             data_out[:, :, 1::2, :sx] = data_in[:, :, 1::2, :]
+#             data_out = data_out[:, :, :, offset:]
+#
+#         return data_out
+#
+#     if ndim == 3:
+#         st, sy, sx = data_in.shape
+#         if offset != 0:
+#             # Create output array with appropriate shape adjustment
+#             data_out = np.zeros((st, sy, sx + abs(offset)))
+#         else:
+#             print("Phase = 0, no correction applied.")
+#             return data_in
+#
+#         if offset > 0:
+#             # For positive offset
+#             data_out[:, 0::2, :sx] = data_in[:, 0::2, :]
+#             data_out[:, 1::2, offset: offset + sx] = data_in[:, 1::2, :]
+#             # Trim output by excluding columns that contain only zeros
+#             data_out = data_out[:, :, : sx + offset]
+#         elif offset < 0:
+#             # For negative offset
+#             offset = abs(offset)
+#             data_out[:, 0::2, offset: offset + sx] = data_in[:, 0::2, :]
+#             data_out[:, 1::2, :sx] = data_in[:, 1::2, :]
+#             # Trim output by excluding the first 'offset' columns
+#             data_out = data_out[:, :, offset:]
+#
+#         return data_out
+#
+#     raise NotImplementedError()
+#
 
-def fix_scan_phase(
-        data_in: np.ndarray,
-        offset: int,
-):
+def fix_scan_phase_2d(data_in: np.ndarray, offset: int):
     """
-    Corrects the scan phase of the data based on a given offset along a specified dimension.
+    Corrects the scan phase of a 2D image by shifting alternating rows.
 
-    Parameters:
-    -----------
-    dataIn : ndarray
-        The input data of shape (sy, sx, sc, sz).
+    Parameters
+    ----------
+    data_in : ndarray
+        Input 2D array of shape (sy, sx).
     offset : int
         The amount of offset to correct for.
 
-    Returns:
-    --------
+    Returns
+    -------
     ndarray
-        The data with corrected scan phase, of shape (sy, sx, sc, sz).
+        The corrected 2D array of the same shape as input.
     """
-    dims = data_in.shape
-    ndim = len(dims)
+    sy, sx = data_in.shape
+    data_out = np.zeros_like(data_in)
+
+    if offset > 0:
+        data_out[0::2, :sx] = data_in[0::2, offset:sx + offset]
+        data_out[1::2, :sx] = data_in[1::2, :sx]
+    elif offset < 0:
+        offset = abs(offset)
+        data_out[0::2, :sx] = data_in[0::2, :sx]
+        data_out[1::2, :sx] = data_in[1::2, offset:sx + offset]
+    else:
+        return data_in
+
+    return data_out[:, :sx]  # Crop to match input size
+
+
+def fix_scan_phase(data_in: np.ndarray, offset: int):
+    """
+    Applies scan phase correction to 2D or 3D data.
+
+    If input is 3D, it computes the mean along the first dimension before applying the correction.
+
+    Parameters
+    ----------
+    data_in : ndarray
+        Input data, either 2D (sy, sx) or 3D (st, sy, sx).
+    offset : int
+        The amount of offset to correct for.
+
+    Returns
+    -------
+    ndarray
+        The corrected array of the same shape as input.
+    """
+    ndim = data_in.ndim
+
     if ndim == 2:
-        sy, sx = data_in.shape
-        data_out = np.zeros_like(data_in)
+        return fix_scan_phase_2d(data_in, offset)
 
-        if offset > 0:
-            # Shift even df left and odd df right by 'offset'
-            data_out[0::2, :sx - offset] = data_in[0::2, offset:]
-            data_out[1::2, offset:] = data_in[1::2, :sx - offset]
-        elif offset < 0:
-            offset = abs(offset)
-            # Shift even df right and odd df left by 'offset'
-            data_out[0::2, offset:] = data_in[0::2, :sx - offset]
-            data_out[1::2, :sx - offset] = data_in[1::2, offset:]
-        else:
-            print("Phase = 0, no correction applied.")
-            return data_in
+    elif ndim == 3:
+        mean_image = np.mean(data_in, axis=0)  # Compute mean along the first dimension
+        corrected_image = fix_scan_phase_2d(mean_image, offset)
+        return np.repeat(corrected_image[np.newaxis, :, :], data_in.shape[0], axis=0)
 
-        return data_out
-    if ndim == 4:
-        st, sc, sy, sx = data_in.shape
-        if offset != 0:
-            data_out = np.zeros((st, sc, sy, sx + abs(offset)))
-        else:
-            print("Phase = 0, no correction applied.")
-            return data_in
-
-        if offset > 0:
-            data_out[:, :, 0::2, :sx] = data_in[:, :, 0::2, :]
-            data_out[:, :, 1::2, offset: offset + sx] = data_in[:, :, 1::2, :]
-            data_out = data_out[:, :, :, : sx + offset]
-        elif offset < 0:
-            offset = abs(offset)
-            data_out[:, :, 0::2, offset: offset + sx] = data_in[:, :, 0::2, :]
-            data_out[:, :, 1::2, :sx] = data_in[:, :, 1::2, :]
-            data_out = data_out[:, :, :, offset:]
-
-        return data_out
-
-    if ndim == 3:
-        st, sy, sx = data_in.shape
-        if offset != 0:
-            # Create output array with appropriate shape adjustment
-            data_out = np.zeros((st, sy, sx + abs(offset)))
-        else:
-            print("Phase = 0, no correction applied.")
-            return data_in
-
-        if offset > 0:
-            # For positive offset
-            data_out[:, 0::2, :sx] = data_in[:, 0::2, :]
-            data_out[:, 1::2, offset: offset + sx] = data_in[:, 1::2, :]
-            # Trim output by excluding columns that contain only zeros
-            data_out = data_out[:, :, : sx + offset]
-        elif offset < 0:
-            # For negative offset
-            offset = abs(offset)
-            data_out[:, 0::2, offset: offset + sx] = data_in[:, 0::2, :]
-            data_out[:, 1::2, :sx] = data_in[:, 1::2, :]
-            # Trim output by excluding the first 'offset' columns
-            data_out = data_out[:, :, offset:]
-
-        return data_out
-
-    raise NotImplementedError()
+    else:
+        raise ValueError("Unsupported number of dimensions. Expected 2D or 3D.")
