@@ -148,6 +148,41 @@ def parse_data_path(fpath):
         raise FileNotFoundError(f"Path '{data_path}' is not a directory.")
 
 
+def update_colocalization(shift_x=None, shift_y=None, image_a=None, image_b=None):
+    from scipy.ndimage import shift
+    image_b_shifted = shift(image_b, shift=(shift_y, shift_x), mode='nearest')
+    shape = image_a.shape
+
+    # Normalize intensity to ensure even scaling
+    image_a = image_a / np.max(image_a)
+    image_b_shifted = image_b_shifted / np.max(image_b_shifted)
+
+    colocalization = np.zeros((*shape, 3))
+    colocalization[..., 1] = image_a  # Green channel
+    colocalization[..., 0] = image_b_shifted  # Red channel
+
+    # Boost overlap only where both channels are significant (> 0.3 threshold to remove weak static)
+    mask = (image_a > 0.3) & (image_b_shifted > 0.3)
+    colocalization[..., 2] = np.where(mask, np.minimum(image_a, image_b_shifted), 0)
+
+    return colocalization
+
+
+def plot_colocalization_hist(max_proj1, max_proj2_shifted, bins=100):
+    # Flatten the images
+    x = max_proj1.flatten()
+    y = max_proj2_shifted.flatten()
+
+    # Plot 2D histogram
+    plt.figure(figsize=(6, 5))
+    plt.hist2d(x, y, bins=bins, cmap='inferno', density=True)
+    plt.colorbar(label='Density')
+    plt.xlabel('Max Projection 1 (Green)')
+    plt.ylabel('Max Projection 2 (Red)')
+    plt.title('2D Histogram of Colocalization')
+    plt.show()
+
+
 def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None) -> None | fpl.ImageWidget:
     # parse data
     if data_in is None:
