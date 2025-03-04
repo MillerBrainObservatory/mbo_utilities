@@ -61,13 +61,14 @@ def print_params(params, indent=5):
 def save_as(
         scan,
         savedir: os.PathLike,
-        planes=None,
-        metadata=None,
-        overwrite=True,
-        append_str='',
-        ext='.tiff',
-        order=None,
-        trim: list=None,
+        planes: list | tuple = None,
+        metadata: dict = None,
+        overwrite: bool = True,
+        append_str: str = '',
+        ext: str = '.tiff',
+        order: list | tuple = None,
+        trim_edge: list | tuple = (0,0,0,0),
+        image_size: list | tuple = None,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -81,6 +82,8 @@ def save_as(
         Path to the directory where the data will be saved.
     planes : int, list, or tuple, optional
         Plane indices to save. If `None`, all planes are saved. Default is `None`.
+    trim_edge : list, optional
+        Number of pixels to trim on each W x H edge. (Left, Right, Top, Bottom). Default is (0,0,0,0).
     metadata : dict, optional
         Additional metadata to update the scan object's metadata. Default is `None`.
     overwrite : bool, optional
@@ -129,24 +132,60 @@ def save_as(
         logger.debug(f"Creating directory: {savedir}")
         savedir.mkdir(parents=True)
     start_time = time.time()
-    _save_data(scan, savedir, planes, overwrite, ext, append_str, metadata=metadata, image_size=None)
+    _save_data(
+        scan,
+        savedir,
+        planes,
+        overwrite,
+        ext,
+        append_str,
+        metadata=metadata,
+        image_size=image_size,
+        trim_edge=trim_edge
+    )
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Time elapsed: {int(elapsed_time // 60)} minutes {int(elapsed_time % 60)} seconds.")
 
 
-def _save_data(scan, path, planes, overwrite, file_extension, append_str, metadata, image_size=None):
+def _save_data(
+        scan,
+        path,
+        planes,
+        overwrite,
+        file_extension,
+        append_str,
+        metadata,
+        image_size=None,
+        trim_edge=None
+):
     if '.' in file_extension:
         file_extension = file_extension.split('.')[-1]
 
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
 
-<<<<<<< HEAD
-    for chan in range(len(planes)):
-=======
+    nt, nz, nx, ny = scan.shape
+    print(f"Saving {nt}x{nz}x{nx}x{ny} in {path}")
+
+    print(trim_edge)
+    left, right, top, bottom = trim_edge
+    left = min(left, nx - 1)
+    right = min(right, nx - left)
+    top = min(top, ny - 1)
+    bottom = min(bottom, ny - top)
+
+    new_height = ny - (top + bottom)
+    new_width = nx - (left + right)
+    print(f"New height: {new_height}")
+    print(f"New width: {new_width}")
+
+    metadata['fov'] = [new_height, new_width]
+    metadata["shape"] = (nt, new_width, new_height)
+    metadata['dims'] = ['time', 'width', 'height']
+    metadata['trimmed'] = [left, right, top, bottom]
+
     for chan in planes:
->>>>>>> pollen
         fname = path.joinpath(f"plane_{chan+1:02d}{append_str}.{file_extension}")
 
         if fname.exists():
@@ -154,7 +193,7 @@ def _save_data(scan, path, planes, overwrite, file_extension, append_str, metada
 
         tifffile.imwrite(
             fname,
-            da.zeros(shape=(scan.shape[0], scan.shape[2], scan.shape[3]), dtype=scan.dtype),
+            da.zeros(shape=metadata['shape'], dtype=scan.dtype),
             metadata=metadata,
             dtype='int16',
         )
@@ -176,7 +215,8 @@ def _save_data(scan, path, planes, overwrite, file_extension, append_str, metada
             for i, chunk in enumerate(range(num_chunks)):
                 frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
                 end = start + frames_in_this_chunk
-                s = scan[start:end, chan, :, :]
+
+                s = scan[start:end, chan, top:ny - bottom, left:nx - right]
                 tif[start:end, :, :] = s
                 start = end
                 pbar.update(1)
@@ -356,7 +396,7 @@ def main():
         save_as(
             scan,
             savepath,
-            frames=frames,
+            # frames=frames, # TODO
             planes=zplanes,
             overwrite=args.overwrite,
             ext=ext,

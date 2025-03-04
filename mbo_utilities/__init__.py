@@ -11,7 +11,7 @@ from .assembly import save_as
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
 from .gui.widgets import run_gui
 from .image import fix_scan_phase, return_scan_offset
-from .util import norm_minmax, float2uint8, smooth_data, is_running_jupyter
+from .util import norm_minmax, float2uint8, smooth_data, is_running_jupyter, norm_percentile, match_array_size
 
 from . import _version
 __version__ = _version.get_versions()['version']
