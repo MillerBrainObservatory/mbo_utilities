@@ -257,20 +257,17 @@ def get_metadata(file: os.PathLike | str, verbose=False):
         # Field-of-view calculations
         # TODO: We may want an FOV measure that takes into account contiguous ROIs
         # As of now, this is for a single ROI
-        fov_x = round(objective_resolution * size_xy[0])  # in microns
-        fov_y = round(objective_resolution * size_xy[1])  # in microns
-        fov_roi_um = (fov_x, fov_y)  # in microns
-        fov_xy = (int(fov_x), int(fov_y / num_rois))
-        fov_px = (int(fov_x / num_pixel_xy[0]), int(fov_y / num_pixel_xy[1]))
+        fov_x_um = round(objective_resolution * size_xy[0])  # in microns
+        fov_y_um = round(objective_resolution * size_xy[1])  # in microns
+        fov_roi_um = (fov_x_um, fov_y_um)  # in microns
 
-        pixel_resolution = (fov_x / num_pixel_xy[0], fov_y / num_pixel_xy[1])
+        pixel_resolution = (fov_x_um / num_pixel_xy[0], fov_y_um / num_pixel_xy[1])
 
         metadata= {
             "num_planes": num_planes,
             "num_frames": int(len(pages) / num_planes),
-            "fov": fov_xy,  # in microns
-            "fov_px": fov_px,
-            "fov_roi_um": fov_roi_um,
+            "fov": fov_roi_um,  # in microns
+            "fov_px": fov_roi_um,
             "num_rois": num_rois,
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
