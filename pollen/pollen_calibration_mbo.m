@@ -32,7 +32,7 @@ dy = fov_um_y/ny;
 vol = load_or_read_data(filepath, filename, ny, nx, nc, nt, nz);
 
 % 1. scan offset correction
-vol = correct_scan_phase(vol);
+vol = correct_scan_phase(vol, filepath);
 
 % 2. user marked pollen
 [xs, ys, Iz, III] = user_pollen_selection(vol);
@@ -70,9 +70,9 @@ end
 end
 
 %% scan offset correction
-function vol = correct_scan_phase(vol)
+function vol = correct_scan_phase(vol, filepath)
 dim = 2;
-disp('Planes shifted. Detecting scan offset...');
+disp('Detecting scan offset...');
 
 Iinit = max(vol, [], 4);
 scan_corrections = zeros(1, size(vol, 3));
@@ -88,6 +88,11 @@ for ijk = 1:size(vol, 3)
     POI = fixScanPhase(POI, scan_corrections(ijk), dim);
     vol(:,:,ijk,:) = POI;
 end
+h5_filename = fullfile(filepath, 'pollen_calibration_data.h5');
+if ~isfile(h5_filename)
+    h5create(h5_filename, '/scan_corrections', size(scan_corrections));
+end
+h5write(h5_filename, '/scan_corrections', scan_corrections);
 end
 
 %% user select beads
@@ -126,9 +131,9 @@ end
 %% power vs z
 function [ZZ, zoi, pp] = analyze_power_vs_z(Iz, filepath, DZ, order)
 disp('Running power vs z')
-amt = 10./DZ;
+amt = 10./DZ; % window size of moving average
 nz = size(Iz, 2);
-ZZ = fliplr((0:(nz-1)) * DZ);
+ZZ = fliplr((0:(nz-1)) * DZ); % * DZ(um) puts this in units of um
 
 f99 = figure(77);
 f99.OuterPosition = [670,800,570,510];
@@ -271,6 +276,19 @@ end
 vx = (-floor(nx/2):floor(nx/2))*dx;
 vy = (-floor(ny/2):floor(ny/2))*dy;
 
+% Compute pixel shifts
+x_shifts = round(xs - mean(xs(1:nc)));  % Shift relative to mean
+y_shifts = round(ys - mean(ys(1:nc)));
+
+% Save to HDF5 file
+h5_filename = fullfile(filepath, 'pollen_calibration_data.h5');
+try
+    h5create(h5_filename, '/x_shifts', size(x_shifts));
+    h5create(h5_filename, '/y_shifts', size(y_shifts));
+catch
+    h5write(h5_filename, '/x_shifts', x_shifts);
+    h5write(h5_filename, '/y_shifts', y_shifts);
+end
 figure;
 plot(vx(round(xs(1:nc))), vy(round(ys(1:nc))), 'bo', 'MarkerSize', 6);
 hold on;
@@ -293,6 +311,7 @@ end
 
 %% find scan offset
 function correction = returnScanOffset2(Iin, dim)
+Iin = flip(Iin);
 if numel(size(Iin)) > 2
     Iin = mean(Iin, 3);
 end
