@@ -125,14 +125,15 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> li
     return [str(file) for file in files]
 
 
-
-def stack_from_files(files: list):
+def stack_from_files(files: list, proj="mean"):
     """Stacks a list of TIFF files into a Dask array. Can be 3D Tyx or 4D Tzyx.
 
     Parameters
     ----------
     files : list
         List of TIFF files to stack.
+    proj : str, optional
+        Projection to use (mean, max, std). Default is 'mean'.
 
     Returns
     -------
@@ -145,11 +146,17 @@ def stack_from_files(files: list):
         if Path(file).suffix not in [".tif", ".tiff"]:
             continue
         arr = tifffile.memmap(file)
-        lazy_arrays.append(arr)
-        # dask_arr = da.from_array(arr, chunks="auto")
+        if proj == "mean":
+            img = np.mean(arr, axis=0)
+        elif proj == "max":
+            img = np.max(arr, axis=0)
+        elif proj == "std":
+            img = np.std(arr, axis=0)
+        else:
+            raise ValueError(f"Unsupported projection '{proj}'")
+        lazy_arrays.append(img)
 
-    zstack = np.stack(lazy_arrays, axis=1)
-    return zstack
+    return np.stack(lazy_arrays, axis=0)
 
 
 def save_png(fname, data):
