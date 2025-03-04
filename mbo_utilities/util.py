@@ -21,16 +21,13 @@ def float2uint8(scan):
     scan = (scan * 255).astype(np.uint8, copy=False)
     return scan
 
-
 def smooth_data(data, window_size=5):
     """Smooth the data using a moving average."""
     return np.convolve(data, np.ones(window_size) / window_size, mode='valid')
 
-
 def norm_minmax(images):
     """ Normalize a NumPy array to the range [0, 1]. """
     return (images - images.min()) / (images.max() - images.min())
-
 
 def norm_percentile(image, low_p=1, high_p=98):
     """
@@ -83,4 +80,24 @@ def match_array_size(arr1, arr2, mode="trim"):
     ValueError
         If an invalid mode is provided.
     """
+    shape1 = np.array(arr1.shape)
+    shape2 = np.array(arr2.shape)
+
+    if mode == "trim":
+        min_shape = np.minimum(shape1, shape2)
+        arr1 = arr1[tuple(slice(0, s) for s in min_shape)]
+        arr2 = arr2[tuple(slice(0, s) for s in min_shape)]
+
+    elif mode == "pad":
+        max_shape = np.maximum(shape1, shape2)
+        padded1 = np.zeros(max_shape, dtype=arr1.dtype)
+        padded2 = np.zeros(max_shape, dtype=arr2.dtype)
+        slices1 = tuple(slice(0, s) for s in shape1)
+        slices2 = tuple(slice(0, s) for s in shape2)
+        padded1[slices1] = arr1
+        padded2[slices2] = arr2
+        arr1, arr2 = padded1, padded2
+    else:
+        raise ValueError("Invalid mode. Use 'trim' or 'pad'.")
+    return np.stack([arr1, arr2], axis=0)
 
