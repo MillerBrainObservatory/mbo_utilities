@@ -2,6 +2,7 @@ import sys
 
 from pathlib import Path
 import numpy as np
+from matplotlib import pyplot as plt
 
 from qtpy.QtWidgets import QMainWindow, QFileDialog, QApplication
 from qtpy import QtGui, QtCore
@@ -18,8 +19,6 @@ try:
     from imgui_bundle import imgui, icons_fontawesome_6 as fa
 except ImportError:
     raise ImportError("Please install imgui via `conda install -c conda-forge imgui-bundle`")
-
-
 
 
 def load_dialog_folder(parent=None, directory=None):
