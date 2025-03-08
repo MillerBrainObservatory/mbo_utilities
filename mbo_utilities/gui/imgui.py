@@ -4,9 +4,9 @@ import h5py
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
 import imgui_bundle
+
 from imgui_bundle import imgui, implot
 from imgui_bundle import portable_file_dialogs as pfd
-from mbo_utilities.gui.imgui import imgui_dynamic_table as mbo_table
 
 from mbo_utilities import (
     return_scan_offset,
@@ -171,7 +171,7 @@ class PollenCalibration(EdgeWindow):
             imgui.end_popup()
 
         if self.pollen_loaded:
-            mbo_table(
+            imgui_dynamic_table(
                 "table",
                 self.user_offsets,
                 self.user_titles,
