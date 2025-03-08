@@ -6,6 +6,7 @@ from fastplotlib.ui import EdgeWindow
 import imgui_bundle
 from imgui_bundle import imgui, implot
 from imgui_bundle import portable_file_dialogs as pfd
+from mbo_utilities.gui.imgui import imgui_dynamic_table as mbo_table
 
 from mbo_utilities import (
     return_scan_offset,
@@ -14,6 +15,62 @@ from mbo_utilities import (
     norm_percentile
 )
 
+
+def imgui_dynamic_table(table_id: str, data_lists: list, titles: list = None, selected_index: int = None):
+    """
+    Draw a dynamic table using ImGui with customizable column titles and highlighted row selection.
+
+    Parameters
+    ----------
+    table_id : str
+        Unique identifier for the table.
+    data_lists : list of lists
+        A list of columns, where each inner list represents a column's data.
+        All columns must have the same length.
+    titles : list of str, optional
+        Column titles corresponding to `data_lists`. If None, default names are assigned as "Column N".
+    selected_index : int, optional
+        Index of the row to highlight. Default is None (no highlighting).
+
+    Raises
+    ------
+    ValueError
+        If `data_lists` is empty or columns have inconsistent lengths.
+        If `titles` is provided but does not match the number of columns.
+    """
+
+    if not data_lists or any(len(col) != len(data_lists[0]) for col in data_lists):
+        raise ValueError("data_lists columns must have consistent lengths and cannot be empty.")
+
+    num_columns = len(data_lists)
+    if titles is None:
+        titles = [f"Column {i + 1}" for i in range(num_columns)]
+    elif len(titles) != num_columns:
+        raise ValueError("Number of titles must match the number of columns in data_lists.")
+
+    if imgui.begin_table(table_id, num_columns, flags=imgui.TableFlags_.borders | imgui.TableFlags_.resizable):
+        for title in titles:
+            imgui.table_setup_column(title, imgui.TableColumnFlags_.width_stretch)
+
+        for title in titles:
+            imgui.table_next_column()
+            imgui.text(title)
+
+        for i, row_values in enumerate(zip(*data_lists)):
+            imgui.table_next_row()
+            for value in row_values:
+                imgui.table_next_column()
+                if i == selected_index:
+                    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(0, 250, 35, 1))
+
+                imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + imgui.get_column_width() - imgui.calc_text_size(
+                    f"{int(value)}").x - imgui.get_style().item_spacing.x)
+                imgui.text(f"{int(value)}")
+
+                if i == selected_index:
+                    imgui.pop_style_color()
+
+        imgui.end_table()
 
 def implot_pollen(pollen_offsets, offset_store, zstack):
     imgui.begin_child("Z-Stack Analysis")
@@ -42,20 +99,26 @@ def implot_pollen(pollen_offsets, offset_store, zstack):
 
 
 class PollenCalibration(EdgeWindow):
-    def __init__(self, fpath=None, iw=None, size=350, location="right", title="Pollen Calibration", depth=5):
-        super().__init__(figure=iw.figure, size=size, location=location, title=title, )
+    def __init__(self, fpath=None, iw=None, size=350, location="right", title="Pollen Calibration", depth=5, pollen_offsets=[], user_offsets=[], user_titles=[]):
+        super().__init__(figure=iw.figure, size=size, location=location, title=title)
+        self.pollen_loaded = False
+        self.pollen_offsets=pollen_offsets
 
-        self.fpath = fpath
-        self.pollen_offsets = self.load_pollen_offsets(depth=depth)
-        self.pollen_offsets_original = self.pollen_offsets.copy()
+        self.user_offsets = user_offsets
+        self.user_titles = user_titles
+
         self.figure = iw.figure
-        self.data_store = iw.data[:].copy()
         self.image_widget = iw
-        self.original_data = iw.data[:]
-        self._current_offset = 0
-        self.offset_store = self.pollen_offsets.copy()
-        self.proj = 'mean'
+        self.shape = self.image_widget.data[0].shape
 
+        self.nz = self.shape[0]
+        self.user_offsets.insert(0, list(range(1, self.nz + 1)))
+        self.user_titles.insert(0, "Z-Plane")
+
+        self.offset_store = self.pollen_offsets.copy()
+        self._current_offset = 0
+
+        self.proj = 'mean'
         self.image_widget.add_event_handler(self.track_slider, "current_index")
 
     @property
@@ -68,33 +131,27 @@ class PollenCalibration(EdgeWindow):
         self.apply_offset()
 
     def update(self):
-        something_changed = False
         button_size = imgui.ImVec2(140, 20)
 
-        offset_changed, value = imgui.input_int(label="offset", v=self.current_offset, step=1, step_fast=2, )
+        offset_changed, value = imgui.input_int("offset", self.current_offset, step=1, step_fast=2)
         if offset_changed:
             self.current_offset = value
 
-        # Calculate Offset
         if imgui.button("Calculate Offset", button_size):
             self.current_offset = self.calculate_offset()
         if imgui.is_item_hovered():
             imgui.set_tooltip("Automatically calculates the best offset for the selected Z-plane.")
 
         if imgui.button("Open File", imgui.ImVec2(140, 20)):
-            selected_file = self.open_file_dialog()
-            if selected_file:
-                print("Selected File:", selected_file)
+            self.pollen_loaded = True
         if imgui.is_item_hovered():
             imgui.set_tooltip("Open File")
 
-        # switch max <--> mean
         if imgui.button("Switch Projection", button_size):
             self.switch()
         if imgui.is_item_hovered():
-            imgui.set_tooltip("Switch to max/mean projection, whichever is currently not selected.")
+            imgui.set_tooltip("Switch to max/mean projection.")
 
-        # Store offset in table
         if imgui.button("Store Offset", button_size):
             ind = self.image_widget.current_index["t"]
             self.offset_store[ind] = self.current_offset
@@ -102,58 +159,27 @@ class PollenCalibration(EdgeWindow):
         if imgui.is_item_hovered():
             imgui.set_tooltip("Set the current offset as the selected value.")
 
-        # Save offset store
         if imgui.button("Save Selected", button_size):
             self.save_to_file()
         if imgui.is_item_hovered():
             imgui.set_tooltip("Overwrite scan-phase values with current selection.")
-        if imgui.begin_popup("Save Successful"):  # popup if success
+
+        if imgui.begin_popup("Save Successful"):
             imgui.text("Offsets successfully saved!")
             if imgui.button("OK"):
                 imgui.close_current_popup()
             imgui.end_popup()
 
-        if imgui.begin_table("table", 3, flags=imgui.TableFlags_.borders | imgui.TableFlags_.resizable):
-            imgui.table_setup_column("Z-Plane", imgui.TableColumnFlags_.width_fixed, 50)
-            imgui.table_setup_column("Calibration Value", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_setup_column("Selected Value", imgui.TableColumnFlags_.width_stretch)
+        if self.pollen_loaded:
+            mbo_table(
+                "table",
+                self.user_offsets,
+                self.user_titles,
+                selected_index=self.image_widget.current_index["t"],
+            )
+        else:
+            imgui.text("No pollen data loaded")
 
-            imgui.table_next_column()
-            imgui.text("Z-Plane")
-            imgui.table_next_column()
-            imgui.text("pollen")
-            imgui.table_next_column()
-            imgui.text("sel")
-
-            imgui.table_next_row()
-            selected_index = self.image_widget.current_index["t"]
-
-            for i, (offset_pollen, offset_selection) in enumerate(zip(self.pollen_offsets, self.offset_store)):
-                imgui.table_next_row()
-                imgui.table_next_column()
-
-                if i == selected_index:
-                    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(0, 250, 35, 1))  # Highlight selected row
-                imgui.text(f"Plane {i + 1}")
-
-                # right align columns
-                imgui.table_next_column()
-                imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + imgui.get_column_width() - imgui.calc_text_size(
-                    f"{offset_pollen[0]}").x - imgui.get_style().item_spacing.x)
-                imgui.text(f"{offset_pollen[0]}")
-
-                imgui.table_next_column()
-                imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + imgui.get_column_width() - imgui.calc_text_size(
-                    f"{offset_selection[0]}").x - imgui.get_style().item_spacing.x)
-                imgui.text(f"{offset_selection[0]}")
-
-                if i == selected_index:
-                    imgui.pop_style_color()
-
-            imgui.end_table()
-
-        if something_changed:
-            self.apply_offset()
 
     def calculate_offset(self):
         ind = self.image_widget.current_index["t"]
@@ -164,40 +190,34 @@ class PollenCalibration(EdgeWindow):
         ind = self.image_widget.current_index["t"]
         frame = self.image_widget.data[0][ind].copy()
         frame[0::2, :] = np.roll(self.image_widget.data[0][ind][0::2, :], shift=-self.current_offset, axis=1)
-        self.image_widget.figure[0, 0].graphics[0].data[:] = frame
+        self.image_widget.figure[0,0].graphics[0].data[:] = frame
 
     def track_slider(self, ev):
+        """events to emit when z-plane changes"""
         t_index = ev["t"]
         self.current_offset = int(self.offset_store[t_index][0])
         self.apply_offset()
 
     def switch(self):
-        pass
-        # ind = self.image_widget.current_index["t"]
-        # if self.proj == 'mean':
-        #     print('mean')
-        #     self.image_widget.set_data(zstack)
-        #     self.image_widget.current_index["t"] = ind
-        #     self.proj = "max"
-        # else:
-        #     print('max')
-        #     self.image_widget.set_data(zstack_mean)
-        #     self.image_widget.figure[0, 0].graphics[0].data[ind, ...] = zstack_mean[ind, ...]
-        #     self.image_widget.current_index["t"] = ind
-        #     self.proj = "mean"
+        ind = self.image_widget.current_index["t"]
+        if self.proj == 'mean':
+            self.image_widget.set_data(zstack_max)
+            self.proj = "max"
+        else:
+            self.image_widget.set_data(zstack_mean)
+            self.image_widget.figure[0,0].graphics[0].data[ind, ...] = zstack_mean[ind, ...]
+            self.proj = "mean"
 
     def save_to_file(self):
         if not self.h5name.is_file():
             print(f"Error: File {self.h5name} does not exist.")
             return
         try:
-            fpath = self.h5name.resolve()
-            with h5py.File(fpath, 'r+') as f:
+            with h5py.File(self.h5name.resolve(), 'r+') as f:
                 if "scan_corrections" in f:
-                    del f["scan_corrections"]  # Remove old dataset
-
+                    del f["scan_corrections"]
                 f.create_dataset("scan_corrections", data=np.array(self.offset_store))
-                print(f"Offsets successfully saved to {fpath}")
+                print(f"Offsets successfully saved to {self.h5name}")
 
             imgui.open_popup("Save Successful")
 
@@ -210,36 +230,17 @@ class PollenCalibration(EdgeWindow):
         if c_index < nz:
             frame = self.image_widget.data[0][c_index]
             frame_n = self.image_widget.data[0][c_index + 1]
-            tmp = norm_percentile(frame * frame_n)
-            self.image_widget.data[0][c_index] = norm_minmax(tmp)
+            tmp = mbo.norm_percentile(frame * frame_n)
+            self.image_widget.data[0][c_index] = mbo.norm_minmax(tmp)
 
     def load_pollen_offsets(self, depth=5):
-        fpath = Path(self.fpath)
-        if fpath.is_dir():
-            fpath = get_files(fpath, '.h5', depth)
-            print(fpath)
-            if not fpath:
-                raise Exception("No file found")
-        elif fpath.is_file():
-            fpath = [fpath]
         with h5py.File(fpath[0], 'r') as f1:
-            # dx = np.array(f1['x_shifts'])
-            # dy = np.array(f1['y_shifts'])
+            dx = np.array(f1['x_shifts'])
+            dy = np.array(f1['y_shifts'])
             ofs_volume = np.array(f1['scan_corrections'])
             self.h5name = Path(fpath[0])
         return ofs_volume
 
     def open_file_dialog(self):
-        """Opens a file selection dialog using portable_file_dialogs."""
-        file_dialog = pfd.open_file(
-            title="Select a File",
-            filters=["*.tiff", "*.tif", "*.h5", "*.hdf5"],
-            options=pfd.opt.none  # No multi-selection
-        )
-
-        if file_dialog.ready():  # Wait for the result
-            selected_files = file_dialog.result()
-            if selected_files:
-                print(selected_files)
-                return selected_files[0]  # Get the first selected file
-        return None
+        file_dialog = pfd.open_file(title="Select a pollen calibration file", filters=["*.tiff", "*.tif", "*.h5", "*.hdf5"], options=pfd.opt.none)
+        return file_dialog.result()
