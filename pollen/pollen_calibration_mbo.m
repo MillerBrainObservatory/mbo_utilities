@@ -1,10 +1,7 @@
-function pollen_calibration_mbo(filepath, dual_cavity,z_step_um,order)
+function pollen_calibration_mbo(filepath,dual_cavity,order)
 % filepath: file dialog will open to this location
 % dual_cavity: 0 if single cavity, 1 if dual cavity
-% z_step_um: distance between zplanes (um)
 % order: order of zplanes, leave empty for original order
-% pollen_calibration(filepath,0,5); single cavity, 5 um step size,
-% original order (1:num_planes)
 
 [filename, filepath] = uigetfile('*.tif', 'Select file:', filepath, 'MultiSelect', 'off');
 if isequal(filename, 0)
@@ -21,6 +18,7 @@ ny = metadata.tiff_width;
 nz = metadata.num_frames;
 nt = 1;
 nc = metadata.num_planes;
+z_step_um = metadata.pollen_z_step;
 
 if nargin < 4 || isempty(order)
     order = 1:nc;
@@ -60,8 +58,9 @@ if exist([filepath fname '.mat'], 'file') < 2
     vol = ScanImageTiffReader([filepath fname '.tif']).data();
     vol = reshape(vol, ny, nx, nc, nt, nz);
     vol = vol - mean(vol(:));  % Normalize
-    vol = mean(vol, 4);
-    vol = reshape(vol, ny, nx, nc, nz);
+    vol = squeeze(mean(vol, 4));
+    vol = permute(vol, [2, 1, 3, 4]);
+
     save([filepath fname '.mat'], 'vol', '-v7.3');
 else
     disp('Loading Preprocessed Data...');
@@ -311,9 +310,9 @@ end
 
 %% find scan offset
 function correction = returnScanOffset2(Iin, dim)
-Iin = flip(Iin);
+
 if numel(size(Iin)) > 2
-    Iin = mean(Iin, 3);
+    Iin = max(Iin, 3);
 end
 
 n = 8;
@@ -477,7 +476,8 @@ metadata_out = struct( ...
     'line_period', line_period, ...
     'scan_frame_period', scan_frame_period, ...
     'size_xy', size_xy, ...
-    'objective_resolution', objective_resolution ...
+    'objective_resolution', objective_resolution, ...
+    'pollen_z_step', header.SI.hStackManager.stackZStepSize ... % pollen only
     );
 
 end
