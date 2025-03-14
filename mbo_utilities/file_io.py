@@ -13,6 +13,26 @@ from mbo_utilities.scanreader.core import expand_wildcard
 from mbo_utilities.util import norm_minmax
 
 
+def update_ops_paths(ops_files: str | list):
+    """Update save_path, save_path0, and save_folder in an ops dictionary based on its current location."""
+    if isinstance(ops_files, (str,Path)):
+        ops_files = [ops_files]
+
+    for ops_file in ops_files:
+        ops = np.load(ops_file, allow_pickle=True).item()
+
+        ops_path = Path(ops_file)
+        plane0_folder = ops_path.parent
+        plane_folder = plane0_folder.parent
+
+        ops["save_path"] = str(plane0_folder)
+        ops["save_path0"] = str(plane_folder)
+        ops["save_folder"] = plane_folder.name
+        ops["ops_path"] = ops_path
+
+        np.save(ops_file, ops)
+
+
 def _make_json_serializable(obj):
     """Convert metadata to JSON serializable format."""
     if isinstance(obj, dict):
@@ -52,6 +72,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
+        key = tuple(list(k) if isinstance(k, range) else k for k in key)
 
         # Call the parent class's __getitem__ with the reordered key
         item = super().__getitem__((0, key[2], key[3], key[1], key[0]))
