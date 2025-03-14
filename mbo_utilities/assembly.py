@@ -10,6 +10,7 @@ import dask.array as da
 
 import tifffile
 
+import mbo_utilities
 from .image import extract_center_square
 from .file_io import  _make_json_serializable, read_scan, save_mp4
 from .metadata import get_metadata, is_raw_scanimage
@@ -69,6 +70,7 @@ def save_as(
         order: list | tuple = None,
         trim_edge: list | tuple = (0,0,0,0),
         image_size: list | tuple = None,
+        fix_phase: bool = False,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -99,6 +101,8 @@ def save_as(
     image_size : int, optional
         Size of the image to save. Default is 255x255 pixel image. If the image is larger
         than the movie dimensions, it will be cropped to fit. Expected dimensions are square.
+    fix_phase : bool, optional
+        Whether to fix scan-phase (x/y) alignment. Default is `False`.
 
 
     Raises
@@ -141,7 +145,8 @@ def save_as(
         append_str,
         metadata=metadata,
         image_size=image_size,
-        trim_edge=trim_edge
+        trim_edge=trim_edge,
+        fix_phase=fix_phase,
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -157,7 +162,8 @@ def _save_data(
         append_str,
         metadata,
         image_size=None,
-        trim_edge=None
+        trim_edge=None,
+        fix_phase=False
 ):
     if '.' in file_extension:
         file_extension = file_extension.split('.')[-1]
@@ -212,14 +218,23 @@ def _save_data(
 
         with tqdm(total=num_chunks, desc=f'Saving plane {chan + 1}', position=0, leave=False) as pbar:
             start = 0
+            phases = []
+            phases_idx = []
             for i, chunk in enumerate(range(num_chunks)):
                 frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
                 end = start + frames_in_this_chunk
 
                 s = scan[start:end, chan, top:ny - bottom, left:nx - right]
+                if fix_phase:
+                    ofs = mbo_utilities.return_scan_offset(s)
+                    if ofs:
+                        s = mbo_utilities.fix_scan_phase(s, ofs)
+                        phases.append(ofs)
+                        phases_idx.append(i)
                 tif[start:end, :, :] = s
                 start = end
                 pbar.update(1)
+
 
 
 def _get_file_writer(ext, overwrite, metadata=None, image_size=None):
