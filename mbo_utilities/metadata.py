@@ -253,6 +253,10 @@ def get_metadata(file: os.PathLike | str, verbose=False):
         sample_format = pages[0].dtype.name
         objective_resolution = si["SI.objectiveResolution"]
         frame_rate = si["SI.hRoiManager.scanFrameRate"]
+        try:
+            z_step_pollen = si["hStackManager.stackZStepSize"]
+        except KeyError:
+            z_step_pollen = None
 
         # Field-of-view calculations
         # TODO: We may want an FOV measure that takes into account contiguous ROIs
@@ -281,6 +285,7 @@ def get_metadata(file: os.PathLike | str, verbose=False):
             "roi_height_px": num_pixel_xy[1],
             "sample_format": sample_format,
             "objective_resolution": objective_resolution,
+            "z_step_pollen": z_step_pollen
         }
         if verbose:
             metadata["all"] = meta
