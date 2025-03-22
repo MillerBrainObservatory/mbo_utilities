@@ -1,6 +1,39 @@
 import numpy as np
 
 
+def align_images_zstack(images, mode="trim"):
+    """
+    Aligns images to a common shape for Z-stack viewing.
+
+    Parameters
+    ----------
+    images : list of np.ndarray
+        List of 2D max-projection images.
+    mode : str, optional
+        "trim" - Crops to the smallest common shape (default).
+        "pad"  - Pads to the largest shape with zeros.
+
+    Returns
+    -------
+    np.ndarray
+        3D Z-stack in (Z, X, Y) format.
+    """
+    shapes = np.array([img.shape for img in images])
+
+    if mode == "trim":
+        target_shape = np.min(shapes, axis=0)
+        aligned_images = [img[:target_shape[0], :target_shape[1]] for img in images]
+
+    elif mode == "pad":
+        target_shape = np.max(shapes, axis=0)
+        aligned_images = [np.pad(img,
+                                 ((0, target_shape[0] - img.shape[0]),
+                                  (0, target_shape[1] - img.shape[1])),
+                                 mode='constant') for img in images]
+    else:
+        raise ValueError("Invalid mode. Choose 'trim' or 'pad'.")
+    return np.stack(aligned_images, axis=0)
+
 def is_running_jupyter():
     """Returns true if users environment is running Jupyter."""
     try:
