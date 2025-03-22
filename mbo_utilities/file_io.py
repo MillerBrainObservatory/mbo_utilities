@@ -13,6 +13,7 @@ from matplotlib import cm
 
 from mbo_utilities.scanreader import scans
 from mbo_utilities.scanreader.core import expand_wildcard
+from mbo_utilities.scanreader.multiroi import ROI
 from mbo_utilities.util import norm_minmax
 
 
@@ -102,6 +103,32 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
     @property
     def size(self):
         return self.num_frames * self.num_channels * self.field_heights[0] * self.field_widths[0]
+
+    @property
+    def scanning_depths(self):
+        """
+        We override this because LBM should always be at a single scanning depth.
+        """
+        return [0]
+
+
+    def _create_rois(self):
+        """
+        Create scan rois from the configuration file. Override the base method to force
+        ROI's that have multiple 'zs' to a single depth.
+        """
+        try:
+            roi_infos = self.tiff_files[0].scanimage_metadata['RoiGroups']['imagingRoiGroup']['rois']
+        except KeyError:
+            raise RuntimeError('This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata.')
+        roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
+        roi_infos = list(filter(lambda r: isinstance(r['zs'], (int, float, list)), roi_infos))  # discard empty/malformed ROIs
+        for roi_info in roi_infos:
+            # LBM uses a single depth that is not stored in metadata, so force this to be 0
+            roi_info['zs'] = [0]
+
+        rois = [ROI(roi_info) for roi_info in roi_infos]
+        return rois
 
 
 def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> list | Path:
