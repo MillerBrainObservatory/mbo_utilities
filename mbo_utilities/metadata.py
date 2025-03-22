@@ -169,7 +169,6 @@ def is_raw_scanimage(file: os.PathLike | str):
             hasattr(tiff_file, 'shaped_metadata')
             and tiff_file.shaped_metadata is not None
             and isinstance(tiff_file.shaped_metadata, (list, tuple))
-            and tiff_file.shaped_metadata
             and tiff_file.shaped_metadata[0] not in ([], (), None)
     ):
         if 'image' in tiff_file.shaped_metadata[0]:
