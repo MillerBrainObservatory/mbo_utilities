@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from itertools import product
+
 import numpy as np
 import tifffile
 from pathlib import Path
 import ffmpeg
 import re
+import dask.array as da
 
 from matplotlib import cm
 
@@ -13,24 +16,27 @@ from mbo_utilities.scanreader.core import expand_wildcard
 from mbo_utilities.util import norm_minmax
 
 
-def update_ops_paths(ops_files: str | list):
-    """Update save_path, save_path0, and save_folder in an ops dictionary based on its current location."""
-    if isinstance(ops_files, (str,Path)):
-        ops_files = [ops_files]
+def npy_to_dask(files, name="", axis=1, astype=None):
+    sample_mov = np.load(files[0], mmap_mode="r")
+    file_ts = [np.load(f, mmap_mode="r").shape[axis] for f in files]
+    nz, nt_sample, ny, nx = sample_mov.shape
 
-    for ops_file in ops_files:
-        ops = np.load(ops_file, allow_pickle=True).item()
+    dtype = sample_mov.dtype
+    chunks = [(nz,), (nt_sample,), (ny,), (nx,)]
+    chunks[axis] = tuple(file_ts)
+    chunks = tuple(chunks)
+    name = "from-npy-stack-%s" % name
 
-        ops_path = Path(ops_file)
-        plane0_folder = ops_path.parent
-        plane_folder = plane0_folder.parent
+    keys = list(product([name], *[range(len(c)) for c in chunks]))
+    values = [(np.load, files[i], "r") for i in range(len(chunks[axis]))]
 
-        ops["save_path"] = str(plane0_folder)
-        ops["save_path0"] = str(plane_folder)
-        ops["save_folder"] = plane_folder.name
-        ops["ops_path"] = ops_path
+    dsk = dict(zip(keys, values))
 
-        np.save(ops_file, ops)
+    arr = da.Array(dsk, name, chunks, dtype)
+    if astype is not None:
+        arr = arr.astype(astype)
+
+    return arr
 
 
 def _make_json_serializable(obj):
