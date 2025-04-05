@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from itertools import product
+from typing import Sequence
 
 import numpy as np
 import tifffile
@@ -12,7 +13,6 @@ import dask.array as da
 from matplotlib import cm
 
 from mbo_utilities.scanreader import scans
-from mbo_utilities.scanreader.core import expand_wildcard
 from mbo_utilities.scanreader.multiroi import ROI
 from mbo_utilities.util import norm_minmax
 
@@ -54,15 +54,60 @@ def _make_json_serializable(obj):
         return obj
 
 
-def read_scan(pathnames, dtype=np.int16, join_contiguous=False):
+def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
+    """
+    Expand a path, list of paths, or wildcard pattern into a sorted list of actual files.
+
+    This is a handy wrapper for loading images or data files when you’ve got a folder,
+    some wildcards, or a mix of both.
+
+    Parameters
+    ----------
+    paths : str, Path, or list of (str or Path)
+        Can be a single path, a wildcard pattern like '*.tif', a folder, or a list of those.
+
+    Returns
+    -------
+    list of Path
+        Sorted list of full paths to matching files.
+
+    Examples
+    --------
+    >>> expand_paths("data/*.tif")
+    [Path('data/img_000.tif'), Path('data/img_001.tif'), ...]
+
+    >>> expand_paths(Path("data"))
+    [Path('data/img_000.tif'), Path('data/img_001.tif'), ...]
+
+    >>> expand_paths(["data/*.tif", Path("more_data")])
+    [Path('data/img_000.tif'), Path('more_data/img_050.tif'), ...]
+    """
+    if isinstance(paths, (str, Path)):
+        paths = [paths]
+    elif not isinstance(paths, (list, tuple)):
+        raise TypeError(f"Expected str, Path, or sequence of them, got {type(paths)}")
+
+    result = []
+    for p in paths:
+        p = Path(p)
+        if "*" in str(p):
+            result.extend(p.parent.glob(p.name))
+        elif p.is_dir():
+            result.extend(p.glob("*"))
+        elif p.exists() and p.is_file():
+            result.append(p)
+
+    return sorted(p.resolve() for p in result if p.is_file())
+
+def read_scan(pathnames, dtype=np.int16):
     """ Reads a ScanImage scan. """
-    # Expand wildcards
-    filenames = expand_wildcard(pathnames)
+
+    filenames = expand_paths(pathnames)
     if len(filenames) == 0:
         error_msg = 'Pathname(s) {} do not match any files in disk.'.format(pathnames)
         raise FileNotFoundError(error_msg)
 
-    scan = ScanMultiROIReordered(join_contiguous=join_contiguous)
+    scan = ScanMultiROIReordered(join_contiguous=True)
 
     # Read metadata and data (lazy operation)
     scan.read_data(filenames, dtype=dtype)
