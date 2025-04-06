@@ -20,7 +20,7 @@ release = "0.0.1"
 # Copy example notebooks for rendering in the docs
 print(f'Copying sphinx source files ...')
 source_dir = Path(__file__).resolve().parent.parent / "demos"
-dest_dir = Path(__file__).resolve().parent / "notebooks"
+dest_dir = Path(__file__).resolve().parent / "user_guide"
 
 def copy_with_overwrite(src: Path, dst: Path):
     print(f'source: {src} being copied to destination: {dst}')
