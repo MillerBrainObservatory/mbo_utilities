@@ -6,6 +6,5 @@
 maxdepth: 2
 numbered: 3
 ---
-
-Image Assembly <assembly>
+assembly.ipynb
 ```
