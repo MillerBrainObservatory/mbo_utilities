@@ -1,6 +1,7 @@
 from .file_io import (
     get_files,
     stack_from_files,
+    npy_from_dask,
     read_scan,
     ScanMultiROIReordered,
     save_png,
@@ -25,6 +26,7 @@ __all__ = [
     'return_scan_offset',
     # file_io
     'ScanMultiROIReordered',
+    'npy_from_stack',
     'get_files',
     'stack_from_files',
     'read_scan',
