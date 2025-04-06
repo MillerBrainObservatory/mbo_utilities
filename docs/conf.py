@@ -20,7 +20,7 @@ release = "0.0.1"
 # Copy example notebooks for rendering in the docs
 print(f'Copying sphinx source files ...')
 source_dir = Path(__file__).resolve().parent.parent / "demos"
-dest_dir = Path(__file__).resolve().parent / "examples" / "notebooks"
+dest_dir = Path(__file__).resolve().parent / "notebooks"
 
 def copy_with_overwrite(src: Path, dst: Path):
     print(f'source: {src} being copied to destination: {dst}')
@@ -72,7 +72,7 @@ source_suffix = {
     ".md": "myst-nb",
 }
 
-autodoc_mock_imports = ['scanreader', 'caiman']
+autodoc_mock_imports = ['scanreader']
 
 nb_execution_mode = "off"
 
@@ -88,8 +88,8 @@ templates_path = ["_templates"]
 # A shorter title for the navigation bar.  Default is the same as html_title.
 html_title = "mbo_utilities"
 
-html_logo = "_static/lcp_logo.svg"
-html_favicon = "_static/icon_caiman_python.svg"
+# html_logo = "_static/lcp_logo.svg"
+# html_favicon = "_static/icon_caiman_python.svg"
 html_theme = "sphinx_book_theme"
 
 html_short_title = "mbo utilities"
