@@ -1,6 +1,7 @@
 import argparse
 import functools
 import os
+import shutil
 import time
 import warnings
 import logging
@@ -11,7 +12,6 @@ import dask.array as da
 import tifffile
 from tifffile import TiffWriter
 import h5py
-from icecream import ic
 
 import mbo_utilities
 from .image import extract_center_square
@@ -188,7 +188,6 @@ def _save_data(
     path.mkdir(parents=True, exist_ok=True)
 
     nt, nz, nx, ny = scan.shape
-    ic(f"Saving {nt}x{nz}x{nx}x{ny} in {path}")  # noqa
 
     print(trim_edge)
     left, right, top, bottom = trim_edge
@@ -199,8 +198,6 @@ def _save_data(
 
     new_height = ny - (top + bottom)
     new_width = nx - (left + right)
-    ic(f"New height: {new_height}")
-    ic(f"New width: {new_width}")
 
     metadata['fov'] = [new_height, new_width]
     metadata["shape"] = (nt, new_width, new_height)
@@ -215,20 +212,9 @@ def _save_data(
             fname = path.joinpath(f"plane_{chan+1:02d}_{append_str}.{file_extension}")
         else:
             fname = path.joinpath(f"plane_{chan + 1:02d}.{file_extension}")
-        ic(fname)
 
         if fname.exists():
             fname.unlink()
-            ic("Unlinking fname")
-
-        ic(file_extension)
-        # tifffile.imwrite(
-        #     fname,
-        #     da.zeros(shape=metadata['shape'], dtype=scan.dtype),
-        #     metadata=metadata,
-        #     dtype='int16',
-        # )
-        # tif = tifffile.memmap(fname)
 
         chunk_size = 10 * 1024 * 1024
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
@@ -237,7 +223,6 @@ def _save_data(
         base_frames_per_chunk = scan.shape[0] // num_chunks
         extra_frames = scan.shape[0] % num_chunks
 
-        ic(base_frames_per_chunk, extra_frames, num_chunks, chunk_size)
         if fname.exists() and not overwrite:
             logger.warning(f'File already exists: {fname}. To overwrite, set overwrite=True (--overwrite in command line)')
             return
@@ -260,7 +245,6 @@ def _save_data(
                         phases_idx.append(i)
 
                 writer(fname, data_chunk)
-                # tif[start:end, :, :] = data_chunk
                 start = end
                 pbar.update(1)
 
@@ -331,50 +315,40 @@ def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
         )
         _write_tiff._first_write = False
 
-def _write_tiff2(path, name, data, overwrite=True, metadata=None, image_size=None):
-    filename = Path(path / f'{name}.tiff')
-    fpath = Path(path) / 'summary_images'
-    fpath.mkdir(exist_ok=True, parents=True)
-    mean_filename = fpath / f'{name}_mean.tiff'
-    movie_filename = fpath / f'{name}.mp4'
-    if filename.exists() and not overwrite:
-        logger.warning(
-            f'File already exists: {filename}. To overwrite, set overwrite=True (--overwrite in command line)')
-        return
+def _write_zarr(path, data, overwrite=True, metadata=None, image_size=None):
+    try:
+        import zarr
+    except ImportError:
+        raise ImportError("Please install zarr to use this feature: pip install zarr")
+    filename = Path(path).with_suffix(".zarr")
 
-    print(f"Writing {filename}")
-    t_write = time.time()
-    tifffile.imwrite(filename, data, metadata=metadata)
+    if not hasattr(_write_zarr, "_initialized"):
+        _write_zarr._initialized = {}
 
-    print(f"Writing {movie_filename}")
-    data = norm_minmax(data)
-    if image_size:
-        if isinstance(image_size, (tuple, list)):
-            image_size = image_size[0]
-    else:
-        image_size = 255
+    if filename not in _write_zarr._initialized:
+        if filename.exists() and overwrite:
+            shutil.rmtree(filename)
 
-    # make sure image_size isnt larger than movie dimensions
-    if image_size > data.shape[1]:
-        image_size = data.shape[1]
+        z = zarr.create_array(
+            store=str(filename),
+            shape=image_size,
+            chunks=(1,) + image_size[1:],
+            dtype=data.dtype,
+            overwrite=True,
+        )
+        if metadata:
+            for k, v in metadata.items():
+                try:
+                    z.attrs[k] = v
+                except TypeError:
+                    z.attrs[k] = str(v)
+        _write_zarr._initialized[filename] = 0
 
-    data = extract_center_square(data, image_size)
-    save_mp4(str(movie_filename), data)
-
-    ####
-    data = np.mean(data, axis=0)
-    print(f"Writing {mean_filename}")
-    tifffile.imwrite(mean_filename, data, metadata=metadata)
-    t_write_end = time.time() - t_write
-    print(f"Data written in {t_write_end:.2f} seconds.")
-
-def _write_zarr(path, name, data, metadata=None, overwrite=True):
-    raise NotImplementedError("Zarr writing is not yet implemented.")
-    # store = zarr.DirectoryStore(path)
-    # root = zarr.group(store, overwrite=overwrite)
-    # ds = root.create_dataset(name=name, data=data.squeeze(), overwrite=True)
-    # if metadata:
-    #     ds.attrs['metadata'] = metadata
+    start = _write_zarr._initialized[filename]
+    end = start + data.shape[0]
+    z = zarr.open_array(str(filename), mode='r+')
+    z[start:end] = data
+    _write_zarr._initialized[filename] = end
 
 
 def main():
