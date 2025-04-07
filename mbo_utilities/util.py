@@ -79,59 +79,104 @@ def smooth_data(data, window_size=5):
     return np.convolve(data, np.ones(window_size) / window_size, mode='valid')
 
 def norm_minmax(images):
-    """ Normalize a NumPy array to the range [0, 1]. """
+    """
+    Normalize a NumPy array to the [0, 1] range.
+
+    Scales the values in the input array to be between 0 and 1 based on the array's minimum and maximum values.
+    This is often used as a preprocessing step before visualization of multi-scale data.
+
+    Parameters
+    ----------
+    images : numpy.ndarray
+       The input array to be normalized.
+
+    Returns
+    -------
+    numpy.ndarray
+       The normalized array with values scaled between 0 and 1.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> arr = np.array([10, 20, 30])
+    >>> norm_minmax(arr)
+    array([0. , 0.5, 1. ])
+    """
     return (images - images.min()) / (images.max() - images.min())
 
 def norm_percentile(image, low_p=1, high_p=98):
     """
-    Normalizes an image using percentile-based contrast stretching.
+    Normalize an image based on percentile contrast stretching.
+
+    Computes the low and high percentile (e.g., 1st and 98th percentiles) of the pixel
+    values, and scales the image so that those percentiles map to 0 and 1 respectively.
+    Values outside the range are clipped, improving contrast especially when the data contain outliers.
 
     Parameters
     ----------
-    image : np.ndarray
-        Input image array to be normalized.
+    image : numpy.ndarray
+       The input image array to be normalized.
     low_p : float, optional
-        Lower percentile for normalization (default is 1).
+       The lower percentile for normalization (default is 1).
     high_p : float, optional
-        Upper percentile for normalization (default is 98).
+       The upper percentile for normalization (default is 98).
 
     Returns
     -------
-    np.ndarray
-        Normalized image with values scaled between 0 and 1.
+    numpy.ndarray
+       The normalized image as a float array, with values in the range [0, 1].
 
-    Notes
-    -----
-    - This method enhances contrast by clipping extreme pixel values.
-    - Percentile-based normalization is useful for images with outliers.
+    Examples
+    --------
+    >>> import numpy as np
+    >>> image = np.array([0, 50, 100, 150, 200, 250])
+    >>> norm_percentile(image, low_p=10, high_p=90)
+    array([0.  , 0.  , 0.25, 0.75, 1.  , 1.  ])
     """
     p_low, p_high = np.percentile(image, (low_p, high_p))
     return np.clip((image - p_low) / (p_high - p_low), 0, 1)
 
 def match_array_size(arr1, arr2, mode="trim"):
     """
-    Adjusts two arrays to have the same shape by either trimming or padding them.
+    Adjust two arrays to a common shape by trimming or padding.
+
+    This function accepts two NumPy arrays and modifies them so that both have the same shape.
+    In "trim" mode, the arrays are cropped to the smallest common dimensions.
+    In "pad" mode, each array is padded with zeros to match the largest dimensions.
+    The resulting arrays are stacked along a new first axis.
 
     Parameters
     ----------
-    arr1 : np.ndarray
-        First input array.
-    arr2 : np.ndarray
-        Second input array.
+    arr1 : numpy.ndarray
+        The first input array.
+    arr2 : numpy.ndarray
+        The second input array.
     mode : str, optional
-        Method for matching array sizes:
-        - "trim" (default): Trims both arrays to the smallest common shape.
-        - "pad": Pads both arrays with zeros to the largest common shape.
+        The method to use for resizing the arrays. Options are:
+          - "trim": Crop the arrays to the smallest common size (default).
+          - "pad": Pad the arrays with zeros to the largest common size.
 
     Returns
     -------
-    np.ndarray
-        A stacked array of shape (2, ...) containing the adjusted arrays.
+    numpy.ndarray
+        A stacked array of shape (2, ...) containing the resized versions of arr1 and arr2.
 
     Raises
     ------
     ValueError
-        If an invalid mode is provided.
+        If an invalid mode is provided (i.e., not "trim" or "pad").
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> arr1 = np.random.rand(5, 7)
+    >>> arr2 = np.random.rand(6, 5)
+    >>> stacked = match_array_size(arr1, arr2, mode="trim")
+    >>> stacked.shape
+    (2, 5, 5)
+    >>> stacked = match_array_size(arr1, arr2, mode="pad")
+    >>> stacked.shape
+    (2, 6, 7)
     """
     shape1 = np.array(arr1.shape)
     shape2 = np.array(arr2.shape)
