@@ -137,11 +137,11 @@ def save_as(
             )
         planes = [planes[i] for i in order]
 
-    raw_metadata = {'si': _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
+    mdata = {'si': _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
                 'image': _make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))}
 
     if metadata is not None:
-        raw_metadata.update(metadata)
+        mdata.update(metadata)
 
     if not savedir.exists():
         logger.debug(f"Creating directory: {savedir}")
@@ -154,7 +154,7 @@ def save_as(
         overwrite,
         ext,
         append_str,
-        metadata=metadata,
+        metadata=mdata,
         image_size=image_size,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
@@ -207,8 +207,8 @@ def _save_data(
     metadata['dims'] = ['time', 'width', 'height']
     metadata['trimmed'] = [left, right, top, bottom]
 
-    writer = _get_file_writer(file_extension, overwrite, metadata, image_size)
-    ic(writer)
+    final_shape = (nt, new_height, new_width)
+    writer = _get_file_writer(file_extension, overwrite=overwrite, metadata=metadata, data_shape=final_shape)
 
     for chan in planes:
         if append_str:
@@ -251,71 +251,63 @@ def _save_data(
                 frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
                 end = start + frames_in_this_chunk
 
-                s = scan[start:end, chan, top:ny - bottom, left:nx - right]
+                data_chunk = scan[start:end, chan, top:ny - bottom, left:nx - right]
                 if fix_phase:
-                    ofs = mbo_utilities.return_scan_offset(s)
+                    ofs = mbo_utilities.return_scan_offset(data_chunk)
                     if ofs:
-                        s = mbo_utilities.fix_scan_phase(s, ofs)
+                        data_chunk = mbo_utilities.fix_scan_phase(data_chunk, ofs)
                         phases.append(ofs)
                         phases_idx.append(i)
 
-                writer(path, fname, s)
-                # tif[start:end, :, :] = s
+                writer(fname, data_chunk)
+                # tif[start:end, :, :] = data_chunk
                 start = end
                 pbar.update(1)
 
     if file_extension in ["tiff", ".tiff", "tif", ".tif"]:
         close_tiff_writers()
 
-def _get_file_writer(ext, overwrite, metadata=None, image_size=None):
+def _get_file_writer(ext, overwrite, metadata=None, data_shape=None):
     if ext in ['.tif', '.tiff', 'tif', 'tiff']:
-        return functools.partial(_write_tiff, overwrite=overwrite, metadata=metadata, image_size=image_size)
+        return functools.partial(_write_tiff, overwrite=overwrite, metadata=metadata, data_shape=data_shape)
     elif ext in ['.zarr', 'zarr']:
         return functools.partial(_write_zarr, overwrite=overwrite, metadata=metadata)
     elif ext in ['.h5', 'h5', 'hdf5', '.hdf5']:
-        return functools.partial(_write_h5, overwrite=overwrite, metadata=metadata)
+        return functools.partial(_write_h5, overwrite=overwrite, metadata=metadata, data_shape=data_shape)
     else:
         raise ValueError(f'Unsupported file extension: {ext}')
 
-def _write_h5(path, data, overwrite=True, metadata=None, image_size=None):
-
+def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None):
     filename = Path(path).with_suffix(".h5")
 
     if not hasattr(_write_h5, "_initialized"):
         _write_h5._initialized = {}
+        _write_h5._offsets = {}
 
     if filename not in _write_h5._initialized:
-        mode = 'w' if overwrite else 'a'
-        with h5py.File(filename, mode) as f:
-            shape = (0, data.shape[1], data.shape[2])  # start with 0 time
-            maxshape = (None,) + shape[1:]
-            f.create_dataset('mov', shape=shape, maxshape=maxshape, dtype=data.dtype, compression='gzip')
+        with h5py.File(filename, 'w' if overwrite else 'a') as f:
+            f.create_dataset('mov', shape=data_shape, dtype=data.dtype, chunks=True, compression=None)
 
             if metadata:
                 for k, v in metadata.items():
-                    print("Saving metadata", k, v)
                     try:
                         f.attrs[k] = v
-                        print(f"Metadata saved: {k}")
                     except TypeError:
-                        print(f"Error saving metadata: {k}")
                         f.attrs[k] = str(v)
-                        print(f"Metadata saved after coercing to str: {k}")
 
-        _write_h5._initialized[filename] = 0
+        _write_h5._initialized[filename] = True
+        _write_h5._offsets[filename] = 0
 
-    start = _write_h5._initialized[filename]
-    end = start + data.shape[0]
-
+    offset = _write_h5._offsets[filename]
     with h5py.File(filename, 'a') as f:
-        dset = f['mov']
-        dset.resize((end, data.shape[1], data.shape[2]))
-        dset[start:end] = data
+        f['mov'][offset:offset + data.shape[0]] = data
 
-    _write_h5._initialized[filename] = end
+    _write_h5._offsets[filename] += data.shape[0]
 
-def _write_tiff(path, name, data, overwrite=True, metadata=None, image_size=None):
-    filename = Path(path) / name
+
+def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
+
+    filename = Path(path).with_suffix(".h5")
 
     if not hasattr(_write_tiff, "_writers"):
         _write_tiff._writers = {}
