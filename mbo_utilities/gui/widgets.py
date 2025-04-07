@@ -11,7 +11,7 @@ from fastplotlib.ui import EdgeWindow
 import dask.array as da
 from tqdm import tqdm
 
-from mbo_utilities import get_files, stack_from_files, read_scan, is_raw_scanimage
+from mbo_utilities import get_files, zstack_from_files, read_scan, is_raw_scanimage
 from mbo_utilities.file_io import ScanMultiROIReordered
 from mbo_utilities.util import is_running_jupyter
 
@@ -49,7 +49,7 @@ def load_data_path(path: str | Path):
             return read_scan(plane_folders, join_contiguous=True)
         else:
             # load assembled z-planes
-            return stack_from_files(plane_folders)
+            return zstack_from_files(plane_folders)
     else:
         print("No processed z-plane folders in folder")
         return
