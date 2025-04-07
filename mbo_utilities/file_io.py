@@ -18,6 +18,47 @@ from mbo_utilities.util import norm_minmax
 
 
 def npy_to_dask(files, name="", axis=1, astype=None):
+    """
+    Creates a Dask array that lazily stacks multiple .npy files along a specified axis without fully loading them into memory.
+
+    This function reads a sample .npy file to obtain a base shape and data type, then computes the size
+    along the concatenation axis for each file. It builds a low‐level Dask graph where each array chunk is loaded
+    on demand using np.load with memory mapping. The resulting Dask array has its chunks defined so that the stacking
+    axis’s chunk sizes correspond to the lengths (number of elements) from each file, while other axes use the dimensions
+    from the sample file.
+
+    Parameters
+    ----------
+    files : list of str or Path
+        A list of file paths pointing to .npy files containing array data. Each file must have the same shape except
+        possibly along the concatenation axis.
+    name : str, optional
+        A string to be appended to a base name ("from-npy-stack-") to label the resulting Dask array. Default is an empty string.
+    axis : int, optional
+        The axis along which to stack/concatenate the arrays from the provided files. Default is 1.
+    astype : numpy.dtype, optional
+        If provided, the resulting Dask array will be cast to this data type. Otherwise, the data type is inferred
+        from the first file.
+
+    Returns
+    -------
+    dask.array.Array
+        A lazily evaluated Dask array representing the stacked arrays from the .npy files. Its shape is determined
+        by the shape of the first file in all dimensions except along the specified axis, whose size is the sum of
+        the corresponding dimensions of each file.
+
+    Examples
+    --------
+    >>> # https://www.fastplotlib.org/
+    >>> import fastplotlib as fpl
+    >>> files = mbo.get_files("path/to/images/", 'fused', 3) # suite3D output
+    >>> arr = npy_to_dask(files, name="stack", axis=1)
+    >>> print(arr.shape)
+    (nz, nt, ny, nx )
+    >>> # Optionally, cast the array to float32
+    >>> arr = npy_to_dask(files, axis=1, astype=np.float32)
+    >>> fpl.ImageWidget(arr.transpose(1, 0, 2, 3)).show()
+    """
     sample_mov = np.load(files[0], mmap_mode="r")
     file_ts = [np.load(f, mmap_mode="r").shape[axis] for f in files]
     nz, nt_sample, ny, nx = sample_mov.shape
@@ -39,8 +80,10 @@ def npy_to_dask(files, name="", axis=1, astype=None):
 
     return arr
 
+
 def is_escaped_string(path: str) -> bool:
     return bool(re.search(r'\\[a-zA-Z]', path))
+
 
 def _make_json_serializable(obj):
     """Convert metadata to JSON serializable format."""
@@ -101,8 +144,35 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
     return sorted(p.resolve() for p in result if p.is_file())
 
+
 def read_scan(pathnames, dtype=np.int16):
-    """ Reads a ScanImage scan. """
+    """
+    Reads a ScanImage scan from a given file or set of file paths and returns a ScanMultiROIReordered object with lazy-loaded data.
+
+    Parameters
+    ----------
+    pathnames : str, Path, or sequence of str/Path
+        A single path, a wildcard pattern (e.g. '*.tif'), or a list of paths specifying the ScanImage TIFF files to read.
+    dtype : numpy.dtype, optional
+        The data type to use when reading the scan data. Default is np.int16.
+
+    Returns
+    -------
+    ScanMultiROIReordered
+        A scan object with metadata and lazily loaded data. Raises FileNotFoundError if no files match the specified path(s).
+
+    Notes
+    -----
+    If the provided path string appears to include escaped characters (for example, unintentional backslashes), a warning message
+    is printed suggesting the use of a raw string (r'...') or double backslashes.
+
+    Examples
+    --------
+    >>> import mbo_utilities as mbo
+    >>> import matplotlib.pyplot as plt
+    >>> scan = mbo.read_scan(r"C:\path\to\scan\*.tif")
+    >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray') # First frame of z-plane 6
+    """
 
     if isinstance(pathnames, str) and is_escaped_string(pathnames):
         print("Detected possible escaped characters in the path."
@@ -113,12 +183,9 @@ def read_scan(pathnames, dtype=np.int16):
         raise FileNotFoundError(error_msg)
 
     scan = ScanMultiROIReordered(join_contiguous=True)
-
-    # Read metadata and data (lazy operation)
     scan.read_data(filenames, dtype=dtype)
 
     return scan
-
 
 class ScanMultiROIReordered(scans.ScanMultiROI):
     """
@@ -184,6 +251,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
 def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> list | Path:
     """
     Recursively searches for files with a specific extension up to a given depth and stores their paths in a pickle file.
+    Sorts result in ascending order by default.
 
     Parameters
     ----------
@@ -191,15 +259,25 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> li
         The base directory to start searching.
     str_contains : str
         The string that the file names should contain.
-    max_depth : int
-        The maximum depth of subdirectories to search.
+    max_depth : int, optional
+        The maximum depth of subdirectories to search. Default is 1.
     sort_ascending : bool, optional
-        Whether to sort files alphanumerically by filename, with digits in ascending order (i.e. 1, 2, 10) (default is False).
+        Whether to sort files alphanumerically by filename, with digits in ascending order (i.e. 1, 2, 10) Defaults to True.
 
     Returns
     -------
     list
         A list of full file paths matching the given extension.
+
+    Examples
+    --------
+    >>> import mbo_utilities as mbo
+
+    Get all ops files, searching 3 nested directories:
+    >>> ops_files = mbo.get_files("path/to/files", "ops.npy", max_depth=3)
+
+    Get only tiffs in this directory:
+    >>> tif_files = mbo.get_files("path/to/files", "tif") # same as max-depth = 1
     """
     base_path = Path(base_dir).expanduser().resolve()
     if not base_path.exists():
@@ -229,21 +307,34 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> li
     return [str(file) for file in files]
 
 
-def stack_from_files(files: list, proj="mean"):
-    """Stacks a list of TIFF files into a Dask array. Can be 3D Tyx or 4D Tzyx.
+def zstack_from_files(files: list, proj="mean"):
+    """
+    Creates a Z-Stack image by applying a projection to each TIFF file in the provided list and stacking the results into a NumPy array.
 
     Parameters
     ----------
-    files : list
-        List of TIFF files to stack.
+    files : list of str or Path
+        A list of file paths to TIFF images. Files whose extensions are not '.tif' or '.tiff' are ignored.
     proj : str, optional
-        Projection to use (mean, max, std). Default is 'mean'.
+        The type of projection to apply to each TIFF image. Valid options are 'mean', 'max', and 'std'. Default is 'mean'.
 
     Returns
     -------
-    dask.array.core.Array
-        Dask array of the stacked files.
+    numpy.ndarray
+        A stacked array of projected images with the new dimension corresponding to the file order. For example, for N input files,
+        the output shape will be (N, height, width).
 
+    Raises
+    ------
+    ValueError
+        If an unsupported projection type is provided.
+
+    Examples
+    --------
+    >>> import mbo_utilities as mbo
+    >>> files = mbo.get_files("/path/to/files", "tif")
+    >>> z_stack = mbo.zstack_from_files(files, proj="max")
+    >>> z_stack.shape  # (3, height, width)
     """
     lazy_arrays = []
     for file in files:
@@ -264,6 +355,24 @@ def stack_from_files(files: list, proj="mean"):
 
 
 def save_png(fname, data):
+    """
+    Saves a given image array as a PNG file using Matplotlib.
+
+    Parameters
+    ----------
+    fname : str or Path
+        The file name (or full path) where the PNG image will be saved.
+    data : array-like
+        The image data to be visualized and saved. Can be any 2D or 3D array that Matplotlib can display.
+
+    Examples
+    --------
+    >>> import mbo_utilities as mbo
+    >>> import tifffile
+    >>> data = tifffile.memmap("path/to/plane_0.tiff")
+    >>> frame = data[0, ...]
+    >>> mbo.save_png("plane_0_frame_1.png", frame)
+    """
     # TODO: move this to a separate module that imports matplotlib
     import matplotlib.pyplot as plt
     plt.imshow(data)
