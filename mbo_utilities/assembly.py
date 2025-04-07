@@ -6,14 +6,17 @@ import warnings
 import logging
 from pathlib import Path
 import numpy as np
-import dask.array as da
 
+import dask.array as da
 import tifffile
+from tifffile import TiffWriter
+import h5py
+from icecream import ic
 
 import mbo_utilities
 from .image import extract_center_square
 from .file_io import  _make_json_serializable, read_scan, save_mp4
-from .metadata import get_metadata, is_raw_scanimage
+from .metadata import get_metadata
 from .util import norm_minmax, is_running_jupyter
 from .scanreader.utils import listify_index
 
@@ -34,6 +37,11 @@ warnings.filterwarnings("ignore")
 
 print = functools.partial(print, flush=True)
 
+def close_tiff_writers():
+    if hasattr(_write_tiff, "_writers"):
+        for writer in _write_tiff._writers.values():
+            writer.close()
+        _write_tiff._writers.clear()
 
 def process_slice_str(slice_str):
     if not isinstance(slice_str, str):
@@ -71,6 +79,7 @@ def save_as(
         trim_edge: list | tuple = (0,0,0,0),
         image_size: list | tuple = None,
         fix_phase: bool = False,
+        debug: bool = False,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -93,7 +102,7 @@ def save_as(
     append_str : str, optional
         String to append to the file name. Default is `''`.
     ext : str, optional
-        File extension for the saved data. Supported options are `'.tiff'` and `'.zarr'`.
+        File extension for the saved data. Supported options are .tiff, .zarr and .h5.
         Default is `'.tiff'`.
     order : list or tuple, optional
         A list or tuple specifying the desired order of planes. If provided, the number of
@@ -103,17 +112,13 @@ def save_as(
         than the movie dimensions, it will be cropped to fit. Expected dimensions are square.
     fix_phase : bool, optional
         Whether to fix scan-phase (x/y) alignment. Default is `False`.
-
+    debug : bool, optional
+        If True, print outputs without running any processes. Default is `False`.
 
     Raises
     ------
     ValueError
         If an unsupported file extension is provided.
-
-    Notes
-    -----
-    This function creates the specified directory if it does not already exist.
-    Data is saved per channel, organized by planes.
     """
 
     savedir = Path(savedir)
@@ -129,7 +134,7 @@ def save_as(
             )
         planes = [planes[i] for i in order]
     if not metadata:
-        metadata = {'si': scan.tiff_files[0].scanimage_metadata,
+        metadata = {'si': _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
                     'image': _make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))}
 
     if not savedir.exists():
@@ -147,6 +152,7 @@ def save_as(
         image_size=image_size,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
+        debug=debug
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -163,16 +169,20 @@ def _save_data(
         metadata,
         image_size=None,
         trim_edge=None,
-        fix_phase=False
+        fix_phase=False,
+        debug=False
 ):
     if '.' in file_extension:
         file_extension = file_extension.split('.')[-1]
+
+    if debug:
+        ic.enable()  # noqa
 
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
 
     nt, nz, nx, ny = scan.shape
-    print(f"Saving {nt}x{nz}x{nx}x{ny} in {path}")
+    ic(f"Saving {nt}x{nz}x{nx}x{ny} in {path}")  # noqa
 
     print(trim_edge)
     left, right, top, bottom = trim_edge
@@ -183,27 +193,36 @@ def _save_data(
 
     new_height = ny - (top + bottom)
     new_width = nx - (left + right)
-    print(f"New height: {new_height}")
-    print(f"New width: {new_width}")
+    ic(f"New height: {new_height}")
+    ic(f"New width: {new_width}")
 
     metadata['fov'] = [new_height, new_width]
     metadata["shape"] = (nt, new_width, new_height)
     metadata['dims'] = ['time', 'width', 'height']
     metadata['trimmed'] = [left, right, top, bottom]
 
+    writer = _get_file_writer(file_extension, overwrite, metadata, image_size)
+    ic(writer)
+
     for chan in planes:
-        fname = path.joinpath(f"plane_{chan+1:02d}{append_str}.{file_extension}")
+        if append_str:
+            fname = path.joinpath(f"plane_{chan+1:02d}_{append_str}.{file_extension}")
+        else:
+            fname = path.joinpath(f"plane_{chan + 1:02d}.{file_extension}")
+        ic(fname)
 
         if fname.exists():
             fname.unlink()
+            ic("Unlinking fname")
 
-        tifffile.imwrite(
-            fname,
-            da.zeros(shape=metadata['shape'], dtype=scan.dtype),
-            metadata=metadata,
-            dtype='int16',
-        )
-        tif = tifffile.memmap(fname)
+        ic(file_extension)
+        # tifffile.imwrite(
+        #     fname,
+        #     da.zeros(shape=metadata['shape'], dtype=scan.dtype),
+        #     metadata=metadata,
+        #     dtype='int16',
+        # )
+        # tif = tifffile.memmap(fname)
 
         chunk_size = 10 * 1024 * 1024
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
@@ -212,6 +231,7 @@ def _save_data(
         base_frames_per_chunk = scan.shape[0] // num_chunks
         extra_frames = scan.shape[0] % num_chunks
 
+        ic(base_frames_per_chunk, extra_frames, num_chunks, chunk_size)
         if fname.exists() and not overwrite:
             logger.warning(f'File already exists: {fname}. To overwrite, set overwrite=True (--overwrite in command line)')
             return
@@ -220,6 +240,7 @@ def _save_data(
             start = 0
             phases = []
             phases_idx = []
+            print(f"num-chunks: {num_chunks}")
             for i, chunk in enumerate(range(num_chunks)):
                 frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
                 end = start + frames_in_this_chunk
@@ -231,22 +252,87 @@ def _save_data(
                         s = mbo_utilities.fix_scan_phase(s, ofs)
                         phases.append(ofs)
                         phases_idx.append(i)
-                tif[start:end, :, :] = s
+
+                writer(path, fname, s)
+                # tif[start:end, :, :] = s
                 start = end
                 pbar.update(1)
 
-
+    if file_extension in ["tiff", ".tiff", "tif", ".tif"]:
+        close_tiff_writers()
 
 def _get_file_writer(ext, overwrite, metadata=None, image_size=None):
-    if ext in ['.tif', '.tiff']:
+    if ext in ['.tif', '.tiff', 'tif', 'tiff']:
         return functools.partial(_write_tiff, overwrite=overwrite, metadata=metadata, image_size=image_size)
-    elif ext == '.zarr':
+    elif ext in ['.zarr', 'zarr']:
         return functools.partial(_write_zarr, overwrite=overwrite, metadata=metadata)
+    elif ext in ['.h5', 'h5', 'hdf5', '.hdf5']:
+        return functools.partial(_write_h5, overwrite=overwrite, metadata=metadata)
     else:
         raise ValueError(f'Unsupported file extension: {ext}')
 
+def _write_h5(path, name, data, overwrite=True, metadata=None, image_size=None):
+    filename = Path(path) / Path(name).with_suffix(".h5")
+
+    if not hasattr(_write_h5, "_initialized"):
+        _write_h5._initialized = {}
+
+    if filename not in _write_h5._initialized:
+        mode = 'w' if overwrite else 'a'
+        with h5py.File(filename, mode) as f:
+            shape = (0, data.shape[1], data.shape[2])  # start with 0 time
+            maxshape = (None,) + shape[1:]
+            f.create_dataset('mov', shape=shape, maxshape=maxshape, dtype=data.dtype, compression='gzip')
+
+            if metadata:
+                for k, v in metadata.items():
+                    print("Saving metadata", k, v)
+                    try:
+                        f.attrs[k] = v
+                        print(f"Metadata saved: {k}")
+                    except TypeError:
+                        print(f"Error saving metadata: {k}")
+                        f.attrs[k] = str(v)
+                        print(f"Metadata saved after coercing to str: {k}")
+
+        _write_h5._initialized[filename] = 0
+
+    start = _write_h5._initialized[filename]
+    end = start + data.shape[0]
+
+    with h5py.File(filename, 'a') as f:
+        dset = f['mov']
+        dset.resize((end, data.shape[1], data.shape[2]))
+        dset[start:end] = data
+
+    _write_h5._initialized[filename] = end
 
 def _write_tiff(path, name, data, overwrite=True, metadata=None, image_size=None):
+    filename = Path(path) / name
+
+    if not hasattr(_write_tiff, "_writers"):
+        _write_tiff._writers = {}
+
+    if filename not in _write_tiff._writers:
+        if filename.exists() and overwrite:
+            filename.unlink()
+        _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
+        _write_tiff._first_write = True
+    else:
+        _write_tiff._first_write = False
+
+    writer = _write_tiff._writers[filename]
+
+    for frame in data:
+        writer.write(
+            frame,
+            contiguous=True,
+            photometric="minisblack",
+            metadata=metadata if _write_tiff._first_write else None,
+        )
+        _write_tiff._first_write = False
+
+def _write_tiff2(path, name, data, overwrite=True, metadata=None, image_size=None):
     filename = Path(path / f'{name}.tiff')
     fpath = Path(path) / 'summary_images'
     fpath.mkdir(exist_ok=True, parents=True)
@@ -257,12 +343,10 @@ def _write_tiff(path, name, data, overwrite=True, metadata=None, image_size=None
             f'File already exists: {filename}. To overwrite, set overwrite=True (--overwrite in command line)')
         return
 
-    ####
     print(f"Writing {filename}")
     t_write = time.time()
     tifffile.imwrite(filename, data, metadata=metadata)
 
-    ####
     print(f"Writing {movie_filename}")
     data = norm_minmax(data)
     if image_size:
@@ -284,7 +368,6 @@ def _write_tiff(path, name, data, overwrite=True, metadata=None, image_size=None
     tifffile.imwrite(mean_filename, data, metadata=metadata)
     t_write_end = time.time() - t_write
     print(f"Data written in {t_write_end:.2f} seconds.")
-
 
 def _write_zarr(path, name, data, metadata=None, overwrite=True):
     raise NotImplementedError("Zarr writing is not yet implemented.")
@@ -384,7 +467,7 @@ def main():
         logger.info(f"Saving data to {savepath}.")
 
         t_scan_init = time.time()
-        scan = read_scan(files, join_contiguous=join_contiguous, )
+        scan = read_scan(files)
         t_scan_init_end = time.time() - t_scan_init
         logger.info(f"--- Scan initialized in {t_scan_init_end:.2f} seconds.")
 
