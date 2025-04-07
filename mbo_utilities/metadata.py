@@ -181,25 +181,45 @@ def is_raw_scanimage(file: os.PathLike | str):
 
 def get_metadata(file: os.PathLike | str, verbose=False):
     """
-    Extract metadata from a TIFF file. This can be a raw ScanImage TIFF or one
-    processed via [lbm_caiman_python.save_as()](#save_as).
+    Extract metadata from a TIFF file produced by ScanImage or processed via the save_as function.
+
+    This function opens the given TIFF file and retrieves critical imaging parameters and acquisition details.
+    It supports both raw ScanImage TIFFs and those modified by downstream processing. If the file contains
+    raw ScanImage metadata, the function extracts key fields such as channel information, number of frames,
+    field-of-view, pixel resolution, and ROI details. When verbose output is enabled, the complete metadata
+    document is returned in addition to the parsed key values.
 
     Parameters
     ----------
-    file: os.PathLike
-        Path to the TIFF file.
-    verbose: bool
-        If true, returns an extended version of the metadata with all scanimage attributes.
+    file : os.PathLike or str
+        The full path to the TIFF file from which metadata is to be extracted.
+    verbose : bool, optional
+        If True, returns an extended metadata dictionary that includes all available ScanImage attributes.
+        Default is False.
 
     Returns
     -------
     dict
-        Metadata extracted from the TIFF file.
+        A dictionary containing the extracted metadata (e.g., number of planes, frame rate, field-of-view,
+        pixel resolution). When verbose is True, the dictionary also includes a key "all" with the full metadata
+        from the TIFF header.
 
     Raises
     ------
     ValueError
-        If no metadata is found in the TIFF file. This can occur when the file is not a ScanImage TIFF.
+        If no recognizable metadata is found in the TIFF file (e.g., the file is not a valid ScanImage TIFF).
+
+    Examples
+    --------
+    >>> meta = get_metadata("path/to/rawscan_00001.tif")
+    >>> print(meta["num_frames"])
+    5345
+    >>> meta = get_metadata("path/to/assembled_data.tif")
+    >>> print(meta["shape"])
+    (14, 5345, 477, 477)
+    >>> meta_verbose = get_metadata("path/to/scanimage_file.tif", verbose=True)
+    >>> print(meta_verbose["all"])
+    {... Includes all ScanImage FrameData ...}
     """
     tiff_file = tifffile.TiffFile(file)
     if is_raw_scanimage(file):

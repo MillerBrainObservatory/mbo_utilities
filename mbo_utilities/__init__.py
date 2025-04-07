@@ -1,8 +1,6 @@
-from icecream import install, ic
-
 from .file_io import (
     get_files,
-    stack_from_files,
+    zstack_from_files,
     npy_to_dask,
     read_scan,
     ScanMultiROIReordered,
@@ -14,13 +12,8 @@ from .assembly import save_as
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
 from .gui.widgets import run_gui
 from .image import fix_scan_phase, return_scan_offset
-from .util import norm_minmax, float2uint8, smooth_data, is_running_jupyter, norm_percentile, match_array_size
+from .util import norm_minmax, smooth_data, is_running_jupyter, norm_percentile, match_array_size
 from . import _version
-
-
-install()
-
-ic.disable()
 
 __version__ = _version.get_versions()['version']
 
@@ -35,7 +28,7 @@ __all__ = [
     'ScanMultiROIReordered',
     'npy_to_dask',
     'get_files',
-    'stack_from_files',
+    'zstack_from_files',
     'read_scan',
     'save_png',
     'save_mp4',
@@ -47,7 +40,6 @@ __all__ = [
     # util
     'norm_minmax',
     'smooth_data',
-    'float2uint8',
     # assembly
     'save_as',
 ]

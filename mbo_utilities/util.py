@@ -34,25 +34,6 @@ def align_images_zstack(images, mode="trim"):
         raise ValueError("Invalid mode. Choose 'trim' or 'pad'.")
     return np.stack(aligned_images, axis=0)
 
-def is_running_jupyter():
-    """Returns true if users environment is running Jupyter."""
-    try:
-        from IPython import get_ipython
-        shell = get_ipython().__class__.__name__
-        if shell == 'ZMQInteractiveShell':  # are there other aliases for a jupyter shell
-            return True  # jupyterlab
-        elif shell == 'TerminalInteractiveShell':
-            return False  # ipython from terminal
-        else:
-            return False
-    except NameError:
-        return False
-
-def float2uint8(scan):
-    """ Converts an scan (or image) from floats to uint8 (preserving the range)."""
-    scan = (scan - scan.min()) / (scan.max() - scan.min())
-    scan = (scan * 255).astype(np.uint8, copy=False)
-    return scan
 
 def smooth_data(data, window_size=5):
     """Smooth the data using a moving average."""
@@ -133,4 +114,19 @@ def match_array_size(arr1, arr2, mode="trim"):
     else:
         raise ValueError("Invalid mode. Use 'trim' or 'pad'.")
     return np.stack([arr1, arr2], axis=0)
+
+
+def is_running_jupyter():
+    """Returns true if users environment is running Jupyter."""
+    try:
+        from IPython import get_ipython
+        shell = get_ipython().__class__.__name__
+        if shell == 'ZMQInteractiveShell':  # are there other aliases for a jupyter shell
+            return True  # jupyterlab
+        elif shell == 'TerminalInteractiveShell':
+            return False  # ipython from terminal
+        else:
+            return False
+    except NameError:
+        return False
 
