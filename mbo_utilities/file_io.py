@@ -39,6 +39,8 @@ def npy_to_dask(files, name="", axis=1, astype=None):
 
     return arr
 
+def is_escaped_string(path: str) -> bool:
+    return bool(re.search(r'\\[a-zA-Z]', path))
 
 def _make_json_serializable(obj):
     """Convert metadata to JSON serializable format."""
@@ -102,6 +104,9 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 def read_scan(pathnames, dtype=np.int16):
     """ Reads a ScanImage scan. """
 
+    if isinstance(pathnames, str) and is_escaped_string(pathnames):
+        print("Detected possible escaped characters in the path."
+              " Use a raw string (r'...') or double backslashes.")
     filenames = expand_paths(pathnames)
     if len(filenames) == 0:
         error_msg = 'Pathname(s) {} do not match any files in disk.'.format(pathnames)
