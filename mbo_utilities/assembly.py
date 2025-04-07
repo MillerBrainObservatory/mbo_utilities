@@ -122,6 +122,9 @@ def save_as(
     """
 
     savedir = Path(savedir)
+    if not savedir.is_dir():
+        raise ValueError(f"{savedir} is not a directory")
+
     if planes is None:
         planes = list(range(scan.num_channels))
     elif not isinstance(planes, (list, tuple)):
@@ -133,9 +136,12 @@ def save_as(
                 f"The length of the `order` ({len(order)}) does not match the number of planes ({len(planes)})."
             )
         planes = [planes[i] for i in order]
-    if not metadata:
-        metadata = {'si': _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
-                    'image': _make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))}
+
+    raw_metadata = {'si': _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
+                'image': _make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))}
+
+    if metadata is not None:
+        raw_metadata.update(metadata)
 
     if not savedir.exists():
         logger.debug(f"Creating directory: {savedir}")
