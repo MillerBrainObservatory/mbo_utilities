@@ -49,7 +49,6 @@ myst_enable_extensions = [
     "colon_fence",
     "dollarmath",
     "html_image",
-    "sphinxcontrib.video",
 ]
 
 extensions = [
