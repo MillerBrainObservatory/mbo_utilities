@@ -277,8 +277,9 @@ def _get_file_writer(ext, overwrite, metadata=None, image_size=None):
     else:
         raise ValueError(f'Unsupported file extension: {ext}')
 
-def _write_h5(path, name, data, overwrite=True, metadata=None, image_size=None):
-    filename = Path(path) / Path(name).with_suffix(".h5")
+def _write_h5(path, data, overwrite=True, metadata=None, image_size=None):
+
+    filename = Path(path).with_suffix(".h5")
 
     if not hasattr(_write_h5, "_initialized"):
         _write_h5._initialized = {}
