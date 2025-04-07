@@ -22,6 +22,7 @@ install_deps = [
     "zarr",
     "tqdm",
     "fabric",
+    "icecream",
 ]
 
 with open(Path(__file__).parent / "README.md", "r", encoding="utf-8") as fh:
