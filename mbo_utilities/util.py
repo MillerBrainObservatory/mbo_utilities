@@ -51,7 +51,31 @@ def align_images_zstack(images, mode="trim"):
 
 
 def smooth_data(data, window_size=5):
-    """Smooth the data using a moving average."""
+    """
+    Smooth 1D data using a moving average filter.
+
+    Applies a moving average (convolution with a uniform window) to smooth the input data array.
+
+    Parameters
+    ----------
+    data : numpy.ndarray
+        Input one-dimensional array to be smoothed.
+    window_size : int, optional
+        The size of the moving window. The default value is 5.
+
+    Returns
+    -------
+    numpy.ndarray
+        The smoothed array, which is shorter than the input by window_size-1 elements due to
+        the valid convolution mode.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> data = np.array([1, 2, 3, 4, 5, 6, 7])
+    >>> smooth_data(data, window_size=3)
+    array([2., 3., 4., 5., 6.])
+    """
     return np.convolve(data, np.ones(window_size) / window_size, mode='valid')
 
 def norm_minmax(images):
