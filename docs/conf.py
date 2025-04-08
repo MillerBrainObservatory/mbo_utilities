@@ -35,8 +35,15 @@ def copy_with_overwrite(src: Path, dst: Path):
 
 if source_dir.exists():
     if dest_dir.exists():
-        shutil.rmtree(dest_dir)
-    dest_dir.mkdir(parents=True, exist_ok=True)
+        # Remove all items except "index.md"
+        for item in dest_dir.iterdir():
+            if item.name != "index.md":
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+    else:
+        dest_dir.mkdir(parents=True, exist_ok=True)
 
     for item in source_dir.rglob("*"):
         relative_path = item.relative_to(source_dir)
