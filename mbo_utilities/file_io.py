@@ -170,7 +170,8 @@ def read_scan(pathnames, dtype=np.int16):
     --------
     >>> import mbo_utilities as mbo
     >>> import matplotlib.pyplot as plt
-    >>> scan = mbo.read_scan(r"C:\path\to\scan\*.tif")
+    >>> raw_files = mbo.get_files(r"path/to/raw/data", 'tif')
+    >>> scan = mbo.read_scan(raw_files)
     >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray') # First frame of z-plane 6
     """
 
