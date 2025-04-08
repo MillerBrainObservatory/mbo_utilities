@@ -6,5 +6,5 @@
 maxdepth: 2
 numbered: 3
 ---
-assembly
+assembly.ipynb
 ```

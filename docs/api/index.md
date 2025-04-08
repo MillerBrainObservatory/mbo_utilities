@@ -1,17 +1,18 @@
 # API
 
-```{eval-rst}
+Python API provides helper functions for saving, loading, processing and visualizing mbo datasets.
 
-.. currentmodule:: mbo_utilities
+1. {ref}`Core <core_api>` functions required for processing mbo datasets.
+2. {ref}`I/O <io_api>` functions for loading and saving datasets.
+3. {ref}`Visualization <viz_api>` functions for visualizing and saving visualizations.
 
-.. autofunction:: get_files
-.. autofunction:: save_mp4
-.. autofunction:: save_as
-.. autofunction:: save_png
-.. autofunction:: read_scan
-.. autofunction:: npy_to_dask
-.. autofunction:: zstack_from_files
-.. autofunction:: get_metadata
+````{toctree}
+---
+maxdepth: 3
+numbered: 2
+---
 
-
-```
+Core Functions <core>
+I/O Functions <io>
+Visualization Functions <visualization>
+````
