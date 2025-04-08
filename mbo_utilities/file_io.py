@@ -147,32 +147,35 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
 def read_scan(pathnames, dtype=np.int16):
     """
-    Reads a ScanImage scan from a given file or set of file paths and returns a ScanMultiROIReordered object with lazy-loaded data.
+    Reads a ScanImage scan from a given file or set of file paths and returns a
+    ScanMultiROIReordered object with lazy-loaded data.
 
     Parameters
     ----------
     pathnames : str, Path, or sequence of str/Path
-        A single path, a wildcard pattern (e.g. '*.tif'), or a list of paths specifying the ScanImage TIFF files to read.
+        A single path, a wildcard pattern (e.g. ``*.tif``), or a list of paths
+        specifying the ScanImage TIFF files to read.
     dtype : numpy.dtype, optional
         The data type to use when reading the scan data. Default is np.int16.
 
     Returns
     -------
     ScanMultiROIReordered
-        A scan object with metadata and lazily loaded data. Raises FileNotFoundError if no files match the specified path(s).
+        A scan object with metadata and lazily loaded data. Raises FileNotFoundError
+        if no files match the specified path(s).
 
     Notes
     -----
-    If the provided path string appears to include escaped characters (for example, unintentional backslashes), a warning message
-    is printed suggesting the use of a raw string (r'...') or double backslashes.
+    If the provided path string appears to include escaped characters (for example,
+    unintentional backslashes), a warning message is printed suggesting the use of a
+    raw string (r'...') or double backslashes.
 
     Examples
     --------
     >>> import mbo_utilities as mbo
     >>> import matplotlib.pyplot as plt
-    >>> raw_files = mbo.get_files(r"path/to/raw/data", 'tif')
-    >>> scan = mbo.read_scan(raw_files)
-    >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray') # First frame of z-plane 6
+    >>> scan = mbo.read_scan(r"C:\path\to\scan\*.tif")
+    >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # First frame of z-plane 6
     """
 
     if isinstance(pathnames, str) and is_escaped_string(pathnames):
