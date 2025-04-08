@@ -254,34 +254,46 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
 
 def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> list | Path:
     """
-    Recursively searches for files with a specific extension up to a given depth and stores their paths in a pickle file.
-    Sorts result in ascending order by default.
+    Recursively search for files in a specified directory whose names contain a given substring,
+    limiting the search to a maximum subdirectory depth. Optionally, the resulting list of file paths
+    is sorted in ascending order using numeric parts of the filenames when available.
 
     Parameters
     ----------
     base_dir : str or Path
-        The base directory to start searching.
-    str_contains : str
-        The string that the file names should contain.
+        The base directory where the search begins. This path is expanded (e.g., '~' is resolved)
+        and converted to an absolute path.
+    str_contains : str, optional
+        A substring that must be present in a file's name for it to be included in the result.
+        If empty, all files are matched.
     max_depth : int, optional
-        The maximum depth of subdirectories to search. Default is 1.
+        The maximum number of subdirectory levels (relative to the base directory) to search.
+        Defaults to 1. If set to 0, it is automatically reset to 1.
     sort_ascending : bool, optional
-        Whether to sort files alphanumerically by filename, with digits in ascending order (i.e. 1, 2, 10) Defaults to True.
+        If True (default), the matched file paths are sorted in ascending alphanumeric order.
+        The sort key extracts numeric parts from filenames so that, for example, "file2" comes
+        before "file10".
 
     Returns
     -------
-    list
-        A list of full file paths matching the given extension.
+    list of str
+        A list of full file paths (as strings) for files within the base directory (and its
+        subdirectories up to the specified depth) that contain the provided substring.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the base directory does not exist.
+    NotADirectoryError
+        If the specified base_dir is not a directory.
 
     Examples
     --------
     >>> import mbo_utilities as mbo
-
-    Get all ops files, searching 3 nested directories:
+    >>> # Get all files that contain "ops.npy" in their names by searching up to 3 levels deep:
     >>> ops_files = mbo.get_files("path/to/files", "ops.npy", max_depth=3)
-
-    Get only tiffs in this directory:
-    >>> tif_files = mbo.get_files("path/to/files", "tif") # same as max-depth = 1
+    >>> # Get only files containing "tif" in the current directory (max_depth=1):
+    >>> tif_files = mbo.get_files("path/to/files", "tif")
     """
     base_path = Path(base_dir).expanduser().resolve()
     if not base_path.exists():
@@ -297,11 +309,11 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> li
 
     files = [
         file for file in base_path.rglob(pattern)
-        if len(file.parts) - base_depth <= max_depth
-           and file.is_file()
+        if len(file.parts) - base_depth <= max_depth and file.is_file()
     ]
 
     if sort_ascending:
+        import re
         def numerical_sort_key(path):
             match = re.search(r'\d+', path.name)
             return int(match.group()) if match else float('inf')
