@@ -131,7 +131,7 @@ html_theme_options = {
         {
             "name": "MBO User Hub",
             "url": "https://millerbrainobservatory.github.io/",
-            "icon": "./_static/icon_mbo_home.png",
+            "icon": "_static/icon_mbo_home.png",
             "type": "local",
         },
         {
