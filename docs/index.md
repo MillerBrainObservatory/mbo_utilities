@@ -6,9 +6,8 @@ This repository contains python functions to pre/post process datasets recording
 
 ```{toctree}
 ---
-maxdepth: 2
+maxdepth: 1
 ---
-user_guide/index
-api/index
+Assembly <assembly>
+API <api/index>
 ```
-
