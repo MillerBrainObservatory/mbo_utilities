@@ -150,3 +150,35 @@ html_theme_options = {
         },
     ],
 }
+
+html_theme_options = {
+    "path_to_docs": "docs",
+    "repository_url": "https://github.com/MillerBrainObservatory/mbo_utilties/",
+    "repository_branch": "master",
+    "use_edit_page_button": True,
+    "use_source_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+    "show_toc_level": 3,
+    "navbar_align": "content",
+    "icon_links": [
+        {
+            "name": "MBO User Hub",
+            "url": "https://millerbrainobservatory.github.io/",
+            "icon": "./_static/icon_mbo_home.png",
+            "type": "local",
+        },
+        {
+            "name": "MBO Github",
+            "url": "https://github.com/MillerBrainObservatory/",
+            "icon": "fa-brands fa-github",
+            "type": "fontawesome",
+        },
+        {
+            "name": "Connect with MBO",
+            "url": "https://mbo.rockefeller.edu/contact/",
+            "icon": "fa-regular fa-address-card",
+            "type": "fontawesome",
+        },
+    ],
+}
