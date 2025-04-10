@@ -11,28 +11,36 @@ kernelspec:
   name: python3
 ---
 
+(assembly)=
 # Image Assembly
 
-Converting raw scanimage-tiff files into fused z-planes.
+`````{admonition} TL;DR
+:class: dropdown
 
-```{figure}  ./_images/ex_diagram.png
-:align: center
-
-
-Overview of pre-processing steps that convert the raw scanimage tiffs into planar timeseries.
-
-```
-
-+++
-
-All you need is a path to your .tiffs and a place to save them.
+If all you want is code to get started, this will 
 ``` python
 import mbo_utilities as mbo
 scan = mbo.read_scan("path/to/data/*.tiff")
 mbo.save_as(scan, "path/to/assembled_data", ext=".tiff")
 ```
+``````
+
+## Overview 
+
+This section covers the steps to convert raw scanimage-tiff files into assembled, planar timeseries.
+
+```{figure}  ./_images/ex_diagram.png
+:align: center
+
+Overview of pre-processing steps that convert the raw scanimage tiffs into planar timeseries.
+Starting with a raw, multi-page ScanImage Tiff, frames are deinterleaved, optionally pre-processed to eliminate scan-phase artifacts,
+and fused to create an assembled timeseries.
+```
+
+----
 
 ```{code-cell} ipython3
+# imports
 from pathlib import Path
 import numpy as np
 
@@ -42,10 +50,11 @@ import mbo_utilities as mbo
 
 ## Input data: Path to your raw .tiff file(s)
 
+```{admonition} One session per folder
+:class: dropdown
 
-```{important}
-
-Make sure your `data_path` contains only `.tiff` files for this imaging session. If there are other `.tiff` files, such as from another session or a processed file for this session, those files will be included in the scan and lead to errors.
+Make sure your `data_path` contains only `.tiff` files for this imaging session.
+If there are other `.tiff` files, such as from another session or a processed file for this session, those files will be included in the scan and lead to errors.
 
 ```
 
@@ -56,7 +65,7 @@ Make sure your `data_path` contains only `.tiff` files for this imaging session.
 Pass a list of files, or a wildcard "/path/to/files/*" to `mbo.read_scan()`.
 
 ``` {tip}
-mbo.get_files() is useful to easily get all files of the same filetype
+{func}`mbo_utilities.get_files` is useful to easily get all files of the same filetype
 ```
 
 ```{code-cell} ipython3
