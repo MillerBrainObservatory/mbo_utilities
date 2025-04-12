@@ -7,9 +7,9 @@ from pathlib import Path
 install_deps = [
     "tifffile",
     "scikit-image",
-    "fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
-    "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
-    "imgui_bundle",
+    # "fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
+    # "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
+    # "imgui_bundle",
     "ipykernel",
     "jupyterlab",
     "jupyter_rfb",
