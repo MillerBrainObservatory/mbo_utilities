@@ -21,7 +21,25 @@ dependencies = [
     "tqdm",
     "fabric",
     "h5py",
+    "imgui-bundle",
+    "imageio"
+
 ]
+
+[project.optional-dependencies]
+gui = [
+	"imgui-bundle",
+] 
+notebook = [
+	"jupyter_rfb>=0.5.1",
+	"jupyterlab",
+	"sidecar",
+	"ipywidgets>=8.0.0,<9",
+	"anywidget",
+]
+
+[tool.uv]
+default-groups = "all"
 
 [project.scripts]
 mbo = "mbo_utilities.__main__:main"
