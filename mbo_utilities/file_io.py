@@ -12,9 +12,9 @@ import dask.array as da
 
 from matplotlib import cm
 
-from mbo_utilities.scanreader import scans
-from mbo_utilities.scanreader.multiroi import ROI
-from mbo_utilities.util import norm_minmax
+from .scanreader import scans
+from .scanreader.multiroi import ROI
+from .util import norm_minmax
 
 
 def npy_to_dask(files, name="", axis=1, astype=None):
