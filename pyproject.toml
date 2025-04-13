@@ -1,6 +1,40 @@
 [build-system]
-requires = ["setuptools", "wheel", "versioneer[toml]"]
+requires = ["setuptools>=61", "wheel", "versioneer[toml]==0.29"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "mbo_utilities"
+description = "Various utilities for the Miller Brain Observatory"
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+dynamic = ["version"]
+requires-python = ">=3.10, <=3.12"
+keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
+dependencies = [
+    "tifffile",
+    "scikit-image",
+    "matplotlib",
+    "ffmpeg-python",
+    "PyWavelets",
+    "dask",
+    "zarr",
+    "tqdm",
+    "fabric",
+    "h5py",
+]
+
+[project.scripts]
+mbo = "mbo_utilities.__main__:main"
+assemble = "mbo_utilities.assembly:main"
+
+[project.urls]
+homepage = "https://github.com/millerbrainobservatory/mbo_utilities"
+
+[tool.setuptools]
+packages = ["mbo_utilities"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["data/*"]
 
 [tool.versioneer]
 VCS = "git"
@@ -9,4 +43,3 @@ versionfile_source = "mbo_utilities/_version.py"
 versionfile_build = "mbo_utilities/_version.py"
 tag_prefix = "mbo-utilities-"
 parentdir_prefix = "mbo-utilities-"
-
