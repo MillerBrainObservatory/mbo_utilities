@@ -8,7 +8,6 @@ install_deps = [
     "tifffile",
     "scikit-image",
     "fastplotlib @ git+https://github.com/fastplotlib/fastplotlib.git@main",
-    "pygfx @ git+https://github.com/pygfx/pygfx.git@main",
     "imgui_bundle",
     "ipykernel",
     "jupyterlab",
@@ -16,13 +15,13 @@ install_deps = [
     "matplotlib",
     "ffmpeg-python",
     "PyWavelets",
+    "pyqt5>=5.15",
     "qtpy",
-    "pyqt5",
     "dask",
     "zarr",
     "tqdm",
     "fabric",
-    "icecream",
+    "h5py",
 ]
 
 with open(Path(__file__).parent / "README.md", "r", encoding="utf-8") as fh:
