@@ -278,7 +278,7 @@ def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = No
         # if running in jupyter, return the image widget to show in the notebook
         image_widget = fpl.ImageWidget(
             data=data,
-            histogram_widget=False,
+            histogram_widget=True,
             graphic_kwargs={"vmin": -350, "vmax": 13000},
         )
         print("Running in Jupyter, returning image widget")

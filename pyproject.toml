@@ -22,13 +22,18 @@ dependencies = [
     "fabric",
     "h5py",
     "imgui-bundle",
-    "imageio"
+    "imageio",
+    "fastplotlib",
+    "pygfx",
 
 ]
 
 [project.optional-dependencies]
 gui = [
 	"imgui-bundle",
+	"pyqt5-tools",
+	"qtpy",
+	"PyQt5",
 ] 
 notebook = [
 	"jupyter_rfb>=0.5.1",
@@ -41,6 +46,45 @@ notebook = [
 [tool.uv]
 default-groups = "all"
 
+[tool.uv.sources]
+fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib", branch = "main" }
+mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "master" }
+pygfx = { git = "https://github.com/pygfx/pygfx", branch = "main" }
+
+# https://github.com/charliermarsh/ruff
+[tool.ruff]
+line-length = 88
+src = ["lbm_suite2p_python"]
+exclude = ["docs", "exclude", "demos", "scripts"] 
+
+[tool.ruff.lint]
+pydocstyle = { convention = "numpy" }
+select = ["ALL"]
+ignore = [
+	"D401",   # First line should be in imperative mood (remove to opt in)
+	"COM812", # Missing trailing comma (conflicts with ruff format)
+	"ISC001", # Import sorting (conflicts with ruff format)
+	"FIX002", # Fixable issue
+	"DOC201", # TODO(manzt) enable in follow-up PR; no doc for return type.
+	"FBT",    # TODO(manzt): enable in follow-up PR; require bool options to be keyword-only.
+]
+
+[tool.ruff.lint.per-file-ignores]
+"docs/*.py" = ["D"] 
+
+[tool.setuptools.exclude-package-data]
+"*" = ["data/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+	"pragma: no cover",
+	"if TYPE_CHECKING:",
+	"@overload",
+	"except ImportError",
+	"\\.\\.\\.",
+	"raise NotImplementedError()"
+]
+
 [project.scripts]
 mbo = "mbo_utilities.__main__:main"
 assemble = "mbo_utilities.assembly:main"
@@ -50,9 +94,6 @@ homepage = "https://github.com/millerbrainobservatory/mbo_utilities"
 
 [tool.setuptools]
 packages = ["mbo_utilities"]
-
-[tool.setuptools.exclude-package-data]
-"*" = ["data/*"]
 
 [tool.versioneer]
 VCS = "git"
