@@ -7,6 +7,7 @@ from .file_io import (
     save_png,
     save_mp4,
     scans,
+    scanreader,
 )
 from .assembly import save_as
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
@@ -25,6 +26,7 @@ __all__ = [
     'fix_scan_phase',
     'return_scan_offset',
     # file_io
+    'scanreader',
     'ScanMultiROIReordered',
     'npy_to_dask',
     'get_files',
