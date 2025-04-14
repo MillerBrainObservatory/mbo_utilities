@@ -256,22 +256,30 @@ def plot_colocalization_hist(max_proj1, max_proj2_shifted, bins=100):
     plt.show()
 
 
-def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None) -> None | fpl.ImageWidget:
-    # parse data
+def _load_data(data_in):
     if data_in is None:
         print("No data provided, opening file dialog")
-        data = load_dialog_folder(parent=None, directory=None)
+        return load_dialog_folder(parent=None, directory=None)
     elif isinstance(data_in, ScanMultiROIReordered):
-        # if data is a ScanMultiROIReordered object, use it directly
         print("Using ScanMultiROIReordered object")
-        data = data_in
+        return data_in
     elif isinstance(data_in, (str, Path)):
-        # if data is a string or Path, load it from the path
         print("Loading data from path")
-        data = load_data_path(data_in)
-    else:
-        raise TypeError(f"Unsupported data type: {type(data_in)}")
+        return load_data_path(data_in)
+    raise TypeError(f"Unsupported data type: {type(data_in)}")
 
+def _run_in_jupyter(data):
+    print("Running in Jupyter")
+    widget = fpl.ImageWidget(
+        data=data,
+        histogram_widget=True,
+        graphic_kwargs={"vmin": -350, "vmax": 13000},
+    )
+    widget.show()
+    return widget
+
+def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None) -> None | fpl.ImageWidget:
+    data = _load_data(data_in)
     if is_running_jupyter():
         print("Running in Jupyter")
 
@@ -291,6 +299,46 @@ def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = No
         main_window.resize(1000, 800)
         app.exec()
 
+# def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None) -> None | fpl.ImageWidget:
+#
+#     if not is_running_jupyter():
+#         # Must be initialized early if any GUI dialog might appear
+#         app = QApplication.instance()
+#         if app is None:
+#             app = QApplication(sys.argv)
+#     # parse data
+#     if data_in is None:
+#         print("No data provided, opening file dialog")
+#         data = load_dialog_folder(parent=None, directory=None)
+#     elif isinstance(data_in, ScanMultiROIReordered):
+#         # if data is a ScanMultiROIReordered object, use it directly
+#         print("Using ScanMultiROIReordered object")
+#         data = data_in
+#     elif isinstance(data_in, (str, Path)):
+#         # if data is a string or Path, load it from the path
+#         print("Loading data from path")
+#         data = load_data_path(data_in)
+#     else:
+#         raise TypeError(f"Unsupported data type: {type(data_in)}")
+#
+#     if is_running_jupyter():
+#         print("Running in Jupyter")
+#
+#         # if running in jupyter, return the image widget to show in the notebook
+#         image_widget = fpl.ImageWidget(
+#             data=data,
+#             histogram_widget=True,
+#             graphic_kwargs={"vmin": -350, "vmax": 13000},
+#         )
+#         print("Running in Jupyter, calling show()")
+#         image_widget.show()
+#     else:
+#         # if running in a standalone script, set up the main window
+#         main_window = LBMMainWindow(data)
+#         main_window.show()
+#         main_window.resize(1000, 800)
+#         app.exec()
+#
 
 if __name__ == "__main__":
     run_gui()
