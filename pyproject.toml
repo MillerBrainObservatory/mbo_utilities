@@ -92,8 +92,10 @@ assemble = "mbo_utilities.assembly:main"
 [project.urls]
 homepage = "https://github.com/millerbrainobservatory/mbo_utilities"
 
-[tool.setuptools]
-packages = ["mbo_utilities"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mbo_utilities*"]
+
 
 [tool.versioneer]
 VCS = "git"
