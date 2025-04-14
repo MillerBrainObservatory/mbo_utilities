@@ -13,7 +13,6 @@ import dask.array as da
 from matplotlib import cm
 
 from .scanreader import scans
-from .scanreader.multiroi import ROI
 from .util import norm_minmax
 
 

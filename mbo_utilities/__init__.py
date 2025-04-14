@@ -1,3 +1,4 @@
+from .scanreader import scans
 from .file_io import (
     get_files,
     zstack_from_files,
@@ -6,8 +7,6 @@ from .file_io import (
     ScanMultiROIReordered,
     save_png,
     save_mp4,
-    scans,
-    scanreader,
 )
 from .assembly import save_as
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
@@ -34,7 +33,6 @@ __all__ = [
     'read_scan',
     'save_png',
     'save_mp4',
-    'scans',
     # metadata
     'is_raw_scanimage',
     'get_metadata',
@@ -44,4 +42,5 @@ __all__ = [
     'smooth_data',
     # assembly
     'save_as',
+    'scans'
 ]
