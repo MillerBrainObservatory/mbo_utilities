@@ -33,6 +33,30 @@ def load_dialog_folder(parent=None, directory=None):
     path = QFileDialog.getExistingDirectory(parent=parent, caption="Open folder with raw data OR assembled z-planes", directory=directory)
     return load_data_path(path)
 
+def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None) -> None | fpl.ImageWidget:
+    if is_running_jupyter():
+        if data_in is None:
+            raise ValueError("Running in Jupyter: please provide a data path, file dialogs are not supported.")
+        if isinstance(data_in, ScanMultiROIReordered):
+            data = data_in
+        else:
+            data = load_data_path(data_in)
+        image_widget = fpl.ImageWidget(data=data, histogram_widget=True, graphic_kwargs={"vmin": -350, "vmax": 13000})
+        image_widget.show()
+        return image_widget
+    else:
+        from qtpy.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication(sys.argv)
+        if data_in is None:
+            data = load_dialog_folder(parent=None, directory=None)
+        else:
+            data = load_data_path(data_in)
+        main_window = LBMMainWindow(data)
+        main_window.show()
+        main_window.resize(1000, 800)
+        app.exec()
 
 def load_data_path(path: str | Path):
     save_folder = Path(path)
@@ -187,6 +211,7 @@ def run_gui(data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = No
         if data_in is None:
             raise ValueError("Running in Jupyter: please provide a data path, file dialogs are not supported.")
         data = load_data_path(data_in)
+
         image_widget = fpl.ImageWidget(data=data, histogram_widget=True, graphic_kwargs={"vmin": -350, "vmax": 13000})
         image_widget.show()
         return image_widget
