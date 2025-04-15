@@ -8,34 +8,37 @@ description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 dynamic = ["version"]
-requires-python = ">=3.10, <=3.12"
+requires-python = ">=3.10, <=3.13"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
     "tifffile",
     "scikit-image",
     "matplotlib",
+    "imageio[ffmpeg]",
     "ffmpeg-python",
     "PyWavelets",
     "dask",
     "zarr",
+    "h5py",
     "tqdm",
     "fabric",
-    "h5py",
-    "imgui-bundle",
-    "imageio",
     "fastplotlib",
     "pygfx",
-
 ]
 
 [project.optional-dependencies]
 gui = [
 	"imgui-bundle",
-	"pyqt5-tools",
-	"qtpy",
-	"PyQt5",
 ] 
 notebook = [
+	"jupyter_rfb>=0.5.1",
+	"jupyterlab",
+	"sidecar",
+	"ipywidgets>=8.0.0,<9",
+	"anywidget",
+]
+all = [
+	"imgui-bundle",
 	"jupyter_rfb>=0.5.1",
 	"jupyterlab",
 	"sidecar",
