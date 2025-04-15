@@ -1,4 +1,4 @@
-from .scanreader import scans
+from .scanreader import scans, ROI
 from .file_io import (
     get_files,
     zstack_from_files,
@@ -25,6 +25,7 @@ __all__ = [
     'fix_scan_phase',
     'return_scan_offset',
     # file_io
+    "ROI",
     'scanreader',
     'ScanMultiROIReordered',
     'npy_to_dask',
