@@ -1,19 +1,18 @@
 from pathlib import Path
+
+from dask import array as da
 import numpy as np
 import h5py
+from tqdm import tqdm
+
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
-import imgui_bundle
 
 from imgui_bundle import imgui, implot
 from imgui_bundle import portable_file_dialogs as pfd
 
-from mbo_utilities import (
-    return_scan_offset,
-    get_files,
-    norm_minmax,
-    norm_percentile
-)
+from ..util import norm_minmax, norm_percentile
+from ..image import return_scan_offset
 
 
 def imgui_dynamic_table(table_id: str, data_lists: list, titles: list = None, selected_index: int = None):
@@ -48,9 +47,9 @@ def imgui_dynamic_table(table_id: str, data_lists: list, titles: list = None, se
     elif len(titles) != num_columns:
         raise ValueError("Number of titles must match the number of columns in data_lists.")
 
-    if imgui.begin_table(table_id, num_columns, flags=imgui.TableFlags_.borders | imgui.TableFlags_.resizable):
+    if imgui.begin_table(table_id, num_columns, flags=imgui.TableFlags_.borders | imgui.TableFlags_.resizable):  # noqa
         for title in titles:
-            imgui.table_setup_column(title, imgui.TableColumnFlags_.width_stretch)
+            imgui.table_setup_column(title, imgui.TableColumnFlags_.width_stretch)  # noqa
 
         for title in titles:
             imgui.table_next_column()
@@ -61,7 +60,7 @@ def imgui_dynamic_table(table_id: str, data_lists: list, titles: list = None, se
             for value in row_values:
                 imgui.table_next_column()
                 if i == selected_index:
-                    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(0, 250, 35, 1))
+                    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(0, 250, 35, 1))  # noqa
 
                 imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + imgui.get_column_width() - imgui.calc_text_size(
                     f"{int(value)}").x - imgui.get_style().item_spacing.x)
@@ -80,7 +79,13 @@ def implot_pollen(pollen_offsets, offset_store, zstack):
     # Offset Comparison Plot
     if implot.begin_plot("Offset Comparison Across Z-Planes"):
         implot.plot_bars("Calibration Offsets", z_planes, np.array([p[0] for p in pollen_offsets]), bar_size=0.4)
-        implot.plot_bars("Selected Offsets", z_planes, np.array([s[0] for s in offset_store]), bar_size=0.4, shift=0.2)
+        implot.plot_bars(  # noqa
+            "Selected Offsets",
+            z_planes,
+            np.array([s[0] for s in offset_store]),
+            bar_size=0.4,
+            shift=0.2
+        )
         implot.end_plot()
 
     # Mean Intensity Plot
@@ -97,10 +102,27 @@ def implot_pollen(pollen_offsets, offset_store, zstack):
 
     imgui.end_child()
 
-
-class PollenCalibration(EdgeWindow):
-    def __init__(self, fpath=None, iw=None, size=350, location="right", title="Pollen Calibration", depth=5, pollen_offsets=[], user_offsets=[], user_titles=[]):
+class PollenCalibrationWidget(EdgeWindow):
+    def __init__(
+            self,
+            fpath=None,
+            iw=None,
+            size=350,
+            location="right",
+            title="Pollen Calibration",
+            pollen_offsets=None,
+            user_offsets=None,
+            user_titles=None
+    ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
+        if user_titles is None:
+            user_titles = []
+        if user_offsets is None:
+            user_offsets = []
+        if pollen_offsets is None:
+            pollen_offsets = []
+        self.fpath = fpath
+        self.h5name = None
         self.pollen_loaded = False
         self.pollen_offsets=pollen_offsets
 
@@ -199,14 +221,15 @@ class PollenCalibration(EdgeWindow):
         self.apply_offset()
 
     def switch(self):
-        ind = self.image_widget.current_index["t"]
-        if self.proj == 'mean':
-            self.image_widget.set_data(zstack_max)
-            self.proj = "max"
-        else:
-            self.image_widget.set_data(zstack_mean)
-            self.image_widget.figure[0,0].graphics[0].data[ind, ...] = zstack_mean[ind, ...]
-            self.proj = "mean"
+        pass
+        # ind = self.image_widget.current_index["t"]
+        # if self.proj == 'mean':
+        #     self.image_widget.set_data(zstack_max)
+        #     self.proj = "max"
+        # else:
+        #     self.image_widget.set_data(zstack_mean)
+        #     self.image_widget.figure[0,0].graphics[0].data[ind, ...] = zstack_mean[ind, ...]
+        #     self.proj = "mean"
 
     def save_to_file(self):
         if not self.h5name.is_file():
@@ -230,17 +253,53 @@ class PollenCalibration(EdgeWindow):
         if c_index < nz:
             frame = self.image_widget.data[0][c_index]
             frame_n = self.image_widget.data[0][c_index + 1]
-            tmp = mbo.norm_percentile(frame * frame_n)
-            self.image_widget.data[0][c_index] = mbo.norm_minmax(tmp)
+            tmp = norm_percentile(frame * frame_n)
+            self.image_widget.data[0][c_index] = norm_minmax(tmp)
 
-    def load_pollen_offsets(self, depth=5):
-        with h5py.File(fpath[0], 'r') as f1:
+    def load_pollen_offsets(self,):
+        with h5py.File(self.fpath[0], 'r') as f1:
             dx = np.array(f1['x_shifts'])
             dy = np.array(f1['y_shifts'])
             ofs_volume = np.array(f1['scan_corrections'])
-            self.h5name = Path(fpath[0])
+            self.h5name = Path(self.fpath[0])
         return ofs_volume
 
+    @staticmethod
     def open_file_dialog(self):
         file_dialog = pfd.open_file(title="Select a pollen calibration file", filters=["*.tiff", "*.tif", "*.h5", "*.hdf5"], options=pfd.opt.none)
         return file_dialog.result()
+
+class SummaryDataWidget(EdgeWindow):
+    def __init__(self, image_widget, size, location):
+        flags = imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_resize  # noqa
+        super().__init__(figure=image_widget.figure, size=size, location=location, title="Preview Data", window_flags=flags)
+        self.image_widget = image_widget
+
+    def update(self):
+        something_changed = False
+        if imgui.button("Mean Z"):
+            self.mean_z()
+        if imgui.is_item_hovered(0):
+            imgui.set_tooltip("Calculate the mean image for each z-plane")
+        imgui.new_line()
+        imgui.separator()
+        imgui.text("Statistics")
+        if imgui.button("Calculate Noise"):
+            self.calculate_noise()
+            imgui.text("Calculating noise...")
+        imgui.new_line()
+        imgui.separator()
+        if something_changed:
+            print("something changed")
+
+    def mean_z(self):
+        data = self.image_widget.data[0]
+        lazy_arr = da.empty_like(data)
+        for i in tqdm(range(data.shape[1]), desc="Calculating Mean Image for each z"):
+            lazy_arr[:, i, ...] = data[:, i, ...].mean(axis=1)
+        print("Showing mean z")
+        mean_z_widget = fpl.ImageWidget(data=lazy_arr, histogram_widget=False, figure_kwargs={"size": (1000, 800)})
+        mean_z_widget.show()
+
+    def calculate_noise(self):
+        pass

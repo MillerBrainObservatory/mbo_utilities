@@ -24,12 +24,12 @@ dependencies = [
     "fabric",
     "fastplotlib",
     "pygfx",
+	"tqdm"
 ]
 
 [project.optional-dependencies]
 gui = [
 	"imgui-bundle",
-
 	"pyqt5==5.15.11",
 	"pyqt5-qt5==5.15.2",
 ] 

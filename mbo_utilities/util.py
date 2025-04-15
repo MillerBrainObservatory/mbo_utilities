@@ -49,7 +49,6 @@ def align_images_zstack(images, mode="trim"):
         raise ValueError("Invalid mode. Choose 'trim' or 'pad'.")
     return np.stack(aligned_images, axis=0)
 
-
 def smooth_data(data, window_size=5):
     """
     Smooth 1D data using a moving average filter.
@@ -199,6 +198,23 @@ def match_array_size(arr1, arr2, mode="trim"):
         raise ValueError("Invalid mode. Use 'trim' or 'pad'.")
     return np.stack([arr1, arr2], axis=0)
 
+def is_qt_installed() -> bool:
+    """Returns True if PyQt5 is installed, otherwise False."""
+    try:
+        import PyQt5
+        return True
+    except ImportError:
+        return False
+
+
+def is_imgui_installed() -> bool:
+    """Returns True if imgui_bundle is installed, otherwise False."""
+    try:
+        import imgui_bundle
+        return True
+    except ImportError:
+        return False
+
 
 def is_running_jupyter():
     """Returns true if users environment is running Jupyter."""
@@ -213,4 +229,3 @@ def is_running_jupyter():
             return False
     except NameError:
         return False
-

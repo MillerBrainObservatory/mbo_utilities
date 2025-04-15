@@ -1,15 +1,14 @@
 import argparse
 import functools
 import os
-import shutil
 import time
 import warnings
 import logging
-from pathlib import Path
 import numpy as np
 
-import dask.array as da
-import tifffile
+import shutil
+from pathlib import Path
+import zarr
 from tifffile import TiffWriter
 import h5py
 
@@ -32,7 +31,6 @@ ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
 
 CHUNKS = {0: 'auto', 1: -1, 2: -1}
 
-# suppress warnings
 warnings.filterwarnings("ignore")
 
 print = functools.partial(print, flush=True)
@@ -77,9 +75,7 @@ def save_as(
         ext: str = '.tiff',
         order: list | tuple = None,
         trim_edge: list | tuple = (0,0,0,0),
-        image_size: list | tuple = None,
         fix_phase: bool = False,
-        debug: bool = False,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -107,13 +103,8 @@ def save_as(
     order : list or tuple, optional
         A list or tuple specifying the desired order of planes. If provided, the number of
         elements in `order` must match the number of planes. Default is `None`.
-    image_size : int, optional
-        Size of the image to save. Default is 255x255 pixel image. If the image is larger
-        than the movie dimensions, it will be cropped to fit. Expected dimensions are square.
     fix_phase : bool, optional
         Whether to fix scan-phase (x/y) alignment. Default is `False`.
-    debug : bool, optional
-        If True, print outputs without running any processes. Default is `False`.
 
     Raises
     ------
@@ -155,10 +146,8 @@ def save_as(
         ext,
         append_str,
         metadata=mdata,
-        image_size=image_size,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
-        debug=debug
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -173,23 +162,17 @@ def _save_data(
         file_extension,
         append_str,
         metadata,
-        image_size=None,
         trim_edge=None,
         fix_phase=False,
-        debug=False
 ):
     if '.' in file_extension:
         file_extension = file_extension.split('.')[-1]
-
-    if debug:
-        ic.enable()  # noqa
 
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
 
     nt, nz, nx, ny = scan.shape
 
-    print(trim_edge)
     left, right, top, bottom = trim_edge
     left = min(left, nx - 1)
     right = min(right, nx - left)
@@ -229,8 +212,6 @@ def _save_data(
 
         with tqdm(total=num_chunks, desc=f'Saving plane {chan + 1}', position=0, leave=False) as pbar:
             start = 0
-            phases = []
-            phases_idx = []
             print(f"num-chunks: {num_chunks}")
             for i, chunk in enumerate(range(num_chunks)):
                 frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
@@ -241,9 +222,6 @@ def _save_data(
                     ofs = mbo_utilities.return_scan_offset(data_chunk)
                     if ofs:
                         data_chunk = mbo_utilities.fix_scan_phase(data_chunk, ofs)
-                        phases.append(ofs)
-                        phases_idx.append(i)
-
                 writer(fname, data_chunk)
                 start = end
                 pbar.update(1)
@@ -288,7 +266,6 @@ def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None):
 
     _write_h5._offsets[filename] += data.shape[0]
 
-
 def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
 
     filename = Path(path).with_suffix(".h5")
@@ -315,26 +292,26 @@ def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
         )
         _write_tiff._first_write = False
 
-def _write_zarr(path, data, overwrite=True, metadata=None, image_size=None):
-    try:
-        import zarr
-    except ImportError:
-        raise ImportError("Please install zarr to use this feature: pip install zarr")
+def _write_zarr(path, data, overwrite=True, metadata=None, single_file=False):
+    # data is assumed to have shape (n, H, W)
     filename = Path(path).with_suffix(".zarr")
-
     if not hasattr(_write_zarr, "_initialized"):
         _write_zarr._initialized = {}
 
     if filename not in _write_zarr._initialized:
         if filename.exists() and overwrite:
             shutil.rmtree(filename)
-
-        z = zarr.create_array(
+        # Instead of using data.shape as the initial shape,
+        # start with zero along the appending axis.
+        empty_shape = (0,) + data.shape[1:]
+        max_shape = (None,) + data.shape[1:]
+        z = zarr.creation.create(
             store=str(filename),
-            shape=image_size,
-            chunks=(1,) + image_size[1:],
+            shape=empty_shape,
+            chunks=(1,) + data.shape[1:],  # one slice per chunk
             dtype=data.dtype,
             overwrite=True,
+            max_shape=max_shape
         )
         if metadata:
             for k, v in metadata.items():
@@ -344,11 +321,12 @@ def _write_zarr(path, data, overwrite=True, metadata=None, image_size=None):
                     z.attrs[k] = str(v)
         _write_zarr._initialized[filename] = 0
 
-    start = _write_zarr._initialized[filename]
-    end = start + data.shape[0]
-    z = zarr.open_array(str(filename), mode='r+')
-    z[start:end] = data
-    _write_zarr._initialized[filename] = end
+    # Open the array in append mode
+    z = zarr.open_array(str(filename), mode='a')
+    # Append new data along the 0th axis
+    z.append(data)
+    # Update the count (optional, since append grows the array automatically)
+    _write_zarr._initialized[filename] = z.shape[0]
 
 
 def main():

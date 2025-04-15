@@ -8,6 +8,7 @@ import tifffile
 from pathlib import Path
 import ffmpeg
 import re
+import dask
 import dask.array as da
 
 from matplotlib import cm
@@ -15,7 +16,15 @@ from matplotlib import cm
 from .scanreader import scans
 from .scanreader.multiroi import ROI
 from .util import norm_minmax
+from .metadata import is_raw_scanimage
 
+CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
+
+def zarr_to_dask(zarr_parent):
+    """Convert directory of zarr arrays into a Z-stack."""
+    # search 3 dirs deep for arrays within our zarr group
+    files = get_files(zarr_parent, ".zarray", 3)
+    return da.stack([da.from_zarr(Path(x).parent) for x in files], axis=1)
 
 def npy_to_dask(files, name="", axis=1, astype=None):
     """
@@ -190,6 +199,7 @@ def read_scan(pathnames, dtype=np.int16):
     scan.read_data(filenames, dtype=dtype)
 
     return scan
+
 
 class ScanMultiROIReordered(scans.ScanMultiROI):
     """
@@ -495,3 +505,29 @@ def save_mp4(fname: str | Path | np.ndarray, images, framerate=60, speedup=1, ch
     process.stdin.close()
     process.wait()
     print(f"Video saved to {fname}")
+
+
+def load_data_path(path: str | Path):
+    """
+    Resovle the given data path to a list of fully-qualified paths to 'tiff' files.
+
+    - If the resulting 'tifs' are raw ScanImage tiffs, turn into a scan object to preview.
+    - If the resulting 'tifs' are assembled z-planes, load into a z-stack.
+    """
+    if isinstance(path, list):
+        plane_folders = path
+    elif isinstance(path, (str, Path)):
+        print(f"Loading data from {path}")
+        save_folder = Path(path).expanduser().resolve()
+        if not save_folder.exists():
+            print("Folder does not exist")
+            return
+        plane_folders = get_files(save_folder, ".tif", 2)
+    elif isinstance(path, dask.array.core.Array):
+        return path
+    else:
+        raise TypeError(f"Invalid type {type(path)}. Expected 'path', 'str' or 'list'")
+    if is_raw_scanimage(plane_folders[0]):
+        return read_scan(plane_folders)
+    else:
+        return zstack_from_files(plane_folders)

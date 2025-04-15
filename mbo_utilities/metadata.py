@@ -165,18 +165,18 @@ def is_raw_scanimage(file: os.PathLike | str):
         return False
 
     tiff_file = tifffile.TiffFile(file)
+    # TiffFile.shaped_metadata is where we store metadata for processed tifs
+    # if this is not empty, we have a processed file
+    # otherwise, we have a raw scanimage tiff
     if (
             hasattr(tiff_file, 'shaped_metadata')
             and tiff_file.shaped_metadata is not None
             and isinstance(tiff_file.shaped_metadata, (list, tuple))
             and tiff_file.shaped_metadata[0] not in ([], (), None)
     ):
-        if 'image' in tiff_file.shaped_metadata[0]:
-            return True
-        else:
-            return False
-    else:
         return False
+    else:
+        return True
 
 
 def get_metadata(file: os.PathLike | str, verbose=False):
@@ -222,7 +222,8 @@ def get_metadata(file: os.PathLike | str, verbose=False):
     {... Includes all ScanImage FrameData ...}
     """
     tiff_file = tifffile.TiffFile(file)
-    if is_raw_scanimage(file):
+    # previously processed files
+    if not is_raw_scanimage(file):
         return tiff_file.shaped_metadata[0]['image']
     elif hasattr(tiff_file, 'scanimage_metadata'):
         meta = tiff_file.scanimage_metadata
