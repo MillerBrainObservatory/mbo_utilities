@@ -48,12 +48,6 @@ class VolumetricBinaryFile:
             self._shape = shape
             mode = "w+"
         else:
-            # For an existing file, determine shape based on file size.
-            # Let nbytes per element = dtype.itemsize.
-            file_bytes = os.path.getsize(self.filename)
-            # Let shape be provided externally or computed.
-            # For simplicity, we expect the user to know the shape when reopening.
-            # Alternatively, you could store shape metadata in a companion file.
             self._shape = shape
             mode = "r+"
 
@@ -106,7 +100,6 @@ class VolumetricBinaryFile:
         return len(self._shape)
 
 
-# Example usage for a 3D dataset:
 if __name__ == "__main__":
     # 3D version (T, Y, X)
     shape3d = (1000, 512, 512)
