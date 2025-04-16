@@ -3,6 +3,7 @@
 # dependencies = [
 #     "numpy",
 #     "fastplotlib",
+#     "glfw",
 # ]
 # ///
 
