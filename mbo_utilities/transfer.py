@@ -1,26 +1,27 @@
 import argparse
+import concurrent.futures
 import sys
+import threading
 from pathlib import Path
+
 from fabric import Connection
 from tqdm import tqdm
-import concurrent.futures
-import threading
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="CLI to sync a local directory to HPC cluster in parallel using Fabric (SFTP over SSH)."
     )
-    parser.add_argument('--data', type=str, required=True,
-                        help='Local path to the data directory (must be a directory).')
-    parser.add_argument('--user', type=str, required=True,
-                        help='Username for the remote server.')
-    parser.add_argument('--remote_host', type=str, default='dtn02-hpc.rockefeller.edu',
-                        help='Remote server hostname.')
-    parser.add_argument('--remote_path', type=str,
-                        help='Path appended to /lustre/fs4/mbo/scratch/{user}.')
-    parser.add_argument('--exclude', type=str, nargs='*',
-                        help='List of patterns to exclude (e.g., temp/ or .git/ ).')
+    parser.add_argument("--data", type=str, required=True,
+                        help="Local path to the data directory (must be a directory).")
+    parser.add_argument("--user", type=str, required=True,
+                        help="Username for the remote server.")
+    parser.add_argument("--remote_host", type=str, default="dtn02-hpc.rockefeller.edu",
+                        help="Remote server hostname.")
+    parser.add_argument("--remote_path", type=str,
+                        help="Path appended to /lustre/fs4/mbo/scratch/{user}.")
+    parser.add_argument("--exclude", type=str, nargs="*",
+                        help="List of patterns to exclude (e.g., temp/ or .git/ ).")
     return parser.parse_args()
 
 
@@ -41,10 +42,10 @@ def transfer_file(host, user, local_file, remote_file_path, pbar, pbar_lock):
         transferred = 0
         # Open a dedicated connection for this file transfer
         with Connection(host=host, user=user) as conn:
-            with open(local_file, 'rb') as lf, conn.sftp() as sftp:
-                remote_dir = '/'.join(remote_file_path.split('/')[:-1])
+            with open(local_file, "rb") as lf, conn.sftp() as sftp:
+                remote_dir = "/".join(remote_file_path.split("/")[:-1])
                 conn.run(f'mkdir -p "{remote_dir}"')
-                with sftp.open(remote_file_path, 'wb') as rf:
+                with sftp.open(remote_file_path, "wb") as rf:
                     chunk_size = 1024 * 1024
                     while True:
                         chunk = lf.read(chunk_size)
@@ -62,13 +63,13 @@ def transfer_file(host, user, local_file, remote_file_path, pbar, pbar_lock):
 
 def transfer_files(host, user, local_path, remote_path, exclude_patterns=None):
     print(f"📂 Starting file transfer from {local_path} to {remote_path}.")
-    all_files = [f for f in local_path.rglob('*') if f.is_file()]
+    all_files = [f for f in local_path.rglob("*") if f.is_file()]
 
     # Filter out excluded files
     if exclude_patterns:
         def should_exclude(f):
             rel_path = str(f.relative_to(local_path)).replace("\\", "/")
-            return any(rel_path.startswith(p.rstrip('/')) for p in exclude_patterns)
+            return any(rel_path.startswith(p.rstrip("/")) for p in exclude_patterns)
 
         all_files = [f for f in all_files if not should_exclude(f)]
 
@@ -81,7 +82,7 @@ def transfer_files(host, user, local_path, remote_path, exclude_patterns=None):
 
     print(f"📦 Total files: {total_files} | Total size: {total_size / 1e9:.2f} GB")
     pbar_lock = threading.Lock()
-    with tqdm(total=total_size, unit='B', unit_scale=True, unit_divisor=1024, desc="Transferring") as pbar:
+    with tqdm(total=total_size, unit="B", unit_scale=True, unit_divisor=1024, desc="Transferring") as pbar:
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = []
             for f in all_files:

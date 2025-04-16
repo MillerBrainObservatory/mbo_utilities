@@ -1,27 +1,25 @@
 from __future__ import annotations
 
-from itertools import product
-from typing import Sequence
-
-import numpy as np
-import tifffile
-from pathlib import Path
-import ffmpeg
 import re
+from collections.abc import Sequence
+from itertools import product
+from pathlib import Path
+
 import dask
 import dask.array as da
-
+import ffmpeg
+import numpy as np
+import tifffile
 from matplotlib import cm
 
+from .metadata import is_raw_scanimage
 from .scanreader import scans
 from .scanreader.multiroi import ROI
 from .util import norm_minmax
-from .metadata import is_raw_scanimage
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
 from suite2p.io.binary import BinaryFile
-from pathlib import Path
 
 
 def tiff_to_binary(tiff_path, out_path, dtype="int16"):
@@ -92,7 +90,7 @@ def npy_to_dask(files, name="", axis=1, astype=None):
     keys = list(product([name], *[range(len(c)) for c in chunks]))
     values = [(np.load, files[i], "r") for i in range(len(chunks[axis]))]
 
-    dsk = dict(zip(keys, values))
+    dsk = dict(zip(keys, values, strict=False))
 
     arr = da.Array(dsk, name, chunks, dtype)
     if astype is not None:
@@ -102,21 +100,20 @@ def npy_to_dask(files, name="", axis=1, astype=None):
 
 
 def is_escaped_string(path: str) -> bool:
-    return bool(re.search(r'\\[a-zA-Z]', path))
+    return bool(re.search(r"\\[a-zA-Z]", path))
 
 
 def _make_json_serializable(obj):
     """Convert metadata to JSON serializable format."""
     if isinstance(obj, dict):
         return {k: _make_json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
+    if isinstance(obj, list):
         return [_make_json_serializable(v) for v in obj]
-    elif isinstance(obj, np.ndarray):
+    if isinstance(obj, np.ndarray):
         return obj.tolist()
-    elif isinstance(obj, (np.integer, np.floating)):
+    if isinstance(obj, (np.integer, np.floating)):
         return obj.item()
-    else:
-        return obj
+    return obj
 
 
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
@@ -194,16 +191,15 @@ def read_scan(pathnames, dtype=np.int16):
     --------
     >>> import mbo_utilities as mbo
     >>> import matplotlib.pyplot as plt
-    >>> scan = mbo.read_scan(r"C:\path\to\scan\*.tif")
+    >>> scan = mbo.read_scan(r"C:\\path\to\\scan\\*.tif")
     >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # First frame of z-plane 6
     """
-
     if isinstance(pathnames, str) and is_escaped_string(pathnames):
         print("Detected possible escaped characters in the path."
               " Use a raw string (r'...') or double backslashes.")
     filenames = expand_paths(pathnames)
     if len(filenames) == 0:
-        error_msg = 'Pathname(s) {} do not match any files in disk.'.format(pathnames)
+        error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
         raise FileNotFoundError(error_msg)
 
     scan = ScanMultiROIReordered(join_contiguous=True)
@@ -227,12 +223,11 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         item = super().__getitem__((0, key[2], key[3], key[1], key[0]))
         if item.ndim == 2:
             return item
-        elif item.ndim == 3:
+        if item.ndim == 3:
             return np.transpose(item, (2, 0, 1))
-        elif item.ndim == 4:
+        if item.ndim == 4:
             return np.transpose(item, (3, 2, 0, 1))
-        else:
-            raise ValueError(f"Unexpected number of dimensions: {item.ndim}")
+        raise ValueError(f"Unexpected number of dimensions: {item.ndim}")
 
     @property
     def shape(self):
@@ -260,14 +255,14 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         ROI's that have multiple 'zs' to a single depth.
         """
         try:
-            roi_infos = self.tiff_files[0].scanimage_metadata['RoiGroups']['imagingRoiGroup']['rois']
+            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
         except KeyError:
-            raise RuntimeError('This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata.')
+            raise RuntimeError("This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata.")
         roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
-        roi_infos = list(filter(lambda r: isinstance(r['zs'], (int, float, list)), roi_infos))  # discard empty/malformed ROIs
+        roi_infos = list(filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos))  # discard empty/malformed ROIs
         for roi_info in roi_infos:
             # LBM uses a single depth that is not stored in metadata, so force this to be 0
-            roi_info['zs'] = [0]
+            roi_info["zs"] = [0]
 
         rois = [ROI(roi_info) for roi_info in roi_infos]
         return rois
@@ -326,7 +321,7 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> li
         max_depth = 1
 
     base_depth = len(base_path.parts)
-    pattern = f'*{str_contains}*' if str_contains else '*'
+    pattern = f"*{str_contains}*" if str_contains else "*"
 
     files = [
         file for file in base_path.rglob(pattern)
@@ -336,8 +331,8 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> li
     if sort_ascending:
         import re
         def numerical_sort_key(path):
-            match = re.search(r'\d+', path.name)
-            return int(match.group()) if match else float('inf')
+            match = re.search(r"\d+", path.name)
+            return int(match.group()) if match else float("inf")
 
         files.sort(key=numerical_sort_key)
 
@@ -413,15 +408,15 @@ def save_png(fname, data):
     # TODO: move this to a separate module that imports matplotlib
     import matplotlib.pyplot as plt
     plt.imshow(data)
-    plt.axis('tight')
-    plt.axis('off')
+    plt.axis("tight")
+    plt.axis("off")
     plt.tight_layout()
-    plt.savefig(fname, dpi=300, bbox_inches='tight')
+    plt.savefig(fname, dpi=300, bbox_inches="tight")
     print(f"Saved data to {fname}")
 
 
 def save_mp4(fname: str | Path | np.ndarray, images, framerate=60, speedup=1, chunk_size=100, cmap="gray", win=7,
-             vcodec='libx264', normalize=True):
+             vcodec="libx264", normalize=True):
     """
     Save a video from a 3D array or TIFF stack to `.mp4`.
 
@@ -494,14 +489,14 @@ def save_mp4(fname: str | Path | np.ndarray, images, framerate=60, speedup=1, ch
     if win and win > 1:
         print(f"Applying temporal averaging with window size {win}")
         kernel = np.ones(win) / win
-        images = np.apply_along_axis(lambda x: np.convolve(x, kernel, mode='same'), axis=0, arr=images)
+        images = np.apply_along_axis(lambda x: np.convolve(x, kernel, mode="same"), axis=0, arr=images)
 
     print(f"Saving {T} frames to {fname}")
     output_framerate = int(framerate * speedup)
     process = (
         ffmpeg
-        .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}', framerate=output_framerate)
-        .output(str(fname), pix_fmt='yuv420p', vcodec=vcodec, r=output_framerate)
+        .input("pipe:", format="rawvideo", pix_fmt="rgb24", s=f"{width}x{height}", framerate=output_framerate)
+        .output(str(fname), pix_fmt="yuv420p", vcodec=vcodec, r=output_framerate)
         .overwrite_output()
         .run_async(pipe_stdin=True)
     )
@@ -532,7 +527,7 @@ def load_data_path(path: str | Path):
         save_folder = Path(path).expanduser().resolve()
         if not save_folder.exists():
             print("Folder does not exist")
-            return
+            return None
         plane_folders = get_files(save_folder, ".tif", 2)
     elif isinstance(path, dask.array.core.Array):
         return path
@@ -540,5 +535,4 @@ def load_data_path(path: str | Path):
         raise TypeError(f"Invalid type {type(path)}. Expected 'path', 'str' or 'list'")
     if is_raw_scanimage(plane_folders[0]):
         return read_scan(plane_folders)
-    else:
-        return zstack_from_files(plane_folders)
+    return zstack_from_files(plane_folders)

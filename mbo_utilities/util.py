@@ -44,7 +44,7 @@ def align_images_zstack(images, mode="trim"):
         aligned_images = [np.pad(img,
                                  ((0, target_shape[0] - img.shape[0]),
                                   (0, target_shape[1] - img.shape[1])),
-                                 mode='constant') for img in images]
+                                 mode="constant") for img in images]
     else:
         raise ValueError("Invalid mode. Choose 'trim' or 'pad'.")
     return np.stack(aligned_images, axis=0)
@@ -75,7 +75,7 @@ def smooth_data(data, window_size=5):
     >>> smooth_data(data, window_size=3)
     array([2., 3., 4., 5., 6.])
     """
-    return np.convolve(data, np.ones(window_size) / window_size, mode='valid')
+    return np.convolve(data, np.ones(window_size) / window_size, mode="valid")
 
 def norm_minmax(images):
     """
@@ -221,11 +221,10 @@ def is_running_jupyter():
     try:
         from IPython import get_ipython
         shell = get_ipython().__class__.__name__
-        if shell == 'ZMQInteractiveShell':  # are there other aliases for a jupyter shell
+        if shell == "ZMQInteractiveShell":  # are there other aliases for a jupyter shell
             return True  # jupyterlab
-        elif shell == 'TerminalInteractiveShell':
+        if shell == "TerminalInteractiveShell":
             return False  # ipython from terminal
-        else:
-            return False
+        return False
     except NameError:
         return False
