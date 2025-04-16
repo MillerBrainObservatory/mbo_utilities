@@ -13,3 +13,7 @@ API <api/index>
 BinaryFile <binaryfile>
 GUI <run_gui>
 ```
+
+## Useful 
+
+[uv-cheatsheet](https://www.saaspegasus.com/guides/uv-deep-dive/#cheatsheet-common-operations-in-uvs-workflows)
