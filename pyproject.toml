@@ -11,20 +11,20 @@ dynamic = ["version"]
 requires-python = ">=3.10, <=3.13"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
-    "tifffile",
-    "scikit-image",
-    "matplotlib",
-    "imageio[ffmpeg]",
-    "ffmpeg-python",
-    "PyWavelets",
-    "dask",
-    "zarr",
-    "h5py",
-    "tqdm",
-    "fabric",
-    "fastplotlib",
-    "pygfx",
-"tqdm"
+	"tifffile",
+	"scikit-image",
+	"matplotlib",
+	"imageio[ffmpeg]",
+	"ffmpeg-python",
+	"PyWavelets",
+	"dask",
+	"zarr",
+	"h5py",
+	"tqdm",
+	"fabric",
+	"fastplotlib",
+	"pygfx",
+	"tqdm",
 	"jupyterlab",
 ]
 
@@ -42,7 +42,7 @@ notebook = [
 	"anywidget",
 ]
 s2p = [
-"suite2p",
+	"suite2p",
 ]
 all = [
 	"imgui-bundle",
@@ -67,7 +67,7 @@ mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities
 [tool.ruff]
 line-length = 88
 src = ["lbm_suite2p_python"]
-exclude = ["docs", "exclude", "demos", "scripts"] 
+exclude = ["docs", "exclude", "demos", "scripts", "versioneer.py"] 
 
 [tool.ruff.lint]
 pydocstyle = { convention = "numpy" }
