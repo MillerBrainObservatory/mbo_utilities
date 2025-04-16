@@ -10,4 +10,5 @@ maxdepth: 1
 ---
 Assembly <assembly>
 API <api/index>
+BinaryFile <binaryfile>
 ```
