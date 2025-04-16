@@ -41,6 +41,7 @@ def render_qt_widget(data=None):
     main_window.resize(data.shape[-1], data.shape[-2])
     main_window.show()
     app.exec_()
+    # return app
 
 
 class LBMMainWindow(QMainWindow):

@@ -11,8 +11,7 @@ if is_qt_installed():
 
 def run_gui(
         data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None,
-        use_qt: bool = False,
-) -> None | fpl.ImageWidget:
+):
     """Open a GUI to preview data."""
     # Handle data_in, which can be a path to files
     if data_in is None:
@@ -29,17 +28,7 @@ def run_gui(
         print('Data provided and set.')
         data = data_in if isinstance(data_in, ScanMultiROIReordered) else load_data_path(data_in)
 
-    if use_qt:
-        print('Use QT forced')
-        if not is_qt_installed():
-            raise ImportError(f"Failed to import Qt from {Path(__file__).name}."
-                              f"Called because `use_qt=True`."
-                              f" Use with `use_qt=False to render in a notebook.")
-        else:
-            print("Forced QT Widget")
-            render_qt_widget(data=data)
-
-    elif is_running_jupyter():
+    if is_running_jupyter():
         print('Is running jupyter')
         # TODO: load dialog when qt isn't installed
         if data_in is None:
@@ -54,6 +43,6 @@ def run_gui(
             iw = fpl.ImageWidget(data=data, histogram_widget=True,)
             iw.show()
             return iw
-    else:  # not runniing jupyter,
+    else:  # not runniing jupyter
             print(f"Not running Jupyter, Rendering qt widget")
-            render_qt_widget(data=data)
+            render_qt_widget(data=data) 
