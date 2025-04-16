@@ -9,5 +9,6 @@ Functions to help visualize datasets.
 
 .. autofunction:: save_mp4
 .. autofunction:: save_png
+.. autofunction:: run_gui
 
 ```
