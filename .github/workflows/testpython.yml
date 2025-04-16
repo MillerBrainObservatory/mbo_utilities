@@ -1,5 +1,3 @@
-name: CI
-
 on:
   push:
     branches:
@@ -7,23 +5,23 @@ on:
   workflow_dispatch:
 
 jobs:
-TestPython:
-  name: Python / Test
-  runs-on: ubuntu-latest
-  strategy:
-    matrix:
-      python-version:
-        - "3.10"
-        - "3.11"
-  steps:
-    - uses: actions/checkout@v4
-      with:
-        lfs: true
-    - uses: astral-sh/setup-uv@v5
-      with:
-        version: "0.6.x"
-    - name: Run tests
-      run: uv run pytest ./tests --color=yes --cov mbo_utilities --cov-report xml
-      env:
-        UV_PYTHON: ${{ matrix.python-version }}
-    - uses: codecov/codecov-action@v5
+  TestPython:
+    name: Python / Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.6.x"
+      - name: Run tests
+        run: uv run pytest ./tests --color=yes --cov mbo_utilities --cov-report xml
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
+      - uses: codecov/codecov-action@v5
