@@ -4,8 +4,11 @@
 #     "numpy",
 #     "fastplotlib",
 # ]
-#
+# ///
+
 import os
+import shutil
+
 import numpy as np
 from pathlib import Path
 import fastplotlib as fpl
@@ -97,6 +100,10 @@ class VolumetricBinaryFile:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+    @property
+    def ndim(self):
+        return len(self._shape)
+
 
 # Example usage for a 3D dataset:
 if __name__ == "__main__":
@@ -112,7 +119,7 @@ if __name__ == "__main__":
     del bf3d
 
     # Example for a 4D dataset (Z, T, Y, X)
-    shape4d = (5, 1000, 512, 512)
+    shape4d = (5, 200, 512, 512)
     outfile4d = "movie_4d.bin"
     data4d = np.random.randint(0, 2 ** 15 - 1, size=shape4d, dtype="int16")
     bf4d = VolumetricBinaryFile(shape4d, outfile4d, dtype="int16")
@@ -123,3 +130,11 @@ if __name__ == "__main__":
 
     loaded = VolumetricBinaryFile(shape4d, outfile4d, dtype="int16")
     iw = fpl.ImageWidget(loaded)
+    iw.show()
+    fpl.loop.run()
+
+    # delete the files
+    if Path("movie_3d.bin").exists():
+        shutil.rmtree("movie_3d.bin")
+    if Path("movie_4d.bin").exists():
+        shutil.rmtree("movie_4d.bin")
