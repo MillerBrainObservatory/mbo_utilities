@@ -55,6 +55,36 @@ all = [
 	"suite2p"
 ]
 
+[dependency-groups]
+dev = [
+	"pytest",
+	"sphinx>=6.1.3",
+	"docutils>=0.19",
+	"opencv-python",
+	"nbsphinx",
+	"numpydoc",
+	"ipykernel",
+	"sphinx-autodoc2",
+	"sphinx_tippy",
+	"sphinx_gallery",
+	"sphinx-togglebutton",
+	"sphinx-copybutton",
+	"sphinx_book_theme",
+	"pydata_sphinx_theme",
+	"sphinx_design",
+	"sphinxcontrib-images",
+	"sphinxcontrib-video",
+	"jupytext",
+	"myst_nb",
+	"seaborn",
+	"scipy",
+	"scikit-image",
+	"suite2p[all]",
+]
+lint = [
+	"ruff"
+]
+
 [tool.uv]
 default-groups = "all"
 
