@@ -24,7 +24,8 @@ dependencies = [
     "fabric",
     "fastplotlib",
     "pygfx",
-	"tqdm"
+"tqdm"
+	"jupyterlab",
 ]
 
 [project.optional-dependencies]
@@ -46,7 +47,6 @@ s2p = [
 all = [
 	"imgui-bundle",
 	"jupyter_rfb>=0.5.1",
-	"jupyterlab",
 	"sidecar",
 	"ipywidgets>=8.0.0,<9",
 	"anywidget",
@@ -60,8 +60,8 @@ default-groups = "all"
 
 [tool.uv.sources]
 fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib", branch = "main" }
-mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "master" }
 pygfx = { git = "https://github.com/pygfx/pygfx", branch = "main" }
+mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "master" }
 
 # https://github.com/charliermarsh/ruff
 [tool.ruff]
