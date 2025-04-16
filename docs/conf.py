@@ -107,6 +107,7 @@ html_file_suffix = ".html"
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3.9", None),
+    "fastplotlib": ("https://www.fastplotlib.org/", None),
     "numpydoc": ("https://numpydoc.readthedocs.io/en/latest", None),
     "mbo": ("https://millerbrainobservatory.github.io/", None),
     "utilities": ("https://millerbrainobservatory.github.io/mbo_utilities/", None),
