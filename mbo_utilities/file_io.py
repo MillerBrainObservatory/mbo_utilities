@@ -20,6 +20,26 @@ from .metadata import is_raw_scanimage
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
+from suite2p.io.binary import BinaryFile
+from pathlib import Path
+
+
+def tiff_to_binary(tiff_path, out_path, dtype="int16"):
+    data = tifffile.memmap(tiff_path)
+    out_path = Path(out_path).with_suffix(".bin")
+
+    if data.ndim != 3:
+        raise ValueError("Must be assembled, 3D (T, Y, X)")
+
+    nframes, x, y = data.shape
+    bf = BinaryFile(Ly=y, Lx=x, filename=str(Path(out_path)), n_frames=nframes, dtype=dtype)
+
+    bf[:] = data
+    bf.close()
+
+    print(f"Wrote binary file '{out_path}' with {nframes} frames of shape ({x},{y}).")
+
+
 def zarr_to_dask(zarr_parent):
     """Convert directory of zarr arrays into a Z-stack."""
     # search 3 dirs deep for arrays within our zarr group
@@ -29,12 +49,6 @@ def zarr_to_dask(zarr_parent):
 def npy_to_dask(files, name="", axis=1, astype=None):
     """
     Creates a Dask array that lazily stacks multiple .npy files along a specified axis without fully loading them into memory.
-
-    This function reads a sample .npy file to obtain a base shape and data type, then computes the size
-    along the concatenation axis for each file. It builds a low‐level Dask graph where each array chunk is loaded
-    on demand using np.load with memory mapping. The resulting Dask array has its chunks defined so that the stacking
-    axis’s chunk sizes correspond to the lengths (number of elements) from each file, while other axes use the dimensions
-    from the sample file.
 
     Parameters
     ----------
@@ -52,9 +66,6 @@ def npy_to_dask(files, name="", axis=1, astype=None):
     Returns
     -------
     dask.array.Array
-        A lazily evaluated Dask array representing the stacked arrays from the .npy files. Its shape is determined
-        by the shape of the first file in all dimensions except along the specified axis, whose size is the sum of
-        the corresponding dimensions of each file.
 
     Examples
     --------
