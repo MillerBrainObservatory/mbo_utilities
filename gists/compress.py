@@ -1,22 +1,16 @@
 # /// script
 # requires-python = ">=3.13"
-# dependencies = [
-#     "numpy",
-#     "tifffile",
-#      "tqdm",
-# ]
+# dependencies = ["click", "numpy", "tifffile", "tqdm"]
 # ///
 import os
 import numpy as np
 import tifffile
 from pathlib import Path
-import tempfile
+import click
 from tqdm import tqdm
 
-def create_compressed_downsampled(tiff_path, output_path, max_bytes=500*1024*1024, dtype="int16"):
-    """
-    Load a 3D TIFF (T, Y, X), downsample the time axis so raw data is under max_bytes, and save it as a compressed npz.
-    """
+
+def create_compressed_downsampled(tiff_path, output_path, max_bytes=500 * 1024 * 1024, dtype="int16"):
     tiff_path = Path(tiff_path)
     data = tifffile.memmap(str(tiff_path), mode="r")
     T, Y, X = data.shape
@@ -29,14 +23,37 @@ def create_compressed_downsampled(tiff_path, output_path, max_bytes=500*1024*102
     raw_bytes = new_T * frame_size
     output_file = Path(output_path).with_suffix(".npz")
     np.savez_compressed(str(output_file), downsampled=downsampled)
-    print(f"Downsampling step: {step}, {new_T} frames, {raw_bytes/1024**2:.1f}MB raw.")
-    print(f"Saved to {output_file}")
+    print(f"Saved to {output_file} ({new_T} frames, {raw_bytes / 1024 ** 2:.1f} MB raw)")
+
+
+@click.command()
+@click.option(
+    "--input", "input_path",
+    prompt=f"Path to TIFF or folder{' [use backslashes]' if os.name == "nt" else ''}",
+    type=click.Path(exists=True)
+)
+@click.option("--unit", prompt="Size unit (MB or GB)", type=click.Choice(["MB", "GB"], case_sensitive=False))
+@click.option("--size", prompt="Max size in selected unit", type=float)
+def cli(input_path, unit, size):
+    base = 1024 ** 2 if unit.upper() == "MB" else 1024 ** 3
+    max_bytes = int(size * base)
+    input_path = Path(input_path)
+
+    output_dir = Path(__file__).parent.parent / "data"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if input_path.is_file():
+        outpath = output_dir / input_path.stem
+        create_compressed_downsampled(input_path, outpath, max_bytes=max_bytes)
+    else:
+        # TODO: use mbo.get_files once imports are more clean, i.e. fast pip install mbo_utilities without GUI cmds
+        tiffs = sorted(input_path.glob("*.tif*")) + sorted(input_path.glob("*.tiff"))
+        with tqdm(total=len(tiffs), desc="Compressing TIFFs") as pbar:
+            for tif in tiffs:
+                outpath = output_dir / tif.stem
+                create_compressed_downsampled(tif, outpath, max_bytes=max_bytes)
+                pbar.update(1)
+
 
 if __name__ == "__main__":
-    tiff_path = r"D:\W2_DATA\kbarber\2025_03_01\mk301\assembled\plane_01_mk301.tiff"
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        output_path = Path(tmpdirname) / "plane_01_mk301"
-        create_compressed_downsampled(tiff_path, output_path)
-        # At this point the compressed file is created in a temporary directory.
-        # You can inspect, upload, or otherwise use it here.
-        # When the with block ends, the temporary directory and its contents are automatically deleted.
+    cli()
