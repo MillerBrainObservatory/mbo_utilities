@@ -31,6 +31,12 @@ jobs:
       - name: Install system deps
         run: sudo apt-get install -y git ffmpeg libegl1-mesa-dev libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers xorg-dev
 
+      - name: Install Windows OpenGL
+        if: runner.os == 'Windows'
+        run: |
+          git clone --depth 1 https://www.github.com/pyvista/gl-ci-helpers.git
+          powershell gl-ci-helpers/appveyor/install_opengl.ps1
+
       - name: Conda Install
         shell: bash
 
@@ -42,11 +48,6 @@ jobs:
           pip install -r docs/requirements.txt
           sphinx-build -b html docs/ docs/_build/html --keep-going
 
-      - name: Install Windows OpenGL
-        if: runner.os == 'Windows'
-        run: |
-          git clone --depth 1 https://www.github.com/pyvista/gl-ci-helpers.git
-          powershell gl-ci-helpers/appveyor/install_opengl.ps1
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
