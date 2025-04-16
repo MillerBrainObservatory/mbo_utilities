@@ -1,5 +1,12 @@
 name: UV Example
 
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [dev, master]
+  workflow_dispatch:
+
 jobs:
   uv-example:
     name: python
