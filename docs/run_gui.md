@@ -10,8 +10,9 @@ kernelspec:
   language: python
   name: python3
 ---
-(gui)=
-# GUI 
+(run_gui)=
+# Run Gui
 
-{func}`mbo_utilities.run_gui()` will open a {func}`fastplotlib.ImageWidget()`.
+{func}`mbo_utilities.run_gui` will open a {func}`fastplotlib.ImageWidget`.
+{ref}`mbo_utilities.run_gui` will open a {ref}`fastplotlib.ImageWidget`}.
 
