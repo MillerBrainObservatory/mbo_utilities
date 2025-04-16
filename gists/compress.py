@@ -36,5 +36,5 @@ def create_compressed_downsampled(tiff_path, output_path, max_bytes=500*1024*102
 
 if __name__ == "__main__":
     tiff_path = r"D:\W2_DATA\kbarber\2025_03_01\mk301\assembled\plane_01_mk301.tiff"
-    output_path = "../data/downsampled_movie"
+    output_path = str(Path(__file__).parent.parent / "data" / "downsampled_movie")
     create_compressed_downsampled(tiff_path, output_path)
