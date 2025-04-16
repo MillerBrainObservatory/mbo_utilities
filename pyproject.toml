@@ -40,6 +40,9 @@ notebook = [
 	"ipywidgets>=8.0.0,<9",
 	"anywidget",
 ]
+s2p = [
+"suite2p",
+]
 all = [
 	"imgui-bundle",
 	"jupyter_rfb>=0.5.1",
@@ -49,6 +52,7 @@ all = [
 	"anywidget",
 	"pyqt5==5.15.11",
 	"pyqt5-qt5==5.15.2",
+	"suite2p"
 ]
 
 [tool.uv]
