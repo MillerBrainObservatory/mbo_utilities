@@ -19,23 +19,6 @@ from .util import norm_minmax
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-from suite2p.io.binary import BinaryFile
-
-
-def tiff_to_binary(tiff_path, out_path, dtype="int16"):
-    data = tifffile.memmap(tiff_path)
-    out_path = Path(out_path).with_suffix(".bin")
-
-    if data.ndim != 3:
-        raise ValueError("Must be assembled, 3D (T, Y, X)")
-
-    nframes, x, y = data.shape
-    bf = BinaryFile(Ly=y, Lx=x, filename=str(Path(out_path)), n_frames=nframes, dtype=dtype)
-
-    bf[:] = data
-    bf.close()
-
-    print(f"Wrote binary file '{out_path}' with {nframes} frames of shape ({x},{y}).")
 
 
 def zarr_to_dask(zarr_parent):
