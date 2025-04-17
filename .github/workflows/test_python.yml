@@ -31,13 +31,16 @@ jobs:
             libx11-dev \
             libx11-xcb-dev \
             libxcb1-dev \
-            libxcb-glx0-dev
+            libxcb-glx0-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxext-dev
         uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
       # - name: Test - python ${{ matrix.python-version }}
       #   run: uv run --frozen pytest
       - name: uv sync
-        run: uv sync --all-extras --dev --active
+        run: uv sync --all-extras --dev --active --refresh
       - name: uv run pytest
         run: uv run pytest tests
