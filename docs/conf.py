@@ -93,8 +93,8 @@ html_static_path = ["_static"]
 # A shorter title for the navigation bar.  Default is the same as html_title.
 html_title = "mbo_utilities"
 
-html_logo = "./_static/logo_suit2p.png"
-html_favicon = "./_static/icon_suite2p.svg"
+html_logo = "./_static/logo_utilities.png"
+html_favicon = "./_static/utilities.png"
 html_theme = "sphinx_book_theme"
 
 html_short_title = "mbo utilities"

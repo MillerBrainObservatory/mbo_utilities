@@ -15,12 +15,13 @@ kernelspec:
 
 Examples of some common function use cases.
 
-{func}`mbo_utilities.run_gui` opens an interactive viewer for imaging data using [fastplotlib](https://www.fastplotlib.org/user_guide/guide.html#what-is-fastplotlib).
-It supports execution in both **Jupyter** and **Qt-native** environments.
-
 ---
 
-## Usage
+(usage_run_gui)=
+## `run_gui`
+
+{func}`mbo_utilities.run_gui` opens an interactive viewer for imaging data using [fastplotlib](https://www.fastplotlib.org/user_guide/guide.html#what-is-fastplotlib).
+It supports execution in both **Jupyter** and **Qt-native** environments.
 
 ### Jupyter / IPython
 

@@ -124,7 +124,6 @@ plt.title('Mean Image for first 100 frames')
 plt.show()
 ```
 
-
 This will display a widget allowing you to scroll in time and in z.
 
 ```{code-cell} ipython3
