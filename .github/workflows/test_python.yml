@@ -35,6 +35,7 @@ jobs:
             libxrandr-dev \
             libxi-dev \
             libxext-dev
+      - name: Setup uv
         uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
