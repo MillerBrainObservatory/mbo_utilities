@@ -43,6 +43,6 @@ jobs:
       # - name: Test - python ${{ matrix.python-version }}
       #   run: uv run --frozen pytest
       - name: uv sync
-        run: uv pip install -e ".[all]" --refresh --active
+        run: uv pip install -e ".[all]"
       - name: uv run pytest
         run: uv run pytest tests
