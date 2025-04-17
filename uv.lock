@@ -827,13 +827,17 @@ wheels = [
 
 [[package]]
 name = "fastplotlib"
-version = "0.5.0"
-source = { git = "https://github.com/fastplotlib/fastplotlib?branch=main#5e910cc78355f0fd475b58900245c3814ee0460c" }
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cmap" },
     { name = "numpy" },
     { name = "pygfx" },
     { name = "wgpu" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4f/4e/b5bcc356933d2f56f330a47a0f59abbfd3054c113ccd46469557c3cd2097/fastplotlib-0.4.0.tar.gz", hash = "sha256:57d92acf97feadf2009f9c4e12d2bed75e0bc199c8016cd14d09cd8f9c01b529", size = 139884 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/78/d8/4304e948c2b5db1b646f35fb99abea2d9f09f8466f2b3c48b3ada4565b74/fastplotlib-0.4.0-py3-none-any.whl", hash = "sha256:f850b597accdb8a3ca3ff10d6593e223d263c5255226842390ed4213968c8311", size = 166977 },
 ]
 
 [[package]]
@@ -2019,6 +2023,7 @@ all = [
     { name = "suite2p" },
 ]
 gui = [
+    { name = "glfw" },
     { name = "imgui-bundle" },
     { name = "pyqt5" },
     { name = "pyqt5-qt5" },
@@ -2037,6 +2042,8 @@ s2p = [
 [package.dev-dependencies]
 dev = [
     { name = "docutils" },
+    { name = "glfw" },
+    { name = "imgui-bundle" },
     { name = "ipykernel" },
     { name = "jupytext" },
     { name = "myst-nb" },
@@ -2070,8 +2077,9 @@ requires-dist = [
     { name = "anywidget", marker = "extra == 'notebook'" },
     { name = "dask" },
     { name = "fabric" },
-    { name = "fastplotlib", git = "https://github.com/fastplotlib/fastplotlib?branch=main" },
+    { name = "fastplotlib" },
     { name = "ffmpeg-python" },
+    { name = "glfw", marker = "extra == 'gui'" },
     { name = "h5py" },
     { name = "imageio", extras = ["ffmpeg"] },
     { name = "imgui-bundle", marker = "extra == 'all'" },
@@ -2083,7 +2091,7 @@ requires-dist = [
     { name = "jupyterlab" },
     { name = "jupyterlab", marker = "extra == 'notebook'" },
     { name = "matplotlib" },
-    { name = "pygfx", git = "https://github.com/pygfx/pygfx?branch=main" },
+    { name = "pygfx" },
     { name = "pyqt5", marker = "extra == 'all'", specifier = "==5.15.11" },
     { name = "pyqt5", marker = "extra == 'gui'", specifier = "==5.15.11" },
     { name = "pyqt5-qt5", marker = "extra == 'all'", specifier = "==5.15.2" },
@@ -2103,6 +2111,8 @@ provides-extras = ["gui", "notebook", "s2p", "all"]
 [package.metadata.requires-dev]
 dev = [
     { name = "docutils", specifier = ">=0.19" },
+    { name = "glfw" },
+    { name = "imgui-bundle" },
     { name = "ipykernel" },
     { name = "jupytext" },
     { name = "myst-nb" },
@@ -3112,7 +3122,7 @@ wheels = [
 [[package]]
 name = "pygfx"
 version = "0.9.0"
-source = { git = "https://github.com/pygfx/pygfx?branch=main#dc443c4b6356cdd276c1cbfdab1b15d2142a07dc" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "freetype-py" },
     { name = "hsluv" },
@@ -3122,6 +3132,10 @@ dependencies = [
     { name = "rendercanvas" },
     { name = "uharfbuzz" },
     { name = "wgpu" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/dc/c6f0aa66fc258ce3e9e663a30fa4b270c6c420bfbaf7579eb8677e00dc32/pygfx-0.9.0.tar.gz", hash = "sha256:80928c30e9525492ba8b9fa90e45422e833de702c7221074250d0f9f61d9f37f", size = 1092808 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/51/b7/fcdbaeaf970bdd8bc42dbb6b6ba4b8208e9a9bebd2127342a28990c49a1d/pygfx-0.9.0-py3-none-any.whl", hash = "sha256:9e619a4d3233f395e9137d1037b5f83201ec77cb84cb600287d91379d803e68a", size = 1171545 },
 ]
 
 [[package]]
