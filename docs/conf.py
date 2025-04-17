@@ -7,8 +7,6 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 import os
 import sys
-import shutil
-from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join("..")))
 sys.path.insert(0, os.path.abspath(os.path.join("..", "mbo_utilities")))
@@ -132,7 +130,7 @@ html_theme_options = {
         {
             "name": "MBO User Hub",
             "url": "https://millerbrainobservatory.github.io/",
-            "icon": "_static/icon_mbo_home.png",
+            "icon": "_static/icon_mbo_home2.png",
             "type": "local",
         },
         {
