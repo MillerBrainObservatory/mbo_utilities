@@ -33,6 +33,7 @@ gui = [
 	"imgui-bundle",
 	"pyqt5==5.15.11",
 	"pyqt5-qt5==5.15.2",
+	"glfw",
 ] 
 notebook = [
 	"jupyter_rfb>=0.5.1",
@@ -80,6 +81,8 @@ dev = [
 	"scipy",
 	"scikit-image",
 	"suite2p[all]",
+	"glfw",
+	"imgui-bundle",
 ]
 lint = [
 	"ruff"
