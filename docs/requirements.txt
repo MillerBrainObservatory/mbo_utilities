@@ -19,4 +19,4 @@ myst_nb
 seaborn
 scipy
 scikit-image
-suite2p[all]
+suite2p
