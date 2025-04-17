@@ -21,8 +21,17 @@ jobs:
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
           sudo apt-get update -y -qq
-          sudo apt-get install --no-install-recommends -y ffmpeg libegl1-mesa-dev libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers xorg-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcb-glx0-dev
-      - name: Install uv@latest
+          sudo apt-get install --no-install-recommends -y \
+            ffmpeg \
+            libegl1-mesa-dev \
+            libgl1-mesa-dri \
+            libxcb-xfixes0-dev \
+            mesa-vulkan-drivers \
+            xorg-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-glx0-dev
         uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
