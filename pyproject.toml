@@ -22,8 +22,6 @@ dependencies = [
 	"h5py",
 	"tqdm",
 	"fabric",
-	"fastplotlib",
-	"pygfx",
 	"tqdm",
 	"jupyterlab",
 ]
@@ -37,6 +35,8 @@ gui = [
 ] 
 notebook = [
 	"jupyter_rfb>=0.5.1",
+	"fastplotlib",
+	"pygfx",
 	"jupyterlab",
 	"sidecar",
 	"ipywidgets>=8.0.0,<9",
@@ -49,6 +49,8 @@ all = [
 	"imgui-bundle",
 	"jupyter_rfb>=0.5.1",
 	"sidecar",
+	"fastplotlib",
+	"pygfx",
 	"ipywidgets>=8.0.0,<9",
 	"anywidget",
 	"pyqt5==5.15.11",
