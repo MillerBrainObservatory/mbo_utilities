@@ -22,9 +22,6 @@ jobs:
           python-version: "3.10"
           enable-cache: true
 
-      - name: Sync dependencies
-        run: uv sync --all-extras --dev
-
       - name: Sync --all-extras
         run: GIT_LFS_SKIP_SMUDGE=1 uv sync --all-extras
 
