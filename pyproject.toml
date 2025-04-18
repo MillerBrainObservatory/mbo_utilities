@@ -58,7 +58,7 @@ all = [
 ]
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "ruff"]
 docs = [
 	"sphinx>=6.1.3",
 	"docutils>=0.19",
@@ -79,12 +79,6 @@ docs = [
 	"scipy",
 	"scikit-image",
 ]
-lint = [
-	"ruff"
-]
-
-[tool.uv]
-default-groups = "all"
 
 [tool.uv.sources]
 fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib", branch = "main" }

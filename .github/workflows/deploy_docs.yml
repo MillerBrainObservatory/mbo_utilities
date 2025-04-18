@@ -24,7 +24,7 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --only-dev
+        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --group docs
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
