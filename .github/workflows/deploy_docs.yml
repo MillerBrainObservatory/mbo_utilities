@@ -10,8 +10,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout 
+        uses: actions/checkout@v4
       - name: Setup Python 3.10
         uses: actions/setup-python@v5
         with:
@@ -27,6 +30,7 @@ jobs:
         run: GIT_LFS_SKIP_SMUDGE=1 uv sync --group docs
 
       - name: Deploy to GitHub Pages
+        if: github.repository == 'MillerBrainObservatory/mbo_utilities'
         uses: peaceiris/actions-gh-pages@v3
         with:
           publish_branch: gh-pages
