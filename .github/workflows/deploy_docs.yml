@@ -20,17 +20,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout 
+      - name: Checkout repo 
         uses: actions/checkout@v4
-      - name: Setup Python 3.10
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
           enable-cache: true
 
       - name: Sync and build docs
@@ -38,7 +33,7 @@ jobs:
           GIT_LFS_SKIP_SMUDGE=1 uv sync --group docs
           GIT_LFS_SKIP_SMUDGE=1 uv run sphinx-build -b html docs docs/_build/html
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy docs
         if: github.repository == 'MillerBrainObservatory/mbo_utilities'
         uses: peaceiris/actions-gh-pages@v3
         with:
