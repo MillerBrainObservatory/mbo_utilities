@@ -15,39 +15,6 @@ project = "mbo_utilities"
 copyright = "2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved"
 release = "0.0.1"
 
-# Copy example notebooks for rendering in the docs
-# print(f'Copying sphinx source files ...')
-# source_dir = Path(__file__).resolve().parent.parent / "demos"
-# dest_dir = Path(__file__).resolve().parent / "user_guide"
-#
-# def copy_with_overwrite(src: Path, dst: Path):
-#     print(f'source: {src} being copied to destination: {dst}')
-#     if src.is_dir():
-#         if dst.exists():
-#             shutil.rmtree(dst)
-#         shutil.copytree(src, dst)
-#     else:
-#         if dst.exists():
-#             dst.unlink()
-#         shutil.copy2(src, dst)
-#
-# if source_dir.exists():
-#     if dest_dir.exists():
-#         # Remove all items except "index.md"
-#         for item in dest_dir.iterdir():
-#             if item.name != "index.md":
-#                 if item.is_dir():
-#                     shutil.rmtree(item)
-#                 else:
-#                     item.unlink()
-#     else:
-#         dest_dir.mkdir(parents=True, exist_ok=True)
-#
-#     for item in source_dir.rglob("*"):
-#         relative_path = item.relative_to(source_dir)
-#         destination_path = dest_dir / relative_path
-#         copy_with_overwrite(item, destination_path)
-
 exclude_patterns = ["Thumbs.db", ".DS_Store"]
 
 myst_enable_extensions = [
@@ -108,9 +75,7 @@ intersphinx_mapping = {
     "fastplotlib": ("https://www.fastplotlib.org/", None),
     "numpydoc": ("https://numpydoc.readthedocs.io/en/latest", None),
     "mbo": ("https://millerbrainobservatory.github.io/", None),
-    "mbo_utilities": ("https://millerbrainobservatory.github.io/mbo_utilities/", None),
     "lbm_suite2p_python": ("https://millerbrainobservatory.github.io/LBM-Suite2p-Python/", None),
-    "caiman": ("https://caiman.readthedocs.io/en/latest/", None),
     "suite2p": ("https://suite2p.readthedocs.io/en/latest/", None),
 }
 
@@ -130,7 +95,7 @@ html_theme_options = {
         {
             "name": "MBO User Hub",
             "url": "https://millerbrainobservatory.github.io/",
-            "icon": "_static/icon_mbo_home2.png",
+            "icon": "_static/icon_mbo_home.png",
             "type": "local",
         },
         {
