@@ -8,7 +8,7 @@ description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 dynamic = ["version"]
-requires-python = ">=3.10, <=3.12"
+requires-python = ">=3.11, <=3.12"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
 	"tifffile>=2025.3.30",
