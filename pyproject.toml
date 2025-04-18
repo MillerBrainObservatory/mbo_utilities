@@ -8,26 +8,23 @@ description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 dynamic = ["version"]
-requires-python = ">=3.10, <=3.13"
+requires-python = ">=3.10, <=3.12"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
-	"tifffile",
+	"tifffile>=2025.3.30",
 	"scikit-image",
-	"matplotlib",
+	"zarr>=2.18.3",
+	"dask>=2025.3.0",
+	"mkl-fft>=1.3.13",
 	"imageio[ffmpeg]",
-	"ffmpeg-python",
-	"PyWavelets",
-	"dask",
-	"zarr",
+	"matplotlib>=3.10.1",
 	"h5py",
 	"tqdm",
-	"fabric",
-	"tqdm",
-	"jupyterlab",
 ]
 
 [project.optional-dependencies]
 gui = [
+	"cmake",
 	"imgui-bundle",
 	"pyqt5==5.15.11",
 	"pyqt5-qt5==5.15.2",
@@ -39,22 +36,25 @@ notebook = [
 	"pygfx",
 	"jupyterlab",
 	"sidecar",
+	"ipykernel",
 	"ipywidgets>=8.0.0,<9",
 	"anywidget",
 ]
-# s2p = [
-# 	"suite2p",
-# ]
+napari = ["napari"]
 all = [
 	"imgui-bundle",
-	"jupyter_rfb>=0.5.1",
-	"sidecar",
-	"fastplotlib",
-	"pygfx",
-	"ipywidgets>=8.0.0,<9",
-	"anywidget",
 	"pyqt5==5.15.11",
 	"pyqt5-qt5==5.15.2",
+	"glfw",
+	"jupyter_rfb>=0.5.1",
+	"fastplotlib",
+	"pygfx",
+	"jupyterlab",
+	"sidecar",
+	"ipykernel",
+	"ipywidgets>=8.0.0,<9",
+	"anywidget",
+	"napari",
 ]
 
 [dependency-groups]
@@ -80,9 +80,9 @@ docs = [
 	"scikit-image",
 ]
 
-[tool.uv.sources]
-fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib", branch = "main" }
-pygfx = { git = "https://github.com/pygfx/pygfx", branch = "main" }
+# [tool.uv.sources]
+# fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib", branch = "main" }
+# pygfx = { git = "https://github.com/pygfx/pygfx", branch = "main" }
 
 # https://github.com/charliermarsh/ruff
 [tool.ruff]
@@ -128,7 +128,6 @@ homepage = "https://github.com/millerbrainobservatory/mbo_utilities"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mbo_utilities*"]
-
 
 [tool.versioneer]
 VCS = "git"
