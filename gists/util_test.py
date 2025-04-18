@@ -8,5 +8,3 @@
 #
 # [tool.uv.sources]
 # mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "master" }
-
-from pathlib import Path
