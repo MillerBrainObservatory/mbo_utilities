@@ -17,15 +17,6 @@ jobs:
         with:
           python-version: "3.10"
 
-      # - name: Install system dependencies
-      #   run: |
-      #     sudo apt-get update -y -qq
-      #     sudo apt-get install --no-install-recommends -y \
-      #       xorg-dev \
-      #       libx11-dev \
-      #       libxcb1-dev \
-      #       libxcb-glx0-dev
-
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -33,7 +24,7 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --docs
+        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --only-dev
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
