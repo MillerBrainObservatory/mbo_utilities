@@ -1,10 +1,11 @@
 from pathlib import Path
 import numpy as np
-import fastplotlib as fpl
 
-from ..util import is_qt_installed, is_running_jupyter
+from ..util import is_imgui_installed, is_qt_installed, is_running_jupyter
 from ..file_io import ScanMultiROIReordered, load_data_path
 
+if is_imgui_installed():
+    import fastplotlib as fpl
 if is_qt_installed():
     from .qt import render_qt_widget
 
