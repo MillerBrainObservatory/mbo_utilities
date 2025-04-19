@@ -113,8 +113,9 @@ def save_as(
     """
 
     savedir = Path(savedir)
-    if not savedir.is_dir():
-        raise ValueError(f"{savedir} is not a directory")
+    if not savedir.parent.is_dir():
+        raise ValueError(f"{savedir} is not inside a valid directory.")
+    savedir.mkdir(exist_ok=True)
 
     if planes is None:
         planes = list(range(scan.num_channels))
