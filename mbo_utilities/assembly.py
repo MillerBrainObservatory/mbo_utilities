@@ -226,10 +226,10 @@ def _save_data(
                 end = start + frames_in_this_chunk
                 data_chunk = scan[start:end, chan_index, top:ny - bottom, left:nx - right]
 
-                min_val = data_chunk.min()
-                max_val = data_chunk.max()
-                metadata['vmin'] =  min_val
-                metadata['vmax'] = max_val
+                # min_val = data_chunk.min()
+                # max_val = data_chunk.max()
+                # metadata['vmin'] = _make_json_serializable(min_val)
+                # metadata['vmax'] = _make_json_serializable(max_val)
 
                 if fix_phase:
                     ofs = mbo_utilities.return_scan_offset(data_chunk)
