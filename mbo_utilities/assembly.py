@@ -76,6 +76,7 @@ def save_as(
         order: list | tuple = None,
         trim_edge: list | tuple = (0,0,0,0),
         fix_phase: bool = False,
+        summary: bool = False,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -105,6 +106,8 @@ def save_as(
         elements in `order` must match the number of planes. Default is `None`.
     fix_phase : bool, optional
         Whether to fix scan-phase (x/y) alignment. Default is `False`.
+    summary : bool, optional
+        Whether to save updated vmin/vmax in metadata. Experimental. Default is `False`.
 
     Raises
     ------
@@ -149,6 +152,7 @@ def save_as(
         metadata=mdata,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
+        summary=summary
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -165,6 +169,7 @@ def _save_data(
         metadata,
         trim_edge=None,
         fix_phase=False,
+        summary=False,
 ):
     if '.' in file_extension:
         file_extension = file_extension.split('.')[-1]
@@ -221,12 +226,15 @@ def _save_data(
                 end = start + frames_in_this_chunk
 
                 data_chunk = scan[start:end, chan_index, top:ny - bottom, left:nx - right]
+                min_val = data_chunk.min()
+                max_val = data_chunk.max()
+                metadata = {'vmin': min_val, 'vmax': max_val}
                 if fix_phase:
                     ofs = mbo_utilities.return_scan_offset(data_chunk)
                     if ofs:
                         data_chunk = mbo_utilities.fix_scan_phase(data_chunk, ofs)
 
-                writer(fname, data_chunk)
+                writer(fname, data_chunk, metadata=metadata)
                 start = end
                 pbar.update(1)
 
@@ -383,6 +391,7 @@ def main():
     parser.add_argument("--zarr", action='store_true', help="Flag to save as .zarr. Default is False")
     parser.add_argument("--assemble", action='store_true', help="Flag to assemble the each ROI into a single image.")
     parser.add_argument("--debug", action='store_true', help="Output verbose debug information.")
+    parser.add_argument("--summary", action="store_true", help="Include min, max, mean, std in metadata per plane.")
     parser.add_argument("--delete_first_frame", action='store_false', help="Flag to delete the first frame of the "
                                                                            "scan when saving.")
     # Commands
@@ -460,6 +469,7 @@ def main():
             planes=zplanes,
             overwrite=args.overwrite,
             ext=ext,
+            summary=args.summary,
         )
         t_save_end = time.time() - t_save
         logger.info(f"--- Processing complete in {t_save_end:.2f} seconds. --")
