@@ -191,11 +191,11 @@ def _save_data(
     final_shape = (nt, new_height, new_width)
     writer = _get_file_writer(file_extension, overwrite=overwrite, metadata=metadata, data_shape=final_shape)
 
-    for chan in planes:
+    for chan_index in planes:
         if append_str:
-            fname = path.joinpath(f"plane_{chan+1:02d}_{append_str}.{file_extension}")
+            fname = path.joinpath(f"plane_{chan_index+1:02d}_{append_str}.{file_extension}")
         else:
-            fname = path.joinpath(f"plane_{chan + 1:02d}.{file_extension}")
+            fname = path.joinpath(f"plane_{chan_index + 1:02d}.{file_extension}")
 
         if fname.exists():
             fname.unlink()
@@ -211,21 +211,26 @@ def _save_data(
             logger.warning(f'File already exists: {fname}. To overwrite, set overwrite=True (--overwrite in command line)')
             return
 
-        with tqdm(total=num_chunks, desc=f'Saving plane {chan + 1}', position=0, leave=False) as pbar:
+        total_chunks = num_chunks * len(planes)
+        pbar = tqdm(total=total_chunks, desc="Saving planes", leave=False, ncols=80)
+
+        for chan_index in planes:
             start = 0
-            print(f"num-chunks: {num_chunks}")
-            for i, chunk in enumerate(range(num_chunks)):
+            for chunk in range(num_chunks):
                 frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
                 end = start + frames_in_this_chunk
 
-                data_chunk = scan[start:end, chan, top:ny - bottom, left:nx - right]
+                data_chunk = scan[start:end, chan_index, top:ny - bottom, left:nx - right]
                 if fix_phase:
                     ofs = mbo_utilities.return_scan_offset(data_chunk)
                     if ofs:
                         data_chunk = mbo_utilities.fix_scan_phase(data_chunk, ofs)
+
                 writer(fname, data_chunk)
                 start = end
                 pbar.update(1)
+
+        pbar.close()
 
     if file_extension in ["tiff", ".tiff", "tif", ".tif"]:
         close_tiff_writers()
