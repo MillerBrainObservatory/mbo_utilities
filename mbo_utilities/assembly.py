@@ -32,13 +32,14 @@ CHUNKS = {0: 'auto', 1: -1, 2: -1}
 warnings.filterwarnings("ignore")
 
 print = functools.partial(print, flush=True)
-# tqdm = functools.partial(tqdm, leave=True, position=0)
+
 
 def close_tiff_writers():
     if hasattr(_write_tiff, "_writers"):
         for writer in _write_tiff._writers.values():
             writer.close()
         _write_tiff._writers.clear()
+
 
 def process_slice_str(slice_str):
     if not isinstance(slice_str, str):
