@@ -224,11 +224,13 @@ def _save_data(
             for chunk in range(num_chunks):
                 frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
                 end = start + frames_in_this_chunk
-
                 data_chunk = scan[start:end, chan_index, top:ny - bottom, left:nx - right]
+
                 min_val = data_chunk.min()
                 max_val = data_chunk.max()
-                metadata = {'vmin': min_val, 'vmax': max_val}
+                metadata['vmin'] =  min_val
+                metadata['vmax'] = max_val
+
                 if fix_phase:
                     ofs = mbo_utilities.return_scan_offset(data_chunk)
                     if ofs:
