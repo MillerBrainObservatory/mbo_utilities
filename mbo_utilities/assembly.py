@@ -8,21 +8,19 @@ import numpy as np
 
 import shutil
 from pathlib import Path
-import zarr
 from tifffile import TiffWriter
 import h5py
 
 import mbo_utilities
-from .image import extract_center_square
-from .file_io import  _make_json_serializable, read_scan, save_mp4
+from .file_io import  _make_json_serializable, read_scan
 from .metadata import get_metadata
-from .util import norm_minmax, is_running_jupyter
+from .util import is_running_jupyter
 from .scanreader.utils import listify_index
 
 if is_running_jupyter():
     from tqdm.notebook import tqdm
 else:
-    from tqdm import tqdm
+    from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
@@ -34,6 +32,7 @@ CHUNKS = {0: 'auto', 1: -1, 2: -1}
 warnings.filterwarnings("ignore")
 
 print = functools.partial(print, flush=True)
+# tqdm = functools.partial(tqdm, leave=True, position=0)
 
 def close_tiff_writers():
     if hasattr(_write_tiff, "_writers"):
@@ -212,7 +211,7 @@ def _save_data(
             return
 
         total_chunks = num_chunks * len(planes)
-        pbar = tqdm(total=total_chunks, desc="Saving planes", leave=False, ncols=80)
+        pbar = tqdm(total=total_chunks, desc=f"Saving plane {chan_index+1}")
 
         for chan_index in planes:
             start = 0
@@ -299,6 +298,11 @@ def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
         _write_tiff._first_write = False
 
 def _write_zarr(path, data, overwrite=True, metadata=None, single_file=False):
+    try:
+        import zarr
+    except ImportError:
+        raise ImportError("Please install zarr to use ext='.zarr'")
+
     # data is assumed to have shape (n, H, W)
     filename = Path(path).with_suffix(".zarr")
     if not hasattr(_write_zarr, "_initialized"):
