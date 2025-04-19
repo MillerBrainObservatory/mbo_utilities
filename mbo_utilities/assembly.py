@@ -274,7 +274,7 @@ def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None):
 
 def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
 
-    filename = Path(path).with_suffix(".h5")
+    filename = Path(path).with_suffix(".tif")
 
     if not hasattr(_write_tiff, "_writers"):
         _write_tiff._writers = {}
