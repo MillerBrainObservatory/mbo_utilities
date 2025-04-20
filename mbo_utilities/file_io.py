@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Sequence
 from itertools import product
@@ -52,6 +53,7 @@ def npy_to_dask(files, name="", axis=1, astype=None):
     --------
     >>> # https://www.fastplotlib.org/
     >>> import fastplotlib as fpl
+    >>> import mbo_utilities as mbo
     >>> files = mbo.get_files("path/to/images/", 'fused', 3) # suite3D output
     >>> arr = npy_to_dask(files, name="stack", axis=1)
     >>> print(arr.shape)
@@ -509,27 +511,35 @@ def save_mp4(fname: str | Path | np.ndarray, images, framerate=60, speedup=1, ch
     process.wait()
     print(f"Video saved to {fname}")
 
-
-def load_data_path(path: str | Path):
+def _is_arraylike(obj) -> bool:
     """
-    Resovle the given data path to a list of fully-qualified paths to 'tiff' files.
-
-    - If the resulting 'tifs' are raw ScanImage tiffs, turn into a scan object to preview.
-    - If the resulting 'tifs' are assembled z-planes, load into a z-stack.
+    Checks if the object is array-like.
+    For now just checks if obj has `__getitem__()`
     """
-    if isinstance(path, list):
-        plane_folders = path
-    elif isinstance(path, (str, Path)):
-        print(f"Loading data from {path}")
-        save_folder = Path(path).expanduser().resolve()
-        if not save_folder.exists():
-            print("Folder does not exist")
-            return None
-        plane_folders = get_files(save_folder, ".tif", 2)
-    elif isinstance(path, dask.array.core.Array):
-        return path
+    for attr in ["__getitem__", "shape", "ndim"]:
+        if not hasattr(obj, attr):
+            return False
+
+    return True
+
+def to_lazy_array(data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray]):
+    """
+    Convencience function to resolve various data_in variants into lazy arrays.
+    """
+    if _is_arraylike(data_in):
+        return data_in
+    if isinstance(data_in, list):
+        if is_raw_scanimage(data_in[0]):
+            return read_scan(data_in)
+        else:
+            return zstack_from_files(data_in)
+    if isinstance(data_in, (str, Path)):
+        data_in = Path(data_in).expanduser().resolve()
+        if data_in.is_file():
+            # check suffix
+            if data_in.suffix in [".tif", ".tiff"]:
+                return tifffile.memmap(data_in)
+            elif data_in.suffix == ".npy":
+                return np.memmap(data_in)
     else:
-        raise TypeError(f"Invalid type {type(path)}. Expected 'path', 'str' or 'list'")
-    if is_raw_scanimage(plane_folders[0]):
-        return read_scan(plane_folders)
-    return zstack_from_files(plane_folders)
+        raise TypeError(f"Invalid type {type(data_in)}")

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 import fastplotlib as fpl
 
-from ..file_io import load_data_path
+from ..file_io import to_lazy_array
 
 try:
     from PyQt5.QtWidgets import QMainWindow, QFileDialog, QApplication
@@ -17,7 +17,7 @@ def load_dialog_folder(directory=None):
     if directory is None:
         directory = str(Path.home())
     path = QFileDialog.getExistingDirectory(parent=None, caption="Open folder with raw data OR assembled z-planes", directory=directory)
-    return load_data_path(path)
+    return to_lazy_array(path)
 
 def render_qt_widget(data=None):
     app = QApplication(sys.argv)
