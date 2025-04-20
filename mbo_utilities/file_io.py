@@ -251,7 +251,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         return rois
 
 
-def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> list | Path:
+def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None) -> list | Path:
     """
     Recursively search for files in a specified directory whose names contain a given substring,
     limiting the search to a maximum subdirectory depth. Optionally, the resulting list of file paths
@@ -272,6 +272,9 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> li
         If True (default), the matched file paths are sorted in ascending alphanumeric order.
         The sort key extracts numeric parts from filenames so that, for example, "file2" comes
         before "file10".
+    exclude_dirs : iterable of str or Path, optional
+        An iterable of directories to exclude from the resulting list of file paths. By default
+        will exclude ".venv/", "__pycache__/", ".git" and ".github"].
 
     Returns
     -------
@@ -306,10 +309,21 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True) -> li
     base_depth = len(base_path.parts)
     pattern = f"*{str_contains}*" if str_contains else "*"
 
+    if exclude_dirs is None:
+        exclude_dirs = [".venv", ".git", "__pycache__"]
+
+    def is_excluded(path):
+        return any(excl in path.parts for excl in exclude_dirs)
+
     files = [
         file for file in base_path.rglob(pattern)
-        if len(file.parts) - base_depth <= max_depth and file.is_file()
+        if len(file.parts) - base_depth <= max_depth and file.is_file() and not is_excluded(file)
     ]
+
+    # files = [
+    #     file for file in base_path.rglob(pattern)
+    #     if len(file.parts) - base_depth <= max_depth and file.is_file()
+    # ]
 
     if sort_ascending:
         import re
