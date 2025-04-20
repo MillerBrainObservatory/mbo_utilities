@@ -23,6 +23,16 @@ dependencies = [
 	"tqdm",
 ]
 
+[project.scripts]
+mbo = "mbo_utilities.__main__:main"
+assemble = "mbo_utilities.assembly:main"
+
+[project.urls]
+Homepage = "https://github.com/millerbrainobservatory/mbo_utilities"
+Documentation = "https://millerbrainobservatory.github.io/mbo_utilities/index.html"
+Repository = "https://github.com/millerbrainobservatory/mbo_utilities"
+Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
+
 [project.optional-dependencies]
 gui = [
 	"cmake",
@@ -119,12 +129,6 @@ exclude_lines = [
 	"raise NotImplementedError()"
 ]
 
-[project.scripts]
-mbo = "mbo_utilities.__main__:main"
-assemble = "mbo_utilities.assembly:main"
-
-[project.urls]
-homepage = "https://github.com/millerbrainobservatory/mbo_utilities"
 
 [tool.setuptools.packages.find]
 where = ["."]
