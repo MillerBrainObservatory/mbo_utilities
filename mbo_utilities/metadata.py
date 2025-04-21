@@ -135,7 +135,6 @@ def _params_from_metadata_suite2p(metadata, ops):
 
     # typical neuron ~16 microns
     ops['fs'] = metadata["frame_rate"]
-    ops['tau'] = 1.5
     ops['nplanes'] = 1
     ops["nchannels"] = 1
     ops['do_bidiphase'] = 0
