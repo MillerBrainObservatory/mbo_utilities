@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "wheel", "versioneer[toml]==0.29"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -99,7 +99,7 @@ docs = [
 [tool.ruff]
 line-length = 88
 src = ["lbm_suite2p_python"]
-exclude = ["docs", "exclude", "demos", "scripts", "versioneer.py"] 
+exclude = ["docs", "exclude", "demos", "scripts"] 
 
 [tool.ruff.lint]
 pydocstyle = { convention = "numpy" }
@@ -134,10 +134,5 @@ exclude_lines = [
 where = ["."]
 include = ["mbo_utilities*"]
 
-[tool.versioneer]
-VCS = "git"
-style = "pep440"
-versionfile_source = "mbo_utilities/_version.py"
-versionfile_build = "mbo_utilities/_version.py"
-tag_prefix = "v"
-# parentdir_prefix =
+[tool.setuptools.dynamic]
+version = {attr = "mbo_utilities.__version__"}

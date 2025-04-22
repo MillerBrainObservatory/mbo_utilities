@@ -16,35 +16,32 @@ from . import _version
 
 from .graphics import run_gui
 
-__version__ = _version.get_versions()['version']
-
 __all__ = [
-    'run_gui',
+    "run_gui",
     # image processing
-    'fix_scan_phase',
-    'return_scan_offset',
+    "fix_scan_phase",
+    "return_scan_offset",
     # file_io
-    'scanreader',
-    'npy_to_dask',
-    'zarr_to_dask',
-    'get_files',
-    'zstack_from_files',
-    'read_scan',
-    'save_png',
-    'save_mp4',
-    'expand_paths',
+    "scanreader",
+    "npy_to_dask",
+    "zarr_to_dask",
+    "get_files",
+    "zstack_from_files",
+    "read_scan",
+    "save_png",
+    "save_mp4",
+    "expand_paths",
     # metadata
-    'is_raw_scanimage',
-    'get_metadata',
-    'params_from_metadata',
+    "is_raw_scanimage",
+    "get_metadata",
+    "params_from_metadata",
     # util
-    'norm_minmax',
-    'smooth_data',
-    'is_running_jupyter',
+    "norm_minmax",
+    "smooth_data",
+    "is_running_jupyter",
     # assembly
-    'save_as',
+    "save_as",
     # utility
 ]
 
-from . import _version
-__version__ = _version.get_versions()['version']
+__version__ = "0.0.2"
