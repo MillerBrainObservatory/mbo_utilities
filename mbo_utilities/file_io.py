@@ -21,7 +21,6 @@ from .util import norm_minmax
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
 
-
 def zarr_to_dask(zarr_parent):
     """Convert directory of zarr arrays into a Z-stack."""
     # search 3 dirs deep for arrays within our zarr group
@@ -413,9 +412,17 @@ def save_png(fname, data):
     plt.savefig(fname, dpi=300, bbox_inches="tight")
     print(f"Saved data to {fname}")
 
-
-def save_mp4(fname: str | Path | np.ndarray, images, framerate=60, speedup=1, chunk_size=100, cmap="gray", win=7,
-             vcodec="libx264", normalize=True):
+def save_mp4(
+        fname: str | Path | np.ndarray,
+        images,
+        framerate=60,
+        speedup=1,
+        chunk_size=100,
+        cmap="gray",
+        win=7,
+        vcodec="libx264",
+        normalize=True
+):
     """
     Save a video from a 3D array or TIFF stack to `.mp4`.
 
@@ -457,11 +464,11 @@ def save_mp4(fname: str | Path | np.ndarray, images, framerate=60, speedup=1, ch
 
     Examples
     --------
-    Save a video from a 3D NumPy array with a colormap and speedup:
+    Save a video from a 3D NumPy array with a gray colormap and 2x speedup:
 
     >>> import numpy as np
     >>> images = np.random.rand(100, 600, 576) * 255
-    >>> save_mp4('output.mp4', images, framerate=30, cmap='viridis', speedup=2)
+    >>> save_mp4('output.mp4', images, framerate=17, cmap='gray', speedup=2)
 
     Save a video with temporal averaging applied over a 5-frame window at 4x speed:
 
