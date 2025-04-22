@@ -45,3 +45,6 @@ __all__ = [
     'save_as',
     # utility
 ]
+
+from . import _version
+__version__ = _version.get_versions()['version']

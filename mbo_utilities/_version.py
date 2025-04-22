@@ -51,8 +51,8 @@ def get_config() -> VersioneerConfig:
     cfg = VersioneerConfig()
     cfg.VCS = "git"
     cfg.style = "pep440"
-    cfg.tag_prefix = "mbo-utilities-"
-    cfg.parentdir_prefix = "mbo-utilities-"
+    cfg.tag_prefix = "v"
+    cfg.parentdir_prefix = "None"
     cfg.versionfile_source = "mbo_utilities/_version.py"
     cfg.verbose = False
     return cfg
@@ -225,8 +225,8 @@ def git_versions_from_keywords(
         if verbose:
             print("discarding '%s', no digits" % ",".join(refs - tags))
     if verbose:
-        print("likely tags: %s" % ",".join(sorted(tags)))
-    for ref in sorted(tags):
+        print("likely tags: %s" % ",".join(sort_ascending(tags)))
+    for ref in sort_ascending(tags):
         # sorting will prefer e.g. "2.0" over "2.0rc1"
         if ref.startswith(tag_prefix):
             r = ref[len(tag_prefix):]
