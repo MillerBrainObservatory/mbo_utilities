@@ -9,6 +9,7 @@ This repository contains python functions to pre/post process datasets recording
 maxdepth: 1
 ---
 Assembly <assembly>
+Usage <usage/index>
 API <api/index>
 ```
 
