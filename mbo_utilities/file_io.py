@@ -478,12 +478,19 @@ def save_mp4(
 
     >>> save_mp4('output.mp4', 'path/to/stack.tiff', framerate=60, cmap='gray')
     """
+    if not isinstance(fname, (str, Path)):
+        raise TypeError(f"Expected fname to be str or Path, got {type(fname)}")
     if isinstance(images, (str, Path)):
         print(f"Loading TIFF stack from {images}")
         if Path(images).is_file():
-            images = tifffile.memmap(images)
+            try:
+                images = tifffile.memmap(images)
+            except MemoryError:
+                images = tifffile.imread(images)
         else:
-            raise FileNotFoundError(f"File not found: {images}")
+            raise FileNotFoundError(f"Images given as a string or path, but not a valid file: {images}")
+    elif not isinstance(images, np.ndarray):
+        raise ValueError(f"Expected images to be a numpy array or a file path, got {type(images)}")
 
     T, height, width = images.shape
     colormap = cm.get_cmap(cmap)
