@@ -75,8 +75,8 @@ def save_as(
         ext: str = '.tiff',
         order: list | tuple = None,
         trim_edge: list | tuple = (0,0,0,0),
-        fix_phase: bool = False,
-        summary: bool = False,
+        fix_phase: bool = True,
+        target_chunk_mb: int = 20,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -105,9 +105,9 @@ def save_as(
         A list or tuple specifying the desired order of planes. If provided, the number of
         elements in `order` must match the number of planes. Default is `None`.
     fix_phase : bool, optional
-        Whether to fix scan-phase (x/y) alignment. Default is `False`.
-    summary : bool, optional
-        Whether to save updated vmin/vmax in metadata. Experimental. Default is `False`.
+        Whether to fix scan-phase (x/y) alignment. Default is `True`.
+    target_chunk_mb : int, optional
+        Chunk size in megabytes for saving data. Increase to help with scan-phase correction.
 
     Raises
     ------
@@ -152,7 +152,7 @@ def save_as(
         metadata=mdata,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
-        summary=summary
+        target_chunk_mb=target_chunk_mb
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -169,7 +169,7 @@ def _save_data(
         metadata,
         trim_edge=None,
         fix_phase=False,
-        summary=False,
+        target_chunk_mb=20,
 ):
     if '.' in file_extension:
         file_extension = file_extension.split('.')[-1]
@@ -196,10 +196,15 @@ def _save_data(
     final_shape = (nt, new_height, new_width)
     writer = _get_file_writer(file_extension, overwrite=overwrite, metadata=metadata, data_shape=final_shape)
 
+    chunk_size = target_chunk_mb * 1024 * 1024
     total_chunks = sum(
-        min(scan.shape[0], max(1, int(np.ceil(scan.shape[0] * scan.shape[2] * scan.shape[3] * 2 / (10 * 1024 * 1024)))))
+        min(scan.shape[0], max(1, int(np.ceil(scan.shape[0] * scan.shape[2] * scan.shape[3] * 2 / chunk_size))))
         for _ in planes
     )
+    # total_chunks = sum(
+    #     min(scan.shape[0], max(1, int(np.ceil(scan.shape[0] * scan.shape[2] * scan.shape[3] * 2 / (10 * 1024 * 1024)))))
+    #     for _ in planes
+    # )
     pbar = tqdm(total=total_chunks, desc="Saving planes")
 
     for chan_index in planes:
@@ -212,9 +217,10 @@ def _save_data(
             logger.warning(f'File already exists: {fname}')
             continue
 
-        chunk_size = 10 * 1024 * 1024
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
         num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
+        # nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
+        # num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
 
         base_frames_per_chunk = scan.shape[0] // num_chunks
         extra_frames = scan.shape[0] % num_chunks
@@ -228,7 +234,7 @@ def _save_data(
             if fix_phase:
                 ofs = mbo_utilities.return_scan_offset(data_chunk)
                 if ofs:
-                    data_chunk = mbo_utilities.fix_scan_phase(data_chunk, ofs)
+                    data_chunk = mbo_utilities.fix_scan_phase(data_chunk, -ofs)
 
             writer(fname, data_chunk)
             start = end
@@ -362,6 +368,11 @@ def main():
                         default=":",  # all planes
                         help="Planes to read (0 based). Use slice notation like NumPy arrays (e.g., 1:5 gives planes "
                              "2 to 6")
+    parser.add_argument("--target_chunk_mb",
+                        type=int,
+                        nargs=1,
+                        default=20,
+                        help="Target chunk size, in MB")
     parser.add_argument("--trimx",
                         type=int,
                         nargs=2,
@@ -385,7 +396,6 @@ def main():
     parser.add_argument("--overwrite", action='store_true', help="Overwrite existing files if saving data..")
     parser.add_argument("--tiff", action='store_false', help="Flag to save as .tiff. Default is True")
     parser.add_argument("--zarr", action='store_true', help="Flag to save as .zarr. Default is False")
-    parser.add_argument("--assemble", action='store_true', help="Flag to assemble the each ROI into a single image.")
     parser.add_argument("--debug", action='store_true', help="Output verbose debug information.")
     parser.add_argument("--summary", action="store_true", help="Include min, max, mean, std in metadata per plane.")
     parser.add_argument("--delete_first_frame", action='store_false', help="Flag to delete the first frame of the "
@@ -424,11 +434,6 @@ def main():
         # filter out the verbose scanimage frame/roi metadata
         print_params({k: v for k, v in metadata.items() if k not in ['si', 'roi_info']})
 
-    if args.assemble:
-        join_contiguous = True
-    else:
-        join_contiguous = False
-
     if args.save:
         savepath = Path(args.save).expanduser()
         logger.info(f"Saving data to {savepath}.")
@@ -465,7 +470,7 @@ def main():
             planes=zplanes,
             overwrite=args.overwrite,
             ext=ext,
-            summary=args.summary,
+            target_chunk_mb=args.target_chunk_mb,
         )
         t_save_end = time.time() - t_save
         logger.info(f"--- Processing complete in {t_save_end:.2f} seconds. --")
