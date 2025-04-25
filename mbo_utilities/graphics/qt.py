@@ -26,16 +26,13 @@ def render_qt_widget(data=None):
         data = load_dialog_folder(directory=None)
 
     main_window = LBMMainWindow()
-    main_window.resize(1000, 800)
     iw = fpl.ImageWidget(
         data=data,
         histogram_widget=True,
-        graphic_kwargs={"vmin": -350, "vmax": 13000}
     )
     # start the widget playing in a loop
     iw._image_widget_sliders._loop = True  # noqa
     qwidget = iw.show()  # need to display before playing
-    iw._image_widget_sliders._playing['t'] = True  # noqa
 
     main_window.setCentralWidget(qwidget)  # noqa
     main_window.resize(data.shape[-1], data.shape[-2])
