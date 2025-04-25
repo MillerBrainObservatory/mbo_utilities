@@ -11,33 +11,42 @@ if is_qt_installed():
 
 
 def run_gui(
-        data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None, **kwargs
+    data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None, **kwargs
 ):
     """Open a GUI to preview data."""
     # Handle data_in, which can be a path to files
     if data_in is None:
-        print('No data provided')
+        print("No data provided")
         if not is_qt_installed():
-            raise ValueError(f"No `data_in` argument provided and no qt installation. "
-                             f"Support for file loading is only available with Qt installs."
-                             f"Install with `pip install -U 'mbo_utilities[all]'`.")
+            raise ValueError(
+                f"No `data_in` argument provided and no qt installation. "
+                f"Support for file loading is only available with Qt installs."
+                f"Install with `pip install -U 'mbo_utilities[all]'`."
+            )
         else:
             # set to None, we will load a dialog folder in QT later
-            print('Setting data to None')
+            print("Setting data to None")
             data = None
     else:
-        print('Data provided and set.')
-        data = data_in if isinstance(data_in, ScanMultiROIReordered) else to_lazy_array(data_in)
+        print("Data provided and set.")
+
+        if isinstance(data_in, ScanMultiROIReordered):
+            data = data_in
+        else:
+            data = to_lazy_array(data_in)
 
     if is_running_jupyter():
-        print('Is running jupyter')
+        print("Is running jupyter")
         # TODO: load dialog when qt isn't installed
         if data_in is None:
             print("Running jupyter, no data provided")
             if not is_qt_installed():
-                raise ValueError(f"No `data_in` argument provided and no qt installation. "
-                                 f"Support for file loading is only available with Qt installs."
-                                 f"Install with `pip install -U 'mbo_utilities[all]'`.")
+                raise ValueError(
+                    f"No `data_in` argument provided and no qt installation. "
+                    f"Support for file loading is only available with Qt installs."
+                    f"Install with `pip install -U 'mbo_utilities[all]'`."
+                )
+            return None
         else:
             # no data, in Jupyter, we need a QT dialog to load a data path
             # can remove this once we have a means to load a native file-dialog from within jupyter
@@ -45,5 +54,6 @@ def run_gui(
             iw.show()
             return iw
     else:  # not runniing jupyter
-            print(f"Not running Jupyter, Rendering qt widget")
-            render_qt_widget(data=data) 
+        print(f"Not running Jupyter, Rendering qt widget")
+        render_qt_widget(data=data)
+        return None
