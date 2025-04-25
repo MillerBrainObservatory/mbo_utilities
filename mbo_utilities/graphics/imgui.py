@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from dask import array as da
+from scipy.ndimage import gaussian_filter
 import numpy as np
 import h5py
 from tqdm import tqdm
@@ -271,35 +272,40 @@ class PollenCalibrationWidget(EdgeWindow):
 
 class SummaryDataWidget(EdgeWindow):
     def __init__(self, image_widget, size, location):
-        flags = imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_resize  # noqa
+        flags = imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_resize
         super().__init__(figure=image_widget.figure, size=size, location=location, title="Preview Data", window_flags=flags)
         self.image_widget = image_widget
 
+        self.gaussian_sigma = 0.0  # new: for the slider
+
     def update(self):
         something_changed = False
-        if imgui.button("Mean Z"):
-            self.mean_z()
-        if imgui.is_item_hovered(0):
-            imgui.set_tooltip("Calculate the mean image for each z-plane")
+
+        # --- Gaussian Filter slider ---
+        imgui.text("Gaussian Filter")
+        changed, value = imgui.slider_float("Sigma", v=self.gaussian_sigma, v_min=0.0, v_max=20.0)
+        if changed:
+            self.gaussian_sigma = value
+            something_changed = True
+
+        imgui.separator()
         imgui.new_line()
+
         imgui.separator()
         imgui.text("Statistics")
         if imgui.button("Calculate Noise"):
             self.calculate_noise()
             imgui.text("Calculating noise...")
-        imgui.new_line()
-        imgui.separator()
-        if something_changed:
-            print("something changed")
 
-    def mean_z(self):
-        data = self.image_widget.data[0]
-        lazy_arr = da.empty_like(data)
-        for i in tqdm(range(data.shape[1]), desc="Calculating Mean Image for each z"):
-            lazy_arr[:, i, ...] = data[:, i, ...].mean(axis=1)
-        print("Showing mean z")
-        mean_z_widget = fpl.ImageWidget(data=lazy_arr, histogram_widget=False, figure_kwargs={"size": (1000, 800)})
-        mean_z_widget.show()
+        if something_changed:
+            self.apply_gaussian()
+
+    def apply_gaussian(self):
+        self.image_widget.frame_apply = {0: lambda image_data: gaussian_filter(image_data, sigma=self.gaussian_sigma)}
+        # frame = np.array(self.image_widget.managed_graphics[0].data[:])
+        # frame_filtered = gaussian_filter(frame, sigma=self.gaussian_sigma)
+        # self.image_widget.managed_graphics[0].reset_vmin_vmax()
+        # self.image_widget.set_data(frame_filtered)
 
     def calculate_noise(self):
         pass
