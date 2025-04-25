@@ -17,7 +17,7 @@ kernelspec:
 
 `save_mp4` converts a 3D numpy array or TIFF stack (`[T, Y, X]`) into an `.mp4` video.  
 
-It supports optional temporal smoothing, normalization, playback speed adjustment, and colormaps.
+It supports optional temporal smoothing, playback speed adjustment, and colormaps.
 
 ```{code-cell} ipython3
 from pathlib import Path
