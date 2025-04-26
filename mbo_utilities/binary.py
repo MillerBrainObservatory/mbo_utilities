@@ -51,7 +51,9 @@ class VolumetricBinaryFile:
             self._shape = shape
             mode = "r+"
 
-        self._file = np.memmap(self.filename, mode=mode, dtype=self.dtype, shape=self._shape)
+        self._file = np.memmap(
+            self.filename, mode=mode, dtype=self.dtype, shape=self._shape
+        )
 
     @property
     def shape(self):
@@ -105,7 +107,7 @@ if __name__ == "__main__":
     shape3d = (1000, 512, 512)
     outfile3d = "movie_3d.bin"
     # Create a new binary file and write data into it
-    data3d = np.random.randint(0, 2 ** 15 - 1, size=shape3d, dtype="int16")
+    data3d = np.random.randint(0, 2**15 - 1, size=shape3d, dtype="int16")
     bf3d = VolumetricBinaryFile(shape3d, outfile3d, dtype="int16")
     bf3d[:] = data3d
     print("3D file saved. Shape:", bf3d.shape)
@@ -115,7 +117,7 @@ if __name__ == "__main__":
     # Example for a 4D dataset (Z, T, Y, X)
     shape4d = (5, 200, 512, 512)
     outfile4d = "movie_4d.bin"
-    data4d = np.random.randint(0, 2 ** 15 - 1, size=shape4d, dtype="int16")
+    data4d = np.random.randint(0, 2**15 - 1, size=shape4d, dtype="int16")
     bf4d = VolumetricBinaryFile(shape4d, outfile4d, dtype="int16")
     bf4d[:] = data4d
     print("4D file saved. Shape:", bf4d.shape)

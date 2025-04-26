@@ -26,7 +26,7 @@ def _params_from_metadata_caiman(metadata):
     params = _default_params_caiman()
 
     if metadata is None:
-        print('No metadata found. Using default parameters.')
+        print("No metadata found. Using default parameters.")
         return params
 
     split_frames = params["main"]["num_frames_split"]
@@ -101,27 +101,27 @@ def _default_params_caiman():
             "splits_rig": 14,
             "num_splits_to_process_rig": None,
             # CNMF parameters
-            'fr': 10,
-            'dxy': (1., 1.),
-            'decay_time': 0.4,
-            'p': 2,
-            'nb': 3,
-            'K': 20,
-            'rf': 64,
-            'stride': [8, 8],
-            'gSig': gSig,
-            'gSiz': gSiz,
-            'method_init': 'greedy_roi',
-            'rolling_sum': True,
-            'use_cnn': False,
-            'ssub': 1,
-            'tsub': 1,
-            'merge_thr': 0.7,
-            'bas_nonneg': True,
-            'min_SNR': 1.4,
-            'rval_thr': 0.8,
+            "fr": 10,
+            "dxy": (1.0, 1.0),
+            "decay_time": 0.4,
+            "p": 2,
+            "nb": 3,
+            "K": 20,
+            "rf": 64,
+            "stride": [8, 8],
+            "gSig": gSig,
+            "gSiz": gSiz,
+            "method_init": "greedy_roi",
+            "rolling_sum": True,
+            "use_cnn": False,
+            "ssub": 1,
+            "tsub": 1,
+            "merge_thr": 0.7,
+            "bas_nonneg": True,
+            "min_SNR": 1.4,
+            "rval_thr": 0.8,
         },
-        "refit": True
+        "refit": True,
     }
 
 
@@ -130,18 +130,18 @@ def _params_from_metadata_suite2p(metadata, ops):
     Tau is 0.7 for GCaMP6f, 1.0 for GCaMP6m, 1.25-1.5 for GCaMP6s
     """
     if metadata is None:
-        print('No metadata found. Using default parameters.')
+        print("No metadata found. Using default parameters.")
         return ops
 
     # typical neuron ~16 microns
-    ops['fs'] = metadata["frame_rate"]
-    ops['nplanes'] = 1
+    ops["fs"] = metadata["frame_rate"]
+    ops["nplanes"] = 1
     ops["nchannels"] = 1
-    ops['do_bidiphase'] = 0
+    ops["do_bidiphase"] = 0
 
     # suite2p iterates each plane and takes ops['dxy'][i] where i is the plane index
-    ops['dx'] = [metadata["pixel_resolution"][0]]
-    ops['dy'] = [metadata["pixel_resolution"][1]]
+    ops["dx"] = [metadata["pixel_resolution"][0]]
+    ops["dy"] = [metadata["pixel_resolution"][1]]
 
     return ops
 
@@ -168,10 +168,10 @@ def is_raw_scanimage(file: os.PathLike | str):
     # if this is not empty, we have a processed file
     # otherwise, we have a raw scanimage tiff
     if (
-            hasattr(tiff_file, 'shaped_metadata')
-            and tiff_file.shaped_metadata is not None
-            and isinstance(tiff_file.shaped_metadata, (list, tuple))
-            and tiff_file.shaped_metadata[0] not in ([], (), None)
+        hasattr(tiff_file, "shaped_metadata")
+        and tiff_file.shaped_metadata is not None
+        and isinstance(tiff_file.shaped_metadata, (list, tuple))
+        and tiff_file.shaped_metadata[0] not in ([], (), None)
     ):
         return False
     else:
@@ -223,13 +223,13 @@ def get_metadata(file: os.PathLike | str, verbose=False):
     tiff_file = tifffile.TiffFile(file)
     # previously processed files
     if not is_raw_scanimage(file):
-        return tiff_file.shaped_metadata[0]['image']
-    elif hasattr(tiff_file, 'scanimage_metadata'):
+        return tiff_file.shaped_metadata[0]["image"]
+    elif hasattr(tiff_file, "scanimage_metadata"):
         meta = tiff_file.scanimage_metadata
         if meta is None:
             return None
 
-        si = meta.get('FrameData', {})
+        si = meta.get("FrameData", {})
         if not si:
             print(f"No FrameData found in {file}.")
             return None
@@ -252,16 +252,27 @@ def get_metadata(file: os.PathLike | str, verbose=False):
 
         if num_rois > 1:
             try:
-                sizes = [roi_group[i]["scanfields"][i]["sizeXY"] for i in range(num_rois)]
-                num_pixel_xys = [roi_group[i]["scanfields"][i]["pixelResolutionXY"] for i in range(num_rois)]
+                sizes = [
+                    roi_group[i]["scanfields"][i]["sizeXY"] for i in range(num_rois)
+                ]
+                num_pixel_xys = [
+                    roi_group[i]["scanfields"][i]["pixelResolutionXY"]
+                    for i in range(num_rois)
+                ]
             except KeyError:
                 sizes = [roi_group[i]["scanfields"]["sizeXY"] for i in range(num_rois)]
-                num_pixel_xys = [roi_group[i]["scanfields"]["pixelResolutionXY"] for i in range(num_rois)]
+                num_pixel_xys = [
+                    roi_group[i]["scanfields"]["pixelResolutionXY"]
+                    for i in range(num_rois)
+                ]
 
             # see if each item in sizes is the same
-            assert all([sizes[0] == size for size in sizes]), "ROIs have different sizes"
-            assert all([num_pixel_xys[0] == num_pixel_xy for num_pixel_xy in
-                        num_pixel_xys]), "ROIs have different pixel resolutions"
+            assert all([sizes[0] == size for size in sizes]), (
+                "ROIs have different sizes"
+            )
+            assert all(
+                [num_pixel_xys[0] == num_pixel_xy for num_pixel_xy in num_pixel_xys]
+            ), "ROIs have different pixel resolutions"
             size_xy = sizes[0]
             num_pixel_xy = num_pixel_xys[0]
         else:
@@ -286,7 +297,7 @@ def get_metadata(file: os.PathLike | str, verbose=False):
 
         pixel_resolution = (fov_x_um / num_pixel_xy[0], fov_y_um / num_pixel_xy[1])
 
-        metadata= {
+        metadata = {
             "num_planes": num_planes,
             "num_frames": int(len(pages) / num_planes),
             "fov": fov_roi_um,  # in microns
@@ -295,7 +306,7 @@ def get_metadata(file: os.PathLike | str, verbose=False):
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
             "ndim": series.ndim,
-            "dtype": 'uint16',
+            "dtype": "uint16",
             "size": series.size,
             "raw_height": pages[0].shape[0],
             "raw_width": pages[0].shape[1],
@@ -304,7 +315,7 @@ def get_metadata(file: os.PathLike | str, verbose=False):
             "roi_height_px": num_pixel_xy[1],
             "sample_format": sample_format,
             "objective_resolution": objective_resolution,
-            "z_step_pollen": z_step_pollen
+            "z_step_pollen": z_step_pollen,
         }
         if verbose:
             metadata["all"] = meta
@@ -327,7 +338,7 @@ def params_from_metadata(metadata, ops=None):
         If provided, will return suite2p ops
     """
     if ops:
-        print('Ops provided. Setting pipeline to suite2p')
+        print("Ops provided. Setting pipeline to suite2p")
         return _params_from_metadata_suite2p(metadata, ops)
     else:
         return _params_from_metadata_caiman(metadata)

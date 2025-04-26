@@ -15,7 +15,9 @@ def tiff_to_binary(tiff_path, out_path, dtype="int16"):
         raise ValueError("Must be assembled, 3D (T, Y, X)")
 
     nframes, x, y = data.shape
-    bf = BinaryFile(Ly=y, Lx=x, filename=str(Path(out_path)), n_frames=nframes, dtype=dtype)
+    bf = BinaryFile(
+        Ly=y, Lx=x, filename=str(Path(out_path)), n_frames=nframes, dtype=dtype
+    )
 
     bf[:] = data
     bf.close()

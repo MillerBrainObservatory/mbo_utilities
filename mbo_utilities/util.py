@@ -37,17 +37,25 @@ def align_images_zstack(images, mode="trim"):
 
     if mode == "trim":
         target_shape = np.min(shapes, axis=0)
-        aligned_images = [img[:target_shape[0], :target_shape[1]] for img in images]
+        aligned_images = [img[: target_shape[0], : target_shape[1]] for img in images]
 
     elif mode == "pad":
         target_shape = np.max(shapes, axis=0)
-        aligned_images = [np.pad(img,
-                                 ((0, target_shape[0] - img.shape[0]),
-                                  (0, target_shape[1] - img.shape[1])),
-                                 mode="constant") for img in images]
+        aligned_images = [
+            np.pad(
+                img,
+                (
+                    (0, target_shape[0] - img.shape[0]),
+                    (0, target_shape[1] - img.shape[1]),
+                ),
+                mode="constant",
+            )
+            for img in images
+        ]
     else:
         raise ValueError("Invalid mode. Choose 'trim' or 'pad'.")
     return np.stack(aligned_images, axis=0)
+
 
 def smooth_data(data, window_size=5):
     """
@@ -77,6 +85,7 @@ def smooth_data(data, window_size=5):
     """
     return np.convolve(data, np.ones(window_size) / window_size, mode="valid")
 
+
 def norm_minmax(images):
     """
     Normalize a NumPy array to the [0, 1] range.
@@ -102,6 +111,7 @@ def norm_minmax(images):
     array([0. , 0.5, 1. ])
     """
     return (images - images.min()) / (images.max() - images.min())
+
 
 def norm_percentile(image, low_p=1, high_p=98):
     """
@@ -134,6 +144,7 @@ def norm_percentile(image, low_p=1, high_p=98):
     """
     p_low, p_high = np.percentile(image, (low_p, high_p))
     return np.clip((image - p_low) / (p_high - p_low), 0, 1)
+
 
 def match_array_size(arr1, arr2, mode="trim"):
     """
@@ -198,10 +209,12 @@ def match_array_size(arr1, arr2, mode="trim"):
         raise ValueError("Invalid mode. Use 'trim' or 'pad'.")
     return np.stack([arr1, arr2], axis=0)
 
+
 def is_qt_installed() -> bool:
     """Returns True if PyQt5 is installed, otherwise False."""
     try:
         import PyQt5
+
         return True
     except ImportError:
         return False
@@ -211,6 +224,7 @@ def is_imgui_installed() -> bool:
     """Returns True if imgui_bundle is installed, otherwise False."""
     try:
         import imgui_bundle
+
         return True
     except ImportError:
         return False
@@ -220,8 +234,11 @@ def is_running_jupyter():
     """Returns true if users environment is running Jupyter."""
     try:
         from IPython import get_ipython
+
         shell = get_ipython().__class__.__name__
-        if shell == "ZMQInteractiveShell":  # are there other aliases for a jupyter shell
+        if (
+            shell == "ZMQInteractiveShell"
+        ):  # are there other aliases for a jupyter shell
             return True  # jupyterlab
         if shell == "TerminalInteractiveShell":
             return False  # ipython from terminal

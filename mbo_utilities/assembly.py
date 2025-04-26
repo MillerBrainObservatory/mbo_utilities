@@ -12,7 +12,7 @@ from tifffile import TiffWriter
 import h5py
 
 import mbo_utilities
-from .file_io import  _make_json_serializable, read_scan
+from .file_io import _make_json_serializable, read_scan
 from .metadata import get_metadata
 from .util import is_running_jupyter
 from .scanreader.utils import listify_index
@@ -27,7 +27,7 @@ logger.setLevel(logging.WARNING)
 
 ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
 
-CHUNKS = {0: 'auto', 1: -1, 2: -1}
+CHUNKS = {0: "auto", 1: -1, 2: -1}
 
 warnings.filterwarnings("ignore")
 
@@ -66,17 +66,17 @@ def print_params(params, indent=5):
 
 
 def save_as(
-        scan,
-        savedir: os.PathLike,
-        planes: list | tuple = None,
-        metadata: dict = None,
-        overwrite: bool = True,
-        append_str: str = '',
-        ext: str = '.tiff',
-        order: list | tuple = None,
-        trim_edge: list | tuple = (0,0,0,0),
-        fix_phase: bool = True,
-        target_chunk_mb: int = 20,
+    scan,
+    savedir: os.PathLike,
+    planes: list | tuple = None,
+    metadata: dict = None,
+    overwrite: bool = True,
+    append_str: str = "",
+    ext: str = ".tiff",
+    order: list | tuple = None,
+    trim_edge: list | tuple = (0, 0, 0, 0),
+    fix_phase: bool = True,
+    target_chunk_mb: int = 20,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -132,8 +132,12 @@ def save_as(
             )
         planes = [planes[i] for i in order]
 
-    mdata = {'si': _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
-                'image': _make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))}
+    mdata = {
+        "si": _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
+        "image": _make_json_serializable(
+            get_metadata(scan.tiff_files[0].filehandle.path)
+        ),
+    }
 
     if metadata is not None:
         mdata.update(metadata)
@@ -152,27 +156,29 @@ def save_as(
         metadata=mdata,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
-        target_chunk_mb=target_chunk_mb
+        target_chunk_mb=target_chunk_mb,
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
-    print(f"Time elapsed: {int(elapsed_time // 60)} minutes {int(elapsed_time % 60)} seconds.")
+    print(
+        f"Time elapsed: {int(elapsed_time // 60)} minutes {int(elapsed_time % 60)} seconds."
+    )
 
 
 def _save_data(
-        scan,
-        path,
-        planes,
-        overwrite,
-        file_extension,
-        append_str,
-        metadata,
-        trim_edge=None,
-        fix_phase=False,
-        target_chunk_mb=20,
+    scan,
+    path,
+    planes,
+    overwrite,
+    file_extension,
+    append_str,
+    metadata,
+    trim_edge=None,
+    fix_phase=False,
+    target_chunk_mb=20,
 ):
-    if '.' in file_extension:
-        file_extension = file_extension.split('.')[-1]
+    if "." in file_extension:
+        file_extension = file_extension.split(".")[-1]
 
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
@@ -188,17 +194,29 @@ def _save_data(
     new_height = ny - (top + bottom)
     new_width = nx - (left + right)
 
-    metadata['fov'] = [new_height, new_width]
+    metadata["fov"] = [new_height, new_width]
     metadata["shape"] = (nt, new_width, new_height)
-    metadata['dims'] = ['time', 'width', 'height']
-    metadata['trimmed'] = [left, right, top, bottom]
+    metadata["dims"] = ["time", "width", "height"]
+    metadata["trimmed"] = [left, right, top, bottom]
 
     final_shape = (nt, new_height, new_width)
-    writer = _get_file_writer(file_extension, overwrite=overwrite, metadata=metadata, data_shape=final_shape)
+    writer = _get_file_writer(
+        file_extension, overwrite=overwrite, metadata=metadata, data_shape=final_shape
+    )
 
     chunk_size = target_chunk_mb * 1024 * 1024
     total_chunks = sum(
-        min(scan.shape[0], max(1, int(np.ceil(scan.shape[0] * scan.shape[2] * scan.shape[3] * 2 / chunk_size))))
+        min(
+            scan.shape[0],
+            max(
+                1,
+                int(
+                    np.ceil(
+                        scan.shape[0] * scan.shape[2] * scan.shape[3] * 2 / chunk_size
+                    )
+                ),
+            ),
+        )
         for _ in planes
     )
     pbar = tqdm(total=total_chunks, desc="Saving planes")
@@ -210,7 +228,7 @@ def _save_data(
             fname = path / f"plane_{chan_index + 1:02d}.{file_extension}"
 
         if fname.exists() and not overwrite:
-            logger.warning(f'File already exists: {fname}')
+            logger.warning(f"File already exists: {fname}")
             continue
 
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
@@ -223,9 +241,13 @@ def _save_data(
 
         start = 0
         for chunk in range(num_chunks):
-            frames_in_this_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
+            frames_in_this_chunk = base_frames_per_chunk + (
+                1 if chunk < extra_frames else 0
+            )
             end = start + frames_in_this_chunk
-            data_chunk = scan[start:end, chan_index, top:ny - bottom, left:nx - right]
+            data_chunk = scan[
+                start:end, chan_index, top : ny - bottom, left : nx - right
+            ]
 
             if fix_phase:
                 ofs = mbo_utilities.return_scan_offset(data_chunk)
@@ -241,15 +263,21 @@ def _save_data(
     if file_extension in ["tiff", ".tiff", "tif", ".tif"]:
         close_tiff_writers()
 
+
 def _get_file_writer(ext, overwrite, metadata=None, data_shape=None):
-    if ext in ['.tif', '.tiff', 'tif', 'tiff']:
-        return functools.partial(_write_tiff, overwrite=overwrite, metadata=metadata, data_shape=data_shape)
-    elif ext in ['.zarr', 'zarr']:
+    if ext in [".tif", ".tiff", "tif", "tiff"]:
+        return functools.partial(
+            _write_tiff, overwrite=overwrite, metadata=metadata, data_shape=data_shape
+        )
+    elif ext in [".zarr", "zarr"]:
         return functools.partial(_write_zarr, overwrite=overwrite, metadata=metadata)
-    elif ext in ['.h5', 'h5', 'hdf5', '.hdf5']:
-        return functools.partial(_write_h5, overwrite=overwrite, metadata=metadata, data_shape=data_shape)
+    elif ext in [".h5", "h5", "hdf5", ".hdf5"]:
+        return functools.partial(
+            _write_h5, overwrite=overwrite, metadata=metadata, data_shape=data_shape
+        )
     else:
-        raise ValueError(f'Unsupported file extension: {ext}')
+        raise ValueError(f"Unsupported file extension: {ext}")
+
 
 def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None):
     filename = Path(path).with_suffix(".h5")
@@ -259,8 +287,10 @@ def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None):
         _write_h5._offsets = {}
 
     if filename not in _write_h5._initialized:
-        with h5py.File(filename, 'w' if overwrite else 'a') as f:
-            f.create_dataset('mov', shape=data_shape, dtype=data.dtype, chunks=True, compression=None)
+        with h5py.File(filename, "w" if overwrite else "a") as f:
+            f.create_dataset(
+                "mov", shape=data_shape, dtype=data.dtype, chunks=True, compression=None
+            )
 
             if metadata:
                 for k, v in metadata.items():
@@ -273,13 +303,13 @@ def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None):
         _write_h5._offsets[filename] = 0
 
     offset = _write_h5._offsets[filename]
-    with h5py.File(filename, 'a') as f:
-        f['mov'][offset:offset + data.shape[0]] = data
+    with h5py.File(filename, "a") as f:
+        f["mov"][offset : offset + data.shape[0]] = data
 
     _write_h5._offsets[filename] += data.shape[0]
 
-def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
 
+def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
     filename = Path(path).with_suffix(".tif")
 
     if not hasattr(_write_tiff, "_writers"):
@@ -303,6 +333,7 @@ def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
             metadata=metadata if _write_tiff._first_write else None,
         )
         _write_tiff._first_write = False
+
 
 def _write_zarr(path, data, overwrite=True, metadata=None, single_file=False):
     try:
@@ -328,7 +359,7 @@ def _write_zarr(path, data, overwrite=True, metadata=None, single_file=False):
             chunks=(1,) + data.shape[1:],  # one slice per chunk
             dtype=data.dtype,
             overwrite=True,
-            max_shape=max_shape
+            max_shape=max_shape,
         )
         if metadata:
             for k, v in metadata.items():
@@ -339,7 +370,7 @@ def _write_zarr(path, data, overwrite=True, metadata=None, single_file=False):
         _write_zarr._initialized[filename] = 0
 
     # Open the array in append mode
-    z = zarr.open_array(str(filename), mode='a')
+    z = zarr.open_array(str(filename), mode="a")
     # Append new data along the 0th axis
     z.append(data)
     # Update the count (optional, since append grows the array automatically)
@@ -347,55 +378,96 @@ def _write_zarr(path, data, overwrite=True, metadata=None, single_file=False):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CLI for processing ScanImage tiff files.")
-    parser.add_argument("path",
-                        type=str,
-                        nargs='?',
-                        default=None,
-                        help="Path to the file or directory to process.")
-    parser.add_argument("--frames",
-                        type=str,
-                        default=":",  # all frames
-                        help="Frames to read (0 based). Use slice notation like NumPy arrays ("
-                             "e.g., :50 gives frames 0 to 50, 5:15:2 gives frames 5 to 15 in steps of 2)."
-                        )
-    parser.add_argument("--planes",
-                        type=str,
-                        default=":",  # all planes
-                        help="Planes to read (0 based). Use slice notation like NumPy arrays (e.g., 1:5 gives planes "
-                             "2 to 6")
-    parser.add_argument("--target_chunk_mb",
-                        type=int,
-                        nargs=1,
-                        default=20,
-                        help="Target chunk size, in MB")
-    parser.add_argument("--trimx",
-                        type=int,
-                        nargs=2,
-                        default=(0, 0),
-                        help="Number of x-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for left and right "
-                             "edges).")
-    parser.add_argument("--trimy", type=int, nargs=2, default=(0, 0),
-                        help="Number of y-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for top and bottom "
-                             "edges).")
+    parser = argparse.ArgumentParser(
+        description="CLI for processing ScanImage tiff files."
+    )
+    parser.add_argument(
+        "path",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Path to the file or directory to process.",
+    )
+    parser.add_argument(
+        "--frames",
+        type=str,
+        default=":",  # all frames
+        help="Frames to read (0 based). Use slice notation like NumPy arrays ("
+        "e.g., :50 gives frames 0 to 50, 5:15:2 gives frames 5 to 15 in steps of 2).",
+    )
+    parser.add_argument(
+        "--planes",
+        type=str,
+        default=":",  # all planes
+        help="Planes to read (0 based). Use slice notation like NumPy arrays (e.g., 1:5 gives planes "
+        "2 to 6",
+    )
+    parser.add_argument(
+        "--target_chunk_mb",
+        type=int,
+        nargs=1,
+        default=20,
+        help="Target chunk size, in MB",
+    )
+    parser.add_argument(
+        "--trimx",
+        type=int,
+        nargs=2,
+        default=(0, 0),
+        help="Number of x-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for left and right "
+        "edges).",
+    )
+    parser.add_argument(
+        "--trimy",
+        type=int,
+        nargs=2,
+        default=(0, 0),
+        help="Number of y-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for top and bottom "
+        "edges).",
+    )
     # Boolean Flags
-    parser.add_argument("--metadata", action="store_true",
-                        help="Print a dictionary of scanimage metadata for files at the given path.")
-    parser.add_argument("--roi",
-                        action='store_true',
-                        help="Save each ROI in its own folder, organized like 'zarr/roi_1/plane_1/, without this "
-                             "arguemnet it would save like 'zarr/plane_1/roi_1'."
-                        )
+    parser.add_argument(
+        "--metadata",
+        action="store_true",
+        help="Print a dictionary of scanimage metadata for files at the given path.",
+    )
+    parser.add_argument(
+        "--roi",
+        action="store_true",
+        help="Save each ROI in its own folder, organized like 'zarr/roi_1/plane_1/, without this "
+        "arguemnet it would save like 'zarr/plane_1/roi_1'.",
+    )
 
-    parser.add_argument("--save", type=str, nargs='?', help="Path to save data to. If not provided, the path will be "
-                                                            "printed.")
-    parser.add_argument("--overwrite", action='store_true', help="Overwrite existing files if saving data..")
-    parser.add_argument("--tiff", action='store_false', help="Flag to save as .tiff. Default is True")
-    parser.add_argument("--zarr", action='store_true', help="Flag to save as .zarr. Default is False")
-    parser.add_argument("--debug", action='store_true', help="Output verbose debug information.")
-    parser.add_argument("--summary", action="store_true", help="Include min, max, mean, std in metadata per plane.")
-    parser.add_argument("--delete_first_frame", action='store_false', help="Flag to delete the first frame of the "
-                                                                           "scan when saving.")
+    parser.add_argument(
+        "--save",
+        type=str,
+        nargs="?",
+        help="Path to save data to. If not provided, the path will be printed.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing files if saving data..",
+    )
+    parser.add_argument(
+        "--tiff", action="store_false", help="Flag to save as .tiff. Default is True"
+    )
+    parser.add_argument(
+        "--zarr", action="store_true", help="Flag to save as .zarr. Default is False"
+    )
+    parser.add_argument(
+        "--debug", action="store_true", help="Output verbose debug information."
+    )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Include min, max, mean, std in metadata per plane.",
+    )
+    parser.add_argument(
+        "--delete_first_frame",
+        action="store_false",
+        help="Flag to delete the first frame of the scan when saving.",
+    )
     # Commands
     args = parser.parse_args()
 
@@ -410,7 +482,7 @@ def main():
 
     path = Path(args.path).expanduser()
     if path.is_dir():
-        files = [str(x) for x in Path(args.path).expanduser().glob('*.tif*')]
+        files = [str(x) for x in Path(args.path).expanduser().glob("*.tif*")]
     elif path.is_file():
         files = [str(path)]
     else:
@@ -422,13 +494,13 @@ def main():
             f"scanreader is currently limited to scanimage .tiff files."
         )
     else:
-        print(f'Found {len(files)} file(s) in {args.path}')
+        print(f"Found {len(files)} file(s) in {args.path}")
 
     if args.metadata:
         metadata = get_metadata(files[0])
         print(f"Metadata for {files[0]}:")
         # filter out the verbose scanimage frame/roi metadata
-        print_params({k: v for k, v in metadata.items() if k not in ['si', 'roi_info']})
+        print_params({k: v for k, v in metadata.items() if k not in ["si", "roi_info"]})
 
     if args.save:
         savepath = Path(args.save).expanduser()
@@ -450,10 +522,10 @@ def main():
         logger.debug(f"Z-Planes: {len(zplanes)}")
 
         if args.zarr:
-            ext = '.zarr'
+            ext = ".zarr"
             logger.debug("Saving as .zarr.")
         elif args.tiff:
-            ext = '.tiff'
+            ext = ".tiff"
             logger.debug("Saving as .tiff.")
         else:
             raise NotImplementedError("Only .zarr and .tif are supported file formats.")
@@ -475,5 +547,5 @@ def main():
         print(args.path)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
