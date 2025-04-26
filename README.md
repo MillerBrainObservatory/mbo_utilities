@@ -1,29 +1,36 @@
-# MBO utilities
-General python/shell utilities and environment/config files.
+# MBO Utilities
+
+General Python and shell utilities developed for the Miller Brain Observatory (MBO) workflows.
+
+[![Documentation](https://img.shields.io/badge/Documentation-black?style=for-the-badge&logo=readthedocs&logoColor=white)](https://millerbrainobservatory.github.io/mbo_utilities/)
+
+Most functions have examples in docstrings.
+
+Converting scanimage tiffs into intermediate filetypes for preprocessing or to use with Suite2p is covered [here](https://millerbrainobservatory.github.io/mbo_utilities/assembly.html).
+
+Function examples [here](https://millerbrainobservatory.github.io/mbo_utilities/api/usage.html) are a work in progress.
+
+---
 
 ## Installation
+
+This package is fully installable with `pip`.
+
+`conda` can still be used for the virtual environment, but be mindful to only install packages with `conda install` when absolutely necessary.
+
+``` bash
+# make sure your environment is activated, be that conda, venv, uv venv (stick to these)
+pip install mbo_utilities
+```
+
+To get the latest version:
+
 ```bash
-conda create -n mbo_util python=3.10 imgui-bundle
-conda activate mbo_util
 pip install git+https://github.com/MillerBrainObservatory/mbo_utilities.git@master
 ```
 
-## Usage
+---
 
-Open a terminal and run the following commands:
+## Acknowledgements
 
-``` bash
-# make sure the conda environment is activated
-mbo --path ~/data/session/
-
-# or open a dialog to select the folder
-mbo --gui
-```
-
-or in Jupyter notebook:
-
-```python
-from mbo_utilities import run_gui
-
-run_gui()
-```
+Thank you to the developers of [scanreader](https://github.com/atlab/scanreader) and the broader open-source community.
