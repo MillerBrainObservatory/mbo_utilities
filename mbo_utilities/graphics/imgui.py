@@ -276,12 +276,11 @@ class SummaryDataWidget(EdgeWindow):
         super().__init__(figure=image_widget.figure, size=size, location=location, title="Preview Data", window_flags=flags)
         self.image_widget = image_widget
 
-        self.gaussian_sigma = 0.0  # new: for the slider
+        self.gaussian_sigma = 0.0
 
     def update(self):
         something_changed = False
 
-        # --- Gaussian Filter slider ---
         imgui.text("Gaussian Filter")
         changed, value = imgui.slider_float("Sigma", v=self.gaussian_sigma, v_min=0.0, v_max=20.0)
         if changed:
@@ -289,23 +288,60 @@ class SummaryDataWidget(EdgeWindow):
             something_changed = True
 
         imgui.separator()
-        imgui.new_line()
+        imgui.text("Image Processing")
+
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Apply Gaussian smoothing to current frame")
+
+        if imgui.button("Compute Temporal Mean"):
+            self.temporal_mean()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Compute mean image across time dimension")
+
+        if imgui.button("Compute Temporal StdDev"):
+            self.temporal_std()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Compute std-dev image across time dimension")
+
+        if imgui.button("Blend Adjacent Z-Planes"):
+            self.blend_adjacent()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Blend current z-plane with adjacent planes")
 
         imgui.separator()
         imgui.text("Statistics")
-        if imgui.button("Calculate Noise"):
-            self.calculate_noise()
-            imgui.text("Calculating noise...")
-
         if something_changed:
             self.apply_gaussian()
 
+    def temporal_mean(self):
+        """Average across time (axis=1 for txy)"""
+        z_idx = self.image_widget.current_index.get("t", 0)
+        frame = self.image_widget.data[0][:, z_idx, ...].mean(axis=0)
+        self.image_widget.figure[0, 0].graphics[0].data[:] = frame
+
+    def temporal_std(self):
+        """Standard deviation across time"""
+        z_idx = self.image_widget.current_index.get("t", 0)
+        frame = self.image_widget.data[0][:, z_idx, ...].std(axis=0)
+        self.image_widget.figure[0, 0].graphics[0].data[:] = frame
+
+    def blend_adjacent(self):
+        """Blend current z with previous and next (if they exist)"""
+        t_idx = self.image_widget.current_index.get("t", 0)
+        data = self.image_widget.data[0]
+        nz = data.shape[0]
+
+        frames = [data[t_idx]]
+        if t_idx > 0:
+            frames.append(data[t_idx - 1])
+        if t_idx < nz - 1:
+            frames.append(data[t_idx + 1])
+
+        blended = np.mean(frames, axis=0)
+        self.image_widget.figure[0, 0].graphics[0].data[:] = blended
+
     def apply_gaussian(self):
         self.image_widget.frame_apply = {0: lambda image_data: gaussian_filter(image_data, sigma=self.gaussian_sigma)}
-        # frame = np.array(self.image_widget.managed_graphics[0].data[:])
-        # frame_filtered = gaussian_filter(frame, sigma=self.gaussian_sigma)
-        # self.image_widget.managed_graphics[0].reset_vmin_vmax()
-        # self.image_widget.set_data(frame_filtered)
 
     def calculate_noise(self):
         pass
