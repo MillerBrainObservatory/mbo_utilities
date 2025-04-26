@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from itertools import product
 from pathlib import Path
 
-import dask
 import dask.array as da
 import ffmpeg
 import numpy as np
@@ -27,9 +26,14 @@ def zarr_to_dask(zarr_parent):
     files = get_files(zarr_parent, ".zarray", 3)
     return da.stack([da.from_zarr(Path(x).parent) for x in files], axis=1)
 
+
 def npy_to_dask(files, name="", axis=1, astype=None):
     """
     Creates a Dask array that lazily stacks multiple .npy files along a specified axis without fully loading them into memory.
+
+    Taken from suite3d for convenience
+    https://github.com/alihaydaroglu/suite3d/blob/py310/suite3d/utils.py
+    To avoid the unnessessary import. Very nice function, thanks Ali!
 
     Parameters
     ----------
@@ -179,8 +183,10 @@ def read_scan(pathnames, dtype=np.int16):
     >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # First frame of z-plane 6
     """
     if isinstance(pathnames, str) and is_escaped_string(pathnames):
-        print("Detected possible escaped characters in the path."
-              " Use a raw string (r'...') or double backslashes.")
+        print(
+            "Detected possible escaped characters in the path."
+            " Use a raw string (r'...') or double backslashes."
+        )
     filenames = expand_paths(pathnames)
     if len(filenames) == 0:
         error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
@@ -215,7 +221,12 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
 
     @property
     def shape(self):
-        return self.num_frames, self.num_channels, self.field_heights[0], self.field_widths[0]
+        return (
+            self.num_frames,
+            self.num_channels,
+            self.field_heights[0],
+            self.field_widths[0],
+        )
 
     @property
     def ndim(self):
@@ -223,7 +234,12 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
 
     @property
     def size(self):
-        return self.num_frames * self.num_channels * self.field_heights[0] * self.field_widths[0]
+        return (
+            self.num_frames
+            * self.num_channels
+            * self.field_heights[0]
+            * self.field_widths[0]
+        )
 
     @property
     def scanning_depths(self):
@@ -232,18 +248,23 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         """
         return [0]
 
-
     def _create_rois(self):
         """
         Create scan rois from the configuration file. Override the base method to force
         ROI's that have multiple 'zs' to a single depth.
         """
         try:
-            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
+            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"][
+                "imagingRoiGroup"
+            ]["rois"]
         except KeyError:
-            raise RuntimeError("This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata.")
+            raise RuntimeError(
+                "This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata."
+            )
         roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
-        roi_infos = list(filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos))  # discard empty/malformed ROIs
+        roi_infos = list(
+            filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos)
+        )  # discard empty/malformed ROIs
         for roi_info in roi_infos:
             # LBM uses a single depth that is not stored in metadata, so force this to be 0
             roi_info["zs"] = [0]
@@ -252,7 +273,9 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         return rois
 
 
-def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None) -> list | Path:
+def get_files(
+    base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
+) -> list | Path:
     """
     Recursively search for files in a specified directory whose names contain a given substring,
     limiting the search to a maximum subdirectory depth. Optionally, the resulting list of file paths
@@ -317,8 +340,11 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True, exclu
         return any(excl in path.parts for excl in exclude_dirs)
 
     files = [
-        file for file in base_path.rglob(pattern)
-        if len(file.parts) - base_depth <= max_depth and file.is_file() and not is_excluded(file)
+        file
+        for file in base_path.rglob(pattern)
+        if len(file.parts) - base_depth <= max_depth
+        and file.is_file()
+        and not is_excluded(file)
     ]
 
     # files = [
@@ -328,6 +354,7 @@ def get_files(base_dir, str_contains="", max_depth=1, sort_ascending=True, exclu
 
     if sort_ascending:
         import re
+
         def numerical_sort_key(path):
             match = re.search(r"\d+", path.name)
             return int(match.group()) if match else float("inf")
@@ -405,6 +432,7 @@ def save_png(fname, data):
     """
     # TODO: move this to a separate module that imports matplotlib
     import matplotlib.pyplot as plt
+
     plt.imshow(data)
     plt.axis("tight")
     plt.axis("off")
@@ -412,16 +440,17 @@ def save_png(fname, data):
     plt.savefig(fname, dpi=300, bbox_inches="tight")
     print(f"Saved data to {fname}")
 
+
 def save_mp4(
-        fname: str | Path | np.ndarray,
-        images,
-        framerate=60,
-        speedup=1,
-        chunk_size=100,
-        cmap="gray",
-        win=7,
-        vcodec="libx264",
-        normalize=True
+    fname: str | Path | np.ndarray,
+    images,
+    framerate=60,
+    speedup=1,
+    chunk_size=100,
+    cmap="gray",
+    win=7,
+    vcodec="libx264",
+    normalize=True,
 ):
     """
     Save a video from a 3D array or TIFF stack to `.mp4`.
@@ -488,9 +517,13 @@ def save_mp4(
             except MemoryError:
                 images = tifffile.imread(images)
         else:
-            raise FileNotFoundError(f"Images given as a string or path, but not a valid file: {images}")
+            raise FileNotFoundError(
+                f"Images given as a string or path, but not a valid file: {images}"
+            )
     elif not isinstance(images, np.ndarray):
-        raise ValueError(f"Expected images to be a numpy array or a file path, got {type(images)}")
+        raise ValueError(
+            f"Expected images to be a numpy array or a file path, got {type(images)}"
+        )
 
     T, height, width = images.shape
     colormap = cm.get_cmap(cmap)
@@ -502,13 +535,20 @@ def save_mp4(
     if win and win > 1:
         print(f"Applying temporal averaging with window size {win}")
         kernel = np.ones(win) / win
-        images = np.apply_along_axis(lambda x: np.convolve(x, kernel, mode="same"), axis=0, arr=images)
+        images = np.apply_along_axis(
+            lambda x: np.convolve(x, kernel, mode="same"), axis=0, arr=images
+        )
 
     print(f"Saving {T} frames to {fname}")
     output_framerate = int(framerate * speedup)
     process = (
-        ffmpeg
-        .input("pipe:", format="rawvideo", pix_fmt="rgb24", s=f"{width}x{height}", framerate=output_framerate)
+        ffmpeg.input(
+            "pipe:",
+            format="rawvideo",
+            pix_fmt="rgb24",
+            s=f"{width}x{height}",
+            framerate=output_framerate,
+        )
         .output(str(fname), pix_fmt="yuv420p", vcodec=vcodec, r=output_framerate)
         .overwrite_output()
         .run_async(pipe_stdin=True)
@@ -525,6 +565,7 @@ def save_mp4(
     process.wait()
     print(f"Video saved to {fname}")
 
+
 def _is_arraylike(obj) -> bool:
     """
     Checks if the object is array-like.
@@ -535,6 +576,7 @@ def _is_arraylike(obj) -> bool:
             return False
 
     return True
+
 
 def to_lazy_array(data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray]):
     """
