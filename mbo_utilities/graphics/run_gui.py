@@ -2,7 +2,7 @@ from pathlib import Path
 import numpy as np
 
 from ..util import is_imgui_installed, is_qt_installed, is_running_jupyter
-from ..file_io import ScanMultiROIReordered, to_lazy_array, load_data_path
+from ..file_io import ScanMultiROIReordered, to_lazy_array
 
 if is_imgui_installed():
     import fastplotlib as fpl
@@ -11,8 +11,8 @@ if is_qt_installed():
 
 
 def run_gui(
-        data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None, **kwargs
-        ):
+    data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None, **kwargs
+):
     """Open a GUI to preview data."""
     # Handle data_in, which can be a path to files
     if data_in is None:
