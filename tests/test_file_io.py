@@ -27,3 +27,20 @@ def test_npy_to_dask(tmp_path):
     expected_shape = (10, 60, 30, 40)
     assert darr.shape == expected_shape
 
+def test_jupyter_check():
+    assert isinstance(mbo.is_running_jupyter(), bool)
+
+def test_qt_check():
+    result = mbo.is_qt_installed()
+    assert isinstance(result, bool)
+
+def test_imgui_check():
+    result = mbo.is_imgui_installed()
+    assert isinstance(result, bool)
+
+# def test_scan_shape():
+#     test_dir = Path(__file__).parent
+#     files = mbo.get_files(test_dir, "tif")
+#     scan = mbo.read_scan(files)
+#     assert scan.shape is not None
+#     assert len(scan.shape) == 4
