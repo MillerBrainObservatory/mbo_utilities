@@ -135,4 +135,4 @@ where = ["."]
 include = ["mbo_utilities*"]
 
 [tool.setuptools.dynamic]
-version = {attr = "mbo_utilities.__version__"}
+version = { file = "mbo_utilities/VERSION" }

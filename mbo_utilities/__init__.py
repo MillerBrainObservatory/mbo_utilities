@@ -1,7 +1,3 @@
-from . import _version
-
-__version__ = "0.0.7"
-
 from .file_io import (
     get_files,
     zstack_from_files,
@@ -44,5 +40,4 @@ __all__ = [
     "is_running_jupyter",
     # assembly
     "save_as",
-    # utility
 ]
