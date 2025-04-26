@@ -42,6 +42,8 @@ __all__ = [
     "norm_minmax",
     "smooth_data",
     "is_running_jupyter",
+    "is_qt_installed",
+    "is_imgui_installed",
     # assembly
     "save_as",
 ]
