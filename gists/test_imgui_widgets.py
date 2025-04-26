@@ -17,16 +17,12 @@ import numpy as np
 from pathlib import Path
 import tifffile
 import fastplotlib as fpl
+from fastplotlib.utils import functions
 
 
 fpath = r"D:\W2_DATA\kbarber\2025_03_01\mk301\results\plane_07_mk301\plane0"
 save_path = Path().home().joinpath("dev")
 
-# ops = lsp.load_ops(mbo.get_files(fpath, 'ops.npy', 3)[0])
-# raw_path = Path(ops["data_path"][0]) / ops["tiff_list"][0]
-# raw_movie = tifffile.memmap(raw_path)
-
-from fastplotlib.utils import functions
 raw_scan = mbo.read_scan(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green\*")
 
 if __name__ == "__main__":

@@ -201,10 +201,6 @@ def _save_data(
         min(scan.shape[0], max(1, int(np.ceil(scan.shape[0] * scan.shape[2] * scan.shape[3] * 2 / chunk_size))))
         for _ in planes
     )
-    # total_chunks = sum(
-    #     min(scan.shape[0], max(1, int(np.ceil(scan.shape[0] * scan.shape[2] * scan.shape[3] * 2 / (10 * 1024 * 1024)))))
-    #     for _ in planes
-    # )
     pbar = tqdm(total=total_chunks, desc="Saving planes")
 
     for chan_index in planes:

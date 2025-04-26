@@ -309,14 +309,51 @@ class SummaryDataWidget(EdgeWindow):
             imgui.set_tooltip("Blend current z-plane with adjacent planes")
 
         imgui.separator()
+        imgui.text("Suite2p Previews")
+
+        if imgui.button("Bandpass Filter"):
+            self.apply_bandpass()
+
+        if imgui.button("Median Projection"):
+            self.median_projection()
+
+        if imgui.button("Variance Map"):
+            self.variance_map()
+
+        if imgui.button("Edge Detection"):
+            self.edge_detection()
+
+        if imgui.button("High-Pass Filter"):
+            self.highpass_filter()
+
+        if imgui.button("Denoised Mean"):
+            self.denoised_mean()
+        imgui.separator()
         imgui.text("Statistics")
         if something_changed:
             self.apply_gaussian()
 
     def temporal_mean(self):
-        """Average across time (axis=1 for txy)"""
-        z_idx = self.image_widget.current_index.get("t", 0)
-        frame = self.image_widget.data[0][:, z_idx, ...].mean(axis=0)
+        """Apply a temporal mean projection around the current frame without changing dimensions."""
+
+        z_idx = self.image_widget.current_index.get("z", 0)
+        t_idx = self.image_widget.current_index.get("t", 0)
+
+        data = self.image_widget.data[0]
+
+        # window around current t
+        window_size = 5
+        half_window = window_size // 2
+        t_min = max(0, t_idx - half_window)
+        t_max = min(data.shape[1], t_idx + half_window + 1)
+
+        # average only across small t window, keeping z, x, y shape
+        averaged = data[:, t_min:t_max, ...].mean(axis=1)  # shape (z, x, y)
+
+        # only show z_idx slice
+        frame = averaged[z_idx]
+
+        # update current view without changing the underlying array
         self.image_widget.figure[0, 0].graphics[0].data[:] = frame
 
     def temporal_std(self):
@@ -339,6 +376,47 @@ class SummaryDataWidget(EdgeWindow):
 
         blended = np.mean(frames, axis=0)
         self.image_widget.figure[0, 0].graphics[0].data[:] = blended
+
+    def apply_bandpass(self):
+        from scipy.ndimage import gaussian_filter
+        frame = self.image_widget.managed_graphics[0].data.value.copy()
+        lowpass = gaussian_filter(frame, sigma=3)
+        highpass = frame - gaussian_filter(frame, sigma=20)
+        bandpassed = frame - lowpass + highpass
+        self.image_widget.figure[0, 0].graphics[0].data[:] = bandpassed
+
+    def median_projection(self):
+        data = self.image_widget.data[0]
+        med_proj = np.median(data, axis=1)  # median across time
+        t_idx = self.image_widget.current_index.get("t", 0)
+        self.image_widget.figure[0, 0].graphics[0].data[:] = med_proj[t_idx]
+
+    def variance_map(self):
+        data = self.image_widget.data[0]
+        var_proj = np.var(data, axis=1)
+        t_idx = self.image_widget.current_index.get("t", 0)
+        self.image_widget.figure[0, 0].graphics[0].data[:] = var_proj[t_idx]
+
+    def edge_detection(self):
+        from scipy.ndimage import sobel
+        frame = self.image_widget.managed_graphics[0].data.value.copy()
+        edge_x = sobel(frame, axis=0)
+        edge_y = sobel(frame, axis=1)
+        edges = np.hypot(edge_x, edge_y)
+        self.image_widget.figure[0, 0].graphics[0].data[:] = edges
+
+    def highpass_filter(self):
+        from scipy.ndimage import gaussian_filter
+        frame = self.image_widget.managed_graphics[0].data.value.copy()
+        low = gaussian_filter(frame, sigma=10)
+        highpass = frame - low
+        self.image_widget.figure[0, 0].graphics[0].data[:] = highpass
+
+    def denoised_mean(self):
+        data = self.image_widget.data[0]
+        t_idx = self.image_widget.current_index.get("t", 0)
+        window = data[:, t_idx - 5:t_idx + 5].mean(axis=1)
+        self.image_widget.figure[0, 0].graphics[0].data[:] = window[t_idx]
 
     def apply_gaussian(self):
         self.image_widget.frame_apply = {0: lambda image_data: gaussian_filter(image_data, sigma=self.gaussian_sigma)}
