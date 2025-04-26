@@ -99,8 +99,12 @@ def return_scan_offset(image_in, nvals: int = 8):
 
     Examples
     --------
-    >>> img = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
-    >>> return_scan_offset(img, 1)
+    >>> from mbo_utilities import return_scan_offset, read_scan
+    >>> scan = read_scan(r"data/assembled/plane_05.tif")
+    >>> frame = np.mean(scan[:400, 0, :, :], axis=0)  #  400 frames of the first plane
+    >>> offset = return_scan_offset(frame, 1)  # on the first axis
+    >>> print(f"Computed scan offset: {offset}")
+
 
     Notes
     -----
@@ -161,7 +165,7 @@ def return_scan_offset(image_in, nvals: int = 8):
     return lags[correction_index]
 
 
-def fix_scan_phase_2d(data_in: np.ndarray, offset: int) -> np.ndarray:
+def _fix_scan_phase_2d(data_in: np.ndarray, offset: int) -> np.ndarray:
     """
     Corrects bidirectional scan phase by shifting only odd rows by the given pixel offset.
     """
@@ -197,8 +201,8 @@ def fix_scan_phase(data_in: np.ndarray, offset: int):
         The corrected array of the same shape as input.
     """
     if data_in.ndim == 2:
-        return fix_scan_phase_2d(data_in, offset)
+        return _fix_scan_phase_2d(data_in, offset)
     elif data_in.ndim == 3:
-        return np.stack([fix_scan_phase_2d(frame, offset) for frame in data_in], axis=0)
+        return np.stack([_fix_scan_phase_2d(frame, offset) for frame in data_in], axis=0)
     else:
         raise ValueError("Unsupported number of dimensions. Expected 2D or 3D.")
