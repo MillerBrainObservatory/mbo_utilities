@@ -61,16 +61,20 @@ def extract_center_square(images, size):
         height, width = images.shape
         center_h, center_w = height // 2, width // 2
         half_size = size // 2
-        return images[center_h - half_size:center_h + half_size,
-               center_w - half_size:center_w + half_size]
+        return images[
+            center_h - half_size : center_h + half_size,
+            center_w - half_size : center_w + half_size,
+        ]
 
     elif images.ndim == 3:  # 3D array (T x H x W)
         T, height, width = images.shape
         center_h, center_w = height // 2, width // 2
         half_size = size // 2
-        return images[:,
-               center_h - half_size:center_h + half_size,
-               center_w - half_size:center_w + half_size]
+        return images[
+            :,
+            center_h - half_size : center_h + half_size,
+            center_w - half_size : center_w + half_size,
+        ]
     else:
         raise ValueError("Input array must be 2D or 3D.")
 
@@ -203,6 +207,8 @@ def fix_scan_phase(data_in: np.ndarray, offset: int):
     if data_in.ndim == 2:
         return _fix_scan_phase_2d(data_in, offset)
     elif data_in.ndim == 3:
-        return np.stack([_fix_scan_phase_2d(frame, offset) for frame in data_in], axis=0)
+        return np.stack(
+            [_fix_scan_phase_2d(frame, offset) for frame in data_in], axis=0
+        )
     else:
         raise ValueError("Unsupported number of dimensions. Expected 2D or 3D.")
