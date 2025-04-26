@@ -79,11 +79,6 @@ def return_scan_offset(image_in, nvals: int = 8):
     """
     Compute the scan offset correction between interleaved lines or columns in an image.
 
-    This function calculates the scan offset correction by analyzing the cross-correlation
-    between interleaved lines or columns of the input image. The cross-correlation peak
-    determines the amount of offset between the lines or columns, which is then used to
-    correct for any misalignment in the imaging process.
-
     Parameters
     ----------
     image_in : ndarray | ndarray-like
@@ -181,21 +176,6 @@ def fix_scan_phase_2d(data_in: np.ndarray, offset: int) -> np.ndarray:
         data_out[1::2, offset:] = data_in[1::2, :-offset]
 
     return data_out
-
-# def fix_scan_phase_2d(data_in: np.ndarray, offset: int):
-#     data_out = np.zeros_like(data_in)
-#
-#     if offset > 0:
-#         data_out[0::2, offset:] = data_in[0::2, :-offset]
-#         data_out[1::2, :] = data_in[1::2, :]
-#     elif offset < 0:
-#         offset = abs(offset)
-#         data_out[0::2, :] = data_in[0::2, :]
-#         data_out[1::2, offset:] = data_in[1::2, :-offset]
-#     else:
-#         return data_in
-#
-#     return data_out
 
 
 def fix_scan_phase(data_in: np.ndarray, offset: int):
