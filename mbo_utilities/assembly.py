@@ -402,7 +402,7 @@ def main():
     # If no arguments are provided, print help and exit
     if len(vars(args)) == 0 or not args.path:
         parser.print_help()
-        return
+        return None
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
