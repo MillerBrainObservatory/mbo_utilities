@@ -347,11 +347,6 @@ def get_files(
         and not is_excluded(file)
     ]
 
-    # files = [
-    #     file for file in base_path.rglob(pattern)
-    #     if len(file.parts) - base_depth <= max_depth and file.is_file()
-    # ]
-
     if sort_ascending:
         import re
 
