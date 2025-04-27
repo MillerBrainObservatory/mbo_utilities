@@ -220,6 +220,22 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         raise ValueError(f"Unexpected number of dimensions: {item.ndim}")
 
     @property
+    def min(self):
+        """
+        Returns the minimum value of the first tiff page.
+        """
+        page = super().__getitem__((0, slice(None), slice(None), 0, 0))
+        return np.min(page)
+    
+    @property
+    def max(self):
+        """
+        Returns the maximum value of the first tiff page.
+        """
+        page = super().__getitem__((0, slice(None), slice(None), 0, 0))
+        return np.max(page)
+
+    @property
     def shape(self):
         return (
             self.num_frames,
