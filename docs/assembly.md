@@ -23,6 +23,9 @@ import mbo_utilities as mbo
 scan = mbo.read_scan("path/to/data/*.tiff") # or list of full filepaths
 mbo.save_as(scan, "path/to/assembled_data", ext=".tiff")
 ```
+```{figure} ./_images/progress_bar.png
+A progress bar will track the current file progress.
+```
 ``````
 
 ## Overview 
@@ -33,7 +36,7 @@ This section covers the steps to convert raw scanimage-tiff files into assembled
 :align: center
 
 Overview of pre-processing steps that convert the raw scanimage tiffs into planar timeseries.
-Starting with a raw, multi-page ScanImage Tiff, frames are deinterleaved, optionally pre-processed to eliminate scan-phase artifacts,
+Starting with a raw, multi-page ScanImage Tiff, frames are {ref}`deinterleaved <ex_deinterleave>`, optionally pre-processed to eliminate scan-phase artifacts,
 and fused to create an assembled timeseries.
 ```
 

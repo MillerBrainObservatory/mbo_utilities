@@ -14,7 +14,6 @@ Usage <usage/index>
 API <api/index>
 venvs
 image_gallery
-tiff_doc_gpt
 ```
 
 ## Useful 
