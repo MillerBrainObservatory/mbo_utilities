@@ -10,48 +10,7 @@ kernelspec:
   language: python
   name: python3
 ---
-(run_gui)=
-# Function Usage
-
-Examples of some common function use cases.
-
----
-
-(usage_run_gui)=
-## `run_gui`
-
-{func}`mbo_utilities.run_gui` opens an interactive viewer for imaging data using [fastplotlib](https://www.fastplotlib.org/user_guide/guide.html#what-is-fastplotlib).
-It supports execution in both **Jupyter** and **Qt-native** environments.
-
-### Jupyter / IPython
-
-Returns a {class}`fastplotlib.ImageWidget`:
-
-```{code} python
-from mbo_utilities.graphics import run_gui
-
-# load directly from a ScanImage folder
-iw = run_gui("path/to/scanimage/folder")
-
-# or from preprocessed ScanMultiROIReordered object
-from mbo_utilities.file_io import ScanMultiROIReordered
-data = ScanMultiROIReordered(...)
-iw = run_gui(data)
-```
-
-If no input is given and Qt is available, the widget will attempt to open a file dialog.
-
-### Python script (non-Jupyter)
-
-```{code} python
-from mbo_utilities.graphics import run_gui
-
-# Will launch native Qt viewer window
-run_gui("path/to/data")
-```
-If run from a script without data_in, and Qt is installed, a file dialog will prompt for input.
-
-## `save_mp4`
+# `save_mp4`
 
 {func}`mbo_utilities.save_mp4`
 
@@ -65,7 +24,7 @@ import mbo_utilities as mbo
 import tifffile
 ```
 
-### Load Data
+## Load Data
 
 ```{code-cell} ipython3
 save_path = Path().home().joinpath("dev")
@@ -74,7 +33,7 @@ data = tifffile.imread(files[0])
 data.shape  # should be [T, Y, X]
 ```
 
-### Example Usage
+## Example Usage
 
 ::::{tab-set}
 
@@ -106,7 +65,7 @@ mbo.save_mp4(save_path / "windowed_5frames_4x.mp4", data, speedup=4, win=5)
 
 ---
 
-### Parameters
+## Parameters
 
 ```{code-block} python
 mbo.save_mp4(

@@ -15,5 +15,4 @@ numbered: 2
 Core Functions <core>
 I/O Functions <io>
 Visualization Functions <visualization>
-Function Usage <usage>
 ````
