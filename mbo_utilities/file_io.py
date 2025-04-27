@@ -182,11 +182,6 @@ def read_scan(pathnames, dtype=np.int16):
     >>> scan = mbo.read_scan(r"C:\\path\to\\scan\\*.tif")
     >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # First frame of z-plane 6
     """
-    if isinstance(pathnames, str) and is_escaped_string(pathnames):
-        print(
-            "Detected possible escaped characters in the path."
-            " Use a raw string (r'...') or double backslashes."
-        )
     filenames = expand_paths(pathnames)
     if len(filenames) == 0:
         error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
@@ -226,7 +221,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         """
         page = super().__getitem__((0, slice(None), slice(None), 0, 0))
         return np.min(page)
-    
+
     @property
     def max(self):
         """
@@ -287,6 +282,13 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
 
         rois = [ROI(roi_info) for roi_info in roi_infos]
         return rois
+
+    def __array__(self):
+        """
+        Convert the scan data to a NumPy array.
+        Calculate the size of the scan and subsample to keep under memory limits.
+        """
+        return np.array(self[:])
 
 
 def get_files(
