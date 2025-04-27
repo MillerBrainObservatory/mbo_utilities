@@ -250,7 +250,7 @@ def is_running_jupyter():
 
 
 def subsample_array(
-    arr: np.ndarray, max_size: int = 1e6, ignore_dims: Sequence[int] | None = None
+    arr, max_size: int = 1e6, ignore_dims: Sequence[int] | None = None
 ):
     """
     Subsamples an input array while preserving its relative dimensional proportions.
@@ -298,17 +298,17 @@ def subsample_array(
     np.ndarray
         subsample of the input array
     """
-    if np.prod(arr.shape, np.int64) <= max_size:
+    if np.prod(arr.shape, dtype=np.int64) <= max_size:
         return arr[:]  # no need to subsample if already below the threshold
 
     # get factor by which to divide all dims
-    f = np.power((np.prod(arr.shape, np.int64) / max_size), 1.0 / arr.ndim)
+    f = np.power((np.prod(arr.shape, dtype=np.int64) / max_size), 1.0 / arr.ndim)
 
     # new shape for subsampled array
     ns = np.floor(np.array(arr.shape, np.int64) / f).clip(min=1)
 
     # get the step size for the slices
-    slices = tuple(
+    slices = list(
         slice(None, None, int(s)) for s in np.floor(arr.shape / ns).astype(int)
     )
 

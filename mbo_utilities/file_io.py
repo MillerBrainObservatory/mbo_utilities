@@ -15,7 +15,7 @@ from matplotlib import cm
 from .metadata import is_raw_scanimage
 from .scanreader import scans
 from .scanreader.multiroi import ROI
-from .util import norm_minmax
+from .util import norm_minmax, subsample_array
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
@@ -198,21 +198,24 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
     """
-
     def __getitem__(self, key):
-        if not isinstance(key, tuple):
+        """Index like a 4D numpy array [t, z, x, y]"""
+        if key == slice(None):
+            return subsample_array(self, ignore_dims=[-1, -2])  # retain image dims
+        elif not isinstance(key, tuple):
             key = (key,)
-        key = tuple(list(k) if isinstance(k, range) else k for k in key)
 
-        # Call the parent class's __getitem__ with the reordered key
-        item = super().__getitem__((0, key[2], key[3], key[1], key[0]))
-        if item.ndim == 2:
-            return item
-        if item.ndim == 3:
-            return np.transpose(item, (2, 0, 1))
-        if item.ndim == 4:
-            return np.transpose(item, (3, 2, 0, 1))
-        raise ValueError(f"Unexpected number of dimensions: {item.ndim}")
+        t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
+        reordered_key = (0, y_key, x_key, z_key, t_key)
+        item = super().__getitem__(reordered_key)
+        ndim = item.ndim
+        if ndim == 2:
+            return item[np.newaxis, np.newaxis, :, :]  # (1,1,x,y)
+        if ndim == 3:
+            return np.transpose(item, (2, 0, 1))[np.newaxis]  # (1,z,x,y)
+        if ndim == 4:
+            return np.transpose(item, (3, 2, 0, 1))  # (t,z,x,y)
+        raise ValueError(f"Unexpected ndim: {ndim}")
 
     @property
     def min(self):
@@ -288,7 +291,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         Convert the scan data to a NumPy array.
         Calculate the size of the scan and subsample to keep under memory limits.
         """
-        return np.array(self[:])
+        return subsample_array(self, ignore_dims=[-1, -2])
 
 
 def get_files(
