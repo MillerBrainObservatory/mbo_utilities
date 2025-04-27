@@ -128,5 +128,14 @@ Single package: `uv sync --upgrade-package package`
 
 All packages: `uv lock --upgrade`
 :::
-
 ::::
+
+## Mixing conda and pip 
+
+uv will fallback to using a conda environment as well, if no .venv folder is in the directory:
+``` {code} bash
+flynn at pop-os in ~/repos/work/mbo_utilities (master●)
+$ uv pip list | grep imgui
+Using Python 3.12.6 environment at: /home/flynn/miniforge3
+imgui-bundle              1.6.2
+```

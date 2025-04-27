@@ -14,13 +14,13 @@ kernelspec:
 (assembly)=
 # Image Assembly
 
-`````{admonition} TL;DR
+`````{admonition} TLDR
 :class: dropdown
 
 If all you want is code to get started, this will 
 ``` python
 import mbo_utilities as mbo
-scan = mbo.read_scan("path/to/data/*.tiff")
+scan = mbo.read_scan("path/to/data/*.tiff") # or list of full filepaths
 mbo.save_as(scan, "path/to/assembled_data", ext=".tiff")
 ```
 ``````
@@ -29,7 +29,7 @@ mbo.save_as(scan, "path/to/assembled_data", ext=".tiff")
 
 This section covers the steps to convert raw scanimage-tiff files into assembled, planar timeseries.
 
-```{figure}  ./_images/ex_diagram.png
+```{figure}  ./_images/assembly_1.png
 :align: center
 
 Overview of pre-processing steps that convert the raw scanimage tiffs into planar timeseries.
@@ -161,17 +161,13 @@ To get a rough idea of the quality of your extracted timeseries, we can create a
 
 Here, we simply click on any pixel in the movie, and we get a 2D trace (or "temporal component" as used in this field) of the pixel through the course of the movie:
 
-```{figure} ./_images/ex_diagram.png 
-:align: center
-```
-
 More advanced visualizations can be easily created, i.e. adding a baseline subtracted element to the trace, or passing the trace through a frequency filter.
 
 ```{code-cell} ipython3
 import tifffile
 from ipywidgets import VBox
 
-img = tifffile.memmap("/home/flynn/lbm_data/mk301/assembled/plane_07_demo.tiff")
+img = tifffile.memmap("path/to/assembled/plane_07.tiff")
 iw_movie = fpl.ImageWidget(img, cmap="viridis")
 
 tfig = fpl.Figure()
@@ -187,6 +183,8 @@ def pixel_clicked(ev):
 VBox([iw_movie.show(), tfig.show()])
 ```
 
-```{code-cell} ipython3
+## Under the hood
 
+```{figure}  ./_images/ex_diagram.png
 ```
+
