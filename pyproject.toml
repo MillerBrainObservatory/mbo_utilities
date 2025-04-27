@@ -21,6 +21,15 @@ dependencies = [
 	"matplotlib>=3.10.1",
 	"h5py",
 	"tqdm",
+	"imgui-bundle",
+	"pyqt5==5.15.11",
+	"pyqt5-qt5==5.15.2",
+	"jupyter_rfb>=0.5.1",
+	"fastplotlib",
+	"pygfx",
+	"jupyterlab",
+	"ipykernel",
+	"ipywidgets>=8.0.0,<9",
 ]
 
 [project.scripts]
@@ -35,21 +44,9 @@ Repository = "https://github.com/millerbrainobservatory/mbo_utilities"
 Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
-gui = [
-	"cmake",
-	"imgui-bundle",
-	"pyqt5==5.15.11",
-	"pyqt5-qt5==5.15.2",
-	"jupyter_rfb>=0.5.1",
-	"fastplotlib",
-	"pygfx",
-	"jupyterlab",
-	"ipykernel",
-	"ipywidgets>=8.0.0,<9",
-]
 napari = ["napari"]
 all = [
-	"mbo_utilities[gui]",
+#	"mbo_utilities[gui]",
 	"napari",
 ]
 
