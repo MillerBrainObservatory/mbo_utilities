@@ -51,20 +51,6 @@ wheels = [
 ]
 
 [[package]]
-name = "anywidget"
-version = "0.9.18"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "ipywidgets" },
-    { name = "psygnal" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ed/69/20423d6abd2a57d767d20a9dcf3f816bd4cbbe4813ac7c7158ba16e44c3f/anywidget-0.9.18.tar.gz", hash = "sha256:262cf459b517a7d044d6fbc84b953e9c83f026790b2dd3ce90f21a7f8eded00f", size = 9808509 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2b/f0/09a30ca0551af20c7cefa7464b7ccb6f5407a550b83c4dcb15c410814849/anywidget-0.9.18-py3-none-any.whl", hash = "sha256:944b82ef1dd17b8ff0fb6d1f199f613caf9111338e6e2857da478f6e73770cb8", size = 220671 },
-]
-
-[[package]]
 name = "app-model"
 version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -897,14 +883,14 @@ wheels = [
 
 [[package]]
 name = "importlib-metadata"
-version = "8.6.1"
+version = "8.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "zipp" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/33/08/c1395a292bb23fd03bdf572a1357c5a733d3eecbab877641ceacab23db6e/importlib_metadata-8.6.1.tar.gz", hash = "sha256:310b41d755445d74569f993ccfc22838295d9fe005425094fad953d7f15c8580", size = 55767 }
+sdist = { url = "https://files.pythonhosted.org/packages/76/66/650a33bd90f786193e4de4b3ad86ea60b53c89b669a5c7be931fac31cdb0/importlib_metadata-8.7.0.tar.gz", hash = "sha256:d13b81ad223b890aa16c5471f2ac3056cf76c5f10f82d6f9292f0b415f389000", size = 56641 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/79/9d/0fb148dc4d6fa4a7dd1d8378168d9b4cd8d4560a6fbf6f0121c5fc34eb68/importlib_metadata-8.6.1-py3-none-any.whl", hash = "sha256:02a89390c1e15fdfdc0d7c6b25cb3e62650d0494005c97d6f148bf5b9787525e", size = 26971 },
+    { url = "https://files.pythonhosted.org/packages/20/b0/36bd937216ec521246249be3bf9855081de4c5e06a0c9b4219dbeda50373/importlib_metadata-8.7.0-py3-none-any.whl", hash = "sha256:e5dd1551894c77868a30651cef00984d50e1002d06942a7101d34870c5f02afd", size = 27656 },
 ]
 
 [[package]]
@@ -1315,7 +1301,7 @@ wheels = [
 
 [[package]]
 name = "jupytext"
-version = "1.17.0"
+version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "markdown-it-py" },
@@ -1324,9 +1310,9 @@ dependencies = [
     { name = "packaging" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/17/b5/b04008ae2f3b37f0a955d9232c729589bcf40819732cd08a54bce08feb83/jupytext-1.17.0.tar.gz", hash = "sha256:c74adf6d205a778f481189e986b6066af79bdeb69099f4138d933cc15c398fb6", size = 3746613 }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/d9/b7acd3bed66c194cec1915c5bbec30994dbb50693ec209e5b115c28ddf63/jupytext-1.17.1.tar.gz", hash = "sha256:c02fda8af76ffd6e064a04cf2d3cc8aae242b2f0e38c42b4cd80baf89c3325d3", size = 3746897 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/dc/46/c2fb92e01eb0423bae7fe91c3bf2ca994069f299a6455919f4a9a12960ed/jupytext-1.17.0-py3-none-any.whl", hash = "sha256:d75b7cd198b3640a12f9cdf4d610bb80c9f27a8c3318b00372f90d21466d40e1", size = 164106 },
+    { url = "https://files.pythonhosted.org/packages/12/b7/e7e3d34c8095c19228874b1babedfb5d901374e40d51ae66f2a90203be53/jupytext-1.17.1-py3-none-any.whl", hash = "sha256:99145b1e1fa96520c21ba157de7d354ffa4904724dcebdcd70b8413688a312de", size = 164286 },
 ]
 
 [[package]]
@@ -1505,9 +1491,8 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
-    { name = "anywidget" },
+    { name = "cmake" },
     { name = "fastplotlib" },
-    { name = "glfw" },
     { name = "imgui-bundle" },
     { name = "ipykernel" },
     { name = "ipywidgets" },
@@ -1517,31 +1502,26 @@ all = [
     { name = "pygfx" },
     { name = "pyqt5" },
     { name = "pyqt5-qt5" },
-    { name = "sidecar" },
 ]
 gui = [
     { name = "cmake" },
-    { name = "glfw" },
+    { name = "fastplotlib" },
     { name = "imgui-bundle" },
+    { name = "ipykernel" },
+    { name = "ipywidgets" },
+    { name = "jupyter-rfb" },
+    { name = "jupyterlab" },
+    { name = "pygfx" },
     { name = "pyqt5" },
     { name = "pyqt5-qt5" },
 ]
 napari = [
     { name = "napari" },
 ]
-notebook = [
-    { name = "anywidget" },
-    { name = "fastplotlib" },
-    { name = "ipykernel" },
-    { name = "ipywidgets" },
-    { name = "jupyter-rfb" },
-    { name = "jupyterlab" },
-    { name = "pygfx" },
-    { name = "sidecar" },
-]
 
 [package.dev-dependencies]
-dev = [
+all = [
+    { name = "mbo-utilities", extra = ["all"] },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -1568,48 +1548,35 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anywidget", marker = "extra == 'all'" },
-    { name = "anywidget", marker = "extra == 'notebook'" },
     { name = "cmake", marker = "extra == 'gui'" },
     { name = "dask", specifier = ">=2025.3.0" },
-    { name = "fastplotlib", marker = "extra == 'all'" },
-    { name = "fastplotlib", marker = "extra == 'notebook'" },
+    { name = "fastplotlib", marker = "extra == 'gui'" },
     { name = "ffmpeg-python" },
-    { name = "glfw", marker = "extra == 'all'" },
-    { name = "glfw", marker = "extra == 'gui'" },
     { name = "h5py" },
     { name = "imageio", extras = ["ffmpeg"] },
-    { name = "imgui-bundle", marker = "extra == 'all'" },
     { name = "imgui-bundle", marker = "extra == 'gui'" },
-    { name = "ipykernel", marker = "extra == 'all'" },
-    { name = "ipykernel", marker = "extra == 'notebook'" },
-    { name = "ipywidgets", marker = "extra == 'all'", specifier = ">=8.0.0,<9" },
-    { name = "ipywidgets", marker = "extra == 'notebook'", specifier = ">=8.0.0,<9" },
-    { name = "jupyter-rfb", marker = "extra == 'all'", specifier = ">=0.5.1" },
-    { name = "jupyter-rfb", marker = "extra == 'notebook'", specifier = ">=0.5.1" },
-    { name = "jupyterlab", marker = "extra == 'all'" },
-    { name = "jupyterlab", marker = "extra == 'notebook'" },
+    { name = "ipykernel", marker = "extra == 'gui'" },
+    { name = "ipywidgets", marker = "extra == 'gui'", specifier = ">=8.0.0,<9" },
+    { name = "jupyter-rfb", marker = "extra == 'gui'", specifier = ">=0.5.1" },
+    { name = "jupyterlab", marker = "extra == 'gui'" },
     { name = "matplotlib", specifier = ">=3.10.1" },
+    { name = "mbo-utilities", extras = ["gui"], marker = "extra == 'all'" },
     { name = "mkl-fft", specifier = ">=1.3.13" },
     { name = "napari", marker = "extra == 'all'" },
     { name = "napari", marker = "extra == 'napari'" },
-    { name = "pygfx", marker = "extra == 'all'" },
-    { name = "pygfx", marker = "extra == 'notebook'" },
-    { name = "pyqt5", marker = "extra == 'all'", specifier = "==5.15.11" },
+    { name = "pygfx", marker = "extra == 'gui'" },
     { name = "pyqt5", marker = "extra == 'gui'", specifier = "==5.15.11" },
-    { name = "pyqt5-qt5", marker = "extra == 'all'", specifier = "==5.15.2" },
     { name = "pyqt5-qt5", marker = "extra == 'gui'", specifier = "==5.15.2" },
     { name = "scikit-image" },
-    { name = "sidecar", marker = "extra == 'all'" },
-    { name = "sidecar", marker = "extra == 'notebook'" },
     { name = "tifffile", specifier = ">=2025.3.30" },
     { name = "tqdm" },
     { name = "zarr", specifier = ">=2.18.3" },
 ]
-provides-extras = ["gui", "notebook", "napari", "all"]
+provides-extras = ["gui", "napari", "all"]
 
 [package.metadata.requires-dev]
-dev = [
+all = [
+    { name = "mbo-utilities", extras = ["all"] },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -2884,11 +2851,11 @@ wheels = [
 
 [[package]]
 name = "setuptools"
-version = "79.0.1"
+version = "80.0.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/bb/71/b6365e6325b3290e14957b2c3a804a529968c77a049b2ed40c095f749707/setuptools-79.0.1.tar.gz", hash = "sha256:128ce7b8f33c3079fd1b067ecbb4051a66e8526e7b65f6cec075dfc650ddfa88", size = 1367909 }
+sdist = { url = "https://files.pythonhosted.org/packages/44/80/97e25f0f1e4067677806084b7382a6ff9979f3d15119375c475c288db9d7/setuptools-80.0.0.tar.gz", hash = "sha256:c40a5b3729d58dd749c0f08f1a07d134fb8a0a3d7f87dc33e7c5e1f762138650", size = 1354221 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/6d/b4752b044bf94cb802d88a888dc7d288baaf77d7910b7dedda74b5ceea0c/setuptools-79.0.1-py3-none-any.whl", hash = "sha256:e147c0549f27767ba362f9da434eab9c5dc0045d5304feb602a0af001089fc51", size = 1256281 },
+    { url = "https://files.pythonhosted.org/packages/23/63/5517029d6696ddf2bd378d46f63f479be001c31b462303170a1da57650cb/setuptools-80.0.0-py3-none-any.whl", hash = "sha256:a38f898dcd6e5380f4da4381a87ec90bd0a7eec23d204a5552e80ee3cab6bd27", size = 1240907 },
 ]
 
 [[package]]
@@ -2898,18 +2865,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755 },
-]
-
-[[package]]
-name = "sidecar"
-version = "0.7.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "ipywidgets" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/23/8c/1143344be27a8c72ab8f02e6b55270e89eca6387bae542f958b056a18764/sidecar-0.7.0.tar.gz", hash = "sha256:c3fa1694b5611c1fab9d7a96c07577ba0764068a89b7b39be9b9ce9770e9d363", size = 3333537 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c5/8e/3a325661f42c7d7aa246b16cbf1113caf94d418e5c367a2483ee1e1f9603/sidecar-0.7.0-py3-none-any.whl", hash = "sha256:a18e5972b45f5b6a81d6738a223471b3e1627bff1e26053834fd843006e67446", size = 17821 },
 ]
 
 [[package]]
