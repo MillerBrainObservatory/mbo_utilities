@@ -201,7 +201,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
     def __getitem__(self, key):
         """Index like a 4D numpy array [t, z, x, y]"""
         if key == slice(None):
-            return subsample_array(self, ignore_dims=[-1, -2])  # retain image dims
+            return np.squeeze(subsample_array(self, ignore_dims=[-1, -2]))  # retain image dims
         elif not isinstance(key, tuple):
             key = (key,)
 
