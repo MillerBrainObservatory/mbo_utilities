@@ -1,10 +1,17 @@
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["click", "numpy", "tifffile", "tqdm", "dask[complete]"]
+# dependencies = ["click", "numpy", "tifffile", "tqdm", "dask[complete]", "fastplotlib[notebook, imgui]"]
 # ///
 import tifffile, dask.array as da
+import mbo_utilities as mbo
+import fasplotlib as fpl
 
-with tifffile.TiffFile(r"D:\W2_DATA\kbarber\2025_03_01\mk301\assembled\plane_07_mk301.tiff") as tif:
-    zarr_array = tif.aszarr(series=0, chunkmode="page")
-dask_arr = da.from_zarr(zarr_array)
-print(dask_arr.shape, dask_arr.chunksize)
+pathnames = r"D:\demo\raw_data/*"
+filenames = mbo.expand_paths(pathnames)
+scan = mbo.read_scan(filenames)
+
+iw = fpl.ImageWindow(scan)
+iw.show()
+
+if __name__ == "__main__":
+    fpl.loop.run()
