@@ -210,11 +210,11 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         item = super().__getitem__(reordered_key)
         ndim = item.ndim
         if ndim == 2:
-            return item[np.newaxis, np.newaxis, :, :]  # (1,1,x,y)
+            return item
         if ndim == 3:
-            return np.transpose(item, (2, 0, 1))[np.newaxis]  # (1,z,x,y)
+            return np.transpose(item, (2, 0, 1))
         if ndim == 4:
-            return np.transpose(item, (3, 2, 0, 1))  # (t,z,x,y)
+            return np.transpose(item, (3, 2, 0, 1))
         raise ValueError(f"Unexpected ndim: {ndim}")
 
     @property
