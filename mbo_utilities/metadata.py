@@ -327,7 +327,7 @@ def get_metadata(file: os.PathLike | str, verbose=False):
         raise ValueError(f"No metadata found in {file}.")
 
 
-def params_from_metadata(metadata, ops=None, pipeline="suite2p"):
+def params_from_metadata(metadata, base_ops, pipeline="suite2p"):
     """
     Use metadata to get sensible default pipeline parameters.
 
@@ -337,8 +337,8 @@ def params_from_metadata(metadata, ops=None, pipeline="suite2p"):
     ----------
     metadata : dict
         Result of mbo.get_metadata()
-    ops : dict, optional
-        If provided, will return suite2p ops
+    base_ops : dict
+        Ops dict to use as a base.
     pipeline : str, optional
         The pipeline to use. Default is "suite2p".
     """
@@ -347,7 +347,7 @@ def params_from_metadata(metadata, ops=None, pipeline="suite2p"):
         return _params_from_metadata_caiman(metadata)
     elif pipeline.lower() == "suite2p":
         print("Setting pipeline to suite2p")
-        return _params_from_metadata_suite2p(metadata, ops)
+        return _params_from_metadata_suite2p(metadata, base_ops)
     else:
         raise ValueError(
             f"Pipeline {pipeline} not recognized. Use 'caiman' or 'suite2'"
