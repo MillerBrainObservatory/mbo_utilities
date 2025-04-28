@@ -170,10 +170,10 @@ class PollenCalibrationWidget(EdgeWindow):
         if imgui.is_item_hovered():
             imgui.set_tooltip("Open File")
 
-        if imgui.button("Switch Projection", button_size):
-            self.switch()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Switch to max/mean projection.")
+        # if imgui.button("Switch Projection", button_size):
+        #     self.switch()
+        # if imgui.is_item_hovered():
+        #     imgui.set_tooltip("Switch to max/mean projection.")
 
         if imgui.button("Store Offset", button_size):
             ind = self.image_widget.current_index["t"]
