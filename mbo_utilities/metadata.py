@@ -138,6 +138,7 @@ def _params_from_metadata_suite2p(metadata, ops):
     ops["nplanes"] = 1
     ops["nchannels"] = 1
     ops["do_bidiphase"] = 0
+    ops["do_metrics"] = 1
 
     # suite2p iterates each plane and takes ops['dxy'][i] where i is the plane index
     ops["dx"] = [metadata["pixel_resolution"][0]]
@@ -330,6 +331,8 @@ def params_from_metadata(metadata, ops=None):
     """
     Use metadata to get sensible default pipeline parameters.
 
+    If ops are not provided, uses suite2p.default_ops(). Sets framerate, pixel resolution, and do_metrics=True.
+
     Parameters
     ----------
     metadata : dict
@@ -341,4 +344,5 @@ def params_from_metadata(metadata, ops=None):
         print("Ops provided. Setting pipeline to suite2p")
         return _params_from_metadata_suite2p(metadata, ops)
     else:
+        print("Warning: CaImAn is not stable, proceed at your own risk.")
         return _params_from_metadata_caiman(metadata)
