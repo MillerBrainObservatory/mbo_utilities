@@ -15,7 +15,7 @@ from matplotlib import cm
 from .metadata import is_raw_scanimage
 from .scanreader import scans
 from .scanreader.multiroi import ROI
-from .util import norm_minmax
+from .util import norm_minmax, subsample_array
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
@@ -182,11 +182,6 @@ def read_scan(pathnames, dtype=np.int16):
     >>> scan = mbo.read_scan(r"C:\\path\to\\scan\\*.tif")
     >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # First frame of z-plane 6
     """
-    if isinstance(pathnames, str) and is_escaped_string(pathnames):
-        print(
-            "Detected possible escaped characters in the path."
-            " Use a raw string (r'...') or double backslashes."
-        )
     filenames = expand_paths(pathnames)
     if len(filenames) == 0:
         error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
@@ -197,27 +192,48 @@ def read_scan(pathnames, dtype=np.int16):
 
     return scan
 
+def _convert_range_to_slice(k):
+    return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
 
 class ScanMultiROIReordered(scans.ScanMultiROI):
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
     """
-
     def __getitem__(self, key):
-        if not isinstance(key, tuple):
-            key = (key,)
-        key = tuple(list(k) if isinstance(k, range) else k for k in key)
-
-        # Call the parent class's __getitem__ with the reordered key
-        item = super().__getitem__((0, key[2], key[3], key[1], key[0]))
-        if item.ndim == 2:
+        """Index like a 4D numpy array [t, z, x, y]"""
+        if key == slice(None):  # asking for full scan, give them a subsample?
+            return np.squeeze(subsample_array(self, ignore_dims=[-1, -2]))  # retain image dims
+        elif not isinstance(key, tuple):
+                key = (key,)
+        key = tuple(map(_convert_range_to_slice, key))
+        t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
+        reordered_key = (0, y_key, x_key, z_key, t_key)
+        item = super().__getitem__(reordered_key)
+        ndim = item.ndim
+        if ndim == 2:
             return item
-        if item.ndim == 3:
+        if ndim == 3:
             return np.transpose(item, (2, 0, 1))
-        if item.ndim == 4:
+        if ndim == 4:
             return np.transpose(item, (3, 2, 0, 1))
-        raise ValueError(f"Unexpected number of dimensions: {item.ndim}")
+        raise ValueError(f"Unexpected ndim: {ndim}")
+
+    @property
+    def min(self):
+        """
+        Returns the minimum value of the first tiff page.
+        """
+        page = super().__getitem__((0, slice(None), slice(None), 0, 0))
+        return np.min(page)
+
+    @property
+    def max(self):
+        """
+        Returns the maximum value of the first tiff page.
+        """
+        page = super().__getitem__((0, slice(None), slice(None), 0, 0))
+        return np.max(page)
 
     @property
     def shape(self):
@@ -271,6 +287,13 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
 
         rois = [ROI(roi_info) for roi_info in roi_infos]
         return rois
+
+    def __array__(self):
+        """
+        Convert the scan data to a NumPy array.
+        Calculate the size of the scan and subsample to keep under memory limits.
+        """
+        return subsample_array(self, ignore_dims=[-1, -2])
 
 
 def get_files(
