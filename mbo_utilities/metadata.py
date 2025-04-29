@@ -179,7 +179,7 @@ def is_raw_scanimage(file: os.PathLike | str):
         return True
 
 
-def get_metadata(file: os.PathLike | str, verbose=False):
+def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
     """
     Extract metadata from a TIFF file produced by ScanImage or processed via the save_as function.
 
@@ -196,6 +196,8 @@ def get_metadata(file: os.PathLike | str, verbose=False):
     verbose : bool, optional
         If True, returns an extended metadata dictionary that includes all available ScanImage attributes.
         Default is False.
+    z_step : float, optional
+        The z-step size in microns. If provided, it will be included in the returned metadata.
 
     Returns
     -------
@@ -281,13 +283,9 @@ def get_metadata(file: os.PathLike | str, verbose=False):
             num_pixel_xy = [roi_group[0]["scanfields"]["pixelResolutionXY"]][0]
 
         # TIFF header-derived metadata
-        sample_format = pages[0].dtype.name
         objective_resolution = si["SI.objectiveResolution"]
         frame_rate = si["SI.hRoiManager.scanFrameRate"]
-        try:
-            z_step_pollen = si["hStackManager.stackZStepSize"]
-        except KeyError:
-            z_step_pollen = None
+        num_frames = si.get('SI.hStackManager.framesPerSlice') or si.get('SI.hRoiManager.framesPerSlice')
 
         # Field-of-view calculations
         # TODO: We may want an FOV measure that takes into account contiguous ROIs
@@ -297,26 +295,24 @@ def get_metadata(file: os.PathLike | str, verbose=False):
         fov_roi_um = (fov_x_um, fov_y_um)  # in microns
 
         pixel_resolution = (fov_x_um / num_pixel_xy[0], fov_y_um / num_pixel_xy[1])
-
         metadata = {
             "num_planes": num_planes,
-            "num_frames": int(len(pages) / num_planes),
+            "num_frames": num_frames,
             "fov": fov_roi_um,  # in microns
             "fov_px": tuple(num_pixel_xy),
             "num_rois": num_rois,
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
+            "duration": round(num_frames / frame_rate, 2),
             "ndim": series.ndim,
-            "dtype": "uint16",
+            "dtype": "int16",
             "size": series.size,
             "raw_height": pages[0].shape[0],
             "raw_width": pages[0].shape[1],
             "tiff_pages": len(pages),
             "roi_width_px": num_pixel_xy[0],
             "roi_height_px": num_pixel_xy[1],
-            "sample_format": sample_format,
             "objective_resolution": objective_resolution,
-            "z_step_pollen": z_step_pollen,
         }
         if verbose:
             metadata["all"] = meta
