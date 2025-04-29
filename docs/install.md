@@ -32,7 +32,6 @@ pip install -e ".[all]"
 ``````
 
 ::::{tab-set}
-
 :::{tab-item} With pip
 ```bash
 pip install mbo_utilities[all]
@@ -43,6 +42,34 @@ pip install mbo_utilities[all]
 ```bash
 conda create -n mbo -c conda-forge python=3.11
 conda activate mbo
+pip install mbo_utilities[all]
+```
+:::
+::::
+
+## Environments
+
+::::{tab-set}
+
+:::{tab-item} `conda`
+```bash
+conda create -n mbo -c conda-forge python=3.11
+conda activate mbo
+pip install mbo_utilities[all]
+```
+:::
+
+:::{tab-item} `uv`
+```bash
+uv pip install mbo_utilities[all]
+```
+:::
+
+:::{tab-item} `venv`
+
+```bash
+python -m venv
+source .venv/bin/activate # optional, helps avoid using a wrong environment (conda, another package .venv)
 pip install mbo_utilities[all]
 ```
 :::
