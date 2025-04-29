@@ -138,7 +138,7 @@ def _params_from_metadata_suite2p(metadata, ops):
     ops["nplanes"] = 1
     ops["nchannels"] = 1
     ops["do_bidiphase"] = 0
-    ops["do_metrics"] = 1
+    ops["do_regmetrics"] = 1
 
     # suite2p iterates each plane and takes ops['dxy'][i] where i is the plane index
     ops["dx"] = [metadata["pixel_resolution"][0]]
