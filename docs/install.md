@@ -94,6 +94,38 @@ You will need [msvcc redistributable](https://learn.microsoft.com/en-us/cpp/wind
 
 ## Troubleshooting
 
+### Environment Issues
+Many hard to diagnose installation/import bugs are due to environment issues.
+
+The first thing you should do is check which python interpreter is being used. Generally this 
+will point to your project like `C://User//Username//repos//mbo_utilities//.venv//Scripts//python.exe`.
+
+``` {figure} ./_images/env_jupyter.png
+
+In jupyter, the terminal from which you ran `jupyter lab/notebook' will display the path to the python executable.
+```
+
+Once you know its location, open a python terminal. For example, with the above `.venv`:
+
+```{code} python3
+C://User//Username//repos//mbo_utilities//.venv//Scripts//python.exe 
+
+$ python
+Python 3.12.6 | packaged by conda-forge | (main, Sep 22 2024, 14:16:49) [GCC 13.3.0] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import mbo_utilities as mbo
+
+$ uv run ipython
+Python 3.11.12 (main, Apr  9 2025, 04:04:00) [Clang 20.1.0 ]
+Type 'copyright', 'credits' or 'license' for more information
+IPython 9.2.0 -- An enhanced Interactive Python. Type '?' for help.
+Tip: Use `object?` to see the help on `object`, `object??` to view its source
+
+In [1]: import mbo_utilities as mbo
+In [2]: mbo.__version__
+Out[2]: '0.1.0'
+```
+
 ### Git LFS Error: `smudge filter lfs failed`
 
 If you see:
