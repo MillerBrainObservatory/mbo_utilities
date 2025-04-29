@@ -80,42 +80,24 @@ Using `uv` has a huge upside:
 
 ---
 
-## uv Cheatsheet
+(uv_cheatsheet)=
+```{list-table} UV CLI Cheatsheet (WIP)
+:header-rows: 1
+:name: uv-commands
 
-::::{tab-set}
-
-:::{tab-item} Core Files
-- **Dependency file**: `pyproject.toml`
-- **Lock file**: `uv.lock`
-:::
-
-:::{tab-item} Creating environments
-- `uv sync`
-- `uv run`
-
-Uv will automatically create a virtualenv the first time you use it.
-:::
-
-:::{tab-item} Installing packages
-- `uv sync`
-- `uv run`
-
-Installs *and* syncs all dependencies.
-:::
-
-:::{tab-item} Adding/Removing packages
-- Add: `uv add package`
-- Remove: `uv remove package`
-
-Updates `pyproject.toml`, `uv.lock`, and your environment automatically.
-:::
-
-:::{tab-item} Upgrading
-- Upgrade one package: `uv sync --upgrade-package package`
-- Upgrade all packages: `uv lock --upgrade`
-:::
-
-::::
+* - **Command**
+  - **Description**
+* - `pyproject.toml`, `uv.lock`
+  - Core files
+* - `uv sync`, `uv run`
+  - Create envs (auto-creates a venv on first use)
+* - `uv sync` / `uv run`
+  - Install & sync deps
+* - `uv add <package>` / `uv remove <package>`
+  - Add/remove packages (updates `pyproject.toml`, `uv.lock`, and your env)
+* - `uv sync --upgrade-package <pkg>` / `uv lock --upgrade`
+  - Upgrade single/all packages
+```
 
 ---
 
