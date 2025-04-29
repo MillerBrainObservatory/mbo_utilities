@@ -302,7 +302,7 @@ def get_metadata(file: os.PathLike | str, verbose=False):
             "num_planes": num_planes,
             "num_frames": int(len(pages) / num_planes),
             "fov": fov_roi_um,  # in microns
-            "fov_px": fov_roi_um,
+            "fov_px": tuple(num_pixel_xy),
             "num_rois": num_rois,
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
@@ -318,6 +318,7 @@ def get_metadata(file: os.PathLike | str, verbose=False):
             "objective_resolution": objective_resolution,
             "z_step_pollen": z_step_pollen,
         }
+        print(metadata["fov_px2"])
         if verbose:
             metadata["all"] = meta
             return metadata
