@@ -318,7 +318,6 @@ def get_metadata(file: os.PathLike | str, verbose=False):
             "objective_resolution": objective_resolution,
             "z_step_pollen": z_step_pollen,
         }
-        print(metadata["fov_px2"])
         if verbose:
             metadata["all"] = meta
             return metadata
