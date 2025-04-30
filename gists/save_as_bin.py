@@ -12,11 +12,17 @@
 import mbo_utilities as mbo
 import numpy as np
 from pathlib import Path
-import tifffile
 import fastplotlib as fpl
 
-fname_scan = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green\*"
-raw_scan = mbo.read_scan(fname_scan)
+fname_scan = Path().home().joinpath("lbm_data/demo/raw")
+scan = mbo.read_scan(fname_scan)
 
-save_path = Path().home().joinpath("lbm_data/output")
-mbo.save_as(raw_scan, save_path, planes=[0, 8], ext=".bin")
+files = mbo.get_files(fname_scan)
+md = mbo.get_metadata(files)
+
+if __name__ == "__main__":
+    save_path = Path().home().joinpath("lbm_data/output")
+    mbo.save_as(scan, save_path, planes=[0, 1, 2, 3], ext=".bin")
+    data = np.memmap(save_path.joinpath("plane1/raw_data.bin"), dtype="int16").reshape((1437, 448, 448))
+    fpl.ImageWidget(data).show()
+    fpl.loop.run()
