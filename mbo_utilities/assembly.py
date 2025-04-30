@@ -267,6 +267,38 @@ def _save_data(
 
     if file_extension in ["tiff", ".tiff", "tif", ".tif"]:
         close_tiff_writers()
+    elif file_extension in [".bin", "bin"]:
+        write_ops(metadata, fname)
+
+
+def write_ops(metadata, fname):
+    # Assumes fname is something like: /output/plane_07.bin
+    # We want to find planeN folder from it
+    fname = Path(fname).with_suffix(".bin")
+    plane_dir = fname.parent / f"plane{int(re.search(r'plane_(\d+)', fname.name).group(1)) - 1}"
+    raw_bin = plane_dir / "raw_data.bin"
+
+    # fallback if above fails
+    if not raw_bin.exists():
+        raw_bin = plane_dir / "data.bin"  # in case user renames later
+
+    shape = metadata.get("shape", None)
+    if shape is None:
+        raise ValueError("metadata must contain 'shape'")
+
+    nt, Ly, Lx = shape
+    dx, dy = metadata.get("pixel_resolution", [1, 1])
+
+    ops = {
+        "Ly": Ly,
+        "Lx": Lx,
+        "nframes": nt,
+        "bin_file": str(raw_bin.resolve()),
+        "dx": dx,
+        "dy": dy,
+    }
+
+    np.save(plane_dir / "ops.npy", ops)
 
 
 def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
@@ -305,6 +337,7 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
 def _write_bin(path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None):
     if chan_index is None:
         raise ValueError("chan_index must be provided")
+
     # for bins, we save in suite2p style planeN/raw_data.bin
     plane_dir = path.parent.joinpath(f"plane{chan_index}")
     plane_dir.mkdir(exist_ok=True)
