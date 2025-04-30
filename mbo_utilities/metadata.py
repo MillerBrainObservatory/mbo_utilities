@@ -211,6 +211,10 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
     ValueError
         If no recognizable metadata is found in the TIFF file (e.g., the file is not a valid ScanImage TIFF).
 
+    Notes
+    -----
+    - num_frames represents the number of frames per z-plane
+
     Examples
     --------
     >>> meta = get_metadata("path/to/rawscan_00001.tif")
@@ -223,6 +227,9 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
     >>> print(meta_verbose["all"])
     {... Includes all ScanImage FrameData ...}
     """
+    if isinstance(file, list):
+        return get_metadata_batch(file)
+
     tiff_file = tifffile.TiffFile(file)
     # previously processed files
     if not is_raw_scanimage(file):
@@ -321,6 +328,47 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
             return metadata
     else:
         raise ValueError(f"No metadata found in {file}.")
+
+
+def get_metadata_batch(files: list[os.PathLike | str], z_step=None, verbose=False):
+    """
+    Extract and aggregate metadata from a list of TIFF files produced by ScanImage.
+
+    Parameters
+    ----------
+    files : list of str or PathLike
+        List of paths to TIFF files.
+    z_step : float, optional
+        Z-step in microns to include in the returned metadata.
+    verbose : bool, optional
+        If True, include full metadata from the first TIFF in 'all' key.
+
+    Returns
+    -------
+    dict
+        Aggregated metadata dictionary with total frame count and per-file page counts.
+    """
+    total_frames = 0
+    frame_indices = []
+    first_meta = None
+
+    for i, f in enumerate(files):
+        tf = tifffile.TiffFile(f)
+        num_pages = len(tf.pages)
+        frame_indices.append(num_pages)
+        total_frames += num_pages
+        if i == 0:
+            if not is_raw_scanimage(f):
+                base = tf.shaped_metadata[0]["image"]
+            elif hasattr(tf, "scanimage_metadata") and tf.scanimage_metadata is not None:
+                base = get_metadata(f, z_step=z_step, verbose=verbose)
+            else:
+                raise ValueError(f"No metadata found in {f}.")
+            first_meta = base.copy()
+
+    first_meta["num_frames"] = total_frames
+    first_meta["frame_indices"] = frame_indices
+    return first_meta
 
 
 def params_from_metadata(metadata, base_ops, pipeline="suite2p"):

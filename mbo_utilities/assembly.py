@@ -16,6 +16,13 @@ from .file_io import _make_json_serializable, read_scan
 from .metadata import get_metadata
 from .util import is_running_jupyter
 from .scanreader.utils import listify_index
+import functools
+try:
+    from suite2p.io import BinaryFile
+    HAS_SUITE2P = True
+except ImportError:
+    HAS_SUITE2P = True
+    BInaryFIle = None
 
 if is_running_jupyter():
     from tqdm.notebook import tqdm
@@ -233,8 +240,6 @@ def _save_data(
 
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
         num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
-        # nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
-        # num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
 
         base_frames_per_chunk = scan.shape[0] // num_chunks
         extra_frames = scan.shape[0] % num_chunks
@@ -254,7 +259,7 @@ def _save_data(
                 if ofs:
                     data_chunk = mbo_utilities.fix_scan_phase(data_chunk, -ofs)
 
-            writer(fname, data_chunk)
+            writer(fname, data_chunk, chan_index=chan_index)
             start = end
             pbar.update(1)
 
@@ -264,22 +269,71 @@ def _save_data(
         close_tiff_writers()
 
 
-def _get_file_writer(ext, overwrite, metadata=None, data_shape=None):
+def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
     if ext in [".tif", ".tiff", "tif", "tiff"]:
         return functools.partial(
-            _write_tiff, overwrite=overwrite, metadata=metadata, data_shape=data_shape
+            _write_tiff,
+            overwrite=overwrite,
+            metadata=metadata,
+            data_shape=data_shape
         )
     elif ext in [".zarr", "zarr"]:
-        return functools.partial(_write_zarr, overwrite=overwrite, metadata=metadata)
+        return functools.partial(
+            _write_zarr,
+            overwrite=overwrite,
+            metadata=metadata
+        )
     elif ext in [".h5", "h5", "hdf5", ".hdf5"]:
         return functools.partial(
-            _write_h5, overwrite=overwrite, metadata=metadata, data_shape=data_shape
+            _write_h5,
+            overwrite=overwrite,
+            metadata=metadata,
+            data_shape=data_shape
+        )
+    elif ext in [".bin", "bin", "raw"]:
+        return functools.partial(
+            _write_bin,
+            overwrite=overwrite,
+            metadata=metadata,
+            chan_index=kwargs.get("chan_index", None),
+            data_shape=data_shape,
         )
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None):
+def _write_bin(path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None):
+    if chan_index is None:
+        raise ValueError("chan_index must be provided")
+    # for bins, we save in suite2p style planeN/raw_data.bin
+    plane_dir = path.parent.joinpath(f"plane{chan_index}")
+    plane_dir.mkdir(exist_ok=True)
+    fname = plane_dir.joinpath("raw_data.bin")
+
+    key = (fname, data_shape)
+    if not hasattr(_write_bin, "_writers"):
+        _write_bin._writers = {}
+        _write_bin._offsets = {}
+
+    if key not in _write_bin._writers:
+        if fname.exists() and overwrite:
+            fname.unlink()
+        if data_shape is None:
+            raise ValueError("data_shape must be provided on first write")
+
+        n_frames, Ly, Lx = data_shape
+        bf = BinaryFile(Ly=Ly, Lx=Lx, filename=str(fname), n_frames=n_frames, dtype="int16")
+        _write_bin._writers[key] = bf
+        _write_bin._offsets[key] = 0
+
+    bf = _write_bin._writers[key]
+    offset = _write_bin._offsets[key]
+
+    bf[offset:offset + data.shape[0]] = data
+    _write_bin._offsets[key] += data.shape[0]
+
+
+def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None):
     filename = Path(path).with_suffix(".h5")
 
     if not hasattr(_write_h5, "_initialized"):
@@ -309,7 +363,7 @@ def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None):
     _write_h5._offsets[filename] += data.shape[0]
 
 
-def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
+def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None):
     filename = Path(path).with_suffix(".tif")
 
     if not hasattr(_write_tiff, "_writers"):
@@ -335,7 +389,7 @@ def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None):
         _write_tiff._first_write = False
 
 
-def _write_zarr(path, data, overwrite=True, metadata=None, single_file=False):
+def _write_zarr(path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None):
     try:
         import zarr
     except ImportError:
