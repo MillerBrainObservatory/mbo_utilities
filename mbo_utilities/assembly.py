@@ -275,10 +275,9 @@ def write_ops(metadata: dict, base_path: str | Path):
         raw_bin = plane_dir.joinpath("raw_data.bin")
         ops_path = plane_dir.joinpath("ops.npy")
 
-        # make sure we don't overwrite existing results
         if ops_path.is_file():
             ops = np.load(ops_path, allow_pickle=True).item()
-            if ops["data_path"] != raw_bin:
+            if "data_path" in ops and ops["data_path"] != raw_bin:
                 print(f"Correcting data_path for {ops_path}")
                 ops["data_path"] = raw_bin
         
@@ -332,7 +331,6 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
         return functools.partial(
             _write_bin,
             overwrite=overwrite,
-            metadata=metadata,
             chan_index=kwargs.get("chan_index", None),
             data_shape=data_shape,
 
@@ -345,8 +343,6 @@ def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
     if chan_index is None:
         raise ValueError("chan_index must be provided")
 
-    if fname.stat().st_size == 0:
-            fname.unlink()
 
     # for bins, we save in suite2p style planeN/raw_data.bin
     plane_dir = path.parent.joinpath(f"plane{chan_index}")
