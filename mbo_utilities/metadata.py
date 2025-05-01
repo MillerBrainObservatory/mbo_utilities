@@ -233,7 +233,7 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
     tiff_file = tifffile.TiffFile(file)
     # previously processed files
     if not is_raw_scanimage(file):
-        return tiff_file.shaped_metadata[0]["image"]
+        return tiff_file.shaped_metadata[0]
     elif hasattr(tiff_file, "scanimage_metadata"):
         meta = tiff_file.scanimage_metadata
         if meta is None:
@@ -292,7 +292,8 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
         # TIFF header-derived metadata
         objective_resolution = si["SI.objectiveResolution"]
         frame_rate = si["SI.hRoiManager.scanFrameRate"]
-        num_frames = si.get('SI.hStackManager.framesPerSlice') or si.get('SI.hRoiManager.framesPerSlice')
+
+        nframes = int(metadata["shape"][0])
 
         # Field-of-view calculations
         # TODO: We may want an FOV measure that takes into account contiguous ROIs
@@ -304,13 +305,14 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
         pixel_resolution = (fov_x_um / num_pixel_xy[0], fov_y_um / num_pixel_xy[1])
         metadata = {
             "num_planes": num_planes,
-            "num_frames": num_frames,
+            "num_frames": nframes,
+            "nframes": nframes,  # alias
             "fov": fov_roi_um,  # in microns
             "fov_px": tuple(num_pixel_xy),
             "num_rois": num_rois,
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
-            "duration": round(num_frames / frame_rate, 2),
+            "duration": round(nframes / frame_rate, 2),
             "ndim": series.ndim,
             "dtype": "int16",
             "size": series.size,

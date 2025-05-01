@@ -23,6 +23,7 @@ try:
 except ImportError:
     HAS_SUITE2P = True
     BInaryFIle = None
+    print("No suite2p detected!")
 
 if is_running_jupyter():
     from tqdm.notebook import tqdm
@@ -129,6 +130,10 @@ def save_as(
     if not planes:
         planes = range(scan.num_channels)
 
+    over_idx = [p for p in planes if p < 0 or p >= scan.num_planes]
+    if over_idx:
+        raise ValueError(f"Invalid plane indices {over_idx}; must be in 0…{scan.num_channels-1}")
+
     if order is not None:
         if len(order) != len(planes):
             raise ValueError(
@@ -138,10 +143,12 @@ def save_as(
 
     mdata = {
         "si": _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
-        "image": _make_json_serializable(
-            get_metadata(scan.tiff_files[0].filehandle.path)
-        ),
     }
+    mdata.update(
+        _make_json_serializable(
+            get_metadata(scan.tiff_files[0].filehandle.path)
+        )
+    )
 
     if metadata is not None:
         mdata.update(metadata)
@@ -183,7 +190,7 @@ def _save_data(
         file_extension = file_extension.split(".")[-1]
 
     path = Path(path)
-    path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(exist_ok=True)
 
     nt, nz, nx, ny = scan.shape
 
@@ -226,12 +233,11 @@ def _save_data(
     for chan_index in planes:
 
         if file_extension == "bin":
-            fname = path / f"plane{chan_index}" / "raw_data.bin"
+            fname = path / f"plane{chan_index}" / "data_raw.bin"
         else:
             fname = path / f"plane_{chan_index + 1:02d}.{file_extension}"
 
         if fname.exists() and not overwrite:
-            logger.warning(f"File already exists: {fname}")
             continue
 
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
@@ -264,71 +270,60 @@ def _save_data(
     if file_extension in ["tiff", "tif"]:
         close_tiff_writers()
     elif file_extension == "bin":
-        write_ops(metadata, path)
+        write_ops(metadata, path, planes)
 
 
-def write_ops(metadata: dict, base_path: str | Path):
+def write_ops(metadata: dict, base_path: str | Path, planes):
     base_path = Path(base_path).expanduser().resolve()
-    for plane_idx in range(metadata["image"]["num_planes"]):
+    del metadata["si"]
 
+    if isinstance(planes, int):
+        planes=[planes]
+    for plane_idx in planes:
         plane_dir = Path(base_path) / f"plane{plane_idx}"
         
-        raw_bin = plane_dir.joinpath("data.bin")
+        raw_bin = plane_dir.joinpath("data_raw.bin")
         ops_path = plane_dir.joinpath("ops.npy")
-
-        if ops_path.is_file():
-            ops = np.load(ops_path, allow_pickle=True).item()
-            if "data_path" in ops and ops["data_path"] != raw_bin:
-                print(f"Correcting data_path for {ops_path}")
-                ops["data_path"] = raw_bin
         
         # TODO: This is not an accurate way to get a metadata value that should not have 
         #        to be calculated. We use shape to account for the trimmed pixels
-        shape = metadata["image"].get("shape")
-        if shape:
-            nt = shape[0]
-            Ly = shape[-2]
-            Lx = shape[-1]
-        else:
-            nt = metadata["image"]["num_frames"]
-            Ly = metadata["image"]["roi_height_px"]
-            Lx = metadata["image"]["roi_width_px"]
-        
-        dx, dy = metadata["image"].get("pixel_resolution", [2, 2])
+        shape = metadata["shape"]
+        nt = shape[0]
+        Ly = shape[-2]
+        Lx = shape[-1]
+        dx, dy = metadata.get("pixel_resolution", [2, 2])
         ops = {
             "Ly": Ly,
             "Lx": Lx,
+            "fs": np.round(metadata.get("frame_rate"), 2),
             "nframes": nt,
-            "bin_file": str(raw_bin.resolve()),
+            "raw_file": str(raw_bin.resolve()),
+            "reg_file": str(raw_bin.resolve()),
             "dx": dx,
             "dy": dy,
-            "metadata": metadata["image"],
+            "metadata": metadata,
         }
         np.save(ops_path, ops)
 
 
 def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
-    if ext in [".tif", ".tiff", "tif", "tiff"]:
+    if ext in ["tif", "tiff"]:
         return functools.partial(
             _write_tiff,
             overwrite=overwrite,
             metadata=metadata,
             data_shape=data_shape
         )
-    elif ext in [".zarr", "zarr"]:
-        return functools.partial(
-            _write_zarr,
-            overwrite=overwrite,
-            metadata=metadata
-        )
-    elif ext in [".h5", "h5", "hdf5", ".hdf5"]:
+    elif ext in ["h5", "hdf5"]:
         return functools.partial(
             _write_h5,
             overwrite=overwrite,
             metadata=metadata,
             data_shape=data_shape
         )
-    elif ext in [".bin", "bin", "raw"]:
+    elif ext == "bin":
+        if not HAS_SUITE2P:
+            raise ValueError("Suite2p not installed.")
         return functools.partial(
             _write_bin,
             overwrite=overwrite,
@@ -345,7 +340,7 @@ def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
     if chan_index is None:
         raise ValueError("chan_index must be provided")
 
-    # for bins, we save in suite2p style planeN/raw_data.bin
+    # for bins, we save in suite2p style planeN/data_raw.bin
     fname = Path(path)
     fname.parent.mkdir(exist_ok=True)
 
@@ -353,6 +348,13 @@ def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
     if not hasattr(_write_bin, "_writers"):
         _write_bin._writers = {}
         _write_bin._offsets = {}
+
+    if key in _write_bin._writers and overwrite:
+        _write_bin._writers[key].close()
+        del _write_bin._writers[key]
+        del _write_bin._offsets[key]
+        if fname.exists():
+            fname.unlink()
 
     if key not in _write_bin._writers:
         if fname.exists() and overwrite:
