@@ -219,6 +219,11 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         raise ValueError(f"Unexpected ndim: {ndim}")
 
     @property
+    def num_planes(self):
+        """LBM alias for num_channels."""
+        return self.num_channels
+
+    @property
     def min(self):
         """
         Returns the minimum value of the first tiff page.

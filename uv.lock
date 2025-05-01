@@ -1215,7 +1215,7 @@ wheels = [
 
 [[package]]
 name = "jupyterlab"
-version = "4.4.1"
+version = "4.4.0a0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "async-lru" },
@@ -1232,9 +1232,9 @@ dependencies = [
     { name = "tornado" },
     { name = "traitlets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f6/55/3ef7e6bfe988d7df3d453cc27912846d50590c90790848594f7228c89569/jupyterlab-4.4.1.tar.gz", hash = "sha256:c75c4f33056fbd84f0b31eb44622a00c7a5f981b85adfeb198a83721f0465808", size = 23028447 }
+sdist = { url = "https://files.pythonhosted.org/packages/21/ee/591a8b44a9e3728949b693dfbb56b0ac632c8c610d22c219740bf0481711/jupyterlab-4.4.0a0.tar.gz", hash = "sha256:ddff121f90054b1088b080ae1d2901c5d3bb39563b9089697247a643aba38aa9", size = 21892807 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/82/c8784597c5a03426c1ef20c48aff37e8cfe050ab5ca87f0d51069f02b362/jupyterlab-4.4.1-py3-none-any.whl", hash = "sha256:989bca3f9cf2d04b2022e7e657e2df6d4aca808b364810d31c4865edd968a5f7", size = 12292928 },
+    { url = "https://files.pythonhosted.org/packages/fc/30/ffb14b08e4ef1246efdcf4549679a6bc1e6afde06f421f0a0c72a87d090f/jupyterlab-4.4.0a0-py3-none-any.whl", hash = "sha256:f6272a9a09800fc400929bb391052684a48b74a52ae204102db48afc39d82cad", size = 11858436 },
 ]
 
 [[package]]
@@ -1518,7 +1518,7 @@ requires-dist = [
     { name = "ipykernel" },
     { name = "ipywidgets", specifier = ">=8.0.0,<9" },
     { name = "jupyter-rfb", specifier = ">=0.5.1" },
-    { name = "jupyterlab" },
+    { name = "jupyterlab", specifier = "==4.4.0a0" },
     { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "mkl-fft", specifier = ">=1.3.13" },
     { name = "napari", marker = "extra == 'all'" },
