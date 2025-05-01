@@ -270,9 +270,10 @@ def _save_data(
 def write_ops(metadata: dict, base_path: str | Path):
     base_path = Path(base_path).expanduser().resolve()
     for plane_idx in range(metadata["image"]["num_planes"]):
+
         plane_dir = Path(base_path) / f"plane{plane_idx}"
         
-        raw_bin = plane_dir.joinpath("raw_data.bin")
+        raw_bin = plane_dir.joinpath("data.bin")
         ops_path = plane_dir.joinpath("ops.npy")
 
         if ops_path.is_file():
@@ -340,14 +341,13 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
 
 
 def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
+
     if chan_index is None:
         raise ValueError("chan_index must be provided")
 
-
     # for bins, we save in suite2p style planeN/raw_data.bin
-    plane_dir = path.parent.joinpath(f"plane{chan_index}")
-    plane_dir.mkdir(exist_ok=True)
-    fname = plane_dir.joinpath("raw_data.bin")
+    fname = Path(path)
+    fname.parent.mkdir(exist_ok=True)
 
     key = (fname, data_shape)
     if not hasattr(_write_bin, "_writers"):
