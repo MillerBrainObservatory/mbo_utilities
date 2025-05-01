@@ -78,7 +78,6 @@ def save_as(
     planes: list | tuple = None,
     metadata: dict = None,
     overwrite: bool = True,
-    append_str: str = "",
     ext: str = ".tiff",
     order: list | tuple = None,
     trim_edge: list | tuple = (0, 0, 0, 0),
@@ -103,8 +102,6 @@ def save_as(
         Additional metadata to update the scan object's metadata. Default is `None`.
     overwrite : bool, optional
         Whether to overwrite existing files. Default is `True`.
-    append_str : str, optional
-        String to append to the file name. Default is `''`.
     ext : str, optional
         File extension for the saved data. Supported options are .tiff, .zarr and .h5.
         Default is `'.tiff'`.
@@ -121,16 +118,16 @@ def save_as(
     ValueError
         If an unsupported file extension is provided.
     """
-
     savedir = Path(savedir)
     if not savedir.parent.is_dir():
         raise ValueError(f"{savedir} is not inside a valid directory.")
     savedir.mkdir(exist_ok=True)
 
-    if planes is None:
-        planes = list(range(scan.num_channels))
-    elif not isinstance(planes, (list, tuple)):
-        planes = [planes]
+    if not hasattr(scan, "num_channels"):
+        raise ValueError("Unable to determine the number of planes in this recording from 'scan.num_channels'")
+
+    if not planes:
+        planes = range(scan.num_channels)
 
     if order is not None:
         if len(order) != len(planes):
@@ -159,7 +156,6 @@ def save_as(
         planes,
         overwrite,
         ext,
-        append_str,
         metadata=mdata,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
@@ -178,7 +174,6 @@ def _save_data(
     planes,
     overwrite,
     file_extension,
-    append_str,
     metadata,
     trim_edge=None,
     fix_phase=False,
@@ -229,8 +224,9 @@ def _save_data(
     pbar = tqdm(total=total_chunks, desc="Saving planes")
 
     for chan_index in planes:
-        if append_str:
-            fname = path / f"plane_{chan_index + 1:02d}_{append_str}.{file_extension}"
+
+        if file_extension == "bin":
+            fname = path / f"plane{chan_index}" / "raw_data.bin"
         else:
             fname = path / f"plane_{chan_index + 1:02d}.{file_extension}"
 
@@ -265,40 +261,50 @@ def _save_data(
 
     pbar.close()
 
-    if file_extension in ["tiff", ".tiff", "tif", ".tif"]:
+    if file_extension in ["tiff", "tif"]:
         close_tiff_writers()
-    elif file_extension in [".bin", "bin"]:
-        write_ops(metadata, fname)
+    elif file_extension == "bin":
+        write_ops(metadata, path)
 
 
-def write_ops(metadata, fname):
-    # Assumes fname is something like: /output/plane_07.bin
-    # We want to find planeN folder from it
-    fname = Path(fname).with_suffix(".bin")
-    plane_dir = fname.parent / f"plane{int(re.search(r'plane_(\d+)', fname.name).group(1)) - 1}"
-    raw_bin = plane_dir / "raw_data.bin"
+def write_ops(metadata: dict, base_path: str | Path):
+    base_path = Path(base_path).expanduser().resolve()
+    for plane_idx in range(metadata["image"]["num_planes"]):
+        plane_dir = Path(base_path) / f"plane{plane_idx}"
+        
+        raw_bin = plane_dir.joinpath("raw_data.bin")
+        ops_path = plane_dir.joinpath("ops.npy")
 
-    # fallback if above fails
-    if not raw_bin.exists():
-        raw_bin = plane_dir / "data.bin"  # in case user renames later
-
-    shape = metadata.get("shape", None)
-    if shape is None:
-        raise ValueError("metadata must contain 'shape'")
-
-    nt, Ly, Lx = shape
-    dx, dy = metadata.get("pixel_resolution", [1, 1])
-
-    ops = {
-        "Ly": Ly,
-        "Lx": Lx,
-        "nframes": nt,
-        "bin_file": str(raw_bin.resolve()),
-        "dx": dx,
-        "dy": dy,
-    }
-
-    np.save(plane_dir / "ops.npy", ops)
+        # make sure we don't overwrite existing results
+        if ops_path.is_file():
+            ops = np.load(ops_path, allow_pickle=True).item()
+            if ops["data_path"] != raw_bin:
+                print(f"Correcting data_path for {ops_path}")
+                ops["data_path"] = raw_bin
+        
+        # TODO: This is not an accurate way to get a metadata value that should not have 
+        #        to be calculated. We use shape to account for the trimmed pixels
+        shape = metadata["image"].get("shape")
+        if shape:
+            nt = shape[0]
+            Ly = shape[-2]
+            Lx = shape[-1]
+        else:
+            nt = metadata["image"]["num_frames"]
+            Ly = metadata["image"]["roi_height_px"]
+            Lx = metadata["image"]["roi_width_px"]
+        
+        dx, dy = metadata["image"].get("pixel_resolution", [2, 2])
+        ops = {
+            "Ly": Ly,
+            "Lx": Lx,
+            "nframes": nt,
+            "bin_file": str(raw_bin.resolve()),
+            "dx": dx,
+            "dy": dy,
+            "metadata": metadata["image"],
+        }
+        np.save(ops_path, ops)
 
 
 def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
@@ -329,14 +335,18 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
             metadata=metadata,
             chan_index=kwargs.get("chan_index", None),
             data_shape=data_shape,
+
         )
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def _write_bin(path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None):
+def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
     if chan_index is None:
         raise ValueError("chan_index must be provided")
+
+    if fname.stat().st_size == 0:
+            fname.unlink()
 
     # for bins, we save in suite2p style planeN/raw_data.bin
     plane_dir = path.parent.joinpath(f"plane{chan_index}")
