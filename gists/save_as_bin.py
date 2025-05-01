@@ -22,7 +22,7 @@ md = mbo.get_metadata(files)
 
 if __name__ == "__main__":
     save_path = Path().home().joinpath("lbm_data/output")
-    mbo.save_as(scan, save_path, ext=".bin", overwrite=False)
+    mbo.save_as(scan, save_path, [6, 13], ext=".bin", overwrite=False)
     data = np.memmap(save_path.joinpath("plane0/raw_data.bin"), dtype="int16").reshape((1437, 448, 448))
     data2 = np.memmap(save_path.joinpath("plane6/raw_data.bin"), dtype="int16").reshape((1437, 448, 448))
     data3 = np.memmap(save_path.joinpath("plane9/raw_data.bin"), dtype="int16").reshape((1437, 448, 448))
