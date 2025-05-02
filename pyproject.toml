@@ -30,6 +30,7 @@ dependencies = [
 	"jupyterlab==4.4.0a",
 	"ipykernel",
 	"ipywidgets>=8.0.0,<9",
+	"icecream>=2.1.4",
 ]
 
 [project.scripts]
