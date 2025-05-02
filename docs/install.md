@@ -8,9 +8,16 @@
 pip install "mbo_utilities[all]"
 ```
 
-**Note**: The gui dependencies often install in under a minute with `python 3.11` and `python 3.12`. On `3.10`, pip will have to build wheels for `imgui-bundle`, which can take ~8 to 10 minutes.
+```{note} If you need python3.10
+:class: dropdown
 
-For example, a `gui` install on Python 3.10 will build `imgui-bundle` from source, increasing the install time by several minutes. We recommend **Python 3.11** for the greatest compatibility and install speed.
+This package is compatible with python 3.10. 
+
+The gui dependencies often install in under a minute with `python 3.11` and `python 3.12`.
+On `3.10`, pip will have to build wheels for `imgui-bundle`, which can take ~8 to 10 minutes.
+
+For example, a `gui` install on Python 3.10 will build `imgui-bundle` from source, increasing the install time by several minutes.
+```
 
 ## Quick Install
 
@@ -21,8 +28,10 @@ This makes the choice of virtual-environment less relevant, you can use `venv`, 
 `````` {tip}
 :class: dropdown
 
-While this pipeline is early in development, we recommend keeping a versioon of the codebase locally using `git`. 
-This will allow you to quickly pull changes and incorperate them into your environment without waiting for a pypi release.
+While this pipeline is early in development, its handing to keep a version of the codebase locally using `git`.
+
+Code in the [master branch](https://github.com/MillerBrainObservatory/mbo_utilities/tree/master) is generally safe.
+If it isn't please [report an issue!](https://github.com/MillerBrainObservatory/mbo_utilities/issues)
 
 ``` {code} bash
 git clone https://github.com/MillerBrainObservatory/mbo_utilities.git
@@ -32,30 +41,12 @@ pip install -e ".[all]"
 ``````
 
 ::::{tab-set}
-:::{tab-item} With pip
-```bash
-pip install mbo_utilities[all]
-```
-:::
-
-:::{tab-item} With Conda (Miniforge3)
-```bash
-conda create -n mbo -c conda-forge python=3.11
-conda activate mbo
-pip install mbo_utilities[all]
-```
-:::
-::::
-
-## Environments
-
-::::{tab-set}
 
 :::{tab-item} `conda`
 ```bash
 conda create -n mbo -c conda-forge python=3.11
 conda activate mbo
-pip install mbo_utilities[all]
+pip install mbo_utilities[all] 
 ```
 :::
 
