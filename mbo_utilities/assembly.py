@@ -207,6 +207,8 @@ def _save_data(
     metadata["shape"] = (nt, new_width, new_height)
     metadata["dims"] = ["time", "width", "height"]
     metadata["trimmed"] = [left, right, top, bottom]
+    metadata["nframes"] = nt
+    metadata["num_frames"] = nt # alias
 
     final_shape = (nt, new_height, new_width)
     writer = _get_file_writer(
