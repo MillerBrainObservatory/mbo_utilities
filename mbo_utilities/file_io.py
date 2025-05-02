@@ -149,7 +149,6 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
     return sorted(p.resolve() for p in result if p.is_file())
 
-
 def read_scan(pathnames, dtype=np.int16):
     """
     Reads a ScanImage scan from a given file or set of file paths and returns a
@@ -158,7 +157,7 @@ def read_scan(pathnames, dtype=np.int16):
     Parameters
     ----------
     pathnames : str, Path, or sequence of str/Path
-        A single path, a wildcard pattern (e.g. ``*.tif``), or a list of paths
+        A single path to, a wildcard pattern (e.g. ``*.tif``), or a list of paths
         specifying the ScanImage TIFF files to read.
     dtype : numpy.dtype, optional
         The data type to use when reading the scan data. Default is np.int16.
@@ -218,6 +217,11 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         if ndim == 4:
             return np.transpose(item, (3, 2, 0, 1))
         raise ValueError(f"Unexpected ndim: {ndim}")
+
+    @property
+    def num_planes(self):
+        """LBM alias for num_channels."""
+        return self.num_channels
 
     @property
     def min(self):

@@ -138,6 +138,7 @@ def _params_from_metadata_suite2p(metadata, ops):
     ops["nplanes"] = 1
     ops["nchannels"] = 1
     ops["do_bidiphase"] = 0
+    ops["do_regmetrics"] = True
 
     # suite2p iterates each plane and takes ops['dxy'][i] where i is the plane index
     ops["dx"] = [metadata["pixel_resolution"][0]]
@@ -178,7 +179,7 @@ def is_raw_scanimage(file: os.PathLike | str):
         return True
 
 
-def get_metadata(file: os.PathLike | str, verbose=False):
+def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
     """
     Extract metadata from a TIFF file produced by ScanImage or processed via the save_as function.
 
@@ -195,6 +196,8 @@ def get_metadata(file: os.PathLike | str, verbose=False):
     verbose : bool, optional
         If True, returns an extended metadata dictionary that includes all available ScanImage attributes.
         Default is False.
+    z_step : float, optional
+        The z-step size in microns. If provided, it will be included in the returned metadata.
 
     Returns
     -------
@@ -208,6 +211,10 @@ def get_metadata(file: os.PathLike | str, verbose=False):
     ValueError
         If no recognizable metadata is found in the TIFF file (e.g., the file is not a valid ScanImage TIFF).
 
+    Notes
+    -----
+    - num_frames represents the number of frames per z-plane
+
     Examples
     --------
     >>> meta = get_metadata("path/to/rawscan_00001.tif")
@@ -220,10 +227,13 @@ def get_metadata(file: os.PathLike | str, verbose=False):
     >>> print(meta_verbose["all"])
     {... Includes all ScanImage FrameData ...}
     """
+    if isinstance(file, list):
+        return get_metadata_batch(file)
+
     tiff_file = tifffile.TiffFile(file)
     # previously processed files
     if not is_raw_scanimage(file):
-        return tiff_file.shaped_metadata[0]["image"]
+        return tiff_file.shaped_metadata[0]
     elif hasattr(tiff_file, "scanimage_metadata"):
         meta = tiff_file.scanimage_metadata
         if meta is None:
@@ -280,13 +290,8 @@ def get_metadata(file: os.PathLike | str, verbose=False):
             num_pixel_xy = [roi_group[0]["scanfields"]["pixelResolutionXY"]][0]
 
         # TIFF header-derived metadata
-        sample_format = pages[0].dtype.name
         objective_resolution = si["SI.objectiveResolution"]
         frame_rate = si["SI.hRoiManager.scanFrameRate"]
-        try:
-            z_step_pollen = si["hStackManager.stackZStepSize"]
-        except KeyError:
-            z_step_pollen = None
 
         # Field-of-view calculations
         # TODO: We may want an FOV measure that takes into account contiguous ROIs
@@ -296,26 +301,23 @@ def get_metadata(file: os.PathLike | str, verbose=False):
         fov_roi_um = (fov_x_um, fov_y_um)  # in microns
 
         pixel_resolution = (fov_x_um / num_pixel_xy[0], fov_y_um / num_pixel_xy[1])
-
         metadata = {
             "num_planes": num_planes,
-            "num_frames": int(len(pages) / num_planes),
             "fov": fov_roi_um,  # in microns
-            "fov_px": fov_roi_um,
+            "fov_px": tuple(num_pixel_xy),
             "num_rois": num_rois,
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
             "ndim": series.ndim,
-            "dtype": "uint16",
+            "dtype": "int16",
             "size": series.size,
+            "raw_frames": len(pages) / num_planes,
             "raw_height": pages[0].shape[0],
             "raw_width": pages[0].shape[1],
             "tiff_pages": len(pages),
             "roi_width_px": num_pixel_xy[0],
             "roi_height_px": num_pixel_xy[1],
-            "sample_format": sample_format,
             "objective_resolution": objective_resolution,
-            "z_step_pollen": z_step_pollen,
         }
         if verbose:
             metadata["all"] = meta
@@ -326,19 +328,69 @@ def get_metadata(file: os.PathLike | str, verbose=False):
         raise ValueError(f"No metadata found in {file}.")
 
 
-def params_from_metadata(metadata, ops=None):
+def get_metadata_batch(files: list[os.PathLike | str], z_step=None, verbose=False):
+    """
+    Extract and aggregate metadata from a list of TIFF files produced by ScanImage.
+
+    Parameters
+    ----------
+    files : list of str or PathLike
+        List of paths to TIFF files.
+    z_step : float, optional
+        Z-step in microns to include in the returned metadata.
+    verbose : bool, optional
+        If True, include full metadata from the first TIFF in 'all' key.
+
+    Returns
+    -------
+    dict
+        Aggregated metadata dictionary with total frame count and per-file page counts.
+    """
+    total_frames = 0
+    frame_indices = []
+    first_meta = None
+
+    for i, f in enumerate(files):
+        tf = tifffile.TiffFile(f)
+        num_pages = len(tf.pages)
+        frame_indices.append(num_pages)
+        total_frames += num_pages
+        if i == 0:
+            if not is_raw_scanimage(f):
+                base = tf.shaped_metadata[0]["image"]
+            elif hasattr(tf, "scanimage_metadata") and tf.scanimage_metadata is not None:
+                base = get_metadata(f, z_step=z_step, verbose=verbose)
+            else:
+                raise ValueError(f"No metadata found in {f}.")
+            first_meta = base.copy()
+
+    first_meta["num_frames"] = total_frames
+    first_meta["frame_indices"] = frame_indices
+    return first_meta
+
+
+def params_from_metadata(metadata, base_ops, pipeline="suite2p"):
     """
     Use metadata to get sensible default pipeline parameters.
+
+    If ops are not provided, uses suite2p.default_ops(). Sets framerate, pixel resolution, and do_metrics=True.
 
     Parameters
     ----------
     metadata : dict
         Result of mbo.get_metadata()
-    ops : dict, optional
-        If provided, will return suite2p ops
+    base_ops : dict
+        Ops dict to use as a base.
+    pipeline : str, optional
+        The pipeline to use. Default is "suite2p".
     """
-    if ops:
-        print("Ops provided. Setting pipeline to suite2p")
-        return _params_from_metadata_suite2p(metadata, ops)
-    else:
+    if pipeline.lower() == "caiman":
+        print("Warning: CaImAn is not stable, proceed at your own risk.")
         return _params_from_metadata_caiman(metadata)
+    elif pipeline.lower() == "suite2p":
+        print("Setting pipeline to suite2p")
+        return _params_from_metadata_suite2p(metadata, base_ops)
+    else:
+        raise ValueError(
+            f"Pipeline {pipeline} not recognized. Use 'caiman' or 'suite2'"
+        )
