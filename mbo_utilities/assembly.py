@@ -365,7 +365,7 @@ def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
             raise ValueError("data_shape must be provided on first write")
 
         n_frames, Ly, Lx = data_shape
-        bf = BinaryFile(Ly=Ly, Lx=Lx, filename=str(fname), n_frames=n_frames, dtype="int16")
+        bf = BinaryFile(Ly=Ly, Lx=Lx, filename=str(fname), n_frames=n_frames, dtype=np.int16)
         _write_bin._writers[key] = bf
         _write_bin._offsets[key] = 0
 
