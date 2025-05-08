@@ -123,7 +123,7 @@ def return_scan_offset(image_in, nvals: int = 8):
     image_in = image_in.squeeze()
 
     if len(image_in.shape) == 3:
-        image_in = np.mean(image_in, axis=0)
+        image_in = np.max(image_in, axis=0)
     elif len(image_in.shape) == 4:
         raise AttributeError("Input image must be 2D or 3D.")
 
