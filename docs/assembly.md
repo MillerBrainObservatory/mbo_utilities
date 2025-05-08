@@ -153,7 +153,6 @@ mbo.save_as(
     overwrite=True,
     ext = '.tiff',
     trim_edge=[2, 2, 2, 2], # post-assembly pixels to trim [left, right, top, bottom]
-    append_str="_demo",      # this will be appended to the filename, 'plane_N_demo.ext'
     fix_phase=False          # fix bi-directional scan phase offset
 )
 ```
