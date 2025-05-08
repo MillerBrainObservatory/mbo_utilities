@@ -126,6 +126,7 @@ def save_as(
     debug = kwargs.get("debug", False)
     if debug:
         ic.enable()
+        ic("Debugging mode ON")
     else:
         ic.disable()
 
@@ -247,10 +248,10 @@ def _save_data(
         )
         for _ in planes
     )
-    pbar = tqdm(total=total_chunks, desc="Saving planes", position=0)
+    pbar = tqdm(total=total_chunks, desc="Saving plane ", position=0)
 
     for chan_index in planes:
-
+        pbar.set_description(f"Saving plane {chan_index + 1}")
         if file_extension == "bin":
             fname = path / f"plane{chan_index}" / "data_raw.bin"
         else:
@@ -278,7 +279,7 @@ def _save_data(
             if fix_phase:
                 ofs = mbo_utilities.return_scan_offset(data_chunk)
                 if ofs:
-                    tqdm.write(ic.format(ofs))
+                    ic(ofs)
                     data_chunk = mbo_utilities.fix_scan_phase(data_chunk, -ofs)
 
             writer(fname, data_chunk, chan_index=chan_index)
@@ -573,8 +574,7 @@ def main():
         return None
 
     if args.debug:
-        logger.setLevel(logging.DEBUG)
-        logger.debug("Debug mode enabled.")
+        ic.enable()
 
     path = Path(args.path).expanduser()
     if path.is_dir():
