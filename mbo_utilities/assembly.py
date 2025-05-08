@@ -10,13 +10,13 @@ import shutil
 from pathlib import Path
 from tifffile import TiffWriter
 import h5py
+from icecream import ic
 
 import mbo_utilities
 from .file_io import _make_json_serializable, read_scan
 from .metadata import get_metadata
 from .util import is_running_jupyter
 from .scanreader.utils import listify_index
-import functools
 try:
     from suite2p.io import BinaryFile
     HAS_SUITE2P = True
@@ -39,7 +39,7 @@ CHUNKS = {0: "auto", 1: -1, 2: -1}
 
 warnings.filterwarnings("ignore")
 
-print = functools.partial(print, flush=True)
+# print = functools.partial(print, flush=True)
 
 
 def close_tiff_writers():
@@ -84,6 +84,7 @@ def save_as(
     trim_edge: list | tuple = (0, 0, 0, 0),
     fix_phase: bool = True,
     target_chunk_mb: int = 20,
+    **kwargs
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -113,13 +114,23 @@ def save_as(
         Whether to fix scan-phase (x/y) alignment. Default is `True`.
     target_chunk_mb : int, optional
         Chunk size in megabytes for saving data. Increase to help with scan-phase correction.
+    kwargs : dict, optional
+        Current kwargs: "debug (ic enable)"
 
     Raises
     ------
     ValueError
         If an unsupported file extension is provided.
     """
+    # Parse kwargs
+    debug = kwargs.get("debug", False)
+    if debug:
+        ic.enable()
+    else:
+        ic.disable()
+
     savedir = Path(savedir)
+    ic(savedir)
     if not savedir.parent.is_dir():
         raise ValueError(f"{savedir} is not inside a valid directory.")
     savedir.mkdir(exist_ok=True)
@@ -130,6 +141,7 @@ def save_as(
     if not planes:
         planes = range(scan.num_channels)
 
+    ic(planes)
     over_idx = [p for p in planes if p < 0 or p >= scan.num_planes]
     if over_idx:
         raise ValueError(f"Invalid plane indices {over_idx}; must be in 0…{scan.num_channels-1}")
@@ -149,11 +161,12 @@ def save_as(
             get_metadata(scan.tiff_files[0].filehandle.path)
         )
     )
-
     if metadata is not None:
         mdata.update(metadata)
 
+    ic(metadata)
     if not savedir.exists():
+        _=ic(savedir)
         logger.debug(f"Creating directory: {savedir}")
         savedir.mkdir(parents=True)
     start_time = time.time()
@@ -193,15 +206,18 @@ def _save_data(
     path.mkdir(exist_ok=True)
 
     nt, nz, nx, ny = scan.shape
+    ic(nt, nz, nx, ny)
 
     left, right, top, bottom = trim_edge
     left = min(left, nx - 1)
     right = min(right, nx - left)
     top = min(top, ny - 1)
     bottom = min(bottom, ny - top)
+    ic(left, right, top, bottom)
 
     new_height = ny - (top + bottom)
     new_width = nx - (left + right)
+    ic(new_height, new_width)
 
     metadata["fov"] = [new_height, new_width]
     metadata["shape"] = (nt, new_width, new_height)
@@ -211,6 +227,7 @@ def _save_data(
     metadata["num_frames"] = nt # alias
 
     final_shape = (nt, new_height, new_width)
+    ic(final_shape)
     writer = _get_file_writer(
         file_extension, overwrite=overwrite, metadata=metadata, data_shape=final_shape
     )
@@ -230,7 +247,7 @@ def _save_data(
         )
         for _ in planes
     )
-    pbar = tqdm(total=total_chunks, desc="Saving planes")
+    pbar = tqdm(total=total_chunks, desc="Saving planes", position=0)
 
     for chan_index in planes:
 
@@ -261,6 +278,7 @@ def _save_data(
             if fix_phase:
                 ofs = mbo_utilities.return_scan_offset(data_chunk)
                 if ofs:
+                    tqdm.write(ic.format(ofs))
                     data_chunk = mbo_utilities.fix_scan_phase(data_chunk, -ofs)
 
             writer(fname, data_chunk, chan_index=chan_index)
@@ -506,22 +524,6 @@ def main():
         default=20,
         help="Target chunk size, in MB",
     )
-    parser.add_argument(
-        "--trimx",
-        type=int,
-        nargs=2,
-        default=(0, 0),
-        help="Number of x-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for left and right "
-        "edges).",
-    )
-    parser.add_argument(
-        "--trimy",
-        type=int,
-        nargs=2,
-        default=(0, 0),
-        help="Number of y-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for top and bottom "
-        "edges).",
-    )
     # Boolean Flags
     parser.add_argument(
         "--metadata",
@@ -548,9 +550,6 @@ def main():
     )
     parser.add_argument(
         "--tiff", action="store_false", help="Flag to save as .tiff. Default is True"
-    )
-    parser.add_argument(
-        "--zarr", action="store_true", help="Flag to save as .zarr. Default is False"
     )
     parser.add_argument(
         "--debug", action="store_true", help="Output verbose debug information."
