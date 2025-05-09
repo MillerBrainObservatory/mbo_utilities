@@ -1,0 +1,1092 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mbo_utilities.assembly &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/togglebutton.css?v=13237357" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=475cc00c" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../../_static/togglebutton.js?v=4a39c7ea"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/mbo_utilities/assembly';</script>
+    <link rel="icon" href="../../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../../_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="../../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../assembly.html">Assembly</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../usage/index.html">Usage</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../usage/save_as.html">1. <code class="docutils literal notranslate"><span class="pre">save_as</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../usage/run_gui.html">2. <code class="docutils literal notranslate"><span class="pre">run_gui</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../usage/save_mp4.html">3. <code class="docutils literal notranslate"><span class="pre">save_mp4</span></code></a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/core.html">1. Core Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html">2. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/visualization.html">3. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../venvs.html">Virtual Environments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../image_gallery.html">Image gallery</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2F_modules/mbo_utilities/assembly.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button"
+   title="Open an issue"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+
+</a>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for mbo_utilities.assembly</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">functools</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">tifffile</span><span class="w"> </span><span class="kn">import</span> <span class="n">TiffWriter</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">h5py</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">icecream</span><span class="w"> </span><span class="kn">import</span> <span class="n">ic</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">mbo_utilities</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.file_io</span><span class="w"> </span><span class="kn">import</span> <span class="n">_make_json_serializable</span><span class="p">,</span> <span class="n">read_scan</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.metadata</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_metadata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">is_running_jupyter</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.scanreader.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">listify_index</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">suite2p.io</span><span class="w"> </span><span class="kn">import</span> <span class="n">BinaryFile</span>
+    <span class="n">HAS_SUITE2P</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="n">HAS_SUITE2P</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">BInaryFIle</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No suite2p detected!&quot;</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="n">is_running_jupyter</span><span class="p">():</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">tqdm.notebook</span><span class="w"> </span><span class="kn">import</span> <span class="n">tqdm</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">tqdm.auto</span><span class="w"> </span><span class="kn">import</span> <span class="n">tqdm</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+<span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">WARNING</span><span class="p">)</span>
+
+<span class="n">ARRAY_METADATA</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;dtype&quot;</span><span class="p">,</span> <span class="s2">&quot;shape&quot;</span><span class="p">,</span> <span class="s2">&quot;nbytes&quot;</span><span class="p">,</span> <span class="s2">&quot;size&quot;</span><span class="p">]</span>
+
+<span class="n">CHUNKS</span> <span class="o">=</span> <span class="p">{</span><span class="mi">0</span><span class="p">:</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">}</span>
+
+<span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span><span class="s2">&quot;ignore&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">close_tiff_writers</span><span class="p">():</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">_write_tiff</span><span class="p">,</span> <span class="s2">&quot;_writers&quot;</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">writer</span> <span class="ow">in</span> <span class="n">_write_tiff</span><span class="o">.</span><span class="n">_writers</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="n">_write_tiff</span><span class="o">.</span><span class="n">_writers</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">process_slice_str</span><span class="p">(</span><span class="n">slice_str</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">slice_str</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Expected a string argument, received: </span><span class="si">{</span><span class="n">slice_str</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">slice_str</span><span class="o">.</span><span class="n">isdigit</span><span class="p">():</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">slice_str</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="n">slice_str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">slice</span><span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">if</span> <span class="n">p</span> <span class="k">else</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">parts</span><span class="p">])</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">process_slice_objects</span><span class="p">(</span><span class="n">slice_str</span><span class="p">):</span>
+    <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="n">process_slice_str</span><span class="p">,</span> <span class="n">slice_str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">print_params</span><span class="p">(</span><span class="n">params</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">5</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">params</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="c1"># if value is a dictionary, recursively call the function</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot; &quot;</span> <span class="o">*</span> <span class="n">indent</span> <span class="o">+</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+            <span class="n">print_params</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">indent</span> <span class="o">+</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot; &quot;</span> <span class="o">*</span> <span class="n">indent</span> <span class="o">+</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="save_as">
+<a class="viewcode-back" href="../../api/io.html#mbo_utilities.save_as">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">save_as</span><span class="p">(</span>
+    <span class="n">scan</span><span class="p">,</span>
+    <span class="n">savedir</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">PathLike</span><span class="p">,</span>
+    <span class="n">planes</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="nb">tuple</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">overwrite</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">ext</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;.tiff&quot;</span><span class="p">,</span>
+    <span class="n">order</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="nb">tuple</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">trim_edge</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="nb">tuple</span> <span class="o">=</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+    <span class="n">fix_phase</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">target_chunk_mb</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20</span><span class="p">,</span>
+    <span class="n">subpixel_phasecorr</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Save scan data to the specified directory in the desired format.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    scan : scanreader.ScanMultiROI</span>
+<span class="sd">        An object representing scan data. Must have attributes such as `num_channels`,</span>
+<span class="sd">        `num_frames`, `fields`, and `rois`, and support indexing for retrieving frame data.</span>
+<span class="sd">    savedir : os.PathLike</span>
+<span class="sd">        Path to the directory where the data will be saved.</span>
+<span class="sd">    planes : int, list, or tuple, optional</span>
+<span class="sd">        Plane indices to save. If `None`, all planes are saved. Default is `None`.</span>
+<span class="sd">    trim_edge : list, optional</span>
+<span class="sd">        Number of pixels to trim on each W x H edge. (Left, Right, Top, Bottom). Default is (0,0,0,0).</span>
+<span class="sd">    metadata : dict, optional</span>
+<span class="sd">        Additional metadata to update the scan object&#39;s metadata. Default is `None`.</span>
+<span class="sd">    overwrite : bool, optional</span>
+<span class="sd">        Whether to overwrite existing files. Default is `True`.</span>
+<span class="sd">    ext : str, optional</span>
+<span class="sd">        File extension for the saved data. Supported options are .tiff, .zarr and .h5.</span>
+<span class="sd">        Default is `&#39;.tiff&#39;`.</span>
+<span class="sd">    order : list or tuple, optional</span>
+<span class="sd">        A list or tuple specifying the desired order of planes. If provided, the number of</span>
+<span class="sd">        elements in `order` must match the number of planes. Default is `None`.</span>
+<span class="sd">    fix_phase : bool, optional</span>
+<span class="sd">        Whether to fix scan-phase (x/y) alignment. Default is `True`.</span>
+<span class="sd">    subpixel_phasecorr : bool, optiional</span>
+<span class="sd">        Whether to use subpixel phase correlation for scan-phase correction. Default is &#39;True&#39;.</span>
+<span class="sd">    target_chunk_mb : int, optional</span>
+<span class="sd">        Chunk size in megabytes for saving data. Increase to help with scan-phase correction.</span>
+<span class="sd">    kwargs : dict, optional</span>
+<span class="sd">        Current kwargs: &quot;debug (ic enable)&quot;</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If an unsupported file extension is provided.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Parse kwargs</span>
+    <span class="n">debug</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;debug&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">debug</span><span class="p">:</span>
+        <span class="n">ic</span><span class="o">.</span><span class="n">enable</span><span class="p">()</span>
+        <span class="n">ic</span><span class="p">(</span><span class="s2">&quot;Debugging mode ON&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">ic</span><span class="o">.</span><span class="n">disable</span><span class="p">()</span>
+
+    <span class="n">savedir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">savedir</span><span class="p">)</span>
+    <span class="n">ic</span><span class="p">(</span><span class="n">savedir</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">savedir</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">savedir</span><span class="si">}</span><span class="s2"> is not inside a valid directory.&quot;</span><span class="p">)</span>
+    <span class="n">savedir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">scan</span><span class="p">,</span> <span class="s2">&quot;num_channels&quot;</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Unable to determine the number of planes in this recording from &#39;scan.num_channels&#39;&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">planes</span><span class="p">:</span>
+        <span class="n">planes</span> <span class="o">=</span> <span class="nb">range</span><span class="p">(</span><span class="n">scan</span><span class="o">.</span><span class="n">num_channels</span><span class="p">)</span>
+
+    <span class="n">ic</span><span class="p">(</span><span class="n">planes</span><span class="p">)</span>
+    <span class="n">over_idx</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">planes</span> <span class="k">if</span> <span class="n">p</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">p</span> <span class="o">&gt;=</span> <span class="n">scan</span><span class="o">.</span><span class="n">num_planes</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">over_idx</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid plane indices </span><span class="si">{</span><span class="n">over_idx</span><span class="si">}</span><span class="s2">; must be in 0…</span><span class="si">{</span><span class="n">scan</span><span class="o">.</span><span class="n">num_channels</span><span class="o">-</span><span class="mi">1</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">order</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">order</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">planes</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The length of the `order` (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">order</span><span class="p">)</span><span class="si">}</span><span class="s2">) does not match the number of planes (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">planes</span><span class="p">)</span><span class="si">}</span><span class="s2">).&quot;</span>
+            <span class="p">)</span>
+        <span class="n">planes</span> <span class="o">=</span> <span class="p">[</span><span class="n">planes</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">order</span><span class="p">]</span>
+
+    <span class="n">mdata</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;si&quot;</span><span class="p">:</span> <span class="n">_make_json_serializable</span><span class="p">(</span><span class="n">scan</span><span class="o">.</span><span class="n">tiff_files</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">scanimage_metadata</span><span class="p">),</span>
+    <span class="p">}</span>
+    <span class="n">mdata</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+        <span class="n">_make_json_serializable</span><span class="p">(</span>
+            <span class="n">get_metadata</span><span class="p">(</span><span class="n">scan</span><span class="o">.</span><span class="n">tiff_files</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">filehandle</span><span class="o">.</span><span class="n">path</span><span class="p">)</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">metadata</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">mdata</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span>
+
+    <span class="n">ic</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">savedir</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="n">_</span><span class="o">=</span><span class="n">ic</span><span class="p">(</span><span class="n">savedir</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Creating directory: </span><span class="si">{</span><span class="n">savedir</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">savedir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="n">_save_data</span><span class="p">(</span>
+        <span class="n">scan</span><span class="p">,</span>
+        <span class="n">savedir</span><span class="p">,</span>
+        <span class="n">planes</span><span class="p">,</span>
+        <span class="n">overwrite</span><span class="p">,</span>
+        <span class="n">ext</span><span class="p">,</span>
+        <span class="n">metadata</span><span class="o">=</span><span class="n">mdata</span><span class="p">,</span>
+        <span class="n">trim_edge</span><span class="o">=</span><span class="n">trim_edge</span><span class="p">,</span>
+        <span class="n">fix_phase</span><span class="o">=</span><span class="n">fix_phase</span><span class="p">,</span>
+        <span class="n">subpixel_phasecorr</span><span class="o">=</span><span class="n">subpixel_phasecorr</span><span class="p">,</span>
+        <span class="n">target_chunk_mb</span><span class="o">=</span><span class="n">target_chunk_mb</span><span class="p">,</span>
+
+    <span class="p">)</span>
+    <span class="n">end_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="n">elapsed_time</span> <span class="o">=</span> <span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span>
+    <span class="nb">print</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">&quot;Time elapsed: </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">elapsed_time</span><span class="w"> </span><span class="o">//</span><span class="w"> </span><span class="mi">60</span><span class="p">)</span><span class="si">}</span><span class="s2"> minutes </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">elapsed_time</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">60</span><span class="p">)</span><span class="si">}</span><span class="s2"> seconds.&quot;</span>
+    <span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_save_data</span><span class="p">(</span>
+    <span class="n">scan</span><span class="p">,</span>
+    <span class="n">path</span><span class="p">,</span>
+    <span class="n">planes</span><span class="p">,</span>
+    <span class="n">overwrite</span><span class="p">,</span>
+    <span class="n">file_extension</span><span class="p">,</span>
+    <span class="n">metadata</span><span class="p">,</span>
+    <span class="n">trim_edge</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">fix_phase</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">subpixel_phasecorr</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">target_chunk_mb</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+<span class="p">):</span>
+    <span class="k">if</span> <span class="s2">&quot;.&quot;</span> <span class="ow">in</span> <span class="n">file_extension</span><span class="p">:</span>
+        <span class="n">file_extension</span> <span class="o">=</span> <span class="n">file_extension</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">path</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">nt</span><span class="p">,</span> <span class="n">nz</span><span class="p">,</span> <span class="n">nx</span><span class="p">,</span> <span class="n">ny</span> <span class="o">=</span> <span class="n">scan</span><span class="o">.</span><span class="n">shape</span>
+    <span class="n">ic</span><span class="p">(</span><span class="n">nt</span><span class="p">,</span> <span class="n">nz</span><span class="p">,</span> <span class="n">nx</span><span class="p">,</span> <span class="n">ny</span><span class="p">)</span>
+
+    <span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">top</span><span class="p">,</span> <span class="n">bottom</span> <span class="o">=</span> <span class="n">trim_edge</span>
+    <span class="n">left</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">nx</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">right</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">right</span><span class="p">,</span> <span class="n">nx</span> <span class="o">-</span> <span class="n">left</span><span class="p">)</span>
+    <span class="n">top</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">top</span><span class="p">,</span> <span class="n">ny</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">bottom</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">bottom</span><span class="p">,</span> <span class="n">ny</span> <span class="o">-</span> <span class="n">top</span><span class="p">)</span>
+    <span class="n">ic</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">top</span><span class="p">,</span> <span class="n">bottom</span><span class="p">)</span>
+
+    <span class="n">new_height</span> <span class="o">=</span> <span class="n">ny</span> <span class="o">-</span> <span class="p">(</span><span class="n">top</span> <span class="o">+</span> <span class="n">bottom</span><span class="p">)</span>
+    <span class="n">new_width</span> <span class="o">=</span> <span class="n">nx</span> <span class="o">-</span> <span class="p">(</span><span class="n">left</span> <span class="o">+</span> <span class="n">right</span><span class="p">)</span>
+    <span class="n">ic</span><span class="p">(</span><span class="n">new_height</span><span class="p">,</span> <span class="n">new_width</span><span class="p">)</span>
+
+    <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;fov&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">new_height</span><span class="p">,</span> <span class="n">new_width</span><span class="p">]</span>
+    <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">nt</span><span class="p">,</span> <span class="n">new_width</span><span class="p">,</span> <span class="n">new_height</span><span class="p">)</span>
+    <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;dims&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">,</span> <span class="s2">&quot;width&quot;</span><span class="p">,</span> <span class="s2">&quot;height&quot;</span><span class="p">]</span>
+    <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;trimmed&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">top</span><span class="p">,</span> <span class="n">bottom</span><span class="p">]</span>
+    <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;nframes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">nt</span>
+    <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;num_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">nt</span> <span class="c1"># alias</span>
+
+    <span class="n">final_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">nt</span><span class="p">,</span> <span class="n">new_height</span><span class="p">,</span> <span class="n">new_width</span><span class="p">)</span>
+    <span class="n">ic</span><span class="p">(</span><span class="n">final_shape</span><span class="p">)</span>
+    <span class="n">writer</span> <span class="o">=</span> <span class="n">_get_file_writer</span><span class="p">(</span>
+        <span class="n">file_extension</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="n">overwrite</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="n">metadata</span><span class="p">,</span> <span class="n">data_shape</span><span class="o">=</span><span class="n">final_shape</span>
+    <span class="p">)</span>
+
+    <span class="n">chunk_size</span> <span class="o">=</span> <span class="n">target_chunk_mb</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span>
+    <span class="n">total_chunks</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span>
+        <span class="nb">min</span><span class="p">(</span>
+            <span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+            <span class="nb">max</span><span class="p">(</span>
+                <span class="mi">1</span><span class="p">,</span>
+                <span class="nb">int</span><span class="p">(</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span>
+                        <span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">*</span> <span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">/</span> <span class="n">chunk_size</span>
+                    <span class="p">)</span>
+                <span class="p">),</span>
+            <span class="p">),</span>
+        <span class="p">)</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">planes</span>
+    <span class="p">)</span>
+    <span class="n">pbar</span> <span class="o">=</span> <span class="n">tqdm</span><span class="p">(</span><span class="n">total</span><span class="o">=</span><span class="n">total_chunks</span><span class="p">,</span> <span class="n">desc</span><span class="o">=</span><span class="s2">&quot;Saving plane &quot;</span><span class="p">,</span> <span class="n">position</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">chan_index</span> <span class="ow">in</span> <span class="n">planes</span><span class="p">:</span>
+        <span class="n">pbar</span><span class="o">.</span><span class="n">set_description</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Saving plane </span><span class="si">{</span><span class="n">chan_index</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">file_extension</span> <span class="o">==</span> <span class="s2">&quot;bin&quot;</span><span class="p">:</span>
+            <span class="n">fname</span> <span class="o">=</span> <span class="n">path</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;plane</span><span class="si">{</span><span class="n">chan_index</span><span class="si">}</span><span class="s2">&quot;</span> <span class="o">/</span> <span class="s2">&quot;data_raw.bin&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">fname</span> <span class="o">=</span> <span class="n">path</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;plane_</span><span class="si">{</span><span class="n">chan_index</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">:</span><span class="s2">02d</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">file_extension</span><span class="si">}</span><span class="s2">&quot;</span>
+
+        <span class="k">if</span> <span class="n">fname</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">overwrite</span><span class="p">:</span>
+            <span class="k">continue</span>
+
+        <span class="n">nbytes_chan</span> <span class="o">=</span> <span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">*</span> <span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">*</span> <span class="mi">2</span>
+        <span class="n">num_chunks</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">nbytes_chan</span> <span class="o">/</span> <span class="n">chunk_size</span><span class="p">))))</span>
+
+        <span class="n">base_frames_per_chunk</span> <span class="o">=</span> <span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">//</span> <span class="n">num_chunks</span>
+        <span class="n">extra_frames</span> <span class="o">=</span> <span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">%</span> <span class="n">num_chunks</span>
+
+        <span class="n">start</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_chunks</span><span class="p">):</span>
+            <span class="n">frames_in_this_chunk</span> <span class="o">=</span> <span class="n">base_frames_per_chunk</span> <span class="o">+</span> <span class="p">(</span>
+                <span class="mi">1</span> <span class="k">if</span> <span class="n">chunk</span> <span class="o">&lt;</span> <span class="n">extra_frames</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="p">)</span>
+            <span class="n">end</span> <span class="o">=</span> <span class="n">start</span> <span class="o">+</span> <span class="n">frames_in_this_chunk</span>
+            <span class="n">data_chunk</span> <span class="o">=</span> <span class="n">scan</span><span class="p">[</span>
+                <span class="n">start</span><span class="p">:</span><span class="n">end</span><span class="p">,</span> <span class="n">chan_index</span><span class="p">,</span> <span class="n">top</span> <span class="p">:</span> <span class="n">ny</span> <span class="o">-</span> <span class="n">bottom</span><span class="p">,</span> <span class="n">left</span> <span class="p">:</span> <span class="n">nx</span> <span class="o">-</span> <span class="n">right</span>
+            <span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">fix_phase</span><span class="p">:</span>
+
+                <span class="n">ofs</span> <span class="o">=</span> <span class="n">mbo_utilities</span><span class="o">.</span><span class="n">return_scan_offset</span><span class="p">(</span><span class="n">data_chunk</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">ofs</span><span class="p">:</span>
+                    <span class="n">ic</span><span class="p">(</span><span class="n">ofs</span><span class="p">)</span>
+                    <span class="n">data_chunk</span> <span class="o">=</span> <span class="n">mbo_utilities</span><span class="o">.</span><span class="n">fix_scan_phase</span><span class="p">(</span><span class="n">data_chunk</span><span class="p">,</span> <span class="o">-</span><span class="n">ofs</span><span class="p">)</span>
+
+            <span class="n">writer</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">data_chunk</span><span class="p">,</span> <span class="n">chan_index</span><span class="o">=</span><span class="n">chan_index</span><span class="p">)</span>
+            <span class="n">start</span> <span class="o">=</span> <span class="n">end</span>
+            <span class="n">pbar</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="n">pbar</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">file_extension</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;tif&quot;</span><span class="p">]:</span>
+        <span class="n">close_tiff_writers</span><span class="p">()</span>
+    <span class="k">elif</span> <span class="n">file_extension</span> <span class="o">==</span> <span class="s2">&quot;bin&quot;</span><span class="p">:</span>
+        <span class="n">write_ops</span><span class="p">(</span><span class="n">metadata</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">planes</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">write_ops</span><span class="p">(</span><span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">base_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span><span class="p">,</span> <span class="n">planes</span><span class="p">):</span>
+    <span class="n">base_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">base_path</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+    <span class="k">del</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;si&quot;</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">planes</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="n">planes</span><span class="o">=</span><span class="p">[</span><span class="n">planes</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">plane_idx</span> <span class="ow">in</span> <span class="n">planes</span><span class="p">:</span>
+        <span class="n">plane_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">base_path</span><span class="p">)</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;plane</span><span class="si">{</span><span class="n">plane_idx</span><span class="si">}</span><span class="s2">&quot;</span>
+        
+        <span class="n">raw_bin</span> <span class="o">=</span> <span class="n">plane_dir</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;data_raw.bin&quot;</span><span class="p">)</span>
+        <span class="n">ops_path</span> <span class="o">=</span> <span class="n">plane_dir</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;ops.npy&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># TODO: This is not an accurate way to get a metadata value that should not have </span>
+        <span class="c1">#        to be calculated. We use shape to account for the trimmed pixels</span>
+        <span class="n">shape</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">]</span>
+        <span class="n">nt</span> <span class="o">=</span> <span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">Ly</span> <span class="o">=</span> <span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span>
+        <span class="n">Lx</span> <span class="o">=</span> <span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">dx</span><span class="p">,</span> <span class="n">dy</span> <span class="o">=</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pixel_resolution&quot;</span><span class="p">,</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">])</span>
+        <span class="n">ops</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;Ly&quot;</span><span class="p">:</span> <span class="n">Ly</span><span class="p">,</span>
+            <span class="s2">&quot;Lx&quot;</span><span class="p">:</span> <span class="n">Lx</span><span class="p">,</span>
+            <span class="s2">&quot;fs&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;frame_rate&quot;</span><span class="p">),</span> <span class="mi">2</span><span class="p">),</span>
+            <span class="s2">&quot;nframes&quot;</span><span class="p">:</span> <span class="n">nt</span><span class="p">,</span>
+            <span class="s2">&quot;raw_file&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">raw_bin</span><span class="o">.</span><span class="n">resolve</span><span class="p">()),</span>
+            <span class="s2">&quot;reg_file&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">raw_bin</span><span class="o">.</span><span class="n">resolve</span><span class="p">()),</span>
+            <span class="s2">&quot;dx&quot;</span><span class="p">:</span> <span class="n">dx</span><span class="p">,</span>
+            <span class="s2">&quot;dy&quot;</span><span class="p">:</span> <span class="n">dy</span><span class="p">,</span>
+            <span class="s2">&quot;metadata&quot;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">,</span>
+        <span class="p">}</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">ops_path</span><span class="p">,</span> <span class="n">ops</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_file_writer</span><span class="p">(</span><span class="n">ext</span><span class="p">,</span> <span class="n">overwrite</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">data_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">ext</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;tif&quot;</span><span class="p">,</span> <span class="s2">&quot;tiff&quot;</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="n">functools</span><span class="o">.</span><span class="n">partial</span><span class="p">(</span>
+            <span class="n">_write_tiff</span><span class="p">,</span>
+            <span class="n">overwrite</span><span class="o">=</span><span class="n">overwrite</span><span class="p">,</span>
+            <span class="n">metadata</span><span class="o">=</span><span class="n">metadata</span><span class="p">,</span>
+            <span class="n">data_shape</span><span class="o">=</span><span class="n">data_shape</span>
+        <span class="p">)</span>
+    <span class="k">elif</span> <span class="n">ext</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;h5&quot;</span><span class="p">,</span> <span class="s2">&quot;hdf5&quot;</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="n">functools</span><span class="o">.</span><span class="n">partial</span><span class="p">(</span>
+            <span class="n">_write_h5</span><span class="p">,</span>
+            <span class="n">overwrite</span><span class="o">=</span><span class="n">overwrite</span><span class="p">,</span>
+            <span class="n">metadata</span><span class="o">=</span><span class="n">metadata</span><span class="p">,</span>
+            <span class="n">data_shape</span><span class="o">=</span><span class="n">data_shape</span>
+        <span class="p">)</span>
+    <span class="k">elif</span> <span class="n">ext</span> <span class="o">==</span> <span class="s2">&quot;bin&quot;</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">HAS_SUITE2P</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Suite2p not installed.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">functools</span><span class="o">.</span><span class="n">partial</span><span class="p">(</span>
+            <span class="n">_write_bin</span><span class="p">,</span>
+            <span class="n">overwrite</span><span class="o">=</span><span class="n">overwrite</span><span class="p">,</span>
+            <span class="n">chan_index</span><span class="o">=</span><span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;chan_index&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+            <span class="n">data_shape</span><span class="o">=</span><span class="n">data_shape</span><span class="p">,</span>
+
+        <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported file extension: </span><span class="si">{</span><span class="n">ext</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_write_bin2</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">data_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">chan_index</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+
+    <span class="k">if</span> <span class="n">chan_index</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;chan_index must be provided&quot;</span><span class="p">)</span>
+    <span class="c1"># </span>
+    <span class="c1"># # for bins, we save in suite2p style planeN/data_raw.bin</span>
+    <span class="c1"># fname = Path(path)</span>
+    <span class="c1"># fname.parent.mkdir(exist_ok=True)</span>
+    <span class="c1"># </span>
+    <span class="c1"># key = (fname, data_shape)</span>
+    <span class="c1"># if not hasattr(_write_bin, &quot;_writers&quot;):</span>
+    <span class="c1">#     _write_bin._writers = {}</span>
+    <span class="c1">#     _write_bin._offsets = {}</span>
+    <span class="c1"># </span>
+    <span class="c1"># if key in _write_bin._writers and overwrite:</span>
+    <span class="c1">#     _write_bin._writers[key].close()</span>
+    <span class="c1">#     del _write_bin._writers[key]</span>
+    <span class="c1">#     del _write_bin._offsets[key]</span>
+    <span class="c1">#     if fname.exists():</span>
+    <span class="c1">#         fname.unlink()</span>
+    <span class="c1"># </span>
+    <span class="c1"># if key not in _write_bin._writers:</span>
+    <span class="c1">#     if fname.exists() and overwrite:</span>
+    <span class="c1">#         fname.unlink()</span>
+    <span class="c1">#     if data_shape is None:</span>
+    <span class="c1">#         raise ValueError(&quot;data_shape must be provided on first write&quot;)</span>
+    <span class="c1"># </span>
+    <span class="c1">#     n_frames, Ly, Lx = data_shape</span>
+    <span class="c1">#     bf = BinaryFile(Ly=Ly, Lx=Lx, filename=str(fname), n_frames=n_frames, dtype=np.int16)</span>
+    <span class="c1">#     _write_bin._writers[key] = bf</span>
+    <span class="c1">#     _write_bin._offsets[key] = 0</span>
+    <span class="c1"># </span>
+    <span class="c1"># bf = _write_bin._writers[key]</span>
+    <span class="c1"># offset = _write_bin._offsets[key]</span>
+    <span class="c1"># </span>
+    <span class="c1"># bf[offset:offset + data.shape[0]] = data</span>
+    <span class="c1"># _write_bin._offsets[key] += data.shape[0]</span>
+    <span class="c1"># </span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_write_bin</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">data_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">chan_index</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">chan_index</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;chan_index must be provided&quot;</span><span class="p">)</span>
+
+    <span class="n">fname</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">fname</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">ic</span><span class="p">(</span><span class="n">fname</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">_write_bin</span><span class="p">,</span> <span class="s2">&quot;_writers&quot;</span><span class="p">):</span>
+        <span class="n">_write_bin</span><span class="o">.</span><span class="n">_writers</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">_write_bin</span><span class="o">.</span><span class="n">_offsets</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="n">key</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">fname</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_write_bin</span><span class="o">.</span><span class="n">_writers</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">data_shape</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;must pass full data_shape on first write&quot;</span><span class="p">)</span>
+        <span class="n">n_frames</span><span class="p">,</span> <span class="n">Ly</span><span class="p">,</span> <span class="n">Lx</span> <span class="o">=</span> <span class="n">data_shape</span>
+        <span class="n">_write_bin</span><span class="o">.</span><span class="n">_writers</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">BinaryFile</span><span class="p">(</span><span class="n">Ly</span><span class="p">,</span> <span class="n">Lx</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">fname</span><span class="p">),</span> <span class="n">n_frames</span><span class="o">=</span><span class="n">n_frames</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int16</span><span class="p">)</span>
+        <span class="n">_write_bin</span><span class="o">.</span><span class="n">_offsets</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">bf</span> <span class="o">=</span> <span class="n">_write_bin</span><span class="o">.</span><span class="n">_writers</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+    <span class="n">off</span> <span class="o">=</span> <span class="n">_write_bin</span><span class="o">.</span><span class="n">_offsets</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+    <span class="n">bf</span><span class="p">[</span><span class="n">off</span><span class="p">:</span><span class="n">off</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="o">=</span> <span class="n">data</span>
+    <span class="n">bf</span><span class="o">.</span><span class="n">file</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+    <span class="n">_write_bin</span><span class="o">.</span><span class="n">_offsets</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">off</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_write_h5</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">data_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">chan_index</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">filename</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="s2">&quot;.h5&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">_write_h5</span><span class="p">,</span> <span class="s2">&quot;_initialized&quot;</span><span class="p">):</span>
+        <span class="n">_write_h5</span><span class="o">.</span><span class="n">_initialized</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">_write_h5</span><span class="o">.</span><span class="n">_offsets</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">if</span> <span class="n">filename</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_write_h5</span><span class="o">.</span><span class="n">_initialized</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="s2">&quot;w&quot;</span> <span class="k">if</span> <span class="n">overwrite</span> <span class="k">else</span> <span class="s2">&quot;a&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span>
+                <span class="s2">&quot;mov&quot;</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="n">data_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">chunks</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">compression</span><span class="o">=</span><span class="kc">None</span>
+            <span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">metadata</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">metadata</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">f</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+                    <span class="k">except</span> <span class="ne">TypeError</span><span class="p">:</span>
+                        <span class="n">f</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+
+        <span class="n">_write_h5</span><span class="o">.</span><span class="n">_initialized</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">_write_h5</span><span class="o">.</span><span class="n">_offsets</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="n">offset</span> <span class="o">=</span> <span class="n">_write_h5</span><span class="o">.</span><span class="n">_offsets</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span>
+    <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="s2">&quot;a&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">f</span><span class="p">[</span><span class="s2">&quot;mov&quot;</span><span class="p">][</span><span class="n">offset</span> <span class="p">:</span> <span class="n">offset</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="o">=</span> <span class="n">data</span>
+
+    <span class="n">_write_h5</span><span class="o">.</span><span class="n">_offsets</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span> <span class="o">+=</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_write_tiff</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">data_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">chan_index</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">filename</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="s2">&quot;.tif&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">_write_tiff</span><span class="p">,</span> <span class="s2">&quot;_writers&quot;</span><span class="p">):</span>
+        <span class="n">_write_tiff</span><span class="o">.</span><span class="n">_writers</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">if</span> <span class="n">filename</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_write_tiff</span><span class="o">.</span><span class="n">_writers</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">filename</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="n">overwrite</span><span class="p">:</span>
+            <span class="n">filename</span><span class="o">.</span><span class="n">unlink</span><span class="p">()</span>
+        <span class="n">_write_tiff</span><span class="o">.</span><span class="n">_writers</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span> <span class="o">=</span> <span class="n">TiffWriter</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">bigtiff</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">_write_tiff</span><span class="o">.</span><span class="n">_first_write</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">_write_tiff</span><span class="o">.</span><span class="n">_first_write</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="n">writer</span> <span class="o">=</span> <span class="n">_write_tiff</span><span class="o">.</span><span class="n">_writers</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span>
+
+    <span class="k">for</span> <span class="n">frame</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">write</span><span class="p">(</span>
+            <span class="n">frame</span><span class="p">,</span>
+            <span class="n">contiguous</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">photometric</span><span class="o">=</span><span class="s2">&quot;minisblack&quot;</span><span class="p">,</span>
+            <span class="n">metadata</span><span class="o">=</span><span class="n">metadata</span> <span class="k">if</span> <span class="n">_write_tiff</span><span class="o">.</span><span class="n">_first_write</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">_write_tiff</span><span class="o">.</span><span class="n">_first_write</span> <span class="o">=</span> <span class="kc">False</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_write_zarr</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">data_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">chan_index</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">zarr</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="s2">&quot;Please install zarr to use ext=&#39;.zarr&#39;&quot;</span><span class="p">)</span>
+
+    <span class="c1"># data is assumed to have shape (n, H, W)</span>
+    <span class="n">filename</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="s2">&quot;.zarr&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">_write_zarr</span><span class="p">,</span> <span class="s2">&quot;_initialized&quot;</span><span class="p">):</span>
+        <span class="n">_write_zarr</span><span class="o">.</span><span class="n">_initialized</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">if</span> <span class="n">filename</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_write_zarr</span><span class="o">.</span><span class="n">_initialized</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">filename</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="n">overwrite</span><span class="p">:</span>
+            <span class="n">shutil</span><span class="o">.</span><span class="n">rmtree</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+        <span class="c1"># Instead of using data.shape as the initial shape,</span>
+        <span class="c1"># start with zero along the appending axis.</span>
+        <span class="n">empty_shape</span> <span class="o">=</span> <span class="p">(</span><span class="mi">0</span><span class="p">,)</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+        <span class="n">max_shape</span> <span class="o">=</span> <span class="p">(</span><span class="kc">None</span><span class="p">,)</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+        <span class="n">z</span> <span class="o">=</span> <span class="n">zarr</span><span class="o">.</span><span class="n">creation</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+            <span class="n">store</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">filename</span><span class="p">),</span>
+            <span class="n">shape</span><span class="o">=</span><span class="n">empty_shape</span><span class="p">,</span>
+            <span class="n">chunks</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,)</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span>  <span class="c1"># one slice per chunk</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
+            <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">max_shape</span><span class="o">=</span><span class="n">max_shape</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">metadata</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">metadata</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">z</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+                <span class="k">except</span> <span class="ne">TypeError</span><span class="p">:</span>
+                    <span class="n">z</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+        <span class="n">_write_zarr</span><span class="o">.</span><span class="n">_initialized</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="c1"># Open the array in append mode</span>
+    <span class="n">z</span> <span class="o">=</span> <span class="n">zarr</span><span class="o">.</span><span class="n">open_array</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">filename</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;a&quot;</span><span class="p">)</span>
+    <span class="c1"># Append new data along the 0th axis</span>
+    <span class="n">z</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+    <span class="c1"># Update the count (optional, since append grows the array automatically)</span>
+    <span class="n">_write_zarr</span><span class="o">.</span><span class="n">_initialized</span><span class="p">[</span><span class="n">filename</span><span class="p">]</span> <span class="o">=</span> <span class="n">z</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;CLI for processing ScanImage tiff files.&quot;</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;path&quot;</span><span class="p">,</span>
+        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+        <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Path to the file or directory to process.&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--frames&quot;</span><span class="p">,</span>
+        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="s2">&quot;:&quot;</span><span class="p">,</span>  <span class="c1"># all frames</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Frames to read (0 based). Use slice notation like NumPy arrays (&quot;</span>
+        <span class="s2">&quot;e.g., :50 gives frames 0 to 50, 5:15:2 gives frames 5 to 15 in steps of 2).&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--planes&quot;</span><span class="p">,</span>
+        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="s2">&quot;:&quot;</span><span class="p">,</span>  <span class="c1"># all planes</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Planes to read (0 based). Use slice notation like NumPy arrays (e.g., 1:5 gives planes &quot;</span>
+        <span class="s2">&quot;2 to 6&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--target_chunk_mb&quot;</span><span class="p">,</span>
+        <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+        <span class="n">nargs</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Target chunk size, in MB&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="c1"># Boolean Flags</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--metadata&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Print a dictionary of scanimage metadata for files at the given path.&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--roi&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Save each ROI in its own folder, organized like &#39;zarr/roi_1/plane_1/, without this &quot;</span>
+        <span class="s2">&quot;arguemnet it would save like &#39;zarr/plane_1/roi_1&#39;.&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--save&quot;</span><span class="p">,</span>
+        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+        <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Path to save data to. If not provided, the path will be printed.&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--overwrite&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Overwrite existing files if saving data..&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--tiff&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_false&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Flag to save as .tiff. Default is True&quot;</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--debug&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Output verbose debug information.&quot;</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--summary&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Include min, max, mean, std in metadata per plane.&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--delete_first_frame&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_false&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Flag to delete the first frame of the scan when saving.&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="c1"># Commands</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="c1"># If no arguments are provided, print help and exit</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">vars</span><span class="p">(</span><span class="n">args</span><span class="p">))</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">path</span><span class="p">:</span>
+        <span class="n">parser</span><span class="o">.</span><span class="n">print_help</span><span class="p">()</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">debug</span><span class="p">:</span>
+        <span class="n">ic</span><span class="o">.</span><span class="n">enable</span><span class="p">()</span>
+
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*.tif*&quot;</span><span class="p">)]</span>
+    <span class="k">elif</span> <span class="n">path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">)]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File or directory not found: </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">files</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Input path given is a non-tiff file: </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">.</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;scanreader is currently limited to scanimage .tiff files.&quot;</span>
+        <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">files</span><span class="p">)</span><span class="si">}</span><span class="s2"> file(s) in </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">metadata</span><span class="p">:</span>
+        <span class="n">metadata</span> <span class="o">=</span> <span class="n">get_metadata</span><span class="p">(</span><span class="n">files</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Metadata for </span><span class="si">{</span><span class="n">files</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+        <span class="c1"># filter out the verbose scanimage frame/roi metadata</span>
+        <span class="n">print_params</span><span class="p">({</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">metadata</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;si&quot;</span><span class="p">,</span> <span class="s2">&quot;roi_info&quot;</span><span class="p">]})</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">save</span><span class="p">:</span>
+        <span class="n">savepath</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">save</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Saving data to </span><span class="si">{</span><span class="n">savepath</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+
+        <span class="n">t_scan_init</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="n">scan</span> <span class="o">=</span> <span class="n">read_scan</span><span class="p">(</span><span class="n">files</span><span class="p">)</span>
+        <span class="n">t_scan_init_end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">t_scan_init</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;--- Scan initialized in </span><span class="si">{</span><span class="n">t_scan_init_end</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds.&quot;</span><span class="p">)</span>
+
+        <span class="n">frames</span> <span class="o">=</span> <span class="n">listify_index</span><span class="p">(</span><span class="n">process_slice_str</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">frames</span><span class="p">),</span> <span class="n">scan</span><span class="o">.</span><span class="n">num_frames</span><span class="p">)</span>
+        <span class="n">zplanes</span> <span class="o">=</span> <span class="n">listify_index</span><span class="p">(</span><span class="n">process_slice_str</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">planes</span><span class="p">),</span> <span class="n">scan</span><span class="o">.</span><span class="n">num_channels</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">delete_first_frame</span><span class="p">:</span>
+            <span class="n">frames</span> <span class="o">=</span> <span class="n">frames</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Deleting first frame. New frames: </span><span class="si">{</span><span class="n">frames</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Frames: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">frames</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Z-Planes: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">zplanes</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">zarr</span><span class="p">:</span>
+            <span class="n">ext</span> <span class="o">=</span> <span class="s2">&quot;.zarr&quot;</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Saving as .zarr.&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">args</span><span class="o">.</span><span class="n">tiff</span><span class="p">:</span>
+            <span class="n">ext</span> <span class="o">=</span> <span class="s2">&quot;.tiff&quot;</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Saving as .tiff.&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;Only .zarr and .tif are supported file formats.&quot;</span><span class="p">)</span>
+
+        <span class="n">t_save</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="n">save_as</span><span class="p">(</span>
+            <span class="n">scan</span><span class="p">,</span>
+            <span class="n">savepath</span><span class="p">,</span>
+            <span class="c1"># frames=frames, # TODO</span>
+            <span class="n">planes</span><span class="o">=</span><span class="n">zplanes</span><span class="p">,</span>
+            <span class="n">overwrite</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">overwrite</span><span class="p">,</span>
+            <span class="n">ext</span><span class="o">=</span><span class="n">ext</span><span class="p">,</span>
+            <span class="n">target_chunk_mb</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">target_chunk_mb</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">t_save_end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">t_save</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;--- Processing complete in </span><span class="si">{</span><span class="n">t_save_end</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds. --&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">scan</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">path</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By Author name not set
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
