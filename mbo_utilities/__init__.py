@@ -16,6 +16,10 @@ from .image import fix_scan_phase, return_scan_offset
 from .util import (norm_minmax, smooth_data, is_running_jupyter, is_imgui_installed, is_qt_installed, subsample_array)
 
 from .graphics import run_gui
+try:
+    from icecream import ic
+except ImportError:  # Graceful fallback if IceCream isn't installed.
+    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
 
 __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
 

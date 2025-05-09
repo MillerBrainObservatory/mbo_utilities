@@ -1,4 +1,36 @@
+from pathlib import Path
+
 import numpy as np
+from scipy.ndimage import fourier_shift
+from skimage.registration import phase_cross_correlation
+import tifffile
+
+def _compute_offset_fft(frame: np.ndarray, upsample: int):
+    pre = frame[::2, :]
+    post = frame[1::2, :]
+    m = min(pre.shape[0], post.shape[0])
+    pre, post = pre[:m], post[:m]
+    shift, _, _ = phase_cross_correlation(pre, post, upsample_factor=upsample)  # noqa
+    return shift[1]
+
+def _apply_shift_fft2d(frame: np.ndarray, offset: float):
+    out = frame.copy()
+    rows = frame[1::2, :]
+    f = np.fft.fftn(rows)
+    fshift = fourier_shift(f, (0, -offset))
+    rows_corr = np.fft.ifftn(fshift).real
+    out[1::2, :] = rows_corr
+    return out
+
+def fix_scan_phase_fft_tiff(path: str | Path, upsample: int = 10) -> np.ndarray:
+    data = tifffile.memmap(path)
+    if data.ndim != 3:
+        raise ValueError("Expected 3D T×Y×X TIFF")
+    corrected = []
+    for frame in data:
+        off = _compute_offset_fft(frame, upsample)
+        corrected.append(_apply_shift_fft2d(frame, off))
+    return np.stack(corrected, axis=0)
 
 
 def extract_center_square(images, size):
@@ -41,7 +73,7 @@ def extract_center_square(images, size):
     --------
     Extract a center square from a 2D image:
 
-    >>> import numpy as np
+    >>> import numpy as np  # noqa
     >>> image = np.random.rand(600, 576)
     >>> cropped = extract_center_square(image, size=200)
     >>> cropped.shape
@@ -87,19 +119,19 @@ def return_scan_offset(image_in, nvals: int = 8):
     ----------
     image_in : ndarray | ndarray-like
         Input image or volume. It can be 2D, 3D, or 4D.
-
-    .. note::
-
-        Dimensions: [height, width], [time, height, width], or [time, plane, height, width].
-        The input array must be castable to numpy. e.g. np.shape, np.ravel.
-
     nvals : int
         Number of pixel-wise shifts to include in the search for best correlation.
+
 
     Returns
     -------
     int
         The computed correction value, based on the peak of the cross-correlation.
+
+    Notes
+    -----
+    Dimensions: [height, width], [time, height, width], or [time, plane, height, width].
+    The input array must be castable to numpy. e.g. np.shape, np.ravel.
 
     Examples
     --------
@@ -123,7 +155,7 @@ def return_scan_offset(image_in, nvals: int = 8):
     image_in = image_in.squeeze()
 
     if len(image_in.shape) == 3:
-        image_in = np.mean(image_in, axis=0)
+        image_in = np.max(image_in, axis=0)
     elif len(image_in.shape) == 4:
         raise AttributeError("Input image must be 2D or 3D.")
 

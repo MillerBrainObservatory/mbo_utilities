@@ -15,14 +15,15 @@ from pathlib import Path
 import tifffile
 import fastplotlib as fpl
 
-fname_scan = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green\*"
-save_path = Path().home().joinpath("dev")
-uncor_save = save_path.joinpath("raw")
+fname_scan = r"/home/flynn/lbm_data/raw"
+save_path = Path("/home/flynn/lbm_data")
+
+uncor_save = save_path.joinpath("uncorrected")
 corrected_save = save_path.joinpath("corrected")
 
 raw_scan = mbo.read_scan(fname_scan)
 
-mbo.save_as(raw_scan, uncor_save, planes=[7], fix_phase=False)
-mbo.save_as(raw_scan, corrected_save, planes=[7], fix_phase=True)
+# mbo.save_as(raw_scan, uncor_save, planes=[11], fix_phase=False)
+mbo.save_as(raw_scan, corrected_save, planes=[11], fix_phase=True, target_chunk_mb=50, debug=False, ext="bin")
 
 x = 2
