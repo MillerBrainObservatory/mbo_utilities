@@ -82,6 +82,7 @@ def save_as(
     trim_edge: list | tuple = (0, 0, 0, 0),
     fix_phase: bool = True,
     target_chunk_mb: int = 20,
+    subpixel_phasecorr: bool = True,
     **kwargs
 ):
     """
@@ -110,6 +111,8 @@ def save_as(
         elements in `order` must match the number of planes. Default is `None`.
     fix_phase : bool, optional
         Whether to fix scan-phase (x/y) alignment. Default is `True`.
+    subpixel_phasecorr : bool, optiional
+        Whether to use subpixel phase correlation for scan-phase correction. Default is 'True'.
     target_chunk_mb : int, optional
         Chunk size in megabytes for saving data. Increase to help with scan-phase correction.
     kwargs : dict, optional
@@ -178,7 +181,9 @@ def save_as(
         metadata=mdata,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
+        subpixel_phasecorr==True,
         target_chunk_mb=target_chunk_mb,
+
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -196,6 +201,7 @@ def _save_data(
     metadata,
     trim_edge=None,
     fix_phase=True,
+    subpixel_phasecorr=True,
     target_chunk_mb=20,
 ):
     if "." in file_extension:
