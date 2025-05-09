@@ -181,7 +181,7 @@ def save_as(
         metadata=mdata,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
-        subpixel_phasecorr==True,
+        subpixel_phasecorr=subpixel_phasecorr,
         target_chunk_mb=target_chunk_mb,
 
     )
