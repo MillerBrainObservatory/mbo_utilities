@@ -39,8 +39,6 @@ CHUNKS = {0: "auto", 1: -1, 2: -1}
 
 warnings.filterwarnings("ignore")
 
-# print = functools.partial(print, flush=True)
-
 
 def close_tiff_writers():
     if hasattr(_write_tiff, "_writers"):
@@ -197,7 +195,7 @@ def _save_data(
     file_extension,
     metadata,
     trim_edge=None,
-    fix_phase=False,
+    fix_phase=True,
     target_chunk_mb=20,
 ):
     if "." in file_extension:
@@ -277,6 +275,7 @@ def _save_data(
             ]
 
             if fix_phase:
+
                 ofs = mbo_utilities.return_scan_offset(data_chunk)
                 if ofs:
                     ic(ofs)
