@@ -10,13 +10,13 @@ import shutil
 from pathlib import Path
 from tifffile import TiffWriter
 import h5py
+from icecream import ic
 
 import mbo_utilities
 from .file_io import _make_json_serializable, read_scan
 from .metadata import get_metadata
 from .util import is_running_jupyter
 from .scanreader.utils import listify_index
-import functools
 try:
     from suite2p.io import BinaryFile
     HAS_SUITE2P = True
@@ -38,8 +38,6 @@ ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
 CHUNKS = {0: "auto", 1: -1, 2: -1}
 
 warnings.filterwarnings("ignore")
-
-print = functools.partial(print, flush=True)
 
 
 def close_tiff_writers():
@@ -84,6 +82,8 @@ def save_as(
     trim_edge: list | tuple = (0, 0, 0, 0),
     fix_phase: bool = True,
     target_chunk_mb: int = 20,
+    subpixel_phasecorr: bool = True,
+    **kwargs
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -111,15 +111,28 @@ def save_as(
         elements in `order` must match the number of planes. Default is `None`.
     fix_phase : bool, optional
         Whether to fix scan-phase (x/y) alignment. Default is `True`.
+    subpixel_phasecorr : bool, optiional
+        Whether to use subpixel phase correlation for scan-phase correction. Default is 'True'.
     target_chunk_mb : int, optional
         Chunk size in megabytes for saving data. Increase to help with scan-phase correction.
+    kwargs : dict, optional
+        Current kwargs: "debug (ic enable)"
 
     Raises
     ------
     ValueError
         If an unsupported file extension is provided.
     """
+    # Parse kwargs
+    debug = kwargs.get("debug", False)
+    if debug:
+        ic.enable()
+        ic("Debugging mode ON")
+    else:
+        ic.disable()
+
     savedir = Path(savedir)
+    ic(savedir)
     if not savedir.parent.is_dir():
         raise ValueError(f"{savedir} is not inside a valid directory.")
     savedir.mkdir(exist_ok=True)
@@ -130,6 +143,7 @@ def save_as(
     if not planes:
         planes = range(scan.num_channels)
 
+    ic(planes)
     over_idx = [p for p in planes if p < 0 or p >= scan.num_planes]
     if over_idx:
         raise ValueError(f"Invalid plane indices {over_idx}; must be in 0…{scan.num_channels-1}")
@@ -149,11 +163,12 @@ def save_as(
             get_metadata(scan.tiff_files[0].filehandle.path)
         )
     )
-
     if metadata is not None:
         mdata.update(metadata)
 
+    ic(metadata)
     if not savedir.exists():
+        _=ic(savedir)
         logger.debug(f"Creating directory: {savedir}")
         savedir.mkdir(parents=True)
     start_time = time.time()
@@ -166,7 +181,9 @@ def save_as(
         metadata=mdata,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
+        subpixel_phasecorr=subpixel_phasecorr,
         target_chunk_mb=target_chunk_mb,
+
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -183,7 +200,8 @@ def _save_data(
     file_extension,
     metadata,
     trim_edge=None,
-    fix_phase=False,
+    fix_phase=True,
+    subpixel_phasecorr=True,
     target_chunk_mb=20,
 ):
     if "." in file_extension:
@@ -193,15 +211,18 @@ def _save_data(
     path.mkdir(exist_ok=True)
 
     nt, nz, nx, ny = scan.shape
+    ic(nt, nz, nx, ny)
 
     left, right, top, bottom = trim_edge
     left = min(left, nx - 1)
     right = min(right, nx - left)
     top = min(top, ny - 1)
     bottom = min(bottom, ny - top)
+    ic(left, right, top, bottom)
 
     new_height = ny - (top + bottom)
     new_width = nx - (left + right)
+    ic(new_height, new_width)
 
     metadata["fov"] = [new_height, new_width]
     metadata["shape"] = (nt, new_width, new_height)
@@ -211,6 +232,7 @@ def _save_data(
     metadata["num_frames"] = nt # alias
 
     final_shape = (nt, new_height, new_width)
+    ic(final_shape)
     writer = _get_file_writer(
         file_extension, overwrite=overwrite, metadata=metadata, data_shape=final_shape
     )
@@ -230,10 +252,10 @@ def _save_data(
         )
         for _ in planes
     )
-    pbar = tqdm(total=total_chunks, desc="Saving planes")
+    pbar = tqdm(total=total_chunks, desc="Saving plane ", position=0)
 
     for chan_index in planes:
-
+        pbar.set_description(f"Saving plane {chan_index + 1}")
         if file_extension == "bin":
             fname = path / f"plane{chan_index}" / "data_raw.bin"
         else:
@@ -259,8 +281,10 @@ def _save_data(
             ]
 
             if fix_phase:
+
                 ofs = mbo_utilities.return_scan_offset(data_chunk)
                 if ofs:
+                    ic(ofs)
                     data_chunk = mbo_utilities.fix_scan_phase(data_chunk, -ofs)
 
             writer(fname, data_chunk, chan_index=chan_index)
@@ -337,44 +361,69 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
+def _write_bin2(path, data, overwrite=False, data_shape=None, chan_index=None):
 
     if chan_index is None:
         raise ValueError("chan_index must be provided")
+    # 
+    # # for bins, we save in suite2p style planeN/data_raw.bin
+    # fname = Path(path)
+    # fname.parent.mkdir(exist_ok=True)
+    # 
+    # key = (fname, data_shape)
+    # if not hasattr(_write_bin, "_writers"):
+    #     _write_bin._writers = {}
+    #     _write_bin._offsets = {}
+    # 
+    # if key in _write_bin._writers and overwrite:
+    #     _write_bin._writers[key].close()
+    #     del _write_bin._writers[key]
+    #     del _write_bin._offsets[key]
+    #     if fname.exists():
+    #         fname.unlink()
+    # 
+    # if key not in _write_bin._writers:
+    #     if fname.exists() and overwrite:
+    #         fname.unlink()
+    #     if data_shape is None:
+    #         raise ValueError("data_shape must be provided on first write")
+    # 
+    #     n_frames, Ly, Lx = data_shape
+    #     bf = BinaryFile(Ly=Ly, Lx=Lx, filename=str(fname), n_frames=n_frames, dtype=np.int16)
+    #     _write_bin._writers[key] = bf
+    #     _write_bin._offsets[key] = 0
+    # 
+    # bf = _write_bin._writers[key]
+    # offset = _write_bin._offsets[key]
+    # 
+    # bf[offset:offset + data.shape[0]] = data
+    # _write_bin._offsets[key] += data.shape[0]
+    # 
 
-    # for bins, we save in suite2p style planeN/data_raw.bin
+def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
+    if chan_index is None:
+        raise ValueError("chan_index must be provided")
+
     fname = Path(path)
     fname.parent.mkdir(exist_ok=True)
+    ic(fname)
 
-    key = (fname, data_shape)
     if not hasattr(_write_bin, "_writers"):
         _write_bin._writers = {}
         _write_bin._offsets = {}
 
-    if key in _write_bin._writers and overwrite:
-        _write_bin._writers[key].close()
-        del _write_bin._writers[key]
-        del _write_bin._offsets[key]
-        if fname.exists():
-            fname.unlink()
-
+    key = str(fname)
     if key not in _write_bin._writers:
-        if fname.exists() and overwrite:
-            fname.unlink()
         if data_shape is None:
-            raise ValueError("data_shape must be provided on first write")
-
+            raise ValueError("must pass full data_shape on first write")
         n_frames, Ly, Lx = data_shape
-        bf = BinaryFile(Ly=Ly, Lx=Lx, filename=str(fname), n_frames=n_frames, dtype="int16")
-        _write_bin._writers[key] = bf
+        _write_bin._writers[key] = BinaryFile(Ly, Lx, str(fname), n_frames=n_frames, dtype=np.int16)
         _write_bin._offsets[key] = 0
-
     bf = _write_bin._writers[key]
-    offset = _write_bin._offsets[key]
-
-    bf[offset:offset + data.shape[0]] = data
-    _write_bin._offsets[key] += data.shape[0]
-
+    off = _write_bin._offsets[key]
+    bf[off:off + data.shape[0]] = data
+    bf.file.flush()
+    _write_bin._offsets[key] = off + data.shape[0]
 
 def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None):
     filename = Path(path).with_suffix(".h5")
@@ -506,22 +555,6 @@ def main():
         default=20,
         help="Target chunk size, in MB",
     )
-    parser.add_argument(
-        "--trimx",
-        type=int,
-        nargs=2,
-        default=(0, 0),
-        help="Number of x-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for left and right "
-        "edges).",
-    )
-    parser.add_argument(
-        "--trimy",
-        type=int,
-        nargs=2,
-        default=(0, 0),
-        help="Number of y-pixels to trim from each ROI. Tuple or list (e.g., 4 4 for top and bottom "
-        "edges).",
-    )
     # Boolean Flags
     parser.add_argument(
         "--metadata",
@@ -550,9 +583,6 @@ def main():
         "--tiff", action="store_false", help="Flag to save as .tiff. Default is True"
     )
     parser.add_argument(
-        "--zarr", action="store_true", help="Flag to save as .zarr. Default is False"
-    )
-    parser.add_argument(
         "--debug", action="store_true", help="Output verbose debug information."
     )
     parser.add_argument(
@@ -574,8 +604,7 @@ def main():
         return None
 
     if args.debug:
-        logger.setLevel(logging.DEBUG)
-        logger.debug("Debug mode enabled.")
+        ic.enable()
 
     path = Path(args.path).expanduser()
     if path.is_dir():

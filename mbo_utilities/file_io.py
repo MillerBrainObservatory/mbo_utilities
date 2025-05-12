@@ -219,6 +219,11 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         raise ValueError(f"Unexpected ndim: {ndim}")
 
     @property
+    def total_frames(self):
+        """Number of frames across all tiff files."""
+        return sum([int(len(tf.pages) / 14) for tf in self.tiff_files])
+
+    @property
     def num_planes(self):
         """LBM alias for num_channels."""
         return self.num_channels
@@ -242,7 +247,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
     @property
     def shape(self):
         return (
-            self.num_frames,
+            self.total_frames,
             self.num_channels,
             self.field_heights[0],
             self.field_widths[0],
