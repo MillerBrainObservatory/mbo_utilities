@@ -17,8 +17,10 @@ from .file_io import _make_json_serializable, read_scan
 from .metadata import get_metadata
 from .util import is_running_jupyter
 from .scanreader.utils import listify_index
+
 try:
     from suite2p.io import BinaryFile
+
     HAS_SUITE2P = True
 except ImportError:
     HAS_SUITE2P = True
@@ -83,7 +85,7 @@ def save_as(
     fix_phase: bool = True,
     target_chunk_mb: int = 20,
     subpixel_phasecorr: bool = True,
-    **kwargs
+    **kwargs,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -138,7 +140,9 @@ def save_as(
     savedir.mkdir(exist_ok=True)
 
     if not hasattr(scan, "num_channels"):
-        raise ValueError("Unable to determine the number of planes in this recording from 'scan.num_channels'")
+        raise ValueError(
+            "Unable to determine the number of planes in this recording from 'scan.num_channels'"
+        )
 
     if not planes:
         planes = range(scan.num_channels)
@@ -146,7 +150,9 @@ def save_as(
     ic(planes)
     over_idx = [p for p in planes if p < 0 or p >= scan.num_planes]
     if over_idx:
-        raise ValueError(f"Invalid plane indices {over_idx}; must be in 0…{scan.num_channels-1}")
+        raise ValueError(
+            f"Invalid plane indices {over_idx}; must be in 0…{scan.num_channels - 1}"
+        )
 
     if order is not None:
         if len(order) != len(planes):
@@ -159,16 +165,14 @@ def save_as(
         "si": _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
     }
     mdata.update(
-        _make_json_serializable(
-            get_metadata(scan.tiff_files[0].filehandle.path)
-        )
+        _make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))
     )
     if metadata is not None:
         mdata.update(metadata)
 
     ic(metadata)
     if not savedir.exists():
-        _=ic(savedir)
+        _ = ic(savedir)
         logger.debug(f"Creating directory: {savedir}")
         savedir.mkdir(parents=True)
     start_time = time.time()
@@ -183,7 +187,6 @@ def save_as(
         fix_phase=fix_phase,
         subpixel_phasecorr=subpixel_phasecorr,
         target_chunk_mb=target_chunk_mb,
-
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -229,7 +232,7 @@ def _save_data(
     metadata["dims"] = ["time", "width", "height"]
     metadata["trimmed"] = [left, right, top, bottom]
     metadata["nframes"] = nt
-    metadata["num_frames"] = nt # alias
+    metadata["num_frames"] = nt  # alias
 
     final_shape = (nt, new_height, new_width)
     ic(final_shape)
@@ -303,14 +306,14 @@ def write_ops(metadata: dict, base_path: str | Path, planes):
     del metadata["si"]
 
     if isinstance(planes, int):
-        planes=[planes]
+        planes = [planes]
     for plane_idx in planes:
         plane_dir = Path(base_path) / f"plane{plane_idx}"
-        
+
         raw_bin = plane_dir.joinpath("data_raw.bin")
         ops_path = plane_dir.joinpath("ops.npy")
-        
-        # TODO: This is not an accurate way to get a metadata value that should not have 
+
+        # TODO: This is not an accurate way to get a metadata value that should not have
         #        to be calculated. We use shape to account for the trimmed pixels
         shape = metadata["shape"]
         nt = shape[0]
@@ -334,17 +337,11 @@ def write_ops(metadata: dict, base_path: str | Path, planes):
 def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
     if ext in ["tif", "tiff"]:
         return functools.partial(
-            _write_tiff,
-            overwrite=overwrite,
-            metadata=metadata,
-            data_shape=data_shape
+            _write_tiff, overwrite=overwrite, metadata=metadata, data_shape=data_shape
         )
     elif ext in ["h5", "hdf5"]:
         return functools.partial(
-            _write_h5,
-            overwrite=overwrite,
-            metadata=metadata,
-            data_shape=data_shape
+            _write_h5, overwrite=overwrite, metadata=metadata, data_shape=data_shape
         )
     elif ext == "bin":
         if not HAS_SUITE2P:
@@ -354,7 +351,6 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
             overwrite=overwrite,
             chan_index=kwargs.get("chan_index", None),
             data_shape=data_shape,
-
         )
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
@@ -376,15 +372,20 @@ def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
         if data_shape is None:
             raise ValueError("must pass full data_shape on first write")
         n_frames, Ly, Lx = data_shape
-        _write_bin._writers[key] = BinaryFile(Ly, Lx, str(fname), n_frames=n_frames, dtype=np.int16)
+        _write_bin._writers[key] = BinaryFile(
+            Ly, Lx, str(fname), n_frames=n_frames, dtype=np.int16
+        )
         _write_bin._offsets[key] = 0
     bf = _write_bin._writers[key]
     off = _write_bin._offsets[key]
-    bf[off:off + data.shape[0]] = data
+    bf[off : off + data.shape[0]] = data
     bf.file.flush()
     _write_bin._offsets[key] = off + data.shape[0]
 
-def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None):
+
+def _write_h5(
+    path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None
+):
     filename = Path(path).with_suffix(".h5")
 
     if not hasattr(_write_h5, "_initialized"):
@@ -414,7 +415,9 @@ def _write_h5(path, data, overwrite=True, metadata=None, data_shape=None, chan_i
     _write_h5._offsets[filename] += data.shape[0]
 
 
-def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None):
+def _write_tiff(
+    path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None
+):
     filename = Path(path).with_suffix(".tif")
 
     if not hasattr(_write_tiff, "_writers"):
@@ -440,7 +443,9 @@ def _write_tiff(path, data, overwrite=True, metadata=None, data_shape=None, chan
         _write_tiff._first_write = False
 
 
-def _write_zarr(path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None):
+def _write_zarr(
+    path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None
+):
     try:
         import zarr
     except ImportError:

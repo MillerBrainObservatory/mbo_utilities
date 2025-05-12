@@ -10,7 +10,9 @@ import click
 from tqdm import tqdm
 
 
-def create_compressed_downsampled(tiff_path, output_path, max_bytes=500 * 1024 * 1024, dtype="int16"):
+def create_compressed_downsampled(
+    tiff_path, output_path, max_bytes=500 * 1024 * 1024, dtype="int16"
+):
     tiff_path = Path(tiff_path)
     data = tifffile.memmap(str(tiff_path), mode="r")
     T, Y, X = data.shape
@@ -23,19 +25,24 @@ def create_compressed_downsampled(tiff_path, output_path, max_bytes=500 * 1024 *
     raw_bytes = new_T * frame_size
     output_file = Path(output_path).with_suffix(".npz")
     np.savez_compressed(str(output_file), downsampled=downsampled)
-    print(f"Saved to {output_file} ({new_T} frames, {raw_bytes / 1024 ** 2:.1f} MB raw)")
+    print(f"Saved to {output_file} ({new_T} frames, {raw_bytes / 1024**2:.1f} MB raw)")
 
 
 @click.command()
 @click.option(
-    "--input", "input_path",
-    prompt=f"Path to TIFF or folder{' [use backslashes]' if os.name == "nt" else ''}",
-    type=click.Path(exists=True)
+    "--input",
+    "input_path",
+    prompt=f"Path to TIFF or folder{' [use backslashes]' if os.name == 'nt' else ''}",
+    type=click.Path(exists=True),
 )
-@click.option("--unit", prompt="Size unit (MB or GB)", type=click.Choice(["MB", "GB"], case_sensitive=False))
+@click.option(
+    "--unit",
+    prompt="Size unit (MB or GB)",
+    type=click.Choice(["MB", "GB"], case_sensitive=False),
+)
 @click.option("--size", prompt="Max size in selected unit", type=float)
 def cli(input_path, unit, size):
-    base = 1024 ** 2 if unit.upper() == "MB" else 1024 ** 3
+    base = 1024**2 if unit.upper() == "MB" else 1024**3
     max_bytes = int(size * base)
     input_path = Path(input_path)
 

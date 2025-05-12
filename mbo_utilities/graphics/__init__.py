@@ -29,5 +29,3 @@ __all__ += [
     "HAS_IMGUI",
     "run_gui",
 ]
-
-

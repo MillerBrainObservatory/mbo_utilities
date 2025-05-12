@@ -149,6 +149,7 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
     return sorted(p.resolve() for p in result if p.is_file())
 
+
 def read_scan(pathnames, dtype=np.int16):
     """
     Reads a ScanImage scan from a given file or set of file paths and returns a
@@ -191,20 +192,25 @@ def read_scan(pathnames, dtype=np.int16):
 
     return scan
 
+
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
+
 
 class ScanMultiROIReordered(scans.ScanMultiROI):
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
     """
+
     def __getitem__(self, key):
         """Index like a 4D numpy array [t, z, x, y]"""
         if key == slice(None):  # asking for full scan, give them a subsample?
-            return np.squeeze(subsample_array(self, ignore_dims=[-1, -2]))  # retain image dims
+            return np.squeeze(
+                subsample_array(self, ignore_dims=[-1, -2])
+            )  # retain image dims
         elif not isinstance(key, tuple):
-                key = (key,)
+            key = (key,)
         key = tuple(map(_convert_range_to_slice, key))
         t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
         reordered_key = (0, y_key, x_key, z_key, t_key)
