@@ -281,7 +281,6 @@ def _save_data(
             ]
 
             if fix_phase:
-
                 ofs = mbo_utilities.return_scan_offset(data_chunk)
                 if ofs:
                     ic(ofs)
@@ -361,52 +360,12 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def _write_bin2(path, data, overwrite=False, data_shape=None, chan_index=None):
-
-    if chan_index is None:
-        raise ValueError("chan_index must be provided")
-    # 
-    # # for bins, we save in suite2p style planeN/data_raw.bin
-    # fname = Path(path)
-    # fname.parent.mkdir(exist_ok=True)
-    # 
-    # key = (fname, data_shape)
-    # if not hasattr(_write_bin, "_writers"):
-    #     _write_bin._writers = {}
-    #     _write_bin._offsets = {}
-    # 
-    # if key in _write_bin._writers and overwrite:
-    #     _write_bin._writers[key].close()
-    #     del _write_bin._writers[key]
-    #     del _write_bin._offsets[key]
-    #     if fname.exists():
-    #         fname.unlink()
-    # 
-    # if key not in _write_bin._writers:
-    #     if fname.exists() and overwrite:
-    #         fname.unlink()
-    #     if data_shape is None:
-    #         raise ValueError("data_shape must be provided on first write")
-    # 
-    #     n_frames, Ly, Lx = data_shape
-    #     bf = BinaryFile(Ly=Ly, Lx=Lx, filename=str(fname), n_frames=n_frames, dtype=np.int16)
-    #     _write_bin._writers[key] = bf
-    #     _write_bin._offsets[key] = 0
-    # 
-    # bf = _write_bin._writers[key]
-    # offset = _write_bin._offsets[key]
-    # 
-    # bf[offset:offset + data.shape[0]] = data
-    # _write_bin._offsets[key] += data.shape[0]
-    # 
-
 def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
     if chan_index is None:
         raise ValueError("chan_index must be provided")
 
     fname = Path(path)
     fname.parent.mkdir(exist_ok=True)
-    ic(fname)
 
     if not hasattr(_write_bin, "_writers"):
         _write_bin._writers = {}
