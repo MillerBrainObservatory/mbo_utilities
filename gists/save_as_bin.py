@@ -17,7 +17,7 @@ from pprint import pprint
 if __name__ == "__main__":
     raw = Path(r"D://demo//raw")
     test_scan = mbo.read_scan(raw)
-    savedir = r"D://demo//assembled"
+    savedir = r"D://demo//assembled3"
     mbo.save_as(test_scan, savedir, ext=".tiff", overwrite=True)
     files = mbo.get_files(savedir, 'tif')
     metadata = mbo.get_metadata(files[0])
