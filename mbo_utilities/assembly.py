@@ -427,20 +427,25 @@ def _write_tiff(
         if filename.exists() and overwrite:
             filename.unlink()
         _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
-        _write_tiff._first_write = True
+
+        _write_tiff._first_write = {filename: True}
+        # _write_tiff._first_write = True
     else:
-        _write_tiff._first_write = False
+        # _write_tiff._first_write = False
+        _write_tiff._first_write = {filename: False}
 
     writer = _write_tiff._writers[filename]
+    is_first = _write_tiff._first_write.get(filename, False)
 
     for frame in data:
         writer.write(
             frame,
             contiguous=True,
             photometric="minisblack",
-            metadata=metadata if _write_tiff._first_write else None,
+            metadata=metadata if is_first else None,
         )
-        _write_tiff._first_write = False
+        _write_tiff._first_write[filename] = False
+        # _write_tiff._first_write = False
 
 
 def _write_zarr(
