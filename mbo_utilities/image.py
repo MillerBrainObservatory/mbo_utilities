@@ -5,6 +5,7 @@ from scipy.ndimage import fourier_shift
 from skimage.registration import phase_cross_correlation
 import tifffile
 
+
 def _compute_offset_fft(frame: np.ndarray, upsample: int):
     pre = frame[::2, :]
     post = frame[1::2, :]
@@ -12,6 +13,7 @@ def _compute_offset_fft(frame: np.ndarray, upsample: int):
     pre, post = pre[:m], post[:m]
     shift, _, _ = phase_cross_correlation(pre, post, upsample_factor=upsample)  # noqa
     return shift[1]
+
 
 def _apply_shift_fft2d(frame: np.ndarray, offset: float):
     out = frame.copy()
@@ -21,6 +23,7 @@ def _apply_shift_fft2d(frame: np.ndarray, offset: float):
     rows_corr = np.fft.ifftn(fshift).real
     out[1::2, :] = rows_corr
     return out
+
 
 def fix_scan_phase_fft_tiff(path: str | Path, upsample: int = 10) -> np.ndarray:
     data = tifffile.memmap(path)

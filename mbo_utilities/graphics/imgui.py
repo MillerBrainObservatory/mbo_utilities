@@ -16,7 +16,9 @@ from ..util import norm_minmax, norm_percentile
 from ..image import return_scan_offset
 
 
-def imgui_dynamic_table(table_id: str, data_lists: list, titles: list = None, selected_index: int = None):
+def imgui_dynamic_table(
+    table_id: str, data_lists: list, titles: list = None, selected_index: int = None
+):
     """
     Draw a dynamic table using ImGui with customizable column titles and highlighted row selection.
 
@@ -40,15 +42,23 @@ def imgui_dynamic_table(table_id: str, data_lists: list, titles: list = None, se
     """
 
     if not data_lists or any(len(col) != len(data_lists[0]) for col in data_lists):
-        raise ValueError("data_lists columns must have consistent lengths and cannot be empty.")
+        raise ValueError(
+            "data_lists columns must have consistent lengths and cannot be empty."
+        )
 
     num_columns = len(data_lists)
     if titles is None:
         titles = [f"Column {i + 1}" for i in range(num_columns)]
     elif len(titles) != num_columns:
-        raise ValueError("Number of titles must match the number of columns in data_lists.")
+        raise ValueError(
+            "Number of titles must match the number of columns in data_lists."
+        )
 
-    if imgui.begin_table(table_id, num_columns, flags=imgui.TableFlags_.borders | imgui.TableFlags_.resizable):  # noqa
+    if imgui.begin_table(
+        table_id,
+        num_columns,
+        flags=imgui.TableFlags_.borders | imgui.TableFlags_.resizable,
+    ):  # noqa
         for title in titles:
             imgui.table_setup_column(title, imgui.TableColumnFlags_.width_stretch)  # noqa
 
@@ -63,14 +73,19 @@ def imgui_dynamic_table(table_id: str, data_lists: list, titles: list = None, se
                 if i == selected_index:
                     imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(0, 250, 35, 1))  # noqa
 
-                imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + imgui.get_column_width() - imgui.calc_text_size(
-                    f"{int(value)}").x - imgui.get_style().item_spacing.x)
+                imgui.set_cursor_pos_x(
+                    imgui.get_cursor_pos_x()
+                    + imgui.get_column_width()
+                    - imgui.calc_text_size(f"{int(value)}").x
+                    - imgui.get_style().item_spacing.x
+                )
                 imgui.text(f"{int(value)}")
 
                 if i == selected_index:
                     imgui.pop_style_color()
 
         imgui.end_table()
+
 
 def implot_pollen(pollen_offsets, offset_store, zstack):
     imgui.begin_child("Z-Stack Analysis")
@@ -79,19 +94,26 @@ def implot_pollen(pollen_offsets, offset_store, zstack):
 
     # Offset Comparison Plot
     if implot.begin_plot("Offset Comparison Across Z-Planes"):
-        implot.plot_bars("Calibration Offsets", z_planes, np.array([p[0] for p in pollen_offsets]), bar_size=0.4)
+        implot.plot_bars(
+            "Calibration Offsets",
+            z_planes,
+            np.array([p[0] for p in pollen_offsets]),
+            bar_size=0.4,
+        )
         implot.plot_bars(  # noqa
             "Selected Offsets",
             z_planes,
             np.array([s[0] for s in offset_store]),
             bar_size=0.4,
-            shift=0.2
+            shift=0.2,
         )
         implot.end_plot()
 
     # Mean Intensity Plot
     if implot.begin_plot("Mean Intensity Across Z-Planes"):
-        mean_intensities = np.array([np.mean(zstack[z]) for z in range(zstack.shape[0])])
+        mean_intensities = np.array(
+            [np.mean(zstack[z]) for z in range(zstack.shape[0])]
+        )
         implot.plot_line("Mean Intensity", z_planes, mean_intensities)
         implot.end_plot()
 
@@ -103,17 +125,18 @@ def implot_pollen(pollen_offsets, offset_store, zstack):
 
     imgui.end_child()
 
+
 class PollenCalibrationWidget(EdgeWindow):
     def __init__(
-            self,
-            fpath=None,
-            iw=None,
-            size=350,
-            location="right",
-            title="Pollen Calibration",
-            pollen_offsets=None,
-            user_offsets=None,
-            user_titles=None
+        self,
+        fpath=None,
+        iw=None,
+        size=350,
+        location="right",
+        title="Pollen Calibration",
+        pollen_offsets=None,
+        user_offsets=None,
+        user_titles=None,
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
         if user_titles is None:
@@ -125,7 +148,7 @@ class PollenCalibrationWidget(EdgeWindow):
         self.fpath = fpath
         self.h5name = None
         self.pollen_loaded = False
-        self.pollen_offsets=pollen_offsets
+        self.pollen_offsets = pollen_offsets
 
         self.user_offsets = user_offsets
         self.user_titles = user_titles
@@ -141,7 +164,7 @@ class PollenCalibrationWidget(EdgeWindow):
         self.offset_store = self.pollen_offsets.copy()
         self._current_offset = 0
 
-        self.proj = 'mean'
+        self.proj = "mean"
         self.image_widget.add_event_handler(self.track_slider, "current_index")
 
     @property
@@ -156,14 +179,18 @@ class PollenCalibrationWidget(EdgeWindow):
     def update(self):
         button_size = imgui.ImVec2(140, 20)
 
-        offset_changed, value = imgui.input_int("offset", self.current_offset, step=1, step_fast=2)
+        offset_changed, value = imgui.input_int(
+            "offset", self.current_offset, step=1, step_fast=2
+        )
         if offset_changed:
             self.current_offset = value
 
         if imgui.button("Calculate Offset", button_size):
             self.current_offset = self.calculate_offset()
         if imgui.is_item_hovered():
-            imgui.set_tooltip("Automatically calculates the best offset for the selected Z-plane.")
+            imgui.set_tooltip(
+                "Automatically calculates the best offset for the selected Z-plane."
+            )
 
         if imgui.button("Open File", imgui.ImVec2(140, 20)):
             self.pollen_loaded = True
@@ -203,7 +230,6 @@ class PollenCalibrationWidget(EdgeWindow):
         else:
             imgui.text("No pollen data loaded")
 
-
     def calculate_offset(self):
         ind = self.image_widget.current_index["t"]
         frame = self.image_widget.data[0][ind].copy()
@@ -212,8 +238,10 @@ class PollenCalibrationWidget(EdgeWindow):
     def apply_offset(self):
         ind = self.image_widget.current_index["t"]
         frame = self.image_widget.data[0][ind].copy()
-        frame[0::2, :] = np.roll(self.image_widget.data[0][ind][0::2, :], shift=-self.current_offset, axis=1)
-        self.image_widget.figure[0,0].graphics[0].data[:] = frame
+        frame[0::2, :] = np.roll(
+            self.image_widget.data[0][ind][0::2, :], shift=-self.current_offset, axis=1
+        )
+        self.image_widget.figure[0, 0].graphics[0].data[:] = frame
 
     def track_slider(self, ev):
         """events to emit when z-plane changes"""
@@ -237,7 +265,7 @@ class PollenCalibrationWidget(EdgeWindow):
             print(f"Error: File {self.h5name} does not exist.")
             return
         try:
-            with h5py.File(self.h5name.resolve(), 'r+') as f:
+            with h5py.File(self.h5name.resolve(), "r+") as f:
                 if "scan_corrections" in f:
                     del f["scan_corrections"]
                 f.create_dataset("scan_corrections", data=np.array(self.offset_store))
@@ -257,23 +285,36 @@ class PollenCalibrationWidget(EdgeWindow):
             tmp = norm_percentile(frame * frame_n)
             self.image_widget.data[0][c_index] = norm_minmax(tmp)
 
-    def load_pollen_offsets(self,):
-        with h5py.File(self.fpath[0], 'r') as f1:
-            dx = np.array(f1['x_shifts'])
-            dy = np.array(f1['y_shifts'])
-            ofs_volume = np.array(f1['scan_corrections'])
+    def load_pollen_offsets(
+        self,
+    ):
+        with h5py.File(self.fpath[0], "r") as f1:
+            dx = np.array(f1["x_shifts"])
+            dy = np.array(f1["y_shifts"])
+            ofs_volume = np.array(f1["scan_corrections"])
             self.h5name = Path(self.fpath[0])
         return ofs_volume
 
     @staticmethod
     def open_file_dialog(self):
-        file_dialog = pfd.open_file(title="Select a pollen calibration file", filters=["*.tiff", "*.tif", "*.h5", "*.hdf5"], options=pfd.opt.none)
+        file_dialog = pfd.open_file(
+            title="Select a pollen calibration file",
+            filters=["*.tiff", "*.tif", "*.h5", "*.hdf5"],
+            options=pfd.opt.none,
+        )
         return file_dialog.result()
+
 
 class SummaryDataWidget(EdgeWindow):
     def __init__(self, image_widget, size, location):
         flags = imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_resize
-        super().__init__(figure=image_widget.figure, size=size, location=location, title="Preview Data", window_flags=flags)
+        super().__init__(
+            figure=image_widget.figure,
+            size=size,
+            location=location,
+            title="Preview Data",
+            window_flags=flags,
+        )
         self.image_widget = image_widget
 
         self.gaussian_sigma = 0.0
@@ -282,7 +323,9 @@ class SummaryDataWidget(EdgeWindow):
         something_changed = False
 
         imgui.text("Gaussian Filter")
-        changed, value = imgui.slider_float("Sigma", v=self.gaussian_sigma, v_min=0.0, v_max=20.0)
+        changed, value = imgui.slider_float(
+            "Sigma", v=self.gaussian_sigma, v_min=0.0, v_max=20.0
+        )
         if changed:
             self.gaussian_sigma = value
             something_changed = True
@@ -379,6 +422,7 @@ class SummaryDataWidget(EdgeWindow):
 
     def apply_bandpass(self):
         from scipy.ndimage import gaussian_filter
+
         frame = self.image_widget.managed_graphics[0].data.value.copy()
         lowpass = gaussian_filter(frame, sigma=3)
         highpass = frame - gaussian_filter(frame, sigma=20)
@@ -399,6 +443,7 @@ class SummaryDataWidget(EdgeWindow):
 
     def edge_detection(self):
         from scipy.ndimage import sobel
+
         frame = self.image_widget.managed_graphics[0].data.value.copy()
         edge_x = sobel(frame, axis=0)
         edge_y = sobel(frame, axis=1)
@@ -407,6 +452,7 @@ class SummaryDataWidget(EdgeWindow):
 
     def highpass_filter(self):
         from scipy.ndimage import gaussian_filter
+
         frame = self.image_widget.managed_graphics[0].data.value.copy()
         low = gaussian_filter(frame, sigma=10)
         highpass = frame - low
@@ -415,11 +461,13 @@ class SummaryDataWidget(EdgeWindow):
     def denoised_mean(self):
         data = self.image_widget.data[0]
         t_idx = self.image_widget.current_index.get("t", 0)
-        window = data[:, t_idx - 5:t_idx + 5].mean(axis=1)
+        window = data[:, t_idx - 5 : t_idx + 5].mean(axis=1)
         self.image_widget.figure[0, 0].graphics[0].data[:] = window[t_idx]
 
     def apply_gaussian(self):
-        self.image_widget.frame_apply = {0: lambda image_data: gaussian_filter(image_data, sigma=self.gaussian_sigma)}
+        self.image_widget.frame_apply = {
+            0: lambda image_data: gaussian_filter(image_data, sigma=self.gaussian_sigma)
+        }
 
     def calculate_noise(self):
         pass

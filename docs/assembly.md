@@ -21,7 +21,7 @@ If all you want is code to get started, this will
 ``` python
 import mbo_utilities as mbo
 scan = mbo.read_scan("path/to/data/*.tiff") # or list of full filepaths
-mbo.save_as(scan, "path/to/assembled_data", ext=".tiff")
+mbo.save_as(scan, "path/to/assembled_data", ext=".tiff") # tiff or bin
 ```
 ```{figure} ./_images/progress_bar.png
 A progress bar will track the current file progress.
@@ -72,8 +72,11 @@ Pass a list of files, or a wildcard "/path/to/files/*" to `mbo.read_scan()`.
 ```
 
 ```{code-cell} ipython3
-files = mbo.get_files("/home/flynn/lbm_data/mk301", 'tif')
+files = mbo.get_files("D://demo//animal_01//raw", 'tif')
 files[:2]
+
+['/home/flynn/lbm_data/raw/mk301_03_01_2025_2roi_17p07hz_224x448px_2umpx_180mw_green_00004.tif',
+ '/home/flynn/lbm_data/raw/mk301_03_01_2025_2roi_17p07hz_224x448px_2umpx_180mw_green_00002.tif']
 ```
 
 ```{code-cell} ipython3
@@ -101,7 +104,6 @@ print(f'[T, X, Y]: {array.shape}')
 
 # load a z stack, with a single frame for each Z
 array = scan[0, :, :, :]
-# 4 fields (join_contiguous=False), one for each ROI
 print(f'[Z, X, Y]: {array.shape}')
 ```
 
@@ -153,7 +155,7 @@ mbo.save_as(
     overwrite=True,
     ext = '.tiff',
     trim_edge=[2, 2, 2, 2], # post-assembly pixels to trim [left, right, top, bottom]
-    fix_phase=False          # fix bi-directional scan phase offset
+    fix_phase=True          # fix bi-directional scan phase offset
 )
 ```
 

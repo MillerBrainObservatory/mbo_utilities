@@ -15,7 +15,7 @@ import tifffile
 
 save_path = Path().home().joinpath("dev")
 
-files = mbo.get_files(save_path, 'tif', 4)
+files = mbo.get_files(save_path, "tif", 4)
 data = tifffile.imread(files[0])
 
 fps = 17
@@ -24,30 +24,30 @@ duration_s = 5
 # For each call:
 mbo.save_mp4(
     save_path.joinpath("default.mp4"),
-    data[:duration_s * fps],  # no speedup
+    data[: duration_s * fps],  # no speedup
     framerate=fps,
 )
 
 mbo.save_mp4(
     save_path.joinpath("speedup_2x.mp4"),
-    data[:duration_s * fps * 2],
+    data[: duration_s * fps * 2],
     framerate=fps,
     speedup=2,
 )
 
 mbo.save_mp4(
     save_path.joinpath("17_frame_window.mp4"),
-    data[:duration_s * fps],
+    data[: duration_s * fps],
     framerate=fps,
-    win=17
+    win=17,
 )
 
 mbo.save_mp4(
     save_path.joinpath("windowed_speedup_6x.mp4"),
-    data[:duration_s * fps * 6],
+    data[: duration_s * fps * 6],
     framerate=fps,
     speedup=6,
-    win=17
+    win=17,
 )
 
 x = 2

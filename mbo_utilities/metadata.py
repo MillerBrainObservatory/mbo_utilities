@@ -358,7 +358,9 @@ def get_metadata_batch(files: list[os.PathLike | str], z_step=None, verbose=Fals
         if i == 0:
             if not is_raw_scanimage(f):
                 base = tf.shaped_metadata[0]["image"]
-            elif hasattr(tf, "scanimage_metadata") and tf.scanimage_metadata is not None:
+            elif (
+                hasattr(tf, "scanimage_metadata") and tf.scanimage_metadata is not None
+            ):
                 base = get_metadata(f, z_step=z_step, verbose=verbose)
             else:
                 raise ValueError(f"No metadata found in {f}.")

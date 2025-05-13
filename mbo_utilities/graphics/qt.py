@@ -9,15 +9,22 @@ try:
     from PyQt5.QtWidgets import QMainWindow, QFileDialog, QApplication
     from PyQt5 import QtGui, QtCore
 except ImportError:
-    raise ImportError(f"Failed to import Qt from {Path(__file__).name}."
-                      f" Please install Qt from https://pypi.org/project/qt")
+    raise ImportError(
+        f"Failed to import Qt from {Path(__file__).name}."
+        f" Please install Qt from https://pypi.org/project/qt"
+    )
 
 
 def load_dialog_folder(directory=None):
     if directory is None:
         directory = str(Path.home())
-    path = QFileDialog.getExistingDirectory(parent=None, caption="Open folder with raw data OR assembled z-planes", directory=directory)
+    path = QFileDialog.getExistingDirectory(
+        parent=None,
+        caption="Open folder with raw data OR assembled z-planes",
+        directory=directory,
+    )
     return to_lazy_array(path)
+
 
 def render_qt_widget(data=None):
     app = QApplication(sys.argv)

@@ -24,6 +24,14 @@ corrected_save = save_path.joinpath("corrected")
 raw_scan = mbo.read_scan(fname_scan)
 
 # mbo.save_as(raw_scan, uncor_save, planes=[11], fix_phase=False)
-mbo.save_as(raw_scan, corrected_save, planes=[11], fix_phase=True, target_chunk_mb=50, debug=False, ext="bin")
+mbo.save_as(
+    raw_scan,
+    corrected_save,
+    planes=[11],
+    fix_phase=True,
+    target_chunk_mb=50,
+    debug=False,
+    ext="bin",
+)
 
 x = 2

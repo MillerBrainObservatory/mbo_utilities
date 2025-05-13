@@ -13,9 +13,17 @@ from .file_io import (
 from .assembly import save_as
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
 from .image import fix_scan_phase, return_scan_offset
-from .util import (norm_minmax, smooth_data, is_running_jupyter, is_imgui_installed, is_qt_installed, subsample_array)
+from .util import (
+    norm_minmax,
+    smooth_data,
+    is_running_jupyter,
+    is_imgui_installed,
+    is_qt_installed,
+    subsample_array,
+)
 
 from .graphics import run_gui
+
 try:
     from icecream import ic
 except ImportError:  # Graceful fallback if IceCream isn't installed.

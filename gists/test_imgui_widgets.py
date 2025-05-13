@@ -24,4 +24,3 @@ if __name__ == "__main__":
     iw.show()
 
     fpl.loop.run()
-
