@@ -15,7 +15,7 @@ dependencies = [
 	"scikit-image",
 	"zarr>=2.18.3",
 	"dask>=2025.3.0",
-	"mkl-fft>=1.3.13",
+	# "mkl-fft>=1.3.13",
 	"imageio[ffmpeg]",
 	"ffmpeg-python",
 	"matplotlib>=3.10.1",
