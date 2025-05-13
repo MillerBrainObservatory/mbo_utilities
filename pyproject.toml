@@ -23,7 +23,7 @@ dependencies = [
 	"tqdm",
 	"imgui-bundle",
 	"pyqt5==5.15.11",
-	"pyqt5-qt5==5.15.2",
+	# "pyqt5-qt5==5.15.2",
 	"jupyter_rfb>=0.5.1",
 	"fastplotlib",
 	"pygfx",
