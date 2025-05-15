@@ -22,15 +22,19 @@ dependencies = [
 	"h5py",
 	"tqdm",
 	"imgui-bundle",
-	"pyqt5==5.15.11",
-	"pyqt5-qt5==5.15.16",
+	# "pyqt5==5.15.11",
 	"jupyter_rfb>=0.5.1",
 	"fastplotlib",
 	"pygfx",
-	"jupyterlab==4.4.0a",
+	"jupyterlab>=4.5.0a0",
 	"ipykernel",
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
+	# platform-specific dependency resolution
+	"pyqt5-qt5<5.15.16; sys_platform == 'win32'",
+	"pyqt5-qt5==5.15.16; sys_platform == 'darwin'",
+	"pyqt5-qt5==5.15.16; sys_platform == 'linux'",
+
 ]
 
 [project.scripts]
