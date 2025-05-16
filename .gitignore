@@ -170,3 +170,6 @@ exclude/
 *.egg-info
 docs/examples/
 data/
+
+# anything with dev in the name
+*dev*
