@@ -171,5 +171,5 @@ exclude/
 docs/examples/
 data/
 
-# anything with dev in the name
-*dev*
+# dev nbs
+dev*.ipynb*
