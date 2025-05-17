@@ -30,12 +30,9 @@ dependencies = [
 	"ipykernel",
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
-	"qtpy",
-	"PyQt5",
-	# platform-specific dependency resolution
-	# "pyqt5-qt5<5.15.2; sys_platform == 'win32'",
-	# "pyqt5-qt5==5.15.16; sys_platform == 'darwin'",
-	# "pyqt5-qt5==5.15.16; sys_platform == 'linux'",
+    "pyqt5==5.15.11",
+    "pyqt5-qt5==5.15.2; sys_platform == 'win32'",
+    "pyqt5-qt5==5.15.16; sys_platform == 'darwin' or sys_platform == 'linux'",
 	"wgpu>=0.21.1",
 ]
 
