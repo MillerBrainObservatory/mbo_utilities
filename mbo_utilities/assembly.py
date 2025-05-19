@@ -295,10 +295,27 @@ def _save_data(
                 data_chunk = correct_phase_chunk(data_chunk)
                 if debug:
                     after = data_chunk
+                    mid = len(before) // 2
+                    projection = before.std(axis=0)  # or max, or mean
+
+                    patch_size = 64
+                    max_val = -np.inf
+                    best_x = best_y = 0
+
+                    for y in range(0, projection.shape[0] - patch_size + 1, 8):
+                        for x in range(0, projection.shape[1] - patch_size + 1, 8):
+                            val = projection[y:y + patch_size, x:x + patch_size].sum()
+                            if val > max_val:
+                                max_val = val
+                                best_y, best_x = y, x
+
+                    ys = slice(best_y, best_y + patch_size)
+                    xs = slice(best_x, best_x + patch_size)
+
                     fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-                    axs[0].imshow(before[len(before) // 2, 120:200, 200:250], cmap="gray")
+                    axs[0].imshow(before[mid, ys, xs], cmap="gray")
                     axs[0].set_title("Before")
-                    axs[1].imshow(after[len(after) // 2, 120:220, 200:250], cmap="gray")
+                    axs[1].imshow(after[mid, ys, xs], cmap="gray")
                     axs[1].set_title("After")
                     fig.tight_layout()
                     fig.savefig(temp_dir / f"chunk_{chunk:03d}.png")
@@ -320,7 +337,7 @@ def correct_phase_chunk(frames: np.ndarray, upsample: int = 10, exclude_center_p
     corrected = frames.copy()
     offsets = np.zeros(frames.shape[0], dtype=np.float32)
 
-    h, w = frames.shape[1:]  # [n_frames, height, width]
+    _, w = frames.shape[1:]
     cx = w // 2
     keep_left = slice(None, cx - exclude_center_px)
     keep_right = slice(cx + exclude_center_px, None)
@@ -333,9 +350,12 @@ def correct_phase_chunk(frames: np.ndarray, upsample: int = 10, exclude_center_p
         post_crop = np.concatenate([post[:m, keep_left], post[:m, keep_right]], axis=1)
 
         try:
-            shift, error, _ = phase_cross_correlation(pre_crop, post_crop, upsample_factor=upsample)
-            offsets[i] = shift[1] if abs(shift[1]) < 2.0 else 0.0  # discard garbage
+            shift, _, _ = phase_cross_correlation(pre_crop, post_crop, upsample_factor=upsample)
+            offsets[i] = shift[1] if abs(shift[1]) < 4.0 else 0.0  # discard garbage
+            if abs(shift[1]) < 4.0:
+                ic(f"Big shift: {i}")
         except Exception:
+            ic("exception!")
             offsets[i] = 0.0
 
     if np.any(np.abs(offsets) > 0.01):
