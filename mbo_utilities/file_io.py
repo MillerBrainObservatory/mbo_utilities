@@ -149,7 +149,7 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     return sorted(p.resolve() for p in result if p.is_file())
 
 
-def read_scan(pathnames, dtype=np.int16, **kwargs):
+def read_scan(pathnames, dtype=np.int16, roi=None, **kwargs):
     """
     Reads a ScanImage scan from a given file or set of file paths and returns a
     ScanMultiROIReordered object with lazy-loaded data.
@@ -159,6 +159,9 @@ def read_scan(pathnames, dtype=np.int16, **kwargs):
     pathnames : str, Path, or sequence of str/Path
         A single path to, a wildcard pattern (e.g. ``*.tif``), or a list of paths
         specifying the ScanImage TIFF files to read.
+    roi : int, optional
+        Specify ROI to export if only exporting a single ROI. 1-based.
+        Defaults to None, which exports pre-assembled (tiled) rois.
     dtype : numpy.dtype, optional
         The data type to use when reading the scan data. Default is np.int16.
 
@@ -178,15 +181,16 @@ def read_scan(pathnames, dtype=np.int16, **kwargs):
     --------
     >>> import mbo_utilities as mbo
     >>> import matplotlib.pyplot as plt
-    >>> scan = mbo.read_scan(r"C:\\path\to\\scan\\*.tif")
+    >>> scan = mbo.read_scan(r"D:\\demo\\raw")
     >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # First frame of z-plane 6
+    >>> scan = mbo.read_scan(r"D:\\demo\\raw", roi=1) # First ROI
+    >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # indexing works the same
     """
     filenames = expand_paths(pathnames)
     if len(filenames) == 0:
         error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
         raise FileNotFoundError(error_msg)
 
-    roi = kwargs.get("roi", None)
     scan = ScanMultiROIReordered(join_contiguous=True, selected_xslice=roi)
     scan.read_data(filenames, dtype=dtype)
 
