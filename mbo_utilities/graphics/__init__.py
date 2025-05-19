@@ -4,7 +4,6 @@ __all__ = []
 
 if is_qt_installed():
     HAS_QT = True
-    from .qt import load_dialog_folder, LBMMainWindow
 else:
     HAS_QT = False
     load_dialog_folder = None

@@ -1,13 +1,14 @@
 from pathlib import Path
 
 from .file_io import (
+    mbo_home,
+    mbo_temp,
     get_files,
     zstack_from_files,
     npy_to_dask,
     read_scan,
     save_png,
     save_mp4,
-    zarr_to_dask,
     expand_paths,
 )
 from .assembly import save_as
@@ -32,6 +33,8 @@ except ImportError:  # Graceful fallback if IceCream isn't installed.
 __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
 
 __all__ = [
+    "mbo_home",
+    "mbo_temp",
     "run_gui",
     # image processing
     "fix_scan_phase",
@@ -39,7 +42,6 @@ __all__ = [
     # file_io
     "scanreader",
     "npy_to_dask",
-    "zarr_to_dask",
     "get_files",
     "zstack_from_files",
     "read_scan",
