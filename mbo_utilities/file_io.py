@@ -6,6 +6,8 @@ from collections.abc import Sequence
 from itertools import product
 from pathlib import Path
 
+from icecream import ic
+
 import dask.array as da
 import ffmpeg
 import numpy as np
@@ -19,12 +21,9 @@ from .util import norm_minmax, subsample_array
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-
-def zarr_to_dask(zarr_parent):
-    """Convert directory of zarr arrays into a Z-stack."""
-    # search 3 dirs deep for arrays within our zarr group
-    files = get_files(zarr_parent, ".zarray", 3)
-    return da.stack([da.from_zarr(Path(x).parent) for x in files], axis=1)
+mbo_home = Path.home() / ".mbo"
+mbo_temp = mbo_home.joinpath("temp")
+mbo_temp.mkdir(parents=True, exist_ok=True)
 
 
 def npy_to_dask(files, name="", axis=1, astype=None):
@@ -616,11 +615,14 @@ def to_lazy_array(data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndar
     Convencience function to resolve various data_in variants into lazy arrays.
     """
     if _is_arraylike(data_in):
+        ic(f"Data is array like")
         return data_in
     if isinstance(data_in, list):
         if is_raw_scanimage(data_in[0]):
+            ic(f"Returning raw scanimage from path {data_in[0]}")
             return read_scan(data_in)
         else:
+            ic(f"Returning z-stack from files:\n {data_in}.")
             return zstack_from_files(data_in)
     if isinstance(data_in, (str, Path)):
         data_in = Path(data_in).expanduser().resolve()
@@ -630,5 +632,9 @@ def to_lazy_array(data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndar
                 return tifffile.memmap(data_in)
             elif data_in.suffix == ".npy":
                 return np.memmap(data_in)
+        elif data_in.is_dir():
+            files = get_files(data_in, 'tif', 1)
+            scan = read_scan(files)
+            return scan
     else:
         raise TypeError(f"Invalid type {type(data_in)}")
