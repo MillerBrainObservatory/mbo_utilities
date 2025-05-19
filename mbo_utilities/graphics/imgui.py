@@ -125,32 +125,19 @@ def implot_pollen(pollen_offsets, offset_store, zstack):
     imgui.end_child()
 
 
-class PollenCalibrationWidget(EdgeWindow):
+class PreviewDataWidget(EdgeWindow):
     def __init__(
         self,
         fpath=None,
         iw=None,
         size=350,
         location="right",
-        title="Pollen Calibration",
-        pollen_offsets=None,
-        user_offsets=None,
-        user_titles=None,
+        title="Preview Data",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
-        if user_titles is None:
-            user_titles = []
-        if user_offsets is None:
-            user_offsets = []
-        if pollen_offsets is None:
-            pollen_offsets = []
         self.fpath = fpath
         self.h5name = None
         self.pollen_loaded = False
-        self.pollen_offsets = pollen_offsets
-
-        self.user_offsets = user_offsets
-        self.user_titles = user_titles
 
         self.figure = iw.figure
         self.image_widget = iw

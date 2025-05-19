@@ -15,7 +15,8 @@ import tifffile
 from matplotlib import cm
 
 from .metadata import is_raw_scanimage
-from .scanreader import scans
+from .scanreader import scans, utils
+from .scanreader.exceptions import FieldDimensionMismatch
 from .scanreader.multiroi import ROI
 from .util import norm_minmax, subsample_array
 
@@ -220,23 +221,91 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
 
     def __getitem__(self, key):
         """Index like a 4D numpy array [t, z, x, y]"""
-        ic(key)
         if key == slice(None):  # asking for full scan, give them a subsample?
-            return np.squeeze(
-                subsample_array(self, ignore_dims=[-1, -2])
-            )  # retain image dims
-        elif not isinstance(key, tuple):
+            return np.squeeze(subsample_array(self, ignore_dims=[-1, -2]))
+
+        # Fill key to size 4 for reordered [t, z, x, y]
+        if not isinstance(key, tuple):
             key = (key,)
         key = tuple(map(_convert_range_to_slice, key))
         t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
-        
+
+        # If a specific ROI slice was selected, apply x-mask
         if self._selected_xslice is not None:
             x_mask = self.fields[0].output_xslices[self._selected_xslice]
             x_key = _intersect_slice(x_key, x_mask)
-            ic(self._selected_xslice, x_mask, x_key)
 
+        # Reorder to original [field, y, x, z, t]
         reordered_key = (0, y_key, x_key, z_key, t_key)
-        item = super().__getitem__(reordered_key)
+        full_key = utils.fill_key(reordered_key, num_dimensions=5)
+
+        for i, index in enumerate(full_key):
+            utils.check_index_type(i, index)
+
+        utils.check_index_is_in_bounds(0, full_key[0], self.num_fields)
+        for field_id in utils.listify_index(full_key[0], self.num_fields):
+            utils.check_index_is_in_bounds(1, full_key[1], self.field_heights[field_id])
+            utils.check_index_is_in_bounds(2, full_key[2], self.field_widths[field_id])
+        utils.check_index_is_in_bounds(3, full_key[3], self.num_channels)
+        utils.check_index_is_in_bounds(4, full_key[4], self.num_frames)
+
+        field_list = utils.listify_index(full_key[0], self.num_fields)
+        y_lists = [
+            utils.listify_index(full_key[1], self.field_heights[field_id])
+            for field_id in field_list
+        ]
+        x_lists = [
+            utils.listify_index(full_key[2], self.field_widths[field_id])
+            for field_id in field_list
+        ]
+        channel_list = utils.listify_index(full_key[3], self.num_channels)
+        frame_list = utils.listify_index(full_key[4], self.num_frames)
+
+        if [] in [field_list, *y_lists, *x_lists, channel_list, frame_list]:
+            return np.empty(0)
+
+        if not all(len(y_list) == len(y_lists[0]) for y_list in y_lists):
+            raise FieldDimensionMismatch("Image heights for all fields do not match")
+        if not all(len(x_list) == len(x_lists[0]) for x_list in x_lists):
+            raise FieldDimensionMismatch("Image widths for all fields do not match")
+
+        item = np.empty(
+            [
+                len(field_list),
+                len(y_lists[0]),
+                len(x_lists[0]),
+                len(channel_list),
+                len(frame_list),
+            ],
+            dtype=self.dtype,
+        )
+
+        for i, (field_id, y_list, x_list) in enumerate(zip(field_list, y_lists, x_lists)):
+            field = self.fields[field_id]
+            slices = zip(
+                field.yslices, field.xslices, field.output_yslices, field.output_xslices
+            )
+            for yslice, xslice, output_yslice, output_xslice in slices:
+                pages = self._read_pages(
+                    [field.slice_id], channel_list, frame_list, yslice, xslice
+                )
+
+                y_range = range(output_yslice.start, output_yslice.stop)
+                x_range = range(output_xslice.start, output_xslice.stop)
+                ys = [[y - output_yslice.start] for y in y_list if y in y_range]
+                xs = [x - output_xslice.start for x in x_list if x in x_range]
+                output_ys = [[index] for index, y in enumerate(y_list) if y in y_range]
+                output_xs = [index for index, x in enumerate(x_list) if x in x_range]
+
+                item[i, output_ys, output_xs] = pages[0, ys, xs]
+
+        squeeze_dims = [
+            i for i, index in enumerate(full_key)
+            if np.issubdtype(type(index), np.signedinteger)
+        ]
+        item = np.squeeze(item, axis=tuple(squeeze_dims))
+
+        # Reorder from [field, y, x, z, t] → [t, z, x, y] or lower-dimensional equivalent
         ndim = item.ndim
         if ndim == 2:
             return item
@@ -244,7 +313,36 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             return np.transpose(item, (2, 0, 1))
         if ndim == 4:
             return np.transpose(item, (3, 2, 0, 1))
+
         raise ValueError(f"Unexpected ndim: {ndim}")
+
+    # def __getitem__(self, key):
+    #     """Index like a 4D numpy array [t, z, x, y]"""
+    #     ic(key)
+    #     if key == slice(None):  # asking for full scan, give them a subsample?
+    #         return np.squeeze(
+    #             subsample_array(self, ignore_dims=[-1, -2])
+    #         )  # retain image dims
+    #     elif not isinstance(key, tuple):
+    #         key = (key,)
+    #     key = tuple(map(_convert_range_to_slice, key))
+    #     t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
+    #
+    #     if self._selected_xslice is not None:
+    #         x_mask = self.fields[0].output_xslices[self._selected_xslice]
+    #         x_key = _intersect_slice(x_key, x_mask)
+    #         ic(self._selected_xslice, x_mask, x_key)
+    #
+    #     reordered_key = (0, y_key, x_key, z_key, t_key)
+    #     item = super().__getitem__(reordered_key)
+    #     ndim = item.ndim
+    #     if ndim == 2:
+    #         return item
+    #     if ndim == 3:
+    #         return np.transpose(item, (2, 0, 1))
+    #     if ndim == 4:
+    #         return np.transpose(item, (3, 2, 0, 1))
+    #     raise ValueError(f"Unexpected ndim: {ndim}")
 
     @property
     def total_frames(self):

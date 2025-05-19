@@ -7,6 +7,7 @@ except ImportError:
     MBO_HAS_IMGUI = False
 
 from ..util import is_imgui_installed
+from .imgui import PreviewDataWidget
 from ..file_io import (
     ScanMultiROIReordered,
     to_lazy_array,
@@ -34,6 +35,7 @@ def run_gui(
         data = to_lazy_array(data_in)
 
     iw = fpl.ImageWidget(data=data, histogram_widget=True, **kwargs)
+    gui = PreviewDataWidget()
     iw.figure.add_gui()
     iw.show()
     fpl.loop.run()

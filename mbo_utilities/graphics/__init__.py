@@ -11,7 +11,7 @@ else:
 
 if is_imgui_installed():
     HAS_IMGUI = True
-    from .imgui import SummaryDataWidget, PollenCalibrationWidget
+    from .imgui import SummaryDataWidget, PreviewDataWidget
 else:
     HAS_IMGUI = False
     PollenCalibrationWidget = None
