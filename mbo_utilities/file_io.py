@@ -149,7 +149,7 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     return sorted(p.resolve() for p in result if p.is_file())
 
 
-def read_scan(pathnames, dtype=np.int16):
+def read_scan(pathnames, dtype=np.int16, **kwargs):
     """
     Reads a ScanImage scan from a given file or set of file paths and returns a
     ScanMultiROIReordered object with lazy-loaded data.
@@ -186,7 +186,8 @@ def read_scan(pathnames, dtype=np.int16):
         error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
         raise FileNotFoundError(error_msg)
 
-    scan = ScanMultiROIReordered(join_contiguous=True)
+    roi = kwargs.get("roi", None)
+    scan = ScanMultiROIReordered(join_contiguous=True, selected_xslice=roi)
     scan.read_data(filenames, dtype=dtype)
 
     return scan
@@ -195,12 +196,19 @@ def read_scan(pathnames, dtype=np.int16):
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
 
+def _intersect_slice(user: slice, mask: slice):
+    start = max(user.start or 0, mask.start)
+    stop = min(user.stop or mask.stop, mask.stop)
+    return slice(start, stop)
 
 class ScanMultiROIReordered(scans.ScanMultiROI):
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
     """
+    def __init__(self, *args, selected_xslice: int = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._selected_xslice = selected_xslice
 
     def __getitem__(self, key):
         """Index like a 4D numpy array [t, z, x, y]"""
@@ -212,6 +220,11 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             key = (key,)
         key = tuple(map(_convert_range_to_slice, key))
         t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
+        
+        if self._selected_xslice is not None:
+            x_mask = self.fields[0].output_xslices[self._selected_xslice]
+            x_key = _intersect_slice(x_key, x_mask)
+
         reordered_key = (0, y_key, x_key, z_key, t_key)
         item = super().__getitem__(reordered_key)
         ndim = item.ndim
@@ -251,12 +264,25 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
 
     @property
     def shape(self):
+        width = self.field_widths[0]
+        if self._selected_xslice is not None:
+            s = self.fields[0].output_xslices[self._selected_xslice]
+            width = s.stop - s.start
         return (
             self.total_frames,
             self.num_channels,
             self.field_heights[0],
-            self.field_widths[0],
+            width,
         )
+
+    # @property
+    # def shape(self):
+    #     return (
+    #         self.total_frames,
+    #         self.num_channels,
+    #         self.field_heights[0],
+    #         self.field_widths[0],
+    #     )
 
     @property
     def ndim(self):

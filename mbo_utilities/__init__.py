@@ -13,7 +13,6 @@ from .file_io import (
 )
 from .assembly import save_as
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
-from .image import fix_scan_phase, return_scan_offset
 from .util import (
     norm_minmax,
     smooth_data,
@@ -36,9 +35,6 @@ __all__ = [
     "mbo_home",
     "mbo_temp",
     "run_gui",
-    # image processing
-    "fix_scan_phase",
-    "return_scan_offset",
     # file_io
     "scanreader",
     "npy_to_dask",

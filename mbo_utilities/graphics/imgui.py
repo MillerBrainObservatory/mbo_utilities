@@ -13,7 +13,6 @@ from imgui_bundle import imgui, implot
 from imgui_bundle import portable_file_dialogs as pfd
 
 from ..util import norm_minmax, norm_percentile
-from ..image import return_scan_offset
 
 
 def imgui_dynamic_table(
@@ -233,7 +232,7 @@ class PollenCalibrationWidget(EdgeWindow):
     def calculate_offset(self):
         ind = self.image_widget.current_index["t"]
         frame = self.image_widget.data[0][ind].copy()
-        return return_scan_offset(frame)
+        return NotImplementedError
 
     def apply_offset(self):
         ind = self.image_widget.current_index["t"]
@@ -248,17 +247,6 @@ class PollenCalibrationWidget(EdgeWindow):
         t_index = ev["t"]
         self.current_offset = int(self.offset_store[t_index][0])
         self.apply_offset()
-
-    def switch(self):
-        pass
-        # ind = self.image_widget.current_index["t"]
-        # if self.proj == 'mean':
-        #     self.image_widget.set_data(zstack_max)
-        #     self.proj = "max"
-        # else:
-        #     self.image_widget.set_data(zstack_mean)
-        #     self.image_widget.figure[0,0].graphics[0].data[ind, ...] = zstack_mean[ind, ...]
-        #     self.proj = "mean"
 
     def save_to_file(self):
         if not self.h5name.is_file():
