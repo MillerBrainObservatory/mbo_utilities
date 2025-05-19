@@ -216,7 +216,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         if selected_xslice == 0:
             raise ValueError("roi parameter is 1-based indexing. 0 is not supported.")
         # -1 because for users 1 based indexing to keep consistent with planes parameter
-        self._selected_xslice = selected_xslice - 1
+        self._selected_xslice = selected_xslice - 1 if selected_xslice else None
 
     def __getitem__(self, key):
         """Index like a 4D numpy array [t, z, x, y]"""
@@ -231,11 +231,9 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
         
         if self._selected_xslice is not None:
-            ic(self._selected_xslice)
             x_mask = self.fields[0].output_xslices[self._selected_xslice]
-            ic(x_mask)
             x_key = _intersect_slice(x_key, x_mask)
-            ic(x_key)
+            ic(self._selected_xslice, x_mask, x_key)
 
         reordered_key = (0, y_key, x_key, z_key, t_key)
         item = super().__getitem__(reordered_key)
