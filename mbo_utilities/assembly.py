@@ -99,6 +99,7 @@ def save_as(
         Path to the directory where the data will be saved.
     planes : int, list, or tuple, optional
         Plane indices to save. If `None`, all planes are saved. Default is `None`.
+        1 based indexing.
     trim_edge : list, optional
         Number of pixels to trim on each W x H edge. (Left, Right, Top, Bottom). Default is (0,0,0,0).
     metadata : dict, optional
@@ -142,14 +143,18 @@ def save_as(
             "Unable to determine the number of planes in this recording from 'scan.num_channels'"
         )
 
-    if not planes:
-        planes = range(scan.num_channels)
+    if isinstance(planes, int):
+        planes = [planes - 1]
+    elif planes is None: # DON'T use "if not planes", then 0 will be treated as falsy
+        planes = list(range(scan.num_channels))
+    else:
+        planes = [p - 1 for p in planes]
 
     ic(planes)
     over_idx = [p for p in planes if p < 0 or p >= scan.num_planes]
     if over_idx:
         raise ValueError(
-            f"Invalid plane indices {over_idx}; must be in 0…{scan.num_channels - 1}"
+            f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{scan.num_channels}"
         )
 
     if order is not None:
@@ -207,11 +212,13 @@ def _save_data(
 ):
     if "." in file_extension:
         file_extension = file_extension.split(".")[-1]
+    if file_extension == "tiff":
+        file_extension = "tif"
 
     path = Path(path)
     path.mkdir(exist_ok=True)
 
-    nt, nz, nx, ny = scan.shape
+    nt, nz, nx, ny = scan.shape_full
     ic(nt, nz, nx, ny)
 
     left, right, top, bottom = trim_edge
@@ -263,6 +270,7 @@ def _save_data(
         temp_dir.mkdir(exist_ok=True)
         ic(f"Saving scan-phase images to {temp_dir}")
 
+    pre_exists = True
     for chan_index in planes:
         pbar.set_description(f"Saving plane {chan_index + 1}")
         if file_extension == "bin":
@@ -271,7 +279,11 @@ def _save_data(
             fname = path / f"plane_{chan_index + 1:02d}.{file_extension}"
 
         if fname.exists() and not overwrite:
-            continue
+            pbar.update(1)
+            print(f"Skipped: {fname}")
+            break
+        else:
+            print(f"Saving: {fname}")
 
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
         num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
@@ -326,6 +338,9 @@ def _save_data(
             pbar.update(1)
 
     pbar.close()
+    if pre_exists and not overwrite:
+        print("All output files exist; skipping save.")
+        return
 
     if file_extension in ["tiff", "tif"]:
         close_tiff_writers()
@@ -349,14 +364,10 @@ def correct_phase_chunk(frames: np.ndarray, upsample: int = 10, exclude_center_p
         pre_crop = np.concatenate([pre[:m, keep_left], pre[:m, keep_right]], axis=1)
         post_crop = np.concatenate([post[:m, keep_left], post[:m, keep_right]], axis=1)
 
-        try:
-            shift, _, _ = phase_cross_correlation(pre_crop, post_crop, upsample_factor=upsample)
-            offsets[i] = shift[1] if abs(shift[1]) < 4.0 else 0.0  # discard garbage
-            if abs(shift[1]) < 4.0:
-                ic(f"Big shift: {i}")
-        except Exception:
-            ic("exception!")
-            offsets[i] = 0.0
+        shift, _, _ = phase_cross_correlation(pre_crop, post_crop, upsample_factor=upsample)
+        offsets[i] = shift[1] if abs(shift[1]) < 4.0 else 0.0  # discard garbage
+        if abs(shift[1]) > 4.0:
+            ic(f"Big shift: {i}")
 
     if np.any(np.abs(offsets) > 0.01):
         rows = corrected[:, 1::2]
@@ -494,9 +505,7 @@ def _write_tiff(
         _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
 
         _write_tiff._first_write = {filename: True}
-        # _write_tiff._first_write = True
     else:
-        # _write_tiff._first_write = False
         _write_tiff._first_write = {filename: False}
 
     writer = _write_tiff._writers[filename]
@@ -510,7 +519,6 @@ def _write_tiff(
             metadata=metadata if is_first else None,
         )
         _write_tiff._first_write[filename] = False
-        # _write_tiff._first_write = False
 
 
 def _write_zarr(
@@ -598,8 +606,7 @@ def main():
     parser.add_argument(
         "--roi",
         action="store_true",
-        help="Save each ROI in its own folder, organized like 'zarr/roi_1/plane_1/, without this "
-        "arguemnet it would save like 'zarr/plane_1/roi_1'.",
+        help="ROI to save. 1-based, so first roi=1, second roi=2"
     )
 
     parser.add_argument(
@@ -614,7 +621,7 @@ def main():
         help="Overwrite existing files if saving data..",
     )
     parser.add_argument(
-        "--tiff", action="store_false", help="Flag to save as .tiff. Default is True"
+        "--bin", action="store_false", help="Flag to save as .bin. Default is False, will save as .tiff"
     )
     parser.add_argument(
         "--debug", action="store_true", help="Output verbose debug information."
@@ -664,7 +671,7 @@ def main():
 
     if args.save:
         savepath = Path(args.save).expanduser()
-        logger.info(f"Saving data to {savepath}.")
+        ic(savepath)
 
         t_scan_init = time.time()
         scan = read_scan(files)
@@ -674,21 +681,11 @@ def main():
         frames = listify_index(process_slice_str(args.frames), scan.num_frames)
         zplanes = listify_index(process_slice_str(args.planes), scan.num_channels)
 
-        if args.delete_first_frame:
-            frames = frames[1:]
-            logger.debug(f"Deleting first frame. New frames: {frames}")
-
-        logger.debug(f"Frames: {len(frames)}")
-        logger.debug(f"Z-Planes: {len(zplanes)}")
-
-        if args.zarr:
-            ext = ".zarr"
-            logger.debug("Saving as .zarr.")
-        elif args.tiff:
+        if args.tiff:
             ext = ".tiff"
             logger.debug("Saving as .tiff.")
         else:
-            raise NotImplementedError("Only .zarr and .tif are supported file formats.")
+            ext = ".bin"
 
         t_save = time.time()
         save_as(
