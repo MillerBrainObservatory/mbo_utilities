@@ -12,11 +12,13 @@ from tifffile import TiffWriter
 import h5py
 from icecream import ic
 
-import mbo_utilities
 from .file_io import _make_json_serializable, read_scan
 from .metadata import get_metadata
 from .util import is_running_jupyter
 from .scanreader.utils import listify_index
+
+from scipy.ndimage import fourier_shift
+from skimage.registration import phase_cross_correlation
 
 try:
     from suite2p.io import BinaryFile
@@ -25,7 +27,6 @@ try:
 except ImportError:
     HAS_SUITE2P = True
     BInaryFIle = None
-    print("No suite2p detected!")
 
 if is_running_jupyter():
     from tqdm.notebook import tqdm
@@ -84,7 +85,6 @@ def save_as(
     trim_edge: list | tuple = (0, 0, 0, 0),
     fix_phase: bool = True,
     target_chunk_mb: int = 20,
-    subpixel_phasecorr: bool = True,
     **kwargs,
 ):
     """
@@ -113,8 +113,6 @@ def save_as(
         elements in `order` must match the number of planes. Default is `None`.
     fix_phase : bool, optional
         Whether to fix scan-phase (x/y) alignment. Default is `True`.
-    subpixel_phasecorr : bool, optiional
-        Whether to use subpixel phase correlation for scan-phase correction. Default is 'True'.
     target_chunk_mb : int, optional
         Chunk size in megabytes for saving data. Increase to help with scan-phase correction.
     kwargs : dict, optional
@@ -185,8 +183,8 @@ def save_as(
         metadata=mdata,
         trim_edge=trim_edge,
         fix_phase=fix_phase,
-        subpixel_phasecorr=subpixel_phasecorr,
         target_chunk_mb=target_chunk_mb,
+        debug=debug,
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -204,8 +202,8 @@ def _save_data(
     metadata,
     trim_edge=None,
     fix_phase=True,
-    subpixel_phasecorr=True,
     target_chunk_mb=20,
+    **kwargs
 ):
     if "." in file_extension:
         file_extension = file_extension.split(".")[-1]
@@ -257,6 +255,14 @@ def _save_data(
     )
     pbar = tqdm(total=total_chunks, desc="Saving plane ", position=0)
 
+    from matplotlib import pyplot as plt
+    debug = kwargs.get("debug", False)
+
+    if debug:
+        temp_dir = path / "scan_phase_check"
+        temp_dir.mkdir(exist_ok=True)
+        ic(f"Saving scan-phase images to {temp_dir}")
+
     for chan_index in planes:
         pbar.set_description(f"Saving plane {chan_index + 1}")
         if file_extension == "bin":
@@ -284,10 +290,19 @@ def _save_data(
             ]
 
             if fix_phase:
-                ofs = mbo_utilities.return_scan_offset(data_chunk)
-                if ofs:
-                    ic(ofs)
-                    data_chunk = mbo_utilities.fix_scan_phase(data_chunk, -ofs)
+                if debug:
+                    before = data_chunk.copy()
+                data_chunk = correct_phase_chunk(data_chunk)
+                if debug:
+                    after = data_chunk
+                    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+                    axs[0].imshow(before[len(before) // 2, 120:200, 200:250], cmap="gray")
+                    axs[0].set_title("Before")
+                    axs[1].imshow(after[len(after) // 2, 120:220, 200:250], cmap="gray")
+                    axs[1].set_title("After")
+                    fig.tight_layout()
+                    fig.savefig(temp_dir / f"chunk_{chunk:03d}.png")
+                    plt.close(fig)
 
             writer(fname, data_chunk, chan_index=chan_index)
             start = end
@@ -300,6 +315,36 @@ def _save_data(
     elif file_extension == "bin":
         write_ops(metadata, path, planes)
 
+def correct_phase_chunk(frames: np.ndarray, upsample: int = 10, exclude_center_px: int = 4) -> np.ndarray:
+
+    corrected = frames.copy()
+    offsets = np.zeros(frames.shape[0], dtype=np.float32)
+
+    h, w = frames.shape[1:]  # [n_frames, height, width]
+    cx = w // 2
+    keep_left = slice(None, cx - exclude_center_px)
+    keep_right = slice(cx + exclude_center_px, None)
+
+    for i, frame in enumerate(frames):
+        pre = frame[::2]
+        post = frame[1::2]
+        m = min(pre.shape[0], post.shape[0])
+        pre_crop = np.concatenate([pre[:m, keep_left], pre[:m, keep_right]], axis=1)
+        post_crop = np.concatenate([post[:m, keep_left], post[:m, keep_right]], axis=1)
+
+        try:
+            shift, error, _ = phase_cross_correlation(pre_crop, post_crop, upsample_factor=upsample)
+            offsets[i] = shift[1] if abs(shift[1]) < 2.0 else 0.0  # discard garbage
+        except Exception:
+            offsets[i] = 0.0
+
+    if np.any(np.abs(offsets) > 0.01):
+        rows = corrected[:, 1::2]
+        f = np.fft.fftn(rows, axes=(1, 2))
+        shifts = np.array([fourier_shift(f[i], (0, offsets[i])) for i in range(f.shape[0])])
+        corrected[:, 1::2] = np.fft.ifftn(shifts, axes=(1, 2)).real
+
+    return corrected
 
 def write_ops(metadata: dict, base_path: str | Path, planes):
     base_path = Path(base_path).expanduser().resolve()
