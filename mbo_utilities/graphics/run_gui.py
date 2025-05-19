@@ -35,8 +35,8 @@ def run_gui(
         data = to_lazy_array(data_in)
 
     iw = fpl.ImageWidget(data=data, histogram_widget=True, **kwargs)
-    gui = PreviewDataWidget()
-    iw.figure.add_gui()
+    gui = PreviewDataWidget(iw=iw)
+    iw.figure.add_gui(gui)
     iw.show()
     fpl.loop.run()
     return None
