@@ -17,10 +17,10 @@ from pprint import pprint
 if __name__ == "__main__":
     # raw = Path(r"D://demo//raw")
     raw = Path(r"/home/flynn/lbm_data/raw")
-    test_scan = mbo.read_scan(raw)
+    test_scan = mbo.read_scan(raw, roi=0)
     # savedir = r"D://demo//assembled_ofs"
-    savedir = r"/home/flynn/lbm_data/assembled_us5"
-    mbo.save_as(test_scan, savedir, ext=".tiff", overwrite=True, fix_phase=True, planes=[6],debug=True)
+    savedir = r"/home/flynn/lbm_data/roi_0"
+    mbo.save_as(test_scan, savedir, ext=".tiff", overwrite=True, fix_phase=True, planes=[6], debug=True)
     files = mbo.get_files(savedir, 'tif')
     metadata = mbo.get_metadata(files[0])
     pprint(metadata)

@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 import fastplotlib as fpl
+from icecream import ic
 
 from ..file_io import to_lazy_array
 
@@ -27,10 +28,9 @@ def load_dialog_folder(directory=None):
 
 
 def render_qt_widget(data=None):
-    app = QApplication(sys.argv)
-
     if data is None:
         data = load_dialog_folder(directory=None)
+        ic(data)
 
     main_window = LBMMainWindow()
     iw = fpl.ImageWidget(
@@ -44,19 +44,23 @@ def render_qt_widget(data=None):
     main_window.setCentralWidget(qwidget)  # noqa
     main_window.resize(data.shape[-1], data.shape[-2])
     main_window.show()
-    app.exec_()
-    # return app
+    fpl.loop.run()
+    # app.exec_()
 
+import glfw
+import os
+from pathlib import Path
+from OpenGL.GL import *
 
-class LBMMainWindow(QMainWindow):
-    def __init__(self, parent=None):
-        super().__init__(parent=parent)
-        self.setGeometry(50, 50, 1500, 800)
-        self.setWindowTitle("MBO Widget")
-        icon_path = str(Path.home() / ".lbm" / "icons" / "icon_suite2p_python.svg")
-        app_icon = QtGui.QIcon()
-        for size in (16, 24, 32, 48, 64, 256):
-            app_icon.addFile(icon_path, QtCore.QSize(size, size))
-        self.setWindowIcon(app_icon)
-        self.setStyleSheet("QMainWindow {background: 'black';}")
-        self.resize(1000, 800)
+def create_glfw_window(width=1500, height=800, title="MBO Widget"):
+    if not glfw.init():
+        raise RuntimeError("Failed to initialize GLFW")
+
+    glfw.window_hint(glfw.RESIZABLE, glfw.TRUE)
+    window = glfw.create_window(width, height, title, None, None)
+    if not window:
+        glfw.terminate()
+        raise RuntimeError("Failed to create GLFW window")
+
+    glfw.make_context_current(window)
+    return window
