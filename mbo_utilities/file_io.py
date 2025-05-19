@@ -219,8 +219,77 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         # -1 because for users 1 based indexing to keep consistent with planes parameter
         self._selected_xslice = selected_xslice - 1 if selected_xslice else None
 
+    def _read_pages(
+        self,
+        slice_list,
+        channel_list,
+        frame_list,
+        yslice=slice(None),
+        xslice=slice(None),
+    ):
+        if self.is_slow_stack:
+            frame_step = self.num_channels
+            slice_step = self.num_channels * self.num_frames
+        else:
+            slice_step = self.num_channels
+            frame_step = self.num_channels * self.num_scanning_depths
+
+        pages_to_read = []
+        index_tuples = []
+        for c in channel_list:
+            for f in frame_list:
+                for s in slice_list:
+                    page = f * frame_step + s * slice_step + c
+                    pages_to_read.append(page)
+                    index_tuples.append((c, f, s))
+
+        out_height = len(utils.listify_index(yslice, self._page_height))
+        out_width = len(utils.listify_index(xslice, self._page_width))
+        pages = np.empty([len(pages_to_read), out_height, out_width], dtype=self.dtype)
+
+        from tqdm.auto import tqdm
+        start_page = 0
+        with tqdm(total=len(channel_list), desc="Channels", position=0, leave=False) as pbar_outer:
+            for ci, c in enumerate(channel_list):
+                with tqdm(total=len(frame_list), desc=f"Frames (ch={c})", position=1, leave=False) as pbar_inner:
+                    frame_count = 0
+                    for fi, f in enumerate(frame_list):
+                        indices = [
+                            i for i, (cc, ff, _) in enumerate(index_tuples)
+                            if cc == c and ff == f
+                        ]
+                        pages_needed = [pages_to_read[i] for i in indices]
+
+                        current_start = 0
+                        for tiff_file in self.tiff_files:
+                            final = current_start + len(tiff_file.pages)
+                            file_pages = [
+                                p for p in pages_needed
+                                if current_start <= p < final
+                            ]
+                            if file_pages:
+                                file_indices = [p - current_start for p in file_pages]
+                                global_indices = [
+                                    i for i in indices if pages_to_read[i] in file_pages
+                                ]
+                                pages[np.array(global_indices)] = tiff_file.asarray(key=file_indices)[..., yslice, xslice]
+                            current_start = final
+                        frame_count += 1
+                        pbar_inner.update(1)
+                    pbar_outer.update(1)
+
+        new_shape = [
+            len(frame_list),
+            len(slice_list),
+            len(channel_list),
+            out_height,
+            out_width,
+        ]
+        return pages.reshape(new_shape).transpose([1, 3, 4, 2, 0])
+
     def __getitem__(self, key):
         """Index like a 4D numpy array [t, z, x, y]"""
+
         if key == slice(None):  # asking for full scan, give them a subsample?
             return np.squeeze(subsample_array(self, ignore_dims=[-1, -2]))
 
@@ -280,6 +349,8 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             dtype=self.dtype,
         )
 
+        from tqdm import tqdm
+
         for i, (field_id, y_list, x_list) in enumerate(zip(field_list, y_lists, x_lists)):
             field = self.fields[field_id]
             slices = zip(
@@ -298,6 +369,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
                 output_xs = [index for index, x in enumerate(x_list) if x in x_range]
 
                 item[i, output_ys, output_xs] = pages[0, ys, xs]
+
 
         squeeze_dims = [
             i for i, index in enumerate(full_key)
