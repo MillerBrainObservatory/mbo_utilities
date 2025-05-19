@@ -1,6 +1,7 @@
 from typing import Sequence
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 
 def align_images_zstack(images, mode="trim"):
@@ -249,7 +250,7 @@ def is_running_jupyter():
         return False
 
 
-def subsample_array(arr, max_size: int = 1e6, ignore_dims: Sequence[int] | None = None):
+def subsample_array(arr: ArrayLike, max_size: int = 1e6, ignore_dims: Sequence[int] | None = None):
     """
     Subsamples an input array while preserving its relative dimensional proportions.
 
