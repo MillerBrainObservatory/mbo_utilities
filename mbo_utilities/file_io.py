@@ -201,6 +201,7 @@ def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
 
 def _intersect_slice(user: slice, mask: slice):
+    ic(user, mask)
     start = max(user.start or 0, mask.start)
     stop = min(user.stop or mask.stop, mask.stop)
     return slice(start, stop)
@@ -212,10 +213,14 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
     """
     def __init__(self, *args, selected_xslice: int = None, **kwargs):
         super().__init__(*args, **kwargs)
-        self._selected_xslice = selected_xslice
+        if selected_xslice == 0:
+            raise ValueError("roi parameter is 1-based indexing. 0 is not supported.")
+        # -1 because for users 1 based indexing to keep consistent with planes parameter
+        self._selected_xslice = selected_xslice - 1
 
     def __getitem__(self, key):
         """Index like a 4D numpy array [t, z, x, y]"""
+        ic(key)
         if key == slice(None):  # asking for full scan, give them a subsample?
             return np.squeeze(
                 subsample_array(self, ignore_dims=[-1, -2])
@@ -226,8 +231,11 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
         
         if self._selected_xslice is not None:
+            ic(self._selected_xslice)
             x_mask = self.fields[0].output_xslices[self._selected_xslice]
+            ic(x_mask)
             x_key = _intersect_slice(x_key, x_mask)
+            ic(x_key)
 
         reordered_key = (0, y_key, x_key, z_key, t_key)
         item = super().__getitem__(reordered_key)
@@ -279,14 +287,14 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             width,
         )
 
-    # @property
-    # def shape(self):
-    #     return (
-    #         self.total_frames,
-    #         self.num_channels,
-    #         self.field_heights[0],
-    #         self.field_widths[0],
-    #     )
+    @property
+    def shape_full(self):
+        return (
+            self.total_frames,
+            self.num_channels,
+            self.field_heights[0],
+            self.field_widths[0],
+        )
 
     @property
     def ndim(self):
@@ -394,7 +402,7 @@ def get_files(
     if not base_path.is_dir():
         raise NotADirectoryError(f"'{base_path}' is not a directory.")
     if max_depth == 0:
-        print("Max-depth of 0 is not allowed. Setting to 1.")
+        ic("Max-depth of 0 is not allowed. Setting to 1.")
         max_depth = 1
 
     base_depth = len(base_path.parts)
@@ -500,7 +508,7 @@ def save_png(fname, data):
     plt.axis("off")
     plt.tight_layout()
     plt.savefig(fname, dpi=300, bbox_inches="tight")
-    print(f"Saved data to {fname}")
+    ic(f"Saved data to {fname}")
 
 
 def save_mp4(
@@ -572,7 +580,7 @@ def save_mp4(
     if not isinstance(fname, (str, Path)):
         raise TypeError(f"Expected fname to be str or Path, got {type(fname)}")
     if isinstance(images, (str, Path)):
-        print(f"Loading TIFF stack from {images}")
+        ic(f"Loading TIFF stack from {images}")
         if Path(images).is_file():
             try:
                 images = tifffile.memmap(images)
@@ -591,17 +599,17 @@ def save_mp4(
     colormap = cm.get_cmap(cmap)
 
     if normalize:
-        print("Normalizing mp4 images to [0, 1]")
+        ic("Normalizing mp4 images to [0, 1]")
         images = norm_minmax(images)
 
     if win and win > 1:
-        print(f"Applying temporal averaging with window size {win}")
+        ic(f"Applying temporal averaging with window size {win}")
         kernel = np.ones(win) / win
         images = np.apply_along_axis(
             lambda x: np.convolve(x, kernel, mode="same"), axis=0, arr=images
         )
 
-    print(f"Saving {T} frames to {fname}")
+    ic(f"Saving {T} frames to {fname}")
     output_framerate = int(framerate * speedup)
     process = (
         ffmpeg.input(
@@ -625,7 +633,7 @@ def save_mp4(
 
     process.stdin.close()
     process.wait()
-    print(f"Video saved to {fname}")
+    ic(f"Video saved to {fname}")
 
 
 def _is_arraylike(obj) -> bool:
