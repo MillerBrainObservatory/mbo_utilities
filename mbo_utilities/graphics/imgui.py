@@ -144,10 +144,8 @@ class PreviewDataWidget(EdgeWindow):
         self.shape = self.image_widget.data[0].shape
 
         self.nz = self.shape[0]
-        self.user_offsets.insert(0, list(range(1, self.nz + 1)))
-        self.user_titles.insert(0, "Z-Plane")
 
-        self.offset_store = self.pollen_offsets.copy()
+        self.offset_store = np.zeros(shape=self.nz)
         self._current_offset = 0
 
         self.proj = "mean"
@@ -163,14 +161,8 @@ class PreviewDataWidget(EdgeWindow):
         self.apply_offset()
 
     def update(self):
+
         button_size = imgui.ImVec2(140, 20)
-
-        offset_changed, value = imgui.input_int(
-            "offset", self.current_offset, step=1, step_fast=2
-        )
-        if offset_changed:
-            self.current_offset = value
-
         if imgui.button("Calculate Offset", button_size):
             self.current_offset = self.calculate_offset()
         if imgui.is_item_hovered():
@@ -178,43 +170,8 @@ class PreviewDataWidget(EdgeWindow):
                 "Automatically calculates the best offset for the selected Z-plane."
             )
 
-        if imgui.button("Open File", imgui.ImVec2(140, 20)):
-            self.pollen_loaded = True
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Open File")
-
-        # if imgui.button("Switch Projection", button_size):
-        #     self.switch()
-        # if imgui.is_item_hovered():
-        #     imgui.set_tooltip("Switch to max/mean projection.")
-
-        if imgui.button("Store Offset", button_size):
-            ind = self.image_widget.current_index["t"]
-            self.offset_store[ind] = self.current_offset
-            self.apply_offset()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Set the current offset as the selected value.")
-
-        if imgui.button("Save Selected", button_size):
-            self.save_to_file()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Overwrite scan-phase values with current selection.")
-
-        if imgui.begin_popup("Save Successful"):
-            imgui.text("Offsets successfully saved!")
-            if imgui.button("OK"):
-                imgui.close_current_popup()
-            imgui.end_popup()
-
-        if self.pollen_loaded:
-            imgui_dynamic_table(
-                "table",
-                self.user_offsets,
-                self.user_titles,
-                selected_index=self.image_widget.current_index["t"],
-            )
-        else:
-            imgui.text("No pollen data loaded")
+        # Here, I want a widget displaying the calculated offset with an "apply" button that does nothing for now
+        # the offset is subpixel
 
     def calculate_offset(self):
         ind = self.image_widget.current_index["t"]
