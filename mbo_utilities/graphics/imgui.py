@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from dask import array as da
 from scipy.ndimage import gaussian_filter
@@ -12,6 +13,7 @@ from fastplotlib.ui import EdgeWindow
 from imgui_bundle import imgui, implot
 from imgui_bundle import portable_file_dialogs as pfd
 
+from .. import mbo_home
 from ..util import norm_minmax, norm_percentile
 
 
@@ -124,20 +126,50 @@ def implot_pollen(pollen_offsets, offset_store, zstack):
 
     imgui.end_child()
 
+def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
+    from scipy.ndimage import fourier_shift
+    result = frame.copy()
+    rows = result[1::2, :]
+    f = np.fft.fftn(rows)
+    fshift = fourier_shift(f, (0, offset))
+    result[1::2, :] = np.fft.ifftn(fshift).real
+    return result
+
+def compute_phase_offset(frame: np.ndarray, upsample: int = 10, exclude_center_px: int = 4) -> float:
+    from skimage.registration import phase_cross_correlation
+    if frame.ndim == 3:
+        frame = np.mean(frame, axis=0)
+    _, w = frame.shape
+    cx = w // 2
+    keep_left = slice(None, cx - exclude_center_px)
+    keep_right = slice(cx + exclude_center_px, None)
+
+    pre = frame[::2]
+    post = frame[1::2]
+    m = min(pre.shape[0], post.shape[0])
+    pre_crop = np.concatenate([pre[:m, keep_left], pre[:m, keep_right]], axis=1)
+    post_crop = np.concatenate([post[:m, keep_left], post[:m, keep_right]], axis=1)
+
+    shift, _, _ = phase_cross_correlation(pre_crop, post_crop, upsample_factor=upsample)
+    return float(shift[1])
+
 
 class PreviewDataWidget(EdgeWindow):
     def __init__(
         self,
-        fpath=None,
-        iw=None,
-        size=350,
-        location="right",
-        title="Preview Data",
+        iw: fpl.ImageWidget,
+        fpath: str | None = None,
+        size: int=350,
+        location: Literal["top", "bottom", "left", "right"]="right",
+        title: str="Preview Data",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
-        self.fpath = fpath
+        if fpath is None:
+            self.fpath = Path(mbo_home)
+        else:
+            self.fpath = Path(fpath)
+
         self.h5name = None
-        self.pollen_loaded = False
 
         self.figure = iw.figure
         self.image_widget = iw
@@ -176,21 +208,42 @@ class PreviewDataWidget(EdgeWindow):
     def calculate_offset(self):
         ind = self.image_widget.current_index["t"]
         frame = self.image_widget.data[0][ind].copy()
-        return NotImplementedError
+        return compute_phase_offset(frame, upsample=20)
 
     def apply_offset(self):
         ind = self.image_widget.current_index["t"]
         frame = self.image_widget.data[0][ind].copy()
-        frame[0::2, :] = np.roll(
-            self.image_widget.data[0][ind][0::2, :], shift=-self.current_offset, axis=1
-        )
-        self.image_widget.figure[0, 0].graphics[0].data[:] = frame
+        offset = self.current_offset
+        corrected = apply_phase_offset(frame, offset)
+        self.image_widget.figure[0, 0].graphics[0].data[:] = corrected
+
+    def preview_before_after(self):
+        ind = self.image_widget.current_index["t"]
+        before = self.image_widget.data[0][ind].copy()
+        offset = compute_phase_offset(before, upsample=20)
+        after = apply_phase_offset(before, offset)
+        return before, after, offset
+        # Assuming GUI can handle dual previews:
+
+    # def calculate_offset(self):
+    #     ind = self.image_widget.current_index["t"]
+    #     frame = self.image_widget.data[0][ind].copy()
+    #     return NotImplementedError
+    #
+    # def apply_offset(self):
+    #     ind = self.image_widget.current_index["t"]
+    #     frame = self.image_widget.data[0][ind].copy()
+    #     frame[0::2, :] = np.roll(
+    #         self.image_widget.data[0][ind][0::2, :], shift=-self.current_offset, axis=1
+    #     )
+    #     self.image_widget.figure[0, 0].graphics[0].data[:] = frame
 
     def track_slider(self, ev):
         """events to emit when z-plane changes"""
         t_index = ev["t"]
-        self.current_offset = int(self.offset_store[t_index][0])
-        self.apply_offset()
+        return
+        # self.current_offset = int(self.offset_store[t_index][0])
+        # self.apply_offset()
 
     def save_to_file(self):
         if not self.h5name.is_file():
