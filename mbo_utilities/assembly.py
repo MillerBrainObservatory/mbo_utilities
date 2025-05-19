@@ -132,8 +132,12 @@ def save_as(
     else:
         ic.disable()
 
+    upsample = kwargs.get("upsample", 20)
+    ic(upsample)
+
     savedir = Path(savedir)
     ic(savedir)
+
     if not savedir.parent.is_dir():
         raise ValueError(f"{savedir} is not inside a valid directory.")
     savedir.mkdir(exist_ok=True)
@@ -149,8 +153,8 @@ def save_as(
         planes = list(range(scan.num_channels))
     else:
         planes = [p - 1 for p in planes]
-
     ic(planes)
+
     over_idx = [p for p in planes if p < 0 or p >= scan.num_planes]
     if over_idx:
         raise ValueError(
@@ -190,6 +194,7 @@ def save_as(
         fix_phase=fix_phase,
         target_chunk_mb=target_chunk_mb,
         debug=debug,
+        upsample=upsample,
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -265,10 +270,6 @@ def _save_data(
     from matplotlib import pyplot as plt
     debug = kwargs.get("debug", False)
 
-    if debug:
-        temp_dir = path / "scan_phase_check"
-        temp_dir.mkdir(exist_ok=True)
-        ic(f"Saving scan-phase images to {temp_dir}")
 
     pre_exists = True
     for chan_index in planes:
@@ -280,10 +281,13 @@ def _save_data(
 
         if fname.exists() and not overwrite:
             pbar.update(1)
-            print(f"Skipped: {fname}")
+            ic(fname, overwrite)
             break
-        else:
-            print(f"Saving: {fname}")
+
+        if debug:
+            temp_dir = path / f"scan_phase_check_plane_{chan_index + 1:02d}"
+            temp_dir.mkdir(exist_ok=True)
+            ic(f"Saving scan-phase images to {temp_dir}")
 
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
         num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
@@ -302,9 +306,10 @@ def _save_data(
             ]
 
             if fix_phase:
+                upsample = kwargs.get("upsample", 20)
                 if debug:
                     before = data_chunk.copy()
-                data_chunk = correct_phase_chunk(data_chunk)
+                data_chunk = correct_phase_chunk(data_chunk, upsample=upsample)
                 if debug:
                     after = data_chunk
                     mid = len(before) // 2
@@ -365,11 +370,11 @@ def correct_phase_chunk(frames: np.ndarray, upsample: int = 10, exclude_center_p
         post_crop = np.concatenate([post[:m, keep_left], post[:m, keep_right]], axis=1)
 
         shift, _, _ = phase_cross_correlation(pre_crop, post_crop, upsample_factor=upsample)
-        offsets[i] = shift[1] if abs(shift[1]) < 4.0 else 0.0  # discard garbage
-        if abs(shift[1]) > 4.0:
-            ic(f"Big shift: {i}")
+        offsets[i] = shift[1] #if abs(shift[1]) < 4.0 else 0.0  # discard garbage
+        # if abs(shift[1]) > 4.0:
+        #     ic(f"Big shift: {i}")
 
-    if np.any(np.abs(offsets) > 0.01):
+    if np.any(np.abs(offsets) > 0.001):
         rows = corrected[:, 1::2]
         f = np.fft.fftn(rows, axes=(1, 2))
         shifts = np.array([fourier_shift(f[i], (0, offsets[i])) for i in range(f.shape[0])])
