@@ -227,6 +227,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         frame_list,
         yslice=slice(None),
         xslice=slice(None),
+        pbar=None,
     ):
         if self.is_slow_stack:
             frame_step = self.num_channels
@@ -344,24 +345,26 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             dtype=self.dtype,
         )
 
-        for i, (field_id, y_list, x_list) in enumerate(zip(field_list, y_lists, x_lists)):
-            field = self.fields[field_id]
-            slices = zip(
-                field.yslices, field.xslices, field.output_yslices, field.output_xslices
-            )
-            for yslice, xslice, output_yslice, output_xslice in slices:
-                pages = self._read_pages(
-                    [field.slice_id], channel_list, frame_list, yslice, xslice
+        total_reads = len(field_list) * len(channel_list) * len(frame_list)
+        with tqdm(total=total_reads, desc="Reading data from tiff") as pbar:
+            for i, (field_id, y_list, x_list) in enumerate(zip(field_list, y_lists, x_lists)):
+                field = self.fields[field_id]
+                slices = zip(
+                    field.yslices, field.xslices, field.output_yslices, field.output_xslices
                 )
+                for yslice, xslice, output_yslice, output_xslice in slices:
+                    pages = self._read_pages(
+                        [field.slice_id], channel_list, frame_list, yslice, xslice, pbar=pbar
+                    )
 
-                y_range = range(output_yslice.start, output_yslice.stop)
-                x_range = range(output_xslice.start, output_xslice.stop)
-                ys = [[y - output_yslice.start] for y in y_list if y in y_range]
-                xs = [x - output_xslice.start for x in x_list if x in x_range]
-                output_ys = [[index] for index, y in enumerate(y_list) if y in y_range]
-                output_xs = [index for index, x in enumerate(x_list) if x in x_range]
+                    y_range = range(output_yslice.start, output_yslice.stop)
+                    x_range = range(output_xslice.start, output_xslice.stop)
+                    ys = [[y - output_yslice.start] for y in y_list if y in y_range]
+                    xs = [x - output_xslice.start for x in x_list if x in x_range]
+                    output_ys = [[index] for index, y in enumerate(y_list) if y in y_range]
+                    output_xs = [index for index, x in enumerate(x_list) if x in x_range]
 
-                item[i, output_ys, output_xs] = pages[0, ys, xs]
+                    item[i, output_ys, output_xs] = pages[0, ys, xs]
 
 
         squeeze_dims = [
@@ -380,34 +383,6 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             return np.transpose(item, (3, 2, 0, 1))
 
         raise ValueError(f"Unexpected ndim: {ndim}")
-
-    # def __getitem__(self, key):
-    #     """Index like a 4D numpy array [t, z, x, y]"""
-    #     ic(key)
-    #     if key == slice(None):  # asking for full scan, give them a subsample?
-    #         return np.squeeze(
-    #             subsample_array(self, ignore_dims=[-1, -2])
-    #         )  # retain image dims
-    #     elif not isinstance(key, tuple):
-    #         key = (key,)
-    #     key = tuple(map(_convert_range_to_slice, key))
-    #     t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
-    #
-    #     if self._selected_xslice is not None:
-    #         x_mask = self.fields[0].output_xslices[self._selected_xslice]
-    #         x_key = _intersect_slice(x_key, x_mask)
-    #         ic(self._selected_xslice, x_mask, x_key)
-    #
-    #     reordered_key = (0, y_key, x_key, z_key, t_key)
-    #     item = super().__getitem__(reordered_key)
-    #     ndim = item.ndim
-    #     if ndim == 2:
-    #         return item
-    #     if ndim == 3:
-    #         return np.transpose(item, (2, 0, 1))
-    #     if ndim == 4:
-    #         return np.transpose(item, (3, 2, 0, 1))
-    #     raise ValueError(f"Unexpected ndim: {ndim}")
 
     @property
     def total_frames(self):
