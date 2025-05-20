@@ -39,7 +39,7 @@ def run_gui(
     nx, ny = data.shape[-2:]
     iw = fpl.ImageWidget(
         data=data,
-        histogram_widget = True,
+        histogram_widget = False,
         figure_kwargs = {
             "size": (nx, ny),
         },
@@ -47,6 +47,7 @@ def run_gui(
             "vmin": vmin,
             "vmax": vmax
         },
+        window_funcs={"t": (np.mean, 5)},
     )
 
     add_gui = kwargs.get("gui", None)
