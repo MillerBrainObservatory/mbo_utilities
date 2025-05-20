@@ -370,7 +370,7 @@ def correct_phase_chunk(frames: np.ndarray, upsample: int = 10, exclude_center_p
         post_crop = np.concatenate([post[:m, keep_left], post[:m, keep_right]], axis=1)
 
         shift, _, _ = phase_cross_correlation(pre_crop, post_crop, upsample_factor=upsample)
-        offsets[i] = shift[1] #if abs(shift[1]) < 4.0 else 0.0  # discard garbage
+        offsets[i] = shift[1] # if abs(shift[1]) < 4.0 else 0.0  # discard garbage
         # if abs(shift[1]) > 4.0:
         #     ic(f"Big shift: {i}")
 

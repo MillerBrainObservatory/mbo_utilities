@@ -32,11 +32,28 @@ def run_gui(
     if isinstance(data_in, ScanMultiROIReordered):
         data = data_in
     else:
+        # all logic for what this function can support is handled here
         data = to_lazy_array(data_in)
 
-    iw = fpl.ImageWidget(data=data, histogram_widget=True, **kwargs)
-    gui = PreviewDataWidget(iw=iw)
-    iw.figure.add_gui(gui)
+    vmin, vmax = data.min, data.max
+    nx, ny = data.shape[-2:]
+    iw = fpl.ImageWidget(
+        data=data,
+        histogram_widget = True,
+        figure_kwargs = {
+            "size": (nx, ny),
+        },
+        graphic_kwargs = {
+            "vmin": vmin,
+            "vmax": vmax
+        },
+    )
+
+    add_gui = kwargs.get("gui", None)
+    if add_gui:
+        gui = PreviewDataWidget(iw=iw)
+        iw.figure.add_gui(gui)
+
     iw.show()
     fpl.loop.run()
     return None

@@ -17,11 +17,12 @@ import fastplotlib as fpl
 
 from imgui_bundle import portable_file_dialogs as pfd
 
-def select_folder():
-    dialog = pfd.select_folder("Select a folder")
-    return dialog
+# def select_folder():
+#     dialog = pfd.select_folder("Select a folder")
+#     return dialog
 
-mbo.run_gui()
+
+mbo.run_gui("/home/flynn/lbm_data/raw", gui=True)
 print("done")
 # path = select_folder()
 # print(path.result())

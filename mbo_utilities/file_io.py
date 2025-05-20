@@ -5,6 +5,7 @@ import re
 from collections.abc import Sequence
 from itertools import product
 from pathlib import Path
+from tqdm.auto import tqdm
 
 from icecream import ic
 
@@ -247,8 +248,6 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         out_width = len(utils.listify_index(xslice, self._page_width))
         pages = np.empty([len(pages_to_read), out_height, out_width], dtype=self.dtype)
 
-        from tqdm.auto import tqdm
-        start_page = 0
         with tqdm(total=len(channel_list), desc="Channels", position=0, leave=False) as pbar_outer:
             for ci, c in enumerate(channel_list):
                 with tqdm(total=len(frame_list), desc=f"Frames (ch={c})", position=1, leave=False) as pbar_inner:
@@ -348,8 +347,6 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             ],
             dtype=self.dtype,
         )
-
-        from tqdm import tqdm
 
         for i, (field_id, y_list, x_list) in enumerate(zip(field_list, y_lists, x_lists)):
             field = self.fields[field_id]

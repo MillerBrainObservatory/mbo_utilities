@@ -1,14 +1,21 @@
 from pathlib import Path
 from typing import Literal
 
-from dask import array as da
 from scipy.ndimage import gaussian_filter
 import numpy as np
 import h5py
-from tqdm import tqdm
+from icecream import ic
+
+try:
+    import cupy as cp
+    from cusignal import register_translation  # GPU version of phase_cross_correlation
+    HAS_CUPY = True
+except ImportError:
+    HAS_CUPY = False
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
+from fastplotlib.widgets.image_widget._widget import _WindowFunctions
 
 from imgui_bundle import imgui, implot
 from imgui_bundle import portable_file_dialogs as pfd
@@ -21,7 +28,7 @@ def imgui_dynamic_table(
     table_id: str, data_lists: list, titles: list = None, selected_index: int = None
 ):
     """
-    Draw a dynamic table using ImGui with customizable column titles and highlighted row selection.
+    imgui dynamic table helper
 
     Parameters
     ----------
@@ -140,6 +147,9 @@ def compute_phase_offset(frame: np.ndarray, upsample: int = 10, exclude_center_p
     if frame.ndim == 3:
         frame = np.mean(frame, axis=0)
     _, w = frame.shape
+
+    frame = frame.astype(np.float32)
+
     cx = w // 2
     keep_left = slice(None, cx - exclude_center_px)
     keep_right = slice(cx + exclude_center_px, None)
@@ -150,37 +160,52 @@ def compute_phase_offset(frame: np.ndarray, upsample: int = 10, exclude_center_p
     pre_crop = np.concatenate([pre[:m, keep_left], pre[:m, keep_right]], axis=1)
     post_crop = np.concatenate([post[:m, keep_left], post[:m, keep_right]], axis=1)
 
-    shift, _, _ = phase_cross_correlation(pre_crop, post_crop, upsample_factor=upsample)
-    return float(shift[1])
+    ic(pre_crop)
+    ic(post_crop)
 
+    # transfer to GPU
+    if HAS_CUPY:
+        pre_gpu = cp.asarray(pre_crop)
+        post_gpu = cp.asarray(post_crop)
+        shift, _, _ = register_translation(
+            cp.asarray(pre_gpu),
+            cp.asarray(post_gpu),
+            upsample_factor=upsample
+        )
+    else:
+        shift, _, _ = phase_cross_correlation(
+            pre_crop, post_crop, upsample_factor=upsample
+        )
+
+    return float(shift[1])
 
 class PreviewDataWidget(EdgeWindow):
     def __init__(
         self,
         iw: fpl.ImageWidget,
         fpath: str | None = None,
-        size: int=350,
-        location: Literal["top", "bottom", "left", "right"]="right",
-        title: str="Preview Data",
+        size: int = 350,
+        location: Literal["bottom", "right"] = "right",
+        title: str = "preview data widget",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
-        if fpath is None:
-            self.fpath = Path(mbo_home)
-        else:
-            self.fpath = Path(fpath)
-
+        self.fpath = Path(fpath) if fpath else Path(mbo_home)
         self.h5name = None
-
-        self.figure = iw.figure
         self.image_widget = iw
         self.shape = self.image_widget.data[0].shape
-
         self.nz = self.shape[0]
 
-        self.offset_store = np.zeros(shape=self.nz)
-        self._current_offset = 0
-
+        self.offset_store = np.zeros(self.nz)
+        self._current_offset = 0.0
+        self.upsample = 20
+        self.always_update = False
         self.proj = "mean"
+        self.window_size = 3
+
+        for subplot in self.image_widget.figure:
+            subplot.toolbar = False
+
+        self.image_widget.window_funcs = {"t": (getattr(np, self.proj), self.window_size)}
         self.image_widget.add_event_handler(self.track_slider, "current_index")
 
     @property
@@ -190,60 +215,90 @@ class PreviewDataWidget(EdgeWindow):
     @current_offset.setter
     def current_offset(self, value):
         self._current_offset = value
-        self.apply_offset()
 
     def update(self):
+        imgui.begin_child("offset_panel")
 
-        button_size = imgui.ImVec2(140, 20)
-        if imgui.button("Calculate Offset", button_size):
-            self.current_offset = self.calculate_offset()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip(
-                "Automatically calculates the best offset for the selected Z-plane."
-            )
+        imgui.push_item_width(80)
 
-        # Here, I want a widget displaying the calculated offset with an "apply" button that does nothing for now
-        # the offset is subpixel
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "window functions")
+        imgui.separator()
+
+        imgui.columns(2, borders=False)
+        imgui.set_column_width(0, 100)
+
+        imgui.align_text_to_frame_padding()
+        imgui.text("projection")
+        imgui.next_column()
+        projection_options = ["mean", "max", "std"]
+        current_idx = projection_options.index(self.proj)
+        changed, new_idx = imgui.combo("##proj", current_idx, projection_options)
+        if changed:
+            self.image_widget.window_funcs["t"].func = getattr(np, self.proj)
+
+        imgui.next_column()
+
+        imgui.align_text_to_frame_padding()
+        imgui.text("window")
+        imgui.next_column()
+        changed, new_win_size = imgui.input_int(
+            "Window Size",
+            self.image_widget.window_funcs["t"].window_size,
+            step=1,
+            step_fast=5
+        )
+        if changed:
+            self.image_widget.window_funcs["t"].window_size = new_win_size
+
+        imgui.next_column()
+
+        imgui.columns(1)
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored(imgui.ImVec4(0.8, 0.6, 1.0, 1.0), "scan-phase correction")
+        imgui.separator()
+        imgui.columns(2, borders=False)
+
+        imgui.align_text_to_frame_padding()
+        imgui.text("offset")
+        imgui.next_column()
+        imgui.text_colored(imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self._current_offset:.3f}")
+        imgui.next_column()
+
+        imgui.align_text_to_frame_padding()
+        imgui.text("upsample")
+        imgui.next_column()
+        changed, val = imgui.input_int("##upsample", self.upsample, step=1, step_fast=2)
+        if changed:
+            self.upsample = max(1, val)
+        imgui.next_column()
+
+        imgui.align_text_to_frame_padding()
+        imgui.text("auto")
+        imgui.next_column()
+        _, self.always_update = imgui.checkbox("##auto", self.always_update)
+        imgui.next_column()
+
+        imgui.columns(1)
+        imgui.spacing()
+        if imgui.button("calculate", imgui.ImVec2(-1, 0)):
+            self.calculate_offset()
+
+        imgui.pop_item_width()
+        imgui.end_child()
 
     def calculate_offset(self):
-        ind = self.image_widget.current_index["t"]
-        frame = self.image_widget.data[0][ind].copy()
-        return compute_phase_offset(frame, upsample=20)
-
-    def apply_offset(self):
-        ind = self.image_widget.current_index["t"]
-        frame = self.image_widget.data[0][ind].copy()
-        offset = self.current_offset
-        corrected = apply_phase_offset(frame, offset)
-        self.image_widget.figure[0, 0].graphics[0].data[:] = corrected
-
-    def preview_before_after(self):
-        ind = self.image_widget.current_index["t"]
-        before = self.image_widget.data[0][ind].copy()
-        offset = compute_phase_offset(before, upsample=20)
-        after = apply_phase_offset(before, offset)
-        return before, after, offset
-        # Assuming GUI can handle dual previews:
-
-    # def calculate_offset(self):
-    #     ind = self.image_widget.current_index["t"]
-    #     frame = self.image_widget.data[0][ind].copy()
-    #     return NotImplementedError
-    #
-    # def apply_offset(self):
-    #     ind = self.image_widget.current_index["t"]
-    #     frame = self.image_widget.data[0][ind].copy()
-    #     frame[0::2, :] = np.roll(
-    #         self.image_widget.data[0][ind][0::2, :], shift=-self.current_offset, axis=1
-    #     )
-    #     self.image_widget.figure[0, 0].graphics[0].data[:] = frame
+        frame = self.image_widget.managed_graphics[0].data[:]
+        ofs = compute_phase_offset(frame, upsample=self.upsample)
+        self._current_offset = ofs
+        corrected = apply_phase_offset(frame, ofs)
+        self.image_widget.managed_graphics[0].data[:] = corrected
 
     def track_slider(self, ev):
-        """events to emit when z-plane changes"""
-        t_index = ev["t"]
-        return
-        # self.current_offset = int(self.offset_store[t_index][0])
-        # self.apply_offset()
+        if self.always_update:
+            self.calculate_offset()
 
     def save_to_file(self):
         if not self.h5name.is_file():
