@@ -227,6 +227,7 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         frame_list,
         yslice=slice(None),
         xslice=slice(None),
+        pbar=None,
     ):
         if self.is_slow_stack:
             frame_step = self.num_channels
@@ -248,34 +249,30 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         out_width = len(utils.listify_index(xslice, self._page_width))
         pages = np.empty([len(pages_to_read), out_height, out_width], dtype=self.dtype)
 
-        with tqdm(total=len(channel_list), desc="Channels", position=0, leave=False) as pbar_outer:
-            for ci, c in enumerate(channel_list):
-                with tqdm(total=len(frame_list), desc=f"Frames (ch={c})", position=1, leave=False) as pbar_inner:
-                    frame_count = 0
-                    for fi, f in enumerate(frame_list):
-                        indices = [
-                            i for i, (cc, ff, _) in enumerate(index_tuples)
-                            if cc == c and ff == f
-                        ]
-                        pages_needed = [pages_to_read[i] for i in indices]
+        for ci, c in enumerate(channel_list):
+            for fi, f in enumerate(frame_list):
+                indices = [
+                    i for i, (cc, ff, _) in enumerate(index_tuples)
+                    if cc == c and ff == f
+                ]
+                pages_needed = [pages_to_read[i] for i in indices]
 
-                        current_start = 0
-                        for tiff_file in self.tiff_files:
-                            final = current_start + len(tiff_file.pages)
-                            file_pages = [
-                                p for p in pages_needed
-                                if current_start <= p < final
-                            ]
-                            if file_pages:
-                                file_indices = [p - current_start for p in file_pages]
-                                global_indices = [
-                                    i for i in indices if pages_to_read[i] in file_pages
-                                ]
-                                pages[np.array(global_indices)] = tiff_file.asarray(key=file_indices)[..., yslice, xslice]
-                            current_start = final
-                        frame_count += 1
-                        pbar_inner.update(1)
-                    pbar_outer.update(1)
+                current_start = 0
+                for tiff_file in self.tiff_files:
+                    final = current_start + len(tiff_file.pages)
+                    file_pages = [p for p in pages_needed if current_start <= p < final]
+                    if file_pages:
+                        file_indices = [p - current_start for p in file_pages]
+                        global_indices = [
+                            i for i in indices if pages_to_read[i] in file_pages
+                        ]
+                        pages[np.array(global_indices)] = tiff_file.asarray(
+                            key=file_indices
+                        )[..., yslice, xslice]
+                    current_start = final
+
+                if pbar:
+                    pbar.update(1)
 
         new_shape = [
             len(frame_list),
@@ -348,24 +345,26 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             dtype=self.dtype,
         )
 
-        for i, (field_id, y_list, x_list) in enumerate(zip(field_list, y_lists, x_lists)):
-            field = self.fields[field_id]
-            slices = zip(
-                field.yslices, field.xslices, field.output_yslices, field.output_xslices
-            )
-            for yslice, xslice, output_yslice, output_xslice in slices:
-                pages = self._read_pages(
-                    [field.slice_id], channel_list, frame_list, yslice, xslice
+        total_reads = len(field_list) * len(channel_list) * len(frame_list)
+        with tqdm(total=total_reads, desc="Reading data from tiff") as pbar:
+            for i, (field_id, y_list, x_list) in enumerate(zip(field_list, y_lists, x_lists)):
+                field = self.fields[field_id]
+                slices = zip(
+                    field.yslices, field.xslices, field.output_yslices, field.output_xslices
                 )
+                for yslice, xslice, output_yslice, output_xslice in slices:
+                    pages = self._read_pages(
+                        [field.slice_id], channel_list, frame_list, yslice, xslice, pbar=pbar
+                    )
 
-                y_range = range(output_yslice.start, output_yslice.stop)
-                x_range = range(output_xslice.start, output_xslice.stop)
-                ys = [[y - output_yslice.start] for y in y_list if y in y_range]
-                xs = [x - output_xslice.start for x in x_list if x in x_range]
-                output_ys = [[index] for index, y in enumerate(y_list) if y in y_range]
-                output_xs = [index for index, x in enumerate(x_list) if x in x_range]
+                    y_range = range(output_yslice.start, output_yslice.stop)
+                    x_range = range(output_xslice.start, output_xslice.stop)
+                    ys = [[y - output_yslice.start] for y in y_list if y in y_range]
+                    xs = [x - output_xslice.start for x in x_list if x in x_range]
+                    output_ys = [[index] for index, y in enumerate(y_list) if y in y_range]
+                    output_xs = [index for index, x in enumerate(x_list) if x in x_range]
 
-                item[i, output_ys, output_xs] = pages[0, ys, xs]
+                    item[i, output_ys, output_xs] = pages[0, ys, xs]
 
 
         squeeze_dims = [
@@ -384,34 +383,6 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             return np.transpose(item, (3, 2, 0, 1))
 
         raise ValueError(f"Unexpected ndim: {ndim}")
-
-    # def __getitem__(self, key):
-    #     """Index like a 4D numpy array [t, z, x, y]"""
-    #     ic(key)
-    #     if key == slice(None):  # asking for full scan, give them a subsample?
-    #         return np.squeeze(
-    #             subsample_array(self, ignore_dims=[-1, -2])
-    #         )  # retain image dims
-    #     elif not isinstance(key, tuple):
-    #         key = (key,)
-    #     key = tuple(map(_convert_range_to_slice, key))
-    #     t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
-    #
-    #     if self._selected_xslice is not None:
-    #         x_mask = self.fields[0].output_xslices[self._selected_xslice]
-    #         x_key = _intersect_slice(x_key, x_mask)
-    #         ic(self._selected_xslice, x_mask, x_key)
-    #
-    #     reordered_key = (0, y_key, x_key, z_key, t_key)
-    #     item = super().__getitem__(reordered_key)
-    #     ndim = item.ndim
-    #     if ndim == 2:
-    #         return item
-    #     if ndim == 3:
-    #         return np.transpose(item, (2, 0, 1))
-    #     if ndim == 4:
-    #         return np.transpose(item, (3, 2, 0, 1))
-    #     raise ValueError(f"Unexpected ndim: {ndim}")
 
     @property
     def total_frames(self):
