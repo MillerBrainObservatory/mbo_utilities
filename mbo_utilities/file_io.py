@@ -202,17 +202,20 @@ def read_scan(pathnames, dtype=np.int16, roi=None, **kwargs):
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
 
+
 def _intersect_slice(user: slice, mask: slice):
     ic(user, mask)
     start = max(user.start or 0, mask.start)
     stop = min(user.stop or mask.stop, mask.stop)
     return slice(start, stop)
 
+
 class ScanMultiROIReordered(scans.ScanMultiROI):
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
     """
+
     def __init__(self, *args, selected_xslice: int = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.pbar = None
@@ -255,7 +258,8 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             frame_count = 0
             for fi, f in enumerate(frame_list):
                 indices = [
-                    i for i, (cc, ff, _) in enumerate(index_tuples)
+                    i
+                    for i, (cc, ff, _) in enumerate(index_tuples)
                     if cc == c and ff == f
                 ]
                 pages_needed = [pages_to_read[i] for i in indices]
@@ -272,7 +276,9 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
                         global_indices = [
                             i for i in indices if pages_to_read[i] in file_pages
                         ]
-                        pages[np.array(global_indices)] = tiff_file.asarray(key=file_indices)[..., yslice, xslice]
+                        pages[np.array(global_indices)] = tiff_file.asarray(
+                            key=file_indices
+                        )[..., yslice, xslice]
                     current_start = final
                 frame_count += 1
 
@@ -352,7 +358,9 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             self._pbar = tqdm(total=total_reads, desc="Reading data from tiff")
         else:
             self._pbar = None
-        for i, (field_id, y_list, x_list) in enumerate(zip(field_list, y_lists, x_lists)):
+        for i, (field_id, y_list, x_list) in enumerate(
+            zip(field_list, y_lists, x_lists)
+        ):
             field = self.fields[field_id]
             slices = zip(
                 field.yslices, field.xslices, field.output_yslices, field.output_xslices
@@ -373,9 +381,9 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
                 if self._pbar is not None:
                     self._pbar.update(1)
 
-
         squeeze_dims = [
-            i for i, index in enumerate(full_key)
+            i
+            for i, index in enumerate(full_key)
             if np.issubdtype(type(index), np.signedinteger)
         ]
         item = np.squeeze(item, axis=tuple(squeeze_dims))
@@ -791,7 +799,9 @@ def _is_arraylike(obj) -> bool:
     return True
 
 
-def to_lazy_array(data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs) -> list[np.ndarray] | np.ndarray | ScanMultiROIReordered:
+def to_lazy_array(
+    data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs
+) -> list[np.ndarray] | np.ndarray | ScanMultiROIReordered:
     """
     Convencience function to resolve various data_in variants into lazy arrays.
     """
@@ -819,7 +829,7 @@ def to_lazy_array(data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndar
             if data_in.suffix == ".npy":
                 return np.memmap(data_in)
         if data_in.is_dir():
-            files = get_files(data_in, 'tif', 1)
+            files = get_files(data_in, "tif", 1)
             return read_scan(files)
 
     raise TypeError(f"Unsupported data type: {type(data_in)}")

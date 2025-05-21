@@ -9,6 +9,7 @@ from icecream import ic
 try:
     import cupy as cp
     from cusignal import register_translation  # GPU version of phase_cross_correlation
+
     HAS_CUPY = True
 except ImportError:
     HAS_CUPY = False
@@ -132,8 +133,10 @@ def implot_pollen(pollen_offsets, offset_store, zstack):
 
     imgui.end_child()
 
+
 def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
     from scipy.ndimage import fourier_shift
+
     result = frame.copy()
     rows = result[1::2, :]
     f = np.fft.fftn(rows)
@@ -141,8 +144,12 @@ def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
     result[1::2, :] = np.fft.ifftn(fshift).real
     return result
 
-def compute_phase_offset(frame: np.ndarray, upsample: int = 10, exclude_center_px: int = 4) -> float:
+
+def compute_phase_offset(
+    frame: np.ndarray, upsample: int = 10, exclude_center_px: int = 4
+) -> float:
     from skimage.registration import phase_cross_correlation
+
     if frame.ndim == 3:
         frame = np.mean(frame, axis=0)
     _, w = frame.shape
@@ -167,9 +174,7 @@ def compute_phase_offset(frame: np.ndarray, upsample: int = 10, exclude_center_p
         pre_gpu = cp.asarray(pre_crop)
         post_gpu = cp.asarray(post_crop)
         shift, _, _ = register_translation(
-            cp.asarray(pre_gpu),
-            cp.asarray(post_gpu),
-            upsample_factor=upsample
+            cp.asarray(pre_gpu), cp.asarray(post_gpu), upsample_factor=upsample
         )
     else:
         shift, _, _ = phase_cross_correlation(
@@ -177,6 +182,7 @@ def compute_phase_offset(frame: np.ndarray, upsample: int = 10, exclude_center_p
         )
 
     return float(shift[1])
+
 
 class PreviewDataWidget(EdgeWindow):
     def __init__(
@@ -275,13 +281,17 @@ class PreviewDataWidget(EdgeWindow):
         imgui.align_text_to_frame_padding()
         imgui.text("offset")
         imgui.next_column()
-        imgui.text_colored(imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self.current_offset:.3f}")
+        imgui.text_colored(
+            imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self.current_offset:.3f}"
+        )
 
         imgui.next_column()
         imgui.align_text_to_frame_padding()
         imgui.text("upsample")
         imgui.next_column()
-        upsample_changed, upsample_val = imgui.input_int("##upsample", self.upsample, step=1, step_fast=2)
+        upsample_changed, upsample_val = imgui.input_int(
+            "##upsample", self.upsample, step=1, step_fast=2
+        )
         if upsample_changed:
             self.upsample = max(1, upsample_val)
 
