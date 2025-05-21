@@ -17,8 +17,10 @@ from pprint import pprint
 
 if __name__ == "__main__":
     # raw = Path(r"D://demo//raw")
-    raw = Path(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green")
-    test_scan = mbo.read_scan(raw, roi=2)
+    # raw = Path(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green")
+    raw = Path(r"/home/flynn/lbm_data/raw")
+    import tifffile
+    test_scan = mbo.read_scan(raw, roi=1)
     savedir = r"D:\W2_DATA\kbarber\2025_03_01\mk301\masknmf\roi_2"
     mbo.save_as(
         test_scan,
