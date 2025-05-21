@@ -149,7 +149,7 @@ def save_as(
 
     if isinstance(planes, int):
         planes = [planes - 1]
-    elif planes is None: # DON'T use "if not planes", then 0 will be treated as falsy
+    elif planes is None:  # DON'T use "if not planes", then 0 will be treated as falsy
         planes = list(range(scan.num_channels))
     else:
         planes = [p - 1 for p in planes]
@@ -213,7 +213,7 @@ def _save_data(
     trim_edge=None,
     fix_phase=True,
     target_chunk_mb=20,
-    **kwargs
+    **kwargs,
 ):
     if "." in file_extension:
         file_extension = file_extension.split(".")[-1]
@@ -268,8 +268,8 @@ def _save_data(
     pbar = tqdm(total=total_chunks, desc="Saving plane ", position=0)
 
     from matplotlib import pyplot as plt
-    debug = kwargs.get("debug", False)
 
+    debug = kwargs.get("debug", False)
 
     pre_exists = True
     for chan_index in planes:
@@ -321,7 +321,9 @@ def _save_data(
 
                     for y in range(0, projection.shape[0] - patch_size + 1, 8):
                         for x in range(0, projection.shape[1] - patch_size + 1, 8):
-                            val = projection[y:y + patch_size, x:x + patch_size].sum()
+                            val = projection[
+                                y : y + patch_size, x : x + patch_size
+                            ].sum()
                             if val > max_val:
                                 max_val = val
                                 best_y, best_x = y, x
@@ -352,8 +354,10 @@ def _save_data(
     elif file_extension == "bin":
         write_ops(metadata, path, planes)
 
-def correct_phase_chunk(frames: np.ndarray, upsample: int = 10, exclude_center_px: int = 4) -> np.ndarray:
 
+def correct_phase_chunk(
+    frames: np.ndarray, upsample: int = 10, exclude_center_px: int = 4
+) -> np.ndarray:
     corrected = frames.copy()
     offsets = np.zeros(frames.shape[0], dtype=np.float32)
 
@@ -369,18 +373,23 @@ def correct_phase_chunk(frames: np.ndarray, upsample: int = 10, exclude_center_p
         pre_crop = np.concatenate([pre[:m, keep_left], pre[:m, keep_right]], axis=1)
         post_crop = np.concatenate([post[:m, keep_left], post[:m, keep_right]], axis=1)
 
-        shift, _, _ = phase_cross_correlation(pre_crop, post_crop, upsample_factor=upsample)
-        offsets[i] = shift[1] # if abs(shift[1]) < 4.0 else 0.0  # discard garbage
+        shift, _, _ = phase_cross_correlation(
+            pre_crop, post_crop, upsample_factor=upsample
+        )
+        offsets[i] = shift[1]  # if abs(shift[1]) < 4.0 else 0.0  # discard garbage
         # if abs(shift[1]) > 4.0:
         #     ic(f"Big shift: {i}")
 
     if np.any(np.abs(offsets) > 0.001):
         rows = corrected[:, 1::2]
         f = np.fft.fftn(rows, axes=(1, 2))
-        shifts = np.array([fourier_shift(f[i], (0, offsets[i])) for i in range(f.shape[0])])
+        shifts = np.array(
+            [fourier_shift(f[i], (0, offsets[i])) for i in range(f.shape[0])]
+        )
         corrected[:, 1::2] = np.fft.ifftn(shifts, axes=(1, 2)).real
 
     return corrected
+
 
 def write_ops(metadata: dict, base_path: str | Path, planes):
     base_path = Path(base_path).expanduser().resolve()
@@ -611,7 +620,7 @@ def main():
     parser.add_argument(
         "--roi",
         action="store_true",
-        help="ROI to save. 1-based, so first roi=1, second roi=2"
+        help="ROI to save. 1-based, so first roi=1, second roi=2",
     )
 
     parser.add_argument(
@@ -626,7 +635,9 @@ def main():
         help="Overwrite existing files if saving data..",
     )
     parser.add_argument(
-        "--bin", action="store_false", help="Flag to save as .bin. Default is False, will save as .tiff"
+        "--bin",
+        action="store_false",
+        help="Flag to save as .bin. Default is False, will save as .tiff",
     )
     parser.add_argument(
         "--debug", action="store_true", help="Output verbose debug information."
