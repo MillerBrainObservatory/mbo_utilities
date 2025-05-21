@@ -311,14 +311,14 @@ wheels = [
 
 [[package]]
 name = "click"
-version = "8.2.0"
+version = "8.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cd/0f/62ca20172d4f87d93cf89665fbaedcd560ac48b465bd1d92bfc7ea6b0a41/click-8.2.0.tar.gz", hash = "sha256:f5452aeddd9988eefa20f90f05ab66f17fce1ee2a36907fd30b05bbb5953814d", size = 235857 }
+sdist = { url = "https://files.pythonhosted.org/packages/60/6c/8ca2efa64cf75a977a0d7fac081354553ebe483345c734fb6b6515d96bbc/click-8.2.1.tar.gz", hash = "sha256:27c491cc05d968d271d5a1db13e3b5a184636d9d930f148c50b038f0d0646202", size = 286342 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/58/1f37bf81e3c689cc74ffa42102fa8915b59085f54a6e4a80bc6265c0f6bf/click-8.2.0-py3-none-any.whl", hash = "sha256:6b303f0b2aa85f1cb4e5303078fadcbcd4e476f114fab9b5007005711839325c", size = 102156 },
+    { url = "https://files.pythonhosted.org/packages/85/32/10bb5764d90a8eee674e9dc6f4db6a0ab47c8c4d0d83c27f7c39ac415a4d/click-8.2.1-py3-none-any.whl", hash = "sha256:61a3265b914e850b85317d0b3109c7f8cd35a670f963866005d6ef1d5175a12b", size = 102215 },
 ]
 
 [[package]]
@@ -332,14 +332,14 @@ wheels = [
 
 [[package]]
 name = "cmap"
-version = "0.6.0"
+version = "0.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/19/b4/a1a81270e5efff6bf0130326951687866be554732ce48bef1f9a48118c29/cmap-0.6.0.tar.gz", hash = "sha256:26b305847e7d722f1be42c2b339417222711da13852f9a123a57a0d100827197", size = 910503 }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/2d/ececc41f53af4ceaa7de144113035252c423cb5189ff4720f75665cb543a/cmap-0.6.1.tar.gz", hash = "sha256:2d9e433c3800c7b90a5cd4d55ad92c6f121d60019d94c7fe3a9af0f870bae2d4", size = 910987 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/46/0b/a2830729fbfff7bc83f4477fcc2344be68ed310b82531eeec253d48fdfae/cmap-0.6.0-py3-none-any.whl", hash = "sha256:7196d1632f0105024aaf570c216b10e7db5a064dadc1f74a3558e911bc1a783b", size = 958255 },
+    { url = "https://files.pythonhosted.org/packages/61/66/ccf0a5c075f95724aa466b7557c249781d5dbe10b11aade92bec5a902728/cmap-0.6.1-py3-none-any.whl", hash = "sha256:0d5e582891fec968b53e3a82eb9a3f71cbea61202b0b72cf9726e8ac5fd502b9", size = 958640 },
 ]
 
 [[package]]
@@ -438,7 +438,7 @@ wheels = [
 
 [[package]]
 name = "dask"
-version = "2025.5.0"
+version = "2025.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -450,9 +450,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "toolz" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/df/44/ac66964138b026bc31d82c38c97ff260b1be7e13d8446c5c21e81b4c0991/dask-2025.5.0.tar.gz", hash = "sha256:3ec9175e53effe1c2b0086668352e0d5261c5ef6f71a410264eda83659d686ef", size = 10971343 }
+sdist = { url = "https://files.pythonhosted.org/packages/3d/29/05feb8e2531c46d763547c66b7f5deb39b53d99b3be1b4ddddbd1cec6567/dask-2025.5.1.tar.gz", hash = "sha256:979d9536549de0e463f4cab8a8c66c3a2ef55791cd740d07d9bf58fab1d1076a", size = 10969324 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/cb/a68c59dd229bae7c439631dba66b0286d551efae67e09e0bbf813635b0d3/dask-2025.5.0-py3-none-any.whl", hash = "sha256:77e9a64bb09098515bc579477b7051b0909474cd7b3e0005e3d0968a70c84015", size = 1473896 },
+    { url = "https://files.pythonhosted.org/packages/38/30/53b0844a7a4c6b041b111b24ca15cc9b8661a86fe1f6aaeb2d0d7f0fb1f2/dask-2025.5.1-py3-none-any.whl", hash = "sha256:3b85fdaa5f6f989dde49da6008415b1ae996985ebdfb1e40de2c997d9010371d", size = 1474226 },
 ]
 
 [package.optional-dependencies]

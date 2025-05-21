@@ -13,11 +13,12 @@ from ..file_io import (
     to_lazy_array,
     get_files,
     read_scan,
-    mbo_home
+    mbo_home,
 )
 
 if is_imgui_installed():
     import fastplotlib as fpl
+
 
 def run_gui(
     data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None, **kwargs
@@ -35,7 +36,6 @@ def run_gui(
         # all logic for what this function can support is handled here
         data = to_lazy_array(data_in)
 
-
     if isinstance(data_in, list):
         vmin, vmax = data[0].min, data[0].max
         nx, ny = data[0].shape[-2:]
@@ -45,14 +45,11 @@ def run_gui(
 
     iw = fpl.ImageWidget(
         data=data,
-        histogram_widget = False,
-        figure_kwargs = {
+        histogram_widget=False,
+        figure_kwargs={
             "size": (nx, ny),
         },
-        graphic_kwargs = {
-            "vmin": vmin,
-            "vmax": vmax
-        },
+        graphic_kwargs={"vmin": vmin, "vmax": vmax},
         window_funcs={"t": (np.mean, 0)},
     )
 
