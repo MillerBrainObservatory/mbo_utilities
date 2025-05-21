@@ -248,34 +248,30 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         out_width = len(utils.listify_index(xslice, self._page_width))
         pages = np.empty([len(pages_to_read), out_height, out_width], dtype=self.dtype)
 
-        with tqdm(total=len(channel_list), desc="Channels", position=0, leave=False) as pbar_outer:
-            for ci, c in enumerate(channel_list):
-                with tqdm(total=len(frame_list), desc=f"Frames (ch={c})", position=1, leave=False) as pbar_inner:
-                    frame_count = 0
-                    for fi, f in enumerate(frame_list):
-                        indices = [
-                            i for i, (cc, ff, _) in enumerate(index_tuples)
-                            if cc == c and ff == f
-                        ]
-                        pages_needed = [pages_to_read[i] for i in indices]
+        for ci, c in enumerate(channel_list):
+            frame_count = 0
+            for fi, f in enumerate(frame_list):
+                indices = [
+                    i for i, (cc, ff, _) in enumerate(index_tuples)
+                    if cc == c and ff == f
+                ]
+                pages_needed = [pages_to_read[i] for i in indices]
 
-                        current_start = 0
-                        for tiff_file in self.tiff_files:
-                            final = current_start + len(tiff_file.pages)
-                            file_pages = [
-                                p for p in pages_needed
-                                if current_start <= p < final
-                            ]
-                            if file_pages:
-                                file_indices = [p - current_start for p in file_pages]
-                                global_indices = [
-                                    i for i in indices if pages_to_read[i] in file_pages
-                                ]
-                                pages[np.array(global_indices)] = tiff_file.asarray(key=file_indices)[..., yslice, xslice]
-                            current_start = final
-                        frame_count += 1
-                        pbar_inner.update(1)
-                    pbar_outer.update(1)
+                current_start = 0
+                for tiff_file in self.tiff_files:
+                    final = current_start + len(tiff_file.pages)
+                    file_pages = [
+                        p for p in pages_needed
+                        if current_start <= p < final
+                    ]
+                    if file_pages:
+                        file_indices = [p - current_start for p in file_pages]
+                        global_indices = [
+                            i for i in indices if pages_to_read[i] in file_pages
+                        ]
+                        pages[np.array(global_indices)] = tiff_file.asarray(key=file_indices)[..., yslice, xslice]
+                    current_start = final
+                frame_count += 1
 
         new_shape = [
             len(frame_list),
