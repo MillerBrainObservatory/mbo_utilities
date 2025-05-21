@@ -215,6 +215,8 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
     """
     def __init__(self, *args, selected_xslice: int = None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.pbar = None
+        self.show_pbar = False
         if selected_xslice == 0:
             raise ValueError("roi parameter is 1-based indexing. 0 is not supported.")
         # -1 because for users 1 based indexing to keep consistent with planes parameter
@@ -345,26 +347,31 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
             dtype=self.dtype,
         )
 
-        total_reads = len(field_list) * len(channel_list) * len(frame_list)
-        with tqdm(total=total_reads, desc="Reading data from tiff") as pbar:
-            for i, (field_id, y_list, x_list) in enumerate(zip(field_list, y_lists, x_lists)):
-                field = self.fields[field_id]
-                slices = zip(
-                    field.yslices, field.xslices, field.output_yslices, field.output_xslices
+        if self.show_pbar:
+            total_reads = len(field_list) * len(channel_list) * len(frame_list)
+            self._pbar = tqdm(total=total_reads, desc="Reading data from tiff")
+        else:
+            self._pbar = None
+        for i, (field_id, y_list, x_list) in enumerate(zip(field_list, y_lists, x_lists)):
+            field = self.fields[field_id]
+            slices = zip(
+                field.yslices, field.xslices, field.output_yslices, field.output_xslices
+            )
+            for yslice, xslice, output_yslice, output_xslice in slices:
+                pages = self._read_pages(
+                    [field.slice_id], channel_list, frame_list, yslice, xslice
                 )
-                for yslice, xslice, output_yslice, output_xslice in slices:
-                    pages = self._read_pages(
-                        [field.slice_id], channel_list, frame_list, yslice, xslice, pbar=pbar
-                    )
 
-                    y_range = range(output_yslice.start, output_yslice.stop)
-                    x_range = range(output_xslice.start, output_xslice.stop)
-                    ys = [[y - output_yslice.start] for y in y_list if y in y_range]
-                    xs = [x - output_xslice.start for x in x_list if x in x_range]
-                    output_ys = [[index] for index, y in enumerate(y_list) if y in y_range]
-                    output_xs = [index for index, x in enumerate(x_list) if x in x_range]
+                y_range = range(output_yslice.start, output_yslice.stop)
+                x_range = range(output_xslice.start, output_xslice.stop)
+                ys = [[y - output_yslice.start] for y in y_list if y in y_range]
+                xs = [x - output_xslice.start for x in x_list if x in x_range]
+                output_ys = [[index] for index, y in enumerate(y_list) if y in y_range]
+                output_xs = [index for index, x in enumerate(x_list) if x in x_range]
 
-                    item[i, output_ys, output_xs] = pages[0, ys, xs]
+                item[i, output_ys, output_xs] = pages[0, ys, xs]
+                if self._pbar is not None:
+                    self._pbar.update(1)
 
 
         squeeze_dims = [
@@ -784,31 +791,35 @@ def _is_arraylike(obj) -> bool:
     return True
 
 
-def to_lazy_array(data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray]):
+def to_lazy_array(data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs) -> list[np.ndarray] | np.ndarray | ScanMultiROIReordered:
     """
     Convencience function to resolve various data_in variants into lazy arrays.
     """
     if _is_arraylike(data_in):
-        ic(f"Data is array like")
-        return data_in
+        return [data_in]
+
     if isinstance(data_in, list):
-        if is_raw_scanimage(data_in[0]):
-            ic(f"Returning raw scanimage from path {data_in[0]}")
-            return read_scan(data_in)
-        else:
-            ic(f"Returning z-stack from files:\n {data_in}.")
-            return zstack_from_files(data_in)
+        if all(_is_arraylike(d) for d in data_in):
+            return data_in
+        if isinstance(data_in[0], (str, Path)):
+            if is_raw_scanimage(str(data_in[0])):
+                ic(f"Returning raw scanimage from path {data_in[0]}")
+                roi = kwargs.get("roi", None)
+                return read_scan(data_in, roi=roi)
+            else:
+                ic(f"Returning z-stack from files:\n {data_in}.")
+                return zstack_from_files(data_in)
+        raise TypeError("Mixed list of unsupported types")
+
     if isinstance(data_in, (str, Path)):
         data_in = Path(data_in).expanduser().resolve()
         if data_in.is_file():
-            # check suffix
             if data_in.suffix in [".tif", ".tiff"]:
                 return tifffile.memmap(data_in)
-            elif data_in.suffix == ".npy":
+            if data_in.suffix == ".npy":
                 return np.memmap(data_in)
-        elif data_in.is_dir():
+        if data_in.is_dir():
             files = get_files(data_in, 'tif', 1)
-            scan = read_scan(files)
-            return scan
-    else:
-        raise TypeError(f"Invalid type {type(data_in)}")
+            return read_scan(files)
+
+    raise TypeError(f"Unsupported data type: {type(data_in)}")

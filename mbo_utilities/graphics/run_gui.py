@@ -35,8 +35,14 @@ def run_gui(
         # all logic for what this function can support is handled here
         data = to_lazy_array(data_in)
 
-    vmin, vmax = data.min, data.max
-    nx, ny = data.shape[-2:]
+
+    if isinstance(data_in, list):
+        vmin, vmax = data[0].min, data[0].max
+        nx, ny = data[0].shape[-2:]
+    else:
+        vmin, vmax = data.min, data.max
+        nx, ny = data.shape[-2:]
+
     iw = fpl.ImageWidget(
         data=data,
         histogram_widget = False,
@@ -47,7 +53,7 @@ def run_gui(
             "vmin": vmin,
             "vmax": vmax
         },
-        window_funcs={"t": (np.mean, 5)},
+        window_funcs={"t": (np.mean, 0)},
     )
 
     add_gui = kwargs.get("gui", None)
