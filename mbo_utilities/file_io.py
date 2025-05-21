@@ -795,8 +795,64 @@ def _is_arraylike(obj) -> bool:
 
     return True
 
+def to_lazy_array(data_in, **kwargs):
+    """Convert a variety of data types into an array or list of arrays to pass to Image Widget"""
+    return dispatch_data_handler(data_in, **kwargs)
 
-def to_lazy_array(
+
+def dispatch_data_handler(data_in, **kwargs):
+    if _is_arraylike(data_in):
+        return [data_in]
+
+    if isinstance(data_in, list):
+        return handle_list(data_in, **kwargs)
+
+    if isinstance(data_in, (str, Path)):
+        return handle_path(Path(data_in).expanduser().resolve(), **kwargs)
+
+    raise TypeError(f"Unsupported input type: {type(data_in)}")
+
+
+def handle_path(path: Path, **kwargs):
+    if path.is_file():
+        if path.suffix in [".tif", ".tiff"]:
+            return tifffile.memmap(path)
+        if path.suffix == ".npy":
+            return np.memmap(path)
+        raise TypeError(f"Unsupported file type: {path.suffix}")
+    
+    if path.is_dir():
+        files = get_files(path, "tif", 1)
+        return read_scan(files, roi=kwargs.get("roi"))
+
+    raise TypeError(f"Path must be a file or directory, got: {path}")
+
+
+def handle_list(data_in: list, **kwargs):
+    if all(_is_arraylike(d) for d in data_in):
+        return data_in
+
+    if all(isinstance(p, (str, Path)) for p in data_in):
+        if is_raw_scanimage(str(data_in[0])):
+            return read_scan(data_in, roi=kwargs.get("roi"))
+        # assembled, memmory mappable files
+        return zstack_from_files(data_in)
+
+    raise TypeError("Unsupported mixed-type list")
+
+
+def standardize_for_image_widget(data):
+    """
+    Convert data to a list or array compatible with ImageWidget input.
+    You can hook in dimension checks here if needed.
+    """
+    if isinstance(data, list):
+        return data
+    if isinstance(data, np.ndarray):
+        return [data]
+    return data  # assume already compatible (e.g., ScanMultiROIReordered)
+
+def to_lazy_array2(
     data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs
 ) -> list[np.ndarray] | np.ndarray | ScanMultiROIReordered:
     """
