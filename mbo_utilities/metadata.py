@@ -161,7 +161,7 @@ def is_raw_scanimage(file: os.PathLike | str):
     bool
         True if the TIFF file is a raw ScanImage TIFF; False otherwise.
     """
-    if not file:
+    if not file or not isinstance(file, (str, os.PathLike)):
         return False
 
     tiff_file = tifffile.TiffFile(file)
