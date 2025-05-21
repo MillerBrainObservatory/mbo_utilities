@@ -18,7 +18,6 @@ from .util import (
     smooth_data,
     is_running_jupyter,
     is_imgui_installed,
-    is_qt_installed,
     subsample_array,
 )
 
