@@ -76,7 +76,7 @@ def print_params(params, indent=5):
 
 def save_as(
     scan,
-    savedir: os.PathLike,
+    savedir: str | Path,
     planes: list | tuple = None,
     metadata: dict = None,
     overwrite: bool = True,
