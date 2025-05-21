@@ -15,7 +15,6 @@ except ImportError:
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
-from fastplotlib.widgets.image_widget._widget import _WindowFunctions
 
 from imgui_bundle import imgui, implot
 from imgui_bundle import portable_file_dialogs as pfd
@@ -194,19 +193,38 @@ class PreviewDataWidget(EdgeWindow):
         self.image_widget = iw
         self.shape = self.image_widget.data[0].shape
         self.nz = self.shape[0]
-
         self.offset_store = np.zeros(self.nz)
+
         self._current_offset = 0.0
+        self._window_size = 1
+
         self.upsample = 20
         self.always_update = False
-        self.proj = "mean"
-        self.window_size = 3
+        self._proj = "mean"
 
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
 
-        self.image_widget.window_funcs = {"t": (getattr(np, self.proj), self.window_size)}
-        self.image_widget.add_event_handler(self.track_slider, "current_index")
+        self.image_widget.window_funcs["t"].window_size = self._window_size
+        self.image_widget.window_funcs["t"].func = getattr(np, self.proj)
+
+    @property
+    def proj(self):
+        return self._proj
+
+    @proj.setter
+    def proj(self, value):
+        self.image_widget.window_funcs["t"].func = getattr(np, value)
+        self._proj = value
+
+    @property
+    def window_size(self):
+        return self._window_size
+
+    @window_size.setter
+    def window_size(self, value):
+        self.image_widget.window_funcs["t"].window_size = value
+        self._window_size = value
 
     @property
     def current_offset(self):
@@ -218,12 +236,10 @@ class PreviewDataWidget(EdgeWindow):
 
     def update(self):
         imgui.begin_child("offset_panel")
-
         imgui.push_item_width(80)
 
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "window functions")
         imgui.separator()
-
         imgui.columns(2, borders=False)
         imgui.set_column_width(0, 100)
 
@@ -232,25 +248,20 @@ class PreviewDataWidget(EdgeWindow):
         imgui.next_column()
         projection_options = ["mean", "max", "std"]
         current_idx = projection_options.index(self.proj)
-        changed, new_idx = imgui.combo("##proj", current_idx, projection_options)
-        if changed:
-            self.image_widget.window_funcs["t"].func = getattr(np, self.proj)
+        proj_changed, new_idx = imgui.combo("##proj", current_idx, projection_options)
+        if proj_changed:
+            self.proj = projection_options[new_idx]
 
         imgui.next_column()
 
         imgui.align_text_to_frame_padding()
         imgui.text("window")
         imgui.next_column()
-        changed, new_win_size = imgui.input_int(
-            "Window Size",
-            self.image_widget.window_funcs["t"].window_size,
-            step=1,
-            step_fast=5
+        size_changed, new_size = imgui.input_int(
+            "", self.window_size, step=1, step_fast=2
         )
-        if changed:
-            self.image_widget.window_funcs["t"].window_size = new_win_size
-
-        imgui.next_column()
+        if size_changed and new_size > 2:
+            self.window_size = new_size
 
         imgui.columns(1)
         imgui.spacing()
@@ -264,22 +275,21 @@ class PreviewDataWidget(EdgeWindow):
         imgui.align_text_to_frame_padding()
         imgui.text("offset")
         imgui.next_column()
-        imgui.text_colored(imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self._current_offset:.3f}")
-        imgui.next_column()
+        imgui.text_colored(imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self.current_offset:.3f}")
 
+        imgui.next_column()
         imgui.align_text_to_frame_padding()
         imgui.text("upsample")
         imgui.next_column()
-        changed, val = imgui.input_int("##upsample", self.upsample, step=1, step_fast=2)
-        if changed:
-            self.upsample = max(1, val)
-        imgui.next_column()
+        upsample_changed, upsample_val = imgui.input_int("##upsample", self.upsample, step=1, step_fast=2)
+        if upsample_changed:
+            self.upsample = max(1, upsample_val)
 
+        imgui.next_column()
         imgui.align_text_to_frame_padding()
         imgui.text("auto")
         imgui.next_column()
         _, self.always_update = imgui.checkbox("##auto", self.always_update)
-        imgui.next_column()
 
         imgui.columns(1)
         imgui.spacing()
@@ -296,7 +306,9 @@ class PreviewDataWidget(EdgeWindow):
         corrected = apply_phase_offset(frame, ofs)
         self.image_widget.managed_graphics[0].data[:] = corrected
 
-    def track_slider(self, ev):
+    def track_slider(self, ev=None):
+        # if self.image_widget.window_funcs["t"].window_size != self.window_size:
+        #     self.image_widget.window_funcs["t"].window_size = self.window_size
         if self.always_update:
             self.calculate_offset()
 
