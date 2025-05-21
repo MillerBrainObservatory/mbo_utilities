@@ -22,7 +22,9 @@ from imgui_bundle import portable_file_dialogs as pfd
 #     return dialog
 
 
-mbo.run_gui("/home/flynn/lbm_data/raw", gui=True)
+# mbo.run_gui("/home/flynn/lbm_data/raw", gui=True)
+data = "/home/flynn/lbm_data/assembled/plane_12.tif"
+mbo.run_gui(data, gui=True)
 print("done")
 # path = select_folder()
 # print(path.result())

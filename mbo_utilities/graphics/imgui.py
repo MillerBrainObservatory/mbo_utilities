@@ -205,14 +205,13 @@ class PreviewDataWidget(EdgeWindow):
         self._window_size = 1
 
         self.upsample = 20
-        self.always_update = False
+        self.auto_update = False
         self._proj = "mean"
 
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
 
-        self.image_widget.window_funcs["t"].window_size = self._window_size
-        self.image_widget.window_funcs["t"].func = getattr(np, self.proj)
+        self.image_widget.add_event_handler(self.track_slider, "current_index")
 
     @property
     def proj(self):
@@ -263,11 +262,11 @@ class PreviewDataWidget(EdgeWindow):
         imgui.align_text_to_frame_padding()
         imgui.text("window")
         imgui.next_column()
-        size_changed, new_size = imgui.input_int(
-            "", self.window_size, step=1, step_fast=2
+        size_changed, new_winsize = imgui.input_int(
+            "##", self.window_size, step=1, step_fast=2
         )
-        if size_changed and new_size > 2:
-            self.window_size = new_size
+        if size_changed and new_winsize > 0:
+            self.window_size = new_winsize
 
         imgui.columns(1)
         imgui.spacing()
@@ -299,7 +298,7 @@ class PreviewDataWidget(EdgeWindow):
         imgui.align_text_to_frame_padding()
         imgui.text("auto")
         imgui.next_column()
-        _, self.always_update = imgui.checkbox("##auto", self.always_update)
+        _, self.auto_update = imgui.checkbox("##auto", self.auto_update)
 
         imgui.columns(1)
         imgui.spacing()
@@ -317,9 +316,7 @@ class PreviewDataWidget(EdgeWindow):
         self.image_widget.managed_graphics[0].data[:] = corrected
 
     def track_slider(self, ev=None):
-        # if self.image_widget.window_funcs["t"].window_size != self.window_size:
-        #     self.image_widget.window_funcs["t"].window_size = self.window_size
-        if self.always_update:
+        if self.auto_update:
             self.calculate_offset()
 
     def save_to_file(self):
