@@ -425,6 +425,14 @@ class ScanMultiROIReordered(scans.ScanMultiROI):
         page = super().__getitem__((0, slice(None), slice(None), 0, 0))
         return np.max(page)
 
+    def min(self):
+        page = self[(0, slice(None), slice(None), 0, 0)]
+        return np.min(page)
+
+    def max(self):
+        page = self[(0, slice(None), slice(None), 0, 0)]
+        return np.max(page)
+
     @property
     def shape(self):
         width = self.field_widths[0]
