@@ -333,8 +333,7 @@ def _save_data(
                 progress_callback(pbar.n / pbar.total, current_plane=chan_index + 1)
 
     pbar.close()
-    if progress_callback is not None:
-        progress_callback(1.0)
+
     if pre_exists and not overwrite:
         print("All output files exist; skipping save.")
         return
