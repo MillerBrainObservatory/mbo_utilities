@@ -8,7 +8,9 @@ from imgui_bundle import imgui_ctx
 
 from ..assembly import save_as
 
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, fourier_shift
+from skimage.registration import phase_cross_correlation
+
 import numpy as np
 import h5py
 from icecream import ic
@@ -16,8 +18,8 @@ from icecream import ic
 from ..file_io import Scan_MBO, SAVE_AS_TYPES
 
 try:
-    import cupy as cp
-    from cusignal import register_translation  # GPU version of phase_cross_correlation
+    import cupy as cp  # noqa
+    from cusignal import register_translation  # GPU version of phase_cross_correlation # noqa
 
     HAS_CUPY = True
 except ImportError:
@@ -74,7 +76,7 @@ def imgui_dynamic_table(
     if imgui.begin_table(
         table_id,
         num_columns,
-        flags=imgui.TableFlags_.borders | imgui.TableFlags_.resizable,
+        flags=imgui.TableFlags_.borders | imgui.TableFlags_.resizable,  # noqa
     ):  # noqa
         for title in titles:
             imgui.table_setup_column(title, imgui.TableColumnFlags_.width_stretch)  # noqa
@@ -144,7 +146,6 @@ def implot_pollen(pollen_offsets, offset_store, zstack):
 
 
 def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
-    from scipy.ndimage import fourier_shift
 
     result = frame.copy()
     rows = result[1::2, :]
@@ -155,9 +156,8 @@ def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
 
 
 def compute_phase_offset(
-    frame: np.ndarray, upsample: int = 10, exclude_center_px: int = 4
+    frame: np.ndarray, upsample: int = 10, exclude_center_px: int = 0
 ) -> float:
-    from skimage.registration import phase_cross_correlation
 
     if frame.ndim == 3:
         frame = np.mean(frame, axis=0)
@@ -187,7 +187,7 @@ def compute_phase_offset(
         )
     else:
         shift, _, _ = phase_cross_correlation(
-            pre_crop, post_crop, upsample_factor=upsample
+            pre_crop, post_crop, upsample_factor=upsample  # noqa
         )
 
     return float(shift[1])
@@ -200,6 +200,14 @@ def _save_as(path, **kwargs):
     scan = read_scan(path)
     save_as(scan, **kwargs)
 
+def _apply_offset(frame, offset):
+    result = frame.copy()
+    rows = frame[1::2, :]
+    f = np.fft.fftn(rows)
+    fshift = fourier_shift(f, (0, offset))
+    result[1::2, :] = np.fft.ifftn(fshift).real
+    return result
+
 class PreviewDataWidget(EdgeWindow):
     def __init__(
         self,
@@ -210,6 +218,12 @@ class PreviewDataWidget(EdgeWindow):
         title: str = "Data Preview",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
+        # whether to set iw managed_graphics data when setting calculate offset
+        self._open_save_popup = None
+        self._show_debug_panel = None
+        self._log_buffer = []
+
+        self.max_offset = 8
         self.fpath = Path(fpath) if fpath else Path(mbo_home)
         self.h5name = None
         self.image_widget = iw
@@ -217,14 +231,13 @@ class PreviewDataWidget(EdgeWindow):
         self.nz = self.shape[0]
         self.offset_store = np.zeros(self.nz)
 
+        self._gaussian_sigma = 0
         self._current_offset = 0.0
         self._window_size = 1
 
-        self.upsample = 20
-        self.auto_update = False
+        self._phase_upsample = 20
+        self._auto_update = False
         self._proj = "mean"
-        self._corrected_data = None
-        self._phase_corrected = False
         self._current_saving_plane = 0
 
         self.fpath = Path(fpath) if fpath else Path(mbo_home)
@@ -251,6 +264,17 @@ class PreviewDataWidget(EdgeWindow):
             subplot.toolbar = False
 
         self.image_widget.add_event_handler(self.track_slider, "current_index")
+        self.image_widget._image_widget_sliders._loop = True  # noqa
+
+    @property
+    def gaussian_sigma(self):
+        return self._gaussian_sigma
+
+    @gaussian_sigma.setter
+    def gaussian_sigma(self, value):
+        if value > 0:
+            self._gaussian_sigma = value
+            self.image_widget.frame_apply = {0: self._combined_frame_apply}
 
     @property
     def proj(self):
@@ -258,8 +282,9 @@ class PreviewDataWidget(EdgeWindow):
 
     @proj.setter
     def proj(self, value):
-        self.image_widget.window_funcs["t"].func = getattr(np, value)
-        self._proj = value
+        if value != self._proj:
+            self.image_widget.window_funcs["t"].func = getattr(np, value)
+            self._proj = value
 
     @property
     def window_size(self):
@@ -276,10 +301,32 @@ class PreviewDataWidget(EdgeWindow):
 
     @current_offset.setter
     def current_offset(self, value):
-        self._current_offset = value
+        if value:
+            self._current_offset = value
+            self.image_widget.frame_apply = {0: self._combined_frame_apply}
+
+    @property
+    def phase_upsample(self):
+        return self._phase_upsample
+
+    @phase_upsample.setter
+    def phase_upsample(self, value):
+        if value > 0:
+            self._phase_upsample = value
+            self.image_widget.frame_apply = {0: self._combined_frame_apply}
+
+    @property
+    def auto_update(self):
+        return self._auto_update
+
+    @auto_update.setter
+    def auto_update(self, value):
+        self._auto_update = value
+        if value:
+            self.image_widget.frame_apply = {0: self._combined_frame_apply}
 
     def update(self):
-        with imgui_ctx.begin_child("##", window_flags=imgui.WindowFlags_.menu_bar):
+        with imgui_ctx.begin_child("##", window_flags=imgui.WindowFlags_.menu_bar):  # noqa
             # Top Menu Bar
             if imgui.begin_menu_bar():
                 if imgui.begin_menu("File", True):
@@ -290,6 +337,15 @@ class PreviewDataWidget(EdgeWindow):
                     if imgui.menu_item("Open Docs", "Ctrl+I", p_selected=False, enabled=True)[0]:
                         webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/")
                     imgui.end_menu()
+
+                if imgui.begin_menu("Settings", True):
+                    if imgui.menu_item("Style", "Ctrl+Shift+S", p_selected=False, enabled=self.is_mbo_scan)[0]:
+                        with imgui_ctx.begin("Settings"):
+                            imgui.show_font_selector('Font Selector')
+                    if imgui.menu_item("Debug Panel", "", p_selected=False, enabled=True)[0]:
+                        self._show_debug_panel = not getattr(self, "_show_debug_panel", False)
+                    imgui.end_menu()
+
                 imgui.end_menu_bar()
 
             # Save As Popup Dialog
@@ -298,8 +354,10 @@ class PreviewDataWidget(EdgeWindow):
                 self._open_save_popup = False
 
             if imgui.begin_popup_modal("Save As")[0]:
+                # Directory + Ext
                 imgui.set_next_item_width(hello_imgui.em_size(20))
-                _, self._save_dir = imgui.input_text("Save Dir", self._save_dir, 256) # 256
+                # TODO: make _save_dir a property to expand ~
+                _, self._save_dir = imgui.input_text("Save Dir", str(Path(self._save_dir).expanduser().resolve()), 256)
                 imgui.same_line()
                 if imgui.button("Browse"):
                     home = Path().home()
@@ -311,19 +369,46 @@ class PreviewDataWidget(EdgeWindow):
                 _, self._ext_idx = imgui.combo("Ext", self._ext_idx, SAVE_AS_TYPES)
                 self._ext = SAVE_AS_TYPES[self._ext_idx]
 
+                # Options Section
+                imgui.separator()
+                imgui.text("Options")
+
+                def checkbox_with_tooltip(_label, _value, _tooltip):
+                    _, _value = imgui.checkbox(_label, _value)
+                    imgui.same_line()
+                    imgui.text_disabled("(?)")
+                    if imgui.is_item_hovered():
+                        imgui.begin_tooltip()
+                        imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+                        imgui.text_unformatted(_tooltip)
+                        imgui.pop_text_wrap_pos()
+                        imgui.end_tooltip()
+                    return _value
+
+                self._overwrite = checkbox_with_tooltip("Overwrite", self._overwrite,
+                                                        "Replace any existing output files.")
+                self._fix_phase = checkbox_with_tooltip("Fix Phase", self._fix_phase,
+                                                        "Apply scan-phase correction to interleaved lines.")
+                self._debug = checkbox_with_tooltip("Debug", self._debug,
+                                                    "Enable debug outputs such as intermediate images.")
+
+                # Z-plane selection
+                imgui.separator()
+                imgui.text("Select Planes")
+
                 try:
                     num_planes = self.image_widget.data[0].num_channels  # noqa
                 except Exception as e:
                     num_planes = 1
                     hello_imgui.log(hello_imgui.LogLevel.error, f"Could not read number of planes: {e}")
 
-                imgui.text("Select Planes")
                 if imgui.button("All"):
                     self._selected_planes = set(range(num_planes))
                 imgui.same_line()
                 if imgui.button("None"):
                     self._selected_planes = set()
 
+                imgui.columns(2, borders=False)
                 for i in range(num_planes):
                     imgui.push_id(i)
                     selected = i in self._selected_planes
@@ -333,19 +418,16 @@ class PreviewDataWidget(EdgeWindow):
                     else:
                         self._selected_planes.discard(i)
                     imgui.pop_id()
+                    imgui.next_column()
+                imgui.columns(1)
 
+                # Buttons
                 imgui.separator()
-                imgui.text("Options")
-                _, self._overwrite = imgui.checkbox("Overwrite", self._overwrite)
-                _, self._fix_phase = imgui.checkbox("Fix Phase", self._fix_phase)
-                _, self._debug = imgui.checkbox("Debug", self._debug)
-
                 if imgui.button("Save", imgui.ImVec2(100, 0)):
                     if not self._save_dir:
                         self._save_dir = mbo_home
                     try:
-                        # planes are 1-indexed to users
-                        save_planes = [p+1 for p in self._selected_planes]
+                        save_planes = [p + 1 for p in self._selected_planes]
                         save_kwargs = {
                             "path": self.fpath,
                             "savedir": self._save_dir,
@@ -365,6 +447,7 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.same_line()
                 if imgui.button("Cancel"):
                     imgui.close_current_popup()
+
                 imgui.end_popup()
 
             # Section: Window Functions
@@ -377,12 +460,24 @@ class PreviewDataWidget(EdgeWindow):
 
             projection_options = ["mean", "max", "std"]
             current_idx = projection_options.index(self.proj)
-            _, new_idx = imgui.combo("Projection", current_idx, projection_options)
-            self.proj = projection_options[new_idx]
+            proj_changed, new_idx = imgui.combo("Projection", current_idx, projection_options)
+            if proj_changed:
+                self.proj = projection_options[new_idx]
+                self._log_buffer.append(f"Set projection: {self.proj}")
+                self._log_buffer = self._log_buffer[-100:]
 
-            _, new_winsize = imgui.input_int("Window Size", self.window_size, step=1, step_fast=2)
-            if new_winsize > 0:
+            winsize_changed, new_winsize = imgui.input_int("Window Size", self.window_size, step=1, step_fast=2)
+            if winsize_changed and new_winsize > 0:
                 self.window_size = new_winsize
+                self._log_buffer.append(f"New Window Size: {new_winsize}")
+                self._log_buffer = self._log_buffer[-100:]
+
+
+            gaussian_changed, new_gaussian_sigma = imgui.slider_float(label="sigma", v=self.gaussian_sigma, v_min=0.0, v_max=20.0, )
+            if gaussian_changed:
+                self.gaussian_sigma = new_gaussian_sigma
+                self._log_buffer.append(f"New gaussian sigma: {new_gaussian_sigma}")
+                self._log_buffer = self._log_buffer[-100:]
 
             imgui.end_group()
 
@@ -397,15 +492,44 @@ class PreviewDataWidget(EdgeWindow):
             imgui.same_line()
             imgui.text_colored(imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self.current_offset:.3f}")
 
-            _, upsample_val = imgui.input_int("Upsample", self.upsample, step=1, step_fast=2)
-            self.upsample = max(1, upsample_val)
+            upsample_changed, upsample_val = imgui.input_int("Upsample", self._phase_upsample, step=1, step_fast=2)
+            if upsample_changed:
+                self.phase_upsample = max(1, upsample_val)
+                self._log_buffer.append(f"New upsample: {upsample_val}")
+                self._log_buffer = self._log_buffer[-100:]  # limit to last 100 lines
 
-            _, self.auto_update = imgui.checkbox("Auto Update", self.auto_update)
+            max_offset_changed, max_offset = imgui.input_int("max-offset", self.max_offset, step=1, step_fast=2)
+            if max_offset_changed:
+                self.max_offset = max(1, max_offset)
+                self._log_buffer.append(f"New max-offset: {max_offset}")
+                self._log_buffer = self._log_buffer[-100:]
 
-            if imgui.button("Calculate", imgui.ImVec2(-1, 0)):
+            auto_changed, new_auto_update = imgui.checkbox("Auto Update", self.auto_update)
+            if auto_changed:
+                self.auto_update = new_auto_update
+                if new_auto_update:
+                    self.calculate_offset()
+                self._log_buffer.append(f"Auto-update changed: {self.auto_update}")
+                self._log_buffer = self._log_buffer[-100:]
+
+            if imgui.button("Calculate", imgui.ImVec2(0, 20)):
+                self._log_buffer.append(f"Calculating offset")
+                self._log_buffer = self._log_buffer[-100:]
                 self.calculate_offset()
+            imgui.same_line()
+            if imgui.button("Reset", imgui.ImVec2(0, 20)):
+                self._log_buffer.append(f"Reset offset")
+                self._log_buffer = self._log_buffer[-100:]
+                self.current_offset = 0
 
             imgui.end_group()
+
+            # Section: Mean Subtraction
+            imgui.spacing()
+            imgui.separator()
+            imgui.text_colored(imgui.ImVec4(0.8, 0.6, 1.0, 1.0), "Mean-Subtraction")
+            imgui.separator()
+            imgui.begin_group()
 
             with imgui_ctx.begin_child("##progress"):
                 # Always show progress bar when active
@@ -420,13 +544,9 @@ class PreviewDataWidget(EdgeWindow):
                     text_color = imgui.ImVec4(1, 1, 1, 1)
                     bar_color = imgui.ImVec4(0.2, 0.7, 0.2, 1) if self._progress_value >= 1.0 else imgui.ImVec4(0.3, 0.3,
                                                                                                                 0.3, 1)
-                    imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)
-                    imgui.push_style_color(imgui.Col_.text, text_color)
-                    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(6, 4))
-
-                    font = imgui.get_font(imgui.ImFont)
-                    if font:
-                        imgui.push_font(font)
+                    imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)  # noqa
+                    imgui.push_style_color(imgui.Col_.text, text_color)  # noqa
+                    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(6, 4))  # noqa
 
                     imgui.progress_bar(
                         self._progress_value,
@@ -434,37 +554,77 @@ class PreviewDataWidget(EdgeWindow):
                         label,
                     )
 
-                    if font:
-                        imgui.pop_font()
                     imgui.pop_style_var()
                     imgui.pop_style_color(2)
 
-    def setup_assets(self):
-        hello_imgui.asset_file_full_path(
-            "./assets/JetBrainsMono/JetBrainsMono-Bold.ttf",
-            size_pixels=16,
-            font_name="jetbrains_bold"
-        )
+        if getattr(self, "_show_debug_panel", False):
+            imgui.spacing()
+            imgui.separator()
+            imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "Debug Output")
+            with imgui_ctx.begin("##debug_log"):
+                for log_line in getattr(self, "_log_buffer", []):
+                    imgui.text_wrapped(log_line)
+
+    def get_raw_frame(self):
+        return self.image_widget.data[0][
+                   self.image_widget.current_index["t"],
+                   self.image_widget.current_index["z"],
+                   :, :]
+
+    def get_managed_frame(self):
+        return self.image_widget.managed_graphics[0].data.value
 
     def gui_progress_callback(self, fraction, current_plane):
         self._progress_value = fraction
         self._current_saving_plane = current_plane
 
+    def _combined_frame_apply(self, frame: np.ndarray) -> np.ndarray:
+        if self._current_offset:
+            frame = apply_phase_offset(frame, self.current_offset)
+        if self._gaussian_sigma > 0:
+            frame = gaussian_filter(frame, sigma=self.gaussian_sigma)
+        return frame
+
     def calculate_offset(self):
-        frame = self.image_widget.managed_graphics[0].data[:]
-        ofs = compute_phase_offset(frame, upsample=self.upsample)
-        if ofs < 5:
-            self._current_offset = ofs
-            self._corrected_data = apply_phase_offset(frame, ofs)
-            self._phase_corrected = True
-        else:
-            self._phase_corrected = False
+        """Get the current frame, calculate the offset"""
+        frame = self.get_raw_frame()
+        self._log_buffer.append(f"Old offset: {self.current_offset}")
+        ofs = compute_phase_offset(frame, upsample=self._phase_upsample)
+        self.current_offset = ofs
+        self._log_buffer.append(f"New offset: {self.current_offset}")
+        self._log_buffer = self._log_buffer[-100:]
+        # force update
+        # self.image_widget.current_index = self.image_widget.current_index
 
     def track_slider(self, ev=None):
+        """called whenever a frame of the movie changes.
+        Note frame_apply is called before this code is reached.
+        """
         if self.auto_update:
-            self.calculate_offset()
-        else:
-            self.current_offset = 0
+             self.calculate_offset()
+
+    def edge_detection(self):
+        from scipy.ndimage import sobel
+
+        frame = self.image_widget.managed_graphics[0].data.value.copy()
+        edge_x = sobel(frame, axis=0)
+        edge_y = sobel(frame, axis=1)
+        edges = np.hypot(edge_x, edge_y)
+        self.image_widget.managed_graphics[0].data[:] = edges
+
+    def highpass_filter(self):
+        from scipy.ndimage import gaussian_filter
+
+        frame = self.image_widget.managed_graphics[0].data[:]
+        low = gaussian_filter(frame, sigma=self.gaussian_sigma)
+        highpass = frame - low
+        self.image_widget.managed_graphics[0].data[:] = highpass
+
+    def denoised_mean(self):
+        data = self.image_widget.data[0]
+        t_idx = self.image_widget.current_index.get("t", 0)
+        window = data[:, t_idx - 5 : t_idx + 5].mean(axis=1)
+        self.image_widget.managed_graphics[0].data[:] = window[t_idx]
 
     def save_to_file(self):
         if not self.h5name.is_file():
@@ -490,25 +650,6 @@ class PreviewDataWidget(EdgeWindow):
             frame_n = self.image_widget.data[0][c_index + 1]
             tmp = norm_percentile(frame * frame_n)
             self.image_widget.data[0][c_index] = norm_minmax(tmp)
-
-    def load_pollen_offsets(
-        self,
-    ):
-        with h5py.File(self.fpath[0], "r") as f1:
-            dx = np.array(f1["x_shifts"])
-            dy = np.array(f1["y_shifts"])
-            ofs_volume = np.array(f1["scan_corrections"])
-            self.h5name = Path(self.fpath[0])
-        return ofs_volume
-
-    @staticmethod
-    def open_file_dialog(self):
-        file_dialog = pfd.open_file(
-            title="Select a pollen calibration file",
-            filters=["*.tiff", "*.tif", "*.h5", "*.hdf5"],
-            options=pfd.opt.none,
-        )
-        return file_dialog.result()
 
 
 class SummaryDataWidget(EdgeWindow):
