@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from .file_io import (
@@ -24,16 +25,21 @@ from .util import (
 from .graphics import run_gui
 
 try:
-    from icecream import ic
+    from icecream import ic, install
+    install()
 except ImportError:  # Graceful fallback if IceCream isn't installed.
     ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
 
 __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
 
+# default to disabling all ic() calls
+ic.enable() if os.environ.get('MBO_DEBUG', False) else ic.disable()
+
 __all__ = [
     "mbo_home",
     "mbo_temp",
     "run_gui",
+
     # file_io
     "scanreader",
     "npy_to_dask",
@@ -42,18 +48,20 @@ __all__ = [
     "read_scan",
     "save_png",
     "save_mp4",
-    "expand_paths",
     "subsample_array",
+
     # metadata
     "is_raw_scanimage",
     "get_metadata",
     "params_from_metadata",
+
     # util
+    "expand_paths",
     "norm_minmax",
     "smooth_data",
     "is_running_jupyter",
-    "is_qt_installed",
-    "is_imgui_installed",
+    "is_imgui_installed",  # we may just enforce imgui?
+
     # assembly
     "save_as",
 ]
