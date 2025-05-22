@@ -5,7 +5,6 @@ import re
 from collections.abc import Sequence
 from itertools import product
 from pathlib import Path
-from tqdm.auto import tqdm
 
 from icecream import ic
 
@@ -17,7 +16,6 @@ from matplotlib import cm
 
 from .metadata import is_raw_scanimage
 from .scanreader import scans, utils
-from .scanreader.exceptions import FieldDimensionMismatch
 from .scanreader.multiroi import ROI
 from .util import norm_minmax, subsample_array
 
@@ -27,6 +25,11 @@ mbo_home = Path.home() / ".mbo"
 mbo_temp = mbo_home.joinpath("temp")
 mbo_temp.mkdir(parents=True, exist_ok=True)
 
+SAVE_AS_TYPES = [
+    ".tiff",
+    ".bin",
+    ".h5"
+]
 
 def npy_to_dask(files, name="", axis=1, astype=None):
     """
@@ -151,7 +154,7 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     return sorted(p.resolve() for p in result if p.is_file())
 
 
-def read_scan(pathnames, dtype=np.int16, roi=None, **kwargs):
+def read_scan(pathnames, dtype=np.int16, roi=None):
     """
     Reads a ScanImage scan from a given file or set of file paths and returns a
     ScanMultiROIReordered object with lazy-loaded data.
@@ -169,7 +172,7 @@ def read_scan(pathnames, dtype=np.int16, roi=None, **kwargs):
 
     Returns
     -------
-    ScanMultiROIReordered
+    Scan_MBO
         A scan object with metadata and lazily loaded data. Raises FileNotFoundError
         if no files match the specified path(s).
 
@@ -193,7 +196,7 @@ def read_scan(pathnames, dtype=np.int16, roi=None, **kwargs):
         error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
         raise FileNotFoundError(error_msg)
 
-    scan = ScanMultiROIReordered(join_contiguous=True, selected_xslice=roi)
+    scan = Scan_MBO(join_contiguous=True, roi=roi)
     scan.read_data(filenames, dtype=dtype)
 
     return scan
@@ -210,231 +213,114 @@ def _intersect_slice(user: slice, mask: slice):
     return slice(start, stop)
 
 
-class ScanMultiROIReordered(scans.ScanMultiROI):
+class Scan_MBO(scans.ScanMultiROI):
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
     """
-
-    def __init__(self, *args, selected_xslice: int = None, **kwargs):
+    def __init__(self, *args, roi: int = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.pbar = None
         self.show_pbar = False
-        if selected_xslice == 0:
+        if roi == 0:
             raise ValueError("roi parameter is 1-based indexing. 0 is not supported.")
         # -1 because for users 1 based indexing to keep consistent with planes parameter
-        self._selected_xslice = selected_xslice - 1 if selected_xslice else None
+        self._roi = roi - 1 if roi else None
 
     def _read_pages(
-        self,
-        slice_list,
-        channel_list,
-        frame_list,
-        yslice=slice(None),
-        xslice=slice(None),
-        pbar=None,
+            self,
+            frames,
+            chans,
+            yslice=slice(None),
+            xslice=slice(None),
+            **kwargs
     ):
-        if self.is_slow_stack:
-            frame_step = self.num_channels
-            slice_step = self.num_channels * self.num_frames
-        else:
-            slice_step = self.num_channels
-            frame_step = self.num_channels * self.num_scanning_depths
+        C = self.num_channels
+        # build global page indices for each (frame, channel)
+        pages = [f * C + c for f in frames for c in chans]
 
-        pages_to_read = []
-        index_tuples = []
-        for c in channel_list:
-            for f in frame_list:
-                for s in slice_list:
-                    page = f * frame_step + s * slice_step + c
-                    pages_to_read.append(page)
-                    index_tuples.append((c, f, s))
+        H = len(utils.listify_index(yslice, self._page_height))
+        W = len(utils.listify_index(xslice, self._page_width))
+        buf = np.empty((len(pages), H, W), dtype=self.dtype)
 
-        out_height = len(utils.listify_index(yslice, self._page_height))
-        out_width = len(utils.listify_index(xslice, self._page_width))
-        pages = np.empty([len(pages_to_read), out_height, out_width], dtype=self.dtype)
-
-        for ci, c in enumerate(channel_list):
-            frame_count = 0
-            for fi, f in enumerate(frame_list):
-                indices = [
-                    i
-                    for i, (cc, ff, _) in enumerate(index_tuples)
-                    if cc == c and ff == f
-                ]
-                pages_needed = [pages_to_read[i] for i in indices]
-
-                current_start = 0
-                for tiff_file in self.tiff_files:
-                    final = current_start + len(tiff_file.pages)
-                    file_pages = [p for p in pages_needed if current_start <= p < final]
-                    if file_pages:
-                        file_indices = [p - current_start for p in file_pages]
-                        global_indices = [
-                            i for i in indices if pages_to_read[i] in file_pages
-                        ]
-                        pages[np.array(global_indices)] = tiff_file.asarray(
-                            key=file_indices
-                        )[..., yslice, xslice]
-                    current_start = final
-                frame_count += 1
-
-        new_shape = [
-            len(frame_list),
-            len(slice_list),
-            len(channel_list),
-            out_height,
-            out_width,
-        ]
-        return pages.reshape(new_shape).transpose([1, 3, 4, 2, 0])
+        start = 0
+        for tf in self.tiff_files:
+            end = start + len(tf.pages)
+            idxs = [i for i, p in enumerate(pages) if start <= p < end]
+            if idxs:
+                frame_idx = [pages[i] - start for i in idxs]
+                buf[idxs] = tf.asarray(key=frame_idx)[..., yslice, xslice]
+            start = end
+        return buf.reshape(len(frames), len(chans), H, W)
 
     def __getitem__(self, key):
-        """Index like a 4D numpy array [t, z, x, y]"""
-
-        if key == slice(None):  # asking for full scan, give them a subsample?
-            return np.squeeze(subsample_array(self, ignore_dims=[-1, -2]))
-
-        # Fill key to size 4 for reordered [t, z, x, y]
-        if not isinstance(key, tuple):
-            key = (key,)
-        key = tuple(map(_convert_range_to_slice, key))
-        t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
-
-        # If a specific ROI slice was selected, apply x-mask
-        if self._selected_xslice is not None:
-            x_mask = self.fields[0].output_xslices[self._selected_xslice]
-            x_key = _intersect_slice(x_key, x_mask)
-
-        # Reorder to original [field, y, x, z, t]
-        reordered_key = (0, y_key, x_key, z_key, t_key)
-        full_key = utils.fill_key(reordered_key, num_dimensions=5)
-
-        for i, index in enumerate(full_key):
-            utils.check_index_type(i, index)
-
-        utils.check_index_is_in_bounds(0, full_key[0], self.num_fields)
-        for field_id in utils.listify_index(full_key[0], self.num_fields):
-            utils.check_index_is_in_bounds(1, full_key[1], self.field_heights[field_id])
-            utils.check_index_is_in_bounds(2, full_key[2], self.field_widths[field_id])
-        utils.check_index_is_in_bounds(3, full_key[3], self.num_channels)
-        utils.check_index_is_in_bounds(4, full_key[4], self.num_frames)
-
-        field_list = utils.listify_index(full_key[0], self.num_fields)
-        y_lists = [
-            utils.listify_index(full_key[1], self.field_heights[field_id])
-            for field_id in field_list
-        ]
-        x_lists = [
-            utils.listify_index(full_key[2], self.field_widths[field_id])
-            for field_id in field_list
-        ]
-        channel_list = utils.listify_index(full_key[3], self.num_channels)
-        frame_list = utils.listify_index(full_key[4], self.num_frames)
-
-        if [] in [field_list, *y_lists, *x_lists, channel_list, frame_list]:
-            return np.empty(0)
-
-        if not all(len(y_list) == len(y_lists[0]) for y_list in y_lists):
-            raise FieldDimensionMismatch("Image heights for all fields do not match")
-        if not all(len(x_list) == len(x_lists[0]) for x_list in x_lists):
-            raise FieldDimensionMismatch("Image widths for all fields do not match")
-
-        item = np.empty(
-            [
-                len(field_list),
-                len(y_lists[0]),
-                len(x_lists[0]),
-                len(channel_list),
-                len(frame_list),
-            ],
-            dtype=self.dtype,
-        )
-
-        if self.show_pbar:
-            total_reads = len(field_list) * len(channel_list) * len(frame_list)
-            self._pbar = tqdm(total=total_reads, desc="Reading data from tiff")
-        else:
-            self._pbar = None
-        for i, (field_id, y_list, x_list) in enumerate(
-            zip(field_list, y_lists, x_lists)
-        ):
-            field = self.fields[field_id]
-            slices = zip(
-                field.yslices, field.xslices, field.output_yslices, field.output_xslices
-            )
-            for yslice, xslice, output_yslice, output_xslice in slices:
-                pages = self._read_pages(
-                    [field.slice_id], channel_list, frame_list, yslice, xslice
-                )
-
-                y_range = range(output_yslice.start, output_yslice.stop)
-                x_range = range(output_xslice.start, output_xslice.stop)
-                ys = [[y - output_yslice.start] for y in y_list if y in y_range]
-                xs = [x - output_xslice.start for x in x_list if x in x_range]
-                output_ys = [[index] for index, y in enumerate(y_list) if y in y_range]
-                output_xs = [index for index, x in enumerate(x_list) if x in x_range]
-
-                item[i, output_ys, output_xs] = pages[0, ys, xs]
-                if self._pbar is not None:
-                    self._pbar.update(1)
-
-        squeeze_dims = [
-            i
-            for i, index in enumerate(full_key)
-            if np.issubdtype(type(index), np.signedinteger)
-        ]
-        item = np.squeeze(item, axis=tuple(squeeze_dims))
-
-        # Reorder from [field, y, x, z, t] → [t, z, x, y] or lower-dimensional equivalent
-        ndim = item.ndim
-        if ndim == 2:
-            return item
-        if ndim == 3:
-            return np.transpose(item, (2, 0, 1))
-        if ndim == 4:
-            return np.transpose(item, (3, 2, 0, 1))
-
-        raise ValueError(f"Unexpected ndim: {ndim}")
+        if not isinstance(key, tuple): key = (key,)
+        t_key, z_key, x_key, y_key = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),)*(4-len(key))
+        frames = utils.listify_index(t_key, self.num_frames)
+        chans  = utils.listify_index(z_key, self.num_channels)
+        if not frames or not chans: return np.empty(0)
+        H_out = self.field_heights[0]
+        W_out = (self.field_widths[0]
+                 if self._roi is None
+                 else (self.fields[0].output_xslices[self._roi].stop
+                       - self.fields[0].output_xslices[self._roi].start))
+        out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
+        slices = zip(self.fields[0].yslices,
+                     self.fields[0].xslices,
+                     self.fields[0].output_yslices,
+                     self.fields[0].output_xslices)
+        for idx, (ys, xs, oys, oxs) in enumerate(slices):
+            if self._roi is not None and idx != self._roi: continue
+            data = self._read_pages(frames, chans, yslice=ys, xslice=xs)
+            out[:, :, oys, oxs] = data
+        squeeze = []
+        if isinstance(t_key, int): squeeze.append(0)
+        if isinstance(z_key, int): squeeze.append(1)
+        if squeeze: out = out.squeeze(axis=tuple(squeeze))
+        return out
 
     @property
     def total_frames(self):
         """Number of frames across all tiff files."""
         return sum([int(len(tf.pages) / 14) for tf in self.tiff_files])
 
+    def xslices(self):
+        return self.fields[0].xslices
+
+    def yslices(self):
+        return self.fields[0].yslices
+
+    def output_xslices(self):
+        return self.fields[0].output_xslices
+
+    def output_yslices(self):
+        return self.fields[0].output_yslices
+
     @property
     def num_planes(self):
         """LBM alias for num_channels."""
         return self.num_channels
 
-    @property
     def min(self):
         """
         Returns the minimum value of the first tiff page.
         """
-        page = super().__getitem__((0, slice(None), slice(None), 0, 0))
-        return np.min(page)
+        # page = self[(0, 0, slice(None), slice(None))]
+        page = self.tiff_files[0].pages[0]
+        return np.min(page.asarray())
 
-    @property
     def max(self):
         """
         Returns the maximum value of the first tiff page.
         """
-        page = super().__getitem__((0, slice(None), slice(None), 0, 0))
-        return np.max(page)
-
-    def min(self):
-        page = self[(0, slice(None), slice(None), 0, 0)]
-        return np.min(page)
-
-    def max(self):
-        page = self[(0, slice(None), slice(None), 0, 0)]
-        return np.max(page)
+        page = self.tiff_files[0].pages[0]
+        return np.max(page.asarray())
 
     @property
     def shape(self):
         width = self.field_widths[0]
-        if self._selected_xslice is not None:
-            s = self.fields[0].output_xslices[self._selected_xslice]
+        if self._roi is not None:
+            s = self.fields[0].output_xslices[self._roi]
             width = s.stop - s.start
         return (
             self.total_frames,
@@ -862,7 +748,7 @@ def standardize_for_image_widget(data):
 
 def to_lazy_array2(
     data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs
-) -> list[np.ndarray] | np.ndarray | ScanMultiROIReordered:
+) -> list[np.ndarray] | np.ndarray | Scan_MBO:
     """
     Convencience function to resolve various data_in variants into lazy arrays.
     """
