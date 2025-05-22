@@ -4,6 +4,8 @@ import os
 import time
 import warnings
 import logging
+from typing import Callable
+
 import numpy as np
 
 import shutil
@@ -15,6 +17,7 @@ from icecream import ic
 from .file_io import _make_json_serializable, read_scan
 from .metadata import get_metadata
 from .util import is_running_jupyter
+from .plot_util import save_phase_images_png
 from .scanreader.utils import listify_index
 
 from scipy.ndimage import fourier_shift
@@ -84,6 +87,7 @@ def save_as(
     order: list | tuple = None,
     trim_edge: list | tuple = (0, 0, 0, 0),
     fix_phase: bool = True,
+    save_phase_png: bool = False,
     target_chunk_mb: int = 20,
     **kwargs,
 ):
@@ -114,10 +118,15 @@ def save_as(
         elements in `order` must match the number of planes. Default is `None`.
     fix_phase : bool, optional
         Whether to fix scan-phase (x/y) alignment. Default is `True`.
+    save_phase_png : bool, optional
+        If correcting scan-phase, save a directory with pre/post images centered on the most
+        active regions of the frame, saved to the save_path. Default is 'False'.
     target_chunk_mb : int, optional
         Chunk size in megabytes for saving data. Increase to help with scan-phase correction.
     kwargs : dict, optional
-        Current kwargs: "debug (ic enable)"
+        Current kwargs:
+        - debug (ic enable)
+        - progress_callback : emit progress-bar events
 
     Raises
     ------
@@ -126,6 +135,7 @@ def save_as(
     """
     # Parse kwargs
     debug = kwargs.get("debug", False)
+    progress_callback = kwargs.get("progress_callback", None)
     if debug:
         ic.enable()
         ic("Debugging mode ON")
@@ -176,12 +186,8 @@ def save_as(
     )
     if metadata is not None:
         mdata.update(metadata)
-
     ic(metadata)
-    if not savedir.exists():
-        _ = ic(savedir)
-        logger.debug(f"Creating directory: {savedir}")
-        savedir.mkdir(parents=True)
+
     start_time = time.time()
     _save_data(
         scan,
@@ -195,6 +201,8 @@ def save_as(
         target_chunk_mb=target_chunk_mb,
         debug=debug,
         upsample=upsample,
+        progress_callback=progress_callback,
+        save_phase_png=save_phase_png,
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -212,14 +220,17 @@ def _save_data(
     metadata,
     trim_edge=None,
     fix_phase=True,
+    save_phase_png=False,
     target_chunk_mb=20,
     **kwargs,
 ):
+    tmp_copy, png_dir = None, None
     if "." in file_extension:
         file_extension = file_extension.split(".")[-1]
     if file_extension == "tiff":
         file_extension = "tif"
 
+    progress_callback: Callable = kwargs.get("progress_callback", None)
     path = Path(path)
     path.mkdir(exist_ok=True)
 
@@ -266,9 +277,6 @@ def _save_data(
         for _ in planes
     )
     pbar = tqdm(total=total_chunks, desc="Saving plane ", position=0)
-
-    from matplotlib import pyplot as plt
-
     debug = kwargs.get("debug", False)
 
     pre_exists = True
@@ -284,10 +292,10 @@ def _save_data(
             ic(fname, overwrite)
             break
 
-        if debug:
-            temp_dir = path / f"scan_phase_check_plane_{chan_index + 1:02d}"
-            temp_dir.mkdir(exist_ok=True)
-            ic(f"Saving scan-phase images to {temp_dir}")
+        if save_phase_png:
+            png_dir = path / f"scan_phase_check_plane_{chan_index + 1:02d}"
+            png_dir.mkdir(exist_ok=True)
+            ic(f"Saving scan-phase images to {png_dir}")
 
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
         num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
@@ -308,43 +316,25 @@ def _save_data(
             if fix_phase:
                 upsample = kwargs.get("upsample", 20)
                 if debug:
-                    before = data_chunk.copy()
+                    tmp_copy = data_chunk.copy()
                 data_chunk = correct_phase_chunk(data_chunk, upsample=upsample)
-                if debug:
-                    after = data_chunk
-                    mid = len(before) // 2
-                    projection = before.std(axis=0)  # or max, or mean
-
-                    patch_size = 64
-                    max_val = -np.inf
-                    best_x = best_y = 0
-
-                    for y in range(0, projection.shape[0] - patch_size + 1, 8):
-                        for x in range(0, projection.shape[1] - patch_size + 1, 8):
-                            val = projection[
-                                y : y + patch_size, x : x + patch_size
-                            ].sum()
-                            if val > max_val:
-                                max_val = val
-                                best_y, best_x = y, x
-
-                    ys = slice(best_y, best_y + patch_size)
-                    xs = slice(best_x, best_x + patch_size)
-
-                    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-                    axs[0].imshow(before[mid, ys, xs], cmap="gray")
-                    axs[0].set_title("Before")
-                    axs[1].imshow(after[mid, ys, xs], cmap="gray")
-                    axs[1].set_title("After")
-                    fig.tight_layout()
-                    fig.savefig(temp_dir / f"chunk_{chunk:03d}.png")
-                    plt.close(fig)
+                if save_phase_png:
+                    save_phase_images_png(
+                        tmp_copy,
+                        data_chunk,
+                        png_dir,
+                        chan_index
+                    )
 
             writer(fname, data_chunk, chan_index=chan_index)
             start = end
             pbar.update(1)
+            if progress_callback is not None:
+                progress_callback(pbar.n / pbar.total, current_plane=chan_index + 1)
 
     pbar.close()
+    if progress_callback is not None:
+        progress_callback(1.0)
     if pre_exists and not overwrite:
         print("All output files exist; skipping save.")
         return
