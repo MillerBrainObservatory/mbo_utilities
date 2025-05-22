@@ -52,8 +52,8 @@ def make_image_widget(data, fpath=None, gui=False):
         window_funcs={"t": (np.mean, 1)},
     )
     if gui:
-        edge_gui = PreviewDataWidget(iw=iw, fpath=fpath)
-        iw.figure.add_gui(edge_gui)
+        ui = PreviewDataWidget(iw=iw, fpath=fpath)
+        iw.figure.add_gui(ui)
     return iw
 
 
@@ -69,24 +69,12 @@ if __name__ == "__main__":
     nx, ny = sample.shape[-2:]
     iw = fpl.ImageWidget(
         data=data,
-        histogram_widget=False,
+        histogram_widget=True,
         figure_kwargs={"size": (nx, ny)},
         graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
         window_funcs={"t": (np.mean, 1)},
     )
     edge_gui = PreviewDataWidget(iw=iw, fpath=fpath)
     iw.figure.add_gui(edge_gui)
-    # iw = make_image_widget(data, gui=True)
     iw.show()
     fpl.loop.run()
-
-    # hello_imgui.run(gui_app, window_size=(100, 80))
-    # if selection_store["result"]:
-    #     data = to_lazy_array(selection_store["result"], roi=1)
-    #     iw = make_image_widget(data, gui=True)
-    #     iw.show()
-    #
-    #     fpl.loop.run()
-    #
-    #
-    #
