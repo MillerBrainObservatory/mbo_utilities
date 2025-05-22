@@ -1,47 +1,92 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#     "numpy",
-#     "mbo_utilities",
-#     "lbm_suite2p_python",
-#     "fastplotlib",
-# ]
-#
-# [tool.uv.sources]
-# mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "master" }
-# lbm_suite2p_python = { git = "https://github.com/MillerBrainObservatory/lbm_suite2p_python", branch = "master" }
-
-import mbo_utilities as mbo
-from mbo_utilities.file_io import mbo_home
+import numpy as np
+from mbo_utilities.file_io import get_files, read_scan, to_lazy_array, _is_arraylike
+from mbo_utilities.graphics.imgui import PreviewDataWidget
+from imgui_bundle import imgui, portable_file_dialogs as pfd, hello_imgui, immapp
 import fastplotlib as fpl
 
-from imgui_bundle import portable_file_dialogs as pfd
+selection_store = {"result": None}
 
-# def select_folder():
-#     dialog = pfd.select_folder("Select a folder")
-#     return dialog
+@immapp.static(file_result=None, files_result=None, folder_result=None)
+def open_file_menu():
+    static = open_file_menu
+
+    if imgui.begin_main_menu_bar():
+        if imgui.begin_menu("File", True):
+            clicked, _ = imgui.menu_item("Open File...", "Ctrl+O", False, True)
+            if clicked:
+                static.file_result = pfd.open_file("Choose file").result()[0]
+                selection_store["result"] = [static.file_result]
+                hello_imgui.get_runner_params().app_shall_exit = True
+
+            clicked, _ = imgui.menu_item("Open Multiple Files...", "Ctrl+Shift+O", False, True)
+            if clicked:
+                static.files_result = pfd.open_file("Choose files", options=pfd.opt.multiselect).result()
+                selection_store["result"] = static.files_result
+                hello_imgui.get_runner_params().app_shall_exit = True
+
+            clicked, _ = imgui.menu_item("Open Folder...", "Ctrl+F", False, True)
+            if clicked:
+                static.folder_result = pfd.select_folder("Choose folder").result()
+                selection_store["result"] = get_files(static.folder_result)
+                hello_imgui.get_runner_params().app_shall_exit = True
+
+            imgui.end_menu()
+        imgui.end_main_menu_bar()
 
 
-# mbo.run_gui("/home/flynn/lbm_data/raw", gui=True)
-data = "/home/flynn/lbm_data/assembled/plane_12.tif"
-mbo.run_gui(data, gui=True)
-print("done")
-# path = select_folder()
-# print(path.result())
+def gui_app():
+    open_file_menu()
 
-#
-# raw_scan = mbo.read_scan(r"/home/flynn/lbm_data/raw")
-# data = raw_scan
-#
-# # main_window = LBMMainWindow()
-# iw = fpl.ImageWidget(
-#     data=data,
-#     histogram_widget=True,
-#     figure_kwargs={"size": (data.shape[-1], data.shape[-2])}
-# )
-#
-# # start the widget playing in a loop
-# iw._image_widget_sliders._loop = True  # noqa
-# iw.show()  # need to display before playing
-#
-# fpl.loop.run()
+
+def make_image_widget(data, fpath=None, gui=False):
+    sample = data[0] if isinstance(data, (list, tuple)) else data
+    assert _is_arraylike(sample), f"Input should be array-like, not {type(sample)}"
+    assert sample.ndim >= 2, f"Expected 2D sample, not: {sample.ndim} dims"
+
+    nx, ny = sample.shape[-2:]
+    iw = fpl.ImageWidget(
+        data=data,
+        histogram_widget=False,
+        figure_kwargs={"size": (nx, ny)},
+        graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
+        window_funcs={"t": (np.mean, 1)},
+    )
+    if gui:
+        edge_gui = PreviewDataWidget(iw=iw, fpath=fpath)
+        iw.figure.add_gui(edge_gui)
+    return iw
+
+
+if __name__ == "__main__":
+    import tifffile
+    # data = tifffile.memmap("/home/flynn/lbm_data/assembled_default/plane_11.tif")
+    fpath = "/home/flynn/lbm_data/raw"
+    data = read_scan("/home/flynn/lbm_data/raw")
+    sample = data[0] if isinstance(data, (list, tuple)) else data
+    assert _is_arraylike(sample), f"Input should be array-like, not {type(sample)}"
+    assert sample.ndim >= 2, f"Expected 2D sample, not: {sample.ndim} dims"
+
+    nx, ny = sample.shape[-2:]
+    iw = fpl.ImageWidget(
+        data=data,
+        histogram_widget=False,
+        figure_kwargs={"size": (nx, ny)},
+        graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
+        window_funcs={"t": (np.mean, 1)},
+    )
+    edge_gui = PreviewDataWidget(iw=iw, fpath=fpath)
+    iw.figure.add_gui(edge_gui)
+    # iw = make_image_widget(data, gui=True)
+    iw.show()
+    fpl.loop.run()
+
+    # hello_imgui.run(gui_app, window_size=(100, 80))
+    # if selection_store["result"]:
+    #     data = to_lazy_array(selection_store["result"], roi=1)
+    #     iw = make_image_widget(data, gui=True)
+    #     iw.show()
+    #
+    #     fpl.loop.run()
+    #
+    #
+    #
