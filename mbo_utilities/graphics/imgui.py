@@ -1,10 +1,19 @@
+import webbrowser
 from pathlib import Path
 from typing import Literal
+import threading
+
+from imgui_bundle import hello_imgui
+from imgui_bundle import imgui_ctx
+
+from ..assembly import save_as
 
 from scipy.ndimage import gaussian_filter
 import numpy as np
 import h5py
 from icecream import ic
+
+from ..file_io import Scan_MBO, SAVE_AS_TYPES
 
 try:
     import cupy as cp
@@ -20,7 +29,7 @@ from fastplotlib.ui import EdgeWindow
 from imgui_bundle import imgui, implot
 from imgui_bundle import portable_file_dialogs as pfd
 
-from .. import mbo_home
+from .. import mbo_home, read_scan
 from ..util import norm_minmax, norm_percentile
 
 
@@ -183,6 +192,13 @@ def compute_phase_offset(
 
     return float(shift[1])
 
+def _save_as(path, **kwargs):
+    """
+    read scan from path for threading
+    there must be a better way to do this
+    """
+    scan = read_scan(path)
+    save_as(scan, **kwargs)
 
 class PreviewDataWidget(EdgeWindow):
     def __init__(
@@ -191,7 +207,7 @@ class PreviewDataWidget(EdgeWindow):
         fpath: str | None = None,
         size: int = 350,
         location: Literal["bottom", "right"] = "right",
-        title: str = "preview data widget",
+        title: str = "Data Preview",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
         self.fpath = Path(fpath) if fpath else Path(mbo_home)
@@ -207,6 +223,29 @@ class PreviewDataWidget(EdgeWindow):
         self.upsample = 20
         self.auto_update = False
         self._proj = "mean"
+        self._corrected_data = None
+        self._phase_corrected = False
+        self._current_saving_plane = 0
+
+        self.fpath = Path(fpath) if fpath else Path(mbo_home)
+
+        self._save_dir = str(getattr(self, "_save_dir", ""))
+        self._planes_str = str(getattr(self, "_planes_str", ""))
+
+        self._ext = str(getattr(self, "_ext", ".tiff"))
+        self._ext_idx = SAVE_AS_TYPES.index(".tiff")
+
+        self._selected_planes = set()
+
+        self._overwrite = True
+        self._fix_phase = True
+        self._debug = False
+        self._progress_value = 0.0
+
+        if isinstance(self.image_widget.data[0], Scan_MBO):
+            self.is_mbo_scan = True
+        else:
+            self.is_mbo_scan = False
 
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
@@ -240,84 +279,192 @@ class PreviewDataWidget(EdgeWindow):
         self._current_offset = value
 
     def update(self):
-        imgui.begin_child("offset_panel")
-        imgui.push_item_width(80)
+        with imgui_ctx.begin_child("##", window_flags=imgui.WindowFlags_.menu_bar):
+            # Top Menu Bar
+            if imgui.begin_menu_bar():
+                if imgui.begin_menu("File", True):
+                    if imgui.menu_item("Save as", "Ctrl+S", p_selected=False, enabled=self.is_mbo_scan)[0]:
+                        self._open_save_popup = True
+                    imgui.end_menu()
+                if imgui.begin_menu("Docs", True):
+                    if imgui.menu_item("Open Docs", "Ctrl+I", p_selected=False, enabled=True)[0]:
+                        webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/")
+                    imgui.end_menu()
+                imgui.end_menu_bar()
 
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "window functions")
-        imgui.separator()
-        imgui.columns(2, borders=False)
-        imgui.set_column_width(0, 100)
+            # Save As Popup Dialog
+            if getattr(self, "_open_save_popup", False):
+                imgui.open_popup("Save As")
+                self._open_save_popup = False
 
-        imgui.align_text_to_frame_padding()
-        imgui.text("projection")
-        imgui.next_column()
-        projection_options = ["mean", "max", "std"]
-        current_idx = projection_options.index(self.proj)
-        proj_changed, new_idx = imgui.combo("##proj", current_idx, projection_options)
-        if proj_changed:
+            if imgui.begin_popup_modal("Save As")[0]:
+                imgui.set_next_item_width(hello_imgui.em_size(20))
+                _, self._save_dir = imgui.input_text("Save Dir", self._save_dir, 256) # 256
+                imgui.same_line()
+                if imgui.button("Browse"):
+                    home = Path().home()
+                    res = pfd.select_folder(str(home))
+                    if res:
+                        self._save_dir = res.result()
+
+                imgui.set_next_item_width(hello_imgui.em_size(20))
+                _, self._ext_idx = imgui.combo("Ext", self._ext_idx, SAVE_AS_TYPES)
+                self._ext = SAVE_AS_TYPES[self._ext_idx]
+
+                try:
+                    num_planes = self.image_widget.data[0].num_channels  # noqa
+                except Exception as e:
+                    num_planes = 1
+                    hello_imgui.log(hello_imgui.LogLevel.error, f"Could not read number of planes: {e}")
+
+                imgui.text("Select Planes")
+                if imgui.button("All"):
+                    self._selected_planes = set(range(num_planes))
+                imgui.same_line()
+                if imgui.button("None"):
+                    self._selected_planes = set()
+
+                for i in range(num_planes):
+                    imgui.push_id(i)
+                    selected = i in self._selected_planes
+                    _, selected = imgui.checkbox(f"Plane {i}", selected)
+                    if selected:
+                        self._selected_planes.add(i)
+                    else:
+                        self._selected_planes.discard(i)
+                    imgui.pop_id()
+
+                imgui.separator()
+                imgui.text("Options")
+                _, self._overwrite = imgui.checkbox("Overwrite", self._overwrite)
+                _, self._fix_phase = imgui.checkbox("Fix Phase", self._fix_phase)
+                _, self._debug = imgui.checkbox("Debug", self._debug)
+
+                if imgui.button("Save", imgui.ImVec2(100, 0)):
+                    if not self._save_dir:
+                        self._save_dir = mbo_home
+                    try:
+                        # planes are 1-indexed to users
+                        save_planes = [p+1 for p in self._selected_planes]
+                        save_kwargs = {
+                            "path": self.fpath,
+                            "savedir": self._save_dir,
+                            "planes": save_planes,
+                            "overwrite": self._overwrite,
+                            "fix_phase": self._fix_phase,
+                            "debug": self._debug,
+                            "ext": self._ext,
+                            "save_phase_png": False,
+                            "target_chunk_mb": 20,
+                            "progress_callback": self.gui_progress_callback,
+                        }
+                        threading.Thread(target=_save_as, kwargs=save_kwargs).start()
+                        imgui.close_current_popup()
+                    except Exception as e:
+                        hello_imgui.log(hello_imgui.LogLevel.error, f"Save failed: {e}")
+                imgui.same_line()
+                if imgui.button("Cancel"):
+                    imgui.close_current_popup()
+                imgui.end_popup()
+
+            # Section: Window Functions
+            imgui.spacing()
+            imgui.separator()
+            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Window Functions")
+            imgui.separator()
+
+            imgui.begin_group()
+
+            projection_options = ["mean", "max", "std"]
+            current_idx = projection_options.index(self.proj)
+            _, new_idx = imgui.combo("Projection", current_idx, projection_options)
             self.proj = projection_options[new_idx]
 
-        imgui.next_column()
+            _, new_winsize = imgui.input_int("Window Size", self.window_size, step=1, step_fast=2)
+            if new_winsize > 0:
+                self.window_size = new_winsize
 
-        imgui.align_text_to_frame_padding()
-        imgui.text("window")
-        imgui.next_column()
-        size_changed, new_winsize = imgui.input_int(
-            "##", self.window_size, step=1, step_fast=2
-        )
-        if size_changed and new_winsize > 0:
-            self.window_size = new_winsize
+            imgui.end_group()
 
-        imgui.columns(1)
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
+            # Section: Scan-phase Correction
+            imgui.spacing()
+            imgui.separator()
+            imgui.text_colored(imgui.ImVec4(0.8, 0.6, 1.0, 1.0), "Scan-Phase Correction")
+            imgui.separator()
+            imgui.begin_group()
 
-        imgui.text_colored(imgui.ImVec4(0.8, 0.6, 1.0, 1.0), "scan-phase correction")
-        imgui.separator()
-        imgui.columns(2, borders=False)
+            imgui.text("Offset")
+            imgui.same_line()
+            imgui.text_colored(imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self.current_offset:.3f}")
 
-        imgui.align_text_to_frame_padding()
-        imgui.text("offset")
-        imgui.next_column()
-        imgui.text_colored(
-            imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self.current_offset:.3f}"
-        )
-
-        imgui.next_column()
-        imgui.align_text_to_frame_padding()
-        imgui.text("upsample")
-        imgui.next_column()
-        upsample_changed, upsample_val = imgui.input_int(
-            "##upsample", self.upsample, step=1, step_fast=2
-        )
-        if upsample_changed:
+            _, upsample_val = imgui.input_int("Upsample", self.upsample, step=1, step_fast=2)
             self.upsample = max(1, upsample_val)
 
-        imgui.next_column()
-        imgui.align_text_to_frame_padding()
-        imgui.text("auto")
-        imgui.next_column()
-        _, self.auto_update = imgui.checkbox("##auto", self.auto_update)
+            _, self.auto_update = imgui.checkbox("Auto Update", self.auto_update)
 
-        imgui.columns(1)
-        imgui.spacing()
-        if imgui.button("calculate", imgui.ImVec2(-1, 0)):
-            self.calculate_offset()
+            if imgui.button("Calculate", imgui.ImVec2(-1, 0)):
+                self.calculate_offset()
 
-        imgui.pop_item_width()
-        imgui.end_child()
+            imgui.end_group()
+
+            with imgui_ctx.begin_child("##progress"):
+                # Always show progress bar when active
+                if 0.0 < self._progress_value < 1.0:
+                    imgui.spacing()
+                    progress_bar_height = hello_imgui.em_size(1.4)
+                    imgui.set_cursor_pos_y(
+                        imgui.get_window_height() - progress_bar_height - hello_imgui.em_size(1.5)
+                    )
+
+                    label = f"Saving plane {self._current_saving_plane}..."  # Update this value externally
+                    text_color = imgui.ImVec4(1, 1, 1, 1)
+                    bar_color = imgui.ImVec4(0.2, 0.7, 0.2, 1) if self._progress_value >= 1.0 else imgui.ImVec4(0.3, 0.3,
+                                                                                                                0.3, 1)
+                    imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)
+                    imgui.push_style_color(imgui.Col_.text, text_color)
+                    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(6, 4))
+
+                    font = imgui.get_font(imgui.ImFont)
+                    if font:
+                        imgui.push_font(font)
+
+                    imgui.progress_bar(
+                        self._progress_value,
+                        imgui.ImVec2(-1, progress_bar_height),
+                        label,
+                    )
+
+                    if font:
+                        imgui.pop_font()
+                    imgui.pop_style_var()
+                    imgui.pop_style_color(2)
+
+    def setup_assets(self):
+        hello_imgui.asset_file_full_path(
+            "./assets/JetBrainsMono/JetBrainsMono-Bold.ttf",
+            size_pixels=16,
+            font_name="jetbrains_bold"
+        )
+
+    def gui_progress_callback(self, fraction, current_plane):
+        self._progress_value = fraction
+        self._current_saving_plane = current_plane
 
     def calculate_offset(self):
         frame = self.image_widget.managed_graphics[0].data[:]
         ofs = compute_phase_offset(frame, upsample=self.upsample)
-        self._current_offset = ofs
-        corrected = apply_phase_offset(frame, ofs)
-        self.image_widget.managed_graphics[0].data[:] = corrected
+        if ofs < 5:
+            self._current_offset = ofs
+            self._corrected_data = apply_phase_offset(frame, ofs)
+            self._phase_corrected = True
+        else:
+            self._phase_corrected = False
 
     def track_slider(self, ev=None):
         if self.auto_update:
             self.calculate_offset()
+        else:
+            self.current_offset = 0
 
     def save_to_file(self):
         if not self.h5name.is_file():
