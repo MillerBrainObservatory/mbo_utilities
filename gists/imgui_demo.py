@@ -69,7 +69,7 @@ if __name__ == "__main__":
     nx, ny = sample.shape[-2:]
     iw = fpl.ImageWidget(
         data=data,
-        histogram_widget=True,
+        histogram_widget=False,
         figure_kwargs={"size": (nx, ny)},
         graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
         window_funcs={"t": (np.mean, 1)},
