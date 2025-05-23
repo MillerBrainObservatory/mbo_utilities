@@ -8,6 +8,7 @@ import h5py
 from icecream import ic
 
 import numpy as np
+from nest_asyncio import apply
 from scipy.ndimage import gaussian_filter, fourier_shift
 from skimage.registration import phase_cross_correlation
 
@@ -49,8 +50,9 @@ def markdown_doc_folder() -> Path:
     return main_package_folder().joinpath("/docs/_static/")
 
 def set_mbo_assets_folder():
-    hello_imgui.set_assets_folder(str(assets_folder()))
-    print("Assets folder set")
+    pass
+    # hello_imgui.set_assets_folder(str(assets_folder()))
+    # hello_imgui.ass
 
 try:
     set_mbo_assets_folder()
@@ -93,116 +95,6 @@ class GuiLogger:
             imgui.text_colored(col, f"[{t}] {m}")
         imgui.end_child()
         imgui.end()
-
-
-def imgui_dynamic_table(
-    table_id: str, data_lists: list, titles: list = None, selected_index: int = None
-):
-    """
-    imgui dynamic table helper
-
-    Parameters
-    ----------
-    table_id : str
-        Unique identifier for the table.
-    data_lists : list of lists
-        A list of columns, where each inner list represents a column's data.
-        All columns must have the same length.
-    titles : list of str, optional
-        Column titles corresponding to `data_lists`. If None, default names are assigned as "Column N".
-    selected_index : int, optional
-        Index of the row to highlight. Default is None (no highlighting).
-
-    Raises
-    ------
-    ValueError
-        If `data_lists` is empty or columns have inconsistent lengths.
-        If `titles` is provided but does not match the number of columns.
-    """
-
-    if not data_lists or any(len(col) != len(data_lists[0]) for col in data_lists):
-        raise ValueError(
-            "data_lists columns must have consistent lengths and cannot be empty."
-        )
-
-    num_columns = len(data_lists)
-    if titles is None:
-        titles = [f"Column {i + 1}" for i in range(num_columns)]
-    elif len(titles) != num_columns:
-        raise ValueError(
-            "Number of titles must match the number of columns in data_lists."
-        )
-
-    if imgui.begin_table(
-        table_id,
-        num_columns,
-        flags=imgui.TableFlags_.borders | imgui.TableFlags_.resizable,  # noqa
-    ):  # noqa
-        for title in titles:
-            imgui.table_setup_column(title, imgui.TableColumnFlags_.width_stretch)  # noqa
-
-        for title in titles:
-            imgui.table_next_column()
-            imgui.text(title)
-
-        for i, row_values in enumerate(zip(*data_lists)):
-            imgui.table_next_row()
-            for value in row_values:
-                imgui.table_next_column()
-                if i == selected_index:
-                    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(0, 250, 35, 1))  # noqa
-
-                imgui.set_cursor_pos_x(
-                    imgui.get_cursor_pos_x()
-                    + imgui.get_column_width()
-                    - imgui.calc_text_size(f"{int(value)}").x
-                    - imgui.get_style().item_spacing.x
-                )
-                imgui.text(f"{int(value)}")
-
-                if i == selected_index:
-                    imgui.pop_style_color()
-
-        imgui.end_table()
-
-
-def implot_pollen(pollen_offsets, offset_store, zstack):
-    imgui.begin_child("Z-Stack Analysis")
-
-    z_planes = np.arange(len(pollen_offsets)) + 1
-
-    # Offset Comparison Plot
-    if implot.begin_plot("Offset Comparison Across Z-Planes"):
-        implot.plot_bars(
-            "Calibration Offsets",
-            z_planes,
-            np.array([p[0] for p in pollen_offsets]),
-            bar_size=0.4,
-        )
-        implot.plot_bars(  # noqa
-            "Selected Offsets",
-            z_planes,
-            np.array([s[0] for s in offset_store]),
-            bar_size=0.4,
-            shift=0.2,
-        )
-        implot.end_plot()
-
-    # Mean Intensity Plot
-    if implot.begin_plot("Mean Intensity Across Z-Planes"):
-        mean_intensities = np.array(
-            [np.mean(zstack[z]) for z in range(zstack.shape[0])]
-        )
-        implot.plot_line("Mean Intensity", z_planes, mean_intensities)
-        implot.end_plot()
-
-    # Cumulative Offset Drift Plot
-    if implot.begin_plot("Cumulative Offset Drift"):
-        cumulative_shifts = np.cumsum(np.array([s[0] for s in offset_store]))
-        implot.plot_line("Cumulative Shift", z_planes, cumulative_shifts)
-        implot.end_plot()
-
-    imgui.end_child()
 
 
 def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
@@ -280,7 +172,6 @@ def draw_progress(
     else:
         draw_progress._hide_time = None
 
-
     p = min(max(percent_complete, 0.0), 1.0)
     h = hello_imgui.em_size(1.4)
     w = imgui.get_content_region_avail().x
@@ -288,6 +179,7 @@ def draw_progress(
     if done:
         bar_color = imgui.ImVec4(0.0, 0.8, 0.0, 1.0)  # green
         text = done_text
+        return
     else:
         bar_color = imgui.ImVec4(0.2, 0.5, 0.9, 1.0)  # visible blue
         text = f"{running_text} {current_index + 1} of {total_count} [{int(p*100)}%]"
@@ -340,11 +232,6 @@ def set_tooltip(_tooltip, _show_mark=True):
         imgui.end_tooltip()
 
 
-def show_theme_window():
-    with imgui_ctx.begin("theme"):
-        hello_imgui.show_theme_tweak_gui()
-
-
 class PreviewDataWidget(EdgeWindow):
     def __init__(
         self,
@@ -366,12 +253,8 @@ class PreviewDataWidget(EdgeWindow):
         self.show_tool_metrics = False
         self._log_buffer = []
         self.font_size = 12
-        # self.icon_tex = hello_imgui.load_texture(str(assets_folder() / "static" / "utilities.png"))
-        # self.logo_tex = hello_imgui.load(str(assets_folder() / "static" / "logo_utilities.png"))
-        # hello_imgui.load_asset_file_data(str(assets_folder()))
-        hello_imgui.load_font_ttf(str(assets_folder() / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"), self.font_size)
+        # hello_imgui.load_font_ttf(str(assets_folder() / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"), self.font_size)
 
-        # whether to set iw managed_graphics data when setting calculate offset
         self._save_done = False
         self._show_theme_window = False
         self._z_stats = None
@@ -419,7 +302,7 @@ class PreviewDataWidget(EdgeWindow):
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
 
-        self.image_widget.add_event_handler(self.track_slider, "current_index")
+        # self.image_widget.add_event_handler(self.track_slider, "current_index")
         self.image_widget._image_widget_sliders._loop = True  # noqa
 
         self._mean_sub_done = False
@@ -474,9 +357,9 @@ class PreviewDataWidget(EdgeWindow):
 
     @current_offset.setter
     def current_offset(self, value):
-        if value:
-            self._current_offset = value
-            self.image_widget.frame_apply = {0: self._combined_frame_apply}
+        if value == self._current_offset or value > self.max_offset:
+            return
+        self._current_offset = value
 
     @property
     def phase_upsample(self):
@@ -494,12 +377,18 @@ class PreviewDataWidget(EdgeWindow):
 
     @auto_update.setter
     def auto_update(self, value):
-        self._auto_update = value
+        if self._auto_update == value:
+            # no change
+            return
         if value:
+            self.image_widget.add_event_handler(self.calculate_offset, "current_index")
             self.image_widget.frame_apply = {0: self._combined_frame_apply}
+        if not value:
+            self.image_widget.remove_event_handler(self.calculate_offset)
+        self._auto_update = value
+        self.calculate_offset()
 
     def update(self):
-
         # Top Menu Bar
         cflags: imgui.ChildFlags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
         wflags: imgui.WindowFlags = imgui.WindowFlags_.menu_bar
@@ -544,16 +433,7 @@ class PreviewDataWidget(EdgeWindow):
 
         if self.show_debug_panel:
             self.debug_panel.draw()
-            # imgui.spacing()
-            # imgui.separator()
-            # imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "Debug Output")
-            # with imgui_ctx.begin("##debug_log"):
-            #     for log_line in getattr(self, "_log_buffer", []):
-            #         imgui.text_wrapped(log_line)
 
-        # specify only one dimension, and the image will be scaled proportionally to its size:
-        # the image height will correspond to 10 text lines
-        # hello_imgui.image_from_asset("static/utilities.png", immapp.em_to_vec2(0.0, 10.0))
         if imgui.begin_tab_bar("MainPreviewTabs"):
             if imgui.begin_tab_item("Preview")[0]:
                 # make thin as possible for side widget
@@ -802,11 +682,8 @@ class PreviewDataWidget(EdgeWindow):
             set_tooltip("When enabled, automatically recompute phase correction whenever any parameter changes.")
             if auto_changed:
                 self.auto_update = new_auto_update
-                if new_auto_update:
-                    self.calculate_offset()
-                    self.debug_panel.log("debug", f"Auto-update changed: {self.auto_update}")
 
-            if imgui.button("Calculate", imgui.ImVec2(0, 0)):
+            if imgui.button("Apply", imgui.ImVec2(0, 0)):
                 self.debug_panel.log("debug", f"Calculating offset")
                 self.calculate_offset()
             set_tooltip("Run the phase-correction algorithm now using the current settings.", _show_mark=False)
@@ -878,7 +755,7 @@ class PreviewDataWidget(EdgeWindow):
             frame = frame - self._zplane_means[z]
         return frame
 
-    def calculate_offset(self):
+    def calculate_offset(self, ev=None):
         """Get the current frame, calculate the offset"""
         frame = self.get_raw_frame()
         self._log_buffer.append(f"Old offset: {self.current_offset}")
@@ -886,16 +763,11 @@ class PreviewDataWidget(EdgeWindow):
         self.current_offset = ofs
         self._log_buffer.append(f"New offset: {self.current_offset}")
         self._log_buffer = self._log_buffer[-100:]
+        # self.image_widget.frame_apply = {0: self._combined_frame_apply}
 
-    def track_slider(self, ev=None):
-        """called whenever a frame of the movie changes.
-        Note frame_apply is called before this code is reached.
-        """
-        if self.auto_update:
-             self.calculate_offset()
 
     def compute_z_stats(self):
-        data = self.image_widget.data[0]
+        data = read_scan(self.fpath)
         self._z_stats = {"mean": [], "std": [], "snr": []}
         self._z_stats_progress = 0.0
         self._z_stats_current_z = 0
