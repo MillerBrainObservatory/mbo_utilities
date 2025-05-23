@@ -1,8 +1,8 @@
+import traceback
 import webbrowser
 from pathlib import Path
 from typing import Literal
 import threading
-import time
 
 import h5py
 from icecream import ic
@@ -28,11 +28,71 @@ except ImportError:
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
 
-from imgui_bundle import imgui, implot
+from imgui_bundle import implot
 from imgui_bundle import portable_file_dialogs as pfd
 
 from .. import mbo_home, read_scan
 from ..util import norm_minmax, norm_percentile
+
+
+def main_package_folder() -> Path:
+    p = Path(__file__).resolve()
+    for parent in p.parents:
+        if (parent / "__init__.py").exists() and (parent / "graphics").is_dir():
+            return parent
+    raise RuntimeError("Cannot find package root")
+
+def assets_folder() -> Path:
+    return main_package_folder() / "graphics" / "assets"
+
+def markdown_doc_folder() -> Path:
+    return main_package_folder().joinpath("/docs/_static/")
+
+def set_mbo_assets_folder():
+    hello_imgui.set_assets_folder(str(assets_folder()))
+    print("Assets folder set")
+
+try:
+    set_mbo_assets_folder()
+except Exception:
+    print(traceback.format_exc())
+    
+import time
+from imgui_bundle import imgui
+
+class GuiLogger:
+    def __init__(self):
+        self.show = True
+        self.filters = {'debug': True, 'info': True, 'error': True}
+        self.messages = []
+
+    def log(self, level, msg):
+        t = time.strftime('%H:%M:%S')
+        self.messages.append((t, level, msg))
+
+    def draw(self):
+        opened, self.show = imgui.begin("Debug Panel", self.show)
+        if not opened:
+            imgui.end()
+            return
+        _, self.filters['debug'] = imgui.checkbox("Debug", self.filters['debug'])
+        imgui.same_line()
+        _, self.filters['info']  = imgui.checkbox("Info",  self.filters['info'])
+        imgui.same_line()
+        _, self.filters['error'] = imgui.checkbox("Error", self.filters['error'])
+        imgui.separator()
+        imgui.begin_child("##debug_scroll", imgui.ImVec2(0,0), False)
+        for t, lvl, m in self.messages:
+            if not self.filters[lvl]:
+                continue
+            col = {
+                'debug': imgui.ImVec4(0.8,0.8,0.8,1),
+                'info':  imgui.ImVec4(1.0,1.0,1.0,1),
+                'error': imgui.ImVec4(1.0,0.3,0.3,1),
+            }[lvl]
+            imgui.text_colored(col, f"[{t}] {m}")
+        imgui.end_child()
+        imgui.end()
 
 
 def imgui_dynamic_table(
@@ -199,50 +259,90 @@ def _save_as(path, **kwargs):
     scan = read_scan(path)
     save_as(scan, **kwargs)
 
-def draw_mean_progress(z_index: int, total_z: int, progress: float, done: bool = False):
-    if not hasattr(draw_mean_progress, "_hide_time"):
-        draw_mean_progress._hide_time = None
+
+def draw_progress(
+        current_index: int,
+        total_count: int,
+        percent_complete: float,
+        running_text: str = "Processing",
+        done_text: str = "Completed",
+        done: bool = False,
+        logger: GuiLogger = None,
+):
+    # TODO: must be a better way to do this
+    if not hasattr(draw_progress, "_hide_time"):
+        draw_progress._hide_time = None
     if done:
-        # Start countdown when done is first triggered
-        if draw_mean_progress._hide_time is None:
-            draw_mean_progress._hide_time = time.time() + 3
-        elif time.time() >= draw_mean_progress._hide_time:
-            return  # Don't draw after 3s
+        if draw_progress._hide_time is None:
+            draw_progress._hide_time = time.time() + 3
+        elif time.time() >= draw_progress._hide_time:
+            return
     else:
-        draw_mean_progress._hide_time = None  # Reset if still running
+        draw_progress._hide_time = None
 
-    progress = min(max(progress, 0.0), 1.0)
-    bar_height = hello_imgui.em_size(1.4)
-    bar_width = imgui.get_content_region_avail().x
-    bar_size = imgui.ImVec2(bar_width, bar_height)
 
-    text = "Statistics computed! mean-sub projection available." if done else f"Processing z-plane {z_index + 1} of {total_z}"
-    percent_str = "100%" if done else f"{int(progress * 100)}%"
+    p = min(max(percent_complete, 0.0), 1.0)
+    h = hello_imgui.em_size(1.4)
+    w = imgui.get_content_region_avail().x
 
-    bar_color = imgui.ImVec4(0.2, 0.2, 0.2, 1.0) if done else imgui.ImVec4(1.0, 0.6, 0.2, 1.0)
-    text_color = imgui.ImVec4(1, 1, 1, 1)
+    if done:
+        bar_color = imgui.ImVec4(0.0, 0.8, 0.0, 1.0)  # green
+        text = done_text
+    else:
+        bar_color = imgui.ImVec4(0.2, 0.5, 0.9, 1.0)  # visible blue
+        text = f"{running_text} {current_index + 1} of {total_count} [{int(p*100)}%]"
+
+    if logger is not None:
+        logger.log('info', f"Current index: {current_index}")
+        logger.log('info', f"Total count: {total_count}")
 
     imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)
     imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(6, 4))
-
-    # Render the bar
-    imgui.progress_bar(progress, bar_size, "")
-
+    imgui.progress_bar(p, imgui.ImVec2(w, h), "")
     imgui.begin_group()
 
-    # Text overlay position
-    bar_y = imgui.get_cursor_pos_y() - bar_height + (bar_height - imgui.calc_text_size(text).y) / 2
-
-    # Centered combined text
-    center_text = f"{text}  —  {percent_str}"
-    text_size = imgui.calc_text_size(center_text)
-    imgui.set_cursor_pos_y(bar_y)
-    imgui.set_cursor_pos_x((bar_width - text_size.x) / 2)
-    imgui.text_colored(text_color, center_text)
+    if text:
+        ts = imgui.calc_text_size(text)
+        y = imgui.get_cursor_pos_y() - h + (h - ts.y) / 2
+        x = (w - ts.x) / 2
+        imgui.set_cursor_pos_y(y)
+        imgui.set_cursor_pos_x(x)
+        imgui.text_colored(imgui.ImVec4(1, 1, 1, 1), text)
 
     imgui.pop_style_var()
     imgui.pop_style_color()
     imgui.end_group()
+
+
+def checkbox_with_tooltip(_label, _value, _tooltip):
+    _, _value = imgui.checkbox(_label, _value)
+    imgui.same_line()
+    imgui.text_disabled("(?)")
+    if imgui.is_item_hovered():
+        imgui.begin_tooltip()
+        imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+        imgui.text_unformatted(_tooltip)
+        imgui.pop_text_wrap_pos()
+        imgui.end_tooltip()
+    return _value
+
+
+def set_tooltip(_tooltip, _show_mark=True):
+    """set a tooltip with or without a (?)"""
+    if _show_mark:
+        imgui.same_line()
+        imgui.text_disabled("(?)")
+    if imgui.is_item_hovered():
+        imgui.begin_tooltip()
+        imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+        imgui.text_unformatted(_tooltip)
+        imgui.pop_text_wrap_pos()
+        imgui.end_tooltip()
+
+
+def show_theme_window():
+    with imgui_ctx.begin("theme"):
+        hello_imgui.show_theme_tweak_gui()
 
 
 class PreviewDataWidget(EdgeWindow):
@@ -255,14 +355,31 @@ class PreviewDataWidget(EdgeWindow):
         title: str = "Data Preview",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
+
+        self._total_saving_planes = 0
+        self.show_debug_panel = False
+        self.debug_panel = GuiLogger()
+        self.show_tool_about = False
+        self.show_tool_style_editor = False
+        self.show_tool_id_stack_tool = False
+        self.show_tool_debug_log = False
+        self.show_tool_metrics = False
+        self._log_buffer = []
+        self.font_size = 12
+        # self.icon_tex = hello_imgui.load_texture(str(assets_folder() / "static" / "utilities.png"))
+        # self.logo_tex = hello_imgui.load(str(assets_folder() / "static" / "logo_utilities.png"))
+        # hello_imgui.load_asset_file_data(str(assets_folder()))
+        hello_imgui.load_font_ttf(str(assets_folder() / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"), self.font_size)
+
         # whether to set iw managed_graphics data when setting calculate offset
+        self._save_done = False
+        self._show_theme_window = False
         self._z_stats = None
         self._z_stats_done = None
         self._z_stats_progress = None
         self._z_stats_current_z = None
         self._open_save_popup = None
         self._show_debug_panel = None
-        self._log_buffer = []
 
         self.max_offset = 8
         self.fpath = Path(fpath) if fpath else Path(mbo_home)
@@ -312,7 +429,11 @@ class PreviewDataWidget(EdgeWindow):
         self._zplane_stats_thread = None
         self._zplane_stats_progress = 0.0
         self._current_mean_z = None
+
         threading.Thread(target=self.compute_z_stats).start()
+
+        if implot.get_current_context() is None:
+            implot.create_context()
 
 
     @property
@@ -378,10 +499,8 @@ class PreviewDataWidget(EdgeWindow):
             self.image_widget.frame_apply = {0: self._combined_frame_apply}
 
     def update(self):
-        # Top Menu Bar
-        if implot.get_current_context() is None:
-            implot.create_context()
 
+        # Top Menu Bar
         cflags: imgui.ChildFlags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
         wflags: imgui.WindowFlags = imgui.WindowFlags_.menu_bar
         with imgui_ctx.begin_child("menu", window_flags=wflags, child_flags=cflags):
@@ -394,35 +513,124 @@ class PreviewDataWidget(EdgeWindow):
                     if imgui.menu_item("Open Docs", "Ctrl+I", p_selected=False, enabled=True)[0]:
                         webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/")
                     imgui.end_menu()
-
-            if imgui.begin_menu("Settings", True):
-                if imgui.menu_item("Debug Panel", "", p_selected=False, enabled=True)[0]:
-                    self._show_debug_panel = not getattr(self, "_show_debug_panel", False)
-                imgui.end_menu()
+                if imgui.begin_menu("Settings", True):
+                    imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
+                    _, self.show_tool_style_editor = imgui.menu_item("Style Editor", "", self.show_tool_style_editor, True)
+                    _, self.show_debug_panel = imgui.menu_item("Debug Panel", "", p_selected=self.show_debug_panel, enabled=True)
+                    _, self.show_tool_about = imgui.menu_item("About MBO", "", self.show_tool_about, True)
+                    imgui.end_menu()
             imgui.end_menu_bar()
 
+        if not hasattr(self, "show_tool_metrics"):
+            self.show_tool_metrics = False
+            self.show_tool_debug_log = False
+            self.show_tool_id_stack_tool = False
+            self.show_tool_style_editor = False
+            self.show_tool_about = False
+
+        # (accessible from the "Tools" menu)
+        if self.show_tool_metrics:
+            imgui.show_metrics_window(self.show_tool_metrics)
+        if self.show_tool_debug_log:
+            imgui.show_debug_log_window(self.show_tool_debug_log)
+        if self.show_tool_id_stack_tool:
+            imgui.show_id_stack_tool_window(self.show_tool_id_stack_tool)
+        if self.show_tool_style_editor:
+            _, self.show_tool_style_editor = imgui.begin("Style Editor", self.show_tool_style_editor)
+            imgui.show_style_editor()
+            imgui.end()
+        if self.show_tool_about:
+            imgui.show_about_window(self.show_tool_about)
+
+        if self.show_debug_panel:
+            self.debug_panel.draw()
+            # imgui.spacing()
+            # imgui.separator()
+            # imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "Debug Output")
+            # with imgui_ctx.begin("##debug_log"):
+            #     for log_line in getattr(self, "_log_buffer", []):
+            #         imgui.text_wrapped(log_line)
+
+        # specify only one dimension, and the image will be scaled proportionally to its size:
+        # the image height will correspond to 10 text lines
+        # hello_imgui.image_from_asset("static/utilities.png", immapp.em_to_vec2(0.0, 10.0))
         if imgui.begin_tab_bar("MainPreviewTabs"):
             if imgui.begin_tab_item("Preview")[0]:
-                self.draw_preview_tab()
+                # make thin as possible for side widget
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))
+                self.draw_preview_section()
+                imgui.pop_style_var()
+                imgui.pop_style_var()
+
                 imgui.end_tab_item()
 
             if self._z_stats_done and imgui.begin_tab_item("Summary Stats")[0]:
-                self.draw_z_stats_section()
+                self.draw_stats_section()
                 imgui.end_tab_item()
             imgui.end_tab_bar()
 
-    def draw_preview_tab(self):
+    def draw_stats_section(self):
 
-        with imgui_ctx.begin_child("##", window_flags=imgui.WindowFlags_.menu_bar):  # noqa
+        if not getattr(self, "_z_stats_done", False):
+            return
 
-            # Save As Popup Dialog
+        z_vals = np.arange(len(self._z_stats["mean"]))
+        mean_vals = np.array(self._z_stats["mean"])
+        std_vals = np.array(self._z_stats["std"])
+        snr_vals = np.array(self._z_stats["snr"])
+
+        # imgui.set_cursor_pos_y(hello_imgui.em_size(1))  # push content toward top
+        imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats")
+
+        cflags: imgui.ChildFlags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
+        with imgui_ctx.begin_child("##Summary",size=imgui.ImVec2(0, 300), child_flags=cflags):
+
+            if imgui.begin_table("zstats", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):
+                for col in ["Z", "Mean", "Std", "SNR"]:
+                    imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
+                imgui.table_headers_row()
+                for i in range(len(z_vals)):
+                    imgui.table_next_row()
+                    for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):
+                        imgui.table_next_column()
+                        imgui.text(f"{val:.2f}")
+                imgui.end_table()
+
+        with imgui_ctx.begin_child("##Plots", size=imgui.ImVec2(0, 300), child_flags=cflags):
+            if not hasattr(self, "_z_plot_yaxis"):
+                self._z_plot_yaxis = "mean"
+
+            imgui.text("Y Axis:")
+            imgui.same_line()
+            for label in ["mean", "std", "snr"]:
+                imgui.same_line()
+                if imgui.radio_button(label, self._z_plot_yaxis == label):
+                    self._z_plot_yaxis = label
+
+            if implot.begin_plot("Z-Plane Stats", size=imgui.ImVec2(-1, 300)):
+                if self._z_plot_yaxis == "mean":
+                    implot.plot_line("Mean", z_vals, mean_vals)
+                elif self._z_plot_yaxis == "std":
+                    implot.plot_line("Std", z_vals, std_vals)
+                elif self._z_plot_yaxis == "snr":
+                    implot.plot_line("SNR", z_vals, snr_vals)
+                implot.end_plot()
+
+    def draw_preview_section(self):
+        cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
+        with imgui_ctx.begin_child(
+            "##PreviewChild",
+            imgui.ImVec2(0, 0),
+            cflags,
+        ):
             if getattr(self, "_open_save_popup", False):
                 imgui.open_popup("Save As")
                 self._open_save_popup = False
 
             if imgui.begin_popup_modal("Save As")[0]:
                 # Directory + Ext
-                imgui.set_next_item_width(hello_imgui.em_size(20))
+                imgui.set_next_item_width(hello_imgui.em_size(25))
                 # TODO: make _save_dir a property to expand ~
                 _, self._save_dir = imgui.input_text("Save Dir", str(Path(self._save_dir).expanduser().resolve()), 256)
                 imgui.same_line()
@@ -432,7 +640,7 @@ class PreviewDataWidget(EdgeWindow):
                     if res:
                         self._save_dir = res.result()
 
-                imgui.set_next_item_width(hello_imgui.em_size(20))
+                imgui.set_next_item_width(hello_imgui.em_size(25))
                 _, self._ext_idx = imgui.combo("Ext", self._ext_idx, SAVE_AS_TYPES)
                 self._ext = SAVE_AS_TYPES[self._ext_idx]
 
@@ -440,28 +648,15 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.separator()
                 imgui.text("Options")
 
-                def checkbox_with_tooltip(_label, _value, _tooltip):
-                    _, _value = imgui.checkbox(_label, _value)
-                    imgui.same_line()
-                    imgui.text_disabled("(?)")
-                    if imgui.is_item_hovered():
-                        imgui.begin_tooltip()
-                        imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-                        imgui.text_unformatted(_tooltip)
-                        imgui.pop_text_wrap_pos()
-                        imgui.end_tooltip()
-                    return _value
-
                 self._overwrite = checkbox_with_tooltip("Overwrite", self._overwrite,
                                                         "Replace any existing output files.")
                 self._fix_phase = checkbox_with_tooltip("Fix Phase", self._fix_phase,
                                                         "Apply scan-phase correction to interleaved lines.")
-                self._debug = checkbox_with_tooltip("Debug", self._debug,
-                                                    "Enable debug outputs such as intermediate images.")
+                self._debug = checkbox_with_tooltip("Debug", self._debug, "Run with debugging, settings -> debug to view the outputs.")
 
                 # Z-plane selection
                 imgui.separator()
-                imgui.text("Select Planes")
+                imgui.text("Select z-planes to save")
 
                 try:
                     num_planes = self.image_widget.data[0].num_channels  # noqa
@@ -488,13 +683,13 @@ class PreviewDataWidget(EdgeWindow):
                     imgui.next_column()
                 imgui.columns(1)
 
-                # Buttons
                 imgui.separator()
                 if imgui.button("Save", imgui.ImVec2(100, 0)):
                     if not self._save_dir:
                         self._save_dir = mbo_home
                     try:
                         save_planes = [p + 1 for p in self._selected_planes]
+                        self._total_saving_planes = len(save_planes)
                         save_kwargs = {
                             "path": self.fpath,
                             "savedir": self._save_dir,
@@ -505,8 +700,10 @@ class PreviewDataWidget(EdgeWindow):
                             "ext": self._ext,
                             "save_phase_png": False,
                             "target_chunk_mb": 20,
-                            "progress_callback": self.gui_progress_callback,
+                            "progress_callback": lambda frac, current_plane: self.gui_progress_callback(frac, current_plane),
                         }
+                        self.debug_panel.log('info', f"Saving planes {save_planes}")
+                        self.debug_panel.log('info', f"Saving to {self._save_dir} as {self._ext}")
                         threading.Thread(target=_save_as, kwargs=save_kwargs).start()
                         imgui.close_current_popup()
                     except Exception as e:
@@ -523,15 +720,20 @@ class PreviewDataWidget(EdgeWindow):
             imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Window Functions")
             imgui.separator()
 
-            imgui.begin_group()
+            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(2, 2))
 
+            imgui.begin_group()
             options = ["mean", "max", "std"]
             disabled_label = "mean-sub (pending)" if not self._mean_sub_done else "mean-sub"
             options.append(disabled_label)
 
             current_display_idx = options.index(self.proj if self._proj != "mean-sub" else disabled_label)
-            imgui.set_next_item_width(hello_imgui.em_size(20))
+
+            imgui.set_next_item_width(hello_imgui.em_size(15))
             proj_changed, selected_display_idx = imgui.combo("Projection", current_display_idx, options)
+            set_tooltip(
+                "Choose projection method over the sliding window: “mean” (average), “max” (peak), “std” (variance), or “mean-sub” (background-subtracted mean, recommended for motion preview)."
+            )
 
             if proj_changed:
                 selected_label = options[selected_display_idx]
@@ -544,20 +746,30 @@ class PreviewDataWidget(EdgeWindow):
                     else:
                         self.image_widget.window_funcs["t"].func = getattr(np, self.proj)
 
+            # Window size for projections
+            imgui.set_next_item_width(hello_imgui.em_size(15))
             winsize_changed, new_winsize = imgui.input_int("Window Size", self.window_size, step=1, step_fast=2)
+            set_tooltip(
+                "Size of the temporal window (in frames) used for projection."
+                " E.g. a value of 3 averages over 3 consecutive frames."
+            )
             if winsize_changed and new_winsize > 0:
                 self.window_size = new_winsize
-                self._log_buffer.append(f"New Window Size: {new_winsize}")
+                self.debug_panel.log('info', f"New Window Size: {new_winsize}")
                 self._log_buffer = self._log_buffer[-100:]
 
-
+            # Gaussian Filter
+            imgui.set_next_item_width(hello_imgui.em_size(15))
             gaussian_changed, new_gaussian_sigma = imgui.slider_float(label="sigma", v=self.gaussian_sigma, v_min=0.0, v_max=20.0, )
+            set_tooltip(
+                "Apply a Gaussian blur to the preview image. Sigma is in pixels; larger values yield stronger smoothing.")
             if gaussian_changed:
                 self.gaussian_sigma = new_gaussian_sigma
-                self._log_buffer.append(f"New gaussian sigma: {new_gaussian_sigma}")
-                self._log_buffer = self._log_buffer[-100:]
+                self.debug_panel.log("info", f"New gaussian sigma: {new_gaussian_sigma}")
 
             imgui.end_group()
+
+            imgui.pop_style_var()
 
             # Section: Scan-phase Correction
             imgui.spacing()
@@ -570,91 +782,79 @@ class PreviewDataWidget(EdgeWindow):
             imgui.same_line()
             imgui.text_colored(imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self.current_offset:.3f}")
 
+            imgui.set_next_item_width(hello_imgui.em_size(10))
             upsample_changed, upsample_val = imgui.input_int("Upsample", self._phase_upsample, step=1, step_fast=2)
+            set_tooltip(
+                "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment.")
             if upsample_changed:
                 self.phase_upsample = max(1, upsample_val)
-                self._log_buffer.append(f"New upsample: {upsample_val}")
-                self._log_buffer = self._log_buffer[-100:]  # limit to last 100 lines
+                self.debug_panel.log("info", f"New upsample: {upsample_val}")
 
+            imgui.set_next_item_width(hello_imgui.em_size(10))
             max_offset_changed, max_offset = imgui.input_int("max-offset", self.max_offset, step=1, step_fast=2)
+            set_tooltip("Maximum allowed pixel shift (in pixels) when estimating the scan-phase offset.")
             if max_offset_changed:
                 self.max_offset = max(1, max_offset)
                 self._log_buffer.append(f"New max-offset: {max_offset}")
                 self._log_buffer = self._log_buffer[-100:]
 
             auto_changed, new_auto_update = imgui.checkbox("Auto Update", self.auto_update)
+            set_tooltip("When enabled, automatically recompute phase correction whenever any parameter changes.")
             if auto_changed:
                 self.auto_update = new_auto_update
                 if new_auto_update:
                     self.calculate_offset()
-                self._log_buffer.append(f"Auto-update changed: {self.auto_update}")
-                self._log_buffer = self._log_buffer[-100:]
+                    self.debug_panel.log("debug", f"Auto-update changed: {self.auto_update}")
 
-            if imgui.button("Calculate", imgui.ImVec2(0, 20)):
-                self._log_buffer.append(f"Calculating offset")
-                self._log_buffer = self._log_buffer[-100:]
+            if imgui.button("Calculate", imgui.ImVec2(0, 0)):
+                self.debug_panel.log("debug", f"Calculating offset")
                 self.calculate_offset()
+            set_tooltip("Run the phase-correction algorithm now using the current settings.", _show_mark=False)
             imgui.same_line()
-            if imgui.button("Reset", imgui.ImVec2(0, 20)):
-                self._log_buffer.append(f"Reset offset")
-                self._log_buffer = self._log_buffer[-100:]
+            if imgui.button("Reset", imgui.ImVec2(0, 0)):
+                self.debug_panel.log("debug", f"Reset offset")
                 self.current_offset = 0
 
+            set_tooltip("Reset the computed scan-phase offset back to zero.")
+
             imgui.end_group()
-
             imgui.separator()
-            with imgui_ctx.begin_child("##progress"):
-                # Always show progress bar when active
-                if 0.0 < self._progress_value < 1.0:
-                    imgui.spacing()
-                    progress_bar_height = hello_imgui.em_size(1.4)
-                    imgui.set_cursor_pos_y(
-                        imgui.get_window_height() - progress_bar_height - hello_imgui.em_size(1.5)
-                    )
-
-                    label = f"Saving plane {self._current_saving_plane}..."  # Update this value externally
-                    text_color = imgui.ImVec4(1, 1, 1, 1)
-                    bar_color = imgui.ImVec4(0.2, 0.7, 0.2, 1) if self._progress_value >= 1.0 else imgui.ImVec4(0.3, 0.3,
-                                                                                                                0.3, 1)
-                    imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)  # noqa
-                    imgui.push_style_color(imgui.Col_.text, text_color)  # noqa
-                    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(6, 4))  # noqa
-
-                    imgui.progress_bar(
-                        self._progress_value,
-                        imgui.ImVec2(-1, progress_bar_height),
-                        label,
-                    )
-
-                    imgui.pop_style_var()
-                    imgui.pop_style_color(2)
-
-            if self._mean_sub_done:
-                with imgui_ctx.begin_child(
-                        "ZStatsSection",
-                        imgui.ImVec2(0, 0),
-                ):
-                    self.draw_z_stats_section()
-
-        if getattr(self, "_show_debug_panel", False):
-            imgui.spacing()
-            imgui.separator()
-            imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "Debug Output")
-            with imgui_ctx.begin("##debug_log"):
-                for log_line in getattr(self, "_log_buffer", []):
-                    imgui.text_wrapped(log_line)
 
         imgui.separator()
-        # Position at bottom with no scrollbar
+
+        # Progress Bars
         bar_height = hello_imgui.em_size(1.4)
         window_height = imgui.get_window_height()
         bar_y = window_height - bar_height - imgui.get_style().item_spacing.y * 2
         imgui.set_cursor_pos_y(bar_y)
 
         if self._mean_sub_done:
-            draw_mean_progress(self.nz - 1, self.nz, 1.0, done=True)
+            draw_progress(
+                self._z_stats_current_z,
+                self.nz,
+                self._mean_sub_progress,
+                running_text="Computing Z-stats",
+                done=True,
+                logger=self.debug_panel,
+            )
         elif 0.0 < self._mean_sub_progress < 1.0:
-            draw_mean_progress(self._z_stats_current_z, self.nz, self._mean_sub_progress)
+            draw_progress(
+                self._z_stats_current_z,
+                self.nz,
+                self._mean_sub_progress,
+                running_text="Computing stats for plane(s)",
+                logger = self.debug_panel,
+            )
+
+        if self._progress_value > 0:
+            draw_progress(
+                current_index=int(self._progress_value * self._total_saving_planes),
+                total_count=self._total_saving_planes,
+                percent_complete=self._progress_value,
+                running_text="Saving planes",
+                done_text="Completed",
+                done=self._save_done
+            )
 
     def get_raw_frame(self):
         return self.image_widget.data[0][
@@ -662,9 +862,10 @@ class PreviewDataWidget(EdgeWindow):
                    self.image_widget.current_index["z"],
                    :, :]
 
-    def gui_progress_callback(self, fraction, current_plane):
-        self._progress_value = fraction
+    def gui_progress_callback(self, fraction, current_plane, **_):
         self._current_saving_plane = current_plane
+        self._progress_value = fraction
+        self._save_done = (fraction >= 1.0)
 
     def _combined_frame_apply(self, frame: np.ndarray) -> np.ndarray:
         """alter final frame only once, in ImageWidget.frame_apply"""
@@ -722,52 +923,7 @@ class PreviewDataWidget(EdgeWindow):
         self._z_stats_done = True
         self._mean_sub_done = True
         self._zplane_means = np.stack(means)
-        self._log_buffer.append("Z-stats and mean-sub completed")
-        self._log_buffer = self._log_buffer[-100:]
-
-    def draw_z_stats_section(self):
-        if not getattr(self, "_z_stats_done", False):
-            return
-
-        z_vals = np.arange(len(self._z_stats["mean"]))
-        mean_vals = np.array(self._z_stats["mean"])
-        std_vals = np.array(self._z_stats["std"])
-        snr_vals = np.array(self._z_stats["snr"])
-
-        imgui.set_cursor_pos_y(hello_imgui.em_size(1))  # push content toward top
-        imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats")
-
-        with imgui_ctx.begin_child("##Summary"):
-            if imgui.begin_table("zstats", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):
-                for col in ["Z", "Mean", "Std", "SNR"]:
-                    imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
-                imgui.table_headers_row()
-                for i in range(len(z_vals)):
-                    imgui.table_next_row()
-                    for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):
-                        imgui.table_next_column()
-                        imgui.text(f"{val:.2f}")
-                imgui.end_table()
-
-        with imgui_ctx.begin_child("##Plots"):
-            if not hasattr(self, "_z_plot_yaxis"):
-                self._z_plot_yaxis = "mean"
-
-            imgui.text("Y Axis:")
-            imgui.same_line()
-            for label in ["mean", "std", "snr"]:
-                imgui.same_line()
-                if imgui.radio_button(label, self._z_plot_yaxis == label):
-                    self._z_plot_yaxis = label
-
-            if implot.begin_plot("Z-Plane Stats", size=imgui.ImVec2(-1, 300)):
-                if self._z_plot_yaxis == "mean":
-                    implot.plot_line("Mean", z_vals, mean_vals)
-                elif self._z_plot_yaxis == "std":
-                    implot.plot_line("Std", z_vals, std_vals)
-                elif self._z_plot_yaxis == "snr":
-                    implot.plot_line("SNR", z_vals, snr_vals)
-                implot.end_plot()
+        self.debug_panel.log("info", "Z-stats and mean-sub completed")
 
     def edge_detection(self):
         from scipy.ndimage import sobel
