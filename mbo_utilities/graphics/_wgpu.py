@@ -13,6 +13,11 @@ import sys
 from imgui_bundle import imgui, imgui_ctx
 from wgpu.gui.auto import WgpuCanvas, run
 from wgpu.utils.imgui import ImguiRenderer
+import fastplotlib as fpl
+import numpy as np
+
+def gen_data(*shape):
+    return np.random.rand(*shape)
 
 # Create a canvas to render to
 canvas = WgpuCanvas(title="imgui", size=(640, 480))
@@ -43,7 +48,8 @@ def update_gui():
     imgui.text("Example Text")
 
     if imgui.button("Hello"):
-        print("World")
+        array = gen_data(3, 3, 3)
+        fpl.ImageWidget(array).show()
 
     _, app_state["text"] = imgui.input_text_multiline(
         "Edit", app_state["text"], imgui.ImVec2(200, 200)
