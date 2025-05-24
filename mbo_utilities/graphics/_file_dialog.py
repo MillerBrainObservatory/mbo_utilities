@@ -75,27 +75,6 @@ def render_file_dialog():
 
 
 if __name__ == "__main__":
-
-    def setup_imgui():
-        from mbo_utilities import get_mbo_project_root, mbo_paths
-
-        # Assets
-        project_assets: Path = get_mbo_project_root().joinpath("assets")
-
-        if not project_assets.is_dir():
-            ic("Assets folder not found.")
-            return
-
-        imgui_path = mbo_paths["base"].joinpath("imgui")
-        imgui_path.mkdir(exist_ok=True)
-
-        assets_path = imgui_path.joinpath("assets")
-        assets_path.mkdir(exist_ok=True)
-
-        shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
-        hello_imgui.set_assets_folder(str(project_assets))
-
-    setup_imgui()
     from imgui_bundle.demos_python import demo_utils
 
     demo_utils.set_hello_imgui_demo_assets_folder()

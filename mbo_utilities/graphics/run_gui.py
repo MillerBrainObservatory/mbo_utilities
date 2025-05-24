@@ -62,7 +62,3 @@ def run_gui(data_in=None, gui=None, roi=None, **kwargs):
 
     iw.show()
     fpl.loop.run()
-
-
-if __name__ == "__main__":
-    main()
