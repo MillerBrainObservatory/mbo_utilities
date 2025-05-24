@@ -1,3 +1,4 @@
+import shutil
 import traceback
 import webbrowser
 from pathlib import Path
@@ -8,15 +9,15 @@ import h5py
 from icecream import ic
 
 import numpy as np
-from nest_asyncio import apply
 from scipy.ndimage import gaussian_filter, fourier_shift
 from skimage.registration import phase_cross_correlation
 
 from imgui_bundle import hello_imgui
 from imgui_bundle import imgui_ctx
 
-from ..assembly import save_as
-from ..file_io import Scan_MBO, SAVE_AS_TYPES
+from mbo_utilities.assembly import save_as
+from mbo_utilities.file_io import Scan_MBO, SAVE_AS_TYPES, _get_mbo_project_root, _get_mbo_dirs, read_scan
+from mbo_utilities.util import norm_minmax, norm_percentile
 
 try:
     import cupy as cp  # noqa
@@ -32,8 +33,25 @@ from fastplotlib.ui import EdgeWindow
 from imgui_bundle import implot
 from imgui_bundle import portable_file_dialogs as pfd
 
-from .. import mbo_home, read_scan
-from ..util import norm_minmax, norm_percentile
+def setup_imgui():
+
+    # Assets
+    project_assets: Path = _get_mbo_project_root().joinpath("assets")
+    mbo_dirs = _get_mbo_dirs()
+
+    if not project_assets.is_dir():
+        ic("Assets folder not found.")
+        return
+
+    imgui_path = mbo_dirs["base"].joinpath("imgui")
+    imgui_path.mkdir(exist_ok=True)
+
+    assets_path = imgui_path.joinpath("assets")
+    assets_path.mkdir(exist_ok=True)
+
+    shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
+    hello_imgui.set_assets_folder(str(project_assets))
+
 
 
 def main_package_folder() -> Path:
@@ -48,11 +66,6 @@ def assets_folder() -> Path:
 
 def markdown_doc_folder() -> Path:
     return main_package_folder().joinpath("/docs/_static/")
-
-def set_mbo_assets_folder():
-    pass
-    # hello_imgui.set_assets_folder(str(assets_folder()))
-    # hello_imgui.ass
 
 try:
     set_mbo_assets_folder()
@@ -232,6 +245,24 @@ def set_tooltip(_tooltip, _show_mark=True):
         imgui.end_tooltip()
 
 
+def setup_imgui():
+
+    # Assets
+    project_assets: Path = get_mbo_project_root().joinpath("assets")
+
+    if not project_assets.is_dir():
+        ic("Assets folder not found.")
+        return
+
+    imgui_path = mbo_paths["base"].joinpath("imgui")
+    imgui_path.mkdir(exist_ok=True)
+
+    assets_path = imgui_path.joinpath("assets")
+    assets_path.mkdir(exist_ok=True)
+
+    shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
+    hello_imgui.set_assets_folder(str(project_assets))
+
 class PreviewDataWidget(EdgeWindow):
     def __init__(
         self,
@@ -242,6 +273,10 @@ class PreviewDataWidget(EdgeWindow):
         title: str = "Data Preview",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
+
+        imgui_ini_path = Path.home() / ".mbo" / "settings" / "imgui.ini"
+        imgui_ini_path.parent.mkdir(parents=True, exist_ok=True)
+        imgui.get_io().ini_filename = str(imgui_ini_path)
 
         self._total_saving_planes = 0
         self.show_debug_panel = False
@@ -1012,3 +1047,6 @@ class SummaryDataWidget(EdgeWindow):
 
     def calculate_noise(self):
         pass
+
+
+
