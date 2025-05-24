@@ -1,11 +1,8 @@
 from .run_gui import run_gui
-from .imgui import SummaryDataWidget, PreviewDataWidget
+from .imgui import PreviewDataWidget
 from imgui_bundle import hello_imgui
 
 from pathlib import Path
-
-_cwd = Path().cwd()
-
 
 def setup_imgui():
     from mbo_utilities import get_mbo_project_root, mbo_paths
