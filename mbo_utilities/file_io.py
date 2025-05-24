@@ -6,6 +6,8 @@ from collections.abc import Sequence
 from itertools import product
 from pathlib import Path
 
+from icecream import ic
+
 import dask.array as da
 import ffmpeg
 import numpy as np
@@ -13,18 +15,13 @@ import tifffile
 from matplotlib import cm
 
 from .metadata import is_raw_scanimage
-from .scanreader import scans
+from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
 from .util import norm_minmax, subsample_array
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-
-def zarr_to_dask(zarr_parent):
-    """Convert directory of zarr arrays into a Z-stack."""
-    # search 3 dirs deep for arrays within our zarr group
-    files = get_files(zarr_parent, ".zarray", 3)
-    return da.stack([da.from_zarr(Path(x).parent) for x in files], axis=1)
+SAVE_AS_TYPES = [".tiff", ".bin", ".h5"]
 
 
 def npy_to_dask(files, name="", axis=1, astype=None):
@@ -91,19 +88,6 @@ def is_escaped_string(path: str) -> bool:
     return bool(re.search(r"\\[a-zA-Z]", path))
 
 
-def _make_json_serializable(obj):
-    """Convert metadata to JSON serializable format."""
-    if isinstance(obj, dict):
-        return {k: _make_json_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_make_json_serializable(v) for v in obj]
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, (np.integer, np.floating)):
-        return obj.item()
-    return obj
-
-
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     """
     Expand a path, list of paths, or wildcard pattern into a sorted list of actual files.
@@ -150,7 +134,7 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     return sorted(p.resolve() for p in result if p.is_file())
 
 
-def read_scan(pathnames, dtype=np.int16):
+def read_scan(pathnames, dtype=np.int16, roi=None):
     """
     Reads a ScanImage scan from a given file or set of file paths and returns a
     ScanMultiROIReordered object with lazy-loaded data.
@@ -160,12 +144,15 @@ def read_scan(pathnames, dtype=np.int16):
     pathnames : str, Path, or sequence of str/Path
         A single path to, a wildcard pattern (e.g. ``*.tif``), or a list of paths
         specifying the ScanImage TIFF files to read.
+    roi : int, optional
+        Specify ROI to export if only exporting a single ROI. 1-based.
+        Defaults to None, which exports pre-assembled (tiled) rois.
     dtype : numpy.dtype, optional
         The data type to use when reading the scan data. Default is np.int16.
 
     Returns
     -------
-    ScanMultiROIReordered
+    Scan_MBO
         A scan object with metadata and lazily loaded data. Raises FileNotFoundError
         if no files match the specified path(s).
 
@@ -179,79 +166,150 @@ def read_scan(pathnames, dtype=np.int16):
     --------
     >>> import mbo_utilities as mbo
     >>> import matplotlib.pyplot as plt
-    >>> scan = mbo.read_scan(r"C:\\path\to\\scan\\*.tif")
+    >>> scan = mbo.read_scan(r"D:\\demo\\raw")
     >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # First frame of z-plane 6
+    >>> scan = mbo.read_scan(r"D:\\demo\\raw", roi=1) # First ROI
+    >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # indexing works the same
     """
     filenames = expand_paths(pathnames)
     if len(filenames) == 0:
         error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
         raise FileNotFoundError(error_msg)
 
-    scan = ScanMultiROIReordered(join_contiguous=True)
+    scan = Scan_MBO(join_contiguous=True, roi=roi)
     scan.read_data(filenames, dtype=dtype)
 
     return scan
 
 
-def _convert_range_to_slice(k):
-    return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
-
-
-class ScanMultiROIReordered(scans.ScanMultiROI):
+class Scan_MBO(scans.ScanMultiROI):
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
     """
 
+    def __init__(self, *args, roi: int = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pbar = None
+        self.show_pbar = False
+        if roi == 0:
+            raise ValueError("roi parameter is 1-based indexing. 0 is not supported.")
+        # -1 because for users 1 based indexing to keep consistent with planes parameter
+        self._roi = roi - 1 if roi else None
+
+    def _read_pages(
+        self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
+    ):
+        C = self.num_channels
+        # build global page indices for each (frame, channel)
+        pages = [f * C + c for f in frames for c in chans]
+
+        H = len(utils.listify_index(yslice, self._page_height))
+        W = len(utils.listify_index(xslice, self._page_width))
+        buf = np.empty((len(pages), H, W), dtype=self.dtype)
+
+        start = 0
+        for tf in self.tiff_files:
+            end = start + len(tf.pages)
+            idxs = [i for i, p in enumerate(pages) if start <= p < end]
+            if idxs:
+                frame_idx = [pages[i] - start for i in idxs]
+                buf[idxs] = tf.asarray(key=frame_idx)[..., yslice, xslice]
+            start = end
+        return buf.reshape(len(frames), len(chans), H, W)
+
     def __getitem__(self, key):
-        """Index like a 4D numpy array [t, z, x, y]"""
-        if key == slice(None):  # asking for full scan, give them a subsample?
-            return np.squeeze(
-                subsample_array(self, ignore_dims=[-1, -2])
-            )  # retain image dims
-        elif not isinstance(key, tuple):
+        if not isinstance(key, tuple):
             key = (key,)
-        key = tuple(map(_convert_range_to_slice, key))
-        t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
-        reordered_key = (0, y_key, x_key, z_key, t_key)
-        item = super().__getitem__(reordered_key)
-        ndim = item.ndim
-        if ndim == 2:
-            return item
-        if ndim == 3:
-            return np.transpose(item, (2, 0, 1))
-        if ndim == 4:
-            return np.transpose(item, (3, 2, 0, 1))
-        raise ValueError(f"Unexpected ndim: {ndim}")
+        t_key, z_key, x_key, y_key = tuple(_convert_range_to_slice(k) for k in key) + (
+            slice(None),
+        ) * (4 - len(key))
+        frames = utils.listify_index(t_key, self.num_frames)
+        chans = utils.listify_index(z_key, self.num_channels)
+        if not frames or not chans:
+            return np.empty(0)
+        H_out = self.field_heights[0]
+        W_out = (
+            self.field_widths[0]
+            if self._roi is None
+            else (
+                self.fields[0].output_xslices[self._roi].stop
+                - self.fields[0].output_xslices[self._roi].start
+            )
+        )
+        out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
+        slices = zip(
+            self.fields[0].yslices,
+            self.fields[0].xslices,
+            self.fields[0].output_yslices,
+            self.fields[0].output_xslices,
+        )
+        for idx, (ys, xs, oys, oxs) in enumerate(slices):
+            if self._roi is not None and idx != self._roi:
+                continue
+            data = self._read_pages(frames, chans, yslice=ys, xslice=xs)
+            out[:, :, oys, oxs] = data
+        squeeze = []
+        if isinstance(t_key, int):
+            squeeze.append(0)
+        if isinstance(z_key, int):
+            squeeze.append(1)
+        if squeeze:
+            out = out.squeeze(axis=tuple(squeeze))
+        return out
 
     @property
     def total_frames(self):
         """Number of frames across all tiff files."""
         return sum([int(len(tf.pages) / 14) for tf in self.tiff_files])
 
+    def xslices(self):
+        return self.fields[0].xslices
+
+    def yslices(self):
+        return self.fields[0].yslices
+
+    def output_xslices(self):
+        return self.fields[0].output_xslices
+
+    def output_yslices(self):
+        return self.fields[0].output_yslices
+
     @property
     def num_planes(self):
         """LBM alias for num_channels."""
         return self.num_channels
 
-    @property
     def min(self):
         """
         Returns the minimum value of the first tiff page.
         """
-        page = super().__getitem__((0, slice(None), slice(None), 0, 0))
-        return np.min(page)
+        # page = self[(0, 0, slice(None), slice(None))]
+        page = self.tiff_files[0].pages[0]
+        return np.min(page.asarray())
 
-    @property
     def max(self):
         """
         Returns the maximum value of the first tiff page.
         """
-        page = super().__getitem__((0, slice(None), slice(None), 0, 0))
-        return np.max(page)
+        page = self.tiff_files[0].pages[0]
+        return np.max(page.asarray())
 
     @property
     def shape(self):
+        width = self.field_widths[0]
+        if self._roi is not None:
+            s = self.fields[0].output_xslices[self._roi]
+            width = s.stop - s.start
+        return (
+            self.total_frames,
+            self.num_channels,
+            self.field_heights[0],
+            width,
+        )
+
+    @property
+    def shape_full(self):
         return (
             self.total_frames,
             self.num_channels,
@@ -365,7 +423,7 @@ def get_files(
     if not base_path.is_dir():
         raise NotADirectoryError(f"'{base_path}' is not a directory.")
     if max_depth == 0:
-        print("Max-depth of 0 is not allowed. Setting to 1.")
+        ic("Max-depth of 0 is not allowed. Setting to 1.")
         max_depth = 1
 
     base_depth = len(base_path.parts)
@@ -471,7 +529,7 @@ def save_png(fname, data):
     plt.axis("off")
     plt.tight_layout()
     plt.savefig(fname, dpi=300, bbox_inches="tight")
-    print(f"Saved data to {fname}")
+    ic(f"Saved data to {fname}")
 
 
 def save_mp4(
@@ -543,7 +601,7 @@ def save_mp4(
     if not isinstance(fname, (str, Path)):
         raise TypeError(f"Expected fname to be str or Path, got {type(fname)}")
     if isinstance(images, (str, Path)):
-        print(f"Loading TIFF stack from {images}")
+        ic(f"Loading TIFF stack from {images}")
         if Path(images).is_file():
             try:
                 images = tifffile.memmap(images)
@@ -562,17 +620,17 @@ def save_mp4(
     colormap = cm.get_cmap(cmap)
 
     if normalize:
-        print("Normalizing mp4 images to [0, 1]")
+        ic("Normalizing mp4 images to [0, 1]")
         images = norm_minmax(images)
 
     if win and win > 1:
-        print(f"Applying temporal averaging with window size {win}")
+        ic(f"Applying temporal averaging with window size {win}")
         kernel = np.ones(win) / win
         images = np.apply_along_axis(
             lambda x: np.convolve(x, kernel, mode="same"), axis=0, arr=images
         )
 
-    print(f"Saving {T} frames to {fname}")
+    ic(f"Saving {T} frames to {fname}")
     output_framerate = int(framerate * speedup)
     process = (
         ffmpeg.input(
@@ -596,7 +654,101 @@ def save_mp4(
 
     process.stdin.close()
     process.wait()
-    print(f"Video saved to {fname}")
+    ic(f"Video saved to {fname}")
+
+
+def to_lazy_array(data_in, **kwargs):
+    """Convert a variety of data types into an array or list of arrays to pass to Image Widget"""
+    return dispatch_data_handler(data_in, **kwargs)
+
+
+def dispatch_data_handler(data_in, **kwargs):
+    if _is_arraylike(data_in):
+        return [data_in]
+
+    if isinstance(data_in, list):
+        return handle_list(data_in, **kwargs)
+
+    if isinstance(data_in, (str, Path)):
+        return handle_path(Path(data_in).expanduser().resolve(), **kwargs)
+
+    raise TypeError(f"Unsupported input type: {type(data_in)}")
+
+
+def handle_path(path: Path, **kwargs):
+    if path.is_file():
+        if path.suffix in [".tif", ".tiff"]:
+            return tifffile.memmap(path)
+        if path.suffix == ".npy":
+            return np.memmap(path)
+        raise TypeError(f"Unsupported file type: {path.suffix}")
+
+    if path.is_dir():
+        files = get_files(path, "tif", 1)
+        return read_scan(files, roi=kwargs.get("roi"))
+
+    raise TypeError(f"Path must be a file or directory, got: {path}")
+
+
+def handle_list(data_in: list, **kwargs):
+    if all(_is_arraylike(d) for d in data_in):
+        return data_in
+
+    if all(isinstance(p, (str, Path)) for p in data_in):
+        if is_raw_scanimage(str(data_in[0])):
+            return read_scan(data_in, roi=kwargs.get("roi"))
+        # assembled, memmory mappable files
+        return zstack_from_files(data_in)
+
+    raise TypeError("Unsupported mixed-type list")
+
+
+def standardize_for_image_widget(data):
+    """
+    Convert data to a list or array compatible with ImageWidget input.
+    You can hook in dimension checks here if needed.
+    """
+    if isinstance(data, list):
+        return data
+    if isinstance(data, np.ndarray):
+        return [data]
+    return data  # assume already compatible (e.g., ScanMultiROIReordered)
+
+
+def to_lazy_array2(
+    data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs
+) -> list[np.ndarray] | np.ndarray | Scan_MBO:
+    """
+    Convencience function to resolve various data_in variants into lazy arrays.
+    """
+    if _is_arraylike(data_in):
+        return [data_in]
+
+    if isinstance(data_in, list):
+        if all(_is_arraylike(d) for d in data_in):
+            return data_in
+        if isinstance(data_in[0], (str, Path)):
+            if is_raw_scanimage(str(data_in[0])):
+                ic(f"Returning raw scanimage from path {data_in[0]}")
+                roi = kwargs.get("roi", None)
+                return read_scan(data_in, roi=roi)
+            else:
+                ic(f"Returning z-stack from files:\n {data_in}.")
+                return zstack_from_files(data_in)
+        raise TypeError("Mixed list of unsupported types")
+
+    if isinstance(data_in, (str, Path)):
+        data_in = Path(data_in).expanduser().resolve()
+        if data_in.is_file():
+            if data_in.suffix in [".tif", ".tiff"]:
+                return tifffile.memmap(data_in)
+            if data_in.suffix == ".npy":
+                return np.memmap(data_in)
+        if data_in.is_dir():
+            files = get_files(data_in, "tif", 1)
+            return read_scan(files)
+
+    raise TypeError(f"Unsupported data type: {type(data_in)}")
 
 
 def _is_arraylike(obj) -> bool:
@@ -611,24 +763,53 @@ def _is_arraylike(obj) -> bool:
     return True
 
 
-def to_lazy_array(data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray]):
+def _get_mbo_project_root() -> Path:
+    """Return the root path of the mbo_utilities repository (based on this file)."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _get_mbo_dirs() -> dict:
     """
-    Convencience function to resolve various data_in variants into lazy arrays.
+    Ensure ~/mbo and its subdirectories exist.
+
+    Returns a dict with paths to the root, settings, and cache directories.
     """
-    if _is_arraylike(data_in):
-        return data_in
-    if isinstance(data_in, list):
-        if is_raw_scanimage(data_in[0]):
-            return read_scan(data_in)
-        else:
-            return zstack_from_files(data_in)
-    if isinstance(data_in, (str, Path)):
-        data_in = Path(data_in).expanduser().resolve()
-        if data_in.is_file():
-            # check suffix
-            if data_in.suffix in [".tif", ".tiff"]:
-                return tifffile.memmap(data_in)
-            elif data_in.suffix == ".npy":
-                return np.memmap(data_in)
-    else:
-        raise TypeError(f"Invalid type {type(data_in)}")
+    base = Path.home().joinpath("mbo")
+    settings = base.joinpath("settings")
+    cache = base.joinpath("cache")
+    logs = base.joinpath("logs")
+
+    for d in (base, settings, cache, logs):
+        d.mkdir(exist_ok=True)
+
+    ic("Created mbo directories:", base, settings, cache, logs)
+    return {
+        "base": base,
+        "settings": settings,
+        "cache": cache,
+        "logs": logs,
+    }
+
+
+def _make_json_serializable(obj):
+    """Convert metadata to JSON serializable format."""
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_make_json_serializable(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    return obj
+
+
+def _convert_range_to_slice(k):
+    return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
+
+
+def _intersect_slice(user: slice, mask: slice):
+    ic(user, mask)
+    start = max(user.start or 0, mask.start)
+    stop = min(user.stop or mask.stop, mask.stop)
+    return slice(start, stop)

@@ -33,16 +33,9 @@ def test_npy_to_dask(tmp_path):
 def test_jupyter_check():
     assert isinstance(mbo.is_running_jupyter(), bool)
 
-
-def test_qt_check():
-    result = mbo.is_qt_installed()
-    assert isinstance(result, bool)
-
-
 def test_imgui_check():
     result = mbo.is_imgui_installed()
     assert isinstance(result, bool)
-
 
 def test_demo_files():
     test_path = Path("D://demo//raw_data")

@@ -1,31 +1,20 @@
-from ..util import is_qt_installed, is_imgui_installed
-
-__all__ = []
-
-if is_qt_installed():
-    HAS_QT = True
-    from .qt import load_dialog_folder, LBMMainWindow
-else:
-    HAS_QT = False
-    load_dialog_folder = None
-    LBMMainWindow = None
-
-if is_imgui_installed():
-    HAS_IMGUI = True
-    from .imgui import SummaryDataWidget, PollenCalibrationWidget
-else:
-    HAS_IMGUI = False
-    PollenCalibrationWidget = None
-    SummaryDataWidget = None
-
 from .run_gui import run_gui
+from .imgui import PreviewDataWidget
+from imgui_bundle import hello_imgui
 
-__all__ += [
-    "load_dialog_folder",
-    "LBMMainWindow",
-    "HAS_QT",
+from pathlib import Path
+
+def setup_imgui():
+    from mbo_utilities import get_mbo_project_root, mbo_paths
+
+    assets: Path = get_mbo_project_root.joinpath("assets")
+    if Path(assets).is_dir():
+        print("yes!")
+    hello_imgui.set_assets_folder(str(assets))
+
+
+__all__ = [
     "SummaryDataWidget",
-    "PollenCalibrationWidget",
-    "HAS_IMGUI",
+    "PreviewDataWidget",
     "run_gui",
 ]
