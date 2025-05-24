@@ -21,10 +21,6 @@ from .util import norm_minmax, subsample_array
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-mbo_home = Path.home() / ".mbo"
-mbo_temp = mbo_home.joinpath("temp")
-mbo_temp.mkdir(parents=True, exist_ok=True)
-
 SAVE_AS_TYPES = [
     ".tiff",
     ".bin",
@@ -93,19 +89,6 @@ def npy_to_dask(files, name="", axis=1, astype=None):
 
 def is_escaped_string(path: str) -> bool:
     return bool(re.search(r"\\[a-zA-Z]", path))
-
-
-def _make_json_serializable(obj):
-    """Convert metadata to JSON serializable format."""
-    if isinstance(obj, dict):
-        return {k: _make_json_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_make_json_serializable(v) for v in obj]
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, (np.integer, np.floating)):
-        return obj.item()
-    return obj
 
 
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
@@ -202,22 +185,12 @@ def read_scan(pathnames, dtype=np.int16, roi=None):
     return scan
 
 
-def _convert_range_to_slice(k):
-    return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
-
-
-def _intersect_slice(user: slice, mask: slice):
-    ic(user, mask)
-    start = max(user.start or 0, mask.start)
-    stop = min(user.stop or mask.stop, mask.stop)
-    return slice(start, stop)
-
-
 class Scan_MBO(scans.ScanMultiROI):
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
     """
+
     def __init__(self, *args, roi: int = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.pbar = None
@@ -255,9 +228,9 @@ class Scan_MBO(scans.ScanMultiROI):
 
     def __getitem__(self, key):
         if not isinstance(key, tuple): key = (key,)
-        t_key, z_key, x_key, y_key = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),)*(4-len(key))
+        t_key, z_key, x_key, y_key = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (4 - len(key))
         frames = utils.listify_index(t_key, self.num_frames)
-        chans  = utils.listify_index(z_key, self.num_channels)
+        chans = utils.listify_index(z_key, self.num_channels)
         if not frames or not chans: return np.empty(0)
         H_out = self.field_heights[0]
         W_out = (self.field_widths[0]
@@ -345,10 +318,10 @@ class Scan_MBO(scans.ScanMultiROI):
     @property
     def size(self):
         return (
-            self.num_frames
-            * self.num_channels
-            * self.field_heights[0]
-            * self.field_widths[0]
+                self.num_frames
+                * self.num_channels
+                * self.field_heights[0]
+                * self.field_widths[0]
         )
 
     @property
@@ -391,7 +364,7 @@ class Scan_MBO(scans.ScanMultiROI):
 
 
 def get_files(
-    base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
+        base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
 ) -> list | Path:
     """
     Recursively search for files in a specified directory whose names contain a given substring,
@@ -460,8 +433,8 @@ def get_files(
         file
         for file in base_path.rglob(pattern)
         if len(file.parts) - base_depth <= max_depth
-        and file.is_file()
-        and not is_excluded(file)
+           and file.is_file()
+           and not is_excluded(file)
     ]
 
     if sort_ascending:
@@ -554,15 +527,15 @@ def save_png(fname, data):
 
 
 def save_mp4(
-    fname: str | Path | np.ndarray,
-    images,
-    framerate=60,
-    speedup=1,
-    chunk_size=100,
-    cmap="gray",
-    win=7,
-    vcodec="libx264",
-    normalize=True,
+        fname: str | Path | np.ndarray,
+        images,
+        framerate=60,
+        speedup=1,
+        chunk_size=100,
+        cmap="gray",
+        win=7,
+        vcodec="libx264",
+        normalize=True,
 ):
     """
     Save a video from a 3D array or TIFF stack to `.mp4`.
@@ -678,17 +651,6 @@ def save_mp4(
     ic(f"Video saved to {fname}")
 
 
-def _is_arraylike(obj) -> bool:
-    """
-    Checks if the object is array-like.
-    For now just checks if obj has `__getitem__()`
-    """
-    for attr in ["__getitem__", "shape", "ndim"]:
-        if not hasattr(obj, attr):
-            return False
-
-    return True
-
 def to_lazy_array(data_in, **kwargs):
     """Convert a variety of data types into an array or list of arrays to pass to Image Widget"""
     return dispatch_data_handler(data_in, **kwargs)
@@ -714,7 +676,7 @@ def handle_path(path: Path, **kwargs):
         if path.suffix == ".npy":
             return np.memmap(path)
         raise TypeError(f"Unsupported file type: {path.suffix}")
-    
+
     if path.is_dir():
         files = get_files(path, "tif", 1)
         return read_scan(files, roi=kwargs.get("roi"))
@@ -746,8 +708,9 @@ def standardize_for_image_widget(data):
         return [data]
     return data  # assume already compatible (e.g., ScanMultiROIReordered)
 
+
 def to_lazy_array2(
-    data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs
+        data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs
 ) -> list[np.ndarray] | np.ndarray | Scan_MBO:
     """
     Convencience function to resolve various data_in variants into lazy arrays.
@@ -780,3 +743,67 @@ def to_lazy_array2(
             return read_scan(files)
 
     raise TypeError(f"Unsupported data type: {type(data_in)}")
+
+
+def _is_arraylike(obj) -> bool:
+    """
+    Checks if the object is array-like.
+    For now just checks if obj has `__getitem__()`
+    """
+    for attr in ["__getitem__", "shape", "ndim"]:
+        if not hasattr(obj, attr):
+            return False
+
+    return True
+
+
+def _get_mbo_project_root() -> Path:
+    """Return the root path of the mbo_utilities repository (based on this file)."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _get_mbo_dirs() -> dict:
+    """
+    Ensure ~/mbo and its subdirectories exist.
+
+    Returns a dict with paths to the root, settings, and cache directories.
+    """
+    base = Path.home().joinpath("mbo")
+    settings = base.joinpath("settings")
+    cache = base.joinpath("cache")
+    logs = base.joinpath("logs")
+
+    for d in (base, settings, cache, logs):
+        d.mkdir(exist_ok=True)
+
+    ic("Created mbo directories:", base, settings, cache, logs)
+    return {
+        "base": base,
+        "settings": settings,
+        "cache": cache,
+        "logs": logs,
+    }
+
+
+def _make_json_serializable(obj):
+    """Convert metadata to JSON serializable format."""
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_make_json_serializable(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    return obj
+
+
+def _convert_range_to_slice(k):
+    return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
+
+
+def _intersect_slice(user: slice, mask: slice):
+    ic(user, mask)
+    start = max(user.start or 0, mask.start)
+    stop = min(user.stop or mask.stop, mask.stop)
+    return slice(start, stop)

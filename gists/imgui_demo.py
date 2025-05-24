@@ -4,18 +4,22 @@ from mbo_utilities.graphics.imgui import PreviewDataWidget
 from imgui_bundle import imgui, portable_file_dialogs as pfd, hello_imgui, immapp
 import fastplotlib as fpl
 
+import os
+
+
 selection_store = {"result": None}
 
 @immapp.static(file_result=None, files_result=None, folder_result=None)
 def open_file_menu():
     static = open_file_menu
+    global selection_store
 
     if imgui.begin_main_menu_bar():
         if imgui.begin_menu("File", True):
             clicked, _ = imgui.menu_item("Open File...", "Ctrl+O", False, True)
             if clicked:
                 static.file_result = pfd.open_file("Choose file").result()[0]
-                selection_store["result"] = [static.file_result]
+                selection_store["result"] = static.file_result
                 hello_imgui.get_runner_params().app_shall_exit = True
 
             clicked, _ = imgui.menu_item("Open Multiple Files...", "Ctrl+Shift+O", False, True)
@@ -32,6 +36,9 @@ def open_file_menu():
 
             imgui.end_menu()
         imgui.end_main_menu_bar()
+
+
+
 
 
 def gui_app():

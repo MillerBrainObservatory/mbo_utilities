@@ -1,10 +1,16 @@
+import shutil
+from pathlib import Path
 from typing import List
+
+from icecream import ic
 from imgui_bundle import (
     imgui,
     imgui_md,
-    immapp,
+    hello_imgui,
 )
 from imgui_bundle import portable_file_dialogs as pfd
+import os
+
 
 class FileDialog:
     def __init__(self):
@@ -51,42 +57,56 @@ class FileDialog:
             self.selected_path=self.select_folder_dialog.result()
             self.select_folder_dialog = None
 
-        if self.last_file_selection:
+        if self.selected_path:
             imgui.text(self.last_file_selection)
+            hello_imgui.get_runner_params().app_shall_exit = True
 
-        # imgui.same_line()
-        # if imgui.button("Add message"):
-        #     self.message_dialog = pfd.message("Message title", "This is an example message", self.message_choice_type, self.icon_type)
-        #
-        # if self.message_dialog and self.message_dialog.ready():
-        #     print("msg ready: " + str(self.message_dialog.result()))
-        #     self.message_dialog = None
-
-        imgui.same_line()
-        for choice in (
-            pfd.choice.ok, pfd.choice.yes_no, pfd.choice.yes_no_cancel,
-            pfd.choice.retry_cancel, pfd.choice.abort_retry_ignore
-        ):
-            if imgui.radio_button(choice.name, self.message_choice_type == choice):
-                self.message_choice_type = choice
-            imgui.same_line()
-
-        imgui.new_line()
         imgui.pop_id()
-
 
 fd = FileDialog()
 
-def demo_gui():
+def render_file_dialog():
+    global fd
     fd.render()
 
 if __name__ == "__main__":
+
+    def setup_imgui():
+        from mbo_utilities import get_mbo_project_root, mbo_paths
+
+        # Assets
+        project_assets: Path = get_mbo_project_root().joinpath("assets")
+
+        if not project_assets.is_dir():
+            ic("Assets folder not found.")
+            return
+
+        imgui_path = mbo_paths["base"].joinpath("imgui")
+        imgui_path.mkdir(exist_ok=True)
+
+        assets_path = imgui_path.joinpath("assets")
+        assets_path.mkdir(exist_ok=True)
+
+        shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
+        hello_imgui.set_assets_folder(str(project_assets))
+
+    setup_imgui()
     from imgui_bundle.demos_python import demo_utils
     demo_utils.set_hello_imgui_demo_assets_folder()
-    from imgui_bundle import immapp
 
-    immapp.run(demo_gui, with_markdown=True, window_size=(1000, 1000))  # type: ignore
+    from imgui_bundle import immapp
+    from imgui_bundle import hello_imgui
+
+    imgui_ini_path = os.path.expanduser("~/.mbo/imgui.ini")
+    os.makedirs(os.path.dirname(imgui_ini_path), exist_ok=True)
+
+    runner_params = hello_imgui.RunnerParams()
+    loc = hello_imgui.ini_settings_location(hello_imgui.IniFolderType.home_folder)
+    runner_params.ini_filename = imgui_ini_path
+    runner_params.callbacks.show_gui = render_file_dialog
+
+    hello_imgui.run(runner_params)
+
+    immapp.run(render_file_dialog, with_markdown=True, window_size=(500, 500))  # type: ignore
     if fd.selected_path:
-        print(fd.selected_path)
-        print(fd.selected_path)
         print(fd.selected_path)
