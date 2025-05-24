@@ -6,8 +6,10 @@ from pathlib import Path
 
 _cwd = Path().cwd()
 
+
 def setup_imgui():
     from mbo_utilities import get_mbo_project_root, mbo_paths
+
     assets: Path = get_mbo_project_root.joinpath("assets")
     if Path(assets).is_dir():
         print("yes!")

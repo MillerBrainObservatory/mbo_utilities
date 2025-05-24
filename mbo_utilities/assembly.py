@@ -319,12 +319,7 @@ def _save_data(
                     tmp_copy = data_chunk.copy()
                 data_chunk = correct_phase_chunk(data_chunk, upsample=upsample)
                 if save_phase_png:
-                    save_phase_images_png(
-                        tmp_copy,
-                        data_chunk,
-                        png_dir,
-                        chan_index
-                    )
+                    save_phase_images_png(tmp_copy, data_chunk, png_dir, chan_index)
 
             writer(fname, data_chunk, chan_index=chan_index)
             start = end

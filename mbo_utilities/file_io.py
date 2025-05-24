@@ -21,11 +21,8 @@ from .util import norm_minmax, subsample_array
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-SAVE_AS_TYPES = [
-    ".tiff",
-    ".bin",
-    ".h5"
-]
+SAVE_AS_TYPES = [".tiff", ".bin", ".h5"]
+
 
 def npy_to_dask(files, name="", axis=1, astype=None):
     """
@@ -201,12 +198,7 @@ class Scan_MBO(scans.ScanMultiROI):
         self._roi = roi - 1 if roi else None
 
     def _read_pages(
-            self,
-            frames,
-            chans,
-            yslice=slice(None),
-            xslice=slice(None),
-            **kwargs
+        self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
     ):
         C = self.num_channels
         # build global page indices for each (frame, channel)
@@ -227,29 +219,43 @@ class Scan_MBO(scans.ScanMultiROI):
         return buf.reshape(len(frames), len(chans), H, W)
 
     def __getitem__(self, key):
-        if not isinstance(key, tuple): key = (key,)
-        t_key, z_key, x_key, y_key = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (4 - len(key))
+        if not isinstance(key, tuple):
+            key = (key,)
+        t_key, z_key, x_key, y_key = tuple(_convert_range_to_slice(k) for k in key) + (
+            slice(None),
+        ) * (4 - len(key))
         frames = utils.listify_index(t_key, self.num_frames)
         chans = utils.listify_index(z_key, self.num_channels)
-        if not frames or not chans: return np.empty(0)
+        if not frames or not chans:
+            return np.empty(0)
         H_out = self.field_heights[0]
-        W_out = (self.field_widths[0]
-                 if self._roi is None
-                 else (self.fields[0].output_xslices[self._roi].stop
-                       - self.fields[0].output_xslices[self._roi].start))
+        W_out = (
+            self.field_widths[0]
+            if self._roi is None
+            else (
+                self.fields[0].output_xslices[self._roi].stop
+                - self.fields[0].output_xslices[self._roi].start
+            )
+        )
         out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
-        slices = zip(self.fields[0].yslices,
-                     self.fields[0].xslices,
-                     self.fields[0].output_yslices,
-                     self.fields[0].output_xslices)
+        slices = zip(
+            self.fields[0].yslices,
+            self.fields[0].xslices,
+            self.fields[0].output_yslices,
+            self.fields[0].output_xslices,
+        )
         for idx, (ys, xs, oys, oxs) in enumerate(slices):
-            if self._roi is not None and idx != self._roi: continue
+            if self._roi is not None and idx != self._roi:
+                continue
             data = self._read_pages(frames, chans, yslice=ys, xslice=xs)
             out[:, :, oys, oxs] = data
         squeeze = []
-        if isinstance(t_key, int): squeeze.append(0)
-        if isinstance(z_key, int): squeeze.append(1)
-        if squeeze: out = out.squeeze(axis=tuple(squeeze))
+        if isinstance(t_key, int):
+            squeeze.append(0)
+        if isinstance(z_key, int):
+            squeeze.append(1)
+        if squeeze:
+            out = out.squeeze(axis=tuple(squeeze))
         return out
 
     @property
@@ -318,10 +324,10 @@ class Scan_MBO(scans.ScanMultiROI):
     @property
     def size(self):
         return (
-                self.num_frames
-                * self.num_channels
-                * self.field_heights[0]
-                * self.field_widths[0]
+            self.num_frames
+            * self.num_channels
+            * self.field_heights[0]
+            * self.field_widths[0]
         )
 
     @property
@@ -364,7 +370,7 @@ class Scan_MBO(scans.ScanMultiROI):
 
 
 def get_files(
-        base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
+    base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
 ) -> list | Path:
     """
     Recursively search for files in a specified directory whose names contain a given substring,
@@ -433,8 +439,8 @@ def get_files(
         file
         for file in base_path.rglob(pattern)
         if len(file.parts) - base_depth <= max_depth
-           and file.is_file()
-           and not is_excluded(file)
+        and file.is_file()
+        and not is_excluded(file)
     ]
 
     if sort_ascending:
@@ -527,15 +533,15 @@ def save_png(fname, data):
 
 
 def save_mp4(
-        fname: str | Path | np.ndarray,
-        images,
-        framerate=60,
-        speedup=1,
-        chunk_size=100,
-        cmap="gray",
-        win=7,
-        vcodec="libx264",
-        normalize=True,
+    fname: str | Path | np.ndarray,
+    images,
+    framerate=60,
+    speedup=1,
+    chunk_size=100,
+    cmap="gray",
+    win=7,
+    vcodec="libx264",
+    normalize=True,
 ):
     """
     Save a video from a 3D array or TIFF stack to `.mp4`.
@@ -710,7 +716,7 @@ def standardize_for_image_widget(data):
 
 
 def to_lazy_array2(
-        data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs
+    data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs
 ) -> list[np.ndarray] | np.ndarray | Scan_MBO:
     """
     Convencience function to resolve various data_in variants into lazy arrays.

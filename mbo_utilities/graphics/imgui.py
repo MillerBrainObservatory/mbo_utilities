@@ -18,12 +18,20 @@ from imgui_bundle import implot
 from imgui_bundle import portable_file_dialogs as pfd
 
 from mbo_utilities.assembly import save_as
-from mbo_utilities.file_io import Scan_MBO, SAVE_AS_TYPES, _get_mbo_project_root, _get_mbo_dirs, read_scan
+from mbo_utilities.file_io import (
+    Scan_MBO,
+    SAVE_AS_TYPES,
+    _get_mbo_project_root,
+    _get_mbo_dirs,
+    read_scan,
+)
 from mbo_utilities.util import norm_minmax, norm_percentile
 
 try:
     import cupy as cp  # noqa
-    from cusignal import register_translation  # GPU version of phase_cross_correlation # noqa
+    from cusignal import (
+        register_translation,
+    )  # GPU version of phase_cross_correlation # noqa
 
     HAS_CUPY = True
 except ImportError:
@@ -32,8 +40,8 @@ except ImportError:
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
 
-def setup_imgui():
 
+def setup_imgui():
     # Assets
     project_assets: Path = _get_mbo_project_root().joinpath("assets")
     mbo_dirs = _get_mbo_dirs()
@@ -51,6 +59,7 @@ def setup_imgui():
     shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
     hello_imgui.set_assets_folder(str(project_assets))
 
+
 def main_package_folder() -> Path:
     """Find the root of the main package by looking for __init__.py and graphics folder.
     may want to refactor this to use _get() instead
@@ -64,11 +73,11 @@ def main_package_folder() -> Path:
 class GuiLogger:
     def __init__(self):
         self.show = True
-        self.filters = {'debug': True, 'info': True, 'error': True}
+        self.filters = {"debug": True, "info": True, "error": True}
         self.messages = []
 
     def log(self, level, msg):
-        t = time.strftime('%H:%M:%S')
+        t = time.strftime("%H:%M:%S")
         self.messages.append((t, level, msg))
 
     def draw(self):
@@ -76,20 +85,20 @@ class GuiLogger:
         if not opened:
             imgui.end()
             return
-        _, self.filters['debug'] = imgui.checkbox("Debug", self.filters['debug'])
+        _, self.filters["debug"] = imgui.checkbox("Debug", self.filters["debug"])
         imgui.same_line()
-        _, self.filters['info']  = imgui.checkbox("Info",  self.filters['info'])
+        _, self.filters["info"] = imgui.checkbox("Info", self.filters["info"])
         imgui.same_line()
-        _, self.filters['error'] = imgui.checkbox("Error", self.filters['error'])
+        _, self.filters["error"] = imgui.checkbox("Error", self.filters["error"])
         imgui.separator()
-        imgui.begin_child("##debug_scroll", imgui.ImVec2(0,0), False)
+        imgui.begin_child("##debug_scroll", imgui.ImVec2(0, 0), False)
         for t, lvl, m in self.messages:
             if not self.filters[lvl]:
                 continue
             col = {
-                'debug': imgui.ImVec4(0.8,0.8,0.8,1),
-                'info':  imgui.ImVec4(1.0,1.0,1.0,1),
-                'error': imgui.ImVec4(1.0,0.3,0.3,1),
+                "debug": imgui.ImVec4(0.8, 0.8, 0.8, 1),
+                "info": imgui.ImVec4(1.0, 1.0, 1.0, 1),
+                "error": imgui.ImVec4(1.0, 0.3, 0.3, 1),
             }[lvl]
             imgui.text_colored(col, f"[{t}] {m}")
         imgui.end_child()
@@ -108,7 +117,6 @@ def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
 def compute_phase_offset(
     frame: np.ndarray, upsample: int = 10, exclude_center_px: int = 0
 ) -> float:
-
     if frame.ndim == 3:
         frame = np.mean(frame, axis=0)
     _, w = frame.shape
@@ -137,10 +145,13 @@ def compute_phase_offset(
         )
     else:
         shift, _, _ = phase_cross_correlation(
-            pre_crop, post_crop, upsample_factor=upsample  # noqa
+            pre_crop,
+            post_crop,
+            upsample_factor=upsample,  # noqa
         )
 
     return float(shift[1])
+
 
 def _save_as(path, **kwargs):
     """
@@ -152,13 +163,13 @@ def _save_as(path, **kwargs):
 
 
 def draw_progress(
-        current_index: int,
-        total_count: int,
-        percent_complete: float,
-        running_text: str = "Processing",
-        done_text: str = "Completed",
-        done: bool = False,
-        logger: GuiLogger = None,
+    current_index: int,
+    total_count: int,
+    percent_complete: float,
+    running_text: str = "Processing",
+    done_text: str = "Completed",
+    done: bool = False,
+    logger: GuiLogger = None,
 ):
     # TODO: must be a better way to do this
     if not hasattr(draw_progress, "_hide_time"):
@@ -181,11 +192,11 @@ def draw_progress(
         return
     else:
         bar_color = imgui.ImVec4(0.2, 0.5, 0.9, 1.0)  # visible blue
-        text = f"{running_text} {current_index + 1} of {total_count} [{int(p*100)}%]"
+        text = f"{running_text} {current_index + 1} of {total_count} [{int(p * 100)}%]"
 
     if logger is not None:
-        logger.log('info', f"Current index: {current_index}")
-        logger.log('info', f"Total count: {total_count}")
+        logger.log("info", f"Current index: {current_index}")
+        logger.log("info", f"Total count: {total_count}")
 
     imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)
     imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(6, 4))
@@ -321,7 +332,6 @@ class PreviewDataWidget(EdgeWindow):
         if implot.get_current_context() is None:
             implot.create_context()
 
-
     @property
     def gaussian_sigma(self):
         return self._gaussian_sigma
@@ -393,23 +403,40 @@ class PreviewDataWidget(EdgeWindow):
 
     def update(self):
         # Top Menu Bar
-        cflags: imgui.ChildFlags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
+        cflags: imgui.ChildFlags = (
+            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
+        )
         wflags: imgui.WindowFlags = imgui.WindowFlags_.menu_bar
         with imgui_ctx.begin_child("menu", window_flags=wflags, child_flags=cflags):
             if imgui.begin_menu_bar():
                 if imgui.begin_menu("File", True):
-                    if imgui.menu_item("Save as", "Ctrl+S", p_selected=False, enabled=self.is_mbo_scan)[0]:
+                    if imgui.menu_item(
+                        "Save as", "Ctrl+S", p_selected=False, enabled=self.is_mbo_scan
+                    )[0]:
                         self._open_save_popup = True
                     imgui.end_menu()
                 if imgui.begin_menu("Docs", True):
-                    if imgui.menu_item("Open Docs", "Ctrl+I", p_selected=False, enabled=True)[0]:
-                        webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/")
+                    if imgui.menu_item(
+                        "Open Docs", "Ctrl+I", p_selected=False, enabled=True
+                    )[0]:
+                        webbrowser.open(
+                            "https://millerbrainobservatory.github.io/mbo_utilities/"
+                        )
                     imgui.end_menu()
                 if imgui.begin_menu("Settings", True):
                     imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
-                    _, self.show_tool_style_editor = imgui.menu_item("Style Editor", "", self.show_tool_style_editor, True)
-                    _, self.show_debug_panel = imgui.menu_item("Debug Panel", "", p_selected=self.show_debug_panel, enabled=True)
-                    _, self.show_tool_about = imgui.menu_item("About MBO", "", self.show_tool_about, True)
+                    _, self.show_tool_style_editor = imgui.menu_item(
+                        "Style Editor", "", self.show_tool_style_editor, True
+                    )
+                    _, self.show_debug_panel = imgui.menu_item(
+                        "Debug Panel",
+                        "",
+                        p_selected=self.show_debug_panel,
+                        enabled=True,
+                    )
+                    _, self.show_tool_about = imgui.menu_item(
+                        "About MBO", "", self.show_tool_about, True
+                    )
                     imgui.end_menu()
             imgui.end_menu_bar()
 
@@ -428,7 +455,9 @@ class PreviewDataWidget(EdgeWindow):
         if self.show_tool_id_stack_tool:
             imgui.show_id_stack_tool_window(self.show_tool_id_stack_tool)
         if self.show_tool_style_editor:
-            _, self.show_tool_style_editor = imgui.begin("Style Editor", self.show_tool_style_editor)
+            _, self.show_tool_style_editor = imgui.begin(
+                "Style Editor", self.show_tool_style_editor
+            )
             imgui.show_style_editor()
             imgui.end()
         if self.show_tool_about:
@@ -454,7 +483,6 @@ class PreviewDataWidget(EdgeWindow):
             imgui.end_tab_bar()
 
     def draw_stats_section(self):
-
         if not getattr(self, "_z_stats_done", False):
             return
 
@@ -466,10 +494,15 @@ class PreviewDataWidget(EdgeWindow):
         # imgui.set_cursor_pos_y(hello_imgui.em_size(1))  # push content toward top
         imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats")
 
-        cflags: imgui.ChildFlags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
-        with imgui_ctx.begin_child("##Summary",size=imgui.ImVec2(0, 300), child_flags=cflags):
-
-            if imgui.begin_table("zstats", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):
+        cflags: imgui.ChildFlags = (
+            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
+        )
+        with imgui_ctx.begin_child(
+            "##Summary", size=imgui.ImVec2(0, 300), child_flags=cflags
+        ):
+            if imgui.begin_table(
+                "zstats", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg
+            ):
                 for col in ["Z", "Mean", "Std", "SNR"]:
                     imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
                 imgui.table_headers_row()
@@ -480,7 +513,9 @@ class PreviewDataWidget(EdgeWindow):
                         imgui.text(f"{val:.2f}")
                 imgui.end_table()
 
-        with imgui_ctx.begin_child("##Plots", size=imgui.ImVec2(0, 300), child_flags=cflags):
+        with imgui_ctx.begin_child(
+            "##Plots", size=imgui.ImVec2(0, 300), child_flags=cflags
+        ):
             if not hasattr(self, "_z_plot_yaxis"):
                 self._z_plot_yaxis = "mean"
 
@@ -515,7 +550,9 @@ class PreviewDataWidget(EdgeWindow):
                 # Directory + Ext
                 imgui.set_next_item_width(hello_imgui.em_size(25))
                 # TODO: make _save_dir a property to expand ~
-                _, self._save_dir = imgui.input_text("Save Dir", str(Path(self._save_dir).expanduser().resolve()), 256)
+                _, self._save_dir = imgui.input_text(
+                    "Save Dir", str(Path(self._save_dir).expanduser().resolve()), 256
+                )
                 imgui.same_line()
                 if imgui.button("Browse"):
                     home = Path().home()
@@ -531,11 +568,19 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.separator()
                 imgui.text("Options")
 
-                self._overwrite = checkbox_with_tooltip("Overwrite", self._overwrite,
-                                                        "Replace any existing output files.")
-                self._fix_phase = checkbox_with_tooltip("Fix Phase", self._fix_phase,
-                                                        "Apply scan-phase correction to interleaved lines.")
-                self._debug = checkbox_with_tooltip("Debug", self._debug, "Run with debugging, settings -> debug to view the outputs.")
+                self._overwrite = checkbox_with_tooltip(
+                    "Overwrite", self._overwrite, "Replace any existing output files."
+                )
+                self._fix_phase = checkbox_with_tooltip(
+                    "Fix Phase",
+                    self._fix_phase,
+                    "Apply scan-phase correction to interleaved lines.",
+                )
+                self._debug = checkbox_with_tooltip(
+                    "Debug",
+                    self._debug,
+                    "Run with debugging, settings -> debug to view the outputs.",
+                )
 
                 # Z-plane selection
                 imgui.separator()
@@ -545,7 +590,10 @@ class PreviewDataWidget(EdgeWindow):
                     num_planes = self.image_widget.data[0].num_channels  # noqa
                 except Exception as e:
                     num_planes = 1
-                    hello_imgui.log(hello_imgui.LogLevel.error, f"Could not read number of planes: {e}")
+                    hello_imgui.log(
+                        hello_imgui.LogLevel.error,
+                        f"Could not read number of planes: {e}",
+                    )
 
                 if imgui.button("All"):
                     self._selected_planes = set(range(num_planes))
@@ -583,10 +631,15 @@ class PreviewDataWidget(EdgeWindow):
                             "ext": self._ext,
                             "save_phase_png": False,
                             "target_chunk_mb": 20,
-                            "progress_callback": lambda frac, current_plane: self.gui_progress_callback(frac, current_plane),
+                            "progress_callback": lambda frac,
+                            current_plane: self.gui_progress_callback(
+                                frac, current_plane
+                            ),
                         }
-                        self.debug_panel.log('info', f"Saving planes {save_planes}")
-                        self.debug_panel.log('info', f"Saving to {self._save_dir} as {self._ext}")
+                        self.debug_panel.log("info", f"Saving planes {save_planes}")
+                        self.debug_panel.log(
+                            "info", f"Saving to {self._save_dir} as {self._ext}"
+                        )
                         threading.Thread(target=_save_as, kwargs=save_kwargs).start()
                         imgui.close_current_popup()
                     except Exception as e:
@@ -607,13 +660,19 @@ class PreviewDataWidget(EdgeWindow):
 
             imgui.begin_group()
             options = ["mean", "max", "std"]
-            disabled_label = "mean-sub (pending)" if not self._mean_sub_done else "mean-sub"
+            disabled_label = (
+                "mean-sub (pending)" if not self._mean_sub_done else "mean-sub"
+            )
             options.append(disabled_label)
 
-            current_display_idx = options.index(self.proj if self._proj != "mean-sub" else disabled_label)
+            current_display_idx = options.index(
+                self.proj if self._proj != "mean-sub" else disabled_label
+            )
 
             imgui.set_next_item_width(hello_imgui.em_size(15))
-            proj_changed, selected_display_idx = imgui.combo("Projection", current_display_idx, options)
+            proj_changed, selected_display_idx = imgui.combo(
+                "Projection", current_display_idx, options
+            )
             set_tooltip(
                 "Choose projection method over the sliding window: “mean” (average), “max” (peak), “std” (variance), or “mean-sub” (background-subtracted mean, recommended for motion preview)."
             )
@@ -627,28 +686,40 @@ class PreviewDataWidget(EdgeWindow):
                     if self.proj == "mean-sub":
                         self.image_widget.frame_apply = {0: self._combined_frame_apply}
                     else:
-                        self.image_widget.window_funcs["t"].func = getattr(np, self.proj)
+                        self.image_widget.window_funcs["t"].func = getattr(
+                            np, self.proj
+                        )
 
             # Window size for projections
             imgui.set_next_item_width(hello_imgui.em_size(15))
-            winsize_changed, new_winsize = imgui.input_int("Window Size", self.window_size, step=1, step_fast=2)
+            winsize_changed, new_winsize = imgui.input_int(
+                "Window Size", self.window_size, step=1, step_fast=2
+            )
             set_tooltip(
                 "Size of the temporal window (in frames) used for projection."
                 " E.g. a value of 3 averages over 3 consecutive frames."
             )
             if winsize_changed and new_winsize > 0:
                 self.window_size = new_winsize
-                self.debug_panel.log('info', f"New Window Size: {new_winsize}")
+                self.debug_panel.log("info", f"New Window Size: {new_winsize}")
                 self._log_buffer = self._log_buffer[-100:]
 
             # Gaussian Filter
             imgui.set_next_item_width(hello_imgui.em_size(15))
-            gaussian_changed, new_gaussian_sigma = imgui.slider_float(label="sigma", v=self.gaussian_sigma, v_min=0.0, v_max=20.0, )
+            gaussian_changed, new_gaussian_sigma = imgui.slider_float(
+                label="sigma",
+                v=self.gaussian_sigma,
+                v_min=0.0,
+                v_max=20.0,
+            )
             set_tooltip(
-                "Apply a Gaussian blur to the preview image. Sigma is in pixels; larger values yield stronger smoothing.")
+                "Apply a Gaussian blur to the preview image. Sigma is in pixels; larger values yield stronger smoothing."
+            )
             if gaussian_changed:
                 self.gaussian_sigma = new_gaussian_sigma
-                self.debug_panel.log("info", f"New gaussian sigma: {new_gaussian_sigma}")
+                self.debug_panel.log(
+                    "info", f"New gaussian sigma: {new_gaussian_sigma}"
+                )
 
             imgui.end_group()
 
@@ -657,39 +728,57 @@ class PreviewDataWidget(EdgeWindow):
             # Section: Scan-phase Correction
             imgui.spacing()
             imgui.separator()
-            imgui.text_colored(imgui.ImVec4(0.8, 0.6, 1.0, 1.0), "Scan-Phase Correction")
+            imgui.text_colored(
+                imgui.ImVec4(0.8, 0.6, 1.0, 1.0), "Scan-Phase Correction"
+            )
             imgui.separator()
             imgui.begin_group()
 
             imgui.text("Offset")
             imgui.same_line()
-            imgui.text_colored(imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self.current_offset:.3f}")
+            imgui.text_colored(
+                imgui.ImVec4(1.0, 0.5, 0.0, 1.0), f"{self.current_offset:.3f}"
+            )
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
-            upsample_changed, upsample_val = imgui.input_int("Upsample", self._phase_upsample, step=1, step_fast=2)
+            upsample_changed, upsample_val = imgui.input_int(
+                "Upsample", self._phase_upsample, step=1, step_fast=2
+            )
             set_tooltip(
-                "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment.")
+                "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment."
+            )
             if upsample_changed:
                 self.phase_upsample = max(1, upsample_val)
                 self.debug_panel.log("info", f"New upsample: {upsample_val}")
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
-            max_offset_changed, max_offset = imgui.input_int("max-offset", self.max_offset, step=1, step_fast=2)
-            set_tooltip("Maximum allowed pixel shift (in pixels) when estimating the scan-phase offset.")
+            max_offset_changed, max_offset = imgui.input_int(
+                "max-offset", self.max_offset, step=1, step_fast=2
+            )
+            set_tooltip(
+                "Maximum allowed pixel shift (in pixels) when estimating the scan-phase offset."
+            )
             if max_offset_changed:
                 self.max_offset = max(1, max_offset)
                 self._log_buffer.append(f"New max-offset: {max_offset}")
                 self._log_buffer = self._log_buffer[-100:]
 
-            auto_changed, new_auto_update = imgui.checkbox("Auto Update", self.auto_update)
-            set_tooltip("When enabled, automatically recompute phase correction whenever any parameter changes.")
+            auto_changed, new_auto_update = imgui.checkbox(
+                "Auto Update", self.auto_update
+            )
+            set_tooltip(
+                "When enabled, automatically recompute phase correction whenever any parameter changes."
+            )
             if auto_changed:
                 self.auto_update = new_auto_update
 
             if imgui.button("Apply", imgui.ImVec2(0, 0)):
                 self.debug_panel.log("debug", f"Calculating offset")
                 self.calculate_offset()
-            set_tooltip("Run the phase-correction algorithm now using the current settings.", _show_mark=False)
+            set_tooltip(
+                "Run the phase-correction algorithm now using the current settings.",
+                _show_mark=False,
+            )
             imgui.same_line()
             if imgui.button("Reset", imgui.ImVec2(0, 0)):
                 self.debug_panel.log("debug", f"Reset offset")
@@ -723,7 +812,7 @@ class PreviewDataWidget(EdgeWindow):
                 self.nz,
                 self._mean_sub_progress,
                 running_text="Computing stats for plane(s)",
-                logger = self.debug_panel,
+                logger=self.debug_panel,
             )
 
         if self._progress_value > 0:
@@ -733,19 +822,21 @@ class PreviewDataWidget(EdgeWindow):
                 percent_complete=self._progress_value,
                 running_text="Saving planes",
                 done_text="Completed",
-                done=self._save_done
+                done=self._save_done,
             )
 
     def get_raw_frame(self):
         return self.image_widget.data[0][
-                   self.image_widget.current_index["t"],
-                   self.image_widget.current_index["z"],
-                   :, :]
+            self.image_widget.current_index["t"],
+            self.image_widget.current_index["z"],
+            :,
+            :,
+        ]
 
     def gui_progress_callback(self, fraction, current_plane, **_):
         self._current_saving_plane = current_plane
         self._progress_value = fraction
-        self._save_done = (fraction >= 1.0)
+        self._save_done = fraction >= 1.0
 
     def _combined_frame_apply(self, frame: np.ndarray) -> np.ndarray:
         """alter final frame only once, in ImageWidget.frame_apply"""
@@ -767,7 +858,6 @@ class PreviewDataWidget(EdgeWindow):
         self._log_buffer.append(f"New offset: {self.current_offset}")
         self._log_buffer = self._log_buffer[-100:]
         # self.image_widget.frame_apply = {0: self._combined_frame_apply}
-
 
     def compute_z_stats(self):
         data = read_scan(self.fpath)
@@ -1015,6 +1105,3 @@ class SummaryDataWidget(EdgeWindow):
 
     def calculate_noise(self):
         pass
-
-
-
