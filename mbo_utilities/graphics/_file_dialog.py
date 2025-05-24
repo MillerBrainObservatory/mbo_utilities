@@ -45,7 +45,9 @@ class FileDialog:
 
         imgui.same_line()
         if imgui.button("Open file (multiselect)"):
-            self.open_file_multiselect = pfd.open_file("Select file", options=pfd.opt.multiselect)
+            self.open_file_multiselect = pfd.open_file(
+                "Select file", options=pfd.opt.multiselect
+            )
         if self.open_file_multiselect and self.open_file_multiselect.ready():
             self.selected_path = self.open_file_multiselect.result()
             self.open_file_multiselect = None
@@ -54,7 +56,7 @@ class FileDialog:
         if imgui.button("Select folder"):
             self.select_folder_dialog = pfd.select_folder("Select folder")
         if self.select_folder_dialog and self.select_folder_dialog.ready():
-            self.selected_path=self.select_folder_dialog.result()
+            self.selected_path = self.select_folder_dialog.result()
             self.select_folder_dialog = None
 
         if self.selected_path:
@@ -63,11 +65,14 @@ class FileDialog:
 
         imgui.pop_id()
 
+
 fd = FileDialog()
+
 
 def render_file_dialog():
     global fd
     fd.render()
+
 
 if __name__ == "__main__":
 
@@ -92,6 +97,7 @@ if __name__ == "__main__":
 
     setup_imgui()
     from imgui_bundle.demos_python import demo_utils
+
     demo_utils.set_hello_imgui_demo_assets_folder()
 
     from imgui_bundle import immapp
