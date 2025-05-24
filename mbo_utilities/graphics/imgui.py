@@ -36,28 +36,10 @@ try:
     HAS_CUPY = True
 except ImportError:
     HAS_CUPY = False
+    register_translation = phase_cross_correlation  # noqa
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
-
-
-def setup_imgui():
-    # Assets
-    project_assets: Path = _get_mbo_project_root().joinpath("assets")
-    mbo_dirs = _get_mbo_dirs()
-
-    if not project_assets.is_dir():
-        ic("Assets folder not found.")
-        return
-
-    imgui_path = mbo_dirs["base"].joinpath("imgui")
-    imgui_path.mkdir(exist_ok=True)
-
-    assets_path = imgui_path.joinpath("assets")
-    assets_path.mkdir(exist_ok=True)
-
-    shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
-    hello_imgui.set_assets_folder(str(project_assets))
 
 
 def main_package_folder() -> Path:
@@ -252,22 +234,20 @@ class PreviewDataWidget(EdgeWindow):
         title: str = "Data Preview",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
+        self._selected_pipelines = None
+        self.imgui_ini_path = None
 
-        imgui_ini_path = Path.home() / ".mbo" / "settings" / "imgui.ini"
-        imgui_ini_path.parent.mkdir(parents=True, exist_ok=True)
-        imgui.get_io().ini_filename = str(imgui_ini_path)
+        self.setup()
+        self.debug_panel = GuiLogger()
 
         self._total_saving_planes = 0
         self.show_debug_panel = False
-        self.debug_panel = GuiLogger()
         self.show_tool_about = False
         self.show_tool_style_editor = False
         self.show_tool_id_stack_tool = False
         self.show_tool_debug_log = False
         self.show_tool_metrics = False
-        self._log_buffer = []
         self.font_size = 12
-        # hello_imgui.load_font_ttf(str(assets_folder() / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"), self.font_size)
 
         self._save_done = False
         self._show_theme_window = False
@@ -279,12 +259,10 @@ class PreviewDataWidget(EdgeWindow):
         self._show_debug_panel = None
 
         self.max_offset = 8
-        self.fpath = Path(fpath) if fpath else Path(mbo_home)
-        self.h5name = None
+        self.fpath = Path(fpath) if fpath else Path(_get_mbo_dirs()["base"]).joinpath("data")
         self.image_widget = iw
         self.shape = self.image_widget.data[0].shape
         self.nz = self.shape[1]
-        self.offset_store = np.zeros(self.nz)
 
         self._gaussian_sigma = 0
         self._current_offset = 0.0
@@ -316,7 +294,6 @@ class PreviewDataWidget(EdgeWindow):
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
 
-        # self.image_widget.add_event_handler(self.track_slider, "current_index")
         self.image_widget._image_widget_sliders._loop = True  # noqa
 
         self._mean_sub_done = False
@@ -329,8 +306,37 @@ class PreviewDataWidget(EdgeWindow):
 
         threading.Thread(target=self.compute_z_stats).start()
 
+    def setup(self):
         if implot.get_current_context() is None:
             implot.create_context()
+
+        project_assets: Path = _get_mbo_project_root().joinpath("assets")
+        mbo_dirs = _get_mbo_dirs()
+
+        imgui_path = mbo_dirs["base"].joinpath("imgui")
+        imgui_path.mkdir(exist_ok=True)
+
+        # give the ini somewhere to go
+        self.imgui_ini_path = imgui_path.joinpath("imgui.ini")
+        self.imgui_ini_path.parent.mkdir(exist_ok=True)
+        imgui.get_io().set_ini_filename(str(self.imgui_ini_path))
+
+        if not project_assets.is_dir():
+            ic("Assets folder not found.")
+            return
+
+        assets_path = imgui_path.joinpath("assets")
+        assets_path.mkdir(exist_ok=True)
+
+        shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
+        hello_imgui.set_assets_folder(str(project_assets))
+
+        font_path = assets_path / "fonts" / "JetBrainsMono-Bold.ttf"
+        if font_path.is_file():
+            imgui.get_io().fonts.clear()
+            imgui.get_io().fonts.add_font_from_file_ttf(str(font_path), 16.0)
+        else:
+            ic("Font not found:", font_path)
 
     @property
     def gaussian_sigma(self):
@@ -468,19 +474,58 @@ class PreviewDataWidget(EdgeWindow):
 
         if imgui.begin_tab_bar("MainPreviewTabs"):
             if imgui.begin_tab_item("Preview")[0]:
-                # make thin as possible for side widget
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))
                 self.draw_preview_section()
                 imgui.pop_style_var()
                 imgui.pop_style_var()
-
                 imgui.end_tab_item()
 
             if self._z_stats_done and imgui.begin_tab_item("Summary Stats")[0]:
                 self.draw_stats_section()
                 imgui.end_tab_item()
+
+            if imgui.begin_tab_item("Analysis")[0]:
+                self.draw_pipeline_section()
+                imgui.end_tab_item()
+
             imgui.end_tab_bar()
+
+    def draw_pipeline_section(self):
+        imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Run a Pipeline")
+        pipelines = ["Suite2p", "MaskNMF"]
+        self._selected_pipelines = {p: False for p in pipelines}
+
+        for name in pipelines:
+            changed, val = imgui.checkbox(name, self._selected_pipelines[name])
+            if changed:
+                self._selected_pipelines[name] = val
+
+        imgui.separator()
+
+        if self._selected_pipelines["Suite2p"]:
+            if imgui.collapsing_header("Suite2p Settings"):
+                self.draw_suite2p_settings()
+
+        if self._selected_pipelines["MaskNMF"]:
+            if imgui.collapsing_header("MaskNMF Settings"):
+                self.draw_masknmf_settings()
+
+    def draw_suite2p_settings(self):
+        imgui.text("Suite2p Pipeline Options")
+        imgui.separator()
+        imgui.checkbox("Run registration", True)
+        imgui.checkbox("Run cell detection", True)
+        imgui.slider_int("Threshold", 30, 0, 100)
+        imgui.input_text("Output folder", "/path/to/suite2p", 256)
+
+    def draw_masknmf_settings(self):
+        imgui.text("MaskNMF Pipeline Options")
+        imgui.separator()
+        imgui.checkbox("Enable CNMF update", True)
+        imgui.checkbox("Enable background subtraction", False)
+        imgui.slider_float("SNR threshold", 5.0, 0.0, 20.0)
+        imgui.input_text("Output folder", "/path/to/masknmf", 256)
 
     def draw_stats_section(self):
         if not getattr(self, "_z_stats_done", False):
@@ -534,6 +579,7 @@ class PreviewDataWidget(EdgeWindow):
                 elif self._z_plot_yaxis == "snr":
                     implot.plot_line("SNR", z_vals, snr_vals)
                 implot.end_plot()
+
 
     def draw_preview_section(self):
         cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
@@ -617,7 +663,7 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.separator()
                 if imgui.button("Save", imgui.ImVec2(100, 0)):
                     if not self._save_dir:
-                        self._save_dir = mbo_home
+                        self._save_dir = _get_mbo_dirs()["base"].joinpath("data")
                     try:
                         save_planes = [p + 1 for p in self._selected_planes]
                         self._total_saving_planes = len(save_planes)
@@ -702,7 +748,6 @@ class PreviewDataWidget(EdgeWindow):
             if winsize_changed and new_winsize > 0:
                 self.window_size = new_winsize
                 self.debug_panel.log("info", f"New Window Size: {new_winsize}")
-                self._log_buffer = self._log_buffer[-100:]
 
             # Gaussian Filter
             imgui.set_next_item_width(hello_imgui.em_size(15))
@@ -760,8 +805,7 @@ class PreviewDataWidget(EdgeWindow):
             )
             if max_offset_changed:
                 self.max_offset = max(1, max_offset)
-                self._log_buffer.append(f"New max-offset: {max_offset}")
-                self._log_buffer = self._log_buffer[-100:]
+                self.debug_panel.log("info", f"New max-offset: {max_offset}")
 
             auto_changed, new_auto_update = imgui.checkbox(
                 "Auto Update", self.auto_update
@@ -852,11 +896,10 @@ class PreviewDataWidget(EdgeWindow):
     def calculate_offset(self, ev=None):
         """Get the current frame, calculate the offset"""
         frame = self.get_raw_frame()
-        self._log_buffer.append(f"Old offset: {self.current_offset}")
+        self.debug_panel.log("debug", f"Calculating offset")
         ofs = compute_phase_offset(frame, upsample=self._phase_upsample)
         self.current_offset = ofs
-        self._log_buffer.append(f"New offset: {self.current_offset}")
-        self._log_buffer = self._log_buffer[-100:]
+        self.debug_panel.log("debug", f"Offset: {self.current_offset:.3f}")
         # self.image_widget.frame_apply = {0: self._combined_frame_apply}
 
     def compute_z_stats(self):
@@ -893,11 +936,13 @@ class PreviewDataWidget(EdgeWindow):
     def edge_detection(self):
         from scipy.ndimage import sobel
 
-        frame = self.image_widget.managed_graphics[0].data.value.copy()
+        frame = self.get_raw_frame()
         edge_x = sobel(frame, axis=0)
         edge_y = sobel(frame, axis=1)
         edges = np.hypot(edge_x, edge_y)
-        self.image_widget.managed_graphics[0].data[:] = edges
+        return edges
+
+
 
     def highpass_filter(self):
         from scipy.ndimage import gaussian_filter
@@ -912,196 +957,3 @@ class PreviewDataWidget(EdgeWindow):
         t_idx = self.image_widget.current_index.get("t", 0)
         window = data[:, t_idx - 5 : t_idx + 5].mean(axis=1)
         self.image_widget.managed_graphics[0].data[:] = window[t_idx]
-
-    def save_to_file(self):
-        if not self.h5name.is_file():
-            print(f"Error: File {self.h5name} does not exist.")
-            return
-        try:
-            with h5py.File(self.h5name.resolve(), "r+") as f:
-                if "scan_corrections" in f:
-                    del f["scan_corrections"]
-                f.create_dataset("scan_corrections", data=np.array(self.offset_store))
-                print(f"Offsets successfully saved to {self.h5name}")
-
-            imgui.open_popup("Save Successful")
-
-        except Exception as e:
-            print(f"Failed to save offsets: {e}")
-
-    def blend(self):
-        nz = self.image_widget.data[0].shape[0]
-        c_index = self.image_widget.current_index["t"]
-        if c_index < nz:
-            frame = self.image_widget.data[0][c_index]
-            frame_n = self.image_widget.data[0][c_index + 1]
-            tmp = norm_percentile(frame * frame_n)
-            self.image_widget.data[0][c_index] = norm_minmax(tmp)
-
-
-class SummaryDataWidget(EdgeWindow):
-    def __init__(self, image_widget, size, location):
-        flags = imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_resize
-        super().__init__(
-            figure=image_widget.figure,
-            size=size,
-            location=location,
-            title="Preview Data",
-            window_flags=flags,
-        )
-        self.image_widget = image_widget
-
-        self.gaussian_sigma = 0.0
-
-    def update(self):
-        something_changed = False
-
-        imgui.text("Gaussian Filter")
-        changed, value = imgui.slider_float(
-            "Sigma", v=self.gaussian_sigma, v_min=0.0, v_max=20.0
-        )
-        if changed:
-            self.gaussian_sigma = value
-            something_changed = True
-
-        imgui.separator()
-        imgui.text("Image Processing")
-
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Apply Gaussian smoothing to current frame")
-
-        if imgui.button("Compute Temporal Mean"):
-            self.temporal_mean()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Compute mean image across time dimension")
-
-        if imgui.button("Compute Temporal StdDev"):
-            self.temporal_std()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Compute std-dev image across time dimension")
-
-        if imgui.button("Blend Adjacent Z-Planes"):
-            self.blend_adjacent()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Blend current z-plane with adjacent planes")
-
-        imgui.separator()
-        imgui.text("Suite2p Previews")
-
-        if imgui.button("Bandpass Filter"):
-            self.apply_bandpass()
-
-        if imgui.button("Median Projection"):
-            self.median_projection()
-
-        if imgui.button("Variance Map"):
-            self.variance_map()
-
-        if imgui.button("Edge Detection"):
-            self.edge_detection()
-
-        if imgui.button("High-Pass Filter"):
-            self.highpass_filter()
-
-        if imgui.button("Denoised Mean"):
-            self.denoised_mean()
-        imgui.separator()
-        imgui.text("Statistics")
-        if something_changed:
-            self.apply_gaussian()
-
-    def temporal_mean(self):
-        """Apply a temporal mean projection around the current frame without changing dimensions."""
-
-        z_idx = self.image_widget.current_index.get("z", 0)
-        t_idx = self.image_widget.current_index.get("t", 0)
-
-        data = self.image_widget.data[0]
-
-        # window around current t
-        window_size = 5
-        half_window = window_size // 2
-        t_min = max(0, t_idx - half_window)
-        t_max = min(data.shape[1], t_idx + half_window + 1)
-
-        # average only across small t window, keeping z, x, y shape
-        averaged = data[:, t_min:t_max, ...].mean(axis=1)  # shape (z, x, y)
-
-        # only show z_idx slice
-        frame = averaged[z_idx]
-
-        # update current view without changing the underlying array
-        self.image_widget.figure[0, 0].graphics[0].data[:] = frame
-
-    def temporal_std(self):
-        """Standard deviation across time"""
-        z_idx = self.image_widget.current_index.get("t", 0)
-        frame = self.image_widget.data[0][:, z_idx, ...].std(axis=0)
-        self.image_widget.figure[0, 0].graphics[0].data[:] = frame
-
-    def blend_adjacent(self):
-        """Blend current z with previous and next (if they exist)"""
-        t_idx = self.image_widget.current_index.get("t", 0)
-        data = self.image_widget.data[0]
-        nz = data.shape[0]
-
-        frames = [data[t_idx]]
-        if t_idx > 0:
-            frames.append(data[t_idx - 1])
-        if t_idx < nz - 1:
-            frames.append(data[t_idx + 1])
-
-        blended = np.mean(frames, axis=0)
-        self.image_widget.figure[0, 0].graphics[0].data[:] = blended
-
-    def apply_bandpass(self):
-        from scipy.ndimage import gaussian_filter
-
-        frame = self.image_widget.managed_graphics[0].data.value.copy()
-        lowpass = gaussian_filter(frame, sigma=3)
-        highpass = frame - gaussian_filter(frame, sigma=20)
-        bandpassed = frame - lowpass + highpass
-        self.image_widget.figure[0, 0].graphics[0].data[:] = bandpassed
-
-    def median_projection(self):
-        data = self.image_widget.data[0]
-        med_proj = np.median(data, axis=1)  # median across time
-        t_idx = self.image_widget.current_index.get("t", 0)
-        self.image_widget.figure[0, 0].graphics[0].data[:] = med_proj[t_idx]
-
-    def variance_map(self):
-        data = self.image_widget.data[0]
-        var_proj = np.var(data, axis=1)
-        t_idx = self.image_widget.current_index.get("t", 0)
-        self.image_widget.figure[0, 0].graphics[0].data[:] = var_proj[t_idx]
-
-    def edge_detection(self):
-        from scipy.ndimage import sobel
-
-        frame = self.image_widget.managed_graphics[0].data.value.copy()
-        edge_x = sobel(frame, axis=0)
-        edge_y = sobel(frame, axis=1)
-        edges = np.hypot(edge_x, edge_y)
-        self.image_widget.figure[0, 0].graphics[0].data[:] = edges
-
-    def highpass_filter(self):
-        from scipy.ndimage import gaussian_filter
-
-        frame = self.image_widget.managed_graphics[0].data.value.copy()
-        low = gaussian_filter(frame, sigma=10)
-        highpass = frame - low
-        self.image_widget.figure[0, 0].graphics[0].data[:] = highpass
-
-    def denoised_mean(self):
-        data = self.image_widget.data[0]
-        t_idx = self.image_widget.current_index.get("t", 0)
-        window = data[:, t_idx - 5 : t_idx + 5].mean(axis=1)
-        self.image_widget.figure[0, 0].graphics[0].data[:] = window[t_idx]
-
-    def apply_gaussian(self):
-        self.image_widget.frame_apply = {
-            0: lambda image_data: gaussian_filter(image_data, sigma=self.gaussian_sigma)
-        }
-
-    def calculate_noise(self):
-        pass
