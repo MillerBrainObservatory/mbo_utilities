@@ -1,0 +1,113 @@
+/* /1* Custom CSS For MBO Documentation *1/ */
+
+
+/* @import url('https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;0,900;1,400;1,700;1,900&family=Open+Sans:ital,wght@0,400;0,600;1,400;1,600&display=swap'); */
+
+/* .navbar-brand img { */
+/*    height: 75px; */
+/* } */
+/* .navbar-brand { */
+/*    height: 75px; */
+/* } */
+
+body {
+  font-family: 'Open Sans', sans-serif;
+  font-size: medium;
+}
+
+/* /1* Making sure the navbar shows correctly in one line */
+/*    Reduces the space between the top-left logo and the navbar section titles *1/ */
+
+/* .col-lg-3 { */
+/*   width: 15%; */
+/* } */
+
+/* /1* Version switcher colors from PyData Sphinx Theme *1/ */
+
+/* .version-switcher__button[data-active-version-name*="devdocs"] { */
+/*   background-color: var(--pst-color-warning); */
+/*   border-color: var(--pst-color-warning); */
+/*   opacity: 0.9; */
+/* } */
+
+/* .version-switcher__button:not([data-active-version-name*="stable"]):not([data-active-version-name*="dev"]):not([data-active-version-name*="pull"]) { */
+/*   background-color: var(--pst-color-danger); */
+/*   border-color: var(--pst-color-danger); */
+/*   opacity: 0.9; */
+/* } */
+
+/* .version-switcher__menu a.list-group-item { */
+/*   font-size: small; */
+/* } */
+
+/* button.btn.version-switcher__button, */
+/* button.btn.version-switcher__button:hover { */
+/*   color: black; */
+/*   font-size: small; */
+/* } */
+
+/* /1* Main index page overview cards *1/ */
+
+/* .sd-card .sd-card-img-top { */
+/*   height: 60px; */
+/*   width: 60px; */
+/*   margin-left: auto; */
+/*   margin-right: auto; */
+/*   margin-top: 10px; */
+/* } */
+
+/* /1* Main index page overview images *1/ */
+
+html[data-theme=dark] .sd-card img[src*='.svg'] {
+  filter: invert(0.82) brightness(0.8) contrast(1.2);
+}
+
+/** landing page logo **/
+#landing-page-logo {
+    background: none;
+}
+
+/** Add a counter before subsections **/
+h1:not(.rubric) {
+    counter-reset: subsection;
+    text-decoration: underline;
+}
+
+/** No icon for admonitions with no-icon class */
+div.admonition.no-icon > .admonition-title::before {
+    content: "";
+}
+div.admonition.no-icon > .admonition-title {
+    padding-left: .6rem;
+}
+div.pyscript {
+    min-height: 300px;
+}
+
+.display-flex {
+    display: flex;
+}
+.display-inline-block {
+    display: inline-block;
+    margin-right: 1rem;
+    margin-bottom: 0;
+}
+span.label {
+    /* pyscript changes this and it messes up footnote labels */
+    all: unset;
+}
+
+.tippy-box {
+    background-color:var(--pst-color-surface);
+    color:var(--pst-color-text-base);
+    border: 1px solid var(--pst-color-border);
+}
+
+.toctree-l2 {
+    font-size: 0.8rem;
+}
+
+pre {
+  background-color: #0F111A;
+}
+
