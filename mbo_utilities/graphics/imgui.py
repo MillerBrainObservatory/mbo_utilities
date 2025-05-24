@@ -4,6 +4,7 @@ import webbrowser
 from pathlib import Path
 from typing import Literal
 import threading
+import time
 
 import h5py
 from icecream import ic
@@ -12,8 +13,9 @@ import numpy as np
 from scipy.ndimage import gaussian_filter, fourier_shift
 from skimage.registration import phase_cross_correlation
 
-from imgui_bundle import hello_imgui
-from imgui_bundle import imgui_ctx
+from imgui_bundle import imgui, hello_imgui, imgui_ctx
+from imgui_bundle import implot
+from imgui_bundle import portable_file_dialogs as pfd
 
 from mbo_utilities.assembly import save_as
 from mbo_utilities.file_io import Scan_MBO, SAVE_AS_TYPES, _get_mbo_project_root, _get_mbo_dirs, read_scan
@@ -29,9 +31,6 @@ except ImportError:
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
-
-from imgui_bundle import implot
-from imgui_bundle import portable_file_dialogs as pfd
 
 def setup_imgui():
 
@@ -52,28 +51,15 @@ def setup_imgui():
     shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
     hello_imgui.set_assets_folder(str(project_assets))
 
-
-
 def main_package_folder() -> Path:
-    p = Path(__file__).resolve()
-    for parent in p.parents:
+    """Find the root of the main package by looking for __init__.py and graphics folder.
+    may want to refactor this to use _get() instead
+    """
+    mbo_project_dir = _get_mbo_project_root().resolve()
+    for parent in mbo_project_dir.parents:
         if (parent / "__init__.py").exists() and (parent / "graphics").is_dir():
             return parent
-    raise RuntimeError("Cannot find package root")
 
-def assets_folder() -> Path:
-    return main_package_folder() / "graphics" / "assets"
-
-def markdown_doc_folder() -> Path:
-    return main_package_folder().joinpath("/docs/_static/")
-
-try:
-    set_mbo_assets_folder()
-except Exception:
-    print(traceback.format_exc())
-    
-import time
-from imgui_bundle import imgui
 
 class GuiLogger:
     def __init__(self):
@@ -244,24 +230,6 @@ def set_tooltip(_tooltip, _show_mark=True):
         imgui.pop_text_wrap_pos()
         imgui.end_tooltip()
 
-
-def setup_imgui():
-
-    # Assets
-    project_assets: Path = get_mbo_project_root().joinpath("assets")
-
-    if not project_assets.is_dir():
-        ic("Assets folder not found.")
-        return
-
-    imgui_path = mbo_paths["base"].joinpath("imgui")
-    imgui_path.mkdir(exist_ok=True)
-
-    assets_path = imgui_path.joinpath("assets")
-    assets_path.mkdir(exist_ok=True)
-
-    shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
-    hello_imgui.set_assets_folder(str(project_assets))
 
 class PreviewDataWidget(EdgeWindow):
     def __init__(
