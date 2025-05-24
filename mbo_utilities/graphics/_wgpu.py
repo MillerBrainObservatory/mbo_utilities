@@ -16,8 +16,10 @@ from wgpu.utils.imgui import ImguiRenderer
 import fastplotlib as fpl
 import numpy as np
 
+
 def gen_data(*shape):
     return np.random.rand(*shape)
+
 
 # Create a canvas to render to
 canvas = WgpuCanvas(title="imgui", size=(640, 480))

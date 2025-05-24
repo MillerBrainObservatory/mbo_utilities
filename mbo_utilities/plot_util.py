@@ -2,11 +2,12 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 def save_phase_images_png(
-        before: np.ndarray,
-        data_chunk: np.ndarray,
-        save_path: str | Path,
-        chan_id: int,
+    before: np.ndarray,
+    data_chunk: np.ndarray,
+    save_path: str | Path,
+    chan_id: int,
 ):
     after = data_chunk
     mid = len(before) // 2
@@ -18,9 +19,7 @@ def save_phase_images_png(
 
     for y in range(0, projection.shape[0] - patch_size + 1, 8):
         for x in range(0, projection.shape[1] - patch_size + 1, 8):
-            val = projection[
-                  y: y + patch_size, x: x + patch_size
-                  ].sum()
+            val = projection[y : y + patch_size, x : x + patch_size].sum()
             if val > max_val:
                 max_val = val
                 best_y, best_x = y, x

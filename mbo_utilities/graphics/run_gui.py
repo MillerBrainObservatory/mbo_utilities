@@ -15,20 +15,21 @@ from mbo_utilities.graphics._file_dialog import render_file_dialog
 
 global selected
 
+
 @click.command()
-@click.option('--roi', '-r', type=click.IntRange(1, 10), default=None)
+@click.option("--roi", "-r", type=click.IntRange(1, 10), default=None)
 @click.option(
-    '--gui/--no-gui',
+    "--gui/--no-gui",
     default=None,
-    help="Enable or disable PreviewDataWidget. Default is auto."
+    help="Enable or disable PreviewDataWidget. Default is auto.",
 )
-@click.argument('data_in', required=False)
+@click.argument("data_in", required=False)
 def run_gui(data_in=None, gui=None, roi=None, **kwargs):
     """Open a GUI to preview data of any supported type."""
     if data_in is None:
         immapp.run(render_file_dialog, with_markdown=True, window_size=(1000, 1000))  # type: ignore
         if not selected:
-            print('not selected')
+            print("not selected")
         else:
             fpath = selected
         files = get_files(fpath)
@@ -61,6 +62,7 @@ def run_gui(data_in=None, gui=None, roi=None, **kwargs):
 
     iw.show()
     fpl.loop.run()
+
 
 if __name__ == "__main__":
     main()
