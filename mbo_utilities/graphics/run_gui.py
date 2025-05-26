@@ -9,43 +9,19 @@ from mbo_utilities.graphics.imgui import PreviewDataWidget
 from mbo_utilities.file_io import (
     to_lazy_array,
     _is_arraylike,
-    _get_mbo_dirs, _get_mbo_project_root,
 )
 import fastplotlib as fpl
-from imgui_bundle import immapp, imgui, hello_imgui
+from imgui_bundle import immapp
 from mbo_utilities.graphics._file_dialog import FileDialog
+from mbo_utilities.graphics._imgui import setup_imgui
 
-def setup():
-    project_assets: Path = _get_mbo_project_root().joinpath("assets")
-    mbo_dirs = _get_mbo_dirs()
+try:
+    setup_imgui()
+    IMGUI_SETUP_COMPLETE = True
+except Exception:
+    IMGUI_SETUP_COMPLETE = False
+    print("Failed to set up imgui. GUI functionality may not work as expected.")
 
-    imgui_path = mbo_dirs["base"].joinpath("imgui")
-    imgui_path.mkdir(exist_ok=True)
-
-    imgui_ini_path = imgui_path.joinpath("imgui.ini")
-    imgui_ini_path.parent.mkdir(exist_ok=True)
-    imgui.create_context()
-    imgui.get_io().set_ini_filename(str(imgui_ini_path))
-
-    if not project_assets.is_dir():
-        ic("Assets folder not found.")
-        return
-
-    assets_path = imgui_path.joinpath("assets")
-    assets_path.mkdir(exist_ok=True)
-
-    shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
-    hello_imgui.set_assets_folder(str(project_assets))
-
-    font_path = assets_path / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"
-    if font_path.is_file():
-        imgui.get_io().fonts.clear()
-        imgui.get_io().fonts.add_font_from_file_ttf(str(font_path), 16.0)
-    else:
-        ic("Font not found:", font_path)
-
-
-setup()
 
 
 @click.command()
@@ -86,7 +62,7 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
     iw = fpl.ImageWidget(
         data=data,
         histogram_widget=False,
-        figure_kwargs={"size": (nx*2.5, ny*2.5)},
+        figure_kwargs={"size": (nx*2, ny*2)},
         graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
         window_funcs={"t": (np.mean, 0)},
     )
