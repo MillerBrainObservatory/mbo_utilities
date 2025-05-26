@@ -20,6 +20,7 @@ if __name__ == "__main__":
     raw = Path(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green")
     # raw = Path(r"/home/flynn/lbm_data/raw")
     import tifffile
+
     test_scan = mbo.read_scan(raw)
     savedir = r"D:\W2_DATA\masknmf\mk301_barber"
     mbo.save_as(
