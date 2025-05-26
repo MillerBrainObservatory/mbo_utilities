@@ -716,7 +716,9 @@ def handle_path(path: Path, **kwargs):
 
     if path.is_dir():
         files = get_files(path, "tif", 1)
-        return read_scan(files, roi=kwargs.get("roi"))
+        scan = read_scan(files, roi=kwargs.get("roi"))
+        scan.fpath = path  # set the path to the directory
+        return scan
 
     raise TypeError(f"Path must be a file or directory, got: {path}")
 
@@ -727,6 +729,8 @@ def handle_list(data_in: list, **kwargs):
 
     if all(isinstance(p, (str, Path)) for p in data_in):
         if is_raw_scanimage(str(data_in[0])):
+            scan = read_scan(data_in, roi=kwargs.get("roi"))
+            scan.fpath = Path(data_in[0]).parent  # set the path to the first file
             return read_scan(data_in, roi=kwargs.get("roi"))
         # assembled, memmory mappable files
         return zstack_from_files(data_in)
