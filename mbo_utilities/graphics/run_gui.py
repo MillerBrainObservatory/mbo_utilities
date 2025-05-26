@@ -37,7 +37,7 @@ def setup():
     shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
     hello_imgui.set_assets_folder(str(project_assets))
 
-    font_path = assets_path / "fonts" / "JetBrainsMono-Bold.ttf"
+    font_path = assets_path / "fonts" / "JetBrainsMono" /"JetBrainsMono-Bold.ttf"
     if font_path.is_file():
         imgui.get_io().fonts.clear()
         imgui.get_io().fonts.add_font_from_file_ttf(str(font_path), 16.0)
