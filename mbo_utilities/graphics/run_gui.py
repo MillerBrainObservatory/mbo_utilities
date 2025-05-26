@@ -37,7 +37,7 @@ def setup():
     shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
     hello_imgui.set_assets_folder(str(project_assets))
 
-    font_path = assets_path / "fonts" / "JetBrainsMono" /"JetBrainsMono-Bold.ttf"
+    font_path = assets_path / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"
     if font_path.is_file():
         imgui.get_io().fonts.clear()
         imgui.get_io().fonts.add_font_from_file_ttf(str(font_path), 16.0)
@@ -61,7 +61,6 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
     if data_in is None:
         file_dialog = FileDialog()
         def render_file_dialog():
-            x = hello_imgui.RunnerParams.ini_filename
             file_dialog.render()
         immapp.run(render_file_dialog, with_markdown=True, window_size=(1000, 1000))  # type: ignore
         data_in = file_dialog.selected_path
@@ -70,6 +69,9 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
         data = data_in
     else:
         ic(data_in)
+        if data_in is None:
+            print("No data input provided. Exiting.")
+            return
         data = to_lazy_array(data_in, roi=roi, **kwargs)
 
     if isinstance(data, list):
