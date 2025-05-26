@@ -11,9 +11,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter, fourier_shift
 from skimage.registration import phase_cross_correlation
 
-from imgui_bundle import imgui, hello_imgui, imgui_ctx
-from imgui_bundle import implot
-from imgui_bundle import portable_file_dialogs as pfd
+from imgui_bundle import imgui, hello_imgui, imgui_ctx, implot, portable_file_dialogs as pfd
 
 from mbo_utilities.assembly import save_as
 from mbo_utilities.file_io import (
@@ -23,6 +21,7 @@ from mbo_utilities.file_io import (
     _get_mbo_dirs,
     read_scan,
 )
+from mbo_utilities.graphics.gui_logger import GuiLogger
 
 try:
     import cupy as cp  # noqa
@@ -47,41 +46,6 @@ def main_package_folder() -> Path | None:
     for parent in mbo_project_dir.parents:
         if (parent / "__init__.py").exists() and (parent / "graphics").is_dir():
             return parent
-
-
-class GuiLogger:
-    def __init__(self):
-        self.show = True
-        self.filters = {"debug": True, "info": True, "error": True}
-        self.messages = []
-
-    def log(self, level, msg):
-        t = time.strftime("%H:%M:%S")
-        self.messages.append((t, level, msg))
-
-    def draw(self):
-        opened, self.show = imgui.begin("Debug Panel", self.show)
-        if not opened:
-            imgui.end()
-            return
-        _, self.filters["debug"] = imgui.checkbox("Debug", self.filters["debug"])
-        imgui.same_line()
-        _, self.filters["info"] = imgui.checkbox("Info", self.filters["info"])
-        imgui.same_line()
-        _, self.filters["error"] = imgui.checkbox("Error", self.filters["error"])
-        imgui.separator()
-        imgui.begin_child("##debug_scroll", imgui.ImVec2(0, 0), False)
-        for t, lvl, m in self.messages:
-            if not self.filters[lvl]:
-                continue
-            col = {
-                "debug": imgui.ImVec4(0.8, 0.8, 0.8, 1),
-                "info": imgui.ImVec4(1.0, 1.0, 1.0, 1),
-                "error": imgui.ImVec4(1.0, 0.3, 0.3, 1),
-            }[lvl]
-            imgui.text_colored(col, f"[{t}] {m}")
-        imgui.end_child()
-        imgui.end()
 
 
 def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
@@ -220,39 +184,6 @@ def set_tooltip(_tooltip, _show_mark=True):
         imgui.pop_text_wrap_pos()
         imgui.end_tooltip()
 
-def setup():
-    project_assets: Path = _get_mbo_project_root().joinpath("assets")
-    mbo_dirs = _get_mbo_dirs()
-
-    imgui_path = mbo_dirs["base"].joinpath("imgui")
-    imgui_path.mkdir(exist_ok=True)
-
-    imgui_ini_path = imgui_path.joinpath("imgui.ini")
-    imgui_ini_path.parent.mkdir(exist_ok=True)
-    imgui.create_context()
-    imgui.get_io().set_ini_filename(str(imgui_ini_path))
-    runner_params = hello_imgui.RunnerParams(
-        ini_folder_type=hello_imgui.IniFolderType.home_folder,
-        ini_filename="mbo_ini.ini",
-    )
-
-    if not project_assets.is_dir():
-        ic("Assets folder not found.")
-        return
-
-    assets_path = imgui_path.joinpath("assets")
-    assets_path.mkdir(exist_ok=True)
-
-    shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
-    hello_imgui.set_assets_folder(str(project_assets))
-
-    font_path = assets_path / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"
-    if font_path.is_file():
-        imgui.get_io().fonts.clear()
-        imgui.get_io().fonts.add_font_from_file_ttf(str(font_path), 16.0)
-    else:
-        ic("Font not found:", font_path)
-
 
 class PreviewDataWidget(EdgeWindow):
     def __init__(
@@ -264,11 +195,14 @@ class PreviewDataWidget(EdgeWindow):
         title: str = "Data Preview",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
+
+        if implot.get_current_context() is None:
+            implot.create_context()
+
         self._current_pipeline = "suite2p"
         self._selected_pipelines = None
         self.imgui_ini_path = None
 
-        setup()
         self.debug_panel = GuiLogger()
 
         self._total_saving_planes = 0
@@ -336,38 +270,6 @@ class PreviewDataWidget(EdgeWindow):
         self._current_mean_z = None
 
         threading.Thread(target=self.compute_z_stats).start()
-
-    def setup(self):
-        if implot.get_current_context() is None:
-            implot.create_context()
-
-        project_assets: Path = _get_mbo_project_root().joinpath("assets")
-        mbo_dirs = _get_mbo_dirs()
-
-        imgui_path = mbo_dirs["base"].joinpath("imgui")
-        imgui_path.mkdir(exist_ok=True)
-
-        # give the ini somewhere to go
-        self.imgui_ini_path = imgui_path.joinpath("imgui.ini")
-        self.imgui_ini_path.parent.mkdir(exist_ok=True)
-        imgui.get_io().set_ini_filename(str(self.imgui_ini_path))
-
-        if not project_assets.is_dir():
-            ic("Assets folder not found.")
-            return
-
-        assets_path = imgui_path.joinpath("assets")
-        assets_path.mkdir(exist_ok=True)
-
-        shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
-        hello_imgui.set_assets_folder(str(project_assets))
-
-        font_path = assets_path / "fonts" / "JetBrainsMono-Bold.ttf"
-        if font_path.is_file():
-            imgui.get_io().fonts.clear()
-            imgui.get_io().fonts.add_font_from_file_ttf(str(font_path), 16.0)
-        else:
-            ic("Font not found:", font_path)
 
     @property
     def gaussian_sigma(self):
@@ -854,6 +756,7 @@ class PreviewDataWidget(EdgeWindow):
             if imgui.button("Apply", imgui.ImVec2(0, 0)):
                 self.debug_panel.log("debug", f"Calculating offset")
                 self.calculate_offset()
+                self.image_widget.frame_apply = {0: self._combined_frame_apply}
             set_tooltip(
                 "Run the phase-correction algorithm now using the current settings.",
                 _show_mark=False,
