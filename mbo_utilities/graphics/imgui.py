@@ -1,12 +1,10 @@
 import shutil
-import traceback
 import webbrowser
 from pathlib import Path
 from typing import Literal
 import threading
 import time
 
-import h5py
 from icecream import ic
 
 import numpy as np
@@ -25,7 +23,6 @@ from mbo_utilities.file_io import (
     _get_mbo_dirs,
     read_scan,
 )
-from mbo_utilities.util import norm_minmax, norm_percentile
 
 try:
     import cupy as cp  # noqa
@@ -42,7 +39,7 @@ import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
 
 
-def main_package_folder() -> Path:
+def main_package_folder() -> Path | None:
     """Find the root of the main package by looking for __init__.py and graphics folder.
     may want to refactor this to use _get() instead
     """
@@ -234,6 +231,7 @@ class PreviewDataWidget(EdgeWindow):
         title: str = "Data Preview",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
+        self._current_pipeline = "suite2p"
         self._selected_pipelines = None
         self.imgui_ini_path = None
 
@@ -485,47 +483,61 @@ class PreviewDataWidget(EdgeWindow):
                 self.draw_stats_section()
                 imgui.end_tab_item()
 
-            if imgui.begin_tab_item("Analysis")[0]:
+            if imgui.begin_tab_item("Process")[0]:
                 self.draw_pipeline_section()
                 imgui.end_tab_item()
 
             imgui.end_tab_bar()
 
     def draw_pipeline_section(self):
-        imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Run a Pipeline")
-        pipelines = ["Suite2p", "MaskNMF"]
-        self._selected_pipelines = {p: False for p in pipelines}
+        imgui.begin_group()
 
-        for name in pipelines:
-            changed, val = imgui.checkbox(name, self._selected_pipelines[name])
-            if changed:
-                self._selected_pipelines[name] = val
+        options = ["suite2p", "masknmf"]
+
+        if not hasattr(self, "_current_pipeline"):
+            self._current_pipeline = options[0]
+
+        current_display_idx = options.index(self._current_pipeline)
+        imgui.set_next_item_width(hello_imgui.em_size(15))
+        changed, selected_idx = imgui.combo("Pipeline", current_display_idx, options)
+
+        if changed:
+            self._current_pipeline = options[selected_idx]
+
+        set_tooltip("Select a processing pipeline to configure.")
 
         imgui.separator()
 
-        if self._selected_pipelines["Suite2p"]:
+        if self._current_pipeline == "suite2p":
             if imgui.collapsing_header("Suite2p Settings"):
                 self.draw_suite2p_settings()
 
-        if self._selected_pipelines["MaskNMF"]:
+        elif self._current_pipeline == "masknmf":
             if imgui.collapsing_header("MaskNMF Settings"):
                 self.draw_masknmf_settings()
 
+        imgui.end_group()
+
     def draw_suite2p_settings(self):
-        imgui.text("Suite2p Pipeline Options")
-        imgui.separator()
-        imgui.checkbox("Run registration", True)
-        imgui.checkbox("Run cell detection", True)
-        imgui.slider_int("Threshold", 30, 0, 100)
-        imgui.input_text("Output folder", "/path/to/suite2p", 256)
+        with imgui_ctx.begin_child("Suite2p Settings"):
+            imgui.text("Quick-Run Suite2p Pipeline Options")
+            imgui.separator()
+            imgui.checkbox("Run registration", True)
+            imgui.checkbox("Run cell detection", True)
+            imgui.slider_int("Threshold", 30, 0, 100)
+            imgui.input_text("Save folder", "/path/to/suite2p", 256)
+            if imgui.button("Run"):
+                self.debug_panel.log("info", "Running Suite2p pipeline...")
+                self.debug_panel.log("info", "Suite2p pipeline completed.")
 
     def draw_masknmf_settings(self):
-        imgui.text("MaskNMF Pipeline Options")
-        imgui.separator()
-        imgui.checkbox("Enable CNMF update", True)
-        imgui.checkbox("Enable background subtraction", False)
-        imgui.slider_float("SNR threshold", 5.0, 0.0, 20.0)
-        imgui.input_text("Output folder", "/path/to/masknmf", 256)
+        with imgui_ctx.begin_child("MaskNMF Settings"):
+            imgui.text("MaskNMF Pipeline Options")
+            imgui.separator()
+            imgui.checkbox("Enable CNMF update", True)
+            imgui.checkbox("Enable background subtraction", False)
+            imgui.slider_float("SNR threshold", 5.0, 0.0, 20.0)
+            imgui.input_text("Output folder", "/path/to/masknmf", 256)
 
     def draw_stats_section(self):
         if not getattr(self, "_z_stats_done", False):
@@ -543,7 +555,7 @@ class PreviewDataWidget(EdgeWindow):
             imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
         )
         with imgui_ctx.begin_child(
-            "##Summary", size=imgui.ImVec2(0, 300), child_flags=cflags
+            "##Summary", size=imgui.ImVec2(0, 0), child_flags=cflags
         ):
             if imgui.begin_table(
                 "zstats", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg
@@ -558,28 +570,18 @@ class PreviewDataWidget(EdgeWindow):
                         imgui.text(f"{val:.2f}")
                 imgui.end_table()
 
-        with imgui_ctx.begin_child(
-            "##Plots", size=imgui.ImVec2(0, 300), child_flags=cflags
-        ):
-            if not hasattr(self, "_z_plot_yaxis"):
-                self._z_plot_yaxis = "mean"
+        imgui.separator()
+        with imgui_ctx.begin_child("##Plots", size=imgui.ImVec2(0, 0), child_flags=cflags):
+            imgui.text("Z-plane Signal: Mean ± Std")
 
-            imgui.text("Y Axis:")
-            imgui.same_line()
-            for label in ["mean", "std", "snr"]:
-                imgui.same_line()
-                if imgui.radio_button(label, self._z_plot_yaxis == label):
-                    self._z_plot_yaxis = label
+            z_vals = np.arange(len(self._z_stats["mean"]), dtype=np.float32)
+            mean_vals = np.array(self._z_stats["mean"], dtype=np.float32)
+            std_vals = np.array(self._z_stats["std"], dtype=np.float32)
 
-            if implot.begin_plot("Z-Plane Stats", size=imgui.ImVec2(-1, 300)):
-                if self._z_plot_yaxis == "mean":
-                    implot.plot_line("Mean", z_vals, mean_vals)
-                elif self._z_plot_yaxis == "std":
-                    implot.plot_line("Std", z_vals, std_vals)
-                elif self._z_plot_yaxis == "snr":
-                    implot.plot_line("SNR", z_vals, snr_vals)
+            if implot.begin_plot("Z-Plane Signal", size=imgui.ImVec2(-1, 300)):
+                implot.plot_error_bars("Mean ± Std", z_vals, mean_vals, std_vals)
+                implot.plot_line("Mean", z_vals, mean_vals)
                 implot.end_plot()
-
 
     def draw_preview_section(self):
         cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
@@ -651,7 +653,7 @@ class PreviewDataWidget(EdgeWindow):
                 for i in range(num_planes):
                     imgui.push_id(i)
                     selected = i in self._selected_planes
-                    _, selected = imgui.checkbox(f"Plane {i}", selected)
+                    _, selected = imgui.checkbox(f"Plane {i + 1}", selected)
                     if selected:
                         self._selected_planes.add(i)
                     else:
