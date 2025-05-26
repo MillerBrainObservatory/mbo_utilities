@@ -173,3 +173,6 @@ data/
 
 # dev nbs
 dev*.ipynb*
+
+# ini files
+*.ini
