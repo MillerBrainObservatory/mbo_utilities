@@ -719,42 +719,6 @@ def standardize_for_image_widget(data):
     return data  # assume already compatible (e.g., ScanMultiROIReordered)
 
 
-def to_lazy_array2(
-    data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray], **kwargs
-) -> list[np.ndarray] | np.ndarray | Scan_MBO:
-    """
-    Convencience function to resolve various data_in variants into lazy arrays.
-    """
-    if _is_arraylike(data_in):
-        return [data_in]
-
-    if isinstance(data_in, list):
-        if all(_is_arraylike(d) for d in data_in):
-            return data_in
-        if isinstance(data_in[0], (str, Path)):
-            if is_raw_scanimage(str(data_in[0])):
-                ic(f"Returning raw scanimage from path {data_in[0]}")
-                roi = kwargs.get("roi", None)
-                return read_scan(data_in, roi=roi)
-            else:
-                ic(f"Returning z-stack from files:\n {data_in}.")
-                return zstack_from_files(data_in)
-        raise TypeError("Mixed list of unsupported types")
-
-    if isinstance(data_in, (str, Path)):
-        data_in = Path(data_in).expanduser().resolve()
-        if data_in.is_file():
-            if data_in.suffix in [".tif", ".tiff"]:
-                return tifffile.memmap(data_in)
-            if data_in.suffix == ".npy":
-                return np.memmap(data_in)
-        if data_in.is_dir():
-            files = get_files(data_in, "tif", 1)
-            return read_scan(files)
-
-    raise TypeError(f"Unsupported data type: {type(data_in)}")
-
-
 def _is_arraylike(obj) -> bool:
     """
     Checks if the object is array-like.
