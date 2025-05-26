@@ -275,7 +275,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zplane_show_subtracted = dict()
         self._zplane_stats_thread = None
         self._zplane_stats_progress = 0.0
-        self._current_mean_z = None
+        self._z_stats_current_mean_z = None
 
         threading.Thread(target=self.compute_z_stats).start()
 
@@ -848,7 +848,6 @@ class PreviewDataWidget(EdgeWindow):
         ofs = compute_phase_offset(frame, upsample=self._phase_upsample)
         self.current_offset = ofs
         self.debug_panel.log("debug", f"Offset: {self.current_offset:.3f}")
-        # self.image_widget.frame_apply = {0: self._combined_frame_apply}
 
     def compute_z_stats(self):
         data = read_scan(self.fpath)
@@ -856,12 +855,12 @@ class PreviewDataWidget(EdgeWindow):
         self._z_stats_progress = 0.0
         self._z_stats_current_z = 0
         self._z_stats_done = False
-        self._current_mean_z = 0
+        self._z_stats_current_mean_z = 0
 
         means = []
         for z in range(self.nz):
             self._z_stats_current_z = z
-            self._current_mean_z = z
+            self._z_stats_current_mean_z = z
 
             stack = data[:, z, :, :].astype(np.float32)
             mean_img = np.mean(stack, axis=0)
@@ -880,26 +879,3 @@ class PreviewDataWidget(EdgeWindow):
         self._mean_sub_done = True
         self._zplane_means = np.stack(means)
         self.debug_panel.log("info", "Z-stats and mean-sub completed")
-
-    def edge_detection(self):
-        from scipy.ndimage import sobel
-
-        frame = self.get_raw_frame()
-        edge_x = sobel(frame, axis=0)
-        edge_y = sobel(frame, axis=1)
-        edges = np.hypot(edge_x, edge_y)
-        return edges
-
-    def highpass_filter(self):
-        from scipy.ndimage import gaussian_filter
-
-        frame = self.image_widget.managed_graphics[0].data[:]
-        low = gaussian_filter(frame, sigma=self.gaussian_sigma)
-        highpass = frame - low
-        self.image_widget.managed_graphics[0].data[:] = highpass
-
-    def denoised_mean(self):
-        data = self.image_widget.data[0]
-        t_idx = self.image_widget.current_index.get("t", 0)
-        window = data[:, t_idx - 5 : t_idx + 5].mean(axis=1)
-        self.image_widget.managed_graphics[0].data[:] = window[t_idx]
