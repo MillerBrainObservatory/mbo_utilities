@@ -6,9 +6,9 @@ import mbo_utilities as mbo
 DATA_ROOT = Path(r"D:\tests\data")
 
 skip_if_missing_data = pytest.mark.skipif(
-    not DATA_ROOT.is_dir(),
-    reason=f"Test data directory not found: {DATA_ROOT}"
+    not DATA_ROOT.is_dir(), reason=f"Test data directory not found: {DATA_ROOT}"
 )
+
 
 @skip_if_missing_data
 def test_get_files_returns_valid_tiffs():
@@ -19,12 +19,14 @@ def test_get_files_returns_valid_tiffs():
         assert Path(f).suffix in (".tif", ".tiff")
         assert Path(f).exists()
 
+
 @skip_if_missing_data
 def test_read_metadata():
     files = mbo.get_files(DATA_ROOT, "tif")
     metadata = mbo.get_metadata(files[0])
     assert isinstance(metadata, dict)
     assert "frame_rate" in metadata.keys()
+
 
 def test_expand_paths(tmp_path):
     """Test expand_paths returns sorted file paths."""
@@ -35,6 +37,7 @@ def test_expand_paths(tmp_path):
     names = sorted([Path(p).name for p in results])
     expected = sorted(["a.txt", "b.txt", "c.md"])
     assert names == expected
+
 
 def test_npy_to_dask(tmp_path):
     """Test npy_to_dask creates a dask array of the expected shape."""
@@ -49,12 +52,15 @@ def test_npy_to_dask(tmp_path):
     expected_shape = (10, 60, 30, 40)
     assert darr.shape == expected_shape
 
+
 def test_jupyter_check():
     assert isinstance(mbo.is_running_jupyter(), bool)
+
 
 def test_imgui_check():
     result = mbo.is_imgui_installed()
     assert isinstance(result, bool)
+
 
 @skip_if_missing_data
 def test_get_files():
@@ -66,6 +72,7 @@ def test_get_files():
         assert len(files) > 0
         for file in files:
             assert Path(file).suffix == ".tif"
+
 
 @skip_if_missing_data
 def test_demo_files():

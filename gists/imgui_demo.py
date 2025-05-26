@@ -9,6 +9,7 @@ import os
 
 selection_store = {"result": None}
 
+
 @immapp.static(file_result=None, files_result=None, folder_result=None)
 def open_file_menu():
     static = open_file_menu
@@ -22,9 +23,13 @@ def open_file_menu():
                 selection_store["result"] = static.file_result
                 hello_imgui.get_runner_params().app_shall_exit = True
 
-            clicked, _ = imgui.menu_item("Open Multiple Files...", "Ctrl+Shift+O", False, True)
+            clicked, _ = imgui.menu_item(
+                "Open Multiple Files...", "Ctrl+Shift+O", False, True
+            )
             if clicked:
-                static.files_result = pfd.open_file("Choose files", options=pfd.opt.multiselect).result()
+                static.files_result = pfd.open_file(
+                    "Choose files", options=pfd.opt.multiselect
+                ).result()
                 selection_store["result"] = static.files_result
                 hello_imgui.get_runner_params().app_shall_exit = True
 
@@ -36,6 +41,7 @@ def open_file_menu():
 
             imgui.end_menu()
         imgui.end_main_menu_bar()
+
 
 def gui_app():
     open_file_menu()
@@ -64,6 +70,7 @@ if __name__ == "__main__":
     from mbo_utilities.graphics._file_dialog import FileDialog
 
     file_dialog = FileDialog()
+
     def render_file_dialog():
         file_dialog.render()
 
@@ -80,7 +87,7 @@ if __name__ == "__main__":
     iw = fpl.ImageWidget(
         data=data,
         histogram_widget=False,
-        figure_kwargs={"size": (nx*2, ny*2)},
+        figure_kwargs={"size": (nx * 2, ny * 2)},
         graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
         window_funcs={"t": (np.mean, 1)},
     )

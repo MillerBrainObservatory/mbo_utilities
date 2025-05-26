@@ -64,7 +64,9 @@ class FileDialog:
 
             imgui.set_cursor_pos_x(start_x)
             if imgui.button("Open File(s)", button_size):
-                self._open_multi = pfd.open_file("Select files", options=pfd.opt.multiselect)
+                self._open_multi = pfd.open_file(
+                    "Select files", options=pfd.opt.multiselect
+                )
 
             imgui.same_line(spacing=spacing)
             if imgui.button("Select Folder", button_size):
