@@ -11,7 +11,13 @@ import numpy as np
 from scipy.ndimage import gaussian_filter, fourier_shift
 from skimage.registration import phase_cross_correlation
 
-from imgui_bundle import imgui, hello_imgui, imgui_ctx, implot, portable_file_dialogs as pfd
+from imgui_bundle import (
+    imgui,
+    hello_imgui,
+    imgui_ctx,
+    implot,
+    portable_file_dialogs as pfd,
+)
 
 from mbo_utilities.assembly import save_as
 from mbo_utilities.file_io import (
@@ -224,7 +230,9 @@ class PreviewDataWidget(EdgeWindow):
         self._show_debug_panel = None
 
         self.max_offset = 8
-        self.fpath = Path(fpath) if fpath else Path(_get_mbo_dirs()["base"]).joinpath("data")
+        self.fpath = (
+            Path(fpath) if fpath else Path(_get_mbo_dirs()["base"]).joinpath("data")
+        )
         self.image_widget = iw
         self.shape = self.image_widget.data[0].shape
         self.nz = self.shape[1]
@@ -506,7 +514,9 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.end_table()
 
         imgui.separator()
-        with imgui_ctx.begin_child("##Plots", size=imgui.ImVec2(0, 0), child_flags=cflags):
+        with imgui_ctx.begin_child(
+            "##Plots", size=imgui.ImVec2(0, 0), child_flags=cflags
+        ):
             imgui.text("Z-plane Signal: Mean ± Std")
 
             z_vals = np.arange(len(self._z_stats["mean"]), dtype=np.float32)
@@ -879,8 +889,6 @@ class PreviewDataWidget(EdgeWindow):
         edge_y = sobel(frame, axis=1)
         edges = np.hypot(edge_x, edge_y)
         return edges
-
-
 
     def highpass_filter(self):
         from scipy.ndimage import gaussian_filter

@@ -23,7 +23,6 @@ except Exception:
     print("Failed to set up imgui. GUI functionality may not work as expected.")
 
 
-
 @click.command()
 @click.option("--roi", type=click.IntRange(1, 10), default=None)
 @click.option(
@@ -36,8 +35,10 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
     """Open a GUI to preview data of any supported type."""
     if data_in is None:
         file_dialog = FileDialog()
+
         def render_file_dialog():
             file_dialog.render()
+
         immapp.run(render_file_dialog, with_markdown=True, window_size=(1000, 1000))  # type: ignore
         data_in = file_dialog.selected_path
     if _is_arraylike(data_in):
@@ -62,7 +63,7 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
     iw = fpl.ImageWidget(
         data=data,
         histogram_widget=False,
-        figure_kwargs={"size": (nx*2, ny*2)},
+        figure_kwargs={"size": (nx * 2, ny * 2)},
         graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
         window_funcs={"t": (np.mean, 0)},
     )
@@ -74,6 +75,7 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
 
     iw.show()
     fpl.loop.run()
+
 
 if __name__ == "__main__":
     run_gui()  # type: ignore

@@ -9,6 +9,7 @@ from mbo_utilities.file_io import (
     _get_mbo_dirs,
 )
 
+
 def setup_imgui():
     project_assets: Path = _get_mbo_project_root().joinpath("assets")
     mbo_dirs = _get_mbo_dirs()
@@ -31,10 +32,11 @@ def setup_imgui():
     shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
     hello_imgui.set_assets_folder(str(project_assets))
 
-    font_path = assets_path / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"
+    font_path = (
+        assets_path / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"
+    )
     if font_path.is_file():
         imgui.get_io().fonts.clear()
         imgui.get_io().fonts.add_font_from_file_ttf(str(font_path), 16.0)
     else:
         ic("Font not found:", font_path)
-
