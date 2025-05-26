@@ -175,4 +175,4 @@ data/
 dev*.ipynb*
 
 # ini files
-*.ini
+**/*.ini
