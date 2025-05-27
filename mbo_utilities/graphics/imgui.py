@@ -42,6 +42,7 @@ except ImportError:
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
 
+REGION_TYPES = ["Full FOV", "Sub-FOV"]
 
 def main_package_folder() -> Path | None:
     """Find the root of the main package by looking for __init__.py and graphics folder.
@@ -93,8 +94,8 @@ def compute_phase_offset(
         )
     else:
         shift, _, _ = phase_cross_correlation(
-            pre_crop,
-            post_crop,
+            pre_crop,  # noqa
+            post_crop,  # noqa
             upsample_factor=upsample,  # noqa
         )
 
@@ -123,9 +124,9 @@ def draw_progress(
     if not hasattr(draw_progress, "_hide_time"):
         draw_progress._hide_time = None
     if done:
-        if draw_progress._hide_time is None:
+        if draw_progress._hide_time is None:  # noqa
             draw_progress._hide_time = time.time() + 3
-        elif time.time() >= draw_progress._hide_time:
+        elif time.time() >= draw_progress._hide_time:  # noqa
             return
     else:
         draw_progress._hide_time = None
@@ -146,8 +147,8 @@ def draw_progress(
         logger.log("info", f"Current index: {current_index}")
         logger.log("info", f"Total count: {total_count}")
 
-    imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)
-    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(6, 4))
+    imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)  # noqa
+    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(6, 4))  # noqa
     imgui.progress_bar(p, imgui.ImVec2(w, h), "")
     imgui.begin_group()
 
@@ -249,6 +250,9 @@ class PreviewDataWidget(EdgeWindow):
         self._save_dir = str(getattr(self, "_save_dir", ""))
         self._planes_str = str(getattr(self, "_planes_str", ""))
 
+        # Combo boxes
+        self._region = str(getattr(self, "_region", "Full FOV"))
+        self._region_idx = REGION_TYPES.index(self._region) if self._region in REGION_TYPES else 0
         self._ext = str(getattr(self, "_ext", ".tiff"))
         self._ext_idx = SAVE_AS_TYPES.index(".tiff")
 
@@ -269,7 +273,6 @@ class PreviewDataWidget(EdgeWindow):
 
         self.image_widget._image_widget_sliders._loop = True  # noqa
 
-        self._mean_sub_done = False
         self._mean_sub_progress = 0.0
         self._zplane_means = None
         self._zplane_show_subtracted = dict()
@@ -351,9 +354,9 @@ class PreviewDataWidget(EdgeWindow):
     def update(self):
         # Top Menu Bar
         cflags: imgui.ChildFlags = (
-            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
+            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
         )
-        wflags: imgui.WindowFlags = imgui.WindowFlags_.menu_bar
+        wflags: imgui.WindowFlags = imgui.WindowFlags_.menu_bar  # noqa
         with imgui_ctx.begin_child("menu", window_flags=wflags, child_flags=cflags):
             if imgui.begin_menu_bar():
                 if imgui.begin_menu("File", True):
@@ -415,8 +418,8 @@ class PreviewDataWidget(EdgeWindow):
 
         if imgui.begin_tab_bar("MainPreviewTabs"):
             if imgui.begin_tab_item("Preview")[0]:
-                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))
-                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))   # noqa
                 self.draw_preview_section()
                 imgui.pop_style_var()
                 imgui.pop_style_var()
@@ -452,14 +455,88 @@ class PreviewDataWidget(EdgeWindow):
         imgui.separator()
 
         if self._current_pipeline == "suite2p":
-            if imgui.collapsing_header("Suite2p Settings"):
-                self.draw_suite2p_settings()
+            self.draw_processing_tab()
 
         elif self._current_pipeline == "masknmf":
-            if imgui.collapsing_header("MaskNMF Settings"):
-                self.draw_masknmf_settings()
+            imgui.text("MaskNMF is not yet implemented in this version.")
 
         imgui.end_group()
+
+    def draw_processing_tab(self):
+
+        cflags: imgui.ChildFlags = (
+                imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
+        )
+        """Draw the processing tab for Suite2p settings."""
+        imgui.spacing()
+        with imgui_ctx.begin_child("##Processing", child_flags=cflags):
+
+            imgui.text("Process full FOV or selected subregion?")
+            imgui.separator()
+
+            imgui.begin_group()
+            # Region selection
+            imgui.set_next_item_width(hello_imgui.em_size(25))
+            _, self._region_idx = imgui.combo("Region type", self._region_idx, REGION_TYPES)
+            self._region = REGION_TYPES[self._region_idx]
+            imgui.end_group()
+
+            imgui.begin_group()
+            imgui.new_line()
+            imgui.separator_text("Registration Settings")
+            self._do_registration = imgui.checkbox("Do Registration", True)[1]
+            if imgui.is_item_hovered(): imgui.set_tooltip("Whether or not to run registration")
+            _, self._align_by_chan = imgui.input_int("Align by Channel", 1)
+            if imgui.is_item_hovered(): imgui.set_tooltip("Which channel to use for alignment (1-based index)")
+            _, self._nimg_init = imgui.input_int("Initial Frames", 300)
+            _, self._batch_size = imgui.input_int("Batch Size", 500)
+            _, self._maxregshift = imgui.input_float("Max Shift Fraction", 0.1)
+            _, self._smooth_sigma = imgui.input_float("Smooth Sigma", 1.15)
+            _, self._smooth_sigma_time = imgui.input_float("Smooth Sigma Time", 0.0)
+            self._keep_movie_raw = imgui.checkbox("Keep Raw Movie", False)[1]
+            self._two_step = imgui.checkbox("Two-Step Registration", False)[1]
+            self._reg_tif = imgui.checkbox("Export Registered TIFF", False)[1]
+            self._reg_tif_chan2 = imgui.checkbox("Export Channel 2 TIFF", False)[1]
+            _, self._subpixel = imgui.input_int("Subpixel Precision", 10)
+            _, self._th_badframes = imgui.input_float("Bad Frame Threshold", 1.0)
+            self._norm_frames = imgui.checkbox("Normalize Frames", True)[1]
+            self._force_refimg = imgui.checkbox("Use Stored refImg", False)[1]
+            self._pad_fft = imgui.checkbox("Pad FFT Image", False)[1]
+            imgui.end_group()
+
+            imgui.begin_group()
+
+            imgui.spacing()
+            imgui.separator_text("Classification Settings")
+            self._soma_crop = imgui.checkbox("Soma Crop", True)[1]
+            self._use_builtin_classifier = imgui.checkbox("Use Builtin Classifier", False)[1]
+            imgui.set_next_item_width(hello_imgui.em_size(30))
+            _, self._classifier_path = imgui.input_text("Classifier Path", "", 256)
+            imgui.end_group()
+
+            imgui.begin_group()
+            imgui.separator_text("ROI Detection Settings")
+            self._roidetect = imgui.checkbox("Detect ROIs", True)[1]
+            self._sparse_mode = imgui.checkbox("Sparse Mode", True)[1]
+            _, self._spatial_scale = imgui.input_int("Spatial Scale", 0)
+            self._connected = imgui.checkbox("Connected ROIs", True)[1]
+            _, self._threshold_scaling = imgui.input_float("Threshold Scaling", 1.0)
+            _, self._spatial_hp_detect = imgui.input_int("Spatial HP Filter", 25)
+            _, self._max_overlap = imgui.input_float("Max Overlap", 0.75)
+            _, self._high_pass = imgui.input_int("High Pass", 100)
+            self._smooth_masks = imgui.checkbox("Smooth Masks", True)[1]
+            _, self._max_iterations = imgui.input_int("Max Iterations", 20)
+            _, self._nbinned = imgui.input_int("Max Binned Frames", 5000)
+            self._denoise = imgui.checkbox("Denoise Movie", False)[1]
+            imgui.end_group()
+
+            imgui.spacing()
+            imgui.input_text("Save folder", "/path/to/suite2p", 256)
+
+            imgui.separator()
+            if imgui.button("Run"):
+                self.debug_panel.log("info", "Running Suite2p pipeline...")
+                self.debug_panel.log("info", "Suite2p pipeline completed.")
 
     def draw_suite2p_settings(self):
         with imgui_ctx.begin_child("Suite2p Settings"):
@@ -468,19 +545,9 @@ class PreviewDataWidget(EdgeWindow):
             imgui.checkbox("Run registration", True)
             imgui.checkbox("Run cell detection", True)
             imgui.slider_int("Threshold", 30, 0, 100)
-            imgui.input_text("Save folder", "/path/to/suite2p", 256)
             if imgui.button("Run"):
                 self.debug_panel.log("info", "Running Suite2p pipeline...")
                 self.debug_panel.log("info", "Suite2p pipeline completed.")
-
-    def draw_masknmf_settings(self):
-        with imgui_ctx.begin_child("MaskNMF Settings"):
-            imgui.text("MaskNMF Pipeline Options")
-            imgui.separator()
-            imgui.checkbox("Enable CNMF update", True)
-            imgui.checkbox("Enable background subtraction", False)
-            imgui.slider_float("SNR threshold", 5.0, 0.0, 20.0)
-            imgui.input_text("Output folder", "/path/to/masknmf", 256)
 
     def draw_stats_section(self):
         if not getattr(self, "_z_stats_done", False):
@@ -495,16 +562,16 @@ class PreviewDataWidget(EdgeWindow):
         imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats")
 
         cflags: imgui.ChildFlags = (
-            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
+            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
         )
         with imgui_ctx.begin_child(
             "##Summary", size=imgui.ImVec2(0, 0), child_flags=cflags
         ):
             if imgui.begin_table(
-                "zstats", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg
+                "zstats", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg  # noqa
             ):
                 for col in ["Z", "Mean", "Std", "SNR"]:
-                    imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
+                    imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)  # noqa
                 imgui.table_headers_row()
                 for i in range(len(z_vals)):
                     imgui.table_next_row()
@@ -529,7 +596,7 @@ class PreviewDataWidget(EdgeWindow):
                 implot.end_plot()
 
     def draw_preview_section(self):
-        cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
+        cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
         with imgui_ctx.begin_child(
             "##PreviewChild",
             imgui.ImVec2(0, 0),
@@ -650,12 +717,12 @@ class PreviewDataWidget(EdgeWindow):
             imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Window Functions")
             imgui.separator()
 
-            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(2, 2))
+            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(2, 2))  # noqa
 
             imgui.begin_group()
             options = ["mean", "max", "std"]
             disabled_label = (
-                "mean-sub (pending)" if not self._mean_sub_done else "mean-sub"
+                "mean-sub (pending)" if not self._z_stats_done else "mean-sub"
             )
             options.append(disabled_label)
 
@@ -790,7 +857,7 @@ class PreviewDataWidget(EdgeWindow):
         bar_y = window_height - bar_height - imgui.get_style().item_spacing.y * 2
         imgui.set_cursor_pos_y(bar_y)
 
-        if self._mean_sub_done:
+        if self._z_stats_done:
             draw_progress(
                 self._z_stats_current_z,
                 self.nz,
@@ -846,8 +913,11 @@ class PreviewDataWidget(EdgeWindow):
         if self._gaussian_sigma > 0:
             frame = gaussian_filter(frame, sigma=self.gaussian_sigma)
         if self.proj == "mean-sub" and self._zplane_means is not None:
-            z = self.image_widget.current_index["z"]
-            frame = frame - self._zplane_means[z]
+            if self.shape == 4:
+                z = self.image_widget.current_index["z"]
+                frame = frame - self._zplane_means[z]
+            else:
+                frame = frame - self._zplane_means[0]
         return frame
 
     def calculate_offset(self, ev=None):
@@ -866,7 +936,6 @@ class PreviewDataWidget(EdgeWindow):
             if data.ndim == 3:
                 data = data[:, np.newaxis, :, :]
 
-            self.nz = data.shape[1]
             self._z_stats = {"mean": [], "std": [], "snr": []}
             self._z_stats_progress = 0.0
             self._z_stats_done = False
