@@ -1,4 +1,3 @@
-import shutil
 import webbrowser
 from pathlib import Path
 from typing import Literal
@@ -25,7 +24,7 @@ from mbo_utilities.file_io import (
     SAVE_AS_TYPES,
     _get_mbo_project_root,
     _get_mbo_dirs,
-    read_scan,
+    read_scan, to_lazy_array,
 )
 from mbo_utilities.graphics.gui_logger import GuiLogger
 
@@ -201,6 +200,7 @@ class PreviewDataWidget(EdgeWindow):
         title: str = "Data Preview",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
+        self.fpath = fpath if fpath else getattr(iw, "fpath", None)
 
         if implot.get_current_context() is None:
             implot.create_context()
@@ -229,12 +229,13 @@ class PreviewDataWidget(EdgeWindow):
         self._show_debug_panel = None
 
         self.max_offset = 8
-        self.fpath = (
-            Path(fpath) if fpath else Path(_get_mbo_dirs()["base"]).joinpath("data")
-        )
         self.image_widget = iw
         self.shape = self.image_widget.data[0].shape
-        self.nz = self.shape[1]
+
+        if len(self.shape) == 4:
+            self.nz = self.shape[1]
+        elif len(self.shape) == 3:
+            self.nz = 1
 
         self._gaussian_sigma = 0
         self._current_offset = 0.0
@@ -539,6 +540,7 @@ class PreviewDataWidget(EdgeWindow):
                 self._open_save_popup = False
 
             if imgui.begin_popup_modal("Save As")[0]:
+
                 # Directory + Ext
                 imgui.set_next_item_width(hello_imgui.em_size(25))
                 # TODO: make _save_dir a property to expand ~
@@ -817,12 +819,20 @@ class PreviewDataWidget(EdgeWindow):
             )
 
     def get_raw_frame(self):
-        return self.image_widget.data[0][
-            self.image_widget.current_index["t"],
-            self.image_widget.current_index["z"],
-            :,
-            :,
-        ]
+        data = self.image_widget.data[0]
+        idx = self.image_widget.current_index
+
+        if data.ndim == 4:  # TZXY
+            t = idx.get("t", 0)
+            z = idx.get("z", 0)
+            return data[t, z, :, :]
+        elif data.ndim == 3:  # TXY
+            t = idx.get("t", 0)
+            return data[t, :, :]
+        elif data.ndim == 2:  # XY
+            return data
+        else:
+            raise ValueError(f"Unsupported data shape: {data.shape}")
 
     def gui_progress_callback(self, fraction, current_plane):
         self._current_saving_plane = current_plane
@@ -849,32 +859,34 @@ class PreviewDataWidget(EdgeWindow):
         self.debug_panel.log("debug", f"Offset: {self.current_offset:.3f}")
 
     def compute_z_stats(self):
-        data = read_scan(self.fpath)
-        self._z_stats = {"mean": [], "std": [], "snr": []}
-        self._z_stats_progress = 0.0
-        self._z_stats_current_z = 0
-        self._z_stats_done = False
-        self._z_stats_current_mean_z = 0
+        if self.fpath:
+            data, fpath = to_lazy_array(self.fpath)
 
-        means = []
-        for z in range(self.nz):
-            self._z_stats_current_z = z
-            self._z_stats_current_mean_z = z
+            # Ensure data is always 4D (T, Z, X, Y)
+            if data.ndim == 3:
+                data = data[:, np.newaxis, :, :]
 
-            stack = data[:, z, :, :].astype(np.float32)
-            mean_img = np.mean(stack, axis=0)
-            std_img = np.std(stack, axis=0)
-            snr_img = np.where(std_img > 1e-5, mean_img / (std_img + 1e-5), 0)
+            self.nz = data.shape[1]
+            self._z_stats = {"mean": [], "std": [], "snr": []}
+            self._z_stats_progress = 0.0
+            self._z_stats_done = False
 
-            self._z_stats["mean"].append(np.mean(mean_img))
-            self._z_stats["std"].append(np.mean(std_img))
-            self._z_stats["snr"].append(np.mean(snr_img))
+            means = []
+            for z in range(self.nz):
+                stack = data[:, z, :, :].astype(np.float32)
+                mean_img = np.mean(stack, axis=0)
+                std_img = np.std(stack, axis=0)
+                snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
 
-            means.append(mean_img)
-            self._z_stats_progress = (z + 1) / self.nz
-            self._mean_sub_progress = self._z_stats_progress
+                self._z_stats["mean"].append(np.mean(mean_img))
+                self._z_stats["std"].append(np.mean(std_img))
+                self._z_stats["snr"].append(np.mean(snr_img))
 
-        self._z_stats_done = True
-        self._mean_sub_done = True
-        self._zplane_means = np.stack(means)
-        self.debug_panel.log("info", "Z-stats and mean-sub completed")
+                means.append(mean_img)
+                self._z_stats_progress = (z + 1) / self.nz
+
+            self._z_stats_done = True
+            self._zplane_means = np.stack(means)
+            self.debug_panel.log("info", "Z-stats and mean-sub completed")
+        else:
+            return
