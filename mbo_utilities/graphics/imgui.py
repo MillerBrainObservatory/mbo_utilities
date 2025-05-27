@@ -207,7 +207,6 @@ class PreviewDataWidget(EdgeWindow):
 
         self._current_pipeline = "suite2p"
         self._selected_pipelines = None
-        self.imgui_ini_path = None
 
         self.debug_panel = GuiLogger()
 
@@ -825,7 +824,7 @@ class PreviewDataWidget(EdgeWindow):
             :,
         ]
 
-    def gui_progress_callback(self, fraction, current_plane, **_):
+    def gui_progress_callback(self, fraction, current_plane):
         self._current_saving_plane = current_plane
         self._progress_value = fraction
         self._save_done = fraction >= 1.0
