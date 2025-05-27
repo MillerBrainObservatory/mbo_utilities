@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import click
 import numpy as np
 from icecream import ic
@@ -38,15 +40,15 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
 
         immapp.run(render_file_dialog, with_markdown=True, window_size=(1000, 1000))  # type: ignore
         data_in = file_dialog.selected_path
-    if _is_arraylike(data_in):
-        ic(data_in)
-        data = data_in
+        fpath = file_dialog.selected_path
+    ic(data_in)
+    if isinstance(data_in, (str, Path)):
+        fpath = data_in
     else:
-        ic(data_in)
-        if data_in is None:
-            print("No data input provided. Exiting.")
-            return
-        data = to_lazy_array(data_in, roi=roi, **kwargs)
+        # allow users to attach fpath as a property
+        fpath = getattr(data_in, "fpath", None)
+
+    data = to_lazy_array(data_in, roi=roi, **kwargs)
 
     if isinstance(data, list):
         sample = data[0]
@@ -66,7 +68,6 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
     )
 
     if widget:
-        fpath = data.fpath if hasattr(data, "fpath") else None
         gui = PreviewDataWidget(iw=iw, fpath=fpath)
         iw.figure.add_gui(gui)
 
