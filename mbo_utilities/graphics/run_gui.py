@@ -40,7 +40,9 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
 
         immapp.run(render_file_dialog, with_markdown=True, window_size=(1000, 1000))  # type: ignore
         data_in = file_dialog.selected_path
-        fpath = file_dialog.selected_path
+        if not data_in:
+            print("No file or folder selected, exiting.")
+            return
     ic(data_in)
     if isinstance(data_in, (str, Path)):
         fpath = data_in
