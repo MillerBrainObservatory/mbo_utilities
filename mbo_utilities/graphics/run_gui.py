@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import click
 import numpy as np
 from icecream import ic
@@ -7,7 +5,6 @@ from icecream import ic
 from mbo_utilities.graphics.imgui import PreviewDataWidget
 from mbo_utilities.file_io import (
     to_lazy_array,
-    _is_arraylike,
 )
 import fastplotlib as fpl
 from imgui_bundle import immapp
@@ -17,7 +14,7 @@ from mbo_utilities.graphics._imgui import setup_imgui
 try:
     setup_imgui()
     IMGUI_SETUP_COMPLETE = True
-except Exception:
+except ImportError:
     IMGUI_SETUP_COMPLETE = False
     print("Failed to set up imgui. GUI functionality may not work as expected.")
 
@@ -44,13 +41,7 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
             print("No file or folder selected, exiting.")
             return
     ic(data_in)
-    if isinstance(data_in, (str, Path)):
-        fpath = data_in
-    else:
-        # allow users to attach fpath as a property
-        fpath = getattr(data_in, "fpath", None)
-
-    data = to_lazy_array(data_in, roi=roi, **kwargs)
+    data, fpath = to_lazy_array(data_in, roi=roi, **kwargs)
 
     if isinstance(data, list):
         sample = data[0]

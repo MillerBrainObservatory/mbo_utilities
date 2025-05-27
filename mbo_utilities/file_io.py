@@ -658,13 +658,14 @@ def save_mp4(
 
 
 def to_lazy_array(data_in, **kwargs):
-    """Convert a variety of data types into an array or list of arrays to pass to Image Widget"""
-    return dispatch_data_handler(data_in, **kwargs)
+    """Convert input data into a lazy array or list of arrays and return associated filenames."""
+    data, filenames = dispatch_data_handler(data_in, **kwargs)
+    return data, filenames
 
 
 def dispatch_data_handler(data_in, **kwargs):
     if _is_arraylike(data_in):
-        return [data_in]
+        return [data_in], getattr(data_in, 'fpath', None)
 
     if isinstance(data_in, list):
         return handle_list(data_in, **kwargs)
@@ -678,31 +679,34 @@ def dispatch_data_handler(data_in, **kwargs):
 def handle_path(path: Path, **kwargs):
     if path.is_file():
         if path.suffix in [".tif", ".tiff"]:
-            return tifffile.memmap(path)
+            return tifffile.memmap(path), str(path)
         if path.suffix == ".npy":
-            return np.memmap(path)
+            return np.memmap(path), str(path)
         raise TypeError(f"Unsupported file type: {path.suffix}")
 
     if path.is_dir():
         files = get_files(path, "tif", 1)
         scan = read_scan(files, roi=kwargs.get("roi"))
-        scan.fpath = path  # set the path to the directory
-        return scan
+        scan.fpath = path
+        return scan, [str(f) for f in files]
 
     raise TypeError(f"Path must be a file or directory, got: {path}")
 
 
 def handle_list(data_in: list, **kwargs):
     if all(_is_arraylike(d) for d in data_in):
-        return data_in
+        filenames = [getattr(d, 'fpath', None) for d in data_in]
+        return data_in, filenames
 
     if all(isinstance(p, (str, Path)) for p in data_in):
-        if is_raw_scanimage(str(data_in[0])):
-            scan = read_scan(data_in, roi=kwargs.get("roi"))
-            scan.fpath = Path(data_in[0]).parent  # set the path to the first file
-            return read_scan(data_in, roi=kwargs.get("roi"))
-        # assembled, memmory mappable files
-        return zstack_from_files(data_in)
+        paths = [Path(p).expanduser().resolve() for p in data_in]
+        if is_raw_scanimage(str(paths[0])):
+            scan = read_scan(paths, roi=kwargs.get("roi"))
+            scan.fpath = paths[0].parent
+            return scan, [str(p) for p in paths]
+        if len(paths) == 1:
+            return handle_path(paths[0], **kwargs)
+        return zstack_from_files(paths), [str(p) for p in paths]
 
     raise TypeError("Unsupported mixed-type list")
 
