@@ -208,46 +208,15 @@ class Scan_MBO(scans.ScanMultiROI):
         W = len(utils.listify_index(xslice, self._page_width))
         buf = np.empty((len(pages), H, W), dtype=self.dtype)
 
-        out_height = len(utils.listify_index(yslice, self._page_height))
-        out_width = len(utils.listify_index(xslice, self._page_width))
-        pages = np.empty([len(pages_to_read), out_height, out_width], dtype=self.dtype)
-
-        for ci, c in enumerate(channel_list):
-            frame_count = 0
-            for fi, f in enumerate(frame_list):
-                indices = [
-                    i
-                    for i, (cc, ff, _) in enumerate(index_tuples)
-                    if cc == c and ff == f
-                ]
-                pages_needed = [pages_to_read[i] for i in indices]
-
-                current_start = 0
-                for tiff_file in self.tiff_files:
-                    final = current_start + len(tiff_file.pages)
-                    file_pages = [
-                        p for p in pages_needed
-                        if current_start <= p < final
-                    ]
-                    if file_pages:
-                        file_indices = [p - current_start for p in file_pages]
-                        global_indices = [
-                            i for i in indices if pages_to_read[i] in file_pages
-                        ]
-                        pages[np.array(global_indices)] = tiff_file.asarray(
-                            key=file_indices
-                        )[..., yslice, xslice]
-                    current_start = final
-                frame_count += 1
-
-        new_shape = [
-            len(frame_list),
-            len(slice_list),
-            len(channel_list),
-            out_height,
-            out_width,
-        ]
-        return pages.reshape(new_shape).transpose([1, 3, 4, 2, 0])
+        start = 0
+        for tf in self.tiff_files:
+            end = start + len(tf.pages)
+            idxs = [i for i, p in enumerate(pages) if start <= p < end]
+            if idxs:
+                frame_idx = [pages[i] - start for i in idxs]
+                buf[idxs] = tf.asarray(key=frame_idx)[..., yslice, xslice]
+            start = end
+        return buf.reshape(len(frames), len(chans), H, W)
 
     def __getitem__(self, key):
         if not isinstance(key, tuple):

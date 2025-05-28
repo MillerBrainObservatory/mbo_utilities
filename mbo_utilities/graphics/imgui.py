@@ -196,7 +196,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_progress = 0.0
         self._zstats_current_mean_z = None
 
-        threading.Thread(target=self.compute_zstats).start()
+        threading.Thread(target=self.compute_zstats, daemon=True).start()
 
     @property
     def gaussian_sigma(self):
@@ -518,7 +518,7 @@ class PreviewDataWidget(EdgeWindow):
                         self.debug_panel.log(
                             "info", f"Saving to {self._saveas_outdir} as {self._ext}"
                         )
-                        threading.Thread(target=_save_as, kwargs=save_kwargs).start()
+                        threading.Thread(target=_save_as, kwargs=save_kwargs, daemon=True).start()
                         imgui.close_current_popup()
                     except Exception as e:
                         hello_imgui.log(hello_imgui.LogLevel.error, f"Save failed: {e}")
