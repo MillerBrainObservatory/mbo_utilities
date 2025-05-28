@@ -54,7 +54,7 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
     nx, ny = sample.shape[-2:]
     iw = fpl.ImageWidget(
         data=data,
-        histogram_widget=False,
+        histogram_widget=True,
         figure_kwargs={"size": (nx * 2, ny * 2)},
         graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
         window_funcs={"t": (np.mean, 0)},

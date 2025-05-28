@@ -22,7 +22,7 @@ dependencies = [
 	"tqdm",
 	"imgui-bundle",
 	"jupyter_rfb>=0.5.1",
-	"fastplotlib>=0.4.0",
+	"fastplotlib>=0.5.0",
 	"jupyterlab>=4.5.0a0",
 	"ipykernel",
 	"ipywidgets>=8.0.0,<9",
