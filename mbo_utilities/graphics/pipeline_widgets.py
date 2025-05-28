@@ -1,8 +1,14 @@
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
+import numpy as np
+import tifffile
 
+from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, implot
+
+from mbo_utilities import get_metadata, get_files
+from mbo_utilities.file_io import _make_json_serializable
 from mbo_utilities.graphics._widgets import set_tooltip
 
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
@@ -44,12 +50,41 @@ class Suite2pSettings:
     nbinned: int = 5000
     denoise: bool = False
 
-def draw_pipeline_section(self):
+    def to_dict(self):
+        return {
+            field.name: getattr(self, field.name)
+            for field in self.__dataclass_fields__.values()
+        }
+
+    def to_file(self, filepath):
+        """Save settings to a JSON file."""
+        np.save(filepath, self.to_dict(), allow_pickle=True)
+
+def draw_tab_process(self):
     """Draws the pipeline selection and configuration section."""
-    imgui.spacing()
-    imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Select a processing pipeline:")
+
+    if not hasattr(self, "_rectangle_selector"):
+        self._rectangle_selector = None
     if not hasattr(self, "_current_pipeline"):
         self._current_pipeline = USER_PIPELINES[0]
+    if not hasattr(self, "_install_error"):
+        self._install_error = False
+    if not hasattr(self, "_show_red_text"):
+        self._show_red_text = False
+
+    imgui.begin_group()
+    imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Process full FOV or elected subregion?")
+
+    imgui.dummy(imgui.ImVec2(0, 5))
+
+    _, self._region_idx = imgui.combo("Region type", self._region_idx, REGION_TYPES)
+    self._region = REGION_TYPES[self._region_idx]
+    if self._region == "Sub-FOV":
+        if self._rectangle_selector is None:
+            self._rectangle_selector = self.image_widget.managed_graphics[0].add_rectangle_selector()
+
+    imgui.spacing()
+    imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Select a processing pipeline:")
 
     current_display_idx = USER_PIPELINES.index(self._current_pipeline)
     changed, selected_idx = imgui.combo("Pipeline", current_display_idx, USER_PIPELINES)
@@ -61,31 +96,19 @@ def draw_pipeline_section(self):
     imgui.spacing()
     imgui.separator()
 
-    # imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
-    # imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
     if self._current_pipeline == "suite2p":
-        imgui.set_next_item_width(imgui.get_content_region_avail().x)
-        draw_processing_tab(self)
+        draw_section_suite2p(self)
     elif self._current_pipeline == "masknmf":
-        imgui.text("MaskNMF is not yet implemented in this version.")
+        draw_section_masknmf(self)
     imgui.spacing()
-    # imgui.pop_style_var()
-    # imgui.pop_style_var()
+    imgui.end_group()
 
-def draw_processing_tab(self):
+def draw_section_suite2p(self):
     imgui.spacing()
-    cflags = imgui.ChildFlags_.auto_resize_x | imgui.ChildFlags_.always_use_window_padding | imgui.ChildFlags_.auto_resize_y
-    with imgui_ctx.begin_child("##Processing", child_flags=cflags):
+    with (imgui_ctx.begin_child("##Processing")):
 
-        avail_w = imgui.get_content_region_avail().x * 0.5
+        avail_w = imgui.get_content_region_avail().x * 0.3
         imgui.push_item_width(avail_w)
-        imgui.begin_group()
-        imgui.text("Process full FOV or selected subregion?")
-        imgui.separator()
-
-        _, self._region_idx = imgui.combo("Region type", self._region_idx, REGION_TYPES)
-        self._region = REGION_TYPES[self._region_idx]
-
         imgui.new_line()
         imgui.separator_text("Registration Settings")
         _, self.s2p.do_registration = imgui.checkbox("Do Registration", self.s2p.do_registration)
@@ -164,7 +187,76 @@ def draw_processing_tab(self):
         imgui.separator()
         if imgui.button("Run"):
             self.debug_panel.log("info", "Running Suite2p pipeline...")
+            run_process(self)
             self.debug_panel.log("info", "Suite2p pipeline completed.")
+        if self._install_error:
+            imgui.same_line()
+            if self._show_red_text:
+                imgui.text_colored(imgui.ImVec4(1.0, 0.0, 0.0, 1.0), "Error: lbm_suite2p_python is not installed.")
+            if self._show_green_text:
+                imgui.text_colored(imgui.ImVec4(1.0, 0.0, 0.0, 1.0), "lbm_suite2p_python install success.")
+            if self._show_install_button:
+                if imgui.button("Install"):
+                    import subprocess
+                    self.debug_panel.log("info", "Installing lbm_suite2p_python...")
+                    try:
+                        subprocess.check_call(["pip", "install", "lbm_suite2p_python"])
+                        self.debug_panel.log("info", "Installation complete.")
+                        self._install_error = False
+                        self._show_red_text = False
+                        self._show_green_text = True
+                    except Exception as e:
+                        try:
+                            self.debug_panel.log("error", f"Installation failed: {e}",)
+                            subprocess.check_call(["uv", "pip", "install", "lbm_suite2p_python"])
+                            self._show_red_text = False
+                            self._show_green_text = True
+                        except Exception as e:
+                            self.debug_panel.log("error", f"Installation failed: {e}")
+                            self._show_red_text = True
+                            self._show_install_button = False
+                            self._show_green_text = True
 
-        imgui.end_group()
         imgui.pop_item_width()
+
+def draw_section_masknmf(self):
+    imgui.text("MaskNMF is not yet implemented in this version.")
+
+def run_process(self):
+    """Runs the selected processing pipeline."""
+    if self._current_pipeline == "suite2p":
+        self.debug_panel.log("info", f"Running Suite2p pipeline with settings: {self.s2p}")
+        try:
+            import lbm_suite2p_python as lsp
+        except ImportError:
+            self.debug_panel.log("error", "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline.")
+            self._install_error = True
+            return
+    if not self._install_error:
+        kwargs = {"self": self}
+        threading.Thread(target=run_plane_from_data, kwargs=kwargs).start()
+    elif self._current_pipeline == "masknmf":
+        self.debug_panel.log("info", "Running MaskNMF pipeline (not yet implemented).")
+    else:
+        self.debug_panel.log("error", "Unknown pipeline selected: %s", self._current_pipeline)
+
+def run_plane_from_data(self):
+    import lbm_suite2p_python as lsp
+    data = self.image_widget.data[0][:, 6, :, :]
+    out_dir = Path(self._saveas_outdir) / "plane_from_data"
+    out_dir.mkdir(exist_ok=True)
+    self.fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
+    metadata = get_metadata(self.fpath)
+    metadata = _make_json_serializable(metadata)
+    final_out = out_dir / "plane_7.tif"
+    save_path = out_dir / "results"
+    save_path.mkdir(exist_ok=True)
+    tifffile.imwrite(final_out, data, metadata=metadata)
+    self.debug_panel.log("info", f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
+
+    ops = self.s2p.to_dict()
+    self.debug_panel.log("info", f"User ops provided:")
+    for k, v in ops.items():
+        self.debug_panel.log("info", f"{k}: {v}")
+    lsp.run_plane(final_out, save_path, ops=ops)
+    self.debug_panel.log("info", f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
