@@ -2,7 +2,6 @@ import webbrowser
 from pathlib import Path
 from typing import Literal
 import threading
-import time
 
 from icecream import ic
 
@@ -22,11 +21,11 @@ from mbo_utilities.assembly import save_as
 from mbo_utilities.file_io import (
     Scan_MBO,
     SAVE_AS_TYPES,
-    _get_mbo_project_root,
     _get_mbo_dirs,
     read_scan, to_lazy_array,
 )
 from mbo_utilities.graphics.gui_logger import GuiLogger
+from mbo_utilities.graphics.progress_bar import draw_zstats_progress, draw_saveas_progress
 
 try:
     import cupy as cp  # noqa
@@ -41,18 +40,10 @@ except ImportError:
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
+# from .pipeline_widgets import draw_pipeline_section
 
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
-
-def main_package_folder() -> Path | None:
-    """Find the root of the main package by looking for __init__.py and graphics folder.
-    may want to refactor this to use _get() instead
-    """
-    mbo_project_dir = _get_mbo_project_root().resolve()
-    for parent in mbo_project_dir.parents:
-        if (parent / "__init__.py").exists() and (parent / "graphics").is_dir():
-            return parent
-
+USER_PIPELINES = ["suite2p", "masknmf"]
 
 def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
     result = frame.copy()
@@ -109,60 +100,6 @@ def _save_as(path, **kwargs):
     """
     scan = read_scan(path)
     save_as(scan, **kwargs)
-
-
-def draw_progress(
-    current_index: int,
-    total_count: int,
-    percent_complete: float,
-    running_text: str = "Processing",
-    done_text: str = "Completed",
-    done: bool = False,
-    logger: GuiLogger = None,
-):
-    # TODO: must be a better way to do this
-    if not hasattr(draw_progress, "_hide_time"):
-        draw_progress._hide_time = None
-    if done:
-        if draw_progress._hide_time is None:  # noqa
-            draw_progress._hide_time = time.time() + 3
-        elif time.time() >= draw_progress._hide_time:  # noqa
-            return
-    else:
-        draw_progress._hide_time = None
-
-    p = min(max(percent_complete, 0.0), 1.0)
-    h = hello_imgui.em_size(1.4)
-    w = imgui.get_content_region_avail().x
-
-    if done:
-        bar_color = imgui.ImVec4(0.0, 0.8, 0.0, 1.0)  # green
-        text = done_text
-        return
-    else:
-        bar_color = imgui.ImVec4(0.2, 0.5, 0.9, 1.0)  # visible blue
-        text = f"{running_text} {current_index + 1} of {total_count} [{int(p * 100)}%]"
-
-    if logger is not None:
-        logger.log("info", f"Current index: {current_index}")
-        logger.log("info", f"Total count: {total_count}")
-
-    imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)  # noqa
-    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(6, 4))  # noqa
-    imgui.progress_bar(p, imgui.ImVec2(w, h), "")
-    imgui.begin_group()
-
-    if text:
-        ts = imgui.calc_text_size(text)
-        y = imgui.get_cursor_pos_y() - h + (h - ts.y) / 2
-        x = (w - ts.x) / 2
-        imgui.set_cursor_pos_y(y)
-        imgui.set_cursor_pos_x(x)
-        imgui.text_colored(imgui.ImVec4(1, 1, 1, 1), text)
-
-    imgui.pop_style_var()
-    imgui.pop_style_color()
-    imgui.end_group()
 
 
 def checkbox_with_tooltip(_label, _value, _tooltip):
@@ -239,12 +176,11 @@ class PreviewDataWidget(EdgeWindow):
         self._nbinned = 5000
         self._denoise = False
 
-        self._current_pipeline = "suite2p"
         self._selected_pipelines = None
 
         self.debug_panel = GuiLogger()
 
-        self._total_saving_planes = 0
+        self._saveas_total = 0
         self.show_debug_panel = False
         self.show_tool_about = False
         self.show_tool_style_editor = False
@@ -253,12 +189,13 @@ class PreviewDataWidget(EdgeWindow):
         self.show_tool_metrics = False
         self.font_size = 12
 
-        self._save_done = False
+
         self._show_theme_window = False
-        self._z_stats = None
-        self._z_stats_done = None
-        self._z_stats_progress = None
-        self._z_stats_current_z = None
+        self._zstats = None
+        self._zstats_done = None
+        self._z_stats_drawn_done = None
+        self._zstats_progress = None
+        self._zstats_current_z = None
         self._open_save_popup = None
         self._show_debug_panel = None
 
@@ -278,9 +215,8 @@ class PreviewDataWidget(EdgeWindow):
         self._phase_upsample = 20
         self._auto_update = False
         self._proj = "mean"
-        self._current_saving_plane = 0
 
-        self._save_dir = str(getattr(self, "_save_dir", ""))
+        self._saveas_outdir = str(getattr(self, "_save_dir", ""))
         self._planes_str = str(getattr(self, "_planes_str", ""))
 
         # Combo boxes
@@ -294,7 +230,6 @@ class PreviewDataWidget(EdgeWindow):
         self._overwrite = True
         self._fix_phase = True
         self._debug = False
-        self._progress_value = 0.0
 
         if isinstance(self.image_widget.data[0], Scan_MBO):
             self.is_mbo_scan = True
@@ -306,12 +241,16 @@ class PreviewDataWidget(EdgeWindow):
 
         self.image_widget._image_widget_sliders._loop = True  # noqa
 
-        self._mean_sub_progress = 0.0
-        self._zplane_means = None
-        self._zplane_show_subtracted = dict()
-        self._zplane_stats_thread = None
-        self._zplane_stats_progress = 0.0
-        self._z_stats_current_mean_z = None
+        self._saveas_done = False
+        self._saveas_progress = 0.0
+        self._saveas_current_index = 0
+
+        self._zstats_meansub_progress = 0.0
+        self._zstats_means = None
+        self._zstats_show_subtracted = dict()
+        self._zstats_stats_thread = None
+        self._zstats_progress = 0.0
+        self._zstats_current_mean_z = None
 
         threading.Thread(target=self.compute_z_stats).start()
 
@@ -458,42 +397,16 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.pop_style_var()
                 imgui.end_tab_item()
 
-            if self._z_stats_done and imgui.begin_tab_item("Summary Stats")[0]:
+            if self._zstats_done and imgui.begin_tab_item("Summary Stats")[0]:
                 self.draw_stats_section()
                 imgui.end_tab_item()
 
             if imgui.begin_tab_item("Process")[0]:
-                self.draw_pipeline_section()
+                imgui.text("Temp")
+                # draw_pipeline_section(self)
                 imgui.end_tab_item()
 
             imgui.end_tab_bar()
-
-    def draw_pipeline_section(self):
-        imgui.begin_group()
-
-        options = ["suite2p", "masknmf"]
-
-        if not hasattr(self, "_current_pipeline"):
-            self._current_pipeline = options[0]
-
-        current_display_idx = options.index(self._current_pipeline)
-        imgui.set_next_item_width(hello_imgui.em_size(15))
-        changed, selected_idx = imgui.combo("Pipeline", current_display_idx, options)
-
-        if changed:
-            self._current_pipeline = options[selected_idx]
-
-        set_tooltip("Select a processing pipeline to configure.")
-
-        imgui.separator()
-
-        if self._current_pipeline == "suite2p":
-            self.draw_processing_tab()
-
-        elif self._current_pipeline == "masknmf":
-            imgui.text("MaskNMF is not yet implemented in this version.")
-
-        imgui.end_group()
 
     def draw_processing_tab(self):
         cflags: imgui.ChildFlags = (
@@ -585,10 +498,10 @@ class PreviewDataWidget(EdgeWindow):
         if not getattr(self, "_z_stats_done", False):
             return
 
-        z_vals = np.arange(len(self._z_stats["mean"]))
-        mean_vals = np.array(self._z_stats["mean"])
-        std_vals = np.array(self._z_stats["std"])
-        snr_vals = np.array(self._z_stats["snr"])
+        z_vals = np.arange(len(self._zstats["mean"]))
+        mean_vals = np.array(self._zstats["mean"])
+        std_vals = np.array(self._zstats["std"])
+        snr_vals = np.array(self._zstats["snr"])
 
         # imgui.set_cursor_pos_y(hello_imgui.em_size(1))  # push content toward top
         imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats")
@@ -618,9 +531,9 @@ class PreviewDataWidget(EdgeWindow):
         ):
             imgui.text("Z-plane Signal: Mean ± Std")
 
-            z_vals = np.arange(len(self._z_stats["mean"]), dtype=np.float32)
-            mean_vals = np.array(self._z_stats["mean"], dtype=np.float32)
-            std_vals = np.array(self._z_stats["std"], dtype=np.float32)
+            z_vals = np.arange(len(self._zstats["mean"]), dtype=np.float32)
+            mean_vals = np.array(self._zstats["mean"], dtype=np.float32)
+            std_vals = np.array(self._zstats["std"], dtype=np.float32)
 
             if implot.begin_plot("Z-Plane Signal", size=imgui.ImVec2(-1, 300)):
                 implot.plot_error_bars("Mean ± Std", z_vals, mean_vals, std_vals)
@@ -643,15 +556,15 @@ class PreviewDataWidget(EdgeWindow):
                 # Directory + Ext
                 imgui.set_next_item_width(hello_imgui.em_size(25))
                 # TODO: make _save_dir a property to expand ~
-                _, self._save_dir = imgui.input_text(
-                    "Save Dir", str(Path(self._save_dir).expanduser().resolve()), 256
+                _, self._saveas_outdir = imgui.input_text(
+                    "Save Dir", str(Path(self._saveas_outdir).expanduser().resolve()), 256
                 )
                 imgui.same_line()
                 if imgui.button("Browse"):
                     home = Path().home()
                     res = pfd.select_folder(str(home))
                     if res:
-                        self._save_dir = res.result()
+                        self._saveas_outdir = res.result()
 
                 imgui.set_next_item_width(hello_imgui.em_size(25))
                 _, self._ext_idx = imgui.combo("Ext", self._ext_idx, SAVE_AS_TYPES)
@@ -709,14 +622,14 @@ class PreviewDataWidget(EdgeWindow):
 
                 imgui.separator()
                 if imgui.button("Save", imgui.ImVec2(100, 0)):
-                    if not self._save_dir:
-                        self._save_dir = _get_mbo_dirs()["base"].joinpath("data")
+                    if not self._saveas_outdir:
+                        self._saveas_outdir = _get_mbo_dirs()["base"].joinpath("data")
                     try:
                         save_planes = [p + 1 for p in self._selected_planes]
-                        self._total_saving_planes = len(save_planes)
+                        self._saveas_total = len(save_planes)
                         save_kwargs = {
                             "path": self.fpath,
-                            "savedir": self._save_dir,
+                            "savedir": self._saveas_outdir,
                             "planes": save_planes,
                             "overwrite": self._overwrite,
                             "fix_phase": self._fix_phase,
@@ -731,7 +644,7 @@ class PreviewDataWidget(EdgeWindow):
                         }
                         self.debug_panel.log("info", f"Saving planes {save_planes}")
                         self.debug_panel.log(
-                            "info", f"Saving to {self._save_dir} as {self._ext}"
+                            "info", f"Saving to {self._saveas_outdir} as {self._ext}"
                         )
                         threading.Thread(target=_save_as, kwargs=save_kwargs).start()
                         imgui.close_current_popup()
@@ -754,7 +667,7 @@ class PreviewDataWidget(EdgeWindow):
             imgui.begin_group()
             options = ["mean", "max", "std"]
             disabled_label = (
-                "mean-sub (pending)" if not self._z_stats_done else "mean-sub"
+                "mean-sub (pending)" if not self._zstats_done else "mean-sub"
             )
             options.append(disabled_label)
 
@@ -883,40 +796,8 @@ class PreviewDataWidget(EdgeWindow):
             imgui.separator()
 
         imgui.separator()
-
-        # Progress Bars
-        bar_height = hello_imgui.em_size(1.4)
-        window_height = imgui.get_window_height()
-        bar_y = window_height - bar_height - imgui.get_style().item_spacing.y * 2
-        imgui.set_cursor_pos_y(bar_y)
-
-        if self._z_stats_done:
-            draw_progress(
-                self._z_stats_current_z,
-                self.nz,
-                self._mean_sub_progress,
-                running_text="Computing Z-stats",
-                done=True,
-                logger=self.debug_panel,
-            )
-        elif 0.0 < self._mean_sub_progress < 1.0:
-            draw_progress(
-                self._z_stats_current_z,
-                self.nz,
-                self._mean_sub_progress,
-                running_text="Computing stats for plane(s)",
-                logger=self.debug_panel,
-            )
-
-        if self._progress_value > 0:
-            draw_progress(
-                current_index=int(self._progress_value * self._total_saving_planes),
-                total_count=self._total_saving_planes,
-                percent_complete=self._progress_value,
-                running_text="Saving planes",
-                done_text="Completed",
-                done=self._save_done,
-            )
+        draw_zstats_progress(self)
+        draw_saveas_progress(self)
 
     def get_raw_frame(self):
         data = self.image_widget.data[0]
@@ -935,9 +816,10 @@ class PreviewDataWidget(EdgeWindow):
             raise ValueError(f"Unsupported data shape: {data.shape}")
 
     def gui_progress_callback(self, fraction, current_plane):
-        self._current_saving_plane = current_plane
-        self._progress_value = fraction
-        self._save_done = fraction >= 1.0
+        """Callback for save_as progress updates."""
+        self._saveas_current_index = current_plane
+        self._saveas_progress = fraction
+        self._saveas_done = fraction >= 1.0
 
     def _combined_frame_apply(self, frame: np.ndarray) -> np.ndarray:
         """alter final frame only once, in ImageWidget.frame_apply"""
@@ -945,12 +827,12 @@ class PreviewDataWidget(EdgeWindow):
             frame = apply_phase_offset(frame, self.current_offset)
         if self._gaussian_sigma > 0:
             frame = gaussian_filter(frame, sigma=self.gaussian_sigma)
-        if self.proj == "mean-sub" and self._zplane_means is not None:
+        if self.proj == "mean-sub" and self._zstats_means is not None:
             if self.shape == 4:
                 z = self.image_widget.current_index["z"]
-                frame = frame - self._zplane_means[z]
+                frame = frame - self._zstats_means[z]
             else:
-                frame = frame - self._zplane_means[0]
+                frame = frame - self._zstats_means[0]
         return frame
 
     def calculate_offset(self, ev=None):
@@ -969,9 +851,9 @@ class PreviewDataWidget(EdgeWindow):
             if data.ndim == 3:
                 data = data[:, np.newaxis, :, :]
 
-            self._z_stats = {"mean": [], "std": [], "snr": []}
-            self._z_stats_progress = 0.0
-            self._z_stats_done = False
+            self._zstats = {"mean": [], "std": [], "snr": []}
+            self._zstats_progress = 0.0
+            self._zstats_done = False
 
             means = []
             for z in range(self.nz):
@@ -980,17 +862,17 @@ class PreviewDataWidget(EdgeWindow):
                 std_img = np.std(stack, axis=0)
                 snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
 
-                self._z_stats["mean"].append(np.mean(mean_img))
-                self._z_stats["std"].append(np.mean(std_img))
-                self._z_stats["snr"].append(np.mean(snr_img))
+                self._zstats["mean"].append(np.mean(mean_img))
+                self._zstats["std"].append(np.mean(std_img))
+                self._zstats["snr"].append(np.mean(snr_img))
 
                 means.append(mean_img)
-                self._z_stats_current_z = z
-                self._z_stats_progress = (z + 1) / self.nz
-                self._mean_sub_progress = (z + 1) / self.nz
+                self._zstats_current_z = z
+                self._zstats_progress = (z + 1) / self.nz
+                self._zstats_meansub_progress = (z + 1) / self.nz
 
-            self._z_stats_done = True
-            self._zplane_means = np.stack(means)
+            self._zstats_done = True
+            self._zstats_means = np.stack(means)
             self.debug_panel.log("info", "Z-stats and mean-sub completed")
         else:
             return
