@@ -13,10 +13,9 @@ class GuiLogger:
         self.messages.append((t, level, msg))
 
     def draw(self):
-        opened, self.show = imgui.begin("Debug Panel", self.show)
-        if not opened:
-            imgui.end()
-            return
+        imgui.set_next_window_size(imgui.ImVec2(600, 300), imgui.Cond_.first_use_ever)
+        window_flags = imgui.WindowFlags_.always_auto_resize
+        self.show, _ = imgui.begin("Debug Panel", self.show, flags=window_flags)
         _, self.filters["debug"] = imgui.checkbox("Debug", self.filters["debug"])
         imgui.same_line()
         _, self.filters["info"] = imgui.checkbox("Info", self.filters["info"])
