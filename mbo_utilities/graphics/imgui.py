@@ -26,7 +26,7 @@ from mbo_utilities.file_io import (
 )
 from mbo_utilities.graphics._widgets import set_tooltip, checkbox_with_tooltip
 from mbo_utilities.graphics.gui_logger import GuiLogger
-from mbo_utilities.graphics.pipeline_widgets import draw_pipeline_section
+from mbo_utilities.graphics.pipeline_widgets import draw_tab_process
 from mbo_utilities.graphics.progress_bar import draw_zstats_progress, draw_saveas_progress
 from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings
 
@@ -350,7 +350,7 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.end_tab_item()
 
             if imgui.begin_tab_item("Process")[0]:
-                draw_pipeline_section(self)
+                draw_tab_process(self)
                 imgui.end_tab_item()
 
             imgui.end_tab_bar()
