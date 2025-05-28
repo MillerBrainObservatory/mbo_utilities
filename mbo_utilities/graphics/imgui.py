@@ -206,6 +206,39 @@ class PreviewDataWidget(EdgeWindow):
         if implot.get_current_context() is None:
             implot.create_context()
 
+        # suite2p settings
+        self._do_registration = True
+        self._align_by_chan = 1
+        self._nimg_init = 300
+        self._batch_size = 500
+        self._maxregshift = 0.1
+        self._smooth_sigma = 1.15
+        self._smooth_sigma_time = 0.0
+        self._keep_movie_raw = False
+        self._two_step = False
+        self._reg_tif = False
+        self._reg_tif_chan2 = False
+        self._subpixel = 10
+        self._th_badframes = 1.0
+        self._norm_frames = True
+        self._force_refimg = False
+        self._pad_fft = False
+        self._soma_crop = True
+        self._use_builtin_classifier = False
+        self._classifier_path = ""
+        self._roidetect = True
+        self._sparse_mode = True
+        self._spatial_scale = 0
+        self._connected = True
+        self._threshold_scaling = 1.0
+        self._spatial_hp_detect = 25
+        self._max_overlap = 0.75
+        self._high_pass = 100
+        self._smooth_masks = True
+        self._max_iterations = 20
+        self._nbinned = 5000
+        self._denoise = False
+
         self._current_pipeline = "suite2p"
         self._selected_pipelines = None
 
@@ -463,7 +496,6 @@ class PreviewDataWidget(EdgeWindow):
         imgui.end_group()
 
     def draw_processing_tab(self):
-
         cflags: imgui.ChildFlags = (
                 imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
         )
@@ -843,6 +875,7 @@ class PreviewDataWidget(EdgeWindow):
             if imgui.button("Reset", imgui.ImVec2(0, 0)):
                 self.debug_panel.log("debug", f"Reset offset")
                 self.current_offset = 0
+                self.image_widget.frame_apply = {0: self._combined_frame_apply}
 
             set_tooltip("Reset the computed scan-phase offset back to zero.")
 
@@ -952,7 +985,9 @@ class PreviewDataWidget(EdgeWindow):
                 self._z_stats["snr"].append(np.mean(snr_img))
 
                 means.append(mean_img)
+                self._z_stats_current_z = z
                 self._z_stats_progress = (z + 1) / self.nz
+                self._mean_sub_progress = (z + 1) / self.nz
 
             self._z_stats_done = True
             self._zplane_means = np.stack(means)
