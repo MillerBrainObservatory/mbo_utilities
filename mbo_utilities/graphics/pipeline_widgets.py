@@ -5,9 +5,9 @@ from pathlib import Path
 import numpy as np
 import tifffile
 
-from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, implot
+from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
 
-from mbo_utilities import get_metadata, get_files
+from mbo_utilities import get_metadata
 from mbo_utilities.file_io import _make_json_serializable
 from mbo_utilities.graphics._widgets import set_tooltip
 
@@ -60,7 +60,7 @@ class Suite2pSettings:
     def to_dict(self):
         return {
             field.name: getattr(self, field.name)
-            for field in self.__dataclass_fields__.values()
+            for field in self.__dataclass_fields__.values()  # type: ignore # noqa
         }
 
     def to_file(self, filepath):
