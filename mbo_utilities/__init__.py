@@ -27,13 +27,12 @@ try:
     install()
 except ImportError:  # Graceful fallback if IceCream isn't installed.
     ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
+    install = None
 
 if is_imgui_installed():
     from .graphics import run_gui
-
-    __all__ = ["run_gui"]
 else:
-    __all__ = []
+    raise ImportError(f"This should be installed with mbo_utilities. Please report this [here](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or on slack.")
 
 __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
 
@@ -41,11 +40,7 @@ __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
 ic.enable() if os.environ.get("MBO_DEBUG", False) else ic.disable()
 
 
-__all__ += [
-    # setup
-    "mbo_home",
-    "mbo_temp",
-    "mbo_paths",
+__all__ = [
     # file_io
     "scanreader",
     "npy_to_dask",
