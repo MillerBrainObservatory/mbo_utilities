@@ -193,7 +193,6 @@ class PreviewDataWidget(EdgeWindow):
         self._show_theme_window = False
         self._zstats = None
         self._zstats_done = None
-        self._z_stats_drawn_done = None
         self._zstats_progress = None
         self._zstats_current_z = None
         self._open_save_popup = None
@@ -252,7 +251,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_progress = 0.0
         self._zstats_current_mean_z = None
 
-        threading.Thread(target=self.compute_z_stats).start()
+        threading.Thread(target=self.compute_zstats).start()
 
     @property
     def gaussian_sigma(self):
@@ -495,7 +494,7 @@ class PreviewDataWidget(EdgeWindow):
                 self.debug_panel.log("info", "Suite2p pipeline completed.")
 
     def draw_stats_section(self):
-        if not getattr(self, "_z_stats_done", False):
+        if not getattr(self, "_zstats_done", False):
             return
 
         z_vals = np.arange(len(self._zstats["mean"]))
@@ -843,7 +842,7 @@ class PreviewDataWidget(EdgeWindow):
         self.current_offset = ofs
         self.debug_panel.log("debug", f"Offset: {self.current_offset:.3f}")
 
-    def compute_z_stats(self):
+    def compute_zstats(self):
         if self.fpath:
             data, fpath = to_lazy_array(self.fpath)
 
