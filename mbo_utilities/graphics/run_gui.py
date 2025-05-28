@@ -35,7 +35,7 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
         def render_file_dialog():
             file_dialog.render()
 
-        immapp.run(render_file_dialog, with_markdown=True, window_size=(1000, 1000))  # type: ignore
+        immapp.run(render_file_dialog, with_markdown=True, window_size=(1000, 1000))  # type: ignore  # noqa
         data_in = file_dialog.selected_path
         if not data_in:
             print("No file or folder selected, exiting.")
@@ -69,4 +69,4 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
 
 
 if __name__ == "__main__":
-    run_gui()  # type: ignore
+    run_gui()  # type: ignore # noqa
