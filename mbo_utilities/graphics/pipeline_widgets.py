@@ -1,10 +1,12 @@
 from dataclasses import dataclass
+from pathlib import Path
 
-from imgui_bundle import imgui, imgui_ctx, hello_imgui
+from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
+
+from mbo_utilities.graphics._widgets import set_tooltip
 
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
-
-# -- Suite2p
+USER_PIPELINES = ["suite2p", "masknmf"]
 
 @dataclass
 class Suite2pSettings:
@@ -42,106 +44,127 @@ class Suite2pSettings:
     nbinned: int = 5000
     denoise: bool = False
 
-
 def draw_pipeline_section(self):
-
+    """Draws the pipeline selection and configuration section."""
+    imgui.spacing()
+    imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Select a processing pipeline:")
     if not hasattr(self, "_current_pipeline"):
         self._current_pipeline = USER_PIPELINES[0]
 
-    imgui.begin_group()
-
     current_display_idx = USER_PIPELINES.index(self._current_pipeline)
-    imgui.set_next_item_width(hello_imgui.em_size(15))
     changed, selected_idx = imgui.combo("Pipeline", current_display_idx, USER_PIPELINES)
 
     if changed:
         self._current_pipeline = USER_PIPELINES[selected_idx]
 
     set_tooltip("Select a processing pipeline to configure.")
-
+    imgui.spacing()
     imgui.separator()
 
+    # imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
+    # imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
     if self._current_pipeline == "suite2p":
-        self.draw_processing_tab()
-
+        imgui.set_next_item_width(imgui.get_content_region_avail().x)
+        draw_processing_tab(self)
     elif self._current_pipeline == "masknmf":
         imgui.text("MaskNMF is not yet implemented in this version.")
-
-    imgui.end_group()
-
-
-def draw_processing_tab(self: PreviewDataWidget):
-    cflags: imgui.ChildFlags = (
-            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
-    )
-    """Draw the processing tab for Suite2p settings."""
     imgui.spacing()
+    # imgui.pop_style_var()
+    # imgui.pop_style_var()
 
+def draw_processing_tab(self):
+    imgui.spacing()
+    cflags = imgui.ChildFlags_.auto_resize_x | imgui.ChildFlags_.always_use_window_padding | imgui.ChildFlags_.auto_resize_y
     with imgui_ctx.begin_child("##Processing", child_flags=cflags):
 
+        avail_w = imgui.get_content_region_avail().x * 0.5
+        imgui.push_item_width(avail_w)
+        imgui.begin_group()
         imgui.text("Process full FOV or selected subregion?")
         imgui.separator()
 
-        imgui.begin_group()
-        # Region selection
-        imgui.set_next_item_width(hello_imgui.em_size(25))
         _, self._region_idx = imgui.combo("Region type", self._region_idx, REGION_TYPES)
         self._region = REGION_TYPES[self._region_idx]
-        imgui.end_group()
 
-        imgui.begin_group()
         imgui.new_line()
         imgui.separator_text("Registration Settings")
-        self._do_registration = imgui.checkbox("Do Registration", True)[1]
-        if imgui.is_item_hovered(): imgui.set_tooltip("Whether or not to run registration")
-        _, self._align_by_chan = imgui.input_int("Align by Channel", 1)
-        if imgui.is_item_hovered(): imgui.set_tooltip("Which channel to use for alignment (1-based index)")
-        _, self._nimg_init = imgui.input_int("Initial Frames", 300)
-        _, self._batch_size = imgui.input_int("Batch Size", 500)
-        _, self._maxregshift = imgui.input_float("Max Shift Fraction", 0.1)
-        _, self._smooth_sigma = imgui.input_float("Smooth Sigma", 1.15)
-        _, self._smooth_sigma_time = imgui.input_float("Smooth Sigma Time", 0.0)
-        self._keep_movie_raw = imgui.checkbox("Keep Raw Movie", False)[1]
-        self._two_step = imgui.checkbox("Two-Step Registration", False)[1]
-        self._reg_tif = imgui.checkbox("Export Registered TIFF", False)[1]
-        self._reg_tif_chan2 = imgui.checkbox("Export Channel 2 TIFF", False)[1]
-        _, self._subpixel = imgui.input_int("Subpixel Precision", 10)
-        _, self._th_badframes = imgui.input_float("Bad Frame Threshold", 1.0)
-        self._norm_frames = imgui.checkbox("Normalize Frames", True)[1]
-        self._force_refimg = imgui.checkbox("Use Stored refImg", False)[1]
-        self._pad_fft = imgui.checkbox("Pad FFT Image", False)[1]
-        imgui.end_group()
-
-        imgui.begin_group()
+        _, self.s2p.do_registration = imgui.checkbox("Do Registration", self.s2p.do_registration)
+        set_tooltip("Whether or not to run registration")
+        _, self.s2p.nimg_init = imgui.input_int("Initial Frames", self.s2p.nimg_init)
+        set_tooltip("Shave off this many frames from the start of the movie for registration")
+        _, self.s2p.batch_size = imgui.input_int("Batch Size", self.s2p.batch_size)
+        set_tooltip("Number of frames to process in each batch during registration")
+        _, self.s2p.maxregshift = imgui.input_float("Max Shift Fraction", self.s2p.maxregshift)
+        set_tooltip("Maximum allowed shift as a fraction of the image size")
+        _, self.s2p.smooth_sigma = imgui.input_float("Smooth Sigma", self.s2p.smooth_sigma)
+        set_tooltip("Sigma for Gaussian smoothing of the image. Keep it low (less than 1.0) for high-frequency data.")
+        _, self.s2p.smooth_sigma_time = imgui.input_float("Smooth Sigma Time", self.s2p.smooth_sigma_time)
+        set_tooltip("Sigma for temporal smoothing of the image.")
+        _, self.s2p.keep_movie_raw = imgui.checkbox("Keep Raw Movie", self.s2p.keep_movie_raw)
+        set_tooltip("Whether to keep the raw movie data after processing, kept as a .bin file.")
+        _, self.s2p.two_step = imgui.checkbox("Two-Step Registration", self.s2p.two_step)
+        set_tooltip("Register once to a reference image, then register to the mean of the registered movie.")
+        _, self.s2p.reg_tif = imgui.checkbox("Export Registered TIFF", self.s2p.reg_tif)
+        set_tooltip("Export the registered movie as a TIFF file. Saved in save/path/reg_tiff/reg_tif_chan1_000N.tif")
+        _, self.s2p.subpixel = imgui.input_int("Subpixel Precision", self.s2p.subpixel)
+        set_tooltip("Subpixel precision for registration. Higher values may improve accuracy but increase processing time.")
+        _, self.s2p.th_badframes = imgui.input_float("Bad Frame Threshold", self.s2p.th_badframes)
+        set_tooltip("Threshold for detecting bad frames during registration. Frames with a value above this threshold will be considered bad.")
+        _, self.s2p.norm_frames = imgui.checkbox("Normalize Frames", self.s2p.norm_frames)
+        set_tooltip("Whether to normalize frames during registration. This can help with illumination variations.")
+        _, self.s2p.force_refimg = imgui.checkbox("Use Stored refImg", self.s2p.force_refimg)
+        set_tooltip("Use a stored reference image for registration instead of computing one from the movie.")
+        _, self.s2p.pad_fft = imgui.checkbox("Pad FFT Image", self.s2p.pad_fft)
+        set_tooltip("Whether to pad the FFT image during registration. This can help with aliasing effects.")
 
         imgui.spacing()
         imgui.separator_text("Classification Settings")
-        self._soma_crop = imgui.checkbox("Soma Crop", True)[1]
-        self._use_builtin_classifier = imgui.checkbox("Use Builtin Classifier", False)[1]
-        imgui.set_next_item_width(hello_imgui.em_size(30))
-        _, self._classifier_path = imgui.input_text("Classifier Path", "", 256)
-        imgui.end_group()
+        _, self.s2p.soma_crop = imgui.checkbox("Soma Crop", self.s2p.soma_crop)
+        set_tooltip("Crop the movie to the soma region before processing.")
+        _, self.s2p.use_builtin_classifier = imgui.checkbox("Use Builtin Classifier", self.s2p.use_builtin_classifier)
+        set_tooltip("Use the built-in classifier for detecting ROIs. If unchecked, a custom classifier path is required.")
+        _, self.s2p.classifier_path = imgui.input_text("Classifier Path", self.s2p.classifier_path, 256)
+        set_tooltip("Path to a custom classifier file. If the built-in classifier is not used, this path must be provided.")
 
-        imgui.begin_group()
         imgui.separator_text("ROI Detection Settings")
-        self._roidetect = imgui.checkbox("Detect ROIs", True)[1]
-        self._sparse_mode = imgui.checkbox("Sparse Mode", True)[1]
-        _, self._spatial_scale = imgui.input_int("Spatial Scale", 0)
-        self._connected = imgui.checkbox("Connected ROIs", True)[1]
-        _, self._threshold_scaling = imgui.input_float("Threshold Scaling", 1.0)
-        _, self._spatial_hp_detect = imgui.input_int("Spatial HP Filter", 25)
-        _, self._max_overlap = imgui.input_float("Max Overlap", 0.75)
-        _, self._high_pass = imgui.input_int("High Pass", 100)
-        self._smooth_masks = imgui.checkbox("Smooth Masks", True)[1]
-        _, self._max_iterations = imgui.input_int("Max Iterations", 20)
-        _, self._nbinned = imgui.input_int("Max Binned Frames", 5000)
-        self._denoise = imgui.checkbox("Denoise Movie", False)[1]
-        imgui.end_group()
+        _, self.s2p.roidetect = imgui.checkbox("Detect ROIs", self.s2p.roidetect)
+        set_tooltip("Whether to detect ROIs in the movie.")
+        _, self.s2p.sparse_mode = imgui.checkbox("Sparse Mode", self.s2p.sparse_mode)
+        set_tooltip("Sparse_mode=True is recommended for soma, False for dendrites.")
+        _, self.s2p.spatial_scale = imgui.input_int("Spatial Scale", self.s2p.spatial_scale)
+        set_tooltip("what the optimal scale of the recording is in pixels. if set to 0, then the algorithm determines it automatically (recommend this on the first try). If it seems off, set it yourself to the following values: 1 (=6 pixels), 2 (=12 pixels), 3 (=24 pixels), or 4 (=48 pixels).")
+        _, self.s2p.connected = imgui.checkbox("Connected ROIs", self.s2p.connected)
+        set_tooltip("Whether to use connected components for ROI detection. If False, ROIs will be detected independently.")
+        _, self.s2p.threshold_scaling = imgui.input_float("Threshold Scaling", self.s2p.threshold_scaling)
+        set_tooltip("Scaling factor for the threshold used in ROI detection. Generally (NOT always), higher values will result in fewer ROIs being detected.")
+        _, self.s2p.spatial_hp_detect = imgui.input_int("Spatial HP Filter", self.s2p.spatial_hp_detect)
+        set_tooltip("Spatial high-pass filter size for ROI detection. A value of 25 is recommended for most datasets.")
+        _, self.s2p.max_overlap = imgui.input_float("Max Overlap", self.s2p.max_overlap)
+        set_tooltip("Maximum allowed overlap between detected ROIs. If two ROIs overlap more than this value, the one with the lower signal will be discarded.")
+        _, self.s2p.high_pass = imgui.input_int("High Pass", self.s2p.high_pass)
+        set_tooltip("High-pass filter size for ROI detection. A value of 100 is recommended for most datasets.")
+        _, self.s2p.smooth_masks = imgui.checkbox("Smooth Masks", self.s2p.smooth_masks)
+        set_tooltip("Whether to smooth the detected masks. This can help with noise but may also remove small ROIs.")
+        _, self.s2p.max_iterations = imgui.input_int("Max Iterations", self.s2p.max_iterations)
+        set_tooltip("Maximum number of iterations for the ROI detection algorithm. More than 100 is likely redundant.")
+        _, self.s2p.nbinned = imgui.input_int("Max Binned Frames", self.s2p.nbinned)
+        set_tooltip("Maximum number of frames to bin for ROI detection. More than 5000 is likely redundant.")
+        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
+        set_tooltip("Whether to denoise the movie before processing. This can help with noise but may also remove small ROIs.")
 
         imgui.spacing()
-        imgui.input_text("Save folder", "/path/to/suite2p", 256)
+        imgui.input_text("Save folder", self._saveas_outdir, 256)
+        imgui.same_line()
+        if imgui.button("Browse"):
+            home = Path().home()
+            res = pfd.select_folder(str(home))
+            if res:
+                self._saveas_outdir = res.result()
 
         imgui.separator()
         if imgui.button("Run"):
             self.debug_panel.log("info", "Running Suite2p pipeline...")
             self.debug_panel.log("info", "Suite2p pipeline completed.")
+
+        imgui.end_group()
+        imgui.pop_item_width()

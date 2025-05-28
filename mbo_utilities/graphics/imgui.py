@@ -24,8 +24,11 @@ from mbo_utilities.file_io import (
     _get_mbo_dirs,
     read_scan, to_lazy_array,
 )
+from mbo_utilities.graphics._widgets import set_tooltip, checkbox_with_tooltip
 from mbo_utilities.graphics.gui_logger import GuiLogger
+from mbo_utilities.graphics.pipeline_widgets import draw_pipeline_section
 from mbo_utilities.graphics.progress_bar import draw_zstats_progress, draw_saveas_progress
+from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings
 
 try:
     import cupy as cp  # noqa
@@ -102,32 +105,6 @@ def _save_as(path, **kwargs):
     save_as(scan, **kwargs)
 
 
-def checkbox_with_tooltip(_label, _value, _tooltip):
-    _, _value = imgui.checkbox(_label, _value)
-    imgui.same_line()
-    imgui.text_disabled("(?)")
-    if imgui.is_item_hovered():
-        imgui.begin_tooltip()
-        imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-        imgui.text_unformatted(_tooltip)
-        imgui.pop_text_wrap_pos()
-        imgui.end_tooltip()
-    return _value
-
-
-def set_tooltip(_tooltip, _show_mark=True):
-    """set a tooltip with or without a (?)"""
-    if _show_mark:
-        imgui.same_line()
-        imgui.text_disabled("(?)")
-    if imgui.is_item_hovered():
-        imgui.begin_tooltip()
-        imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-        imgui.text_unformatted(_tooltip)
-        imgui.pop_text_wrap_pos()
-        imgui.end_tooltip()
-
-
 class PreviewDataWidget(EdgeWindow):
     def __init__(
         self,
@@ -138,49 +115,17 @@ class PreviewDataWidget(EdgeWindow):
         title: str = "Data Preview",
     ):
         super().__init__(figure=iw.figure, size=size, location=location, title=title)
-        self.fpath = fpath if fpath else getattr(iw, "fpath", None)
 
         if implot.get_current_context() is None:
             implot.create_context()
 
-        # suite2p settings
-        self._do_registration = True
-        self._align_by_chan = 1
-        self._nimg_init = 300
-        self._batch_size = 500
-        self._maxregshift = 0.1
-        self._smooth_sigma = 1.15
-        self._smooth_sigma_time = 0.0
-        self._keep_movie_raw = False
-        self._two_step = False
-        self._reg_tif = False
-        self._reg_tif_chan2 = False
-        self._subpixel = 10
-        self._th_badframes = 1.0
-        self._norm_frames = True
-        self._force_refimg = False
-        self._pad_fft = False
-        self._soma_crop = True
-        self._use_builtin_classifier = False
-        self._classifier_path = ""
-        self._roidetect = True
-        self._sparse_mode = True
-        self._spatial_scale = 0
-        self._connected = True
-        self._threshold_scaling = 1.0
-        self._spatial_hp_detect = 25
-        self._max_overlap = 0.75
-        self._high_pass = 100
-        self._smooth_masks = True
-        self._max_iterations = 20
-        self._nbinned = 5000
-        self._denoise = False
+        self.fpath = fpath if fpath else getattr(iw, "fpath", None)
+
+        self.s2p = Suite2pSettings()
+        self.debug_panel = GuiLogger()
 
         self._selected_pipelines = None
 
-        self.debug_panel = GuiLogger()
-
-        self._saveas_total = 0
         self.show_debug_panel = False
         self.show_tool_about = False
         self.show_tool_style_editor = False
@@ -188,7 +133,6 @@ class PreviewDataWidget(EdgeWindow):
         self.show_tool_debug_log = False
         self.show_tool_metrics = False
         self.font_size = 12
-
 
         self._show_theme_window = False
         self._zstats = None
@@ -215,17 +159,16 @@ class PreviewDataWidget(EdgeWindow):
         self._auto_update = False
         self._proj = "mean"
 
-        self._saveas_outdir = str(getattr(self, "_save_dir", ""))
         self._planes_str = str(getattr(self, "_planes_str", ""))
 
         # Combo boxes
         self._region = str(getattr(self, "_region", "Full FOV"))
         self._region_idx = REGION_TYPES.index(self._region) if self._region in REGION_TYPES else 0
+
         self._ext = str(getattr(self, "_ext", ".tiff"))
         self._ext_idx = SAVE_AS_TYPES.index(".tiff")
 
         self._selected_planes = set()
-
         self._overwrite = True
         self._fix_phase = True
         self._debug = False
@@ -243,6 +186,8 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_done = False
         self._saveas_progress = 0.0
         self._saveas_current_index = 0
+        self._saveas_outdir = str(getattr(self, "_save_dir", ""))
+        self._saveas_total = 0
 
         self._zstats_meansub_progress = 0.0
         self._zstats_means = None
@@ -405,86 +350,10 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.end_tab_item()
 
             if imgui.begin_tab_item("Process")[0]:
-                imgui.text("Temp")
-                # draw_pipeline_section(self)
+                draw_pipeline_section(self)
                 imgui.end_tab_item()
 
             imgui.end_tab_bar()
-
-    def draw_processing_tab(self):
-        cflags: imgui.ChildFlags = (
-                imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
-        )
-        """Draw the processing tab for Suite2p settings."""
-        imgui.spacing()
-        with imgui_ctx.begin_child("##Processing", child_flags=cflags):
-
-            imgui.text("Process full FOV or selected subregion?")
-            imgui.separator()
-
-            imgui.begin_group()
-            # Region selection
-            imgui.set_next_item_width(hello_imgui.em_size(25))
-            _, self._region_idx = imgui.combo("Region type", self._region_idx, REGION_TYPES)
-            self._region = REGION_TYPES[self._region_idx]
-            imgui.end_group()
-
-            imgui.begin_group()
-            imgui.new_line()
-            imgui.separator_text("Registration Settings")
-            self._do_registration = imgui.checkbox("Do Registration", True)[1]
-            if imgui.is_item_hovered(): imgui.set_tooltip("Whether or not to run registration")
-            _, self._align_by_chan = imgui.input_int("Align by Channel", 1)
-            if imgui.is_item_hovered(): imgui.set_tooltip("Which channel to use for alignment (1-based index)")
-            _, self._nimg_init = imgui.input_int("Initial Frames", 300)
-            _, self._batch_size = imgui.input_int("Batch Size", 500)
-            _, self._maxregshift = imgui.input_float("Max Shift Fraction", 0.1)
-            _, self._smooth_sigma = imgui.input_float("Smooth Sigma", 1.15)
-            _, self._smooth_sigma_time = imgui.input_float("Smooth Sigma Time", 0.0)
-            self._keep_movie_raw = imgui.checkbox("Keep Raw Movie", False)[1]
-            self._two_step = imgui.checkbox("Two-Step Registration", False)[1]
-            self._reg_tif = imgui.checkbox("Export Registered TIFF", False)[1]
-            self._reg_tif_chan2 = imgui.checkbox("Export Channel 2 TIFF", False)[1]
-            _, self._subpixel = imgui.input_int("Subpixel Precision", 10)
-            _, self._th_badframes = imgui.input_float("Bad Frame Threshold", 1.0)
-            self._norm_frames = imgui.checkbox("Normalize Frames", True)[1]
-            self._force_refimg = imgui.checkbox("Use Stored refImg", False)[1]
-            self._pad_fft = imgui.checkbox("Pad FFT Image", False)[1]
-            imgui.end_group()
-
-            imgui.begin_group()
-
-            imgui.spacing()
-            imgui.separator_text("Classification Settings")
-            self._soma_crop = imgui.checkbox("Soma Crop", True)[1]
-            self._use_builtin_classifier = imgui.checkbox("Use Builtin Classifier", False)[1]
-            imgui.set_next_item_width(hello_imgui.em_size(30))
-            _, self._classifier_path = imgui.input_text("Classifier Path", "", 256)
-            imgui.end_group()
-
-            imgui.begin_group()
-            imgui.separator_text("ROI Detection Settings")
-            self._roidetect = imgui.checkbox("Detect ROIs", True)[1]
-            self._sparse_mode = imgui.checkbox("Sparse Mode", True)[1]
-            _, self._spatial_scale = imgui.input_int("Spatial Scale", 0)
-            self._connected = imgui.checkbox("Connected ROIs", True)[1]
-            _, self._threshold_scaling = imgui.input_float("Threshold Scaling", 1.0)
-            _, self._spatial_hp_detect = imgui.input_int("Spatial HP Filter", 25)
-            _, self._max_overlap = imgui.input_float("Max Overlap", 0.75)
-            _, self._high_pass = imgui.input_int("High Pass", 100)
-            self._smooth_masks = imgui.checkbox("Smooth Masks", True)[1]
-            _, self._max_iterations = imgui.input_int("Max Iterations", 20)
-            _, self._nbinned = imgui.input_int("Max Binned Frames", 5000)
-            self._denoise = imgui.checkbox("Denoise Movie", False)[1]
-            imgui.end_group()
-
-            imgui.spacing()
-            imgui.input_text("Save folder", "/path/to/suite2p", 256)
-
-            imgui.separator()
-            if imgui.button("Run"):
-                self.debug_panel.log("info", "Running Suite2p pipeline...")
-                self.debug_panel.log("info", "Suite2p pipeline completed.")
 
     def draw_suite2p_settings(self):
         with imgui_ctx.begin_child("Suite2p Settings"):
