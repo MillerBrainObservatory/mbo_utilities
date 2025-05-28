@@ -397,7 +397,11 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.end_tab_item()
 
             if self._zstats_done and imgui.begin_tab_item("Summary Stats")[0]:
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))   # noqa
                 self.draw_stats_section()
+                imgui.pop_style_var()
+                imgui.pop_style_var()
                 imgui.end_tab_item()
 
             if imgui.begin_tab_item("Process")[0]:
