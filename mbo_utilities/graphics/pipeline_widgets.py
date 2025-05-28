@@ -242,21 +242,29 @@ def run_process(self):
 
 def run_plane_from_data(self):
     import lbm_suite2p_python as lsp
-    data = self.image_widget.data[0][:, 6, :, :]
-    out_dir = Path(self._saveas_outdir) / "plane_from_data"
+    if self._region == "Sub-FOV":
+        self.debug_panel.log("info", "Running Suite2p pipeline on selected subregion.")
+        current_z = self.image_widget.current_index["z"]
+        ind_xy = self._rectangle_selector.get_selected_indices()
+        ind_x = list(ind_xy[0])
+        ind_y = list(ind_xy[1])
+        data = self.image_widget.data[0][:, current_z, ind_x, ind_y]
+        self.debug_panel.log("info", f"shape of selected data: {data.shape}")
+    else:
+        data = self.image_widget.data[0][:, 6, :, :]
+    out_dir = Path(self._saveas_outdir)
     out_dir.mkdir(exist_ok=True)
     self.fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
     metadata = get_metadata(self.fpath)
     metadata = _make_json_serializable(metadata)
-    final_out = out_dir / "plane_7.tif"
-    save_path = out_dir / "results"
-    save_path.mkdir(exist_ok=True)
-    tifffile.imwrite(final_out, data, metadata=metadata)
+    save_path = out_dir / "plane_7.tif"
+    metadata["shape"] = data.shape
+    tifffile.imwrite(save_path, data, metadata=metadata)
     self.debug_panel.log("info", f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
 
     ops = self.s2p.to_dict()
     self.debug_panel.log("info", f"User ops provided:")
     for k, v in ops.items():
         self.debug_panel.log("info", f"{k}: {v}")
-    lsp.run_plane(final_out, save_path, ops=ops)
+    lsp.run_plane(save_path, out_dir, ops=ops)
     self.debug_panel.log("info", f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
