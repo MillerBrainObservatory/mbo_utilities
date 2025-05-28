@@ -1,6 +1,33 @@
 import numpy as np
-from imgui_bundle import imgui, implot
+from imgui_bundle import (
+    implot,
+    imgui,
+)
 
+def checkbox_with_tooltip(_label, _value, _tooltip):
+    _, _value = imgui.checkbox(_label, _value)
+    imgui.same_line()
+    imgui.text_disabled("(?)")
+    if imgui.is_item_hovered():
+        imgui.begin_tooltip()
+        imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+        imgui.text_unformatted(_tooltip)
+        imgui.pop_text_wrap_pos()
+        imgui.end_tooltip()
+    return _value
+
+
+def set_tooltip(_tooltip, _show_mark=True):
+    """set a tooltip with or without a (?)"""
+    if _show_mark:
+        imgui.same_line()
+        imgui.text_disabled("(?)")
+    if imgui.is_item_hovered():
+        imgui.begin_tooltip()
+        imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+        imgui.text_unformatted(_tooltip)
+        imgui.pop_text_wrap_pos()
+        imgui.end_tooltip()
 
 def imgui_dynamic_table(
     table_id: str, data_lists: list, titles: list = None, selected_index: int = None
