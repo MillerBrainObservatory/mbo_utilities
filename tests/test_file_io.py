@@ -9,6 +9,14 @@ skip_if_missing_data = pytest.mark.skipif(
     not DATA_ROOT.is_dir(), reason=f"Test data directory not found: {DATA_ROOT}"
 )
 
+@skip_if_missing_data
+def test_metadata():
+    """Test that metadata can be read from a file."""
+    files = mbo.get_files(DATA_ROOT, "tif")
+    assert len(files) > 0
+    metadata = mbo.get_metadata(files[0])
+    assert isinstance(metadata, dict)
+    assert "frame_rate" in metadata.keys()
 
 @skip_if_missing_data
 def test_get_files_returns_valid_tiffs():
