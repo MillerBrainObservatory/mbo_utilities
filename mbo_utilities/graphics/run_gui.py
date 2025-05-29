@@ -1,3 +1,5 @@
+import copy
+
 import click
 import numpy as np
 from icecream import ic
@@ -20,7 +22,7 @@ except ImportError:
 
 
 @click.command()
-@click.option("--roi", type=click.IntRange(1, 10), default=None)
+@click.option("--roi", type=click.IntRange(-1, 10), default=None)
 @click.option(
     "--widget",
     default=True,
@@ -42,30 +44,55 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
             return
     ic(data_in)
     data, fpath = to_lazy_array(data_in, roi=roi, **kwargs)
+    if hasattr(data, "rois"):
+        arrs = []
+        for roi in range(len(data.rois)):
+            scan_copy = copy.copy(data)
+            scan_copy.roi = roi + 1
+            arrs.append(scan_copy)
 
-    if isinstance(data, list):
-        sample = data[0]
+        nx, ny = data.shape[-2:]
+        iw = fpl.ImageWidget(
+            data=arrs,
+            names = [f"ROI {i + 1}" for i in range(len(arrs))],
+            histogram_widget=True,
+            figure_kwargs={"size": (nx * 2, ny * 2)},
+            graphic_kwargs={"vmin": data.min(), "vmax": data.max()},
+            window_funcs={"t": (np.mean, 0)},
+        )
+
+        if widget:
+            gui = PreviewDataWidget(iw=iw, fpath=fpath)
+            iw.figure.add_gui(gui)
+
+        iw.show()
+        fpl.loop.run()
+
     else:
-        sample = data
 
-    if sample.ndim < 2:
-        raise ValueError(f"Invalid input shape: expected >=2D, got {sample.shape}")
+        if isinstance(data, list):
+            sample = data[0]
+        else:
+            sample = data
 
-    nx, ny = sample.shape[-2:]
-    iw = fpl.ImageWidget(
-        data=data,
-        histogram_widget=True,
-        figure_kwargs={"size": (nx * 2, ny * 2)},
-        graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
-        window_funcs={"t": (np.mean, 0)},
-    )
+        if sample.ndim < 2:
+            raise ValueError(f"Invalid input shape: expected >=2D, got {sample.shape}")
 
-    if widget:
-        gui = PreviewDataWidget(iw=iw, fpath=fpath)
-        iw.figure.add_gui(gui)
+        nx, ny = sample.shape[-2:]
+        iw = fpl.ImageWidget(
+            data=data,
+            histogram_widget=True,
+            figure_kwargs={"size": (nx * 2, ny * 2)},
+            graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
+            window_funcs={"t": (np.mean, 0)},
+        )
 
-    iw.show()
-    fpl.loop.run()
+        if widget:
+            gui = PreviewDataWidget(iw=iw, fpath=fpath)
+            iw.figure.add_gui(gui)
+
+        iw.show()
+        fpl.loop.run()
 
 
 if __name__ == "__main__":

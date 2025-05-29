@@ -119,30 +119,48 @@ class PreviewDataWidget(EdgeWindow):
         if implot.get_current_context() is None:
             implot.create_context()
 
+        self.font_size = 12
+
         self.fpath = fpath if fpath else getattr(iw, "fpath", None)
 
         self.s2p = Suite2pSettings()
         self.debug_panel = GuiLogger()
 
-        self._selected_pipelines = None
 
-        self.show_debug_panel = False
-        self.show_tool_about = False
-        self.show_tool_style_editor = False
-        self.show_tool_id_stack_tool = False
-        self.show_tool_debug_log = False
-        self.show_tool_metrics = False
-        self.font_size = 12
+        self._show_debug_panel = False
+        self._show_tool_about = False
+        self._show_tool_style_editor = False
+        self._show_tool_metrics = False
+        self._show_debug_panel = None
 
-        self._show_theme_window = False
+
         self._zstats = None
         self._zstats_done = None
         self._zstats_progress = None
         self._zstats_current_z = None
         self._open_save_popup = None
-        self._show_debug_panel = None
 
-        self.max_offset = 8
+        # preview data widget vars
+        self._max_offset = 8
+        self._gaussian_sigma = 0
+        self._current_offset = 0.0
+        self._window_size = 1
+        self._phase_upsample = 20
+        self._auto_update = False
+        self._proj = "mean"
+
+        self._selected_pipelines = None
+
+        self._ext = str(getattr(self, "_ext", ".tiff"))
+        self._ext_idx = SAVE_AS_TYPES.index(".tiff")
+
+        self._selected_planes = set()
+        self._planes_str = str(getattr(self, "_planes_str", ""))
+        self._overwrite = True
+        self._fix_phase = True
+        self._debug = False
+
+        # image widget setup
         self.image_widget = iw
         self.shape = self.image_widget.data[0].shape
 
@@ -150,28 +168,6 @@ class PreviewDataWidget(EdgeWindow):
             self.nz = self.shape[1]
         elif len(self.shape) == 3:
             self.nz = 1
-
-        self._gaussian_sigma = 0
-        self._current_offset = 0.0
-        self._window_size = 1
-
-        self._phase_upsample = 20
-        self._auto_update = False
-        self._proj = "mean"
-
-        self._planes_str = str(getattr(self, "_planes_str", ""))
-
-        # Combo boxes
-        self._region = str(getattr(self, "_region", "Full FOV"))
-        self._region_idx = REGION_TYPES.index(self._region) if self._region in REGION_TYPES else 0
-
-        self._ext = str(getattr(self, "_ext", ".tiff"))
-        self._ext_idx = SAVE_AS_TYPES.index(".tiff")
-
-        self._selected_planes = set()
-        self._overwrite = True
-        self._fix_phase = True
-        self._debug = False
 
         if isinstance(self.image_widget.data[0], Scan_MBO):
             self.is_mbo_scan = True
@@ -206,7 +202,7 @@ class PreviewDataWidget(EdgeWindow):
     def gaussian_sigma(self, value):
         if value > 0:
             self._gaussian_sigma = value
-            self.image_widget.frame_apply = {0: self._combined_frame_apply}
+            self.update_frame_apply()
 
     @property
     def proj(self):
@@ -216,7 +212,7 @@ class PreviewDataWidget(EdgeWindow):
     def proj(self, value):
         if value != self._proj:
             if value == "mean-sub":
-                self.image_widget.frame_apply = {0: self._combined_frame_apply}
+                self.update_frame_apply()
             else:
                 self.image_widget.window_funcs["t"].func = getattr(np, value)
             self._proj = value
@@ -236,7 +232,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @current_offset.setter
     def current_offset(self, value):
-        if value == self._current_offset or value > self.max_offset:
+        if value == self._current_offset or value > self._max_offset:
             return
         self._current_offset = value
 
@@ -248,7 +244,7 @@ class PreviewDataWidget(EdgeWindow):
     def phase_upsample(self, value):
         if value > 0:
             self._phase_upsample = value
-            self.image_widget.frame_apply = {0: self._combined_frame_apply}
+            self.update_frame_apply()
 
     @property
     def auto_update(self):
@@ -257,11 +253,10 @@ class PreviewDataWidget(EdgeWindow):
     @auto_update.setter
     def auto_update(self, value):
         if self._auto_update == value:
-            # no change
             return
         if value:
             self.image_widget.add_event_handler(self.calculate_offset, "current_index")
-            self.image_widget.frame_apply = {0: self._combined_frame_apply}
+            self.update_frame_apply()
         if not value:
             self.image_widget.remove_event_handler(self.calculate_offset)
         self._auto_update = value
@@ -291,45 +286,36 @@ class PreviewDataWidget(EdgeWindow):
                     imgui.end_menu()
                 if imgui.begin_menu("Settings", True):
                     imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
-                    _, self.show_tool_style_editor = imgui.menu_item(
-                        "Style Editor", "", self.show_tool_style_editor, True
+                    _, self._show_tool_style_editor = imgui.menu_item(
+                        "Style Editor", "", self._show_tool_style_editor, True
                     )
-                    _, self.show_debug_panel = imgui.menu_item(
+                    _, self._show_debug_panel = imgui.menu_item(
                         "Debug Panel",
                         "",
-                        p_selected=self.show_debug_panel,
+                        p_selected=self._show_debug_panel,
                         enabled=True,
                     )
-                    _, self.show_tool_about = imgui.menu_item(
-                        "About MBO", "", self.show_tool_about, True
+                    _, self._show_tool_about = imgui.menu_item(
+                        "About MBO", "", self._show_tool_about, True
                     )
                     imgui.end_menu()
             imgui.end_menu_bar()
 
         if not hasattr(self, "show_tool_metrics"):
-            self.show_tool_metrics = False
-            self.show_tool_debug_log = False
-            self.show_tool_id_stack_tool = False
-            self.show_tool_style_editor = False
-            self.show_tool_about = False
+            self._show_tool_metrics = False
+            self._show_tool_style_editor = False
+            self._show_tool_about = False
 
         # (accessible from the "Tools" menu)
-        if self.show_tool_metrics:
-            imgui.show_metrics_window(self.show_tool_metrics)
-        if self.show_tool_debug_log:
-            imgui.show_debug_log_window(self.show_tool_debug_log)
-        if self.show_tool_id_stack_tool:
-            imgui.show_id_stack_tool_window(self.show_tool_id_stack_tool)
-        if self.show_tool_style_editor:
-            _, self.show_tool_style_editor = imgui.begin(
-                "Style Editor", self.show_tool_style_editor
+        if self._show_tool_style_editor:
+            _, self._show_tool_style_editor = imgui.begin(
+                "Style Editor", self._show_tool_style_editor
             )
             imgui.show_style_editor()
             imgui.end()
-        if self.show_tool_about:
-            imgui.show_about_window(self.show_tool_about)
-
-        if self.show_debug_panel:
+        if self._show_tool_about:
+            imgui.show_about_window(self._show_tool_about)
+        if self._show_debug_panel:
             self.debug_panel.draw()
 
         if imgui.begin_tab_bar("MainPreviewTabs"):
@@ -562,7 +548,7 @@ class PreviewDataWidget(EdgeWindow):
                 else:
                     self.proj = selected_label
                     if self.proj == "mean-sub":
-                        self.image_widget.frame_apply = {0: self._combined_frame_apply}
+                        self.update_frame_apply()
                     else:
                         self.image_widget.window_funcs["t"].func = getattr(
                             np, self.proj
@@ -630,13 +616,13 @@ class PreviewDataWidget(EdgeWindow):
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
             max_offset_changed, max_offset = imgui.input_int(
-                "max-offset", self.max_offset, step=1, step_fast=2
+                "max-offset", self._max_offset, step=1, step_fast=2
             )
             set_tooltip(
                 "Maximum allowed pixel shift (in pixels) when estimating the scan-phase offset."
             )
             if max_offset_changed:
-                self.max_offset = max(1, max_offset)
+                self._max_offset = max(1, max_offset)
                 self.debug_panel.log("info", f"New max-offset: {max_offset}")
 
             auto_changed, new_auto_update = imgui.checkbox(
@@ -651,7 +637,7 @@ class PreviewDataWidget(EdgeWindow):
             if imgui.button("Apply", imgui.ImVec2(0, 0)):
                 self.debug_panel.log("debug", f"Calculating offset")
                 self.calculate_offset()
-                self.image_widget.frame_apply = {0: self._combined_frame_apply}
+                self.update_frame_apply()
             set_tooltip(
                 "Run the phase-correction algorithm now using the current settings.",
                 _show_mark=False,
@@ -660,7 +646,7 @@ class PreviewDataWidget(EdgeWindow):
             if imgui.button("Reset", imgui.ImVec2(0, 0)):
                 self.debug_panel.log("debug", f"Reset offset")
                 self.current_offset = 0
-                self.image_widget.frame_apply = {0: self._combined_frame_apply}
+                self.update_frame_apply()
 
             set_tooltip("Reset the computed scan-phase offset back to zero.")
 
@@ -692,6 +678,12 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_current_index = current_plane
         self._saveas_progress = fraction
         self._saveas_done = fraction >= 1.0
+
+    def update_frame_apply(self):
+        """Update the frame_apply function of the image widget."""
+        self.image_widget.frame_apply = {
+            i: self._combined_frame_apply for i in range(len(self.image_widget.data))
+        }
 
     def _combined_frame_apply(self, frame: np.ndarray) -> np.ndarray:
         """alter final frame only once, in ImageWidget.frame_apply"""
