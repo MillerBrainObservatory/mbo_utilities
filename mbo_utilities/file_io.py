@@ -192,10 +192,23 @@ class Scan_MBO(scans.ScanMultiROI):
         super().__init__(*args, **kwargs)
         self.pbar = None
         self.show_pbar = False
-        if roi == 0:
-            raise ValueError("roi parameter is 1-based indexing. 0 is not supported.")
-        # -1 because for users 1 based indexing to keep consistent with planes parameter
-        self._roi = roi - 1 if roi else None
+        self._roi = roi
+
+    @property
+    def roi(self):
+        """
+        Get the current ROI index.
+        If roi is None, returns -1 to indicate no specific ROI.
+        """
+        return self._roi
+
+    @roi.setter
+    def roi(self, value):
+        """
+        Set the current ROI index.
+        If value is None, sets roi to -1 to indicate no specific ROI.
+        """
+        self._roi = value
 
     def _read_pages(
         self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
@@ -221,42 +234,84 @@ class Scan_MBO(scans.ScanMultiROI):
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
-        t_key, z_key, x_key, y_key = tuple(_convert_range_to_slice(k) for k in key) + (
-            slice(None),
-        ) * (4 - len(key))
+        t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (4 - len(key))
         frames = utils.listify_index(t_key, self.num_frames)
         chans = utils.listify_index(z_key, self.num_channels)
         if not frames or not chans:
             return np.empty(0)
+
         H_out = self.field_heights[0]
-        W_out = (
-            self.field_widths[0]
-            if self._roi is None
-            else (
-                self.fields[0].output_xslices[self._roi].stop
-                - self.fields[0].output_xslices[self._roi].start
-            )
-        )
-        out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
-        slices = zip(
-            self.fields[0].yslices,
-            self.fields[0].xslices,
-            self.fields[0].output_yslices,
-            self.fields[0].output_xslices,
-        )
-        for idx, (ys, xs, oys, oxs) in enumerate(slices):
-            if self._roi is not None and idx != self._roi:
-                continue
+
+        # Return a tuple of all individual ROI slices
+        if self.roi in [-1, 0]:
+            roi_outputs = []
+            for roi_idx in range(self.num_rois):
+                oxs = self.fields[0].output_xslices[roi_idx]
+                oys = self.fields[0].output_yslices[roi_idx]
+                xs = self.fields[0].xslices[roi_idx]
+                ys = self.fields[0].yslices[roi_idx]
+
+                H_roi = oys.stop - oys.start
+                W_roi = oxs.stop - oxs.start
+                if W_roi <= 0 or H_roi <= 0:
+                    roi_outputs.append(np.empty((len(frames), len(chans), H_roi, W_roi), dtype=self.dtype))
+                    continue
+
+                data = self._read_pages(frames, chans, yslice=ys, xslice=xs)
+                squeeze = []
+                if isinstance(t_key, int):
+                    squeeze.append(0)
+                if isinstance(z_key, int):
+                    squeeze.append(1)
+                if squeeze:
+                    data = data.squeeze(axis=tuple(squeeze))
+
+                roi_outputs.append(data)
+            return tuple(roi_outputs)
+
+        elif self.roi is not None and self.roi > 0:
+            oxs = self.fields[0].output_xslices[0]
+            oys = self.fields[0].output_yslices[self.roi - 1]
+            xs = self.fields[0].xslices[self.roi - 1]
+            ys = self.fields[0].yslices[self.roi - 1]
+
+            W_out = oxs.stop - oxs.start
+            H_out = self.field_heights[0]
+            out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
+
             data = self._read_pages(frames, chans, yslice=ys, xslice=xs)
             out[:, :, oys, oxs] = data
-        squeeze = []
-        if isinstance(t_key, int):
-            squeeze.append(0)
-        if isinstance(z_key, int):
-            squeeze.append(1)
-        if squeeze:
-            out = out.squeeze(axis=tuple(squeeze))
-        return out
+
+            squeeze = []
+            if isinstance(t_key, int):
+                squeeze.append(0)
+            if isinstance(z_key, int):
+                squeeze.append(1)
+            if squeeze:
+                out = out.squeeze(axis=tuple(squeeze))
+
+            return out
+
+        else:
+            W_out = self.field_widths[0]
+            out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
+            for ys, xs, oys, oxs in zip(
+                    self.fields[0].yslices,
+                    self.fields[0].xslices,
+                    self.fields[0].output_yslices,
+                    self.fields[0].output_xslices,
+            ):
+                data = self._read_pages(frames, chans, yslice=ys, xslice=xs)
+                out[:, :, oys, oxs] = data
+
+            squeeze = []
+            if isinstance(t_key, int):
+                squeeze.append(0)
+            if isinstance(z_key, int):
+                squeeze.append(1)
+            if squeeze:
+                out = out.squeeze(axis=tuple(squeeze))
+            return out
 
     @property
     def total_frames(self):
@@ -297,15 +352,20 @@ class Scan_MBO(scans.ScanMultiROI):
 
     @property
     def shape(self):
-        width = self.field_widths[0]
-        if self._roi is not None:
-            s = self.fields[0].output_xslices[self._roi]
+        if self.roi > 0:
+            s = self.fields[0].output_xslices[self.roi - 1]
             width = s.stop - s.start
+            return (
+                self.total_frames,
+                self.num_channels,
+                self.field_heights[0],
+                width,
+            )
         return (
             self.total_frames,
             self.num_channels,
             self.field_heights[0],
-            width,
+            self.field_widths[0],
         )
 
     @property
