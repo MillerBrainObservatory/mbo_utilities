@@ -18,6 +18,14 @@ except ImportError:
     HAS_LSP = False
     lsp = None
 
+try:
+    import masknmf
+    HAS_MASKNMF = True
+except ImportError:
+    HAS_MASKNMF = False
+    masknmf = None
+
+
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
 USER_PIPELINES = ["suite2p", "masknmf"]
 
