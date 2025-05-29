@@ -7,15 +7,13 @@ class GuiLogger:
         self.show = True
         self.filters = {"debug": True, "info": True, "error": True}
         self.messages = []
+        self.window_flags = imgui.WindowFlags_.none
 
     def log(self, level, msg):
         t = time.strftime("%H:%M:%S")
         self.messages.append((t, level, msg))
 
     def draw(self):
-        imgui.set_next_window_size(imgui.ImVec2(600, 300), imgui.Cond_.first_use_ever)
-        window_flags = imgui.WindowFlags_.always_auto_resize
-        self.show, _ = imgui.begin("Debug Panel", self.show, flags=window_flags)
         _, self.filters["debug"] = imgui.checkbox("Debug", self.filters["debug"])
         imgui.same_line()
         _, self.filters["info"] = imgui.checkbox("Info", self.filters["info"])
@@ -33,4 +31,3 @@ class GuiLogger:
             }[lvl]
             imgui.text_colored(col, f"[{t}] {m}")
         imgui.end_child()
-        imgui.end()

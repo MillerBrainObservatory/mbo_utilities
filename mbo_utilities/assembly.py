@@ -1,4 +1,4 @@
-import argparse
+import copy
 import functools
 import os
 import time
@@ -14,11 +14,10 @@ from tifffile import TiffWriter
 import h5py
 from icecream import ic
 
-from .file_io import _make_json_serializable, read_scan
+from .file_io import _make_json_serializable
 from .metadata import get_metadata
 from .util import is_running_jupyter
 from .plot_util import save_phase_images_png
-from .scanreader.utils import listify_index
 
 from scipy.ndimage import fourier_shift
 from skimage.registration import phase_cross_correlation
@@ -53,30 +52,6 @@ def close_tiff_writers():
         _write_tiff._writers.clear()
 
 
-def process_slice_str(slice_str):
-    if not isinstance(slice_str, str):
-        raise ValueError(f"Expected a string argument, received: {slice_str}")
-    if slice_str.isdigit():
-        return int(slice_str)
-    else:
-        parts = slice_str.split(":")
-    return slice(*[int(p) if p else None for p in parts])
-
-
-def process_slice_objects(slice_str):
-    return tuple(map(process_slice_str, slice_str.split(",")))
-
-
-def print_params(params, indent=5):
-    for k, v in params.items():
-        # if value is a dictionary, recursively call the function
-        if isinstance(v, dict):
-            print(" " * indent + f"{k}:")
-            print_params(v, indent + 4)
-        else:
-            print(" " * indent + f"{k}: {v}")
-
-
 def save_as(
     scan,
     savedir: str | Path,
@@ -89,6 +64,7 @@ def save_as(
     fix_phase: bool = True,
     save_phase_png: bool = False,
     target_chunk_mb: int = 20,
+    progress_callback: Callable = None,
     **kwargs,
 ):
     """
@@ -135,7 +111,6 @@ def save_as(
     """
     # Parse kwargs
     debug = kwargs.get("debug", False)
-    progress_callback = kwargs.get("progress_callback", None)
     if debug:
         ic.enable()
         ic("Debugging mode ON")
@@ -143,6 +118,7 @@ def save_as(
         ic.disable()
 
     upsample = kwargs.get("upsample", 20)
+
     ic(upsample)
 
     savedir = Path(savedir)
@@ -151,6 +127,36 @@ def save_as(
     if not savedir.parent.is_dir():
         raise ValueError(f"{savedir} is not inside a valid directory.")
     savedir.mkdir(exist_ok=True)
+
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError(
+            f"Metadata must be a dictionary, got {type(metadata)} instead."
+        )
+
+    if getattr(scan, "roi", None) in (-1, 0):
+        for i in range(1, scan.num_rois + 1):
+            subscan = copy.copy(scan)
+            subscan.roi = i
+            subdir = Path(savedir) / f"roi{i}"
+            subdir.mkdir(exist_ok=True)
+            metadata.update({"roi": i})
+            save_as(
+                subscan,
+                subdir,
+                planes=planes,
+                metadata=metadata,
+                overwrite=overwrite,
+                ext=ext,
+                order=order,
+                trim_edge=trim_edge,
+                fix_phase=fix_phase,
+                save_phase_png=save_phase_png,
+                target_chunk_mb=target_chunk_mb,
+                **kwargs,
+            )
+        return
 
     if not hasattr(scan, "num_channels"):
         raise ValueError(
@@ -188,6 +194,7 @@ def save_as(
         mdata.update(metadata)
     ic(metadata)
 
+
     start_time = time.time()
     _save_data(
         scan,
@@ -222,6 +229,7 @@ def _save_data(
     fix_phase=True,
     save_phase_png=False,
     target_chunk_mb=20,
+    progress_callback=None,
     **kwargs,
 ):
     tmp_copy, png_dir = None, None
@@ -230,7 +238,6 @@ def _save_data(
     if file_extension == "tiff":
         file_extension = "tif"
 
-    progress_callback: Callable = kwargs.get("progress_callback", None)
     path = Path(path)
     path.mkdir(exist_ok=True)
 
@@ -254,7 +261,6 @@ def _save_data(
     metadata["trimmed"] = [left, right, top, bottom]
     metadata["nframes"] = nt
     metadata["num_frames"] = nt  # alias
-
 
     final_shape = (nt, new_height, new_width)
     ic(final_shape)

@@ -352,7 +352,7 @@ class Scan_MBO(scans.ScanMultiROI):
 
     @property
     def shape(self):
-        if self.roi > 0:
+        if self.roi is not None and self.roi > 0:
             s = self.fields[0].output_xslices[self.roi - 1]
             width = s.stop - s.start
             return (
@@ -426,7 +426,7 @@ class Scan_MBO(scans.ScanMultiROI):
         Convert the scan data to a NumPy array.
         Calculate the size of the scan and subsample to keep under memory limits.
         """
-        return subsample_array(self, ignore_dims=[-1, -2])
+        return subsample_array(self, ignore_dims=[-1, -2, -3])
 
 
 def get_files(
@@ -737,18 +737,36 @@ def dispatch_data_handler(data_in, **kwargs):
 
 
 def handle_path(path: Path, **kwargs):
+    if path.is_dir():
+        files = get_files(path, "tif", 1)
+        if is_raw_scanimage(files[0]):
+            scan = read_scan(files, roi=kwargs.get("roi"))
+            scan.fpath = path
+            return scan, [str(f) for f in files]
+        else: # TODO: handle large tiff sizes
+            # make sure its a .tif or .tiff directory
+            if all(Path(f).suffix in [".tif", ".tiff"] for f in files):
+                try:
+                    arrays = [tifffile.memmap(f, mode="r") for f in files]
+                except Exception as e:
+                    ic(e)
+                    arrays = [tifffile.imread(f, mode="r") for f in files]
+            elif all(Path(f).suffix == ".npy" for f in files):
+                arrays = [np.memmap(f, mode="r") for f in files]
+            else:
+                raise TypeError(f"Unsupported file types in directory: {path}")
+
+            ref_shape = arrays[0].shape[-2:]
+            if not all(a.shape[-2:] == ref_shape for a in arrays):
+                raise ValueError("Inconsistent TIFF shapes across planes")
+            return np.stack(arrays, axis=1), [str(f) for f in files]
+
     if path.is_file():
         if path.suffix in [".tif", ".tiff"]:
             return tifffile.memmap(path), str(path)
         if path.suffix == ".npy":
             return np.memmap(path), str(path)
         raise TypeError(f"Unsupported file type: {path.suffix}")
-
-    if path.is_dir():
-        files = get_files(path, "tif", 1)
-        scan = read_scan(files, roi=kwargs.get("roi"))
-        scan.fpath = path
-        return scan, [str(f) for f in files]
 
     raise TypeError(f"Path must be a file or directory, got: {path}")
 

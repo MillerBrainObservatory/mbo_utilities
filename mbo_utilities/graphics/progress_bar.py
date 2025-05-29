@@ -1,6 +1,7 @@
 import time
 from collections import defaultdict
 
+from icecream import ic
 from imgui_bundle import (
     imgui,
     hello_imgui,
@@ -23,8 +24,8 @@ def draw_progress(
     done: bool = False,
     custom_text: str | None = None,
 ):
-    state = _progress_state[key]
     now = time.time()
+    state = _progress_state[key]
 
     if done and not state["done_shown_once"]:
         state["hide_time"] = now + 3
@@ -47,16 +48,11 @@ def draw_progress(
     if not done and state["done_cleared"]:
         return  # prevent flashing previous bar
 
-    # Set position
     bar_height = hello_imgui.em_size(1.4)
-    window_height = imgui.get_window_height()
-    bar_y = window_height - bar_height - imgui.get_style().item_spacing.y * 2
-    imgui.set_cursor_pos_y(bar_y)
+    imgui.spacing()
 
-    # Choose bar style
     p = min(max(percent_complete, 0.0), 1.0)
     w = imgui.get_content_region_avail().x
-    h = bar_height
 
     bar_color = imgui.ImVec4(0.0, 0.8, 0.0, 1.0) if state["is_showing_done"] else imgui.ImVec4(0.2, 0.5, 0.9, 1.0)
     if state["is_showing_done"]:
@@ -70,14 +66,12 @@ def draw_progress(
 
     imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)
     imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(6, 4))
-    imgui.progress_bar(p, imgui.ImVec2(w, h), "")
+    imgui.progress_bar(p, imgui.ImVec2(w, bar_height), "")
     imgui.begin_group()
 
     if text:
         ts = imgui.calc_text_size(text)
-        y = imgui.get_cursor_pos_y() - h + (h - ts.y) / 2
         x = (w - ts.x) / 2
-        imgui.set_cursor_pos_y(y)
         imgui.set_cursor_pos_x(x)
         imgui.text_colored(imgui.ImVec4(1, 1, 1, 1), text)
 
@@ -88,10 +82,6 @@ def draw_progress(
 def draw_saveas_progress(self):
     key = "saveas"
     state = _progress_state[key]
-
-    if state["done_cleared"]:
-        return  # don't draw anything anymore
-
     if state["is_showing_done"]:
         draw_progress(
             key=key,
@@ -113,18 +103,41 @@ def draw_saveas_progress(self):
         )
 
 def draw_zstats_progress(self):
-    key = "zstats"
-    state = _progress_state[key]
+    if self.num_rois > 1:
+        for i in range(self.num_rois):
+            roi_key = f"zstats_roi{i+1}"
+            roi_state = _progress_state[roi_key]
 
-    if state["done_cleared"]:
-        return  # don't draw anything anymore
+            if roi_state["done_cleared"]:
+                continue
 
-    draw_progress(
-        key=key,
-        current_index=self._zstats_current_z,
-        total_count=self.nz,
-        percent_complete=self._zstats_meansub_progress,
-        running_text="Computing stats for plane(s)",
-        done_text="Z-stats complete",
-        done=self._zstats_done,
-    )
+            # Make sure these are valid per-ROI lists
+            current_z = self._zstats_current_z[i] if isinstance(self._zstats_current_z, list) else 0
+            progress = self._zstats_progress[i] if isinstance(self._zstats_progress, list) else 0.0
+            done = self._zstats_done[i] if isinstance(self._zstats_done, list) else False
+
+            draw_progress(
+                key=roi_key,
+                current_index=current_z,
+                total_count=self.nz,
+                percent_complete=progress,
+                running_text=f"Computing stats: ROI {i+1}, plane(s)",
+                done_text=f"Z-stats complete (ROI {i+1})",
+                done=done,
+            )
+    else:
+        key = "zstats"
+        state = _progress_state[key]
+
+        if state["done_cleared"]:
+            return
+
+        draw_progress(
+            key=key,
+            current_index=self._zstats_current_z,
+            total_count=self.nz,
+            percent_complete=self._zstats_progress,
+            running_text="Computing stats for plane(s)",
+            done_text="Z-stats complete",
+            done=self._zstats_done,
+        )

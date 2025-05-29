@@ -34,8 +34,12 @@ def setup_imgui():
     font_path = (
         assets_path / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"
     )
-    if font_path.is_file():
-        imgui.get_io().fonts.clear()
-        imgui.get_io().fonts.add_font_from_file_ttf(str(font_path), 16.0)
-    else:
-        ic("Font not found:", font_path)
+    try:
+        if font_path.is_file():
+            imgui.get_io().fonts.clear()
+            font_path = Path(font_path).expanduser().resolve(strict=True)
+            imgui.get_io().fonts.add_font_from_file_ttf(str(font_path), 16.0)
+        else:
+            ic("Font not found:", font_path)
+    except Exception as e:
+        ic("Error loading font:", e)

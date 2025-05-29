@@ -321,3 +321,17 @@ def subsample_array(
     slices = tuple(slices)
 
     return np.asarray(arr[slices])
+
+
+def _process_slice_str(slice_str):
+    if not isinstance(slice_str, str):
+        raise ValueError(f"Expected a string argument, received: {slice_str}")
+    if slice_str.isdigit():
+        return int(slice_str)
+    else:
+        parts = slice_str.split(":")
+    return slice(*[int(p) if p else None for p in parts])
+
+
+def _process_slice_objects(slice_str):
+    return tuple(map(_process_slice_str, slice_str.split(",")))

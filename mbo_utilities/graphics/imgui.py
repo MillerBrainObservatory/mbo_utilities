@@ -1,6 +1,7 @@
 import webbrowser
 from pathlib import Path
 from typing import Literal
+from multiprocessing import Pool
 import threading
 
 from icecream import ic
@@ -14,7 +15,7 @@ from imgui_bundle import (
     hello_imgui,
     imgui_ctx,
     implot,
-    portable_file_dialogs as pfd,
+    portable_file_dialogs as pfd, ImVec2, ImVec4,
 )
 
 from mbo_utilities.assembly import save_as
@@ -22,7 +23,7 @@ from mbo_utilities.file_io import (
     Scan_MBO,
     SAVE_AS_TYPES,
     _get_mbo_dirs,
-    read_scan, to_lazy_array,
+    read_scan,
 )
 from mbo_utilities.graphics._widgets import set_tooltip, checkbox_with_tooltip
 from mbo_utilities.graphics.gui_logger import GuiLogger
@@ -48,6 +49,107 @@ from fastplotlib.ui import EdgeWindow
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
 USER_PIPELINES = ["suite2p", "masknmf"]
 
+def style_seaborn():
+    style = implot.get_style()
+    style.set_color_(implot.Col_.line.value, implot.AUTO_COL)
+    style.set_color_(implot.Col_.fill.value, implot.AUTO_COL)
+    style.set_color_(implot.Col_.marker_outline.value, implot.AUTO_COL)
+    style.set_color_(implot.Col_.marker_fill.value, implot.AUTO_COL)
+
+    style.set_color_(implot.Col_.error_bar.value, ImVec4(0.00, 0.00, 0.00, 1.00))
+    style.set_color_(implot.Col_.frame_bg.value, ImVec4(1.00, 1.00, 1.00, 1.00))
+    style.set_color_(implot.Col_.plot_bg.value, ImVec4(0.92, 0.92, 0.95, 1.00))
+    style.set_color_(implot.Col_.plot_border.value, ImVec4(0.00, 0.00, 0.00, 0.00))
+    style.set_color_(implot.Col_.legend_bg.value, ImVec4(0.92, 0.92, 0.95, 1.00))
+    style.set_color_(implot.Col_.legend_border.value, ImVec4(0.80, 0.81, 0.85, 1.00))
+    style.set_color_(implot.Col_.legend_text.value, ImVec4(0.00, 0.00, 0.00, 1.00))
+    style.set_color_(implot.Col_.title_text.value, ImVec4(0.00, 0.00, 0.00, 1.00))
+    style.set_color_(implot.Col_.inlay_text.value, ImVec4(0.00, 0.00, 0.00, 1.00))
+    style.set_color_(implot.Col_.axis_text.value, ImVec4(0.00, 0.00, 0.00, 1.00))
+    style.set_color_(implot.Col_.axis_grid.value, ImVec4(1.00, 1.00, 1.00, 1.00))
+    style.set_color_(implot.Col_.axis_bg_hovered.value, ImVec4(0.92, 0.92, 0.95, 1.00))
+    style.set_color_(implot.Col_.axis_bg_active.value, ImVec4(0.92, 0.92, 0.95, 0.75))
+    style.set_color_(implot.Col_.selection.value, ImVec4(1.00, 0.65, 0.00, 1.00))
+    style.set_color_(implot.Col_.crosshairs.value, ImVec4(0.23, 0.10, 0.64, 0.50))
+
+    style.line_weight = 1.5
+    style.marker = implot.Marker_.none.value
+    style.marker_size = 4
+    style.marker_weight = 1
+    style.fill_alpha = 1.0
+    style.error_bar_size = 5
+    style.error_bar_weight = 1.5
+    style.digital_bit_height = 8
+    style.digital_bit_gap = 4
+    style.plot_border_size = 0
+    style.minor_alpha = 1.0
+    style.major_tick_len = ImVec2(0, 0)
+    style.minor_tick_len = ImVec2(0, 0)
+    style.major_tick_size = ImVec2(0, 0)
+    style.minor_tick_size = ImVec2(0, 0)
+    style.major_grid_size = ImVec2(1.2, 1.2)
+    style.minor_grid_size = ImVec2(1.2, 1.2)
+    style.plot_padding = ImVec2(12, 12)
+    style.label_padding = ImVec2(5, 5)
+    style.legend_padding = ImVec2(5, 5)
+    style.mouse_pos_padding = ImVec2(5, 5)
+    style.plot_min_size = ImVec2(300, 225)
+
+def style_seaborn_dark():
+    style = implot.get_style()
+
+    # Auto colors for lines and markers
+    style.set_color_(implot.Col_.line.value, implot.AUTO_COL)
+    style.set_color_(implot.Col_.fill.value, implot.AUTO_COL)
+    style.set_color_(implot.Col_.marker_outline.value, implot.AUTO_COL)
+    style.set_color_(implot.Col_.marker_fill.value, implot.AUTO_COL)
+
+    # Backgrounds and axes
+    style.set_color_(implot.Col_.frame_bg.value, ImVec4(0.15, 0.17, 0.2, 1.00))  # dark gray
+    style.set_color_(implot.Col_.plot_bg.value, ImVec4(0.13, 0.15, 0.18, 1.00))  # darker gray
+    style.set_color_(implot.Col_.plot_border.value, ImVec4(0.00, 0.00, 0.00, 0.00))
+    style.set_color_(implot.Col_.axis_grid.value, ImVec4(0.35, 0.40, 0.45, 0.5))  # light grid
+    style.set_color_(implot.Col_.axis_text.value, ImVec4(0.9, 0.9, 0.9, 1.0))  # light text
+    style.set_color_(implot.Col_.axis_bg_hovered.value, ImVec4(0.25, 0.27, 0.3, 1.00))
+    style.set_color_(implot.Col_.axis_bg_active.value, ImVec4(0.25, 0.27, 0.3, 0.75))
+
+    # Legends and labels
+    style.set_color_(implot.Col_.legend_bg.value, ImVec4(0.13, 0.15, 0.18, 1.00))
+    style.set_color_(implot.Col_.legend_border.value, ImVec4(0.4, 0.4, 0.4, 1.00))
+    style.set_color_(implot.Col_.legend_text.value, ImVec4(0.9, 0.9, 0.9, 1.00))
+    style.set_color_(implot.Col_.title_text.value, ImVec4(1.0, 1.0, 1.0, 1.00))
+    style.set_color_(implot.Col_.inlay_text.value, ImVec4(0.9, 0.9, 0.9, 1.00))
+
+    # Misc
+    style.set_color_(implot.Col_.error_bar.value, ImVec4(0.9, 0.9, 0.9, 1.00))
+    style.set_color_(implot.Col_.selection.value, ImVec4(1.00, 0.65, 0.00, 1.00))
+    style.set_color_(implot.Col_.crosshairs.value, ImVec4(0.8, 0.8, 0.8, 0.5))
+
+    # Sizes
+    style.line_weight = 1.5
+    style.marker = implot.Marker_.none.value
+    style.marker_size = 4
+    style.marker_weight = 1
+    style.fill_alpha = 1.0
+    style.error_bar_size = 5
+    style.error_bar_weight = 1.5
+    style.digital_bit_height = 8
+    style.digital_bit_gap = 4
+    style.plot_border_size = 0
+    style.minor_alpha = 0.3
+    style.major_tick_len = ImVec2(0, 0)
+    style.minor_tick_len = ImVec2(0, 0)
+    style.major_tick_size = ImVec2(0, 0)
+    style.minor_tick_size = ImVec2(0, 0)
+    style.major_grid_size = ImVec2(1.2, 1.2)
+    style.minor_grid_size = ImVec2(1.2, 1.2)
+    style.plot_padding = ImVec2(12, 12)
+    style.label_padding = ImVec2(5, 5)
+    style.legend_padding = ImVec2(5, 5)
+    style.mouse_pos_padding = ImVec2(5, 5)
+    style.plot_min_size = ImVec2(300, 225)
+
+
 def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
     result = frame.copy()
     rows = result[1::2, :]
@@ -55,7 +157,6 @@ def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
     fshift = fourier_shift(f, (0, offset))
     result[1::2, :] = np.fft.ifftn(fshift).real
     return result
-
 
 def compute_phase_offset(
     frame: np.ndarray, upsample: int = 10, exclude_center_px: int = 0
@@ -96,13 +197,42 @@ def compute_phase_offset(
     return float(shift[1])
 
 
-def _save_as(path, **kwargs):
+def _save_as(
+        path: str | Path,
+        savedir: str | Path,
+        planes: list | tuple = None,
+        metadata: dict = None,
+        overwrite: bool = True,
+        ext: str = ".tiff",
+        order: list | tuple = None,
+        trim_edge: list | tuple = (0, 0, 0, 0),
+        fix_phase: bool = True,
+        save_phase_png: bool = False,
+        target_chunk_mb: int = 20,
+        debug: bool = False,
+        **kwargs,
+):
     """
     read scan from path for threading
     there must be a better way to do this
     """
     scan = read_scan(path)
-    save_as(scan, **kwargs)
+    save_as(
+        scan,
+        savedir=savedir,
+        planes=planes,
+        metadata=metadata,
+        overwrite=overwrite,
+        ext=ext,
+        order=order,
+        trim_edge=trim_edge,
+        fix_phase=fix_phase,
+        save_phase_png=save_phase_png,
+        target_chunk_mb=target_chunk_mb,
+        progress_callback=kwargs.get("progress_callback", None),
+        debug=debug,
+        **kwargs,
+    )
 
 
 class PreviewDataWidget(EdgeWindow):
@@ -126,19 +256,11 @@ class PreviewDataWidget(EdgeWindow):
         self.s2p = Suite2pSettings()
         self.debug_panel = GuiLogger()
 
-
         self._show_debug_panel = False
         self._show_tool_about = False
         self._show_tool_style_editor = False
         self._show_tool_metrics = False
-        self._show_debug_panel = None
-
-
-        self._zstats = None
-        self._zstats_done = None
-        self._zstats_progress = None
-        self._zstats_current_z = None
-        self._open_save_popup = None
+        self._show_debug_panel = False
 
         # preview data widget vars
         self._max_offset = 8
@@ -150,6 +272,7 @@ class PreviewDataWidget(EdgeWindow):
         self._proj = "mean"
 
         self._selected_pipelines = None
+        self._selected_roi = 0
 
         self._ext = str(getattr(self, "_ext", ".tiff"))
         self._ext_idx = SAVE_AS_TYPES.index(".tiff")
@@ -179,20 +302,39 @@ class PreviewDataWidget(EdgeWindow):
 
         self.image_widget._image_widget_sliders._loop = True  # noqa
 
+        self._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(self.num_rois)]
+        self._zstats_means = [0 for _ in range(self.num_rois)]
+        self._zstats_done = [False] * self.num_rois
+        self._zstats_progress = [0.0] * self.num_rois
+        self._zstats_current_z = [0] * self.num_rois
+
+        self._saveas_popup_open = False
         self._saveas_done = False
         self._saveas_progress = 0.0
         self._saveas_current_index = 0
         self._saveas_outdir = str(getattr(self, "_save_dir", ""))
         self._saveas_total = 0
 
-        self._zstats_meansub_progress = 0.0
-        self._zstats_means = None
-        self._zstats_show_subtracted = dict()
-        self._zstats_stats_thread = None
-        self._zstats_progress = 0.0
-        self._zstats_current_mean_z = None
-
         threading.Thread(target=self.compute_zstats, daemon=True).start()
+
+    @property
+    def num_rois(self):
+        return len(self.image_widget.managed_graphics)
+
+    @property
+    def selected_roi(self):
+        return self._selected_roi
+
+    @selected_roi.setter
+    def selected_roi(self, value):
+        if value < 0 or value >= len(self.image_widget.data):
+            raise ValueError(
+                f"Invalid ROI index: {value}. "
+                f"Must be between 0 and {len(self.image_widget.managed_graphics) - 1}."
+            )
+        self._selected_roi = value
+        self.image_widget.current_index = {"roi": value}
+        self.update_frame_apply()
 
     @property
     def gaussian_sigma(self):
@@ -263,6 +405,11 @@ class PreviewDataWidget(EdgeWindow):
         self.calculate_offset()
 
     def update(self):
+        if not hasattr(self, "show_tool_metrics"):
+            self._show_tool_metrics = False
+            self._show_tool_style_editor = False
+            self._show_tool_about = False
+
         # Top Menu Bar
         cflags: imgui.ChildFlags = (
             imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
@@ -274,7 +421,7 @@ class PreviewDataWidget(EdgeWindow):
                     if imgui.menu_item(
                         "Save as", "Ctrl+S", p_selected=False, enabled=self.is_mbo_scan
                     )[0]:
-                        self._open_save_popup = True
+                        self._saveas_popup_open = True
                     imgui.end_menu()
                 if imgui.begin_menu("Docs", True):
                     if imgui.menu_item(
@@ -301,10 +448,6 @@ class PreviewDataWidget(EdgeWindow):
                     imgui.end_menu()
             imgui.end_menu_bar()
 
-        if not hasattr(self, "show_tool_metrics"):
-            self._show_tool_metrics = False
-            self._show_tool_style_editor = False
-            self._show_tool_about = False
 
         # (accessible from the "Tools" menu)
         if self._show_tool_style_editor:
@@ -314,9 +457,21 @@ class PreviewDataWidget(EdgeWindow):
             imgui.show_style_editor()
             imgui.end()
         if self._show_tool_about:
+            _, self._show_tool_about = imgui.begin(
+                "##About", self._show_tool_about
+            )
             imgui.show_about_window(self._show_tool_about)
+            imgui.end()
         if self._show_debug_panel:
+            imgui.set_next_window_size(imgui.ImVec2(600, 300), imgui.Cond_.first_use_ever)
+            window_flags = imgui.WindowFlags_.always_auto_resize
+            _, self._show_tool_about = imgui.begin(
+                "##About",
+                self._show_debug_panel,
+                window_flags=window_flags  # type: ignore # noqa
+            )
             self.debug_panel.draw()
+            imgui.end()
 
         if imgui.begin_tab_bar("MainPreviewTabs"):
             if imgui.begin_tab_item("Preview")[0]:
@@ -327,7 +482,7 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.pop_style_var()
                 imgui.end_tab_item()
 
-            if self._zstats_done and imgui.begin_tab_item("Summary Stats")[0]:
+            if  imgui.begin_tab_item("Summary Stats")[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))   # noqa
                 self.draw_stats_section()
@@ -341,62 +496,110 @@ class PreviewDataWidget(EdgeWindow):
 
             imgui.end_tab_bar()
 
-    def draw_suite2p_settings(self):
-        with imgui_ctx.begin_child("Suite2p Settings"):
-            imgui.text("Quick-Run Suite2p Pipeline Options")
-            imgui.separator()
-            imgui.checkbox("Run registration", True)
-            imgui.checkbox("Run cell detection", True)
-            imgui.slider_int("Threshold", 30, 0, 100)
-            if imgui.button("Run"):
-                self.debug_panel.log("info", "Running Suite2p pipeline...")
-                self.debug_panel.log("info", "Suite2p pipeline completed.")
-
     def draw_stats_section(self):
-        if not getattr(self, "_zstats_done", False):
+        if not self._zstats_done:
             return
 
-        z_vals = np.arange(len(self._zstats["mean"]))
-        mean_vals = np.array(self._zstats["mean"])
-        std_vals = np.array(self._zstats["std"])
-        snr_vals = np.array(self._zstats["snr"])
+        stats_list = self._zstats if isinstance(self._zstats, list) else [self._zstats]
 
-        # imgui.set_cursor_pos_y(hello_imgui.em_size(1))  # push content toward top
         imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats")
+        cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # type: ignore # noqa
+        imgui.spacing()
 
-        cflags: imgui.ChildFlags = (
-            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
-        )
-        with imgui_ctx.begin_child(
-            "##Summary", size=imgui.ImVec2(0, 0), child_flags=cflags
-        ):
-            if imgui.begin_table(
-                "zstats", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg  # noqa
-            ):
-                for col in ["Z", "Mean", "Std", "SNR"]:
-                    imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)  # noqa
-                imgui.table_headers_row()
-                for i in range(len(z_vals)):
-                    imgui.table_next_row()
-                    for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):
-                        imgui.table_next_column()
-                        imgui.text(f"{val:.2f}")
-                imgui.end_table()
+        # ROI selector
+        roi_labels = [f"ROI {i + 1}" for i in range(len(stats_list)) if stats_list[i] and "mean" in stats_list[i]]
+        roi_labels.append("Combined")
+        for i, label in enumerate(roi_labels):
+            if imgui.radio_button(label, self._selected_roi == i):
+                self._selected_roi = i
+            if i < len(roi_labels) - 1:
+                imgui.same_line()
 
         imgui.separator()
-        with imgui_ctx.begin_child(
-            "##Plots", size=imgui.ImVec2(0, 0), child_flags=cflags
-        ):
-            imgui.text("Z-plane Signal: Mean ± Std")
 
-            z_vals = np.arange(len(self._zstats["mean"]), dtype=np.float32)
-            mean_vals = np.array(self._zstats["mean"], dtype=np.float32)
-            std_vals = np.array(self._zstats["std"], dtype=np.float32)
+        if self._selected_roi == len(roi_labels) - 1:  # Combined
+            imgui.text("Stats for Combined ROIs")
+            mean_vals = np.mean([np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0)
 
-            if implot.begin_plot("Z-Plane Signal", size=imgui.ImVec2(-1, 300)):
-                implot.plot_error_bars("Mean ± Std", z_vals, mean_vals, std_vals)
-                implot.plot_line("Mean", z_vals, mean_vals)
-                implot.end_plot()
+            if len(mean_vals) == 0:
+                return
+
+            std_vals = np.mean([np.array(s["std"]) for s in stats_list if s and "std" in s], axis=0)
+            snr_vals = np.mean([np.array(s["snr"]) for s in stats_list if s and "snr" in s], axis=0)
+
+            z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
+
+            # Table
+            with imgui_ctx.begin_child("##SummaryCombined", size=imgui.ImVec2(0, 0), child_flags=cflags):
+                if imgui.begin_table("Stats, averaged over ROI's", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):
+                    for col in ["Z", "Mean", "Std", "SNR"]:
+                        imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
+                    imgui.table_headers_row()
+                    for i in range(len(z_vals)):
+                        imgui.table_next_row()
+                        for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):
+                            imgui.table_next_column()
+                            imgui.text(f"{val:.2f}")
+                    imgui.end_table()
+
+            with imgui_ctx.begin_child("##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags):
+                imgui.text("Z-plane Signal: Combined")
+                if implot.begin_plot("Z-Plane Plot", ImVec2(-1, 0)):
+                    implot.setup_axes("Z-Plane", "Mean Fluorescence", implot.AxisFlags_.none.value,
+                                      implot.AxisFlags_.auto_fit.value)
+                    implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, self.nz)
+                    implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
+                    style_seaborn_dark()
+
+                    for i, stats in enumerate(stats_list):
+                        if not stats or "mean" not in stats:
+                            continue
+
+                        z_vals_ind = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
+                        mean_vals_ind = np.array(stats["mean"])
+                        implot.plot_line(f"ROI {i + 1}", z_vals_ind, mean_vals_ind)
+
+                    implot.end_plot()
+
+
+        else:
+            roi_idx = self._selected_roi
+            stats = stats_list[roi_idx]
+
+            if not stats or "mean" not in stats:
+                return
+
+            imgui.text(f"Stats for ROI {roi_idx + 1}")
+            mean_vals = np.array(stats["mean"])
+            std_vals = np.array(stats["std"])
+            snr_vals = np.array(stats["snr"])
+            z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
+
+            with imgui_ctx.begin_child(f"##Summary{roi_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags):
+                if imgui.begin_table(f"zstats{roi_idx}", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):
+                    for col in ["Z", "Mean", "Std", "SNR"]:
+                        imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
+                    imgui.table_headers_row()
+                    for i in range(len(z_vals)):
+                        imgui.table_next_row()
+                        for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):
+                            imgui.table_next_column()
+                            imgui.text(f"{val:.2f}")
+                    imgui.end_table()
+
+            with imgui_ctx.begin_child(f"##Plots", size=imgui.ImVec2(0, 0), child_flags=cflags):
+                imgui.text("Z-plane Signal: Mean ± Std")
+                if implot.begin_plot(f"Z-Plane Signal {roi_idx}", size=imgui.ImVec2(-1, 300)):
+                    z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
+                    implot.setup_axes("Z-Plane", "Mean Fluorescence", implot.AxisFlags_.none.value,
+                                      implot.AxisFlags_.auto_fit.value)
+                    # implot.setup_axis_limits(implot.ImAxis_.x1.value, z_vals[0], z_vals[-1])
+                    implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, self.nz)
+                    implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
+                    style_seaborn_dark()
+                    implot.plot_error_bars("Mean ± Std", z_vals, mean_vals, std_vals)
+                    implot.plot_line("Mean", z_vals, mean_vals)
+                    implot.end_plot()
 
     def draw_preview_section(self):
         cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
@@ -405,12 +608,11 @@ class PreviewDataWidget(EdgeWindow):
             imgui.ImVec2(0, 0),
             cflags,
         ):
-            if getattr(self, "_open_save_popup", False):
+            if getattr(self, "_saveas_popup_open", False):
                 imgui.open_popup("Save As")
-                self._open_save_popup = False
+                self._saveas_popup_open = False
 
             if imgui.begin_popup_modal("Save As")[0]:
-
                 # Directory + Ext
                 imgui.set_next_item_width(hello_imgui.em_size(25))
                 # TODO: make _save_dir a property to expand ~
@@ -431,6 +633,7 @@ class PreviewDataWidget(EdgeWindow):
                 # Options Section
                 imgui.separator()
                 imgui.text("Options")
+                set_tooltip("Note: Current values for upsample and max-offset are applied during scan-phase correction.", True)
 
                 self._overwrite = checkbox_with_tooltip(
                     "Overwrite", self._overwrite, "Replace any existing output files."
@@ -660,6 +863,7 @@ class PreviewDataWidget(EdgeWindow):
     def get_raw_frame(self):
         data = self.image_widget.data[0]
         idx = self.image_widget.current_index
+        self.debug_panel.log("debug", f"Raw frame requested for index: {idx}")
 
         if data.ndim == 4:  # TZXY
             t = idx.get("t", 0)
@@ -691,7 +895,7 @@ class PreviewDataWidget(EdgeWindow):
             frame = apply_phase_offset(frame, self.current_offset)
         if self._gaussian_sigma > 0:
             frame = gaussian_filter(frame, sigma=self.gaussian_sigma)
-        if self.proj == "mean-sub" and self._zstats_means is not None:
+        if self.proj == "mean-sub" and self._zstats_means:
             if self.shape == 4:
                 z = self.image_widget.current_index["z"]
                 frame = frame - self._zstats_means[z]
@@ -707,36 +911,46 @@ class PreviewDataWidget(EdgeWindow):
         self.current_offset = ofs
         self.debug_panel.log("debug", f"Offset: {self.current_offset:.3f}")
 
+    def _compute_zstats_single_roi(self, data_ix, arr):
+        self.debug_panel.log("debug", f"Computing z-statistics for ROI {data_ix + 1}")
+
+        if arr.ndim == 3:
+            arr = arr[:, np.newaxis, :, :]  # TZYX
+
+        stats = {"mean": [], "std": [], "snr": []}
+        means = []
+
+        for z in range(self.nz):
+            self.debug_panel.log("debug", f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {data_ix + 1} --")
+            stack = arr[:, z].astype(np.float32)
+            mean_img = np.mean(stack, axis=0)
+            std_img = np.std(stack, axis=0)
+            snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
+
+            stats["mean"].append(np.mean(mean_img))
+            stats["std"].append(np.mean(std_img))
+            stats["snr"].append(np.mean(snr_img))
+            means.append(mean_img)
+
+            self.debug_panel.log(
+                "debug",
+                f"ROI {data_ix + 1} - Z-plane {z + 1}: "
+                f"Mean: {stats['mean'][-1]:.2f}, "
+                f"Std: {stats['std'][-1]:.2f}, "
+                f"SNR: {stats['snr'][-1]:.2f}"
+            )
+
+            self._zstats_progress[data_ix] = (z + 1) / self.nz
+            self._zstats_current_z[data_ix] = z
+
+        self._zstats[data_ix] = stats
+        self._zstats_means[data_ix] = np.stack(means)
+        self._zstats_done[data_ix] = True
+
     def compute_zstats(self):
-        if self.fpath:
-            data, fpath = to_lazy_array(self.fpath)
-
-            # Ensure data is always 4D (T, Z, X, Y)
-            if data.ndim == 3:
-                data = data[:, np.newaxis, :, :]
-
-            self._zstats = {"mean": [], "std": [], "snr": []}
-            self._zstats_progress = 0.0
-            self._zstats_done = False
-
-            means = []
-            for z in range(self.nz):
-                stack = data[:, z, :, :].astype(np.float32)
-                mean_img = np.mean(stack, axis=0)
-                std_img = np.std(stack, axis=0)
-                snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
-
-                self._zstats["mean"].append(np.mean(mean_img))
-                self._zstats["std"].append(np.mean(std_img))
-                self._zstats["snr"].append(np.mean(snr_img))
-
-                means.append(mean_img)
-                self._zstats_current_z = z
-                self._zstats_progress = (z + 1) / self.nz
-                self._zstats_meansub_progress = (z + 1) / self.nz
-
-            self._zstats_done = True
-            self._zstats_means = np.stack(means)
-            self.debug_panel.log("info", "Z-stats and mean-sub completed")
-        else:
+        if not self.image_widget or not self.image_widget.data:
             return
+
+        arrs = [np.array(arr) for arr in self.image_widget.data]
+        for data_ix, arr in enumerate(arrs):
+            threading.Thread(target=self._compute_zstats_single_roi, args=(data_ix, arr), daemon=True).start()

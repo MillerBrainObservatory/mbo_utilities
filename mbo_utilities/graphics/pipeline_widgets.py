@@ -86,6 +86,8 @@ def draw_tab_process(self):
         self._install_error = False
     if not hasattr(self, "_show_red_text"):
         self._show_red_text = False
+    if not hasattr(self, "_region_idx"):
+        self._region_idx = 0
 
     imgui.begin_group()
     imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Process full FOV or elected subregion?")
