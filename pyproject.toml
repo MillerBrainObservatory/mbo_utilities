@@ -31,8 +31,8 @@ dependencies = [
 ]
 
 [project.scripts]
-mbo = "mbo_utilities.__main__:main"  # alias
-run_gui = "mbo_utilities.__main__:main"
+mbo = "mbo_utilities.graphics.run_gui:run_gui"  # alias
+run_gui = "mbo_utilities.graphics.run_gui:run_gui"
 assemble = "mbo_utilities.assembly:main"
 
 [project.urls]
