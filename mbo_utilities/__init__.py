@@ -36,7 +36,7 @@ else:
 
 __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
 
-# default to disabling all ic() calls
+# default to disabling all ic() calls unless MBO_DEBUG is set
 ic.enable() if os.environ.get("MBO_DEBUG", False) else ic.disable()
 
 
