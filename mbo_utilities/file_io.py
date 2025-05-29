@@ -754,7 +754,6 @@ def _get_mbo_dirs() -> dict:
     for d in (base, settings, cache, logs):
         d.mkdir(exist_ok=True)
 
-    ic("Created mbo directories:", base, settings, cache, logs)
     return {
         "base": base,
         "settings": settings,
