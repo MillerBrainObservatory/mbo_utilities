@@ -187,7 +187,11 @@ def save_as(
         roi_list = list(scan.roi)                 # list of ROIs
 
     start_time = time.time()
+    if 0 in roi_list:
+        if len(roi_list) > 1:
+            roi_list = [r + 1 for r in roi_list if r is not None]
     for r in roi_list:
+        ic(r, roi_list)
         subscan = copy.copy(scan)
         subscan.roi = r
         target = savedir if r is None else savedir / f"roi{r}"
