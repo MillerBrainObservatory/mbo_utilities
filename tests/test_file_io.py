@@ -1,7 +1,13 @@
-import numpy as np
 import pytest
 from pathlib import Path
+from itertools import product
+
+import numpy as np
+from icecream import ic
+
 import mbo_utilities as mbo
+
+ic.enable()
 
 DATA_ROOT = Path(r"D:\tests\data")
 
@@ -16,6 +22,9 @@ def test_metadata():
     assert len(files) > 0
     metadata = mbo.get_metadata(files[0])
     assert isinstance(metadata, dict)
+    assert "pixel_resolution" in metadata.keys()
+    assert "objective_resolution" in metadata.keys()
+    assert "dtype" in metadata.keys()
     assert "frame_rate" in metadata.keys()
 
 @skip_if_missing_data
@@ -26,14 +35,6 @@ def test_get_files_returns_valid_tiffs():
     for f in files:
         assert Path(f).suffix in (".tif", ".tiff")
         assert Path(f).exists()
-
-
-@skip_if_missing_data
-def test_read_metadata():
-    files = mbo.get_files(DATA_ROOT, "tif")
-    metadata = mbo.get_metadata(files[0])
-    assert isinstance(metadata, dict)
-    assert "frame_rate" in metadata.keys()
 
 
 def test_expand_paths(tmp_path):
@@ -71,20 +72,27 @@ def test_imgui_check():
 
 
 @skip_if_missing_data
-def test_get_files():
-    """Test get_files returns a list of files with the specified extension."""
+def test_demo_files(tmp_path: Path):
     test_path = Path(r"D:\tests\data")
-    if test_path.is_dir():
-        files = mbo.get_files(test_path, "tif")
-        assert isinstance(files, list)
-        assert len(files) > 0
-        for file in files:
-            assert Path(file).suffix == ".tif"
 
+    assembled_path = test_path / "assembled"
+    assembled_path.mkdir(exist_ok=True)
 
-@skip_if_missing_data
-def test_demo_files():
-    test_path = Path(r"D:\tests\data")
-    files = mbo.get_files(test_path, "tif")
-    scan = mbo.read_scan(files)
-    assert hasattr(scan, "shape")
+    test_files = mbo.get_files(test_path, "tif")
+    for roi in [0, 1, None]:
+        if roi is None:
+            savedir = assembled_path / "full"
+        else:
+            savedir = assembled_path
+        test_scan = mbo.read_scan(test_files, roi=roi)
+        mbo.save_as(
+            test_scan,
+            savedir.expanduser().resolve(),
+            ext=".tiff",
+            overwrite=True,
+            fix_phase=True,
+            planes=[1, 7, 14],
+            debug=True,
+        )
+    outputs = mbo.get_files(assembled_path, "tif", max_depth=3)
+    print(outputs)
