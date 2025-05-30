@@ -127,7 +127,6 @@ def _default_params_caiman():
         "refit": True,
     }
 
-
 def _params_from_metadata_suite2p(metadata, ops):
     """
     Tau is 0.7 for GCaMP6f, 1.0 for GCaMP6m, 1.25-1.5 for GCaMP6s
@@ -157,6 +156,39 @@ def report_missing_metadata(file: os.PathLike | str):
         print(f"Missing 'state' software tag.")
     if not 'scanimage.SI' in tiff_file.description[-256:]:
         print(f"Missing 'scanimage.SI' in description tag.")
+
+def has_mbo_metadata(file: os.PathLike | str) -> bool:
+    """
+    Check if a TIFF file has metadata from the Miller Brain Observatory.
+
+    Specifically, this checks for tiff_file.shaped_metadata, which is used to store system and user
+    supplied metadata.
+
+    Parameters
+    ----------
+    file: os.PathLike
+        Path to the TIFF file.
+
+    Returns
+    -------
+    bool
+        True if the TIFF file has MBO metadata; False otherwise.
+    """
+    if not file or not isinstance(file, (str, os.PathLike)):
+        raise ValueError("Invalid file path provided: must be a string or os.PathLike object."
+                         f"Got: {file} of type {type(file)}")
+    # Tiffs
+    if Path(file).suffix in [".tif", ".tiff"]:
+        try:
+            tiff_file = tifffile.TiffFile(file)
+            if hasattr(tiff_file, "shaped_metadata") and tiff_file.shaped_metadata is not None:
+                return True
+            else:
+                return False
+        except Exception:
+            return False
+    return False
+
 
 def is_raw_scanimage(file: os.PathLike | str, verbose=False) -> bool:
     """
