@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import json
 import os
 from pathlib import Path
 
@@ -147,6 +149,14 @@ def _params_from_metadata_suite2p(metadata, ops):
 
     return ops
 
+def report_missing_metadata(file: os.PathLike | str):
+    tiff_file = tifffile.TiffFile(file)
+    if not tiff_file.software == 'SI':
+        print(f"Missing SI software tag.")
+    if not tiff_file.description[:6] == 'state.':
+        print(f"Missing 'state' software tag.")
+    if not 'scanimage.SI' in tiff_file.description[-256:]:
+        print(f"Missing 'scanimage.SI' in description tag.")
 
 def is_raw_scanimage(file: os.PathLike | str, verbose=False) -> bool:
     """
@@ -166,14 +176,13 @@ def is_raw_scanimage(file: os.PathLike | str, verbose=False) -> bool:
         return False
     elif Path(file).suffix not in [".tif", ".tiff"]:
         return False
-
     try:
         tiff_file = tifffile.TiffFile(file)
+        if (
         # TiffFile.shaped_metadata is where we store metadata for processed tifs
         # if this is not empty, we have a processed file
         # otherwise, we have a raw scanimage tiff
-        if (
-            hasattr(tiff_file, "shaped_metadata")
+        hasattr(tiff_file, "shaped_metadata")
             and tiff_file.shaped_metadata is not None
             and isinstance(tiff_file.shaped_metadata, (list, tuple))
         ):
@@ -404,3 +413,54 @@ def params_from_metadata(metadata, base_ops, pipeline="suite2p"):
         raise ValueError(
             f"Pipeline {pipeline} not recognized. Use 'caiman' or 'suite2'"
         )
+
+
+
+def _parse_value(value_str):
+    if value_str.startswith("'") and value_str.endswith("'"):
+        return value_str[1:-1]
+    if value_str == 'true':
+        return True
+    if value_str == 'false':
+        return False
+    if value_str == 'NaN':
+        return float('nan')
+    if value_str == 'Inf':
+        return float('inf')
+    if re.match(r'^\d+(\.\d+)?$', value_str):
+        return float(value_str) if '.' in value_str else int(value_str)
+    if re.match(r'^\[(.*)]$', value_str):
+        return [_parse_value(v.strip()) for v in value_str[1:-1].split()]
+    return value_str
+
+
+def _parse_key_value(parse_line):
+    key_str, value_str = parse_line.split(' = ', 1)
+    return key_str, _parse_value(value_str)
+
+
+def parse(metadata_str):
+    """
+    Parses the metadata string from a ScanImage Tiff file.
+
+    :param metadata_str:
+    :return metadata_kv, metadata_json:
+    """
+    lines = metadata_str.split('\n')
+    metadata_kv = {}
+    json_portion = []
+    parsing_json = False
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith('SI.'):
+            key, value = _parse_key_value(line)
+            metadata_kv[key] = value
+        elif line.startswith('{'):
+            parsing_json = True
+        if parsing_json:
+            json_portion.append(line)
+    metadata_json = json.loads('\n'.join(json_portion))
+    return metadata_kv, metadata_json

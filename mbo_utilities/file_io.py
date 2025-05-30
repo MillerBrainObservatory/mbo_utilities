@@ -175,7 +175,9 @@ def read_scan(pathnames, dtype=np.int16, roi=None):
     if len(filenames) == 0:
         error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
         raise FileNotFoundError(error_msg)
+    if not is_raw_scanimage(filenames[0]):
 
+        raise ValueError(f"The file {filenames[0]} does not appear to be a raw ScanImage TIFF file.")
     scan = Scan_MBO(join_contiguous=True, roi=roi)
     scan.read_data(filenames, dtype=dtype)
 
@@ -548,7 +550,11 @@ def zstack_from_files(files: list, proj="mean"):
     for file in files:
         if Path(file).suffix not in [".tif", ".tiff"]:
             continue
-        arr = tifffile.memmap(file)
+        try:
+            arr = tifffile.memmap(file)
+        except ValueError:
+            ic(f"Failed to memmap {file}, trying to read directly.")
+            arr = tifffile.imread(file)
         if proj == "mean":
             img = np.mean(arr, axis=0)
         elif proj == "max":
@@ -739,6 +745,8 @@ def dispatch_data_handler(data_in, **kwargs):
 def handle_path(path: Path, **kwargs):
     if path.is_dir():
         files = get_files(path, "tif", 1)
+        if not files:
+            return []
         if is_raw_scanimage(files[0]):
             scan = read_scan(files, roi=kwargs.get("roi"))
             scan.fpath = path
@@ -763,7 +771,11 @@ def handle_path(path: Path, **kwargs):
 
     if path.is_file():
         if path.suffix in [".tif", ".tiff"]:
-            return tifffile.memmap(path), str(path)
+            try:
+                return tifffile.memmap(path), str(path)
+            except [MemoryError, PermissionError, ValueError] as e:
+                ic(f"Failed to memmap {path}: {e}")
+                return tifffile.imread(path), str(path)
         if path.suffix == ".npy":
             return np.memmap(path), str(path)
         raise TypeError(f"Unsupported file type: {path.suffix}")

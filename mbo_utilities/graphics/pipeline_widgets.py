@@ -78,14 +78,18 @@ class Suite2pSettings:
 def draw_tab_process(self):
     """Draws the pipeline selection and configuration section."""
 
-    if not hasattr(self, "_rectangle_selector"):
-        self._rectangle_selector = None
+    if not hasattr(self, "_rectangle_selectors"):
+        self._rectangle_selectors = set()
     if not hasattr(self, "_current_pipeline"):
         self._current_pipeline = USER_PIPELINES[0]
     if not hasattr(self, "_install_error"):
         self._install_error = False
     if not hasattr(self, "_show_red_text"):
         self._show_red_text = False
+    if not hasattr(self, "_show_green_text"):
+        self._show_green_text = False
+    if not hasattr(self, "_show_install_button"):
+        self._show_install_button = False
     if not hasattr(self, "_region_idx"):
         self._region_idx = 0
 
@@ -97,8 +101,14 @@ def draw_tab_process(self):
     _, self._region_idx = imgui.combo("Region type", self._region_idx, REGION_TYPES)
     self._region = REGION_TYPES[self._region_idx]
     if self._region == "Sub-FOV":
-        if self._rectangle_selector is None:
-            self._rectangle_selector = self.image_widget.managed_graphics[0].add_rectangle_selector()
+        if not self._rectangle_selectors:
+            for iw in self.image_widget.managed_graphics:
+                _widget_selector = iw.add_rectangle_selector()
+                self._rectangle_selectors.add(_widget_selector)
+    # elif self._region == "Full FOV":
+    #     if self._rectangle_selectors is not None:
+    #         for iw in self.image_widget.managed_graphics:
+    #             self._rectangle_selectors.clear()
 
     imgui.spacing()
     imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Select a processing pipeline:")
@@ -262,7 +272,7 @@ def run_plane_from_data(self):
         if self._region == "Sub-FOV":
             self.debug_panel.log("info", "Running Suite2p pipeline on selected subregion.")
             current_z = self.image_widget.current_index["z"]
-            ind_xy = self._rectangle_selector.get_selected_indices()
+            ind_xy = self._rectangle_selectors.get_selected_indices()
             ind_x = list(ind_xy[0])
             ind_y = list(ind_xy[1])
             data = self.image_widget.data[0][:, current_z, ind_x, ind_y]
