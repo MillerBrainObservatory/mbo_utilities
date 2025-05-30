@@ -245,7 +245,7 @@ class Scan_MBO(scans.ScanMultiROI):
         H_out = self.field_heights[0]
 
         # Return a tuple of all individual ROI slices
-        if self.roi in [-1, 0]:
+        if isinstance(self.roi, list) or self.roi in [-1, 0]:
             roi_outputs = []
             for roi_idx in range(self.num_rois):
                 oxs = self.fields[0].output_xslices[roi_idx]

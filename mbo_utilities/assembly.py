@@ -65,7 +65,8 @@ def save_as(
     save_phase_png: bool = False,
     target_chunk_mb: int = 20,
     progress_callback: Callable = None,
-    **kwargs,
+    upsample: int = 20,
+    debug: bool = False,
 ):
     """
     Save scan data to the specified directory in the desired format.
@@ -99,27 +100,29 @@ def save_as(
         active regions of the frame, saved to the save_path. Default is 'False'.
     target_chunk_mb : int, optional
         Chunk size in megabytes for saving data. Increase to help with scan-phase correction.
-    kwargs : dict, optional
-        Current kwargs:
-        - debug (ic enable)
-        - progress_callback : emit progress-bar events
+    progress_callback : callable, optional
+        A callback function to emit progress-bar events. It should accept a single float
+        argument representing the progress (0.0 to 1.0) and an optional `current_plane` argument.
+    roi : int, list, or None, optional
+        The region of interest (ROI) to save. If `None`, saves the full stack. If `0`, saves all
+        individual ROIs. If an integer, saves the specified ROI. If a list, saves the specified
+        ROIs. Default is `None`.
+    debug : bool, optional
+        If `True`, enables debugging mode with detailed output. Default is `False`.
+    upsample : int, optional
+        Upsampling factor for phase correction.
+        Value of 1 means no upsampling. Default is `20`.
 
     Raises
     ------
     ValueError
         If an unsupported file extension is provided.
     """
-    # Parse kwargs
-    debug = kwargs.get("debug", False)
     if debug:
         ic.enable()
         ic("Debugging mode ON")
     else:
         ic.disable()
-
-    upsample = kwargs.get("upsample", 20)
-
-    ic(upsample)
 
     savedir = Path(savedir)
     ic(savedir)
@@ -134,29 +137,6 @@ def save_as(
         raise ValueError(
             f"Metadata must be a dictionary, got {type(metadata)} instead."
         )
-
-    if getattr(scan, "roi", None) in (-1, 0):
-        for i in range(1, scan.num_rois + 1):
-            subscan = copy.copy(scan)
-            subscan.roi = i
-            subdir = Path(savedir) / f"roi{i}"
-            subdir.mkdir(exist_ok=True)
-            metadata.update({"roi": i})
-            save_as(
-                subscan,
-                subdir,
-                planes=planes,
-                metadata=metadata,
-                overwrite=overwrite,
-                ext=ext,
-                order=order,
-                trim_edge=trim_edge,
-                fix_phase=fix_phase,
-                save_phase_png=save_phase_png,
-                target_chunk_mb=target_chunk_mb,
-                **kwargs,
-            )
-        return
 
     if not hasattr(scan, "num_channels"):
         raise ValueError(
@@ -194,23 +174,41 @@ def save_as(
         mdata.update(metadata)
     ic(metadata)
 
+    savedir = Path(savedir)
+    savedir.mkdir(exist_ok=True)
+
+    if scan.roi is None:
+        roi_list = [None]                    # full‐stack
+    elif scan.roi == 0:
+        roi_list = list(range(1, scan.num_rois + 1))  # all individual ROIs
+    elif isinstance(scan.roi, int):
+        roi_list = [scan.roi]                     # single ROI
+    else:
+        roi_list = list(scan.roi)                 # list of ROIs
 
     start_time = time.time()
-    _save_data(
-        scan,
-        savedir,
-        planes,
-        overwrite,
-        ext,
-        metadata=mdata,
-        trim_edge=trim_edge,
-        fix_phase=fix_phase,
-        target_chunk_mb=target_chunk_mb,
-        debug=debug,
-        upsample=upsample,
-        progress_callback=progress_callback,
-        save_phase_png=save_phase_png,
-    )
+    for r in roi_list:
+        subscan = copy.copy(scan)
+        subscan.roi = r
+        target = savedir if r is None else savedir / f"roi{r}"
+        target.mkdir(exist_ok=True)
+        meta = (metadata or {}).copy()
+        if r is not None:
+            meta["roi"] = r
+        _save_data(
+            subscan,
+            target,
+            planes=planes,
+            overwrite=overwrite,
+            ext=ext,
+            trim_edge=trim_edge,
+            fix_phase=fix_phase,
+            save_phase_png=save_phase_png,
+            target_chunk_mb=target_chunk_mb,
+            metadata=meta,
+            progress_callback=progress_callback,
+            upsample=upsample,
+        )
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(
@@ -223,20 +221,21 @@ def _save_data(
     path,
     planes,
     overwrite,
-    file_extension,
+    ext,
     metadata,
     trim_edge=None,
     fix_phase=True,
     save_phase_png=False,
     target_chunk_mb=20,
     progress_callback=None,
-    **kwargs,
+    upsample=20,
+    debug=False,
 ):
     tmp_copy, png_dir = None, None
-    if "." in file_extension:
-        file_extension = file_extension.split(".")[-1]
-    if file_extension == "tiff":
-        file_extension = "tif"
+    if "." in ext:
+        ext = ext.split(".")[-1]
+    if ext == "tiff":
+        ext = "tif"
 
     path = Path(path)
     path.mkdir(exist_ok=True)
@@ -265,7 +264,7 @@ def _save_data(
     final_shape = (nt, new_height, new_width)
     ic(final_shape)
     writer = _get_file_writer(
-        file_extension, overwrite=overwrite, metadata=metadata, data_shape=final_shape
+        ext, overwrite=overwrite, metadata=metadata, data_shape=final_shape
     )
 
     chunk_size = target_chunk_mb * 1024 * 1024
@@ -284,15 +283,14 @@ def _save_data(
         for _ in planes
     )
     pbar = tqdm(total=total_chunks, desc="Saving plane ", position=0)
-    debug = kwargs.get("debug", False)
 
     pre_exists = True
     for chan_index in planes:
         pbar.set_description(f"Saving plane {chan_index + 1}")
-        if file_extension == "bin":
+        if ext == "bin":
             fname = path / f"plane{chan_index}" / "data_raw.bin"
         else:
-            fname = path / f"plane_{chan_index + 1:02d}.{file_extension}"
+            fname = path / f"plane_{chan_index + 1:02d}.{ext}"
 
         if fname.exists() and not overwrite:
             pbar.update(1)
@@ -321,7 +319,6 @@ def _save_data(
             ]
 
             if fix_phase:
-                upsample = kwargs.get("upsample", 20)
                 if debug:
                     tmp_copy = data_chunk.copy()
                 data_chunk = correct_phase_chunk(data_chunk, upsample=upsample)
@@ -340,9 +337,9 @@ def _save_data(
         print("All output files exist; skipping save.")
         return
 
-    if file_extension in ["tiff", "tif"]:
+    if ext in ["tiff", "tif"]:
         close_tiff_writers()
-    elif file_extension == "bin":
+    elif ext == "bin":
         write_ops(metadata, path, planes)
 
 

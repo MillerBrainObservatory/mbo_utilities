@@ -232,7 +232,6 @@ def _save_as(
         target_chunk_mb=target_chunk_mb,
         progress_callback=progress_callback,
         debug=debug,
-        **kwargs,
     )
 
 
@@ -762,12 +761,9 @@ class PreviewDataWidget(EdgeWindow):
                     try:
                         save_planes = [p + 1 for p in self._selected_planes]
                         self._saveas_total = len(save_planes)
-                        if self._saveas_selected_roi == set():
-                            self._saveas_selected_roi = set(range(self.num_rois))
-
                         if self._saveas_rois:
-                            if not self._saveas_selected_roi:
-                                self._saveas_selected_roi = set(range(self.num_rois))
+                            if not self._saveas_selected_roi or len(self._saveas_selected_roi) == set():
+                                self._saveas_selected_roi = set(range(1, self.num_rois + 1))
                             rois = sorted(self._saveas_selected_roi)
                         else:
                             rois = 0
