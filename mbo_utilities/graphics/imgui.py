@@ -766,7 +766,7 @@ class PreviewDataWidget(EdgeWindow):
                                 self._saveas_selected_roi = set(range(1, self.num_rois + 1))
                             rois = sorted(self._saveas_selected_roi)
                         else:
-                            rois = 0
+                            rois = None
 
                         save_kwargs = {
                             "path": self.fpath,
