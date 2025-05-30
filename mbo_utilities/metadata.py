@@ -148,7 +148,7 @@ def _params_from_metadata_suite2p(metadata, ops):
     return ops
 
 
-def is_raw_scanimage(file: os.PathLike | str):
+def is_raw_scanimage(file: os.PathLike | str, verbose=False) -> bool:
     """
     Check if a TIFF file is a raw ScanImage TIFF.
 
@@ -179,6 +179,9 @@ def is_raw_scanimage(file: os.PathLike | str):
         ):
             return False
         else:
+            if tiff_file.scanimage_metadata is None:
+                print(f"No ScanImage metadata found in {file}.")
+                return False
             return True
     except Exception:
         return False
