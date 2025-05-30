@@ -1,14 +1,16 @@
 import pytest
 from pathlib import Path
-from itertools import product
 
 import numpy as np
 from icecream import ic
+from tifffile import imread
 
 import mbo_utilities as mbo
 
 ic.enable()
 
+BASE = Path(r"D:\tests\data")
+ASSEMBLED = BASE / "assembled"
 DATA_ROOT = Path(r"D:\tests\data")
 
 skip_if_missing_data = pytest.mark.skipif(
@@ -71,28 +73,46 @@ def test_imgui_check():
     assert isinstance(result, bool)
 
 
-@skip_if_missing_data
-def test_demo_files(tmp_path: Path):
-    test_path = Path(r"D:\tests\data")
+@pytest.mark.parametrize("roi,subdir", [
+    (0,     ""),         # individual ROIs in ASSEMBLED/roi1, roi2…
+    (1,     ""),         # same, just roi=1
+    (None, "full"),      # full‐stack in ASSEMBLED/full
+])
+def test_demo_files(tmp_path, roi, subdir):
+    ASSEMBLED.mkdir(exist_ok=True)
+    files = mbo.get_files(BASE, "tif")
 
-    assembled_path = test_path / "assembled"
-    assembled_path.mkdir(exist_ok=True)
+    save_dir = ASSEMBLED / subdir if subdir else ASSEMBLED
+    scan = mbo.read_scan(files, roi=roi)
+    mbo.save_as(
+        scan,
+        save_dir,
+        ext=".tiff",
+        overwrite=True,
+        fix_phase=False,
+        planes=[1, 7, 14],
+    )
 
-    test_files = mbo.get_files(test_path, "tif")
-    for roi in [0, 1, None]:
-        if roi is None:
-            savedir = assembled_path / "full"
-        else:
-            savedir = assembled_path
-        test_scan = mbo.read_scan(test_files, roi=roi)
-        mbo.save_as(
-            test_scan,
-            savedir.expanduser().resolve(),
-            ext=".tiff",
-            overwrite=True,
-            fix_phase=True,
-            planes=[1, 7, 14],
-            debug=True,
-        )
-    outputs = mbo.get_files(assembled_path, "tif", max_depth=3)
-    print(outputs)
+    out = mbo.get_files(ASSEMBLED, "plane", max_depth=2)
+    assert out, "No plane files written"
+
+
+@pytest.fixture
+def plane_paths():
+    return mbo.get_files(ASSEMBLED, "plane_01.tif", max_depth=3)
+
+
+def test_full_contains_rois_side_by_side(plane_paths):
+    # map parent‐dir → path, e.g. "full", "roi1", "roi2"
+    by_dir = {Path(p).parent.name: Path(p) for p in plane_paths}
+    full = imread(by_dir["full"])
+    roi1 = imread(by_dir["roi1"])
+    roi2 = imread(by_dir["roi2"])
+
+    T, H, W = full.shape
+    assert roi1.shape == (T, H, W // 2)
+    assert roi2.shape == (T, H, W - W // 2)
+
+    left, right = full[:, :, : W // 2], full[:, :, W // 2 :]
+    np.testing.assert_array_equal(left,  roi1)
+    np.testing.assert_array_equal(right, roi2)

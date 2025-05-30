@@ -7,26 +7,28 @@
 # ]
 #
 # [tool.uv.sources]
-# mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "master" }
+# mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "dev" }
 import tifffile
 
 import mbo_utilities as mbo
 from pathlib import Path
 
-
 if __name__ == "__main__":
-    raw = Path(r"D://tests//data")
-    test_scan = mbo.read_scan(raw, roi=0) # -1 or 0 both return a tuple of ROI's
-    savedir = r"D:\tests\save_as_test"
+    raw = Path(r"")
+    # Values for argument `roi`:
+    #
+    # 0:                    Save all ROIs separately
+    # 1:                    Save only the first ROI
+    # 2:                    Save only the second ROI
+    # (1, 2 ... num_rois):  Save only the specified ROIs
+    # None:                 Assembly and save joined ROIs
+    test_scan = mbo.read_scan("D://tests//data", roi=0)
+    savedir = r"D:\demo\masknmf"
     mbo.save_as(
         test_scan,
         savedir,
         ext=".tiff",
-        overwrite=True,
+        overwrite=False,
         fix_phase=True,
-        planes=[7],
-        debug=True,
+        planes=[1, 5, 10, 14],
     )
-    files = list(Path(savedir).glob("*.tif*"))[0]
-    img = tifffile.imread(files)
-    print(img.shape)
