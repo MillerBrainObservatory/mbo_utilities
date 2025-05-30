@@ -10,9 +10,7 @@ import tifffile
 from icecream import ic
 from matplotlib import cm
 
-import mbo_utilities
-import mbo_utilities as mbo
-from mbo_utilities import norm_minmax
+from mbo_utilities.util import norm_minmax
 
 
 def save_phase_images_png(
@@ -96,7 +94,6 @@ def save_png(fname, data):
     >>> mbo.save_png("plane_0_frame_1.png", frame)
     """
     # TODO: move this to a separate module that imports matplotlib
-    import matplotlib.pyplot as plt
 
     plt.imshow(data)
     plt.axis("tight")

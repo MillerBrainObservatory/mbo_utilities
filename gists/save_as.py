@@ -16,7 +16,7 @@ from pathlib import Path
 
 if __name__ == "__main__":
     raw = Path(r"D://tests//data")
-    test_scan = mbo.read_scan(raw, roi=(1,2)) # -1 or 0 both return a tuple of ROI's
+    test_scan = mbo.read_scan(raw, roi=0) # -1 or 0 both return a tuple of ROI's
     savedir = r"D:\tests\save_as_test"
     mbo.save_as(
         test_scan,
