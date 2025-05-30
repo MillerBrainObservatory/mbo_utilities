@@ -14,7 +14,7 @@ from tifffile import TiffWriter
 import h5py
 from icecream import ic
 
-from .file_io import _make_json_serializable
+from .file_io import _make_json_serializable, Scan_MBO
 from .metadata import get_metadata
 from .util import is_running_jupyter
 from .plot_util import save_phase_images_png
@@ -53,7 +53,7 @@ def close_tiff_writers():
 
 
 def save_as(
-    scan,
+    scan: Scan_MBO,
     savedir: str | Path,
     planes: list | tuple = None,
     metadata: dict = None,
@@ -73,7 +73,7 @@ def save_as(
 
     Parameters
     ----------
-    scan : scanreader.ScanMultiROI
+    scan : scanreader.Scan_MBO
         An object representing scan data. Must have attributes such as `num_channels`,
         `num_frames`, `fields`, and `rois`, and support indexing for retrieving frame data.
     savedir : os.PathLike
@@ -172,6 +172,8 @@ def save_as(
     )
     if metadata is not None:
         mdata.update(metadata)
+    out_mdata = {"save_path": str(savedir.resolve())}
+    mdata.update(out_mdata)
     ic(metadata)
 
     savedir = Path(savedir)
