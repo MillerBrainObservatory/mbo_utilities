@@ -3,7 +3,7 @@ from pathlib import Path
 
 from .file_io import (
     get_files,
-    zstack_from_files,
+    stack_from_files,
     npy_to_dask,
     read_scan,
     save_png,
@@ -45,7 +45,7 @@ __all__ = [
     "scanreader",
     "npy_to_dask",
     "get_files",
-    "zstack_from_files",
+    "stack_from_files",
     "read_scan",
     "save_png",
     "save_mp4",

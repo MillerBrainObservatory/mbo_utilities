@@ -354,15 +354,19 @@ class Scan_MBO(scans.ScanMultiROI):
 
     @property
     def shape(self):
-        if self.roi is not None and self.roi > 0:
-            s = self.fields[0].output_xslices[self.roi - 1]
-            width = s.stop - s.start
-            return (
-                self.total_frames,
-                self.num_channels,
-                self.field_heights[0],
-                width,
-            )
+        """Shape is relative to the current ROI."""
+        if self.roi is not None:
+            if not isinstance(self.roi, (list, tuple)):
+                if self.roi > 0:
+                    s = self.fields[0].output_xslices[self.roi - 1]
+                    width = s.stop - s.start
+                    return (
+                        self.total_frames,
+                        self.num_channels,
+                        self.field_heights[0],
+                        width,
+                    )
+        # roi = None, or a list/tuple indicates the shape should be relative to the full FOV
         return (
             self.total_frames,
             self.num_channels,
@@ -517,7 +521,7 @@ def get_files(
     return [str(file) for file in files]
 
 
-def zstack_from_files(files: list, proj="mean"):
+def stack_from_files(files: list, proj="mean"):
     """
     Creates a Z-Stack image by applying a projection to each TIFF file in the provided list and stacking the results into a NumPy array.
 
@@ -543,7 +547,7 @@ def zstack_from_files(files: list, proj="mean"):
     --------
     >>> import mbo_utilities as mbo
     >>> files = mbo.get_files("/path/to/files", "tif")
-    >>> z_stack = mbo.zstack_from_files(files, proj="max")
+    >>> z_stack = mbo.stack_from_files(files, proj="max")
     >>> z_stack.shape  # (3, height, width)
     """
     lazy_arrays = []
@@ -796,7 +800,7 @@ def handle_list(data_in: list, **kwargs):
             return scan, [str(p) for p in paths]
         if len(paths) == 1:
             return handle_path(paths[0], **kwargs)
-        return zstack_from_files(paths), [str(p) for p in paths]
+        return stack_from_files(paths), [str(p) for p in paths]
 
     raise TypeError("Unsupported mixed-type list")
 

@@ -762,39 +762,36 @@ class PreviewDataWidget(EdgeWindow):
                     try:
                         save_planes = [p + 1 for p in self._selected_planes]
                         self._saveas_total = len(save_planes)
-                        self._saveas_rois = None
                         if self._saveas_selected_roi == set():
                             self._saveas_selected_roi = set(range(self.num_rois))
 
                         if self._saveas_rois:
                             if not self._saveas_selected_roi:
                                 self._saveas_selected_roi = set(range(self.num_rois))
-                            elif len(self._saveas_selected_roi) == 1:
-                                self._saveas_rois = self._saveas_selected_roi
+                            rois = sorted(self._saveas_selected_roi)
                         else:
-                            self._saveas_rois = 0
+                            rois = 0
 
-                        for roi in self._saveas_rois:
-                            save_kwargs = {
-                                "path": self.fpath,
-                                "savedir": self._saveas_outdir,
-                                "planes": save_planes,
-                                "roi": roi,
-                                "overwrite": self._overwrite,
-                                "fix_phase": self._fix_phase,
-                                "debug": self._debug,
-                                "ext": self._ext,
-                                "save_phase_png": self._saveas_save_phase_png,
-                                "target_chunk_mb": self._saveas_chunk_mb,
-                                "progress_callback": lambda frac, current_plane: self.gui_progress_callback(frac,
-                                                                                                            current_plane),
-                            }
-                            self.debug_panel.log("info", f"Saving planes {save_planes}")
-                            self.debug_panel.log(
-                                "info", f"Saving to {self._saveas_outdir} as {self._ext}"
-                            )
-                            threading.Thread(target=_save_as, kwargs=save_kwargs, daemon=True).start()
-                            imgui.close_current_popup()
+                        save_kwargs = {
+                            "path": self.fpath,
+                            "savedir": self._saveas_outdir,
+                            "planes": save_planes,
+                            "roi": rois,
+                            "overwrite": self._overwrite,
+                            "fix_phase": self._fix_phase,
+                            "debug": self._debug,
+                            "ext": self._ext,
+                            "save_phase_png": self._saveas_save_phase_png,
+                            "target_chunk_mb": self._saveas_chunk_mb,
+                            "progress_callback": lambda frac, current_plane: self.gui_progress_callback(frac,
+                                                                                                        current_plane),
+                        }
+                        self.debug_panel.log("info", f"Saving planes {save_planes}")
+                        self.debug_panel.log(
+                            "info", f"Saving to {self._saveas_outdir} as {self._ext}"
+                        )
+                        threading.Thread(target=_save_as, kwargs=save_kwargs, daemon=True).start()
+                        imgui.close_current_popup()
                     except Exception as e:
                         self.debug_panel.log(
                             "error", f"Error saving data: {e}"
@@ -806,7 +803,6 @@ class PreviewDataWidget(EdgeWindow):
                     imgui.close_current_popup()
 
                 imgui.end_popup()
-
             # Section: Window Functions
             imgui.spacing()
             imgui.separator()
