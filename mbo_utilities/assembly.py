@@ -303,6 +303,7 @@ def _save_data(
             ic(fname, overwrite)
             break
 
+        pre_exists = False
         if save_phase_png:
             png_dir = path / f"scan_phase_check_plane_{chan_index + 1:02d}"
             png_dir.mkdir(exist_ok=True)

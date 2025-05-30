@@ -116,3 +116,31 @@ def test_full_contains_rois_side_by_side(plane_paths):
     left, right = full[:, :, : W // 2], full[:, :, W // 2 :]
     np.testing.assert_array_equal(left,  roi1)
     np.testing.assert_array_equal(right, roi2)
+
+def test_overwrite_false_skips_existing(tmp_path, capsys):
+    # First write with overwrite=True
+    files = mbo.get_files(BASE, "tif")
+    scan = mbo.read_scan(files, roi=None)
+    mbo.save_as(scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1])
+
+    # Capture output of second call with overwrite=False
+    mbo.save_as(scan, ASSEMBLED, ext=".tiff", overwrite=False, fix_phase=False, planes=[1])
+    captured = capsys.readouterr().out
+
+    assert "All output files exist; skipping save." in captured
+
+def test_overwrite_true_rewrites(tmp_path, capsys):
+    # first write with overwrite=True
+    files = mbo.get_files(BASE, "tif")
+    scan = mbo.read_scan(files, roi=None)
+    mbo.save_as(scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1])
+
+    # second write with overwrite=True
+    mbo.save_as(scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1])
+    captured = capsys.readouterr().out
+
+    # Should not skip entirely
+    assert "All output files exist; skipping save." not in captured
+
+    # And it should print the elapsed‐time message twice (once per call)
+    assert captured.count("Time elapsed:") >= 2

@@ -29,6 +29,7 @@ if __name__ == "__main__":
         savedir,
         ext=".tiff",
         overwrite=False,
+        debug=True,
         fix_phase=True,
         planes=[1, 5, 10, 14],
     )

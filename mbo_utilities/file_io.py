@@ -314,8 +314,12 @@ class Scan_MBO(scans.ScanMultiROI):
 
     @property
     def total_frames(self):
-        """Number of frames across all tiff files."""
-        return sum([int(len(tf.pages) / 14) for tf in self.tiff_files])
+        return sum(len(tf.pages) // self.num_channels for tf in self.tiff_files)
+
+    # @property
+    # def total_frames(self):
+    #     """Number of frames across all tiff files."""
+    #     return sum([int(len(tf.pages) / 14) for tf in self.tiff_files])
 
     def xslices(self):
         return self.fields[0].xslices
