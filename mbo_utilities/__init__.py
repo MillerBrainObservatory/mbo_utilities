@@ -6,11 +6,10 @@ from .file_io import (
     stack_from_files,
     npy_to_dask,
     read_scan,
-    save_png,
-    save_mp4,
     expand_paths,
     _get_mbo_dirs,
 )
+from .plot_util import save_png, save_mp4
 from .assembly import save_as
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
 from .util import (
@@ -47,8 +46,6 @@ __all__ = [
     "get_files",
     "stack_from_files",
     "read_scan",
-    "save_png",
-    "save_mp4",
     "subsample_array",
     # metadata
     "is_raw_scanimage",
