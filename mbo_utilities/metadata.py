@@ -292,9 +292,7 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
         if not si:
             print(f"No FrameData found in {file}.")
             return None
-        print("Reading tiff series data...")
         series = tiff_file.series[0]
-        print("Reading tiff pages...")
         pages = tiff_file.pages
         print("Raw tiff fully read.")
 
