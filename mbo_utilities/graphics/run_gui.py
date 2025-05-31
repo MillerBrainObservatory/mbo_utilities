@@ -1,15 +1,17 @@
 import copy
+from pathlib import Path
+from typing import Sequence
 
 import click
 import numpy as np
 from icecream import ic
 
-from mbo_utilities.graphics.imgui import PreviewDataWidget
-from mbo_utilities.file_io import (
-    to_lazy_array,
-)
 import fastplotlib as fpl
 from imgui_bundle import immapp
+
+from mbo_utilities.file_io import Scan_MBO
+from mbo_utilities.graphics.imgui import PreviewDataWidget
+from mbo_utilities.lazy_array import LazyArrayLoader
 from mbo_utilities.graphics._file_dialog import FileDialog
 from mbo_utilities.graphics._imgui import setup_imgui
 
@@ -21,6 +23,31 @@ except ImportError:
     print("Failed to set up imgui. GUI functionality may not work as expected.")
 
 
+def to_lazy_array(
+        data_in: str | Path | Sequence[str|Path] | Scan_MBO | np.ndarray,
+        roi: int|None=None,
+) -> tuple[Scan_MBO | np.ndarray | list[np.ndarray], str | None] | None:
+    """
+    Load any of your supported formats lazily and return (data, filepaths).
+    """
+    lazy_array = LazyArrayLoader(data_in, roi=roi)
+    if hasattr(lazy_array.loader, "paths"):
+        return lazy_array.loader.load(), lazy_array.loader.paths
+    data = lazy_array.load()
+    if isinstance(data, Scan_MBO):
+        if hasattr(data, "fpath"):
+            path = data.fpath
+        else:
+            path = data_in
+    elif isinstance(data_in, np.ndarray):
+        if hasattr(data, "fpath"):
+            path = data.fpath
+        else:
+            path = None
+    else:
+        return None
+    return data, path
+
 @click.command()
 @click.option("--roi", type=click.IntRange(-1, 10), default=None)
 @click.option(
@@ -29,7 +56,7 @@ except ImportError:
     help="Enable or disable PreviewDataWidget. Default is enabled.",
 )
 @click.argument("data_in", required=False)
-def run_gui(data_in=None, widget=None, roi=None, **kwargs):
+def run_gui(data_in=None, widget=None, roi=None):
     """Open a GUI to preview data of any supported type."""
     if data_in is None:
         file_dialog = FileDialog()
@@ -43,7 +70,7 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
             print("No file or folder selected, exiting.")
             return
     ic(data_in)
-    data, fpath = to_lazy_array(data_in, roi=roi, **kwargs)
+    data, fpath = to_lazy_array(data_in, roi=roi)
     if hasattr(data, "rois"):
         arrs = []
         for roi in range(len(data.rois)):
@@ -55,7 +82,7 @@ def run_gui(data_in=None, widget=None, roi=None, **kwargs):
         iw = fpl.ImageWidget(
             data=arrs,
             names = [f"ROI {i + 1}" for i in range(len(arrs))],
-            histogram_widget=True,
+            histogram_widget=False,
             figure_kwargs={"size": (nx * 2, ny * 2)},
             graphic_kwargs={"vmin": data.min(), "vmax": data.max()},
             window_funcs={"t": (np.mean, 0)},

@@ -16,7 +16,10 @@ from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
 from .util import subsample_array
 
-CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
+
+CHUNKS = {
+    0: 1, 1: "auto", 2: -1, 3: -1
+}
 
 SAVE_AS_TYPES = [".tiff", ".bin", ".h5"]
 
@@ -175,7 +178,7 @@ def read_scan(pathnames, dtype=np.int16, roi=None):
     if not is_raw_scanimage(filenames[0]):
         raise ValueError(f"The file {filenames[0]} does not appear to be a raw ScanImage TIFF file.")
 
-    scan = Scan_MBO(join_contiguous=True, roi=roi)
+    scan = Scan_MBO(roi=roi)
     scan.read_data(filenames, dtype=dtype)
 
     return scan
@@ -187,8 +190,9 @@ class Scan_MBO(scans.ScanMultiROI):
     and reorders the output to [time, z, x, y].
     """
 
-    def __init__(self, *args, roi: int = None, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, roi: int | Sequence[int] | None = None):
+        super().__init__(join_contiguous=True)
+        self.join_contiguous = True
         self.pbar = None
         self.show_pbar = False
         self._roi = roi
@@ -573,7 +577,7 @@ def stack_from_files(files: list, proj="mean"):
     return np.stack(lazy_arrays, axis=0)
 
 
-def to_lazy_array(data_in, **kwargs):
+def to_lazy_array_v1(data_in, **kwargs):
     """Convert input data into a lazy array or list of arrays and return associated filenames."""
     data, filenames = dispatch_data_handler(data_in, **kwargs)
     return data, filenames
