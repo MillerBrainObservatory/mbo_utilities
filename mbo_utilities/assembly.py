@@ -1,9 +1,11 @@
-import argparse
+import copy
 import functools
 import os
 import time
 import warnings
 import logging
+from typing import Callable
+
 import numpy as np
 
 import shutil
@@ -12,11 +14,10 @@ from tifffile import TiffWriter
 import h5py
 from icecream import ic
 
-import mbo_utilities
-from .file_io import _make_json_serializable, read_scan
+from .file_io import _make_json_serializable, Scan_MBO
 from .metadata import get_metadata
 from .util import is_running_jupyter
-from .scanreader.utils import listify_index
+from .plot_util import save_phase_images_png
 
 try:
     from suite2p.io import BinaryFile
@@ -25,14 +26,20 @@ try:
 except ImportError:
     HAS_SUITE2P = True
     BInaryFIle = None
-    print("No suite2p detected!")
 
 if is_running_jupyter():
     from tqdm.notebook import tqdm
 else:
     from tqdm.auto import tqdm
 
-logger = logging.getLogger(__name__)
+MBO_DEBUG = bool(int(os.getenv("MBO_DEBUG", "0")))  # export MBO_DEV=1 to enable
+logging.basicConfig(level=logging.DEBUG if MBO_DEBUG else logging.INFO)
+
+if not MBO_DEBUG:
+    ic.disable()
+
+# set a name the gui can use to identify this module
+logger = logging.getLogger("mbo.save_as")
 logger.setLevel(logging.WARNING)
 
 ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
@@ -49,33 +56,9 @@ def close_tiff_writers():
         _write_tiff._writers.clear()
 
 
-def process_slice_str(slice_str):
-    if not isinstance(slice_str, str):
-        raise ValueError(f"Expected a string argument, received: {slice_str}")
-    if slice_str.isdigit():
-        return int(slice_str)
-    else:
-        parts = slice_str.split(":")
-    return slice(*[int(p) if p else None for p in parts])
-
-
-def process_slice_objects(slice_str):
-    return tuple(map(process_slice_str, slice_str.split(",")))
-
-
-def print_params(params, indent=5):
-    for k, v in params.items():
-        # if value is a dictionary, recursively call the function
-        if isinstance(v, dict):
-            print(" " * indent + f"{k}:")
-            print_params(v, indent + 4)
-        else:
-            print(" " * indent + f"{k}: {v}")
-
-
 def save_as(
-    scan,
-    savedir: os.PathLike,
+    scan: Scan_MBO,
+    savedir: str | Path,
     planes: list | tuple = None,
     metadata: dict = None,
     overwrite: bool = True,
@@ -83,22 +66,25 @@ def save_as(
     order: list | tuple = None,
     trim_edge: list | tuple = (0, 0, 0, 0),
     fix_phase: bool = True,
+    save_phase_png: bool = False,
     target_chunk_mb: int = 20,
-    subpixel_phasecorr: bool = True,
-    **kwargs,
+    progress_callback: Callable = None,
+    upsample: int = 20,
+    debug: bool = False,
 ):
     """
     Save scan data to the specified directory in the desired format.
 
     Parameters
     ----------
-    scan : scanreader.ScanMultiROI
+    scan : scanreader.Scan_MBO
         An object representing scan data. Must have attributes such as `num_channels`,
         `num_frames`, `fields`, and `rois`, and support indexing for retrieving frame data.
     savedir : os.PathLike
         Path to the directory where the data will be saved.
     planes : int, list, or tuple, optional
         Plane indices to save. If `None`, all planes are saved. Default is `None`.
+        1 based indexing.
     trim_edge : list, optional
         Number of pixels to trim on each W x H edge. (Left, Right, Top, Bottom). Default is (0,0,0,0).
     metadata : dict, optional
@@ -113,45 +99,60 @@ def save_as(
         elements in `order` must match the number of planes. Default is `None`.
     fix_phase : bool, optional
         Whether to fix scan-phase (x/y) alignment. Default is `True`.
-    subpixel_phasecorr : bool, optiional
-        Whether to use subpixel phase correlation for scan-phase correction. Default is 'True'.
+    save_phase_png : bool, optional
+        If correcting scan-phase, save a directory with pre/post images centered on the most
+        active regions of the frame, saved to the save_path. Default is 'False'.
     target_chunk_mb : int, optional
         Chunk size in megabytes for saving data. Increase to help with scan-phase correction.
-    kwargs : dict, optional
-        Current kwargs: "debug (ic enable)"
+    progress_callback : callable, optional
+        A callback function to emit progress-bar events. It should accept a single float
+        argument representing the progress (0.0 to 1.0) and an optional `current_plane` argument.
+    debug : bool, optional
+        If `True`, enables debugging mode with detailed output. Default is `False`.
+    upsample : int, optional
+        Upsampling factor for phase correction.
+        Value of 1 means no upsampling. Default is `20`.
 
     Raises
     ------
     ValueError
         If an unsupported file extension is provided.
     """
-    # Parse kwargs
-    debug = kwargs.get("debug", False)
+    # Logging
     if debug:
         ic.enable()
         ic("Debugging mode ON")
+        logger.setLevel(logging.DEBUG)
     else:
+        logger.setLevel(logging.INFO)
         ic.disable()
 
+    # save path
     savedir = Path(savedir)
     ic(savedir)
+
     if not savedir.parent.is_dir():
         raise ValueError(f"{savedir} is not inside a valid directory.")
     savedir.mkdir(exist_ok=True)
 
+    # handle channels and planes
     if not hasattr(scan, "num_channels"):
         raise ValueError(
             "Unable to determine the number of planes in this recording from 'scan.num_channels'"
         )
 
-    if not planes:
-        planes = range(scan.num_channels)
-
+    if isinstance(planes, int):
+        planes = [planes - 1]
+    elif planes is None:  # DON'T use "if not planes", then 0 will be treated as falsy
+        planes = list(range(scan.num_channels))
+    else:
+        planes = [p - 1 for p in planes]
     ic(planes)
+
     over_idx = [p for p in planes if p < 0 or p >= scan.num_planes]
     if over_idx:
         raise ValueError(
-            f"Invalid plane indices {over_idx}; must be in 0…{scan.num_channels - 1}"
+            f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{scan.num_channels}"
         )
 
     if order is not None:
@@ -161,33 +162,64 @@ def save_as(
             )
         planes = [planes[i] for i in order]
 
-    mdata = {
-        "si": _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
-    }
-    mdata.update(
-        _make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))
-    )
-    if metadata is not None:
-        mdata.update(metadata)
+    # handle metadata
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError(
+            f"Metadata must be a dictionary, got {type(metadata)} instead."
+        )
 
-    ic(metadata)
-    if not savedir.exists():
-        _ = ic(savedir)
-        logger.debug(f"Creating directory: {savedir}")
-        savedir.mkdir(parents=True)
-    start_time = time.time()
-    _save_data(
-        scan,
-        savedir,
-        planes,
-        overwrite,
-        ext,
-        metadata=mdata,
-        trim_edge=trim_edge,
-        fix_phase=fix_phase,
-        subpixel_phasecorr=subpixel_phasecorr,
-        target_chunk_mb=target_chunk_mb,
+    # metadata is now either {} or None, so we can safely update it
+    metadata = get_metadata(scan.tiff_files[0].filehandle.path)  # from the file
+
+    # keep the scanimage metadata under the "si" key
+    metadata.update(
+        {"si": _make_json_serializable(scan.tiff_files[0].scanimage_metadata)}
     )
+    metadata["save_path"] = str(savedir.resolve())
+
+    # which rois to save
+    if scan.roi is None:
+        roi_list = [None]  # full‐stack
+    elif scan.roi == 0:
+        roi_list = list(range(1, scan.num_rois + 1))  # all individual ROIs
+    elif isinstance(scan.roi, int):
+        roi_list = [scan.roi]  # single ROI
+    else:
+        roi_list = list(scan.roi)  # list of ROIs
+
+    start_time = time.time()
+
+    # this is a bit confusing. If roi=None, that atttribute is set on the scan object and
+    # when it is inddexed e.g. scan[0], it will return a stack with each roi assembled.
+    if 0 in roi_list:
+        if len(roi_list) > 1:
+            roi_list = [r + 1 for r in roi_list if r is not None]
+    for r in roi_list:
+        ic(r, roi_list)
+        subscan = copy.copy(scan)
+        subscan.roi = r
+
+        target = savedir if r is None else savedir / f"roi{r}"
+        target.mkdir(exist_ok=True)
+        meta = (metadata or {}).copy()
+        if r is not None:
+            meta["roi"] = r
+        _save_data(
+            subscan,
+            target,
+            planes=planes,
+            overwrite=overwrite,
+            ext=ext,
+            trim_edge=trim_edge,
+            fix_phase=fix_phase,
+            save_phase_png=save_phase_png,
+            target_chunk_mb=target_chunk_mb,
+            metadata=meta,
+            progress_callback=progress_callback,
+            upsample=upsample,
+        )
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(
@@ -200,20 +232,26 @@ def _save_data(
     path,
     planes,
     overwrite,
-    file_extension,
+    ext,
     metadata,
     trim_edge=None,
     fix_phase=True,
-    subpixel_phasecorr=True,
+    save_phase_png=False,
     target_chunk_mb=20,
+    progress_callback=None,
+    upsample=20,
+    debug=False,
 ):
-    if "." in file_extension:
-        file_extension = file_extension.split(".")[-1]
+    tmp_copy, png_dir = None, None
+    if "." in ext:
+        ext = ext.split(".")[-1]
+    if ext == "tiff":
+        ext = "tif"
 
     path = Path(path)
     path.mkdir(exist_ok=True)
 
-    nt, nz, nx, ny = scan.shape
+    nt, nz, nx, ny = scan.shape_full
     ic(nt, nz, nx, ny)
 
     left, right, top, bottom = trim_edge
@@ -233,11 +271,12 @@ def _save_data(
     metadata["trimmed"] = [left, right, top, bottom]
     metadata["nframes"] = nt
     metadata["num_frames"] = nt  # alias
+    metadata["save_path"] = str(path.expanduser().resolve())
 
     final_shape = (nt, new_height, new_width)
     ic(final_shape)
     writer = _get_file_writer(
-        file_extension, overwrite=overwrite, metadata=metadata, data_shape=final_shape
+        ext, overwrite=overwrite, metadata=metadata, data_shape=final_shape
     )
 
     chunk_size = target_chunk_mb * 1024 * 1024
@@ -257,15 +296,24 @@ def _save_data(
     )
     pbar = tqdm(total=total_chunks, desc="Saving plane ", position=0)
 
+    pre_exists = True
     for chan_index in planes:
         pbar.set_description(f"Saving plane {chan_index + 1}")
-        if file_extension == "bin":
+        if ext == "bin":
             fname = path / f"plane{chan_index}" / "data_raw.bin"
         else:
-            fname = path / f"plane_{chan_index + 1:02d}.{file_extension}"
+            fname = path / f"plane_{chan_index + 1:02d}.{ext}"
 
         if fname.exists() and not overwrite:
-            continue
+            pbar.update(1)
+            ic(fname, overwrite)
+            break
+
+        pre_exists = False
+        if save_phase_png:
+            png_dir = path / f"scan_phase_check_plane_{chan_index + 1:02d}"
+            png_dir.mkdir(exist_ok=True)
+            ic(f"Saving scan-phase images to {png_dir}")
 
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
         num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
@@ -283,27 +331,35 @@ def _save_data(
                 start:end, chan_index, top : ny - bottom, left : nx - right
             ]
 
-            if fix_phase:
-                ofs = mbo_utilities.return_scan_offset(data_chunk)
-                if ofs:
-                    ic(ofs)
-                    data_chunk = mbo_utilities.fix_scan_phase(data_chunk, -ofs)
+            # if fix_phase:
+            #     if save_phase_png:
+            #         tmp_copy = data_chunk.copy()
+            #     data_chunk = correct_phase_chunk(data_chunk, upsample=upsample)
+            #     if save_phase_png:
+            #         save_phase_images_png(tmp_copy, data_chunk, png_dir, chan_index)
 
             writer(fname, data_chunk, chan_index=chan_index)
             start = end
             pbar.update(1)
+            if progress_callback is not None:
+                progress_callback(pbar.n / pbar.total, current_plane=chan_index + 1)
 
     pbar.close()
 
-    if file_extension in ["tiff", "tif"]:
+    if pre_exists and not overwrite:
+        print("All output files exist; skipping save.")
+        return
+
+    if ext in ["tiff", "tif"]:
         close_tiff_writers()
-    elif file_extension == "bin":
+    elif ext == "bin":
         write_ops(metadata, path, planes)
 
 
 def write_ops(metadata: dict, base_path: str | Path, planes):
     base_path = Path(base_path).expanduser().resolve()
-    del metadata["si"]
+    if "si" in metadata.keys():
+        del metadata["si"]
 
     if isinstance(planes, int):
         planes = [planes]
@@ -356,26 +412,37 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
+def _write_bin(
+    path,
+    data,
+    *,
+    overwrite: bool = False,
+    data_shape=None,
+    chan_index=None,
+):
     if chan_index is None:
         raise ValueError("chan_index must be provided")
+
+    if not hasattr(_write_bin, "_writers"):
+        _write_bin._writers, _write_bin._offsets = {}, {}
 
     fname = Path(path)
     fname.parent.mkdir(exist_ok=True)
 
-    if not hasattr(_write_bin, "_writers"):
-        _write_bin._writers = {}
-        _write_bin._offsets = {}
+    if overwrite and fname.exists():
+        fname.unlink()
+        _write_bin._writers.pop(str(fname), None)
+        _write_bin._offsets.pop(str(fname), None)
 
     key = str(fname)
     if key not in _write_bin._writers:
-        if data_shape is None:
-            raise ValueError("must pass full data_shape on first write")
-        n_frames, Ly, Lx = data_shape
+        n_frames = data_shape[0] if data_shape else data.shape[0]
+        Ly, Lx = data.shape[1], data.shape[2]
         _write_bin._writers[key] = BinaryFile(
-            Ly, Lx, str(fname), n_frames=n_frames, dtype=np.int16
+            Ly, Lx, key, n_frames=n_frames, dtype=np.int16
         )
         _write_bin._offsets[key] = 0
+
     bf = _write_bin._writers[key]
     off = _write_bin._offsets[key]
     bf[off : off + data.shape[0]] = data
@@ -429,9 +496,7 @@ def _write_tiff(
         _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
 
         _write_tiff._first_write = {filename: True}
-        # _write_tiff._first_write = True
     else:
-        # _write_tiff._first_write = False
         _write_tiff._first_write = {filename: False}
 
     writer = _write_tiff._writers[filename]
@@ -445,7 +510,6 @@ def _write_tiff(
             metadata=metadata if is_first else None,
         )
         _write_tiff._first_write[filename] = False
-        # _write_tiff._first_write = False
 
 
 def _write_zarr(
@@ -490,157 +554,3 @@ def _write_zarr(
     z.append(data)
     # Update the count (optional, since append grows the array automatically)
     _write_zarr._initialized[filename] = z.shape[0]
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="CLI for processing ScanImage tiff files."
-    )
-    parser.add_argument(
-        "path",
-        type=str,
-        nargs="?",
-        default=None,
-        help="Path to the file or directory to process.",
-    )
-    parser.add_argument(
-        "--frames",
-        type=str,
-        default=":",  # all frames
-        help="Frames to read (0 based). Use slice notation like NumPy arrays ("
-        "e.g., :50 gives frames 0 to 50, 5:15:2 gives frames 5 to 15 in steps of 2).",
-    )
-    parser.add_argument(
-        "--planes",
-        type=str,
-        default=":",  # all planes
-        help="Planes to read (0 based). Use slice notation like NumPy arrays (e.g., 1:5 gives planes "
-        "2 to 6",
-    )
-    parser.add_argument(
-        "--target_chunk_mb",
-        type=int,
-        nargs=1,
-        default=20,
-        help="Target chunk size, in MB",
-    )
-    # Boolean Flags
-    parser.add_argument(
-        "--metadata",
-        action="store_true",
-        help="Print a dictionary of scanimage metadata for files at the given path.",
-    )
-    parser.add_argument(
-        "--roi",
-        action="store_true",
-        help="Save each ROI in its own folder, organized like 'zarr/roi_1/plane_1/, without this "
-        "arguemnet it would save like 'zarr/plane_1/roi_1'.",
-    )
-
-    parser.add_argument(
-        "--save",
-        type=str,
-        nargs="?",
-        help="Path to save data to. If not provided, the path will be printed.",
-    )
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="Overwrite existing files if saving data..",
-    )
-    parser.add_argument(
-        "--tiff", action="store_false", help="Flag to save as .tiff. Default is True"
-    )
-    parser.add_argument(
-        "--debug", action="store_true", help="Output verbose debug information."
-    )
-    parser.add_argument(
-        "--summary",
-        action="store_true",
-        help="Include min, max, mean, std in metadata per plane.",
-    )
-    parser.add_argument(
-        "--delete_first_frame",
-        action="store_false",
-        help="Flag to delete the first frame of the scan when saving.",
-    )
-    # Commands
-    args = parser.parse_args()
-
-    # If no arguments are provided, print help and exit
-    if len(vars(args)) == 0 or not args.path:
-        parser.print_help()
-        return None
-
-    if args.debug:
-        ic.enable()
-
-    path = Path(args.path).expanduser()
-    if path.is_dir():
-        files = [str(x) for x in Path(args.path).expanduser().glob("*.tif*")]
-    elif path.is_file():
-        files = [str(path)]
-    else:
-        raise FileNotFoundError(f"File or directory not found: {args.path}")
-
-    if len(files) < 1:
-        raise ValueError(
-            f"Input path given is a non-tiff file: {args.path}.\n"
-            f"scanreader is currently limited to scanimage .tiff files."
-        )
-    else:
-        print(f"Found {len(files)} file(s) in {args.path}")
-
-    if args.metadata:
-        metadata = get_metadata(files[0])
-        print(f"Metadata for {files[0]}:")
-        # filter out the verbose scanimage frame/roi metadata
-        print_params({k: v for k, v in metadata.items() if k not in ["si", "roi_info"]})
-
-    if args.save:
-        savepath = Path(args.save).expanduser()
-        logger.info(f"Saving data to {savepath}.")
-
-        t_scan_init = time.time()
-        scan = read_scan(files)
-        t_scan_init_end = time.time() - t_scan_init
-        logger.info(f"--- Scan initialized in {t_scan_init_end:.2f} seconds.")
-
-        frames = listify_index(process_slice_str(args.frames), scan.num_frames)
-        zplanes = listify_index(process_slice_str(args.planes), scan.num_channels)
-
-        if args.delete_first_frame:
-            frames = frames[1:]
-            logger.debug(f"Deleting first frame. New frames: {frames}")
-
-        logger.debug(f"Frames: {len(frames)}")
-        logger.debug(f"Z-Planes: {len(zplanes)}")
-
-        if args.zarr:
-            ext = ".zarr"
-            logger.debug("Saving as .zarr.")
-        elif args.tiff:
-            ext = ".tiff"
-            logger.debug("Saving as .tiff.")
-        else:
-            raise NotImplementedError("Only .zarr and .tif are supported file formats.")
-
-        t_save = time.time()
-        save_as(
-            scan,
-            savepath,
-            # frames=frames, # TODO
-            planes=zplanes,
-            overwrite=args.overwrite,
-            ext=ext,
-            target_chunk_mb=args.target_chunk_mb,
-        )
-        t_save_end = time.time() - t_save
-        logger.info(f"--- Processing complete in {t_save_end:.2f} seconds. --")
-        return scan
-    else:
-        print(args.path)
-
-
-if __name__ == "__main__":
-    main()
