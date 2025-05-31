@@ -47,40 +47,45 @@ class FileDialog:
 
             imgui.new_line()
 
-            # Button details
             button_size = hello_imgui.em_to_vec2(20, 2.5)
             spacing = hello_imgui.em_size(2)
-            total_width = button_size.x * 2 + spacing
-            start_x = (window_width - total_width) * 0.5
 
+            total_w = button_size.x * 2 + spacing
+            start_x = (imgui.get_window_width() - total_w) * 0.5
             imgui.set_cursor_pos_x(start_x)
-            if imgui.button("Open File(s)", button_size):
-                self._open_multi = pfd.open_file(
-                    "Select files", options=pfd.opt.multiselect
-                )
 
-            # Hover text for "Open File(s)"
+            if imgui.button("Open File(s)", button_size):
+                self._open_multi = pfd.open_file("Select files", options=pfd.opt.multiselect)
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Open single/multiple files.\nSupported formats: individual TIFF files, assembled TIFF stacks, or numpy memmaps.")
+                imgui.set_tooltip("Open one or more TIFF/NPY files.")
 
             imgui.same_line(spacing=spacing)
             if imgui.button("Select Folder", button_size):
                 self._select_folder = pfd.select_folder("Select folder")
-
-            # Hover text for "Select Folder"
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Select a directory containing raw-scanimage tiffs or individual tiff files.\nIf the directory contains multiple files, they will be ordered by filename and appended on the time dimension.")
+                imgui.set_tooltip("Pick a directory of TIFFs.")
 
-            # Handle file/folder selection results
+            imgui.new_line()
+            cancel_x = (imgui.get_window_width() - button_size.x) * 0.5
+            imgui.set_cursor_pos_x(cancel_x)
+            if imgui.button("Quit", hello_imgui.em_to_vec2(20, 1.5)) or imgui.is_key_pressed(imgui.Key.escape):
+                self.selected_path = None
+
+            # results
             if self._open_multi and self._open_multi.ready():
-                self.selected_path = self._open_multi.result()
-                self._open_multi = None
-                hello_imgui.get_runner_params().app_shall_exit = True
+                res = self._open_multi.result()
+                self.selected_path = res
+                if res:
+                    self._open_multi = None
+                    hello_imgui.get_runner_params().app_shall_exit = True
 
             if self._select_folder and self._select_folder.ready():
-                self.selected_path = self._select_folder.result()
+                res = self._select_folder.result()
+                self.selected_path = res
+                if res:
+                    self._select_folder = None
+                    hello_imgui.get_runner_params().app_shall_exit = True
                 self._select_folder = None
-                hello_imgui.get_runner_params().app_shall_exit = True
 
             imgui.pop_id()
 
