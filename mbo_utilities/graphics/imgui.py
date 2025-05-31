@@ -1,3 +1,4 @@
+import inspect
 import webbrowser
 from pathlib import Path
 from typing import Literal
@@ -195,6 +196,44 @@ def compute_phase_offset(
         )
 
     return float(shift[1])
+import inspect, numbers, collections.abc as cab, numpy as np
+from imgui_bundle import imgui_ctx, imgui as im
+
+_NAME_COLORS = (
+    im.ImVec4(0.95, 0.80, 0.30, 1.0),
+    im.ImVec4(0.60, 0.95, 0.40, 1.0),
+)
+_VALUE_COLOR = im.ImVec4(0.85, 0.85, 0.85, 1.0)
+
+
+def _fmt(x):
+    if isinstance(x, (str, bool, numbers.Number)):
+        return repr(x)
+    if isinstance(x, (bytes, bytearray)):
+        return f"<{len(x)} bytes>"
+    if isinstance(x, cab.Sequence) and not isinstance(x, (str, bytes)):
+        return f"[len={len(x)}]" if len(x) > 8 else repr(x)
+    shp = getattr(x, "shape", None)
+    if shp is not None and not isinstance(shp, property):
+        try:
+            return f"<shape={tuple(shp)} dtype={getattr(x, 'dtype', '')}>"
+        except TypeError:
+            pass
+    return f"<{type(x).__name__}>"
+
+
+def draw_scope():
+    with imgui_ctx.begin_child("Scope Inspector"):
+        frame = inspect.currentframe().f_back
+        vars_all = {**frame.f_globals, **frame.f_locals}
+        im.push_style_var(im.StyleVar_.item_spacing, im.ImVec2(8, 4))
+        try:
+            for idx, (name, val) in enumerate(sorted(vars_all.items())):
+                im.text_colored(_NAME_COLORS[idx & 1], name)
+                im.same_line(spacing=16)
+                im.text_colored(_VALUE_COLOR, _fmt(val))
+        finally:
+            im.pop_style_var()
 
 
 def _save_as(
@@ -261,6 +300,7 @@ class PreviewDataWidget(EdgeWindow):
         self._show_tool_style_editor = False
         self._show_tool_metrics = False
         self._show_debug_panel = False
+        self._show_scope = False
 
         # preview data widget vars
         self._max_offset = 8
@@ -412,6 +452,32 @@ class PreviewDataWidget(EdgeWindow):
 
     def update(self):
 
+        # (accessible from the "Tools" menu)
+        if self._show_tool_style_editor:
+            _, self._show_tool_style_editor = imgui.begin(
+                "Style Editor", self._show_tool_style_editor
+            )
+            imgui.show_style_editor()
+            imgui.end()
+        if self._show_scope:
+            imgui.set_next_window_size(imgui.ImVec2(1000, 1000), imgui.Cond_.first_use_ever)  # type: ignore # noqa
+            _, self._show_scope = imgui.begin(
+                "Scope Inspector", self._show_scope,
+                flags=imgui.WindowFlags_.always_auto_resize  # type: ignore # noqa
+            )
+            draw_scope()
+            imgui.end()
+        if self._show_debug_panel:
+            imgui.set_next_window_size(imgui.ImVec2(1000, 1000), imgui.Cond_.first_use_ever)  # type: ignore # noqa
+            window_flags = imgui.WindowFlags_.always_auto_resize
+            _, self._show_tool_about = imgui.begin(
+                "MBO Debug Panel",
+                self._show_debug_panel,
+                flags=window_flags  # type: ignore # noqa
+            )
+            self.debug_panel.draw()
+            imgui.end()
+
         # Top Menu Bar
         cflags: imgui.ChildFlags = (
             imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
@@ -436,7 +502,10 @@ class PreviewDataWidget(EdgeWindow):
                 if imgui.begin_menu("Settings", True):
                     imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
                     _, self._show_tool_style_editor = imgui.menu_item(
-                        "Style Editor", "", self._show_tool_style_editor, True
+                        "Style Editor",
+                        "",
+                        self._show_tool_style_editor,
+                        True
                     )
                     _, self._show_debug_panel = imgui.menu_item(
                         "Debug Panel",
@@ -444,35 +513,14 @@ class PreviewDataWidget(EdgeWindow):
                         p_selected=self._show_debug_panel,
                         enabled=True,
                     )
-                    _, self._show_tool_about = imgui.menu_item(
-                        "About MBO", "", self._show_tool_about, True
+                    _, self._show_scope = imgui.menu_item(
+                        "Scope Inspector",
+                        "",
+                        self._show_scope,
+                        True
                     )
                     imgui.end_menu()
             imgui.end_menu_bar()
-
-        # (accessible from the "Tools" menu)
-        if self._show_tool_style_editor:
-            _, self._show_tool_style_editor = imgui.begin(
-                "Style Editor", self._show_tool_style_editor
-            )
-            imgui.show_style_editor()
-            imgui.end()
-        if self._show_tool_about:
-            _, self._show_tool_about = imgui.begin(
-                "##About", self._show_tool_about
-            )
-            imgui.show_about_window(self._show_tool_about)
-            imgui.end()
-        if self._show_debug_panel:
-            imgui.set_next_window_size(imgui.ImVec2(600, 300), imgui.Cond_.first_use_ever)  # type: ignore # noqa
-            window_flags = imgui.WindowFlags_.always_auto_resize
-            _, self._show_tool_about = imgui.begin(
-                "##About",
-                self._show_debug_panel,
-                flags=window_flags  # type: ignore # noqa
-            )
-            self.debug_panel.draw()
-            imgui.end()
 
         if imgui.begin_tab_bar("MainPreviewTabs"):
             if imgui.begin_tab_item("Preview")[0]:
@@ -482,15 +530,13 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.pop_style_var()
                 imgui.pop_style_var()
                 imgui.end_tab_item()
-
-            if  imgui.begin_tab_item("Summary Stats")[0]:
+            if imgui.begin_tab_item("Summary Stats")[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))   # noqa
                 self.draw_stats_section()
                 imgui.pop_style_var()
                 imgui.pop_style_var()
                 imgui.end_tab_item()
-
             if imgui.begin_tab_item("Process")[0]:
                 draw_tab_process(self)
                 imgui.end_tab_item()
