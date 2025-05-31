@@ -7,12 +7,15 @@ from imgui_bundle import (
     hello_imgui,
 )
 
-_progress_state = defaultdict(lambda: {
-    "hide_time": None,
-    "is_showing_done": False,
-    "done_shown_once": False,
-    "done_cleared": False,
-})
+_progress_state = defaultdict(
+    lambda: {
+        "hide_time": None,
+        "is_showing_done": False,
+        "done_shown_once": False,
+        "done_cleared": False,
+    }
+)
+
 
 def draw_progress(
     key: str,
@@ -54,7 +57,11 @@ def draw_progress(
     p = min(max(percent_complete, 0.0), 1.0)
     w = imgui.get_content_region_avail().x
 
-    bar_color = imgui.ImVec4(0.0, 0.8, 0.0, 1.0) if state["is_showing_done"] else imgui.ImVec4(0.2, 0.5, 0.9, 1.0)
+    bar_color = (
+        imgui.ImVec4(0.0, 0.8, 0.0, 1.0)
+        if state["is_showing_done"]
+        else imgui.ImVec4(0.2, 0.5, 0.9, 1.0)
+    )
     if state["is_showing_done"]:
         text = done_text
     elif custom_text:
@@ -79,6 +86,7 @@ def draw_progress(
     imgui.pop_style_color()
     imgui.end_group()
 
+
 def draw_saveas_progress(self):
     key = "saveas"
     state = _progress_state[key]
@@ -102,18 +110,23 @@ def draw_saveas_progress(self):
             custom_text=f"Saving z-plane {self._saveas_current_index} [{int(self._saveas_progress * 100)}%]",
         )
 
+
 def draw_zstats_progress(self):
     # if self.num_rois > 1:
     for i in range(self.num_rois):
-        roi_key = f"zstats_roi{i+1}"
+        roi_key = f"zstats_roi{i + 1}"
         roi_state = _progress_state[roi_key]
 
         if roi_state["done_cleared"]:
             continue
 
         # Make sure these are valid per-ROI lists
-        current_z = self._zstats_current_z[i] if isinstance(self._zstats_current_z, list) else 0
-        progress = self._zstats_progress[i] if isinstance(self._zstats_progress, list) else 0.0
+        current_z = (
+            self._zstats_current_z[i] if isinstance(self._zstats_current_z, list) else 0
+        )
+        progress = (
+            self._zstats_progress[i] if isinstance(self._zstats_progress, list) else 0.0
+        )
         done = self._zstats_done[i] if isinstance(self._zstats_done, list) else False
 
         draw_progress(
@@ -121,8 +134,8 @@ def draw_zstats_progress(self):
             current_index=current_z,
             total_count=self.nz,
             percent_complete=progress,
-            running_text=f"Computing stats: ROI {i+1}, plane(s)",
-            done_text=f"Z-stats complete (ROI {i+1})",
+            running_text=f"Computing stats: ROI {i + 1}, plane(s)",
+            done_text=f"Z-stats complete (ROI {i + 1})",
             done=done,
         )
     # else:

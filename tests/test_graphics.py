@@ -1,5 +1,6 @@
 import sys
 
+
 def test_imgui_context_creation():
     if sys.platform == "win32":
         return

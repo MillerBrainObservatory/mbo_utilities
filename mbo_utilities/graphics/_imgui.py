@@ -9,6 +9,7 @@ from mbo_utilities.file_io import (
     _get_mbo_dirs,
 )
 
+
 def setup_imgui():
     project_assets: Path = _get_mbo_project_root().joinpath("assets")
     mbo_dirs = _get_mbo_dirs()

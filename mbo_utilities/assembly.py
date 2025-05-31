@@ -19,9 +19,6 @@ from .metadata import get_metadata
 from .util import is_running_jupyter
 from .plot_util import save_phase_images_png
 
-from scipy.ndimage import fourier_shift
-from skimage.registration import phase_cross_correlation
-
 try:
     from suite2p.io import BinaryFile
 
@@ -35,7 +32,14 @@ if is_running_jupyter():
 else:
     from tqdm.auto import tqdm
 
-logger = logging.getLogger(__name__)
+MBO_DEBUG = bool(int(os.getenv("MBO_DEBUG", "0")))  # export MBO_DEV=1 to enable
+logging.basicConfig(level=logging.DEBUG if MBO_DEBUG else logging.INFO)
+
+if not MBO_DEBUG:
+    ic.disable()
+
+# set a name the gui can use to identify this module
+logger = logging.getLogger("mbo.save_as")
 logger.setLevel(logging.WARNING)
 
 ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
@@ -103,10 +107,6 @@ def save_as(
     progress_callback : callable, optional
         A callback function to emit progress-bar events. It should accept a single float
         argument representing the progress (0.0 to 1.0) and an optional `current_plane` argument.
-    roi : int, list, or None, optional
-        The region of interest (ROI) to save. If `None`, saves the full stack. If `0`, saves all
-        individual ROIs. If an integer, saves the specified ROI. If a list, saves the specified
-        ROIs. Default is `None`.
     debug : bool, optional
         If `True`, enables debugging mode with detailed output. Default is `False`.
     upsample : int, optional
@@ -118,12 +118,16 @@ def save_as(
     ValueError
         If an unsupported file extension is provided.
     """
+    # Logging
     if debug:
         ic.enable()
         ic("Debugging mode ON")
+        logger.setLevel(logging.DEBUG)
     else:
+        logger.setLevel(logging.INFO)
         ic.disable()
 
+    # save path
     savedir = Path(savedir)
     ic(savedir)
 
@@ -131,13 +135,7 @@ def save_as(
         raise ValueError(f"{savedir} is not inside a valid directory.")
     savedir.mkdir(exist_ok=True)
 
-    if metadata is None:
-        metadata = {}
-    if not isinstance(metadata, dict):
-        raise ValueError(
-            f"Metadata must be a dictionary, got {type(metadata)} instead."
-        )
-
+    # handle channels and planes
     if not hasattr(scan, "num_channels"):
         raise ValueError(
             "Unable to determine the number of planes in this recording from 'scan.num_channels'"
@@ -164,31 +162,37 @@ def save_as(
             )
         planes = [planes[i] for i in order]
 
-    mdata = {
-        "si": _make_json_serializable(scan.tiff_files[0].scanimage_metadata),
-    }
-    mdata.update(
-        _make_json_serializable(get_metadata(scan.tiff_files[0].filehandle.path))
+    # handle metadata
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError(
+            f"Metadata must be a dictionary, got {type(metadata)} instead."
+        )
+
+    # metadata is now either {} or None, so we can safely update it
+    metadata = get_metadata(scan.tiff_files[0].filehandle.path)  # from the file
+
+    # keep the scanimage metadata under the "si" key
+    metadata.update(
+        {"si": _make_json_serializable(scan.tiff_files[0].scanimage_metadata)}
     )
-    if metadata is not None:
-        mdata.update(metadata)
-    out_mdata = {"save_path": str(savedir.resolve())}
-    mdata.update(out_mdata)
-    ic(metadata)
+    metadata["save_path"] = str(savedir.resolve())
 
-    savedir = Path(savedir)
-    savedir.mkdir(exist_ok=True)
-
+    # which rois to save
     if scan.roi is None:
-        roi_list = [None]                    # full‐stack
+        roi_list = [None]  # full‐stack
     elif scan.roi == 0:
         roi_list = list(range(1, scan.num_rois + 1))  # all individual ROIs
     elif isinstance(scan.roi, int):
-        roi_list = [scan.roi]                     # single ROI
+        roi_list = [scan.roi]  # single ROI
     else:
-        roi_list = list(scan.roi)                 # list of ROIs
+        roi_list = list(scan.roi)  # list of ROIs
 
     start_time = time.time()
+
+    # this is a bit confusing. If roi=None, that atttribute is set on the scan object and
+    # when it is inddexed e.g. scan[0], it will return a stack with each roi assembled.
     if 0 in roi_list:
         if len(roi_list) > 1:
             roi_list = [r + 1 for r in roi_list if r is not None]
@@ -196,6 +200,7 @@ def save_as(
         ic(r, roi_list)
         subscan = copy.copy(scan)
         subscan.roi = r
+
         target = savedir if r is None else savedir / f"roi{r}"
         target.mkdir(exist_ok=True)
         meta = (metadata or {}).copy()
@@ -266,6 +271,7 @@ def _save_data(
     metadata["trimmed"] = [left, right, top, bottom]
     metadata["nframes"] = nt
     metadata["num_frames"] = nt  # alias
+    metadata["save_path"] = str(path.expanduser().resolve())
 
     final_shape = (nt, new_height, new_width)
     ic(final_shape)
@@ -325,12 +331,12 @@ def _save_data(
                 start:end, chan_index, top : ny - bottom, left : nx - right
             ]
 
-            if fix_phase:
-                if debug:
-                    tmp_copy = data_chunk.copy()
-                data_chunk = correct_phase_chunk(data_chunk, upsample=upsample)
-                if save_phase_png:
-                    save_phase_images_png(tmp_copy, data_chunk, png_dir, chan_index)
+            # if fix_phase:
+            #     if save_phase_png:
+            #         tmp_copy = data_chunk.copy()
+            #     data_chunk = correct_phase_chunk(data_chunk, upsample=upsample)
+            #     if save_phase_png:
+            #         save_phase_images_png(tmp_copy, data_chunk, png_dir, chan_index)
 
             writer(fname, data_chunk, chan_index=chan_index)
             start = end
@@ -350,45 +356,10 @@ def _save_data(
         write_ops(metadata, path, planes)
 
 
-def correct_phase_chunk(
-    frames: np.ndarray, upsample: int = 10, exclude_center_px: int = 4
-) -> np.ndarray:
-    corrected = frames.copy()
-    offsets = np.zeros(frames.shape[0], dtype=np.float32)
-
-    _, w = frames.shape[1:]
-    cx = w // 2
-    keep_left = slice(None, cx - exclude_center_px)
-    keep_right = slice(cx + exclude_center_px, None)
-
-    for i, frame in enumerate(frames):
-        pre = frame[::2]
-        post = frame[1::2]
-        m = min(pre.shape[0], post.shape[0])
-        pre_crop = np.concatenate([pre[:m, keep_left], pre[:m, keep_right]], axis=1)
-        post_crop = np.concatenate([post[:m, keep_left], post[:m, keep_right]], axis=1)
-
-        shift, _, _ = phase_cross_correlation(
-            pre_crop, post_crop, upsample_factor=upsample
-        )
-        offsets[i] = shift[1]  # if abs(shift[1]) < 4.0 else 0.0  # discard garbage
-        # if abs(shift[1]) > 4.0:
-        #     ic(f"Big shift: {i}")
-
-    if np.any(np.abs(offsets) > 0.001):
-        rows = corrected[:, 1::2]
-        f = np.fft.fftn(rows, axes=(1, 2))
-        shifts = np.array(
-            [fourier_shift(f[i], (0, offsets[i])) for i in range(f.shape[0])]
-        )
-        corrected[:, 1::2] = np.fft.ifftn(shifts, axes=(1, 2)).real
-
-    return corrected
-
-
 def write_ops(metadata: dict, base_path: str | Path, planes):
     base_path = Path(base_path).expanduser().resolve()
-    del metadata["si"]
+    if "si" in metadata.keys():
+        del metadata["si"]
 
     if isinstance(planes, int):
         planes = [planes]
@@ -441,26 +412,37 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def _write_bin(path, data, overwrite=False, data_shape=None, chan_index=None):
+def _write_bin(
+    path,
+    data,
+    *,
+    overwrite: bool = False,
+    data_shape=None,
+    chan_index=None,
+):
     if chan_index is None:
         raise ValueError("chan_index must be provided")
+
+    if not hasattr(_write_bin, "_writers"):
+        _write_bin._writers, _write_bin._offsets = {}, {}
 
     fname = Path(path)
     fname.parent.mkdir(exist_ok=True)
 
-    if not hasattr(_write_bin, "_writers"):
-        _write_bin._writers = {}
-        _write_bin._offsets = {}
+    if overwrite and fname.exists():
+        fname.unlink()
+        _write_bin._writers.pop(str(fname), None)
+        _write_bin._offsets.pop(str(fname), None)
 
     key = str(fname)
     if key not in _write_bin._writers:
-        if data_shape is None:
-            raise ValueError("must pass full data_shape on first write")
-        n_frames, Ly, Lx = data_shape
+        n_frames = data_shape[0] if data_shape else data.shape[0]
+        Ly, Lx = data.shape[1], data.shape[2]
         _write_bin._writers[key] = BinaryFile(
-            Ly, Lx, str(fname), n_frames=n_frames, dtype=np.int16
+            Ly, Lx, key, n_frames=n_frames, dtype=np.int16
         )
         _write_bin._offsets[key] = 0
+
     bf = _write_bin._writers[key]
     off = _write_bin._offsets[key]
     bf[off : off + data.shape[0]] = data

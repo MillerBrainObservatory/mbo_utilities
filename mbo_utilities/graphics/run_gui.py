@@ -24,8 +24,8 @@ except ImportError:
 
 
 def to_lazy_array(
-        data_in: str | Path | Sequence[str|Path] | Scan_MBO | np.ndarray,
-        roi: int|None=None,
+    data_in: str | Path | Sequence[str | Path] | Scan_MBO | np.ndarray,
+    roi: int | None = None,
 ) -> tuple[Scan_MBO | np.ndarray | list[np.ndarray], str | None] | None:
     """
     Load any of your supported formats lazily and return (data, filepaths).
@@ -48,15 +48,21 @@ def to_lazy_array(
         return None
     return data, path
 
+
 @click.command()
 @click.option("--roi", type=click.IntRange(-1, 10), default=None)
 @click.option(
-    "--widget",
+    "--widget/--no-widget",
     default=True,
-    help="Enable or disable PreviewDataWidget. Default is enabled.",
+    help="Enable or disable PreviewDataWidget (default enabled).",
+)
+@click.option(
+    "--threading/--no-threading",
+    default=True,
+    help="Enable or disable threading (only effects widgets).",
 )
 @click.argument("data_in", required=False)
-def run_gui(data_in=None, widget=None, roi=None):
+def run_gui(data_in=None, widget=None, roi=None, threading=True):
     """Open a GUI to preview data of any supported type."""
     if data_in is None:
         file_dialog = FileDialog()
@@ -66,6 +72,7 @@ def run_gui(data_in=None, widget=None, roi=None):
 
         immapp.run(render_file_dialog, with_markdown=True, window_size=(1000, 1000))  # type: ignore  # noqa
         data_in = file_dialog.selected_path
+        threading = file_dialog.threading_enabled
         if not data_in:
             print("No file or folder selected, exiting.")
             return
@@ -81,7 +88,7 @@ def run_gui(data_in=None, widget=None, roi=None):
         nx, ny = data.shape[-2:]
         iw = fpl.ImageWidget(
             data=arrs,
-            names = [f"ROI {i + 1}" for i in range(len(arrs))],
+            names=[f"ROI {i + 1}" for i in range(len(arrs))],
             histogram_widget=False,
             figure_kwargs={"size": (nx * 2, ny * 2)},
             graphic_kwargs={"vmin": data.min(), "vmax": data.max()},
@@ -89,14 +96,13 @@ def run_gui(data_in=None, widget=None, roi=None):
         )
 
         if widget:
-            gui = PreviewDataWidget(iw=iw, fpath=fpath)
+            gui = PreviewDataWidget(iw=iw, fpath=fpath, threading_enabled=threading)
             iw.figure.add_gui(gui)
 
         iw.show()
         fpl.loop.run()
 
     else:
-
         if isinstance(data, list):
             sample = data[0]
         else:
@@ -115,7 +121,7 @@ def run_gui(data_in=None, widget=None, roi=None):
         )
 
         if widget:
-            gui = PreviewDataWidget(iw=iw, fpath=fpath)
+            gui = PreviewDataWidget(iw=iw, fpath=fpath, threading_enabled=threading)
             iw.figure.add_gui(gui)
 
         iw.show()

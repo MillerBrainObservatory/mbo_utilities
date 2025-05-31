@@ -17,6 +17,7 @@ skip_if_missing_data = pytest.mark.skipif(
     not DATA_ROOT.is_dir(), reason=f"Test data directory not found: {DATA_ROOT}"
 )
 
+
 @skip_if_missing_data
 def test_metadata():
     """Test that metadata can be read from a file."""
@@ -28,6 +29,7 @@ def test_metadata():
     assert "objective_resolution" in metadata.keys()
     assert "dtype" in metadata.keys()
     assert "frame_rate" in metadata.keys()
+
 
 @skip_if_missing_data
 def test_get_files_returns_valid_tiffs():
@@ -73,11 +75,14 @@ def test_imgui_check():
     assert isinstance(result, bool)
 
 
-@pytest.mark.parametrize("roi,subdir", [
-    (0,     ""),         # individual ROIs in ASSEMBLED/roi1, roi2…
-    (1,     ""),         # same, just roi=1
-    (None, "full"),      # full‐stack in ASSEMBLED/full
-])
+@pytest.mark.parametrize(
+    "roi,subdir",
+    [
+        (0, ""),  # individual ROIs in ASSEMBLED/roi1, roi2…
+        (1, ""),  # same, just roi=1
+        (None, "full"),  # full‐stack in ASSEMBLED/full
+    ],
+)
 def test_demo_files(tmp_path, roi, subdir):
     ASSEMBLED.mkdir(exist_ok=True)
     files = mbo.get_files(BASE, "tif")
@@ -114,29 +119,39 @@ def test_full_contains_rois_side_by_side(plane_paths):
     assert roi2.shape == (T, H, W - W // 2)
 
     left, right = full[:, :, : W // 2], full[:, :, W // 2 :]
-    np.testing.assert_array_equal(left,  roi1)
+    np.testing.assert_array_equal(left, roi1)
     np.testing.assert_array_equal(right, roi2)
+
 
 def test_overwrite_false_skips_existing(tmp_path, capsys):
     # First write with overwrite=True
     files = mbo.get_files(BASE, "tif")
     scan = mbo.read_scan(files, roi=None)
-    mbo.save_as(scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1])
+    mbo.save_as(
+        scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1]
+    )
 
     # Capture output of second call with overwrite=False
-    mbo.save_as(scan, ASSEMBLED, ext=".tiff", overwrite=False, fix_phase=False, planes=[1])
+    mbo.save_as(
+        scan, ASSEMBLED, ext=".tiff", overwrite=False, fix_phase=False, planes=[1]
+    )
     captured = capsys.readouterr().out
 
     assert "All output files exist; skipping save." in captured
+
 
 def test_overwrite_true_rewrites(tmp_path, capsys):
     # first write with overwrite=True
     files = mbo.get_files(BASE, "tif")
     scan = mbo.read_scan(files, roi=None)
-    mbo.save_as(scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1])
+    mbo.save_as(
+        scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1]
+    )
 
     # second write with overwrite=True
-    mbo.save_as(scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1])
+    mbo.save_as(
+        scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1]
+    )
     captured = capsys.readouterr().out
 
     # Should not skip entirely

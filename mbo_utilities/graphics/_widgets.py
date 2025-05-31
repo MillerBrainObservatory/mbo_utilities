@@ -4,6 +4,7 @@ from imgui_bundle import (
     imgui,
 )
 
+
 def checkbox_with_tooltip(_label, _value, _tooltip):
     _, _value = imgui.checkbox(_label, _value)
     imgui.same_line()
@@ -28,6 +29,7 @@ def set_tooltip(_tooltip, _show_mark=True):
         imgui.text_unformatted(_tooltip)
         imgui.pop_text_wrap_pos()
         imgui.end_tooltip()
+
 
 def imgui_dynamic_table(
     table_id: str, data_lists: list, titles: list = None, selected_index: int = None

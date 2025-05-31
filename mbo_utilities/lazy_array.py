@@ -12,22 +12,14 @@ from .file_io import Scan_MBO, read_scan, get_files
 from mbo_utilities.metadata import has_mbo_metadata, get_metadata
 
 
-CHUNKS_4D = {
-    0: 1,
-    1: "auto",
-    2: -1,
-    3: -1
-}
+CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-CHUNKS_3D = {
-    0: 1,
-    1: -1,
-    2: -1
-}
+CHUNKS_3D = {0: 1, 1: -1, 2: -1}
+
 
 class Loader(Protocol):
-    def load(self) -> Tuple[Any, List[str]]:
-        ...
+    def load(self) -> Tuple[Any, List[str]]: ...
+
 
 @dataclass
 class MBOScanLoader:
@@ -39,6 +31,7 @@ class MBOScanLoader:
         scan.fpath = Path(self.paths[0].parent)
         scan.read_data(self.paths)
         return scan
+
 
 @dataclass
 class MBOTiffLoader:
@@ -60,7 +53,6 @@ class MBOTiffLoader:
         self._chunks = value
 
     def load(self) -> tuple[da.Array, list[str]]:
-
         # open each plane as a memmap
         mms: list[np.ndarray] = []
         for p in self.paths:
@@ -77,9 +69,9 @@ class MBOTiffLoader:
                 da_mm = da.from_array(mm, chunks=self._chunks)
             planes.append(da_mm)
 
-        stack = da.concatenate(planes, axis=0)       # (Z,T,Y,X)
+        stack = da.concatenate(planes, axis=0)  # (Z,T,Y,X)
         # should make this a parameter
-        out   = stack.transpose(1, 0, 2, 3)          # (T,Z,Y,X)
+        out = stack.transpose(1, 0, 2, 3)  # (T,Z,Y,X)
         return out
 
 
@@ -90,6 +82,7 @@ class NpyLoader:
     def load(self) -> Tuple[np.ndarray, List[str]]:
         arr = np.load(str(self.path), mmap_mode="r")
         return arr
+
 
 @dataclass
 class TifLoader:

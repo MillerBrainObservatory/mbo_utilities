@@ -15,20 +15,14 @@ from pathlib import Path
 
 if __name__ == "__main__":
     raw = Path(r"")
-    # Values for argument `roi`:
-    #
-    # 0:                    Save all ROIs separately
-    # 1:                    Save only the first ROI
-    # 2:                    Save only the second ROI
-    # (1, 2 ... num_rois):  Save only the specified ROIs
-    # None:                 Assembly and save joined ROIs
-    test_scan = mbo.read_scan("D://tests//data", roi=0)
-    savedir = r"D:\demo\masknmf"
+
+    test_scan = mbo.read_scan("/home/flynn/lbm_data/raw", roi=0)
+    savedir = r"/home/flynn/lbm_data/saved"
     mbo.save_as(
         test_scan,
         savedir,
-        ext=".tiff",
-        overwrite=False,
+        ext=".bin",
+        overwrite=True,
         debug=True,
         fix_phase=True,
         planes=[1, 5, 10, 14],

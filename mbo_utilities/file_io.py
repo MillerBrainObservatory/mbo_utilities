@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import re
 from collections.abc import Sequence
 from itertools import product
@@ -16,10 +14,7 @@ from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
 from .util import subsample_array
 
-
-CHUNKS = {
-    0: 1, 1: "auto", 2: -1, 3: -1
-}
+CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
 SAVE_AS_TYPES = [".tiff", ".bin", ".h5"]
 
@@ -176,12 +171,19 @@ def read_scan(pathnames, dtype=np.int16, roi=None):
         error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
         raise FileNotFoundError(error_msg)
     if not is_raw_scanimage(filenames[0]):
-        raise ValueError(f"The file {filenames[0]} does not appear to be a raw ScanImage TIFF file.")
+        raise ValueError(
+            f"The file {filenames[0]} does not appear to be a raw ScanImage TIFF file."
+        )
 
     scan = Scan_MBO(roi=roi)
     scan.read_data(filenames, dtype=dtype)
 
     return scan
+
+
+# subpixel fft, cross-correlation,
+# or first cross-correlation then subpixel
+PHASECORR_METHODS = ["subpix", "two_step"]
 
 
 class Scan_MBO(scans.ScanMultiROI):
@@ -192,10 +194,66 @@ class Scan_MBO(scans.ScanMultiROI):
 
     def __init__(self, roi: int | Sequence[int] | None = None):
         super().__init__(join_contiguous=True)
-        self.join_contiguous = True
+        self._phasecorr_enabled = False
+        self._phasecorr_method = "subpix"
+        self.border: int | tuple[int, int, int, int] = 0
+        self.upsample: int = 20
         self.pbar = None
         self.show_pbar = False
         self._roi = roi
+
+    def _correct_phase(self, arr: np.ndarray) -> np.ndarray:
+        if self._phasecorr_enabled:
+            from .phasecorr import correct_scan_phase
+
+            return correct_scan_phase(
+                arr,
+                method=self._phasecorr_method,
+                upsample=self.upsample,
+                border=self.border,
+            )
+        return arr
+
+    @property
+    def phasecorr_method(self):
+        """
+        Get the current phase correction method.
+        Options are 'two_step', 'subpix', or 'crosscorr'.
+        """
+        return self._phasecorr_method
+
+    @phasecorr_method.setter
+    def phasecorr_method(self, value: str):
+        """
+        Set the phase correction method.
+        Options are 'two_step', 'subpix', or 'crosscorr'.
+        """
+        if value not in PHASECORR_METHODS:
+            raise ValueError(
+                f"Unsupported phase correction method: {value}. "
+                f"Supported methods are: {PHASECORR_METHODS}"
+            )
+        if value in ["two_step", "crosscorr"]:
+            raise NotImplementedError()
+        self._phasecorr_method = value
+
+    @property
+    def do_phasecorr(self):
+        """
+        Get whether phase correction is applied.
+        If True, phase correction is applied to the data.
+        """
+        return self._phasecorr_enabled
+
+    @do_phasecorr.setter
+    def do_phasecorr(self, value: bool):
+        """
+        Set whether to apply phase correction.
+        If True, phase correction is applied to the data.
+        """
+        if not isinstance(value, bool):
+            raise ValueError("do_phasecorr must be a boolean value.")
+        self._phasecorr_enabled = value
 
     @property
     def roi(self):
@@ -230,14 +288,21 @@ class Scan_MBO(scans.ScanMultiROI):
             idxs = [i for i, p in enumerate(pages) if start <= p < end]
             if idxs:
                 frame_idx = [pages[i] - start for i in idxs]
-                buf[idxs] = tf.asarray(key=frame_idx)[..., yslice, xslice]
+                ic(tf, frame_idx)
+                buf[idxs] = self._correct_phase(
+                    tf.asarray(key=frame_idx)[..., yslice, xslice]
+                )
+                ic(yslice, xslice)
+
             start = end
         return buf.reshape(len(frames), len(chans), H, W)
 
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
-        t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (4 - len(key))
+        t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (
+            slice(None),
+        ) * (4 - len(key))
         frames = utils.listify_index(t_key, self.num_frames)
         chans = utils.listify_index(z_key, self.num_channels)
         if not frames or not chans:
@@ -257,7 +322,11 @@ class Scan_MBO(scans.ScanMultiROI):
                 H_roi = oys.stop - oys.start
                 W_roi = oxs.stop - oxs.start
                 if W_roi <= 0 or H_roi <= 0:
-                    roi_outputs.append(np.empty((len(frames), len(chans), H_roi, W_roi), dtype=self.dtype))
+                    roi_outputs.append(
+                        np.empty(
+                            (len(frames), len(chans), H_roi, W_roi), dtype=self.dtype
+                        )
+                    )
                     continue
 
                 data = self._read_pages(frames, chans, yslice=ys, xslice=xs)
@@ -299,10 +368,10 @@ class Scan_MBO(scans.ScanMultiROI):
             W_out = self.field_widths[0]
             out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
             for ys, xs, oys, oxs in zip(
-                    self.fields[0].yslices,
-                    self.fields[0].xslices,
-                    self.fields[0].output_yslices,
-                    self.fields[0].output_xslices,
+                self.fields[0].yslices,
+                self.fields[0].xslices,
+                self.fields[0].output_yslices,
+                self.fields[0].output_xslices,
             ):
                 data = self._read_pages(frames, chans, yslice=ys, xslice=xs)
                 out[:, :, oys, oxs] = data
@@ -585,7 +654,7 @@ def to_lazy_array_v1(data_in, **kwargs):
 
 def dispatch_data_handler(data_in, **kwargs):
     if _is_arraylike(data_in):
-        return [data_in], getattr(data_in, 'fpath', None)
+        return [data_in], getattr(data_in, "fpath", None)
 
     if isinstance(data_in, list):
         return handle_list(data_in, **kwargs)
@@ -605,7 +674,7 @@ def handle_path(path: Path, **kwargs):
             scan = read_scan(files, roi=kwargs.get("roi"))
             scan.fpath = path
             return scan, [str(f) for f in files]
-        else: # TODO: handle large tiff sizes
+        else:  # TODO: handle large tiff sizes
             # make sure its a .tif or .tiff directory
             if all(Path(f).suffix in [".tif", ".tiff"] for f in files):
                 try:
@@ -640,10 +709,12 @@ def handle_path(path: Path, **kwargs):
 def handle_list(data_in: list, **kwargs):
     # if data_in is already array-like, we need to get the filepath from the object itself
     if all(_is_arraylike(d) for d in data_in):
-        filenames = [getattr(d, 'fpath', None) for d in data_in]
+        filenames = [getattr(d, "fpath", None) for d in data_in]
         if not filenames or all(f is None for f in filenames):
-            print("Warning: No file paths found in the input data."
-                  " Lazy loading and data-preview features may not work as expected.")
+            print(
+                "Warning: No file paths found in the input data."
+                " Lazy loading and data-preview features may not work as expected."
+            )
         return data_in, filenames
 
     if all(isinstance(p, (str, Path)) for p in data_in):

@@ -1,9 +1,9 @@
-import inspect
 import webbrowser
 from pathlib import Path
 from typing import Literal
 import threading
 from functools import partial
+from dataclasses import dataclass, field
 
 from icecream import ic
 
@@ -16,7 +16,9 @@ from imgui_bundle import (
     hello_imgui,
     imgui_ctx,
     implot,
-    portable_file_dialogs as pfd, ImVec2, ImVec4,
+    portable_file_dialogs as pfd,
+    ImVec2,
+    ImVec4,
 )
 
 from mbo_utilities.assembly import save_as
@@ -29,7 +31,10 @@ from mbo_utilities.file_io import (
 from mbo_utilities.graphics._widgets import set_tooltip, checkbox_with_tooltip
 from mbo_utilities.graphics.gui_logger import GuiLogger
 from mbo_utilities.graphics.pipeline_widgets import draw_tab_process
-from mbo_utilities.graphics.progress_bar import draw_zstats_progress, draw_saveas_progress
+from mbo_utilities.graphics.progress_bar import (
+    draw_zstats_progress,
+    draw_saveas_progress,
+)
 from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings
 
 try:
@@ -49,6 +54,7 @@ from fastplotlib.ui import EdgeWindow
 
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
 USER_PIPELINES = ["suite2p", "masknmf"]
+
 
 def style_seaborn():
     style = implot.get_style()
@@ -96,6 +102,7 @@ def style_seaborn():
     style.mouse_pos_padding = ImVec2(5, 5)
     style.plot_min_size = ImVec2(300, 225)
 
+
 def style_seaborn_dark():
     style = implot.get_style()
 
@@ -106,11 +113,19 @@ def style_seaborn_dark():
     style.set_color_(implot.Col_.marker_fill.value, implot.AUTO_COL)
 
     # Backgrounds and axes
-    style.set_color_(implot.Col_.frame_bg.value, ImVec4(0.15, 0.17, 0.2, 1.00))  # dark gray
-    style.set_color_(implot.Col_.plot_bg.value, ImVec4(0.13, 0.15, 0.18, 1.00))  # darker gray
+    style.set_color_(
+        implot.Col_.frame_bg.value, ImVec4(0.15, 0.17, 0.2, 1.00)
+    )  # dark gray
+    style.set_color_(
+        implot.Col_.plot_bg.value, ImVec4(0.13, 0.15, 0.18, 1.00)
+    )  # darker gray
     style.set_color_(implot.Col_.plot_border.value, ImVec4(0.00, 0.00, 0.00, 0.00))
-    style.set_color_(implot.Col_.axis_grid.value, ImVec4(0.35, 0.40, 0.45, 0.5))  # light grid
-    style.set_color_(implot.Col_.axis_text.value, ImVec4(0.9, 0.9, 0.9, 1.0))  # light text
+    style.set_color_(
+        implot.Col_.axis_grid.value, ImVec4(0.35, 0.40, 0.45, 0.5)
+    )  # light grid
+    style.set_color_(
+        implot.Col_.axis_text.value, ImVec4(0.9, 0.9, 0.9, 1.0)
+    )  # light text
     style.set_color_(implot.Col_.axis_bg_hovered.value, ImVec4(0.25, 0.27, 0.3, 1.00))
     style.set_color_(implot.Col_.axis_bg_active.value, ImVec4(0.25, 0.27, 0.3, 0.75))
 
@@ -159,6 +174,7 @@ def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
     result[1::2, :] = np.fft.ifftn(fshift).real
     return result
 
+
 def compute_phase_offset(
     frame: np.ndarray, upsample: int = 10, exclude_center_px: int = 0
 ) -> float:
@@ -196,6 +212,8 @@ def compute_phase_offset(
         )
 
     return float(shift[1])
+
+
 import inspect, numbers, collections.abc as cab, numpy as np
 from imgui_bundle import imgui_ctx, imgui as im
 
@@ -237,20 +255,20 @@ def draw_scope():
 
 
 def _save_as(
-        path: str | Path,
-        savedir: str | Path,
-        planes: list | tuple = None,
-        metadata: dict = None,
-        overwrite: bool = True,
-        ext: str = ".tiff",
-        order: list | tuple = None,
-        trim_edge: list | tuple = (0, 0, 0, 0),
-        fix_phase: bool = True,
-        save_phase_png: bool = False,
-        target_chunk_mb: int = 20,
-        debug: bool = False,
-        progress_callback=None,
-        **kwargs,
+    path: str | Path,
+    savedir: str | Path,
+    planes: list | tuple = None,
+    metadata: dict = None,
+    overwrite: bool = True,
+    ext: str = ".tiff",
+    order: list | tuple = None,
+    trim_edge: list | tuple = (0, 0, 0, 0),
+    fix_phase: bool = True,
+    save_phase_png: bool = False,
+    target_chunk_mb: int = 20,
+    debug: bool = False,
+    progress_callback=None,
+    **kwargs,
 ):
     """
     read scan from path for threading
@@ -274,16 +292,54 @@ def _save_as(
     )
 
 
+@dataclass
+class SaveStatus:
+    # progress-bar
+    progress: float = 0.0
+    plane: int | None = None
+    message: str = ""
+    logs: dict = field(default_factory=dict)
+
+
 class PreviewDataWidget(EdgeWindow):
     def __init__(
         self,
         iw: fpl.ImageWidget,
         fpath: str | None = None,
+        threading_enabled: bool = True,
         size: int = 350,
         location: Literal["bottom", "right"] = "right",
         title: str = "Data Preview",
+        show_title: bool = False,
+        movable: bool = False,
+        resizable: bool = False,
+        scrollable: bool = False,
+        auto_resize: bool = True,
+        window_flags: int | None = None,
     ):
-        super().__init__(figure=iw.figure, size=size, location=location, title=title)
+        """
+        Fastplotlib attachment, callable with fastplotlib.ImageWidget.add_gui(PreviewDataWidget)
+        """
+        flags = 0
+        if not show_title:
+            flags |= imgui.WindowFlags_.no_title_bar
+        if not movable:
+            flags |= imgui.WindowFlags_.no_move
+        if not resizable:
+            flags |= imgui.WindowFlags_.no_resize
+        if not scrollable:
+            flags |= imgui.WindowFlags_.no_scrollbar
+        if auto_resize:
+            flags |= imgui.WindowFlags_.always_auto_resize
+        if window_flags is not None:
+            flags |= window_flags
+        super().__init__(
+            figure=iw.figure,
+            size=size,
+            location=location,
+            title=title,
+            window_flags=flags,
+        )
 
         if implot.get_current_context() is None:
             implot.create_context()
@@ -344,7 +400,9 @@ class PreviewDataWidget(EdgeWindow):
 
         self.image_widget._image_widget_sliders._loop = True  # noqa
 
-        self._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(self.num_rois)]
+        self._zstats = [
+            {"mean": [], "std": [], "snr": []} for _ in range(self.num_rois)
+        ]
         self._zstats_means = [0 for _ in range(self.num_rois)]
         self._zstats_done = [False] * self.num_rois
         self._zstats_progress = [0.0] * self.num_rois
@@ -361,7 +419,8 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_rois = False
         self._saveas_selected_roi_mode = "All"
 
-        threading.Thread(target=self.compute_zstats, daemon=True).start()
+        if threading_enabled:
+            threading.Thread(target=self.compute_zstats, daemon=True).start()
 
     @property
     def num_rois(self):
@@ -451,7 +510,6 @@ class PreviewDataWidget(EdgeWindow):
         self.calculate_offset()
 
     def update(self):
-
         # (accessible from the "Tools" menu)
         if self._show_tool_style_editor:
             _, self._show_tool_style_editor = imgui.begin(
@@ -460,27 +518,32 @@ class PreviewDataWidget(EdgeWindow):
             imgui.show_style_editor()
             imgui.end()
         if self._show_scope:
-            imgui.set_next_window_size(imgui.ImVec2(1000, 1000), imgui.Cond_.first_use_ever)  # type: ignore # noqa
+            imgui.set_next_window_size(
+                imgui.ImVec2(1000, 1000), imgui.Cond_.first_use_ever
+            )  # type: ignore # noqa
             _, self._show_scope = imgui.begin(
-                "Scope Inspector", self._show_scope,
-                flags=imgui.WindowFlags_.always_auto_resize  # type: ignore # noqa
+                "Scope Inspector",
+                self._show_scope,
+                flags=imgui.WindowFlags_.always_auto_resize,  # type: ignore # noqa
             )
             draw_scope()
             imgui.end()
         if self._show_debug_panel:
-            imgui.set_next_window_size(imgui.ImVec2(1000, 1000), imgui.Cond_.first_use_ever)  # type: ignore # noqa
+            imgui.set_next_window_size(
+                imgui.ImVec2(1000, 1000), imgui.Cond_.first_use_ever
+            )
             window_flags = imgui.WindowFlags_.always_auto_resize
             _, self._show_tool_about = imgui.begin(
                 "MBO Debug Panel",
                 self._show_debug_panel,
-                flags=window_flags  # type: ignore # noqa
+                flags=window_flags,  # type: ignore # noqa
             )
             self.debug_panel.draw()
             imgui.end()
 
         # Top Menu Bar
         cflags: imgui.ChildFlags = (
-            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
+            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # type: ignore # noqa
         )
         wflags: imgui.WindowFlags = imgui.WindowFlags_.menu_bar  # noqa
         with imgui_ctx.begin_child("menu", window_flags=wflags, child_flags=cflags):
@@ -502,10 +565,7 @@ class PreviewDataWidget(EdgeWindow):
                 if imgui.begin_menu("Settings", True):
                     imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
                     _, self._show_tool_style_editor = imgui.menu_item(
-                        "Style Editor",
-                        "",
-                        self._show_tool_style_editor,
-                        True
+                        "Style Editor", "", self._show_tool_style_editor, True
                     )
                     _, self._show_debug_panel = imgui.menu_item(
                         "Debug Panel",
@@ -514,10 +574,7 @@ class PreviewDataWidget(EdgeWindow):
                         enabled=True,
                     )
                     _, self._show_scope = imgui.menu_item(
-                        "Scope Inspector",
-                        "",
-                        self._show_scope,
-                        True
+                        "Scope Inspector", "", self._show_scope, True
                     )
                     imgui.end_menu()
             imgui.end_menu_bar()
@@ -525,14 +582,14 @@ class PreviewDataWidget(EdgeWindow):
         if imgui.begin_tab_bar("MainPreviewTabs"):
             if imgui.begin_tab_item("Preview")[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
-                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))   # noqa
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
                 self.draw_preview_section()
                 imgui.pop_style_var()
                 imgui.pop_style_var()
                 imgui.end_tab_item()
             if imgui.begin_tab_item("Summary Stats")[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
-                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))   # noqa
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
                 self.draw_stats_section()
                 imgui.pop_style_var()
                 imgui.pop_style_var()
@@ -554,7 +611,11 @@ class PreviewDataWidget(EdgeWindow):
         imgui.spacing()
 
         # ROI selector
-        roi_labels = [f"ROI {i + 1}" for i in range(len(stats_list)) if stats_list[i] and "mean" in stats_list[i]]
+        roi_labels = [
+            f"ROI {i + 1}"
+            for i in range(len(stats_list))
+            if stats_list[i] and "mean" in stats_list[i]
+        ]
         roi_labels.append("Combined")
         for i, label in enumerate(roi_labels):
             if imgui.radio_button(label, self._selected_roi == i):
@@ -566,25 +627,35 @@ class PreviewDataWidget(EdgeWindow):
 
         if self._selected_roi == len(roi_labels) - 1:  # Combined
             imgui.text("Stats for Combined ROIs")
-            mean_vals = np.mean([np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0)
+            mean_vals = np.mean(
+                [np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0
+            )
 
             if len(mean_vals) == 0:
                 return
 
-            std_vals = np.mean([np.array(s["std"]) for s in stats_list if s and "std" in s], axis=0)
-            snr_vals = np.mean([np.array(s["snr"]) for s in stats_list if s and "snr" in s], axis=0)
+            std_vals = np.mean(
+                [np.array(s["std"]) for s in stats_list if s and "std" in s], axis=0
+            )
+            snr_vals = np.mean(
+                [np.array(s["snr"]) for s in stats_list if s and "snr" in s], axis=0
+            )
 
             z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
 
             # Table
-            with imgui_ctx.begin_child("##SummaryCombined", size=imgui.ImVec2(0, 0), child_flags=cflags):
+            with imgui_ctx.begin_child(
+                "##SummaryCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
+            ):
                 if imgui.begin_table(
-                        "Stats, averaged over ROI's",
-                        4,
-                        imgui.TableFlags_.borders | imgui.TableFlags_.row_bg  # type: ignore # noqa
+                    "Stats, averaged over ROI's",
+                    4,
+                    imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,  # type: ignore # noqa
                 ):  # type: ignore # noqa
                     for col in ["Z", "Mean", "Std", "SNR"]:
-                        imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)  # type: ignore # noqa
+                        imgui.table_setup_column(
+                            col, imgui.TableColumnFlags_.width_stretch
+                        )  # type: ignore # noqa
                     imgui.table_headers_row()
                     for i in range(len(z_vals)):
                         imgui.table_next_row()
@@ -593,11 +664,17 @@ class PreviewDataWidget(EdgeWindow):
                             imgui.text(f"{val:.2f}")
                     imgui.end_table()
 
-            with imgui_ctx.begin_child("##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags):
+            with imgui_ctx.begin_child(
+                "##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
+            ):
                 imgui.text("Z-plane Signal: Combined")
                 if implot.begin_plot("Z-Plane Plot", ImVec2(-1, 0)):
-                    implot.setup_axes("Z-Plane", "Mean Fluorescence", implot.AxisFlags_.none.value,
-                                      implot.AxisFlags_.auto_fit.value)
+                    implot.setup_axes(
+                        "Z-Plane",
+                        "Mean Fluorescence",
+                        implot.AxisFlags_.none.value,
+                        implot.AxisFlags_.auto_fit.value,
+                    )
                     implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, self.nz)
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
                     style_seaborn_dark()
@@ -612,7 +689,6 @@ class PreviewDataWidget(EdgeWindow):
 
                     implot.end_plot()
 
-
         else:
             roi_idx = self._selected_roi
             stats = stats_list[roi_idx]
@@ -626,10 +702,18 @@ class PreviewDataWidget(EdgeWindow):
             snr_vals = np.array(stats["snr"])
             z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
 
-            with imgui_ctx.begin_child(f"##Summary{roi_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags):
-                if imgui.begin_table(f"zstats{roi_idx}", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):  # type: ignore # noqa
+            with imgui_ctx.begin_child(
+                f"##Summary{roi_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
+            ):
+                if imgui.begin_table(
+                    f"zstats{roi_idx}",
+                    4,
+                    imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
+                ):  # type: ignore # noqa
                     for col in ["Z", "Mean", "Std", "SNR"]:
-                        imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)  # type: ignore # noqa
+                        imgui.table_setup_column(
+                            col, imgui.TableColumnFlags_.width_stretch
+                        )  # type: ignore # noqa
                     imgui.table_headers_row()
                     for i in range(len(z_vals)):
                         imgui.table_next_row()
@@ -638,12 +722,20 @@ class PreviewDataWidget(EdgeWindow):
                             imgui.text(f"{val:.2f}")
                     imgui.end_table()
 
-            with imgui_ctx.begin_child(f"##Plots", size=imgui.ImVec2(0, 0), child_flags=cflags):
+            with imgui_ctx.begin_child(
+                f"##Plots", size=imgui.ImVec2(0, 0), child_flags=cflags
+            ):
                 imgui.text("Z-plane Signal: Mean ± Std")
-                if implot.begin_plot(f"Z-Plane Signal {roi_idx}", size=imgui.ImVec2(-1, 300)):
+                if implot.begin_plot(
+                    f"Z-Plane Signal {roi_idx}", size=imgui.ImVec2(-1, 300)
+                ):
                     z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
-                    implot.setup_axes("Z-Plane", "Mean Fluorescence", implot.AxisFlags_.none.value,
-                                      implot.AxisFlags_.auto_fit.value)
+                    implot.setup_axes(
+                        "Z-Plane",
+                        "Mean Fluorescence",
+                        implot.AxisFlags_.none.value,
+                        implot.AxisFlags_.auto_fit.value,
+                    )
                     # implot.setup_axis_limits(implot.ImAxis_.x1.value, z_vals[0], z_vals[-1])
                     implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, self.nz)
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
@@ -671,7 +763,9 @@ class PreviewDataWidget(EdgeWindow):
 
                 # Directory + Ext
                 _, self._saveas_outdir = imgui.input_text(
-                    "Save Dir", str(Path(self._saveas_outdir).expanduser().resolve()), 256
+                    "Save Dir",
+                    str(Path(self._saveas_outdir).expanduser().resolve()),
+                    256,
                 )
                 imgui.same_line()
                 if imgui.button("Browse"):
@@ -690,8 +784,9 @@ class PreviewDataWidget(EdgeWindow):
 
                 # Options Section
                 self._saveas_rois = checkbox_with_tooltip(
-                    "Save ROI's", self._saveas_rois,
-                    "Enable to save each ROI individually. Saved to subfolders like roi1/, roi2/, etc."
+                    "Save ROI's",
+                    self._saveas_rois,
+                    "Enable to save each ROI individually. Saved to subfolders like roi1/, roi2/, etc.",
                 )
                 if self._saveas_rois:
                     try:
@@ -705,7 +800,9 @@ class PreviewDataWidget(EdgeWindow):
 
                     imgui.spacing()
                     imgui.separator()
-                    imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose ROI(s):")
+                    imgui.text_colored(
+                        imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose ROI(s):"
+                    )
                     imgui.dummy(ImVec2(0, 5))
 
                     if imgui.button("All##roi"):
@@ -731,7 +828,10 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.separator()
 
                 imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Options")
-                set_tooltip("Note: Current values for upsample and max-offset are applied during scan-phase correction.", True)
+                set_tooltip(
+                    "Note: Current values for upsample and max-offset are applied during scan-phase correction.",
+                    True,
+                )
 
                 imgui.dummy(ImVec2(0, 5))
 
@@ -756,11 +856,18 @@ class PreviewDataWidget(EdgeWindow):
 
                 imgui.spacing()
                 imgui.text("Chunk Size (MB)")
-                set_tooltip("Target chunk size when saving TIFF or binary. Affects I/O and memory usage.")
+                set_tooltip(
+                    "Target chunk size when saving TIFF or binary. Affects I/O and memory usage."
+                )
 
                 imgui.set_next_item_width(hello_imgui.em_size(20))
                 _, self._saveas_chunk_mb = imgui.drag_int(
-                    "##target_chunk_mb", self._saveas_chunk_mb, v_speed=1, v_min=1, v_max=1024,)
+                    "##target_chunk_mb",
+                    self._saveas_chunk_mb,
+                    v_speed=1,
+                    v_min=1,
+                    v_max=1024,
+                )
 
                 imgui.spacing()
                 imgui.separator()
@@ -808,8 +915,13 @@ class PreviewDataWidget(EdgeWindow):
                         save_planes = [p + 1 for p in self._selected_planes]
                         self._saveas_total = len(save_planes)
                         if self._saveas_rois:
-                            if not self._saveas_selected_roi or len(self._saveas_selected_roi) == set():
-                                self._saveas_selected_roi = set(range(1, self.num_rois + 1))
+                            if (
+                                not self._saveas_selected_roi
+                                or len(self._saveas_selected_roi) == set()
+                            ):
+                                self._saveas_selected_roi = set(
+                                    range(1, self.num_rois + 1)
+                                )
                             rois = sorted(self._saveas_selected_roi)
                         else:
                             rois = None
@@ -825,19 +937,21 @@ class PreviewDataWidget(EdgeWindow):
                             "ext": self._ext,
                             "save_phase_png": self._saveas_save_phase_png,
                             "target_chunk_mb": self._saveas_chunk_mb,
-                            "progress_callback": lambda frac, current_plane: self.gui_progress_callback(frac,
-                                                                                                        current_plane),
+                            "progress_callback": lambda frac,
+                            current_plane: self.gui_progress_callback(
+                                frac, current_plane
+                            ),
                         }
                         self.debug_panel.log("info", f"Saving planes {save_planes}")
                         self.debug_panel.log(
                             "info", f"Saving to {self._saveas_outdir} as {self._ext}"
                         )
-                        threading.Thread(target=_save_as, kwargs=save_kwargs, daemon=True).start()
+                        threading.Thread(
+                            target=_save_as, kwargs=save_kwargs, daemon=True
+                        ).start()
                         imgui.close_current_popup()
                     except Exception as e:
-                        self.debug_panel.log(
-                            "error", f"Error saving data: {e}"
-                        )
+                        self.debug_panel.log("error", f"Error saving data: {e}")
                         imgui.close_current_popup()
 
                 imgui.same_line()
@@ -924,7 +1038,9 @@ class PreviewDataWidget(EdgeWindow):
             # Section: Scan-phase Correction
             imgui.spacing()
             imgui.separator()
-            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Scan-Phase Correction")
+            imgui.text_colored(
+                imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Scan-Phase Correction"
+            )
             imgui.separator()
             imgui.begin_group()
 
@@ -1047,7 +1163,10 @@ class PreviewDataWidget(EdgeWindow):
         means = []
 
         for z in range(self.nz):
-            self.debug_panel.log("debug", f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {data_ix + 1} --")
+            self.debug_panel.log(
+                "debug",
+                f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {data_ix + 1} --",
+            )
             stack = arr[:, z].astype(np.float32)
             mean_img = np.mean(stack, axis=0)
             std_img = np.std(stack, axis=0)
@@ -1063,7 +1182,7 @@ class PreviewDataWidget(EdgeWindow):
                 f"ROI {data_ix + 1} - Z-plane {z + 1}: "
                 f"Mean: {stats['mean'][-1]:.2f}, "
                 f"Std: {stats['std'][-1]:.2f}, "
-                f"SNR: {stats['snr'][-1]:.2f}"
+                f"SNR: {stats['snr'][-1]:.2f}",
             )
 
             self._zstats_progress[data_ix] = (z + 1) / self.nz
@@ -1079,4 +1198,6 @@ class PreviewDataWidget(EdgeWindow):
 
         arrs = [np.array(arr) for arr in self.image_widget.data]
         for data_ix, arr in enumerate(arrs):
-            threading.Thread(target=self._compute_zstats_single_roi, args=(data_ix, arr), daemon=True).start()
+            threading.Thread(
+                target=self._compute_zstats_single_roi, args=(data_ix, arr), daemon=True
+            ).start()
