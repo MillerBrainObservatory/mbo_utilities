@@ -203,7 +203,7 @@ def save_as(
 
         target = savedir if r is None else savedir / f"roi{r}"
         target.mkdir(exist_ok=True)
-        meta = (metadata or {}).copy()
+        meta = metadata.copy()
         if r is not None:
             meta["roi"] = r
         _save_data(
@@ -240,13 +240,16 @@ def _save_data(
     target_chunk_mb=20,
     progress_callback=None,
     upsample=20,
-    debug=False,
 ):
-    tmp_copy, png_dir = None, None
     if "." in ext:
         ext = ext.split(".")[-1]
     if ext == "tiff":
         ext = "tif"
+
+    if fix_phase:
+        scan.do_phasecorr = True
+    if upsample:
+        scan.upsample = upsample
 
     path = Path(path)
     path.mkdir(exist_ok=True)
@@ -330,13 +333,6 @@ def _save_data(
             data_chunk = scan[
                 start:end, chan_index, top : ny - bottom, left : nx - right
             ]
-
-            # if fix_phase:
-            #     if save_phase_png:
-            #         tmp_copy = data_chunk.copy()
-            #     data_chunk = correct_phase_chunk(data_chunk, upsample=upsample)
-            #     if save_phase_png:
-            #         save_phase_images_png(tmp_copy, data_chunk, png_dir, chan_index)
 
             writer(fname, data_chunk, chan_index=chan_index)
             start = end
