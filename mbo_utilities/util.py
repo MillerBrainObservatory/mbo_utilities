@@ -2,8 +2,6 @@ from typing import Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy.ndimage import fourier_shift
-from skimage.registration import phase_cross_correlation
 
 
 def align_images_zstack(images, mode="trim"):
@@ -347,72 +345,3 @@ def _print_params(params, indent=5):
             _print_params(v, indent + 4)
         else:
             print(" " * indent + f"{k}: {v}")
-
-
-from typing import Sequence
-import numpy as np
-from scipy.ndimage import fourier_shift
-from skimage.registration import phase_cross_correlation
-
-
-def correct_scan_phase(
-    arr: np.ndarray,
-    *,
-    upsample: int = 10,
-    border: int | Sequence[int] = 0,
-) -> np.ndarray:
-    """Phase-align even/odd raster lines on the last two axes.
-
-    `border` is the number of pixels you *ignore* at each frame edge when
-    estimating the shift.  It can be
-
-    * one int → the same margin on every side
-    * four ints ``(top, bottom, left, right)``
-
-    The shift is still applied to the **full** frames.
-    """
-    a = np.asarray(arr)
-    if a.ndim < 2:
-        raise ValueError("array must be at least 2-D (Y,X)")
-
-    flat = a.reshape(-1, *a.shape[-2:])  # (N, Y, X)
-    fixed = _correct_scan_phase_frame(flat, upsample, border)
-    return fixed.reshape(a.shape)
-
-
-def _correct_scan_phase_frame(
-    frames: np.ndarray,
-    upsample: int = 10,
-    border: int | Sequence[int] = 0,
-) -> np.ndarray:
-    out = frames.copy()
-    offs = np.zeros(frames.shape[0], dtype=np.float32)
-
-    if isinstance(border, int):
-        t, b, l, r = border, border, border, border
-    else:
-        t, b, l, r = border  # expects 4-tuple
-
-    for i, fr in enumerate(frames):
-        even, odd = fr[::2], fr[1::2]
-        m = min(even.shape[0], odd.shape[0])
-
-        even_crop = even[:m, t : even.shape[1] - b, l : even.shape[2] - r]
-        odd_crop = odd[:m, t : odd.shape[1] - b, l : odd.shape[2] - r]
-
-        shift, *_ = phase_cross_correlation(
-            even_crop,
-            odd_crop,
-            upsample_factor=upsample,
-        )
-        offs[i] = shift[1]
-
-    if np.any(offs):
-        rows = out[:, 1::2]
-        f = np.fft.fftn(rows, axes=(1, 2))
-        shifted = np.array(
-            [fourier_shift(f[k], (0, offs[k])) for k in range(f.shape[0])]
-        )
-        out[:, 1::2] = np.fft.ifftn(shifted, axes=(1, 2)).real
-
-    return out
