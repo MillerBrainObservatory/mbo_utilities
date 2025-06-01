@@ -96,7 +96,20 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
         )
 
         if widget:
-            gui = PreviewDataWidget(iw=iw, fpath=fpath, threading_enabled=threading)
+            gui = PreviewDataWidget(
+                iw=iw,
+                fpath=fpath,
+                threading_enabled=threading,
+                size=350,
+                location="right",
+                title="Data Preview",
+                show_title=True,
+                movable=True,
+                resizable=True,
+                scrollable=True,
+                auto_resize=True,
+                window_flags=None,
+            )
             iw.figure.add_gui(gui)
 
         iw.show()
@@ -121,7 +134,20 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
         )
 
         if widget:
-            gui = PreviewDataWidget(iw=iw, fpath=fpath, threading_enabled=threading)
+            gui = PreviewDataWidget(
+                iw=iw,
+                fpath=fpath,
+                threading_enabled=threading,
+                size=350,
+                location="right",
+                title="Data Preview",
+                show_title=True,
+                movable=True,
+                resizable=True,
+                scrollable=True,
+                auto_resize=True,
+                window_flags=None,
+            )
             iw.figure.add_gui(gui)
 
         iw.show()
