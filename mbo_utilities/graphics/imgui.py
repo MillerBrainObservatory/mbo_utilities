@@ -4,11 +4,10 @@ from typing import Literal
 import threading
 from functools import partial
 from dataclasses import dataclass, field
-
-from icecream import ic
+import inspect, numbers, collections.abc as cab
 
 import numpy as np
-from scipy.ndimage import gaussian_filter, fourier_shift
+from scipy.ndimage import gaussian_filter
 from skimage.registration import phase_cross_correlation
 
 from imgui_bundle import (
@@ -30,12 +29,12 @@ from mbo_utilities.file_io import (
 )
 from mbo_utilities.graphics._widgets import set_tooltip, checkbox_with_tooltip
 from mbo_utilities.graphics.gui_logger import GuiLogger
-from mbo_utilities.graphics.pipeline_widgets import draw_tab_process
 from mbo_utilities.graphics.progress_bar import (
     draw_zstats_progress,
     draw_saveas_progress,
 )
-from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings
+from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
+from mbo_utilities.phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets
 
 try:
     import cupy as cp  # noqa
@@ -166,62 +165,11 @@ def style_seaborn_dark():
     style.plot_min_size = ImVec2(300, 225)
 
 
-def apply_phase_offset(frame: np.ndarray, offset: float) -> np.ndarray:
-    result = frame.copy()
-    rows = result[1::2, :]
-    f = np.fft.fftn(rows)
-    fshift = fourier_shift(f, (0, offset))
-    result[1::2, :] = np.fft.ifftn(fshift).real
-    return result
-
-
-def compute_phase_offset(
-    frame: np.ndarray, upsample: int = 10, exclude_center_px: int = 0
-) -> float:
-    if frame.ndim == 3:
-        frame = np.mean(frame, axis=0)
-    _, w = frame.shape
-
-    frame = frame.astype(np.float32)
-
-    cx = w // 2
-    keep_left = slice(None, cx - exclude_center_px)
-    keep_right = slice(cx + exclude_center_px, None)
-
-    pre = frame[::2]
-    post = frame[1::2]
-    m = min(pre.shape[0], post.shape[0])
-    pre_crop = np.concatenate([pre[:m, keep_left], pre[:m, keep_right]], axis=1)
-    post_crop = np.concatenate([post[:m, keep_left], post[:m, keep_right]], axis=1)
-
-    ic(pre_crop)
-    ic(post_crop)
-
-    # transfer to GPU
-    if HAS_CUPY:
-        pre_gpu = cp.asarray(pre_crop)
-        post_gpu = cp.asarray(post_crop)
-        shift, _, _ = register_translation(
-            cp.asarray(pre_gpu), cp.asarray(post_gpu), upsample_factor=upsample
-        )
-    else:
-        shift, _, _ = phase_cross_correlation(
-            pre_crop,  # noqa
-            post_crop,  # noqa
-            upsample_factor=upsample,  # noqa
-        )
-
-    return float(shift[1])
-
-
-import inspect, numbers, collections.abc as cab, numpy as np
-from imgui_bundle import imgui_ctx, imgui as im
-
 _NAME_COLORS = (
-    im.ImVec4(0.95, 0.80, 0.30, 1.0),
-    im.ImVec4(0.60, 0.95, 0.40, 1.0),
+    imgui.ImVec4(0.95, 0.80, 0.30, 1.0),
+    imgui.ImVec4(0.60, 0.95, 0.40, 1.0),
 )
-_VALUE_COLOR = im.ImVec4(0.85, 0.85, 0.85, 1.0)
+_VALUE_COLOR = imgui.ImVec4(0.85, 0.85, 0.85, 1.0)
 
 
 def _fmt(x):
@@ -244,14 +192,14 @@ def draw_scope():
     with imgui_ctx.begin_child("Scope Inspector"):
         frame = inspect.currentframe().f_back
         vars_all = {**frame.f_globals, **frame.f_locals}
-        im.push_style_var(im.StyleVar_.item_spacing, im.ImVec2(8, 4))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4))
         try:
             for idx, (name, val) in enumerate(sorted(vars_all.items())):
-                im.text_colored(_NAME_COLORS[idx & 1], name)
-                im.same_line(spacing=16)
-                im.text_colored(_VALUE_COLOR, _fmt(val))
+                imgui.text_colored(_NAME_COLORS[idx & 1], name)
+                imgui.same_line(spacing=16)
+                imgui.text_colored(_VALUE_COLOR, _fmt(val))
         finally:
-            im.pop_style_var()
+            imgui.pop_style_var()
 
 
 def _save_as(
@@ -275,6 +223,8 @@ def _save_as(
     there must be a better way to do this
     """
     scan = read_scan(path, roi=kwargs.get("roi", None))
+    if fix_phase:
+        scan.phasecorr_enabled = True
     save_as(
         scan,
         savedir=savedir,
@@ -284,7 +234,6 @@ def _save_as(
         ext=ext,
         order=order,
         trim_edge=trim_edge,
-        fix_phase=fix_phase,
         save_phase_png=save_phase_png,
         target_chunk_mb=target_chunk_mb,
         progress_callback=progress_callback,
@@ -294,7 +243,7 @@ def _save_as(
 
 @dataclass
 class SaveStatus:
-    # progress-bar
+    # progressbar
     progress: float = 0.0
     plane: int | None = None
     message: str = ""
@@ -344,6 +293,12 @@ class PreviewDataWidget(EdgeWindow):
         if implot.get_current_context() is None:
             implot.create_context()
 
+        # font = self.image_widget..io.fonts.add_font_from_file_ttf(...)
+        # backend.create_fonts_texture()
+        self.io = imgui.get_io()
+        self.io.set_ini_filename("/home/flynn/lbm_data/mbo_settings.ini")
+        self.imgui_backend = iw.figure.imgui_renderer.backend
+
         self.font_size = 12
 
         self.fpath = fpath if fpath else getattr(iw, "fpath", None)
@@ -364,6 +319,7 @@ class PreviewDataWidget(EdgeWindow):
         self._current_offset = 0.0
         self._window_size = 1
         self._phase_upsample = 20
+        self._border = 0
         self._auto_update = False
         self._proj = "mean"
 
@@ -1062,6 +1018,17 @@ class PreviewDataWidget(EdgeWindow):
                 self.debug_panel.log("info", f"New upsample: {upsample_val}")
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
+            border_changed, border_val = imgui.input_int(
+                "Exclude border-px", self._border, step=1, step_fast=2
+            )
+            set_tooltip(
+                "Number of pixels to exclude from the edges of the image when computing the scan-phase offset."
+            )
+            if border_changed:
+                self._border = max(0, border_val)
+                self.debug_panel.log("info", f"New upsample: {border_val}")
+
+            imgui.set_next_item_width(hello_imgui.em_size(10))
             max_offset_changed, max_offset = imgui.input_int(
                 "max-offset", self._max_offset, step=1, step_fast=2
             )
@@ -1137,7 +1104,7 @@ class PreviewDataWidget(EdgeWindow):
     def _combined_frame_apply(self, frame: np.ndarray, roi=None) -> np.ndarray:
         """alter final frame only once, in ImageWidget.frame_apply"""
         if self._current_offset:
-            frame = apply_phase_offset(frame, self.current_offset)
+            frame = apply_scan_phase_offsets(frame, self.current_offset)
         if self._gaussian_sigma > 0:
             frame = gaussian_filter(frame, sigma=self.gaussian_sigma)
         if self.proj == "mean-sub" and self._zstats_means:
@@ -1149,7 +1116,7 @@ class PreviewDataWidget(EdgeWindow):
         """Get the current frame, calculate the offset"""
         frame = self.get_raw_frame()
         self.debug_panel.log("debug", f"Calculating offset")
-        ofs = compute_phase_offset(frame, upsample=self._phase_upsample)
+        ofs = compute_scan_phase_offsets(frame, upsample=self.phase_upsample, border=self._border)
         self.current_offset = ofs
         self.debug_panel.log("debug", f"Offset: {self.current_offset:.3f}")
 
