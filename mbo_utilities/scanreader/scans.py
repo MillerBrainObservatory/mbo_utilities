@@ -878,7 +878,7 @@ class ScanMultiROI(NewerScan, BaseScan):
         microns = (degrees * float(match.group("deg2um_factor"))) if match else None
         return microns
 
-    def read_data(self, filenames, dtype=np.uint16):
+    def read_data(self, filenames, dtype=np.int16):
         """Set the header, create rois and fields (joining them if necessary)."""
         super().read_data(filenames, dtype)
         self.rois = self._create_rois()
