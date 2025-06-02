@@ -213,6 +213,8 @@ class SaveStatus:
     message: str = ""
     logs: dict = field(default_factory=dict)
 
+def draw_menu(self):
+    pass
 
 class PreviewDataWidget(EdgeWindow):
     def __init__(
@@ -341,6 +343,7 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_selected_roi_mode = "All"
 
         if threading_enabled:
+            self.logger.info("Starting zstats computation in a separate thread.")
             threading.Thread(target=self.compute_zstats, daemon=True).start()
 
     @property
@@ -376,7 +379,7 @@ class PreviewDataWidget(EdgeWindow):
         self._border = value
         for arr in self.image_widget.data:
             if isinstance(arr, Scan_MBO):
-                arr.max_offset = value
+                arr.border = value
                 self.logger.info(f"Border set to {value}.")
             else:
                 self.logger.warning(
@@ -530,10 +533,9 @@ class PreviewDataWidget(EdgeWindow):
             self.debug_panel.draw()
             imgui.end()
 
-        wflags: imgui.WindowFlags = imgui.WindowFlags_.menu_bar  # noqa
         with imgui_ctx.begin_child(
                 "menu",
-                window_flags=wflags,
+                window_flags=imgui.WindowFlags_.menu_bar,  # noqa,
                 child_flags=imgui.ChildFlags_.auto_resize_y
                             | imgui.ChildFlags_.always_auto_resize,
         ):
@@ -572,26 +574,29 @@ class PreviewDataWidget(EdgeWindow):
                     imgui.end_menu()
             imgui.end_menu_bar()
 
-        if imgui.begin_tab_bar("MainPreviewTabs"):
-            if imgui.begin_tab_item("Preview")[0]:
-                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
-                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
-                self.draw_preview_section()
-                imgui.pop_style_var()
-                imgui.pop_style_var()
-                imgui.end_tab_item()
-            if imgui.begin_tab_item("Summary Stats")[0]:
-                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
-                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
-                self.draw_stats_section()
-                imgui.pop_style_var()
-                imgui.pop_style_var()
-                imgui.end_tab_item()
-            if imgui.begin_tab_item("Process")[0]:
-                draw_tab_process(self)
-                imgui.end_tab_item()
+        with imgui_ctx.begin_child(
+                "tabs",
+        ):
+            if imgui.begin_tab_bar("MainPreviewTabs"):
+                if imgui.begin_tab_item("Preview")[0]:
+                    imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
+                    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
+                    self.draw_preview_section()
+                    imgui.pop_style_var()
+                    imgui.pop_style_var()
+                    imgui.end_tab_item()
+                if imgui.begin_tab_item("Summary Stats")[0]:
+                    imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
+                    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
+                    self.draw_stats_section()
+                    imgui.pop_style_var()
+                    imgui.pop_style_var()
+                    imgui.end_tab_item()
+                if imgui.begin_tab_item("Process")[0]:
+                    draw_tab_process(self)
+                    imgui.end_tab_item()
 
-            imgui.end_tab_bar()
+                imgui.end_tab_bar()
 
     def draw_stats_section(self):
         if not self._zstats_done:

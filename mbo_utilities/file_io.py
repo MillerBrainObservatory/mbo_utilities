@@ -340,7 +340,6 @@ class Scan_MBO(scans.ScanMultiROI):
     def _read_pages(
         self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
     ):
-        self.logger.debug(f"Reading pages for frames: {frames}, channels: {chans}, yslice: {yslice}, xslice: {xslice}")
         C = self.num_channels
         pages = [f * C + c for f in frames for c in chans]
 
