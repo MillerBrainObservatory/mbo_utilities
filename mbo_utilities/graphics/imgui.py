@@ -1126,7 +1126,7 @@ class PreviewDataWidget(EdgeWindow):
                 "Number of pixels to exclude from the edges of the image when computing the scan-phase offset."
             )
             if border_changed:
-                self._border = max(0, border_val)
+                self.border = max(0, border_val)
                 self.logger.info(f"New border: {border_val}")
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
@@ -1137,7 +1137,7 @@ class PreviewDataWidget(EdgeWindow):
                 "Maximum allowed pixel shift (in pixels) when estimating the scan-phase offset."
             )
             if max_offset_changed:
-                self._max_offset = max(1, max_offset)
+                self.max_offset = max(1, max_offset)
                 self.logger.info(f"New max-offset: {max_offset}")
 
             imgui.end_group()
