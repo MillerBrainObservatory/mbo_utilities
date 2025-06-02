@@ -65,7 +65,7 @@ def save_as(
     ext: str = ".tiff",
     order: list | tuple = None,
     trim_edge: list | tuple = (0, 0, 0, 0),
-    fix_phase: bool = True,
+    fix_phase: bool = False,
     save_phase_png: bool = False,
     target_chunk_mb: int = 20,
     progress_callback: Callable = None,
@@ -98,7 +98,7 @@ def save_as(
         A list or tuple specifying the desired order of planes. If provided, the number of
         elements in `order` must match the number of planes. Default is `None`.
     fix_phase : bool, optional
-        Whether to fix scan-phase (x/y) alignment. Default is `True`.
+        Whether to fix scan-phase (x/y) alignment. Default is `False`.
     save_phase_png : bool, optional
         If correcting scan-phase, save a directory with pre/post images centered on the most
         active regions of the frame, saved to the save_path. Default is 'False'.
@@ -180,14 +180,14 @@ def save_as(
     metadata["save_path"] = str(savedir.resolve())
 
     # which rois to save
-    if scan.roi is None:
+    if scan.selected_roi is None:
         roi_list = [None]  # full‐stack
-    elif scan.roi == 0:
+    elif scan.selected_roi == 0:
         roi_list = list(range(1, scan.num_rois + 1))  # all individual ROIs
-    elif isinstance(scan.roi, int):
-        roi_list = [scan.roi]  # single ROI
+    elif isinstance(scan.selected_roi, int):
+        roi_list = [scan.selected_roi]  # single ROI
     else:
-        roi_list = list(scan.roi)  # list of ROIs
+        roi_list = list(scan.selected_roi)  # list of ROIs
 
     start_time = time.time()
 
@@ -196,16 +196,16 @@ def save_as(
     if 0 in roi_list:
         if len(roi_list) > 1:
             roi_list = [r + 1 for r in roi_list if r is not None]
-    for r in roi_list:
-        ic(r, roi_list)
+    for roi in roi_list:
+        ic(roi, roi_list)
         subscan = copy.copy(scan)
-        subscan.roi = r
+        subscan.selected_roi = roi
 
-        target = savedir if r is None else savedir / f"roi{r}"
+        target = savedir if roi is None else savedir / f"roi{roi}"
         target.mkdir(exist_ok=True)
         meta = metadata.copy()
-        if r is not None:
-            meta["roi"] = r
+        if roi is not None:
+            meta["roi"] = roi
         _save_data(
             subscan,
             target,
@@ -247,7 +247,7 @@ def _save_data(
         ext = "tif"
 
     if fix_phase:
-        scan.do_phasecorr = True
+        scan.fix_phase = True
     if upsample:
         scan.upsample = upsample
 
@@ -503,7 +503,7 @@ def _write_tiff(
             frame,
             contiguous=True,
             photometric="minisblack",
-            metadata=metadata if is_first else None,
+            metadata=_make_json_serializable(metadata) if is_first else None,
         )
         _write_tiff._first_write[filename] = False
 

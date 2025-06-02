@@ -3,11 +3,15 @@ from scipy.ndimage import fourier_shift
 from skimage.registration import phase_cross_correlation
 
 
-def _phase_offset(frame, upsample=10, border=0, max_offset=8):
+def _phase_offset(
+        frame,
+        upsample=10,
+        border=0,
+        max_offset=4
+):
     if frame.ndim == 3:
-        frame = frame.mean(0)
+        frame = frame.mean(axis=0)
 
-    frame = frame.astype(np.float32, copy=False)
     h, w = frame.shape
 
     if isinstance(border, int):
@@ -28,29 +32,57 @@ def _phase_offset(frame, upsample=10, border=0, max_offset=8):
 
     shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
     dx = float(shift[1])
-    return np.sign(dx) * min(abs(dx), max_offset)
+    if max_offset:
+        return np.sign(dx) * min(abs(dx), max_offset)
+    return dx
 
-def _apply_offset(frame, off):
+def _apply_offset(frame, shift):
     rows = frame[1::2]
     f = np.fft.fftn(rows)
-    f = fourier_shift(f, (0, off))
+    f = fourier_shift(f, (0, shift))
     frame[1::2] = np.fft.ifftn(f).real
     return frame
 
 
-def compute_scan_phase_offsets(arr, *, method="subpix", upsample=10, max_offset=8, border=0):
+def compute_scan_phase_offsets(
+        arr,
+        method="subpix",
+        upsample=10,
+        max_offset=4,
+        border=0
+):
     a = np.asarray(arr)
     if a.ndim == 2:
-        return _phase_offset(a, upsample, max_offset, border)
+        return _phase_offset(
+            a,
+            upsample=upsample,
+            border=border,
+            max_offset=max_offset
+        )
     flat = a.reshape(a.shape[0], *a.shape[-2:])
     if method == "subpix":
-        return np.array([_phase_offset(f, upsample, max_offset, border) for f in flat], dtype=np.float32)
+        return np.array([_phase_offset(
+            f,
+            upsample=upsample,
+            border=border,
+            max_offset=max_offset,
+        ) for f in flat])  # dtype=np.float32)
     if method == "two_step":
         offs = []
         for f in flat:
-            o1 = _phase_offset(f, upsample, max_offset, border)
+            o1 = _phase_offset(
+                f,
+                upsample=upsample,
+                border=border,
+                max_offset=max_offset,
+            )
             f2 = _apply_offset(f.copy(), o1)
-            o2 = _phase_offset(f2, upsample, max_offset, border)
+            o2 = _phase_offset(
+                f2,
+                upsample=upsample,
+                border=border,
+                max_offset=max_offset,
+            )
             offs.append(o1 + o2)
         return np.array(offs, dtype=np.float32)
     raise ValueError(method)

@@ -82,7 +82,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
         arrs = []
         for roi in range(len(data.rois)):
             scan_copy = copy.copy(data)
-            scan_copy.roi = roi + 1
+            scan_copy.selected_roi = roi + 1
             arrs.append(scan_copy)
 
         nx, ny = data.shape[-2:]

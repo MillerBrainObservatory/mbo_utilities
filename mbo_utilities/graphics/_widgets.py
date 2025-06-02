@@ -6,7 +6,7 @@ from imgui_bundle import (
 
 
 def checkbox_with_tooltip(_label, _value, _tooltip):
-    _, _value = imgui.checkbox(_label, _value)
+    _changed, _value = imgui.checkbox(_label, _value)
     imgui.same_line()
     imgui.text_disabled("(?)")
     if imgui.is_item_hovered():

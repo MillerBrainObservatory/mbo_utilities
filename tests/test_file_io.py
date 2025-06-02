@@ -18,6 +18,9 @@ skip_if_missing_data = pytest.mark.skipif(
 )
 
 
+# Note the perfect phase of frame 1058
+
+
 @skip_if_missing_data
 def test_metadata():
     """Test that metadata can be read from a file."""

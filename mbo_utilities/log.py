@@ -1,0 +1,42 @@
+import os, logging
+# this ic import convenciton is from their readme
+try:
+    from icecream import ic, install
+    install()
+except ImportError:  # Graceful fallback if IceCream isn't installed.
+    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
+    install = None
+
+_debug = bool(int(os.getenv("MBO_DEBUG", "0")))
+_level = logging.DEBUG if _debug else logging.INFO
+
+class _ICFmt(logging.Formatter):
+    def format(self, record):
+        return ic.format(record.getMessage())
+
+_h = logging.StreamHandler()
+_h.setFormatter(_ICFmt())
+
+_root = logging.getLogger("mbo")
+_root.setLevel(_level)
+_root.addHandler(_h)
+_root.propagate = False
+
+def get(subname: str | None = None) -> logging.Logger:
+    name = "mbo" if subname is None else f"mbo.{subname}"
+    return logging.getLogger(name)
+
+def enable(*subs):
+    for s in subs:
+        get(s).disabled = False
+
+def disable(*subs):
+    for s in subs:
+        get(s).disabled = True
+
+for sub in os.getenv("MBO_ENABLE", "").split(","):
+    if sub:
+        enable(sub)
+for sub in os.getenv("MBO_DISABLE", "").split(","):
+    if sub:
+        disable(sub)

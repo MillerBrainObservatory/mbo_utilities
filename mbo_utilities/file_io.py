@@ -9,12 +9,20 @@ import dask.array as da
 import numpy as np
 import tifffile
 
+from . import log
 from .metadata import is_raw_scanimage
+from .phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets
 from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
 from .util import subsample_array
 
+# subpixel fft, cross-correlation,
+# or first cross-correlation then subpixel
+PHASECORR_METHODS = ["subpix", "two_step"]
+
+
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
+
 
 SAVE_AS_TYPES = [".tiff", ".bin", ".h5"]
 
@@ -129,7 +137,16 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     return sorted(p.resolve() for p in result if p.is_file())
 
 
-def read_scan(pathnames, dtype=np.int16, roi=None):
+def read_scan(
+        pathnames,
+        dtype=np.int16,
+        roi=None,
+        fix_phase: bool = False,
+        phasecorr_method: str = "subpix",
+        border: int | tuple[int, int, int, int] = 0,
+        upsample: int = 20,
+        max_offset: int = 8,
+):
     """
     Reads a ScanImage scan from a given file or set of file paths and returns a
     ScanMultiROIReordered object with lazy-loaded data.
@@ -142,6 +159,19 @@ def read_scan(pathnames, dtype=np.int16, roi=None):
     roi : int, optional
         Specify ROI to export if only exporting a single ROI. 1-based.
         Defaults to None, which exports pre-assembled (tiled) rois.
+    fix_phase : bool, optional
+        If True, applies phase correction to the scan data. Default is False.
+    phasecorr_method : str, optional
+        The method to use for phase correction. Options are 'subpix', 'two_step',
+    border : int or tuple of int, optional
+        The border size to use for phase correction. If an int, applies the same
+        border to all sides. If a tuple, specifies (top, bottom, left, right) borders.
+    upsample : int, optional
+        The for subpixel correction, upsample factor for phase correction.
+        A value of 1 clamps to whole-pixel. Default is 10.
+    max_offset : int, optional
+        The maximum allowed phase offset in pixels. If the computed offset exceeds
+        this value, it is clamped to the maximum. Default is 3.
     dtype : numpy.dtype, optional
         The data type to use when reading the scan data. Default is np.int16.
 
@@ -175,15 +205,17 @@ def read_scan(pathnames, dtype=np.int16, roi=None):
             f"The file {filenames[0]} does not appear to be a raw ScanImage TIFF file."
         )
 
-    scan = Scan_MBO(roi=roi)
+    scan = Scan_MBO(
+        roi=roi,
+        fix_phase=fix_phase,
+        phasecorr_method=phasecorr_method,
+        border=border,
+        upsample=upsample,
+        max_offset=max_offset,
+    )
     scan.read_data(filenames, dtype=dtype)
 
     return scan
-
-
-# subpixel fft, cross-correlation,
-# or first cross-correlation then subpixel
-PHASECORR_METHODS = ["subpix", "two_step"]
 
 
 class Scan_MBO(scans.ScanMultiROI):
@@ -192,27 +224,52 @@ class Scan_MBO(scans.ScanMultiROI):
     and reorders the output to [time, z, x, y].
     """
 
-    def __init__(self, roi: int | Sequence[int] | None = None):
+    def __init__(
+            self,
+            roi: int | Sequence[int] | None = None,
+            fix_phase: bool = False,
+            phasecorr_method: str = "subpix",
+            border: int | tuple[int, int, int, int] = 0,
+            upsample: int = 20,
+            max_offset: int = 8,
+    ):
         super().__init__(join_contiguous=True)
-        self._phasecorr_enabled = False
-        self._phasecorr_method = "subpix"
-        self.border: int | tuple[int, int, int, int] = 0
-        self.upsample: int = 20
+        self._selected_roi = roi
+        self._fix_phase = fix_phase
+        self._phasecorr_method = phasecorr_method
+        self.border: int | tuple[int, int, int, int] = border
+        self.max_offset: int = max_offset
+        self.upsample: int = upsample
         self.pbar = None
         self.show_pbar = False
-        self._roi = roi
+        self._offset = 0.0
 
-    def _correct_phase(self, arr: np.ndarray) -> np.ndarray:
-        if self._phasecorr_enabled:
-            from .phasecorr import correct_scan_phase
+        # Debugging toggles
+        self.debug_flags = {
+            "frame_idx": True,
+            "roi_array_shape": False,
+            "phase_offset": False,
+        }
+        self.logger = log.get("scan")
+        self.logger.info("MBO Scan initialized.")
 
-            return correct_scan_phase(
-                arr,
-                method=self._phasecorr_method,
-                upsample=self.upsample,
-                border=self.border,
-            )
-        return arr
+    @property
+    def offset(self):
+        return self._offset
+
+    @offset.setter
+    def offset(self, value: float | np.ndarray):
+        """
+        Set the phase offset for phase correction.
+        If value is a scalar, it applies the same offset to all frames.
+        If value is an array, it must match the number of frames.
+        """
+        if isinstance(value, (int, float)):
+            self._offset = float(value)
+        elif isinstance(value, np.ndarray):
+            self._offset = value
+        else:
+            raise TypeError("Offset must be a scalar or a 1D numpy array.")
 
     @property
     def phasecorr_method(self):
@@ -238,44 +295,44 @@ class Scan_MBO(scans.ScanMultiROI):
         self._phasecorr_method = value
 
     @property
-    def do_phasecorr(self):
+    def fix_phase(self):
         """
         Get whether phase correction is applied.
         If True, phase correction is applied to the data.
         """
-        return self._phasecorr_enabled
+        return self._fix_phase
 
-    @do_phasecorr.setter
-    def do_phasecorr(self, value: bool):
+    @fix_phase.setter
+    def fix_phase(self, value: bool):
         """
         Set whether to apply phase correction.
         If True, phase correction is applied to the data.
         """
         if not isinstance(value, bool):
             raise ValueError("do_phasecorr must be a boolean value.")
-        self._phasecorr_enabled = value
+        self._fix_phase = value
 
     @property
-    def roi(self):
+    def selected_roi(self):
         """
         Get the current ROI index.
         If roi is None, returns -1 to indicate no specific ROI.
         """
-        return self._roi
+        return self._selected_roi
 
-    @roi.setter
-    def roi(self, value):
+    @selected_roi.setter
+    def selected_roi(self, value):
         """
         Set the current ROI index.
         If value is None, sets roi to -1 to indicate no specific ROI.
         """
-        self._roi = value
+        self._selected_roi = value
 
     def _read_pages(
         self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
     ):
+        self.logger.debug(f"Reading pages for frames: {frames}, channels: {chans}, yslice: {yslice}, xslice: {xslice}")
         C = self.num_channels
-        # build global page indices for each (frame, channel)
         pages = [f * C + c for f in frames for c in chans]
 
         H = len(utils.listify_index(yslice, self._page_height))
@@ -288,12 +345,17 @@ class Scan_MBO(scans.ScanMultiROI):
             idxs = [i for i, p in enumerate(pages) if start <= p < end]
             if idxs:
                 frame_idx = [pages[i] - start for i in idxs]
-                ic(tf, frame_idx)
-                buf[idxs] = self._correct_phase(
-                    tf.asarray(key=frame_idx)[..., yslice, xslice]
-                )
-                ic(yslice, xslice)
-
+                if self._fix_phase:
+                    chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
+                    self.offset = compute_scan_phase_offsets(
+                        chunk,
+                        upsample=self.upsample,
+                        max_offset=self.max_offset,
+                        border=self.border,
+                    )
+                    buf[idxs] = apply_scan_phase_offsets(chunk, self.offset)
+                else:
+                    buf[idxs] = tf.asarray(key=frame_idx)[..., yslice, xslice]
             start = end
         return buf.reshape(len(frames), len(chans), H, W)
 
@@ -311,7 +373,7 @@ class Scan_MBO(scans.ScanMultiROI):
         H_out = self.field_heights[0]
 
         # Return a tuple of all individual ROI slices
-        if isinstance(self.roi, list) or self.roi in [-1, 0]:
+        if isinstance(self.selected_roi, list) or self.selected_roi == 0:
             roi_outputs = []
             for roi_idx in range(self.num_rois):
                 oxs = self.fields[0].output_xslices[roi_idx]
@@ -341,11 +403,11 @@ class Scan_MBO(scans.ScanMultiROI):
                 roi_outputs.append(data)
             return tuple(roi_outputs)
 
-        elif self.roi is not None and self.roi > 0:
+        elif self.selected_roi is not None and self.selected_roi > 0:
             oxs = self.fields[0].output_xslices[0]
-            oys = self.fields[0].output_yslices[self.roi - 1]
-            xs = self.fields[0].xslices[self.roi - 1]
-            ys = self.fields[0].yslices[self.roi - 1]
+            oys = self.fields[0].output_yslices[self.selected_roi - 1]
+            xs = self.fields[0].xslices[self.selected_roi - 1]
+            ys = self.fields[0].yslices[self.selected_roi - 1]
 
             W_out = oxs.stop - oxs.start
             H_out = self.field_heights[0]
@@ -389,11 +451,6 @@ class Scan_MBO(scans.ScanMultiROI):
     def total_frames(self):
         return sum(len(tf.pages) // self.num_channels for tf in self.tiff_files)
 
-    # @property
-    # def total_frames(self):
-    #     """Number of frames across all tiff files."""
-    #     return sum([int(len(tf.pages) / 14) for tf in self.tiff_files])
-
     def xslices(self):
         return self.fields[0].xslices
 
@@ -429,10 +486,10 @@ class Scan_MBO(scans.ScanMultiROI):
     @property
     def shape(self):
         """Shape is relative to the current ROI."""
-        if self.roi is not None:
-            if not isinstance(self.roi, (list, tuple)):
-                if self.roi > 0:
-                    s = self.fields[0].output_xslices[self.roi - 1]
+        if self.selected_roi is not None:
+            if not isinstance(self.selected_roi, (list, tuple)):
+                if self.selected_roi > 0:
+                    s = self.fields[0].output_xslices[self.selected_roi - 1]
                     width = s.stop - s.start
                     return (
                         self.total_frames,
@@ -483,19 +540,17 @@ class Scan_MBO(scans.ScanMultiROI):
         ROI's that have multiple 'zs' to a single depth.
         """
         try:
-            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"][
-                "imagingRoiGroup"
-            ]["rois"]
+            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
         except KeyError:
-            raise RuntimeError(
-                "This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata."
-            )
+            raise RuntimeError("This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata.")
         roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
-        roi_infos = list(
-            filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos)
-        )  # discard empty/malformed ROIs
+
+        # discard empty/malformed ROIs
+        roi_infos = list(filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos))
+
+        # LBM uses a single depth that is not stored in metadata,
+        # so force this to be 0.
         for roi_info in roi_infos:
-            # LBM uses a single depth that is not stored in metadata, so force this to be 0
             roi_info["zs"] = [0]
 
         rois = [ROI(roi_info) for roi_info in roi_infos]
@@ -644,90 +699,6 @@ def stack_from_files(files: list, proj="mean"):
         lazy_arrays.append(img)
 
     return np.stack(lazy_arrays, axis=0)
-
-
-def to_lazy_array_v1(data_in, **kwargs):
-    """Convert input data into a lazy array or list of arrays and return associated filenames."""
-    data, filenames = dispatch_data_handler(data_in, **kwargs)
-    return data, filenames
-
-
-def dispatch_data_handler(data_in, **kwargs):
-    if _is_arraylike(data_in):
-        return [data_in], getattr(data_in, "fpath", None)
-
-    if isinstance(data_in, list):
-        return handle_list(data_in, **kwargs)
-
-    if isinstance(data_in, (str, Path)):
-        return handle_path(Path(data_in).expanduser().resolve(), **kwargs)
-
-    raise TypeError(f"Unsupported input type: {type(data_in)}")
-
-
-def handle_path(path: Path, **kwargs):
-    if path.is_dir():
-        files = get_files(path, "tif", 1)
-        if not files:
-            return []
-        if is_raw_scanimage(files[0]):
-            scan = read_scan(files, roi=kwargs.get("roi"))
-            scan.fpath = path
-            return scan, [str(f) for f in files]
-        else:  # TODO: handle large tiff sizes
-            # make sure its a .tif or .tiff directory
-            if all(Path(f).suffix in [".tif", ".tiff"] for f in files):
-                try:
-                    arrays = [tifffile.memmap(f, mode="r") for f in files]
-                except Exception as e:
-                    ic(e)
-                    arrays = [tifffile.imread(f, mode="r") for f in files]
-            elif all(Path(f).suffix == ".npy" for f in files):
-                arrays = [np.memmap(f, mode="r") for f in files]
-            else:
-                raise TypeError(f"Unsupported file types in directory: {path}")
-
-            ref_shape = arrays[0].shape[-2:]
-            if not all(a.shape[-2:] == ref_shape for a in arrays):
-                raise ValueError("Inconsistent TIFF shapes across planes")
-            return np.stack(arrays, axis=1), [str(f) for f in files]
-
-    if path.is_file():
-        if path.suffix in [".tif", ".tiff"]:
-            try:
-                return tifffile.memmap(path), str(path)
-            except [MemoryError, PermissionError, ValueError] as e:
-                ic(f"Failed to memmap {path}: {e}")
-                return tifffile.imread(path), str(path)
-        if path.suffix == ".npy":
-            return np.memmap(path), str(path)
-        raise TypeError(f"Unsupported file type: {path.suffix}")
-
-    raise TypeError(f"Path must be a file or directory, got: {path}")
-
-
-def handle_list(data_in: list, **kwargs):
-    # if data_in is already array-like, we need to get the filepath from the object itself
-    if all(_is_arraylike(d) for d in data_in):
-        filenames = [getattr(d, "fpath", None) for d in data_in]
-        if not filenames or all(f is None for f in filenames):
-            print(
-                "Warning: No file paths found in the input data."
-                " Lazy loading and data-preview features may not work as expected."
-            )
-        return data_in, filenames
-
-    if all(isinstance(p, (str, Path)) for p in data_in):
-        paths = [Path(p).expanduser().resolve() for p in data_in]
-        if is_raw_scanimage(str(paths[0])):
-            scan = read_scan(paths, roi=kwargs.get("roi"))
-            scan.fpath = paths[0].parent
-            return scan, [str(p) for p in paths]
-        if len(paths) == 1:
-            return handle_path(paths[0], **kwargs)
-        return stack_from_files(paths), [str(p) for p in paths]
-
-    raise TypeError("Unsupported mixed-type list")
 
 
 def _is_arraylike(obj) -> bool:

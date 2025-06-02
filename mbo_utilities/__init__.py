@@ -1,6 +1,7 @@
-import os
 from pathlib import Path
 
+# from . import log
+import mbo_utilities.log as log
 from .file_io import (
     get_files,
     stack_from_files,
@@ -20,14 +21,6 @@ from .util import (
     subsample_array,
 )
 
-try:
-    from icecream import ic, install
-
-    install()
-except ImportError:  # Graceful fallback if IceCream isn't installed.
-    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
-    install = None
-
 if is_imgui_installed():
     from .graphics import run_gui
 else:
@@ -36,9 +29,6 @@ else:
     )
 
 __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
-
-# default to disabling all ic() calls unless MBO_DEBUG is set
-ic.enable() if os.environ.get("MBO_DEBUG", False) else ic.disable()
 
 
 __all__ = [

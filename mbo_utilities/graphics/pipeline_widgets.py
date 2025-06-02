@@ -295,9 +295,9 @@ def draw_section_suite2p(self):
 
         imgui.separator()
         if imgui.button("Run"):
-            self.debug_panel.log("info", "Running Suite2p pipeline...")
+            self.logger.log("info", "Running Suite2p pipeline...")
             run_process(self)
-            self.debug_panel.log("info", "Suite2p pipeline completed.")
+            self.logger.log("info", "Suite2p pipeline completed.")
         if self._install_error:
             imgui.same_line()
             if self._show_red_text:
@@ -314,16 +314,16 @@ def draw_section_suite2p(self):
                 if imgui.button("Install"):
                     import subprocess
 
-                    self.debug_panel.log("info", "Installing lbm_suite2p_python...")
+                    self.logger.log("info", "Installing lbm_suite2p_python...")
                     try:
                         subprocess.check_call(["pip", "install", "lbm_suite2p_python"])
-                        self.debug_panel.log("info", "Installation complete.")
+                        self.logger.log("info", "Installation complete.")
                         self._install_error = False
                         self._show_red_text = False
                         self._show_green_text = True
                     except Exception as e:
                         try:
-                            self.debug_panel.log(
+                            self.logger.log(
                                 "error",
                                 f"Installation failed: {e}",
                             )
@@ -333,7 +333,7 @@ def draw_section_suite2p(self):
                             self._show_red_text = False
                             self._show_green_text = True
                         except Exception as e:
-                            self.debug_panel.log("error", f"Installation failed: {e}")
+                            self.logger.log("error", f"Installation failed: {e}")
                             self._show_red_text = True
                             self._show_install_button = False
                             self._show_green_text = True
@@ -348,13 +348,13 @@ def draw_section_masknmf(self):
 def run_process(self):
     """Runs the selected processing pipeline."""
     if self._current_pipeline == "suite2p":
-        self.debug_panel.log(
+        self.logger.log(
             "info", f"Running Suite2p pipeline with settings: {self.s2p}"
         )
         try:
             import lbm_suite2p_python as lsp
         except ImportError:
-            self.debug_panel.log(
+            self.logger.log(
                 "error",
                 "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline.",
             )
@@ -364,9 +364,9 @@ def run_process(self):
         kwargs = {"self": self}
         threading.Thread(target=run_plane_from_data, kwargs=kwargs).start()
     elif self._current_pipeline == "masknmf":
-        self.debug_panel.log("info", "Running MaskNMF pipeline (not yet implemented).")
+        self.logger.log("info", "Running MaskNMF pipeline (not yet implemented).")
     else:
-        self.debug_panel.log(
+        self.logger.log(
             "error", "Unknown pipeline selected: %s", self._current_pipeline
         )
 
@@ -374,7 +374,7 @@ def run_process(self):
 def run_plane_from_data(self):
     if HAS_LSP:
         if self._region == "Sub-FOV":
-            self.debug_panel.log(
+            self.logger.log(
                 "info", "Running Suite2p pipeline on selected subregion."
             )
             current_z = self.image_widget.current_index["z"]
@@ -382,7 +382,7 @@ def run_plane_from_data(self):
             ind_x = list(ind_xy[0])
             ind_y = list(ind_xy[1])
             data = self.image_widget.data[0][:, current_z, ind_x, ind_y]
-            self.debug_panel.log("info", f"shape of selected data: {data.shape}")
+            self.logger.log("info", f"shape of selected data: {data.shape}")
         else:
             data = self.image_widget.data[0][:, 6, :, :]
         out_dir = Path(self._saveas_outdir)
@@ -393,11 +393,11 @@ def run_plane_from_data(self):
         save_path = out_dir / "plane_7.tif"
         metadata["shape"] = data.shape
         tifffile.imwrite(save_path, data, metadata=metadata)
-        self.debug_panel.log("info", f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
+        self.logger.log("info", f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
 
         ops = self.s2p.to_dict()
-        self.debug_panel.log("info", f"User ops provided:")
+        self.logger.log("info", f"User ops provided:")
         for k, v in ops.items():
-            self.debug_panel.log("info", f"{k}: {v}")
+            self.logger.log("info", f"{k}: {v}")
         lsp.run_plane(save_path, out_dir, ops=ops)
-        self.debug_panel.log("info", f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
+        self.logger.log("info", f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
