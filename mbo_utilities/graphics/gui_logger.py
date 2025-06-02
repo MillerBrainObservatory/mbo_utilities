@@ -10,24 +10,6 @@ class GuiLogHandler(logging.Handler):
         self.gui_logger = gui_logger
 
     def emit(self, record):
-        msg = self.format(record)
-        self.gui_logger.add_message(record.levelno, msg)
-
-
-class GuiLogger:
-    def __init__(self):
-        self.show = True
-        self.filters = {"debug": True, "info": True, "error": True}
-        self.messages = []
-        self.window_flags = imgui.WindowFlags_.none
-        self.active_loggers = {
-            "mbo": True,
-            "gui": True,
-            "scan": True,
-            "io": True
-        }
-
-    def add_message(self, levelno, msg):
         t = time.strftime("%H:%M:%S")
         level_str = {
             logging.DEBUG: "debug",
@@ -35,11 +17,26 @@ class GuiLogger:
             logging.WARNING: "warn",
             logging.ERROR: "error",
             logging.CRITICAL: "error"
-        }.get(levelno, "info")
-        self.messages.append((t, level_str, msg))
+        }.get(record.levelno, "info")
+        # extract only the last segment of the logger name, e.g. "mbo.scan" → "scan"
+        name = record.name.split(".")[-1]
+        self.gui_logger.messages.append((t, level_str, name, self.format(record)))
 
+
+class GuiLogger:
+    def __init__(self):
+        self.show = True
+        self.filters = {"debug": True, "info": True, "error": True}
+        self.messages = []  # now holds tuples (time, level, logger_name, text)
+        self.window_flags = imgui.WindowFlags_.none
+        self.active_loggers = {
+            "mbo": True,
+            "gui": True,
+            "scan": True,
+        }
+        
     def draw(self):
-        # Log level filters
+        # Log‐level checkboxes
         _, self.filters["debug"] = imgui.checkbox("Debug", self.filters["debug"])
         imgui.same_line()
         _, self.filters["info"] = imgui.checkbox("Info", self.filters["info"])
@@ -48,7 +45,7 @@ class GuiLogger:
 
         imgui.separator()
 
-        # Toggle specific sub-loggers
+        # Sub‐logger toggles
         for name in list(self.active_loggers):
             imgui.push_id(f"logger_{name}")
             changed, state = imgui.checkbox(f"Logger: {name}", self.active_loggers[name])
@@ -62,13 +59,58 @@ class GuiLogger:
 
         imgui.separator()
         imgui.begin_child("##debug_scroll", imgui.ImVec2(0, 0), False)
-        for t, lvl, m in self.messages:
+
+        # iterate newest‐first
+        for t, lvl, logger_name, m in reversed(self.messages):
             if not self.filters.get(lvl, False):
+                continue
+            if not self.active_loggers.get(logger_name, False):
+                continue
+
+            # color by severity
+            if lvl == "debug":
+                col = imgui.ImVec4(0.6, 0.6, 0.6, 1)
+            elif lvl == "info":
+                col = imgui.ImVec4(1.0, 1.0, 1.0, 1)
+            else:  # "warn" or "error"
+                col = imgui.ImVec4(1.0, 0.3, 0.3, 1)
+            imgui.text_colored(col, f"[{t}] [{logger_name}] {m}")
+        imgui.end_child()
+
+    def draw2(self):
+        # Log‐level checkboxes
+        _, self.filters["debug"] = imgui.checkbox("Debug", self.filters["debug"])
+        imgui.same_line()
+        _, self.filters["info"] = imgui.checkbox("Info", self.filters["info"])
+        imgui.same_line()
+        _, self.filters["error"] = imgui.checkbox("Error", self.filters["error"])
+
+        imgui.separator()
+
+        # Sub‐logger toggles
+        for name in list(self.active_loggers):
+            imgui.push_id(f"logger_{name}")
+            changed, state = imgui.checkbox(f"Logger: {name}", self.active_loggers[name])
+            if changed:
+                self.active_loggers[name] = state
+                if state:
+                    log.enable(name)
+                else:
+                    log.disable(name)
+            imgui.pop_id()
+
+        imgui.separator()
+        imgui.begin_child("##debug_scroll", imgui.ImVec2(0, 0), False)
+        for t, lvl, logger_name, m in self.messages:
+            # skip if this level is unchecked or this logger is disabled
+            if not self.filters.get(lvl, False):
+                continue
+            if not self.active_loggers.get(logger_name, False):
                 continue
             col = {
                 "debug": imgui.ImVec4(0.8, 0.8, 0.8, 1),
                 "info": imgui.ImVec4(1.0, 1.0, 1.0, 1),
                 "error": imgui.ImVec4(1.0, 0.3, 0.3, 1),
             }[lvl]
-            imgui.text_colored(col, f"[{t}] {m}")
+            imgui.text_colored(col, f"[{t}] [{logger_name}] {m}")
         imgui.end_child()

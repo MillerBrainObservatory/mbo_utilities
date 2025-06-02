@@ -251,6 +251,15 @@ class Scan_MBO(scans.ScanMultiROI):
             "phase_offset": False,
         }
         self.logger = log.get("scan")
+        self.logger.debug(
+            f"Initializing MBO Scan with parameters:\n"
+            f"roi: {roi}, "
+            f"fix_phase: {fix_phase}, "
+            f"phasecorr_method: {phasecorr_method}, "
+            f"border: {border}, "
+            f"upsample: {upsample}, "
+            f"max_offset: {max_offset}"
+        )
         self.logger.info("MBO Scan initialized.")
 
     @property

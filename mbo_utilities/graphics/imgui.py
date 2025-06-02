@@ -346,19 +346,25 @@ class PreviewDataWidget(EdgeWindow):
         """
         Fastplotlib attachment, callable with fastplotlib.ImageWidget.add_gui(PreviewDataWidget)
         """
-        flags = 0
-        if not show_title:
-            flags |= imgui.WindowFlags_.no_title_bar
-        if not movable:
-            flags |= imgui.WindowFlags_.no_move
-        if not resizable:
-            flags |= imgui.WindowFlags_.no_resize
-        if not scrollable:
-            flags |= imgui.WindowFlags_.no_scrollbar
-        if auto_resize:
-            flags |= imgui.WindowFlags_.always_auto_resize
-        if window_flags is not None:
-            flags |= window_flags
+        self.debug_panel = GuiLogger()
+        gui_handler = GuiLogHandler(self.debug_panel)
+        for name in ("mbo", "gui", "scan",):
+            lg = log.get(name)
+            lg.addHandler(gui_handler)
+            lg.setLevel(logging.DEBUG)  # allow debug/info messages through
+            lg.disabled = False
+        self.logger = log.get("gui")
+        self.s2p = Suite2pSettings()
+        self.logger.info("Logger initialized.")
+
+        flags = (
+                (imgui.WindowFlags_.no_title_bar if not show_title else 0) |
+                (imgui.WindowFlags_.no_move if not movable else 0) |
+                (imgui.WindowFlags_.no_resize if not resizable else 0) |
+                (imgui.WindowFlags_.no_scrollbar if not scrollable else 0) |
+                (imgui.WindowFlags_.always_auto_resize if auto_resize else 0) |
+                (window_flags or 0)
+        )
         super().__init__(
             figure=iw.figure,
             size=size,
@@ -366,34 +372,16 @@ class PreviewDataWidget(EdgeWindow):
             title=title,
             window_flags=flags,
         )
-
-        self.logger = log.get("gui")
-
         if implot.get_current_context() is None:
             implot.create_context()
 
         # backend.create_fonts_texture()
         self.io = imgui.get_io()
         self.io.set_ini_filename("/home/flynn/lbm_data/mbo_settings.ini")
-        # font = self.io.fonts.add_font_from_file_ttf(
-        #     "~/repos/mbo_utilities/assets/fonts/JetBrainsMono/JetBrainsMonoNerdFont-Bold.ttf",
-        #     16.0
-        # )
 
         self.imgui_backend = iw.figure.imgui_renderer.backend
         self.font_size = 12
         self.fpath = fpath if fpath else getattr(iw, "fpath", None)
-
-        self.s2p = Suite2pSettings()
-        self.debug_panel = GuiLogger()
-        gui_handler = GuiLogHandler(self.debug_panel)
-        # gui_handler.setFormatter(log._ICFmt())
-        logger = log.get("gui")
-        logger.addHandler(gui_handler)
-        logger.setLevel(logging.INFO)  # ensure messages aren't filtered
-        logger.disabled = False  # ensure it isn't disabled
-        self.logger = logger
-        # setup_logger()
 
         self._show_debug_panel = False
         self._show_tool_style_editor = False
@@ -478,10 +466,12 @@ class PreviewDataWidget(EdgeWindow):
         if not value:
             for i, arr in enumerate(self.image_widget.data):
                 arr.offset = 0.0
+                self.logger.info(f"Resetting phase for array {i}.")
         if self.is_mbo_scan:
             for arr in self.image_widget.data:
                 if isinstance(arr, Scan_MBO):
                     arr.fix_phase = value
+                    self.logger.info(f"Set fix_phase to {value} for MBO Scan object.")
         else:
             self.logger.warning(
                 "Fix phase is only applicable to MBO Scan objects. "
@@ -500,6 +490,7 @@ class PreviewDataWidget(EdgeWindow):
         for arr in self.image_widget.data:
             if isinstance(arr, Scan_MBO):
                 arr.max_offset = value
+                self.logger.info(f"Border set to {value}.")
             else:
                 self.logger.warning(
                     "Max offset is only applicable to MBO Scan objects. "
@@ -516,6 +507,7 @@ class PreviewDataWidget(EdgeWindow):
         for arr in self.image_widget.data:
             if isinstance(arr, Scan_MBO):
                 arr.max_offset = value
+                self.logger.info(f"Max offset set to {value}.")
             else:
                 self.logger.warning(
                     "Max offset is only applicable to MBO Scan objects. "
@@ -538,7 +530,8 @@ class PreviewDataWidget(EdgeWindow):
                 f"Must be between 0 and {len(self.image_widget.managed_graphics) - 1}."
             )
         self._selected_roi = value
-        self.image_widget.current_index = {"roi": value}
+        self.logger.info(f"Selected ROI index set to {value}.")
+        # self.image_widget.current_index = {"roi": value}
         self.update_frame_apply()
 
     @property
@@ -549,7 +542,10 @@ class PreviewDataWidget(EdgeWindow):
     def gaussian_sigma(self, value):
         if value > 0:
             self._gaussian_sigma = value
+            self.logger.info(f"Gaussian sigma set to {value}.")
             self.update_frame_apply()
+        else:
+            self.logger.warning(f"Invalid gaussian sigma value: {value}. ")
 
     @property
     def proj(self):
@@ -559,8 +555,11 @@ class PreviewDataWidget(EdgeWindow):
     def proj(self, value):
         if value != self._proj:
             if value == "mean-sub":
+                self.logger.info("Setting projection to mean-subtracted.")
                 self.update_frame_apply()
             else:
+
+                self.logger.info(f"Setting projection to np.{value}.")
                 self.image_widget.window_funcs["t"].func = getattr(np, value)
             self._proj = value
 
@@ -572,14 +571,25 @@ class PreviewDataWidget(EdgeWindow):
     def window_size(self, value):
         self.image_widget.window_funcs["t"].window_size = value
         self._window_size = value
+        self.logger.info(f"Window size set to {value}.")
 
     @property
     def current_offset(self):
         if all(hasattr(array, "offset") for array in self.image_widget.data):
             if isinstance(self.image_widget.data[0].offset, float):
+                self.logger.info(f"All arrays have offset attribute. Setting from array.offset")
                 return [array.offset for array in self.image_widget.data]
             else:
-                return [array.offset[1] for array in self.image_widget.data]
+                self.logger.info(f"Arrays don't have offset attribute. ")
+                return [
+                    compute_scan_phase_offsets(
+                        arr,
+                        "subpix",
+                        self.phase_upsample,
+                        self.max_offset,
+                        self.border
+                    ) for i, arr in enumerate(self.image_widget.data)
+                ]
         else:
             frame = self.get_raw_frame()
             return compute_scan_phase_offsets(
