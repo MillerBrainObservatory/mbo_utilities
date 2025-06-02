@@ -1,11 +1,13 @@
 import logging
 import webbrowser
 from pathlib import Path
-from typing import Literal, Any
+from typing import Literal
 import threading
 from functools import partial
 from dataclasses import dataclass, field
-import inspect, numbers, collections.abc as cab
+import inspect
+import collections.abc as cab
+import numbers
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
@@ -28,6 +30,7 @@ from mbo_utilities.file_io import (
     _get_mbo_dirs,
     read_scan,
 )
+from mbo_utilities.graphics._imgui import begin_popup_size, ndim_to_frame
 from mbo_utilities.graphics._widgets import set_tooltip, checkbox_with_tooltip
 from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler
 from mbo_utilities.graphics.progress_bar import (
@@ -35,7 +38,7 @@ from mbo_utilities.graphics.progress_bar import (
     draw_saveas_progress,
 )
 from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
-from mbo_utilities.phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets
+from mbo_utilities.phasecorr import compute_scan_phase_offsets
 from mbo_utilities import log
 
 try:
@@ -173,7 +176,6 @@ _NAME_COLORS = (
 )
 _VALUE_COLOR = imgui.ImVec4(0.85, 0.85, 0.85, 1.0)
 
-
 def _fmt(x):
     if isinstance(x, (str, bool, numbers.Number)):
         return repr(x)
@@ -189,20 +191,93 @@ def _fmt(x):
             pass
     return f"<{type(x).__name__}>"
 
-
 def draw_scope():
     with imgui_ctx.begin_child("Scope Inspector"):
         frame = inspect.currentframe().f_back
-        vars_all = {**frame.f_globals, **frame.f_locals}
-        imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4))
+        vars_all = {**frame.f_locals}
+        imgui.push_style_var( # type: ignore # noqa
+            imgui.StyleVar_.item_spacing,
+            imgui.ImVec2(8, 4)
+        )
         try:
-            for idx, (name, val) in enumerate(sorted(vars_all.items())):
-                imgui.text_colored(_NAME_COLORS[idx & 1], name)
-                imgui.same_line(spacing=16)
-                imgui.text_colored(_VALUE_COLOR, _fmt(val))
+            for name, val in sorted(vars_all.items()):
+                if (
+                    inspect.ismodule(val)
+                    or (name.startswith("_")
+                    or name.endswith("_"))
+                    or callable(val)
+                ):
+                    continue
+                _render_item(name, val)
         finally:
             imgui.pop_style_var()
 
+def _render_item(name, val, prefix=""):
+    from collections.abc import Mapping, Sequence
+
+    full_name = f"{prefix}{name}"
+    # Dictionaries
+    if isinstance(val, Mapping):
+        # filter out all-underscore keys and callables
+        children = [(k, v) for k, v in val.items()
+                    if not (k.startswith("__") and k.endswith("__")) and not callable(v)]
+        if children:
+            if imgui.tree_node(full_name):
+                for k, v in children:
+                    _render_item(str(k), v, prefix=full_name + ".")
+                imgui.tree_pop()
+        else:
+            # no valid children → render as a leaf
+            imgui.text_colored(_NAME_COLORS[0], full_name)
+            imgui.same_line(spacing=16)
+            imgui.text_colored(_VALUE_COLOR, _fmt(val))
+    # Lists/tuples/etc.
+    elif isinstance(val, Sequence) and not isinstance(val, (str, bytes, bytearray)):
+        children = [(i, v) for i, v in enumerate(val) if not callable(v)]
+        if children:
+            if imgui.tree_node(f"{full_name} [{type(val).__name__}]"):
+                for i, v in children:
+                    _render_item(f"{i}", v, prefix=full_name + "[")
+                imgui.tree_pop()
+        else:
+            imgui.text_colored(_NAME_COLORS[0], full_name)
+            imgui.same_line(spacing=16)
+            imgui.text_colored(_VALUE_COLOR, _fmt(val))
+
+    # Other objects: show only settable attributes and @property values
+    else:
+        cls = type(val)
+        # gather all @property names on the class
+        prop_names = [
+            name_ for name_, attr in cls.__dict__.items()
+            if isinstance(attr, property)
+        ]
+        # gather instance attributes from __dict__, excluding private and callable
+        fields = {}
+        if hasattr(val, "__dict__"):
+            fields = {
+                n: v for n, v in vars(val).items()
+                if not n.startswith("_") and not callable(v)
+            }
+        # if there are any fields or properties, show a tree node
+        if fields or prop_names:
+            if imgui.tree_node(f"{full_name} ({cls.__name__})"):
+                # render instance attributes
+                for k, v in fields.items():
+                    _render_item(k, v, prefix=full_name + ".")
+                # render properties by retrieving their current value
+                for prop in prop_names:
+                    try:
+                        prop_val = getattr(val, prop)
+                    except Exception:
+                        continue
+                    _render_item(prop, prop_val, prefix=full_name + ".")
+                imgui.tree_pop()
+        else:
+            # leaf node: display name and formatted value
+            imgui.text_colored(_NAME_COLORS[0], full_name)
+            imgui.same_line(spacing=16)
+            imgui.text_colored(_VALUE_COLOR, _fmt(val))
 
 def _save_as(
     path: str | Path,
@@ -250,31 +325,6 @@ class SaveStatus:
     plane: int | None = None
     message: str = ""
     logs: dict = field(default_factory=dict)
-
-
-def begin_popup_size():
-    width_em = hello_imgui.em_size(1.0)  # 1em in pixels
-    win_w = imgui.get_window_width()
-    win_h = imgui.get_window_height()
-
-    # 75% of window size in ems
-    w = win_w * 0.75 / width_em
-    h = win_h * 0.75 / width_em  # same em size applies for height in most UIs
-
-    # Clamp in em units
-    w = min(max(w, 20), 60)  # roughly 300–800 px if 1em ≈ 15px
-    h = min(max(h, 20), 60)
-
-    return hello_imgui.em_to_vec2(w, h)
-
-def ndim_to_frame(arr, t=0, z=0):
-    if arr.ndim == 4:  # TZXY
-        return arr[t, z]
-    if arr.ndim == 3:  # TXY
-        return arr[t]
-    if arr.ndim == 2:  # XY
-        return arr
-    raise ValueError(f"Unsupported data shape: {arr.shape}")
 
 
 class PreviewDataWidget(EdgeWindow):
@@ -583,10 +633,6 @@ class PreviewDataWidget(EdgeWindow):
             self.debug_panel.draw()
             imgui.end()
 
-        # Top Menu Bar
-        cflags: imgui.ChildFlags = (
-            imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # type: ignore # noqa
-        )
         wflags: imgui.WindowFlags = imgui.WindowFlags_.menu_bar  # noqa
         with imgui_ctx.begin_child(
                 "menu",
@@ -1099,11 +1145,13 @@ class PreviewDataWidget(EdgeWindow):
 
             imgui.columns(2, "offsets", False)
             for i, iw in enumerate(self.image_widget.data):
-                if not isinstance(iw.offset, float):
-                    continue
+                if not hasattr(iw, "offset"):
+                    ofs = self.current_offset[i]
+                else:
+                    ofs = iw.offset if isinstance(iw.offset, float) else iw.offset[1]
                 imgui.text(f"Array {i}:")
                 imgui.next_column()
-                imgui.text(f"{iw.offset:.3f}")
+                imgui.text(f"{ofs:.3f}")
                 imgui.next_column()
             imgui.columns(1)
 

@@ -44,3 +44,29 @@ def setup_imgui():
             ic("Font not found:", font_path)
     except Exception as e:
         ic("Error loading font:", e)
+
+
+def begin_popup_size():
+    width_em = hello_imgui.em_size(1.0)  # 1em in pixels
+    win_w = imgui.get_window_width()
+    win_h = imgui.get_window_height()
+
+    # 75% of window size in ems
+    w = win_w * 0.75 / width_em
+    h = win_h * 0.75 / width_em  # same em size applies for height in most UIs
+
+    # Clamp in em units
+    w = min(max(w, 20), 60)  # roughly 300–800 px if 1em ≈ 15px
+    h = min(max(h, 20), 60)
+
+    return hello_imgui.em_to_vec2(w, h)
+
+
+def ndim_to_frame(arr, t=0, z=0):
+    if arr.ndim == 4:  # TZXY
+        return arr[t, z]
+    if arr.ndim == 3:  # TXY
+        return arr[t]
+    if arr.ndim == 2:  # XY
+        return arr
+    raise ValueError(f"Unsupported data shape: {arr.shape}")
