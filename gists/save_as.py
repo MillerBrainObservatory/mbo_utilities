@@ -34,14 +34,18 @@ def find_si_rois(file):
 
 
 if __name__ == "__main__":
-    test_scan = mbo.read_scan("/home/flynn/lbm_data/raw", roi=0)
-    savedir = r"/home/flynn/lbm_data/saved"
+    test_scan = mbo.read_scan(
+        "/home/flynn/lbm_data/raw",
+        roi=0,
+        phasecorr_method="mean",
+    )
+    savedir = r"/home/flynn/lbm_data/mean_phasecorr"
     mbo.save_as(
         test_scan,
         savedir,
-        ext=".bin",
+        ext=".tiff",
         overwrite=True,
+        fix_phase=False,
         debug=True,
-        fix_phase=True,
         planes=[1, 5, 10, 14],
     )
