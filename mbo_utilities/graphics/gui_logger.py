@@ -14,7 +14,7 @@ class GuiLogHandler(logging.Handler):
         level_str = {
             logging.DEBUG: "debug",
             logging.INFO: "info",
-            logging.WARNING: "warn",
+            logging.WARNING: "warning",
             logging.ERROR: "error",
             logging.CRITICAL: "error"
         }.get(record.levelno, "info")
@@ -26,13 +26,14 @@ class GuiLogHandler(logging.Handler):
 class GuiLogger:
     def __init__(self):
         self.show = True
-        self.filters = {"debug": True, "info": True, "error": True}
+        self.filters = {"debug": True, "info": True, "warning": True}
         self.messages = []  # now holds tuples (time, level, logger_name, text)
         self.window_flags = imgui.WindowFlags_.none
         self.active_loggers = {
             "mbo": True,
             "gui": True,
             "scan": True,
+            "save_as": True,
         }
         
     def draw(self):
@@ -41,7 +42,7 @@ class GuiLogger:
         imgui.same_line()
         _, self.filters["info"] = imgui.checkbox("Info", self.filters["info"])
         imgui.same_line()
-        _, self.filters["error"] = imgui.checkbox("Error", self.filters["error"])
+        _, self.filters["warning"] = imgui.checkbox("warning", self.filters["warning"])
 
         imgui.separator()
 
@@ -83,7 +84,7 @@ class GuiLogger:
         imgui.same_line()
         _, self.filters["info"] = imgui.checkbox("Info", self.filters["info"])
         imgui.same_line()
-        _, self.filters["error"] = imgui.checkbox("Error", self.filters["error"])
+        _, self.filters["warning"] = imgui.checkbox("warning", self.filters["warning"])
 
         imgui.separator()
 
@@ -110,7 +111,7 @@ class GuiLogger:
             col = {
                 "debug": imgui.ImVec4(0.8, 0.8, 0.8, 1),
                 "info": imgui.ImVec4(1.0, 1.0, 1.0, 1),
-                "error": imgui.ImVec4(1.0, 0.3, 0.3, 1),
+                "warning": imgui.ImVec4(1.0, 0.3, 0.3, 1),
             }[lvl]
             imgui.text_colored(col, f"[{t}] [{logger_name}] {m}")
         imgui.end_child()

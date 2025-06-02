@@ -12,8 +12,8 @@ import shutil
 from pathlib import Path
 from tifffile import TiffWriter
 import h5py
-from icecream import ic
 
+from . import log
 from .file_io import _make_json_serializable, Scan_MBO
 from .metadata import get_metadata
 from .util import is_running_jupyter
@@ -33,14 +33,11 @@ else:
     from tqdm.auto import tqdm
 
 MBO_DEBUG = bool(int(os.getenv("MBO_DEBUG", "0")))  # export MBO_DEV=1 to enable
-logging.basicConfig(level=logging.DEBUG if MBO_DEBUG else logging.INFO)
-
-if not MBO_DEBUG:
-    ic.disable()
+logging.basicConfig(level=logging.INFO if MBO_DEBUG else logging.WARNING)
 
 # set a name the gui can use to identify this module
-logger = logging.getLogger("mbo.save_as")
-logger.setLevel(logging.WARNING)
+logger = log.get("save_as")
+logger.propagate = False
 
 ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
 
@@ -120,16 +117,12 @@ def save_as(
     """
     # Logging
     if debug:
-        ic.enable()
-        ic("Debugging mode ON")
-        logger.setLevel(logging.DEBUG)
-    else:
         logger.setLevel(logging.INFO)
-        ic.disable()
+    else:
+        logger.setLevel(logging.WARNING)
 
     # save path
     savedir = Path(savedir)
-    ic(savedir)
 
     if not savedir.parent.is_dir():
         raise ValueError(f"{savedir} is not inside a valid directory.")
@@ -142,12 +135,13 @@ def save_as(
         )
 
     if isinstance(planes, int):
+        logger.info(f"Saving only plane {planes} (1-based index).")
         planes = [planes - 1]
     elif planes is None:  # DON'T use "if not planes", then 0 will be treated as falsy
+        logger.info(f"Saving all {scan.num_channels} planes.")
         planes = list(range(scan.num_channels))
     else:
         planes = [p - 1 for p in planes]
-    ic(planes)
 
     over_idx = [p for p in planes if p < 0 or p >= scan.num_planes]
     if over_idx:
@@ -164,6 +158,7 @@ def save_as(
 
     # handle metadata
     if metadata is None:
+        logger.info("No metadata provided; using empty dictionary.")
         metadata = {}
     if not isinstance(metadata, dict):
         raise ValueError(
@@ -172,12 +167,14 @@ def save_as(
 
     # metadata is now either {} or None, so we can safely update it
     metadata = get_metadata(scan.tiff_files[0].filehandle.path)  # from the file
+    logger.info("Using metadata from the first TIFF file in the scan." f" Metadata keys: {list(metadata.keys())}")
 
     # keep the scanimage metadata under the "si" key
     metadata.update(
         {"si": _make_json_serializable(scan.tiff_files[0].scanimage_metadata)}
     )
     metadata["save_path"] = str(savedir.resolve())
+
 
     # which rois to save
     if scan.selected_roi is None:
@@ -189,6 +186,8 @@ def save_as(
     else:
         roi_list = list(scan.selected_roi)  # list of ROIs
 
+    logger.info(f"Saving ROIs: {roi_list} (0 means full stack, None means all ROIs).")
+
     start_time = time.time()
 
     # this is a bit confusing. If roi=None, that atttribute is set on the scan object and
@@ -197,7 +196,7 @@ def save_as(
         if len(roi_list) > 1:
             roi_list = [r + 1 for r in roi_list if r is not None]
     for roi in roi_list:
-        ic(roi, roi_list)
+        logger.info(f"Saving ROI {roi} of {scan.num_rois}.")
         subscan = copy.copy(scan)
         subscan.selected_roi = roi
 
@@ -255,18 +254,15 @@ def _save_data(
     path.mkdir(exist_ok=True)
 
     nt, nz, nx, ny = scan.shape_full
-    ic(nt, nz, nx, ny)
 
     left, right, top, bottom = trim_edge
     left = min(left, nx - 1)
     right = min(right, nx - left)
     top = min(top, ny - 1)
     bottom = min(bottom, ny - top)
-    ic(left, right, top, bottom)
 
     new_height = ny - (top + bottom)
     new_width = nx - (left + right)
-    ic(new_height, new_width)
 
     metadata["fov"] = [new_height, new_width]
     metadata["shape"] = (nt, new_width, new_height)
@@ -277,7 +273,7 @@ def _save_data(
     metadata["save_path"] = str(path.expanduser().resolve())
 
     final_shape = (nt, new_height, new_width)
-    ic(final_shape)
+    logger.info(f"Final shape: {final_shape} (nt, height, width)")
     writer = _get_file_writer(
         ext, overwrite=overwrite, metadata=metadata, data_shape=final_shape
     )
@@ -309,14 +305,12 @@ def _save_data(
 
         if fname.exists() and not overwrite:
             pbar.update(1)
-            ic(fname, overwrite)
             break
 
         pre_exists = False
         if save_phase_png:
             png_dir = path / f"scan_phase_check_plane_{chan_index + 1:02d}"
             png_dir.mkdir(exist_ok=True)
-            ic(f"Saving scan-phase images to {png_dir}")
 
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
         num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))

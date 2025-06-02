@@ -213,8 +213,97 @@ class SaveStatus:
     message: str = ""
     logs: dict = field(default_factory=dict)
 
-def draw_menu(self):
+def draw_menu(parent):
+    # (accessible from the "Tools" menu)
+    if parent.show_style_window:
+        _, parent.show_style_window = imgui.begin(
+            "Style Editor", parent.show_style_window
+        )
+        imgui.show_style_editor()
+        imgui.end()
+    if parent.show_scope_window:
+        size = begin_popup_size()
+        imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)  # type: ignore # noqa
+        _, parent.show_scope_window = imgui.begin(
+            "Scope Inspector",
+            parent.show_scope_window,
+        )
+        draw_scope()
+        imgui.end()
+    if parent.show_debug_panel:
+        size = begin_popup_size()
+        imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)  # type: ignore # noqa
+        _, parent.show_debug_panel = imgui.begin(
+            "MBO Debug Panel",
+            parent.show_debug_panel,
+        )
+        parent.debug_panel.draw()
+        imgui.end()
+    with imgui_ctx.begin_child(
+            "menu",
+            window_flags=imgui.WindowFlags_.menu_bar,  # noqa,
+            child_flags=imgui.ChildFlags_.auto_resize_y
+                        | imgui.ChildFlags_.always_auto_resize,
+    ):
+        if imgui.begin_menu_bar():
+            if imgui.begin_menu("File", True):
+                if imgui.menu_item(
+                        "Save as", "Ctrl+S", p_selected=False, enabled=parent.is_mbo_scan
+                )[0]:
+                    parent._saveas_popup_open = True
+                imgui.end_menu()
+            if imgui.begin_menu("Docs", True):
+                if imgui.menu_item(
+                        "Open Docs", "Ctrl+I", p_selected=False, enabled=True
+                )[0]:
+                    webbrowser.open(
+                        "https://millerbrainobservatory.github.io/mbo_utilities/"
+                    )
+                imgui.end_menu()
+            if imgui.begin_menu("Settings", True):
+                imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
+                imgui.separator()
+                imgui.spacing()
+                _, parent.show_style_window = imgui.menu_item(
+                    "Style Editor", "", parent.show_style_window, True
+                )
+                _, parent.show_debug_panel = imgui.menu_item(
+                    "Debug Panel",
+                    "",
+                    p_selected=parent.show_debug_panel,
+                    enabled=True,
+                )
+                _, parent.show_scope_window = imgui.menu_item(
+                    "Scope Inspector", "", parent.show_scope_window, True
+                )
+                imgui.end_menu()
+        imgui.end_menu_bar()
     pass
+
+def draw_tabs(parent):
+    with imgui_ctx.begin_child(
+            "tabs",
+    ):
+        if imgui.begin_tab_bar("MainPreviewTabs"):
+            if imgui.begin_tab_item("Preview")[0]:
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
+                parent.draw_preview_section()
+                imgui.pop_style_var()
+                imgui.pop_style_var()
+                imgui.end_tab_item()
+            if imgui.begin_tab_item("Summary Stats")[0]:
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
+                parent.draw_stats_section()
+                imgui.pop_style_var()
+                imgui.pop_style_var()
+                imgui.end_tab_item()
+            if imgui.begin_tab_item("Process")[0]:
+                draw_tab_process(parent)
+                imgui.end_tab_item()
+            imgui.end_tab_bar()
+
 
 class PreviewDataWidget(EdgeWindow):
     def __init__(
@@ -242,6 +331,7 @@ class PreviewDataWidget(EdgeWindow):
             lg.addHandler(gui_handler)
             lg.setLevel(logging.DEBUG)  # allow debug/info messages through
             lg.disabled = False
+            lg.propagate = False
         self.logger = log.get("gui")
         self.s2p = Suite2pSettings()
         self.logger.info("Logger initialized.")
@@ -272,13 +362,17 @@ class PreviewDataWidget(EdgeWindow):
         self.font_size = 12
         self.fpath = fpath if fpath else getattr(iw, "fpath", None)
 
-        self._show_debug_panel = False
-        self._show_tool_style_editor = False
-        self._show_tool_metrics = False
-        self._show_debug_panel = False
-        self._show_scope = False
+        # boolean flags: imgui.begin() calls that are drawn
+        # when these are set to true.
+        self.show_style_window = False
+        self.show_metrics_window = False
+        self.show_debug_panel = False
+        self.show_scope_window = False
 
-        # preview data widget vars
+        # properties: each have a @property getter and setter
+        # that controls what to do with the value.
+        # different filetypes sometimes require different handling
+        # though it may be easier to group these instead into a function or a class.
         self._max_offset = 8
         self._gaussian_sigma = 0
         self._current_offset = 0.0
@@ -291,9 +385,9 @@ class PreviewDataWidget(EdgeWindow):
         self._selected_pipelines = None
         self._selected_roi = 0
 
+        # properties for saving to another filetype
         self._ext = str(getattr(self, "_ext", ".tiff"))
         self._ext_idx = SAVE_AS_TYPES.index(".tiff")
-
         self._selected_planes = set()
         self._planes_str = str(getattr(self, "_planes_str", ""))
         self._overwrite = True
@@ -323,8 +417,11 @@ class PreviewDataWidget(EdgeWindow):
 
         self.image_widget._image_widget_sliders._loop = True  # noqa
 
+        # zstats: an entry for each given array
+        # these are sent to a thread to compute
         self._zstats = [
-            {"mean": [], "std": [], "snr": []} for _ in range(self.num_arrays)
+            {"mean": [], "std": [], "snr": []}
+            for _ in range(self.num_arrays)
         ]
         self._zstats_means = [0 for _ in range(self.num_arrays)]
         self._zstats_done = [False] * self.num_arrays
@@ -507,96 +604,8 @@ class PreviewDataWidget(EdgeWindow):
             )
 
     def update(self):
-        # (accessible from the "Tools" menu)
-        if self._show_tool_style_editor:
-            _, self._show_tool_style_editor = imgui.begin(
-                "Style Editor", self._show_tool_style_editor
-            )
-            imgui.show_style_editor()
-            imgui.end()
-        if self._show_scope:
-            size = begin_popup_size()
-            imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)  # type: ignore # noqa
-            _, self._show_scope = imgui.begin(
-                "Scope Inspector",
-                self._show_scope,
-            )
-            draw_scope()
-            imgui.end()
-        if self._show_debug_panel:
-            size = begin_popup_size()
-            imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)  # type: ignore # noqa
-            _, self._show_debug_panel = imgui.begin(
-                "MBO Debug Panel",
-                self._show_debug_panel,
-            )
-            self.debug_panel.draw()
-            imgui.end()
-
-        with imgui_ctx.begin_child(
-                "menu",
-                window_flags=imgui.WindowFlags_.menu_bar,  # noqa,
-                child_flags=imgui.ChildFlags_.auto_resize_y
-                            | imgui.ChildFlags_.always_auto_resize,
-        ):
-            if imgui.begin_menu_bar():
-                if imgui.begin_menu("File", True):
-                    if imgui.menu_item(
-                        "Save as", "Ctrl+S", p_selected=False, enabled=self.is_mbo_scan
-                    )[0]:
-                        self._saveas_popup_open = True
-                    imgui.end_menu()
-                if imgui.begin_menu("Docs", True):
-                    if imgui.menu_item(
-                        "Open Docs", "Ctrl+I", p_selected=False, enabled=True
-                    )[0]:
-                        webbrowser.open(
-                            "https://millerbrainobservatory.github.io/mbo_utilities/"
-                        )
-                    imgui.end_menu()
-                if imgui.begin_menu("Settings", True):
-
-                    imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
-                    imgui.separator()
-                    imgui.spacing()
-                    _, self._show_tool_style_editor = imgui.menu_item(
-                        "Style Editor", "", self._show_tool_style_editor, True
-                    )
-                    _, self._show_debug_panel = imgui.menu_item(
-                        "Debug Panel",
-                        "",
-                        p_selected=self._show_debug_panel,
-                        enabled=True,
-                    )
-                    _, self._show_scope = imgui.menu_item(
-                        "Scope Inspector", "", self._show_scope, True
-                    )
-                    imgui.end_menu()
-            imgui.end_menu_bar()
-
-        with imgui_ctx.begin_child(
-                "tabs",
-        ):
-            if imgui.begin_tab_bar("MainPreviewTabs"):
-                if imgui.begin_tab_item("Preview")[0]:
-                    imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
-                    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
-                    self.draw_preview_section()
-                    imgui.pop_style_var()
-                    imgui.pop_style_var()
-                    imgui.end_tab_item()
-                if imgui.begin_tab_item("Summary Stats")[0]:
-                    imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
-                    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
-                    self.draw_stats_section()
-                    imgui.pop_style_var()
-                    imgui.pop_style_var()
-                    imgui.end_tab_item()
-                if imgui.begin_tab_item("Process")[0]:
-                    draw_tab_process(self)
-                    imgui.end_tab_item()
-
-                imgui.end_tab_bar()
+        draw_menu(self)
+        draw_tabs(self)
 
     def draw_stats_section(self):
         if not self._zstats_done:
@@ -1110,7 +1119,6 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_done = fraction >= 1.0
 
     def update_frame_apply(self):
-        pass
         """Update the frame_apply function of the image widget."""
         self.image_widget.frame_apply = {
             i: partial(self._combined_frame_apply, roi=i)

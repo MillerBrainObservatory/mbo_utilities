@@ -11,14 +11,14 @@ import tifffile
 
 from . import log
 from .metadata import is_raw_scanimage
-from .phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets
+from .phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets, _apply_offset
 from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
 from .util import subsample_array
 
 # subpixel fft, cross-correlation,
 # or first cross-correlation then subpixel
-PHASECORR_METHODS = ["subpix", "two_step"]
+PHASECORR_METHODS = ["subpix", "mean", "max", "std"]
 
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
@@ -214,7 +214,6 @@ def read_scan(
         max_offset=max_offset,
     )
     scan.read_data(filenames, dtype=dtype)
-
     return scan
 
 
@@ -251,7 +250,7 @@ class Scan_MBO(scans.ScanMultiROI):
             "phase_offset": False,
         }
         self.logger = log.get("scan")
-        self.logger.debug(
+        self.logger.info(
             f"Initializing MBO Scan with parameters:\n"
             f"roi: {roi}, "
             f"fix_phase: {fix_phase}, "
@@ -260,7 +259,6 @@ class Scan_MBO(scans.ScanMultiROI):
             f"upsample: {upsample}, "
             f"max_offset: {max_offset}"
         )
-        self.logger.info("MBO Scan initialized.")
 
     @property
     def offset(self):
@@ -284,7 +282,7 @@ class Scan_MBO(scans.ScanMultiROI):
     def phasecorr_method(self):
         """
         Get the current phase correction method.
-        Options are 'two_step', 'subpix', or 'crosscorr'.
+        Options are 'subpix' or 'mean'.
         """
         return self._phasecorr_method
 
@@ -299,8 +297,6 @@ class Scan_MBO(scans.ScanMultiROI):
                 f"Unsupported phase correction method: {value}. "
                 f"Supported methods are: {PHASECORR_METHODS}"
             )
-        if value in ["two_step", "crosscorr"]:
-            raise NotImplementedError()
         self._phasecorr_method = value
 
     @property
@@ -353,17 +349,33 @@ class Scan_MBO(scans.ScanMultiROI):
             idxs = [i for i, p in enumerate(pages) if start <= p < end]
             if idxs:
                 frame_idx = [pages[i] - start for i in idxs]
-                if self._fix_phase:
-                    chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
-                    self.offset = compute_scan_phase_offsets(
-                        chunk,
-                        upsample=self.upsample,
-                        max_offset=self.max_offset,
-                        border=self.border,
-                    )
-                    buf[idxs] = apply_scan_phase_offsets(chunk, self.offset)
+                chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
+                if self.fix_phase:
+                    if self.phasecorr_method == "mean":
+                        self.logger.debug("Applying mean‐based phase correction to chunk")
+                        mean_img = chunk.mean(axis=0)
+                        self.logger.debug(f"Mean image shape: {mean_img.shape}")
+                        single_offset = compute_scan_phase_offsets(
+                            mean_img,
+                            upsample=self.upsample,
+                            max_offset=self.max_offset,
+                            border=self.border,
+                        )
+                        self.offset = single_offset
+                        # apply that same offset to every frame in the chunk
+                        for i, frm in enumerate(chunk):
+                            buf[idxs[i]] = _apply_offset(frm, single_offset)
+                    else:
+                        offs = compute_scan_phase_offsets(
+                            chunk,
+                            upsample=self.upsample,
+                            max_offset=self.max_offset,
+                            border=self.border,
+                        )
+                        self.offset = offs
+                        buf[idxs] = apply_scan_phase_offsets(chunk, offs)
                 else:
-                    buf[idxs] = tf.asarray(key=frame_idx)[..., yslice, xslice]
+                    buf[idxs] = chunk
             start = end
         return buf.reshape(len(frames), len(chans), H, W)
 

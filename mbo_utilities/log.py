@@ -1,8 +1,7 @@
 import os, logging
 # this ic import convenciton is from their readme
 try:
-    from icecream import ic, install
-    install()
+    from icecream import ic
 except ImportError:  # Graceful fallback if IceCream isn't installed.
     ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
     install = None
@@ -10,13 +9,7 @@ except ImportError:  # Graceful fallback if IceCream isn't installed.
 _debug = bool(int(os.getenv("MBO_DEBUG", "0")))
 _level = logging.DEBUG if _debug else logging.INFO
 
-class _ICFmt(logging.Formatter):
-    def format(self, record):
-        return ic.format(record.getMessage())
-
 _h = logging.StreamHandler()
-_h.setFormatter(_ICFmt())
-
 _root = logging.getLogger("mbo")
 _root.setLevel(_level)
 _root.addHandler(_h)
