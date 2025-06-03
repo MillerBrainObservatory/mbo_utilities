@@ -6,6 +6,9 @@ import click
 import numpy as np
 from icecream import ic
 
+# force import to ensure glfw is initialized before fastplotlib
+import glfw
+from rendercanvas.glfw import GlfwRenderCanvas, loop
 import fastplotlib as fpl
 from imgui_bundle import immapp
 
