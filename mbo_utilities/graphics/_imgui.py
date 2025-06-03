@@ -6,13 +6,13 @@ from pathlib import Path
 
 from mbo_utilities.file_io import (
     _get_mbo_project_root,
-    _get_mbo_dirs,
+    get_mbo_dirs,
 )
 
 
 def setup_imgui():
     project_assets: Path = _get_mbo_project_root().joinpath("assets")
-    mbo_dirs = _get_mbo_dirs()
+    mbo_dirs = get_mbo_dirs()
 
     imgui_path = mbo_dirs["base"].joinpath("imgui")
     imgui_path.mkdir(exist_ok=True)
