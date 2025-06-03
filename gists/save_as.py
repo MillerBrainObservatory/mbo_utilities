@@ -34,6 +34,14 @@ def find_si_rois(file):
 
 
 if __name__ == "__main__":
+    input_tiff = "/home/flynn/lbm_data/tif/roi2/plane_11.tif"
+    data = tifffile.memmap(input_tiff, mode="r")
+    mbo.save_nonscan(
+        data,
+        "/home/flynn/lbm_data/bigtemp2",
+        ext=".bin",
+        overwrite=True,
+    )
     test_scan = mbo.read_scan(
         "/home/flynn/lbm_data/raw",
         roi=1,
