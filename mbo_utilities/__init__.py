@@ -1,14 +1,13 @@
 from pathlib import Path
 
-# from . import log
-import mbo_utilities.log as log
+from . import log as mbo_logger
 from .file_io import (
     get_files,
     stack_from_files,
     npy_to_dask,
     read_scan,
     expand_paths,
-    _get_mbo_dirs,
+    get_mbo_dirs,
 )
 from .plot_util import save_png, save_mp4
 from .assembly import save_as
@@ -32,7 +31,9 @@ __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
 
 
 __all__ = [
+    "mbo_logger",
     # file_io
+    "get_mbo_dirs",
     "scanreader",
     "npy_to_dask",
     "get_files",
