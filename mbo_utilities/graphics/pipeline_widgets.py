@@ -6,8 +6,7 @@ import numpy as np
 import tifffile
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
-
-from mbo_utilities import get_metadata
+from mbo_utilities import get_metadata, save_as
 from mbo_utilities.file_io import _make_json_serializable
 from mbo_utilities.graphics._widgets import set_tooltip
 
@@ -361,43 +360,77 @@ def run_process(self):
             self._install_error = True
             return
     if not self._install_error:
-        kwargs = {"self": self}
-        threading.Thread(target=run_plane_from_data, kwargs=kwargs).start()
+        for i, arr in enumerate(self.image_widget.data):
+            kwargs = {"self": self, "arr_idx" : i}
+            threading.Thread(target=run_plane_from_data, kwargs=kwargs).start()
     elif self._current_pipeline == "masknmf":
         self.logger.info("Running MaskNMF pipeline (not yet implemented).")
     else:
         self.logger.error(f"Unknown pipeline selected: {self._current_pipeline}")
 
 
-def run_plane_from_data(self):
+def run_plane_from_data(self, arr_idx):
+    metadata = getattr(self, "metadata", None)
+    input_file = None
+
+    dims = self.image_widget.current_index
+    if "z" in dims:
+        current_z = self.image_widget.current_index["z"]
+    else:
+        current_z = 0
+
     if HAS_LSP:
         if self._region == "Sub-FOV":
-            current_z = self.image_widget.current_index["z"]
-            ind_xy = self._rectangle_selectors.get_selected_indices()
+            ind_xy = list(self._rectangle_selectors)[arr_idx].get_selected_indices()
             self.logger.info(f"Sub-indices selected: {ind_xy}")
             ind_x = list(ind_xy[0])
             ind_y = list(ind_xy[1])
-            data = self.image_widget.data[0][:, current_z, ind_x, ind_y]
-            self.logger.info(f"shape of selected data: {data.shape}")
         else:
-            data = self.image_widget.data[0][:, 6, :, :]
+            ind_x, ind_y = slice(None), slice(None)
+
+        if self.image_widget.data[arr_idx].ndim == 4:
+            data = self.image_widget.data[arr_idx][:, current_z, ind_x, ind_y]
+        elif self.image_widget.data[arr_idx].ndim == 3:
+            data = self.image_widget.data[arr_idx][:, ind_x, ind_y]
+        else:
+            data = self.image_widget.data[arr_idx][ind_x, ind_y]
+        self.logger.info(f"shape of selected data: {data.shape}")
         out_dir = Path(self._saveas_outdir)
         out_dir.mkdir(exist_ok=True)
-        self.fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
-        metadata = get_metadata(self.fpath)
-        metadata = _make_json_serializable(metadata)
-        save_path = out_dir / "plane_7.tif"
-        metadata["shape"] = data.shape
-        tifffile.imwrite(save_path, data, metadata=metadata)
-        self.logger.info(
-            f"Plane 7 saved to {out_dir / 'plane_7.tif'}"
-        )
 
+        self.fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
+
+        if self.fpath.suffix.lower() in [".tif", ".tiff"]:
+            metadata = get_metadata(self.fpath)
+            metadata = _make_json_serializable(metadata)
+            input_file = out_dir / "plane_7.tif"
+            metadata["shape"] = data.shape
+            save_as(
+                data,
+                input_file,
+                metadata
+            )
+            tifffile.imwrite(input_file, data, metadata=metadata)
+            self.logger.info(f"Temporary file created:"
+                        f" {input_file}")
+
+        elif self.fpath.suffix.lower() == ".bin":
+            metadata = np.load(self.fpath.parent / "ops.npy", allow_pickle=True).item()
+            input_file = self.fpath
+
+        self.logger.info(f"Metadata provided:")
+        for k, v in metadata.items():
+            self.logger.info(f"{k}: {v}")
         ops = self.s2p.to_dict()
         self.logger.info(f"User ops provided:")
         for k, v in ops.items():
             self.logger.info(f"{k}: {v}")
-        lsp.run_plane(save_path, out_dir, ops=ops)
-        self.logger.info(
-            f"Plane 7 saved to {out_dir / 'plane_7.tif'}"
-        )
+        ops.update(metadata)
+        if input_file:
+            lsp.run_plane(input_file, out_dir, ops=ops)
+            self.logger.info(
+                f"Plane 7 saved to {out_dir / 'plane_7.tif'}"
+            )
+        else:
+            self.logger.error("No valid input file found for processing.")
+            return
