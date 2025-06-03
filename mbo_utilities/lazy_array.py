@@ -11,7 +11,6 @@ from mbo_utilities.metadata import is_raw_scanimage
 from .file_io import Scan_MBO, read_scan, get_files
 from mbo_utilities.metadata import has_mbo_metadata, get_metadata
 
-
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
@@ -22,20 +21,49 @@ class Loader(Protocol):
 
 
 @dataclass
+class Suite2pLoader:
+    fpath: Path | str
+    metadata: dict
+    shape: tuple[int, ...] = ()
+
+    def __post_init__(self):
+        if isinstance(self.fpath, list):
+            self.metadata_file = [p for p in self.fpath if p.suffix == ".npy"][0]
+            self.bin_file = [p for p in self.fpath if p.suffix == ".bin"][0]
+            self.fpath = Path(self.bin_file)
+        if isinstance(self.metadata, (str, Path)):
+            self.metadata = np.load(self.metadata, allow_pickle=True).item()
+
+    def load(self) -> np.memmap:
+        import os, numpy as np
+        # know (Ly, Lx) and nframes from your saved metadata
+        dtype = np.int16
+        fname = self.fpath
+        file_size = os.path.getsize(fname)
+        total_elements = file_size // np.dtype(dtype).itemsize
+        nframes, Lx, Ly = self.metadata["nframes"], self.metadata["Lx"], self.metadata["Ly"]
+        nframes = total_elements // (Ly * Lx)
+        movie = np.memmap(self.fpath, dtype=dtype, mode="r", shape=(nframes, Ly, Lx))
+        return movie
+
+
+@dataclass
 class MBOScanLoader:
-    paths: list[Path]
+    fpath: list[Path]
     roi: int | Sequence[int] | None = None
+    shape: tuple[int, ...] = ()
 
     def load(self) -> Scan_MBO:
-        scan = read_scan(self.paths, roi=self.roi)
-        scan.fpath = Path(self.paths[0].parent)
-        scan.read_data(self.paths)
+        scan = read_scan(self.fpath, roi=self.roi)
+        scan.fpath = Path(self.fpath[0].parent)
+        scan.read_data(self.fpath)
+        self.shape = scan.shape
         return scan
 
 
 @dataclass
 class MBOTiffLoader:
-    paths: list[Path]
+    fpath: list[Path]
     shape: tuple[int, ...] = ()
     _chunks: tuple[int, ...] | dict | None = None
 
@@ -55,7 +83,7 @@ class MBOTiffLoader:
     def load(self) -> tuple[da.Array, list[str]]:
         # open each plane as a memmap
         mms: list[np.ndarray] = []
-        for p in self.paths:
+        for p in self.fpath:
             mm = tifffile.memmap(p, mode="r").view(np.int16)
             mms.append(mm)
 
@@ -125,10 +153,18 @@ class LazyArrayLoader:
         # check for mixed‐type in a single directory
         exts = {p.suffix.lower() for p in self.inputs}
         if len(exts) > 1:
+            # if there is a single .bin and .npy, its a suite2p bin
+            # leaving the code below because
+            if exts == {".bin", ".npy"}:
+                meta = self.inputs[0].parent.joinpath("ops.npy")
+                self.loader = Suite2pLoader(self.inputs, metadata=meta)
+                return
             raise ValueError(f"Multiple file types found in directory: {exts!r}")
 
         # dispatch on the first file
         first = Path(self.inputs[0])
+
+        # TIFF
         if first.suffix in [".tif", ".tiff"]:
             if is_raw_scanimage(first):
                 self.loader = MBOScanLoader(self.inputs, roi=self.roi)
@@ -137,11 +173,14 @@ class LazyArrayLoader:
             else:
                 raise ValueError("Unsupported TIFF file type or missing metadata.")
         elif first.suffix.lower() == ".bin":
-            # meta = first.parent.joinpath("ops.npy")
-            # if meta.is_file():
-            #     print(f"Metadata found: {meta}")
-            #     metadata = np.load(meta, allow_pickle=True).item()
-            raise NotImplementedError("BIN files with metadata are not yet supported.")
+            meta = first.parent.joinpath("ops.npy")
+            if meta.is_file():
+                # suite2p standard bin with ops containing Lx/Ly
+                print(f"Metadata found: {meta}")
+                metadata = np.load(meta, allow_pickle=True).item()
+                self.loader = Suite2pLoader(self.inputs, metadata)
+            else:
+                raise NotImplementedError("BIN files with metadata are not yet supported.")
         else:
             raise TypeError(f"Unsupported file type: {first.suffix}")
 

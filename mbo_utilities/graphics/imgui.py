@@ -1,4 +1,5 @@
 import logging
+import numbers
 import webbrowser
 from pathlib import Path
 from typing import Literal
@@ -403,6 +404,8 @@ class PreviewDataWidget(EdgeWindow):
         if len(self.shape) == 4:
             self.nz = self.shape[1]
         elif len(self.shape) == 3:
+            self.nz = 1
+        else:
             self.nz = 1
 
         if isinstance(self.image_widget.data[0], Scan_MBO):
@@ -1059,7 +1062,7 @@ class PreviewDataWidget(EdgeWindow):
                 if not hasattr(iw, "offset"):
                     ofs = self.current_offset[i]
                 else:
-                    ofs = iw.offset if isinstance(iw.offset, float) else iw.offset[1]
+                    ofs = iw.offset if isinstance(iw.offset, (float, int)) else iw.offset[i]
                 imgui.text(f"Array {i}:")
                 imgui.next_column()
                 imgui.text(f"{ofs:.3f}")

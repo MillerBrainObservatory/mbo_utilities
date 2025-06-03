@@ -36,7 +36,7 @@ def find_si_rois(file):
 if __name__ == "__main__":
     test_scan = mbo.read_scan(
         "/home/flynn/lbm_data/raw",
-        roi=0,
+        roi=1,
         phasecorr_method="mean",
     )
     savedir = r"/home/flynn/lbm_data/bin"
@@ -47,5 +47,5 @@ if __name__ == "__main__":
         overwrite=True,
         fix_phase=True,
         debug=True,
-        planes=[10],
+        planes=[11],
     )

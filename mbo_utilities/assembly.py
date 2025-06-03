@@ -118,8 +118,11 @@ def save_as(
     # Logging
     if debug:
         logger.setLevel(logging.INFO)
+        logger.info("Debug mode enabled; setting log level to INFO.")
+        logger.propagate = True  # send to terminal
     else:
         logger.setLevel(logging.WARNING)
+        logger.info("Debug mode disabled; setting log level to WARNING.")
 
     # save path
     savedir = Path(savedir)
@@ -175,7 +178,6 @@ def save_as(
     )
     metadata["save_path"] = str(savedir.resolve())
 
-
     # which rois to save
     if scan.selected_roi is None:
         roi_list = [None]  # full‐stack
@@ -218,6 +220,7 @@ def save_as(
             metadata=meta,
             progress_callback=progress_callback,
             upsample=upsample,
+            debug=debug,
         )
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -239,6 +242,7 @@ def _save_data(
     target_chunk_mb=20,
     progress_callback=None,
     upsample=20,
+    debug=False,
 ):
     if "." in ext:
         ext = ext.split(".")[-1]
@@ -253,7 +257,7 @@ def _save_data(
     path = Path(path)
     path.mkdir(exist_ok=True)
 
-    nt, nz, nx, ny = scan.shape_full
+    nt, nz, nx, ny = scan.shape
 
     left, right, top, bottom = trim_edge
     left = min(left, nx - 1)
@@ -293,18 +297,25 @@ def _save_data(
         )
         for _ in planes
     )
-    pbar = tqdm(total=total_chunks, desc="Saving plane ", position=0)
+    logger.info(f"Total chunks to save: {total_chunks} (target chunk size: {chunk_size / 1024 / 1024:.2f} MB)")
+    if not debug:
+        pbar = tqdm(total=total_chunks, desc="Saving plane ", position=0)
+    else:
+        pbar=None
 
     pre_exists = True
     for chan_index in planes:
-        pbar.set_description(f"Saving plane {chan_index + 1}")
+        if pbar:
+            pbar.set_description(f"Saving plane {chan_index + 1}")
         if ext == "bin":
             fname = path / f"plane{chan_index}" / "data_raw.bin"
         else:
             fname = path / f"plane_{chan_index + 1:02d}.{ext}"
 
         if fname.exists() and not overwrite:
-            pbar.update(1)
+            logger.info(f"File {fname} already exists with overwrite=True; skipping save.")
+            if pbar:
+                pbar.update(1)
             break
 
         pre_exists = False
@@ -327,14 +338,18 @@ def _save_data(
             data_chunk = scan[
                 start:end, chan_index, top : ny - bottom, left : nx - right
             ]
-
+            logger.info(
+                f"Saving chunk {chunk + 1}/{num_chunks} for plane {chan_index + 1}:"
+                f" {data_chunk.shape} (frames, height, width)")
             writer(fname, data_chunk, chan_index=chan_index)
             start = end
-            pbar.update(1)
-            if progress_callback is not None:
-                progress_callback(pbar.n / pbar.total, current_plane=chan_index + 1)
+            if pbar:
+                pbar.update(1)
+                if progress_callback is not None:
+                    progress_callback(pbar.n / pbar.total, current_plane=chan_index + 1)
 
-    pbar.close()
+    if pbar:
+        pbar.close()
 
     if pre_exists and not overwrite:
         print("All output files exist; skipping save.")
@@ -419,13 +434,11 @@ def _write_bin(
     fname = Path(path)
     fname.parent.mkdir(exist_ok=True)
 
-    if overwrite and fname.exists():
-        fname.unlink()
-        _write_bin._writers.pop(str(fname), None)
-        _write_bin._offsets.pop(str(fname), None)
-
     key = str(fname)
     if key not in _write_bin._writers:
+        if overwrite and fname.exists():
+            fname.unlink()
+
         n_frames = data_shape[0] if data_shape else data.shape[0]
         Ly, Lx = data.shape[1], data.shape[2]
         _write_bin._writers[key] = BinaryFile(
@@ -438,6 +451,7 @@ def _write_bin(
     bf[off : off + data.shape[0]] = data
     bf.file.flush()
     _write_bin._offsets[key] = off + data.shape[0]
+    logger.info(f"Wrote {data.shape[0]} frames to {fname} for channel {chan_index + 1}.")
 
 
 def _write_h5(

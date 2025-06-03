@@ -31,8 +31,8 @@ def to_lazy_array(
     Load any of your supported formats lazily and return (data, filepaths).
     """
     lazy_array = LazyArrayLoader(data_in, roi=roi)
-    if hasattr(lazy_array.loader, "paths"):
-        return lazy_array.loader.load(), lazy_array.loader.paths
+    if hasattr(lazy_array.loader, "fpath"):
+        return lazy_array.loader.load(), lazy_array.loader.fpath
     data = lazy_array.load()
     if isinstance(data, Scan_MBO):
         if hasattr(data, "fpath"):
