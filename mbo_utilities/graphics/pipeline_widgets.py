@@ -295,9 +295,9 @@ def draw_section_suite2p(self):
 
         imgui.separator()
         if imgui.button("Run"):
-            self.logger.log("info", "Running Suite2p pipeline...")
+            self.logger.info("Running Suite2p pipeline...")
             run_process(self)
-            self.logger.log("info", "Suite2p pipeline completed.")
+            self.logger.info("Suite2p pipeline completed.")
         if self._install_error:
             imgui.same_line()
             if self._show_red_text:
@@ -348,13 +348,13 @@ def draw_section_masknmf(self):
 def run_process(self):
     """Runs the selected processing pipeline."""
     if self._current_pipeline == "suite2p":
-        self.logger.log(
-            "info", f"Running Suite2p pipeline with settings: {self.s2p}"
+        self.logger.info(
+            f"Running Suite2p pipeline with settings: {self.s2p}"
         )
         try:
             import lbm_suite2p_python as lsp
         except ImportError:
-            self.logger.log(
+            self.logger.warning(
                 "error",
                 "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline.",
             )
@@ -364,25 +364,21 @@ def run_process(self):
         kwargs = {"self": self}
         threading.Thread(target=run_plane_from_data, kwargs=kwargs).start()
     elif self._current_pipeline == "masknmf":
-        self.logger.log("info", "Running MaskNMF pipeline (not yet implemented).")
+        self.logger.info("Running MaskNMF pipeline (not yet implemented).")
     else:
-        self.logger.log(
-            "error", "Unknown pipeline selected: %s", self._current_pipeline
-        )
+        self.logger.error(f"Unknown pipeline selected: {self._current_pipeline}")
 
 
 def run_plane_from_data(self):
     if HAS_LSP:
         if self._region == "Sub-FOV":
-            self.logger.log(
-                "info", "Running Suite2p pipeline on selected subregion."
-            )
             current_z = self.image_widget.current_index["z"]
             ind_xy = self._rectangle_selectors.get_selected_indices()
+            self.logger.info(f"Sub-indices selected: {ind_xy}")
             ind_x = list(ind_xy[0])
             ind_y = list(ind_xy[1])
             data = self.image_widget.data[0][:, current_z, ind_x, ind_y]
-            self.logger.log("info", f"shape of selected data: {data.shape}")
+            self.logger.info(f"shape of selected data: {data.shape}")
         else:
             data = self.image_widget.data[0][:, 6, :, :]
         out_dir = Path(self._saveas_outdir)
@@ -393,11 +389,15 @@ def run_plane_from_data(self):
         save_path = out_dir / "plane_7.tif"
         metadata["shape"] = data.shape
         tifffile.imwrite(save_path, data, metadata=metadata)
-        self.logger.log("info", f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
+        self.logger.info(
+            f"Plane 7 saved to {out_dir / 'plane_7.tif'}"
+        )
 
         ops = self.s2p.to_dict()
-        self.logger.log("info", f"User ops provided:")
+        self.logger.info(f"User ops provided:")
         for k, v in ops.items():
-            self.logger.log("info", f"{k}: {v}")
+            self.logger.info(f"{k}: {v}")
         lsp.run_plane(save_path, out_dir, ops=ops)
-        self.logger.log("info", f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
+        self.logger.info(
+            f"Plane 7 saved to {out_dir / 'plane_7.tif'}"
+        )
