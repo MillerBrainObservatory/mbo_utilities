@@ -3,17 +3,77 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence, List, Tuple, Any, Protocol
 
-import numpy as np
 import tifffile
 import dask.array as da
 
+from . import log
 from mbo_utilities.metadata import is_raw_scanimage
+from .assembly import HAS_SUITE2P
 from .file_io import Scan_MBO, read_scan, get_files
 from mbo_utilities.metadata import has_mbo_metadata, get_metadata
+try:
+    from suite2p.io import BinaryFile
+    HAS_SUITE2P = True
+except ImportError:
+    HAS_SUITE2P = False
+    BinaryFile = None
+
+logger = log.get("file_reader")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
+
+# (put this anywhere in your code where you want the wrapper to live;
+#  you don’t need to import suite2p at module‐top—only inside the loader)
+
+import numpy as np
+from suite2p.io import BinaryFile
+
+class _Suite2pLazyArray:
+    def __init__(self, ops: dict):
+        Ly = ops["Ly"]
+        Lx = ops["Lx"]
+        n_frames = ops["nframes"]
+        reg_file = ops["reg_file"]
+        self._bf = BinaryFile(Ly=Ly, Lx=Lx, filename=reg_file, n_frames=n_frames)
+        self.shape = (n_frames, Ly, Lx)
+        self.ndim = 3
+        self.dtype = np.int16
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._bf[key]
+
+        if isinstance(key, slice):
+            idxs = range(*key.indices(self.shape[0]))
+            return np.stack([self._bf[i] for i in idxs], axis=0)
+
+        t, y, x = key
+        if isinstance(t, int):
+            frame = self._bf[t]
+            return frame[y, x]
+        elif isinstance(t, range):
+            idxs = t
+        else:
+            idxs = range(*t.indices(self.shape[0]))
+        return np.stack([self._bf[i][y, x] for i in idxs], axis=0)
+
+    def min(self) -> float:
+        return float(self._bf[0].min())
+
+    def max(self) -> float:
+        return float(self._bf[0].max())
+
+    def __array__(self):
+        n = min(10, self.shape[0])
+        return np.stack([self._bf[i] for i in range(n)], axis=0)
+
+    def close(self):
+        self._bf.file.close()
 
 
 class Loader(Protocol):
@@ -25,26 +85,29 @@ class Suite2pLoader:
     fpath: Path | str
     metadata: dict
     shape: tuple[int, ...] = ()
+    nframes: int = 0
+    frame_rate: float = 0.0
 
     def __post_init__(self):
+        if not HAS_SUITE2P:
+            logger.info("No suite2p detected, cannot initialize Suite2pLoader.")
+            return None
         if isinstance(self.fpath, list):
-            self.metadata_file = [p for p in self.fpath if p.suffix == ".npy"][0]
-            self.bin_file = [p for p in self.fpath if p.suffix == ".bin"][0]
-            self.fpath = Path(self.bin_file)
+            self.metadata = np.load([p for p in self.fpath if p.suffix == ".npy"][0], allow_pickle=True).item()
+            self.fpath = [p for p in self.fpath if p.suffix == ".bin"][0]
         if isinstance(self.metadata, (str, Path)):
             self.metadata = np.load(self.metadata, allow_pickle=True).item()
+        self.nframes = self.metadata["nframes"]
+        self.Lx = self.metadata["Lx"]
+        self.Ly = self.metadata["Ly"]
 
-    def load(self) -> np.memmap:
-        import os, numpy as np
-        # know (Ly, Lx) and nframes from your saved metadata
-        dtype = np.int16
-        fname = self.fpath
-        file_size = os.path.getsize(fname)
-        total_elements = file_size // np.dtype(dtype).itemsize
-        nframes, Lx, Ly = self.metadata["nframes"], self.metadata["Lx"], self.metadata["Ly"]
-        nframes = total_elements // (Ly * Lx)
-        movie = np.memmap(self.fpath, dtype=dtype, mode="r", shape=(nframes, Ly, Lx))
-        return movie
+    def load(self) -> _Suite2pLazyArray:
+        """
+        Instead of returning a raw np.memmap, wrap the binary in a LazySuite2pMovie.
+        That way we never load all frames at once—ImageWidget (or anything else) can
+        index it on demand.
+        """
+        return _Suite2pLazyArray(self.metadata)
 
 
 @dataclass
@@ -148,7 +211,9 @@ class LazyArrayLoader:
         filtered = [p for p in self.inputs if p.suffix.lower() in supported]
         if not filtered:
             raise ValueError(f"No supported files in {self.inputs}")
+
         self.inputs = filtered
+        first = Path(self.inputs[0])
 
         # check for mixed‐type in a single directory
         exts = {p.suffix.lower() for p in self.inputs}
@@ -156,13 +221,11 @@ class LazyArrayLoader:
             # if there is a single .bin and .npy, its a suite2p bin
             # leaving the code below because
             if exts == {".bin", ".npy"}:
-                meta = self.inputs[0].parent.joinpath("ops.npy")
-                self.loader = Suite2pLoader(self.inputs, metadata=meta)
+                metadata_file = Path(self.inputs[0]).parent.joinpath("ops.npy")
+                bin_file = Path(self.inputs[0]).parent.joinpath("data_raw.bin")
+                self.loader = Suite2pLoader(bin_file, metadata=np.load(metadata_file, allow_pickle=True).item())
                 return
             raise ValueError(f"Multiple file types found in directory: {exts!r}")
-
-        # dispatch on the first file
-        first = Path(self.inputs[0])
 
         # TIFF
         if first.suffix in [".tif", ".tiff"]:
@@ -173,12 +236,11 @@ class LazyArrayLoader:
             else:
                 raise ValueError("Unsupported TIFF file type or missing metadata.")
         elif first.suffix.lower() == ".bin":
-            meta = first.parent.joinpath("ops.npy")
-            if meta.is_file():
-                # suite2p standard bin with ops containing Lx/Ly
-                print(f"Metadata found: {meta}")
-                metadata = np.load(meta, allow_pickle=True).item()
-                self.loader = Suite2pLoader(self.inputs, metadata)
+            metadata_file = first.parent.joinpath("ops.npy")
+            if metadata_file.is_file():
+                metadata = np.load(metadata_file, allow_pickle=True).item()
+                bin_file = self.inputs[0]
+                self.loader = Suite2pLoader(bin_file, metadata)
             else:
                 raise NotImplementedError("BIN files with metadata are not yet supported.")
         else:
