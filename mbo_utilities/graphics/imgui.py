@@ -441,10 +441,15 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_selected_roi = set()  # -1 means all ROIs
         self._saveas_rois = False
         self._saveas_selected_roi_mode = "All"
+        self.set_context_info()
 
         if threading_enabled:
             self.logger.info("Starting zstats computation in a separate thread.")
             threading.Thread(target=self.compute_zstats, daemon=True).start()
+
+    def set_context_info(self):
+        title = f"Filepath: {self.fpath}"
+        self.image_widget.figure.canvas.set_title(str(title))
 
     @property
     def fix_phase(self):
