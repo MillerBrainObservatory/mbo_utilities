@@ -26,6 +26,119 @@ CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
 SAVE_AS_TYPES = [".tiff", ".bin", ".h5"]
 
+from pathlib import Path
+import numpy as np
+import tifffile
+import logging
+
+logger = logging.getLogger("mbo.save_as")
+
+PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
+
+def load_ops(ops_input: str | Path | list[str | Path]):
+    """Simple utility load a suite2p npy file"""
+    if isinstance(ops_input, (str, Path)):
+        return np.load(ops_input, allow_pickle=True).item()
+    elif isinstance(ops_input, dict):
+        return ops_input
+    print("Warning: No valid ops file provided, returning None.")
+    return {}
+
+def normalize_folder(path):
+    """
+    Derive a folder tag from a filename based on “planeN”, “roiN”, or "tagN" patterns.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        File path or name whose stem will be parsed.
+
+    Returns
+    -------
+    str
+        If the stem starts with “plane”, “roi”, or “res” followed by an integer,
+        returns that tag plus the integer (e.g. “plane3”, “roi7”, “res2”).
+        Otherwise returns the original stem unchanged.
+
+    Examples
+    --------
+    >>> normalize_folder("plane_01.tif")
+    'plane1'
+    >>> normalize_folder("plane2.bin")
+    'plane2'
+    >>> normalize_folder("roi5.raw")
+    'roi5'
+    >>> normalize_folder("ROI_10.dat")
+    'roi10'
+    >>> normalize_folder("res-3.h5")
+    'res3'
+    >>> normalize_folder("assembled_data_1.tiff")
+    'assembled_data_1'
+    >>> normalize_folder("file_12.tif")
+    'file_12'
+    """
+    name = Path(path).stem
+    for tag in PIPELINE_TAGS:
+        low = name.lower()
+        if low.startswith(tag):
+            suffix = name[len(tag):]
+            if suffix and (suffix[0] in ("_", "-")):
+                suffix = suffix[1:]
+            if suffix.isdigit():
+                return f"{tag}{int(suffix)}"
+    return name
+
+def ensure_bin_and_ops_from_tiff(input_tiff: Path, save_root: Path) -> tuple[Path, dict]:
+    """
+    Given a TIFF time‐series, guarantee that its “data_raw.bin” and “ops.npy”
+    in the corresponding plane folder under `save_root` both exist and
+    match the TIFF’s dimensions. If they already exist but dimensions differ,
+    they are overwritten.
+
+    Parameters
+    ----------
+    input_tiff : Path
+        Path to the source TIFF stack.
+    save_root : Path
+        Base directory under which the plane folder will be created.
+
+    Returns
+    -------
+    output_dir : Path
+        Directory named by `normalize_folder(input_tiff)` under `save_root`.
+    ops0 : dict
+        The resulting ops dictionary, saved at `output_dir/ops.npy`.
+
+    Side effects
+    ------------
+    - Creates (or clears) `output_dir/data_raw.bin`.
+    - Loads metadata via `mbo_utilities.metadata.get_metadata`.
+    - Calls `write_ops` to write `ops.npy` under `output_dir`.
+    """
+    folder = normalize_folder(input_tiff)
+    output_dir = save_root / folder
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    raw_bin = output_dir / "data_raw.bin"
+    ops_path = output_dir / "ops.npy"
+
+    # Read TIFF memory‐map to inspect shape
+    data = tifffile.memmap(str(input_tiff))
+    nt, ny, nx = data.shape  # (frames, height, width)
+
+    # Either raw_bin didn’t exist or was invalid—create fresh
+    logger.info(f"Writing new raw binary to {raw_bin}.")
+    _write_raw_binary(input_tiff, raw_bin)
+
+    # Build metadata and ops
+    metadata = get_metadata(str(input_tiff))
+    metadata["shape"] = (nt, nx, ny)  # match what write_ops expects: (nframes, Lx, Ly)
+    planes = [1]
+    write_ops(metadata, output_dir, planes)
+
+    ops0 = load_ops(ops_path)
+    return output_dir, ops0
+
 
 def npy_to_dask(files, name="", axis=1, astype=None):
     """
@@ -738,7 +851,7 @@ def _get_mbo_project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def _get_mbo_dirs() -> dict:
+def get_mbo_dirs() -> dict:
     """
     Ensure ~/mbo and its subdirectories exist.
 
@@ -782,3 +895,91 @@ def _intersect_slice(user: slice, mask: slice):
     start = max(user.start or 0, mask.start)
     stop = min(user.stop or mask.stop, mask.stop)
     return slice(start, stop)
+
+
+def write_ops_(metadata: dict, base_path: str | Path, planes):
+    base_path = Path(base_path).expanduser().resolve()
+    if "si" in metadata.keys():
+        del metadata["si"]
+
+    if isinstance(planes, int):
+        planes = [planes]
+    for plane_idx in planes:
+        plane_dir = Path(base_path) / f"plane{plane_idx}"
+
+        raw_bin = plane_dir.joinpath("data_raw.bin")
+        ops_path = plane_dir.joinpath("ops.npy")
+
+        # TODO: This is not an accurate way to get a metadata value that should not have
+        #        to be calculated. We use shape to account for the trimmed pixels
+        shape = metadata["shape"]
+        nt = shape[0]
+        Ly = shape[-2]
+        Lx = shape[-1]
+        dx, dy = metadata.get("pixel_resolution", [2, 2])
+        ops = {
+            "Ly": Ly,
+            "Lx": Lx,
+            "fs": np.round(metadata.get("frame_rate"), 2),
+            "nframes": nt,
+            "raw_file": str(raw_bin.resolve()),
+            "reg_file": str(raw_bin.resolve()),
+            "dx": dx,
+            "dy": dy,
+            "metadata": metadata,
+        }
+        np.save(ops_path, ops)
+
+def write_ops(metadata, raw_filename):
+    """
+    Write metadata to an ops file alongside the given filename.
+    metadata must contain
+    'shape'
+    'pixel_resolution',
+    'frame_rate' keys.
+    """
+    logger.info(f"Writing ops file for {raw_filename} with metadata: {metadata}")
+    assert isinstance(raw_filename, (str, Path)), "filename must be a string or Path object"
+    filename = Path(raw_filename).expanduser().resolve()
+
+    # this convention means input can be either
+    if filename.is_file():
+        root = filename.parent
+    else:
+        root = filename
+    raw_bin = root.joinpath("data_raw.bin")
+    ops_path = root.joinpath("ops.npy")
+
+    logger.debug(f"Writing ops file to {ops_path} with raw_bin: {raw_bin}")
+
+    shape = metadata["shape"]
+    nt = shape[0]
+    Ly = shape[-2]
+    Lx = shape[-1]
+
+    if "pixel_resolution" not in metadata:
+        logger.warning("No pixel resolution found in metadata, using default [2, 2].")
+    if "fs" not in metadata:
+        if "frame_rate" in metadata:
+            metadata["fs"] = metadata["frame_rate"]
+        elif "framerate" in metadata:
+            metadata["fs"] = metadata["framerate"]
+        else:
+            logger.debug("No frame rate found in metadata; defaulting fs=10")
+            metadata["fs"] = 10
+
+    dx, dy = metadata.get("pixel_resolution", [2, 2])
+    ops = {
+        "Ly": Ly,
+        "Lx": Lx,
+        "fs": metadata['fs'],
+        "nframes": nt,
+        "raw_file": str(raw_bin.resolve()),
+        "reg_file": str(raw_bin.resolve()),
+        "dx": dx,
+        "dy": dy,
+        "metadata": metadata,
+    }
+    np.save(ops_path, ops)
+    logger.debug(f"Ops file written to {ops_path} with metadata:\n"
+                 f" {ops}")

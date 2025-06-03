@@ -14,10 +14,9 @@ from tifffile import TiffWriter
 import h5py
 
 from . import log
-from .file_io import _make_json_serializable, Scan_MBO
+from .file_io import _make_json_serializable, Scan_MBO, write_ops
 from .metadata import get_metadata
 from .util import is_running_jupyter
-from .plot_util import save_phase_images_png
 
 try:
     from suite2p.io import BinaryFile
@@ -228,6 +227,101 @@ def save_as(
         f"Time elapsed: {int(elapsed_time // 60)} minutes {int(elapsed_time % 60)} seconds."
     )
 
+def save_nonscan(
+    data,
+    savepath,
+    ext,
+    metadata=None,
+    overwrite=False,
+    trim_edge=None,
+    target_chunk_mb=20,
+):
+    if "." in ext:
+        ext = ext.split(".")[-1]
+    if ext == "tiff":
+        ext = "tif"
+
+    savepath = Path(savepath)
+    savepath.mkdir(exist_ok=True)
+
+    if data.ndim == 3:
+        nt, nx, ny = data.shape
+        use_planes = [0]
+    else:
+        raise ValueError(f"Unsupported data.ndim={data.ndim}; expected 3.")
+
+    # Trim edges
+    left, right, top, bottom = trim_edge or (0, 0, 0, 0)
+    left = min(left, nx - 1)
+    right = min(right, nx - left)
+    top = min(top, ny - 1)
+    bottom = min(bottom, ny - top)
+
+    new_height = ny - (top + bottom)
+    new_width = nx - (left + right)
+
+    if metadata is None:
+        logger.info("No metadata provided; using empty dictionary.")
+        metadata = {}
+    metadata["fov"] = [new_height, new_width]
+    metadata["shape"] = (nt, new_width, new_height)
+    metadata["dims"] = ["time", "width", "height"]
+    metadata["trimmed"] = [left, right, top, bottom]
+    metadata["nframes"] = nt
+    metadata["num_frames"] = nt  # alias
+    metadata["save_path"] = str(savepath.expanduser().resolve())
+
+    final_shape = (nt, new_height, new_width)
+    logger.info(f"Final shape: {final_shape} (nt, height, width)")
+    writer = _get_file_writer(ext, overwrite=overwrite, metadata=metadata, data_shape=final_shape)
+
+    chunk_size = target_chunk_mb * 1024 * 1024
+    total_chunks = sum(
+        min(
+            nt,
+            max(1, int(np.ceil(nt * new_height * new_width * 2 / chunk_size))),
+        )
+        for _ in use_planes
+    )
+    logger.info(f"Total chunks to save: {total_chunks} (target chunk size: {chunk_size / 1024 / 1024:.2f} MB)")
+    if ext == "bin":
+        fname = savepath / "data_raw.bin"
+    else:
+        fname = savepath / f"data.{ext}"
+
+    if fname.exists() and not overwrite:
+        logger.info(f"File {fname} exists with overwrite=False; skipping.")
+        return
+
+    pre_exists = False
+
+    nbytes_chan = nt * new_height * new_width * 2
+    num_chunks = min(nt, max(1, int(np.ceil(nbytes_chan / chunk_size))))
+
+    base_frames_per_chunk = nt // num_chunks
+    extra_frames = nt % num_chunks
+
+    start = 0
+    for chunk in range(num_chunks):
+        frames_in_chunk = base_frames_per_chunk + (1 if chunk < extra_frames else 0)
+        end = start + frames_in_chunk
+
+        block = data[start:end, top : ny - bottom, left : nx - right]
+
+        logger.info(
+            f"Saving chunk {chunk + 1}/{num_chunks}:"
+            f" {block.shape} (frames, height, width)"
+        )
+        writer(fname, block, metadata=metadata)
+        start = end
+
+    if pre_exists and not overwrite:
+        print("All output files exist; skipping save.")
+        return
+
+    if ext in ["tif", "tiff"]:
+        close_tiff_writers()
+
 
 def _save_data(
     scan,
@@ -357,42 +451,6 @@ def _save_data(
 
     if ext in ["tiff", "tif"]:
         close_tiff_writers()
-    elif ext == "bin":
-        write_ops(metadata, path, planes)
-
-
-def write_ops(metadata: dict, base_path: str | Path, planes):
-    base_path = Path(base_path).expanduser().resolve()
-    if "si" in metadata.keys():
-        del metadata["si"]
-
-    if isinstance(planes, int):
-        planes = [planes]
-    for plane_idx in planes:
-        plane_dir = Path(base_path) / f"plane{plane_idx}"
-
-        raw_bin = plane_dir.joinpath("data_raw.bin")
-        ops_path = plane_dir.joinpath("ops.npy")
-
-        # TODO: This is not an accurate way to get a metadata value that should not have
-        #        to be calculated. We use shape to account for the trimmed pixels
-        shape = metadata["shape"]
-        nt = shape[0]
-        Ly = shape[-2]
-        Lx = shape[-1]
-        dx, dy = metadata.get("pixel_resolution", [2, 2])
-        ops = {
-            "Ly": Ly,
-            "Lx": Lx,
-            "fs": np.round(metadata.get("frame_rate"), 2),
-            "nframes": nt,
-            "raw_file": str(raw_bin.resolve()),
-            "reg_file": str(raw_bin.resolve()),
-            "dx": dx,
-            "dy": dy,
-            "metadata": metadata,
-        }
-        np.save(ops_path, ops)
 
 
 def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
@@ -410,8 +468,7 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
         return functools.partial(
             _write_bin,
             overwrite=overwrite,
-            chan_index=kwargs.get("chan_index", None),
-            data_shape=data_shape,
+            metadata=metadata,
         )
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
@@ -422,12 +479,9 @@ def _write_bin(
     data,
     *,
     overwrite: bool = False,
-    data_shape=None,
-    chan_index=None,
+    metadata=None,
+    **kwargs
 ):
-    if chan_index is None:
-        raise ValueError("chan_index must be provided")
-
     if not hasattr(_write_bin, "_writers"):
         _write_bin._writers, _write_bin._offsets = {}, {}
 
@@ -435,23 +489,29 @@ def _write_bin(
     fname.parent.mkdir(exist_ok=True)
 
     key = str(fname)
+    first_write = False
     if key not in _write_bin._writers:
         if overwrite and fname.exists():
             fname.unlink()
 
-        n_frames = data_shape[0] if data_shape else data.shape[0]
         Ly, Lx = data.shape[1], data.shape[2]
         _write_bin._writers[key] = BinaryFile(
-            Ly, Lx, key, n_frames=n_frames, dtype=np.int16
+            Ly, Lx, key, n_frames=metadata["nframes"], dtype=np.int16
         )
         _write_bin._offsets[key] = 0
+        first_write = True
 
     bf = _write_bin._writers[key]
     off = _write_bin._offsets[key]
     bf[off : off + data.shape[0]] = data
     bf.file.flush()
     _write_bin._offsets[key] = off + data.shape[0]
-    logger.info(f"Wrote {data.shape[0]} frames to {fname} for channel {chan_index + 1}.")
+
+    if first_write:
+        raw_filename = fname  # points to data_raw.bin
+        write_ops(metadata, raw_filename)
+
+    logger.info(f"Wrote {data.shape[0]} frames to {fname}.")
 
 
 def _write_h5(
