@@ -39,7 +39,7 @@ if __name__ == "__main__":
     mbo.save_nonscan(
         data,
         "/home/flynn/lbm_data/bigtemp2",
-        ext=".bin",
+        ext=".tif",
         overwrite=True,
     )
     test_scan = mbo.read_scan(
