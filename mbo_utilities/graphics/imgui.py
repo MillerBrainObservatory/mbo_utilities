@@ -25,7 +25,7 @@ from mbo_utilities.assembly import save_as
 from mbo_utilities.file_io import (
     Scan_MBO,
     SAVE_AS_TYPES,
-    _get_mbo_dirs,
+    get_mbo_dirs,
     read_scan,
 )
 from mbo_utilities.graphics._imgui import begin_popup_size, ndim_to_frame
@@ -36,7 +36,7 @@ from mbo_utilities.graphics.progress_bar import (
     draw_saveas_progress,
 )
 from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
-from mbo_utilities.phasecorr import compute_scan_phase_offsets
+from mbo_utilities.phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets
 from mbo_utilities import log
 
 try:
@@ -363,6 +363,30 @@ class PreviewDataWidget(EdgeWindow):
         self.font_size = 12
         self.fpath = fpath if fpath else getattr(iw, "fpath", None)
 
+        # image widget setup
+        self.image_widget = iw
+        self.shape = self.image_widget.data[0].shape
+
+        if len(self.shape) == 4:
+            self.nz = self.shape[1]
+        elif len(self.shape) == 3:
+            self.nz = 1
+        else:
+            self.nz = 1
+
+        if isinstance(self.image_widget.data[0], Scan_MBO):
+            self.is_mbo_scan = True
+        else:
+            self.is_mbo_scan = False
+        if self.is_mbo_scan:
+            for arr in self.image_widget.data:
+                arr.fix_phase = False
+
+        for subplot in self.image_widget.figure:
+            subplot.toolbar = False
+
+        self.image_widget._image_widget_sliders._loop = True  # noqa
+
         # boolean flags: imgui.begin() calls that are drawn
         # when these are set to true.
         self.show_style_window = False
@@ -376,7 +400,7 @@ class PreviewDataWidget(EdgeWindow):
         # though it may be easier to group these instead into a function or a class.
         self._max_offset = 8
         self._gaussian_sigma = 0
-        self._current_offset = 0.0
+        self._current_offset = [0.0] * self.num_arrays
         self._window_size = 1
         self._phase_upsample = 20
         self._border = 0
@@ -396,29 +420,6 @@ class PreviewDataWidget(EdgeWindow):
         self._debug = False
         self._saveas_save_phase_png = False
         self._saveas_chunk_mb = 20
-
-        # image widget setup
-        self.image_widget = iw
-        self.shape = self.image_widget.data[0].shape
-
-        if len(self.shape) == 4:
-            self.nz = self.shape[1]
-        elif len(self.shape) == 3:
-            self.nz = 1
-        else:
-            self.nz = 1
-
-        if isinstance(self.image_widget.data[0], Scan_MBO):
-            self.is_mbo_scan = True
-        else:
-            self.is_mbo_scan = False
-        if self.is_mbo_scan:
-            self.image_widget.data[0].fix_phase = False
-
-        for subplot in self.image_widget.figure:
-            subplot.toolbar = False
-
-        self.image_widget._image_widget_sliders._loop = True  # noqa
 
         # zstats: an entry for each given array
         # these are sent to a thread to compute
@@ -452,6 +453,34 @@ class PreviewDataWidget(EdgeWindow):
         self.image_widget.figure.canvas.set_title(str(title))
 
     @property
+    def current_offset(self):
+        if not self._fix_phase:
+            return self._current_offset
+        if all(hasattr(array, "offset") for array in self.image_widget.data):
+            if isinstance(self.image_widget.data[0].offset, float):
+                self.logger.info(f"All arrays have offset attribute. Setting from array.offset")
+                return [array.offset for array in self.image_widget.data]
+            else:
+                self.logger.info(f"Arrays don't have offset attribute. ")
+                return [
+                    compute_scan_phase_offsets(
+                        arr,
+                        "subpix",
+                        self.phase_upsample,
+                        self.max_offset,
+                        self.border
+                    ) for i, arr in enumerate(self.image_widget.data)
+                ]
+        else:
+            frame = self.get_raw_frame()
+            return compute_scan_phase_offsets(
+                frame,
+                upsample=self.phase_upsample,
+                border=self.border,
+                max_offset=self.max_offset,
+            )
+
+    @property
     def fix_phase(self):
         return self._fix_phase
 
@@ -460,18 +489,20 @@ class PreviewDataWidget(EdgeWindow):
         self._fix_phase = value
         if not value:
             for i, arr in enumerate(self.image_widget.data):
-                arr.offset = 0.0
+                if self.is_mbo_scan:
+                    arr.offset = 0.0
+                    self.current_offset[i] = 0.0
+                else:
+                    self.current_offset[i] = 0.0
                 self.logger.info(f"Resetting phase for array {i}.")
-        if self.is_mbo_scan:
+        elif self.is_mbo_scan:
             for arr in self.image_widget.data:
                 if isinstance(arr, Scan_MBO):
                     arr.fix_phase = value
                     self.logger.info(f"Set fix_phase to {value} for MBO Scan object.")
         else:
-            self.logger.warning(
-                "Fix phase is only applicable to MBO Scan objects. "
-                "No action taken."
-            )
+            self.update_frame_apply()
+
         # force update
         self.image_widget.current_index = self.image_widget.current_index
 
@@ -567,32 +598,6 @@ class PreviewDataWidget(EdgeWindow):
         self.image_widget.window_funcs["t"].window_size = value
         self._window_size = value
         self.logger.info(f"Window size set to {value}.")
-
-    @property
-    def current_offset(self):
-        if all(hasattr(array, "offset") for array in self.image_widget.data):
-            if isinstance(self.image_widget.data[0].offset, float):
-                self.logger.info(f"All arrays have offset attribute. Setting from array.offset")
-                return [array.offset for array in self.image_widget.data]
-            else:
-                self.logger.info(f"Arrays don't have offset attribute. ")
-                return [
-                    compute_scan_phase_offsets(
-                        arr,
-                        "subpix",
-                        self.phase_upsample,
-                        self.max_offset,
-                        self.border
-                    ) for i, arr in enumerate(self.image_widget.data)
-                ]
-        else:
-            frame = self.get_raw_frame()
-            return compute_scan_phase_offsets(
-                frame,
-                upsample=self.phase_upsample,
-                border=self.border,
-                max_offset=self.max_offset,
-            )
 
     @property
     def phase_upsample(self):
@@ -921,7 +926,7 @@ class PreviewDataWidget(EdgeWindow):
 
                 if imgui.button("Save", imgui.ImVec2(100, 0)):
                     if not self._saveas_outdir:
-                        self._saveas_outdir = _get_mbo_dirs()["base"].joinpath("data")
+                        self._saveas_outdir = get_mbo_dirs()["base"].joinpath("data")
                     try:
                         save_planes = [p + 1 for p in self._selected_planes]
                         self._saveas_total = len(save_planes)
@@ -1129,22 +1134,20 @@ class PreviewDataWidget(EdgeWindow):
     def update_frame_apply(self):
         """Update the frame_apply function of the image widget."""
         self.image_widget.frame_apply = {
-            i: partial(self._combined_frame_apply, roi=i)
+            i: partial(self._combined_frame_apply, arr_idx=i)
             for i in range(len(self.image_widget.managed_graphics))
         }
 
-    def _combined_frame_apply(self, frame: np.ndarray, roi=None) -> np.ndarray:
+    def _combined_frame_apply(self, frame: np.ndarray, arr_idx: int=0) -> np.ndarray:
         """alter final frame only once, in ImageWidget.frame_apply"""
         if self._gaussian_sigma > 0:
             frame = gaussian_filter(frame, sigma=self.gaussian_sigma)
+        if not self.is_mbo_scan:
+            frame = apply_scan_phase_offsets(frame, self.current_offset[arr_idx])
         if self.proj == "mean-sub" and self._zstats_means:
             z = self.image_widget.current_index.get("z", 0)
-            frame = frame - self._zstats_means[roi][z]
+            frame = frame - self._zstats_means[arr_idx][z]
         return frame
-
-    def calculate_offset(self, ev=None):  # type: ignore # noqa
-        """Get the current frame, calculate the offset"""
-        raise NotImplementedError()
 
     def _compute_zstats_single_roi(self, data_ix, arr):
         self.logger.info(f"Computing z-statistics for ROI {data_ix + 1}")
