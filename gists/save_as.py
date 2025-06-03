@@ -39,13 +39,13 @@ if __name__ == "__main__":
         roi=0,
         phasecorr_method="mean",
     )
-    savedir = r"/home/flynn/lbm_data/mean_phasecorr"
+    savedir = r"/home/flynn/lbm_data/bin"
     mbo.save_as(
         test_scan,
         savedir,
-        ext=".tiff",
+        ext=".bin",
         overwrite=True,
-        fix_phase=False,
+        fix_phase=True,
         debug=True,
-        planes=[1, 5, 10, 14],
+        planes=[10],
     )
