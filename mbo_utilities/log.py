@@ -33,3 +33,18 @@ for sub in os.getenv("MBO_ENABLE", "").split(","):
 for sub in os.getenv("MBO_DISABLE", "").split(","):
     if sub:
         disable(sub)
+
+def get_package_loggers() -> list[str]:
+    """Get all loggers that are part of the 'mbo' package."""
+    return [
+        name for name in logging.Logger.manager.loggerDict
+        if name.startswith("mbo.") and isinstance(logging.Logger.manager.loggerDict[name], logging.Logger)
+    ]
+
+def get_all_loggers() -> list[str]:
+    """Get all loggers that are currently enabled."""
+    return [
+        name for name,
+        logger in logging.Logger.manager.loggerDict.items()
+        if isinstance(logger, logging.Logger)
+           and not logger.disabled]
