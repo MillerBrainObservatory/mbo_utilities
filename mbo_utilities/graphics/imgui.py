@@ -1,5 +1,4 @@
 import logging
-import numbers
 import webbrowser
 from pathlib import Path
 from typing import Literal
@@ -357,9 +356,13 @@ class PreviewDataWidget(EdgeWindow):
 
         # backend.create_fonts_texture()
         self.io = imgui.get_io()
-        self.io.set_ini_filename("/home/flynn/lbm_data/mbo_settings.ini")
+        fd_settings_dir = Path(get_mbo_dirs()["imgui"]).joinpath(
+            "assets",
+            "app_settings",
+            "preview_settings.ini"
+        ).expanduser().resolve()
+        self.io.set_ini_filename(str(fd_settings_dir))
 
-        self.imgui_backend = iw.figure.imgui_renderer.backend
         self.font_size = 12
         self.fpath = fpath if fpath else getattr(iw, "fpath", None)
 
@@ -674,7 +677,8 @@ class PreviewDataWidget(EdgeWindow):
                 ):  # type: ignore # noqa
                     for col in ["Z", "Mean", "Std", "SNR"]:
                         imgui.table_setup_column(
-                            col, imgui.TableColumnFlags_.width_stretch
+                            col,
+                            imgui.TableColumnFlags_.width_stretch
                         )  # type: ignore # noqa
                     imgui.table_headers_row()
                     for i in range(len(z_vals)):

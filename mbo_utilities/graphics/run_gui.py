@@ -10,16 +10,16 @@ from icecream import ic
 import glfw
 from rendercanvas.glfw import GlfwRenderCanvas, loop
 import fastplotlib as fpl
-from imgui_bundle import immapp
+from imgui_bundle import immapp, imgui, hello_imgui
 
+from mbo_utilities import get_mbo_dirs
 from mbo_utilities.file_io import Scan_MBO
 from mbo_utilities.graphics.imgui import PreviewDataWidget
 from mbo_utilities.lazy_array import LazyArrayLoader
 from mbo_utilities.graphics._file_dialog import FileDialog
-from mbo_utilities.graphics._imgui import setup_imgui
 
 try:
-    setup_imgui()
+    # setup_imgui()
     IMGUI_SETUP_COMPLETE = True
 except ImportError:
     IMGUI_SETUP_COMPLETE = False
@@ -73,7 +73,31 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
         def render_file_dialog():
             file_dialog.render()
 
-        immapp.run(render_file_dialog, with_markdown=True, window_size=(1000, 1000))  # type: ignore  # noqa
+        runner_params = hello_imgui.RunnerParams()
+        runner_params.app_window_params.window_title = (
+            "MBO Utilities - Data Selection"
+        )
+        runner_params.callbacks.show_gui = render_file_dialog
+
+        fd_settings_dir = Path(get_mbo_dirs()["settings"]).joinpath(
+            "fd_settings.ini"
+        ).expanduser().resolve()
+        runner_params.ini_filename = str(fd_settings_dir)
+
+        assets_dir = Path(get_mbo_dirs()["assets"])
+        hello_imgui.set_assets_folder(str(assets_dir))
+
+        runner_params.app_window_params.window_geometry.size = (1400, 950)
+        addons = immapp.AddOnsParams()
+        addons.with_markdown = True
+        addons.with_implot = True
+        addons.with_implot3d = True
+
+        immapp.run(
+            runner_params=runner_params,
+            add_ons_params = addons
+        )
+
         data_in = file_dialog.selected_path
         threading = file_dialog.threading_enabled
         if not data_in:

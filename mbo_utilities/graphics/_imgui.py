@@ -20,7 +20,7 @@ def setup_imgui():
     imgui_ini_path = imgui_path.joinpath("imgui.ini")
     imgui_ini_path.parent.mkdir(exist_ok=True)
     imgui.create_context()
-    imgui.get_io().set_ini_filename(str(imgui_ini_path))
+    imgui.get_io().set_ini_filename("/home/flynn/lbm_data/mbo_filesettings.ini")
 
     if not project_assets.is_dir():
         ic("Assets folder not found.")

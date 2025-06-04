@@ -817,20 +817,24 @@ def get_mbo_dirs() -> dict:
     Returns a dict with paths to the root, settings, and cache directories.
     """
     base = Path.home().joinpath("mbo")
-    settings = base.joinpath("settings")
+    imgui = base.joinpath("imgui")
     cache = base.joinpath("cache")
     logs = base.joinpath("logs")
 
-    for d in (base, settings, cache, logs):
+    assets = imgui.joinpath("assets")
+    settings = assets.joinpath("app_settings")
+
+    for d in (base, imgui, cache, logs, assets):
         d.mkdir(exist_ok=True)
 
     return {
         "base": base,
-        "settings": settings,
+        "imgui": imgui,
         "cache": cache,
         "logs": logs,
+        "assets": assets,
+        "settings": settings,
     }
-
 
 def _make_json_serializable(obj):
     """Convert metadata to JSON serializable format."""
