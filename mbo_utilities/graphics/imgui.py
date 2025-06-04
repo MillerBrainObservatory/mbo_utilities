@@ -401,12 +401,12 @@ class PreviewDataWidget(EdgeWindow):
         # that controls what to do with the value.
         # different filetypes sometimes require different handling
         # though it may be easier to group these instead into a function or a class.
-        self._max_offset = 8
+        self._max_offset = 3
         self._gaussian_sigma = 0
         self._current_offset = [0.0] * self.num_arrays
         self._window_size = 1
         self._phase_upsample = 20
-        self._border = 0
+        self._border = 3
         self._auto_update = False
         self._proj = "mean"
 
