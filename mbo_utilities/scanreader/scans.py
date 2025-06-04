@@ -809,19 +809,19 @@ class ScanMultiROI(NewerScan, BaseScan):
     def __init__(self, join_contiguous):
         super().__init__()
         self.join_contiguous = join_contiguous
-        self.rois = None
+        self._rois = []
         self.fields = None
+
+    def read_data(self, filenames, dtype=np.int16):
+        super().read_data(filenames, dtype)
+        self._rois = self._create_rois()
+        self.fields = self._create_fields()
+        if self.join_contiguous:
+            self._join_contiguous_fields()
 
     @property
     def num_fields(self):
         return len(self.fields)
-
-    @property
-    def num_rois(self):
-        if isinstance(self.rois, list):
-            return len(self.rois)
-        elif isinstance(self.rois, int):
-            return self.rois
 
     @property
     def field_heights(self):
@@ -881,13 +881,13 @@ class ScanMultiROI(NewerScan, BaseScan):
         microns = (degrees * float(match.group("deg2um_factor"))) if match else None
         return microns
 
-    def read_data(self, filenames, dtype=np.int16):
-        """Set the header, create rois and fields (joining them if necessary)."""
-        super().read_data(filenames, dtype)
-        self.rois = self._create_rois()
-        self.fields = self._create_fields()
-        if self.join_contiguous:
-            self._join_contiguous_fields()
+    # def read_data(self, filenames, dtype=np.int16):
+    #     """Set the header, create rois and fields (joining them if necessary)."""
+    #     super().read_data(filenames, dtype)
+    #     self.rois = self._create_rois()
+    #     self.fields = self._create_fields()
+    #     if self.join_contiguous:
+    #         self._join_contiguous_fields()
 
     def _create_rois(self):
         """Create scan rois from the configuration file."""
