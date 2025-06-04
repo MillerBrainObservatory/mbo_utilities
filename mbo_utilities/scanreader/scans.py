@@ -818,7 +818,10 @@ class ScanMultiROI(NewerScan, BaseScan):
 
     @property
     def num_rois(self):
-        return len(self.rois)
+        if isinstance(self.rois, list):
+            return len(self.rois)
+        elif isinstance(self.rois, int):
+            return self.rois
 
     @property
     def field_heights(self):
