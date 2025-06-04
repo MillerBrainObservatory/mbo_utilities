@@ -100,12 +100,6 @@ class FileDialog:
                 "For issues, please report here: "
                 "https://github.com/MillerBrainObservatory/mbo_utilities/issues/new"
             )
-            _, self.save_phase_png = imgui.checkbox(
-                "Save Phase PNG", getattr(self, "save_phase_png", False)
-            )
-            set_tooltip(
-                "If enabled, the scan-phase will be corrected and a PNG of the phase will be saved in the same directory as the data file."
-            )
             imgui.end_group()
 
             # OS-dialog results --------------------------------------
