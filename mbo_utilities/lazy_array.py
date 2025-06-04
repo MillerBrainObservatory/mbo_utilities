@@ -6,6 +6,7 @@ from typing import Sequence, List, Tuple, Any, Protocol
 import numpy as np
 import tifffile
 import dask.array as da
+from dask.array import Array
 from numpy import memmap
 
 from . import log
@@ -146,27 +147,30 @@ class MBOTiffLoader:
     def chunks(self, value):
         self._chunks = value
 
-    def load(self) -> tuple[da.Array, list[str]]:
+    def load(self) -> memmap[Any, Any] | Any:
         # open each plane as a memmap
         mms: list[np.ndarray] = []
-        for p in self.fpath:
-            mm = tifffile.memmap(p, mode="r").view(np.int16)
-            mms.append(mm)
+        if isinstance(self.fpath, list):
+            if len(self.fpath) > 1:
+                for p in self.fpath:
+                    mm = tifffile.memmap(p, mode="r").view(np.int16)
+                    mms.append(mm)
 
-        # wrap every mem-map in a dask.Array
-        planes = []
-        for mm in mms:
-            if mm.ndim == 3:
-                da_mm = da.from_array(mm, chunks=self._chunks)
-                da_mm = da_mm[None, ...]
-            else:
-                da_mm = da.from_array(mm, chunks=self._chunks)
-            planes.append(da_mm)
+                # wrap every mem-map in a dask.Array
+                planes = []
+                for mm in mms:
+                    if mm.ndim == 3:
+                        da_mm = da.from_array(mm, chunks=self._chunks)
+                        da_mm = da_mm[None, ...]
+                    else:
+                        da_mm = da.from_array(mm, chunks=self._chunks)
+                    planes.append(da_mm)
 
-        stack = da.concatenate(planes, axis=0)  # (Z,T,Y,X)
-        # should make this a parameter
-        out = stack.transpose(1, 0, 2, 3)  # (T,Z,Y,X)
-        return out
+                stack = da.concatenate(planes, axis=0)  # (Z,T,Y,X)
+                # should make this a parameter
+                out = stack.transpose(1, 0, 2, 3)  # (T,Z,Y,X)
+                return out
+        return tifffile.memmap(self.fpath[0], mode="r")
 
 
 @dataclass
