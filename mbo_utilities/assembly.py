@@ -20,7 +20,6 @@ from .util import is_running_jupyter
 
 try:
     from suite2p.io import BinaryFile
-
     HAS_SUITE2P = True
 except ImportError:
     HAS_SUITE2P = True
@@ -137,7 +136,7 @@ def save_as(
         )
 
     if isinstance(planes, int):
-        logger.info(f"Saving only plane {planes} (1-based index).")
+        logger.info(f"Saving only plane {planes}.")
         planes = [planes - 1]
     elif planes is None:  # DON'T use "if not planes", then 0 will be treated as falsy
         logger.info(f"Saving all {scan.num_channels} planes.")
@@ -263,17 +262,21 @@ def save_nonscan(
     if metadata is None:
         logger.info("No metadata provided; using empty dictionary.")
         metadata = {}
+
     metadata["fov"] = [new_height, new_width]
     metadata["shape"] = (nt, new_width, new_height)
     metadata["dims"] = ["time", "width", "height"]
     metadata["trimmed"] = [left, right, top, bottom]
     metadata["nframes"] = nt
     metadata["num_frames"] = nt  # alias
-    metadata["save_path"] = str(savepath.expanduser().resolve())
 
     final_shape = (nt, new_height, new_width)
     logger.info(f"Final shape: {final_shape} (nt, height, width)")
-    writer = _get_file_writer(ext, overwrite=overwrite, metadata=metadata, data_shape=final_shape)
+    writer = _get_file_writer(
+        ext,
+        overwrite=overwrite,
+        metadata=metadata
+    )
 
     chunk_size = target_chunk_mb * 1024 * 1024
     total_chunks = sum(
@@ -288,6 +291,8 @@ def save_nonscan(
         fname = savepath / "data_raw.bin"
     else:
         fname = savepath / f"data.{ext}"
+
+    metadata["save_path"] = str(fname.expanduser().resolve())
 
     if fname.exists() and not overwrite:
         logger.info(f"File {fname} exists with overwrite=False; skipping.")
@@ -368,13 +373,13 @@ def _save_data(
     metadata["dims"] = ["time", "width", "height"]
     metadata["trimmed"] = [left, right, top, bottom]
     metadata["nframes"] = nt
+    metadata["n_frames"] = nt    # alias
     metadata["num_frames"] = nt  # alias
-    metadata["save_path"] = str(path.expanduser().resolve())
 
     final_shape = (nt, new_height, new_width)
     logger.info(f"Final shape: {final_shape} (nt, height, width)")
     writer = _get_file_writer(
-        ext, overwrite=overwrite, metadata=metadata, data_shape=final_shape
+        ext, overwrite=overwrite
     )
 
     chunk_size = target_chunk_mb * 1024 * 1024
@@ -400,12 +405,17 @@ def _save_data(
 
     pre_exists = True
     for chan_index in planes:
+        metadata_plane = metadata.copy()
         if pbar:
             pbar.set_description(f"Saving plane {chan_index + 1}")
         if ext == "bin":
-            fname = path / f"plane{chan_index}" / "data_raw.bin"
+            fname = path / f"plane{chan_index + 1}" / "data_raw.bin"
         else:
-            fname = path / f"plane_{chan_index + 1:02d}.{ext}"
+            fname = path / f"plane{chan_index + 1}.{ext}"
+
+        metadata["save_path"] = str(fname.parent.expanduser().resolve())
+        metadata_plane["plane"] = chan_index + 1 # 1-based indexing
+        metadata_plane["plane_index"] = chan_index
 
         if fname.exists() and not overwrite:
             logger.info(f"File {fname} already exists with overwrite=True; skipping save.")
@@ -435,8 +445,9 @@ def _save_data(
             ]
             logger.info(
                 f"Saving chunk {chunk + 1}/{num_chunks} for plane {chan_index + 1}:"
-                f" {data_chunk.shape} (frames, height, width)")
-            writer(fname, data_chunk, chan_index=chan_index)
+                f" {data_chunk.shape} (frames, height, width)"
+            )
+            writer(fname, data_chunk, metadata=metadata_plane)
             start = end
             if pbar:
                 pbar.update(1)
@@ -454,14 +465,18 @@ def _save_data(
         close_tiff_writers()
 
 
-def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
+def _get_file_writer(ext, overwrite, metadata=None):
     if ext in ["tif", "tiff"]:
         return functools.partial(
-            _write_tiff, overwrite=overwrite, metadata=metadata, data_shape=data_shape
+            _write_tiff,
+            overwrite=overwrite,
+            metadata=metadata
         )
     elif ext in ["h5", "hdf5"]:
         return functools.partial(
-            _write_h5, overwrite=overwrite, metadata=metadata, data_shape=data_shape
+            _write_h5,
+            overwrite=overwrite,
+            metadata=metadata,
         )
     elif ext == "bin":
         if not HAS_SUITE2P:
@@ -478,10 +493,8 @@ def _get_file_writer(ext, overwrite, metadata=None, data_shape=None, **kwargs):
 def _write_bin(
     path,
     data,
-    *,
     overwrite: bool = False,
     metadata=None,
-    **kwargs
 ):
     if not hasattr(_write_bin, "_writers"):
         _write_bin._writers, _write_bin._offsets = {}, {}
@@ -516,7 +529,7 @@ def _write_bin(
 
 
 def _write_h5(
-    path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None
+    path, data, overwrite=True, metadata=None
 ):
     filename = Path(path).with_suffix(".h5")
 
@@ -527,7 +540,7 @@ def _write_h5(
     if filename not in _write_h5._initialized:
         with h5py.File(filename, "w" if overwrite else "a") as f:
             f.create_dataset(
-                "mov", shape=data_shape, dtype=data.dtype, chunks=True, compression=None
+                "mov", shape=data.shape, dtype=data.dtype, chunks=True, compression=None
             )
 
             if metadata:
@@ -548,7 +561,7 @@ def _write_h5(
 
 
 def _write_tiff(
-    path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None
+    path, data, overwrite=True, metadata=None
 ):
     filename = Path(path).with_suffix(".tif")
 
@@ -578,7 +591,7 @@ def _write_tiff(
 
 
 def _write_zarr(
-    path, data, overwrite=True, metadata=None, data_shape=None, chan_index=None
+    path, data, overwrite=True, metadata=None
 ):
     try:
         import zarr
@@ -597,7 +610,7 @@ def _write_zarr(
         # start with zero along the appending axis.
         empty_shape = (0,) + data.shape[1:]
         max_shape = (None,) + data.shape[1:]
-        z = zarr.creation.create(
+        z = zarr.create(
             store=str(filename),
             shape=empty_shape,
             chunks=(1,) + data.shape[1:],  # one slice per chunk
