@@ -176,3 +176,4 @@ dev*.ipynb*
 
 # ini files
 **/*.ini
+__marimo__
