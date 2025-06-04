@@ -32,7 +32,6 @@ def _params_from_metadata_caiman(metadata):
         print("No metadata found. Using default parameters.")
         return params
 
-    split_frames = params["main"]["num_frames_split"]
     params["main"]["fr"] = metadata["frame_rate"]
     params["main"]["dxy"] = metadata["pixel_resolution"]
 
@@ -366,9 +365,6 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
             "ndim": series.ndim,
             "dtype": "int16",
             "size": series.size,
-            "raw_frames": len(pages) / num_planes,
-            "raw_height": pages[0].shape[0],
-            "raw_width": pages[0].shape[1],
             "tiff_pages": len(pages),
             "roi_width_px": num_pixel_xy[0],
             "roi_height_px": num_pixel_xy[1],
