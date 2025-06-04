@@ -3,39 +3,41 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence, List, Tuple, Any, Protocol
 
+import numpy as np
 import tifffile
 import dask.array as da
+from numpy import memmap
 
 from . import log
 from mbo_utilities.metadata import is_raw_scanimage
 from .assembly import HAS_SUITE2P
 from .file_io import Scan_MBO, read_scan, get_files
-from mbo_utilities.metadata import has_mbo_metadata, get_metadata
-try:
+from mbo_utilities.metadata import has_mbo_metadata
+if HAS_SUITE2P:
     from suite2p.io import BinaryFile
-    HAS_SUITE2P = True
-except ImportError:
-    HAS_SUITE2P = False
+else:
     BinaryFile = None
 
 logger = log.get("file_reader")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
-
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
-# (put this anywhere in your code where you want the wrapper to live;
-#  you don’t need to import suite2p at module‐top—only inside the loader)
-
-import numpy as np
-from suite2p.io import BinaryFile
 
 class _Suite2pLazyArray:
     def __init__(self, ops: dict):
         Ly = ops["Ly"]
         Lx = ops["Lx"]
-        n_frames = ops["nframes"]
-        reg_file = ops["reg_file"]
+        n_frames = ops.get("nframes", ops.get("nframes", None))
+        if n_frames is None:
+            raise ValueError(
+                f"Could not locate 'nframes' or `n_frames` in ops: {ops.keys()}"
+            )
+        reg_file = ops.get("reg_file", ops.get("raw_file", None))
+        if reg_file is None:
+            raise ValueError(
+                f"Could not locate 'reg_file' or 'raw_file' in ops: {ops.keys()}"
+            )
         self._bf = BinaryFile(Ly=Ly, Lx=Lx, filename=reg_file, n_frames=n_frames)
         self.shape = (n_frames, Ly, Lx)
         self.ndim = 3
@@ -179,7 +181,7 @@ class NpyLoader:
 class TifLoader:
     path: list[Path]
 
-    def load(self) -> Tuple[np.ndarray, List[str]]:
+    def load(self) -> memmap[Any, Any]:
         arr = tifffile.memmap(str(self.path))
         return arr
 
