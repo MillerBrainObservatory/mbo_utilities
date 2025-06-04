@@ -10,12 +10,13 @@ from numpy import memmap
 
 from . import log
 from mbo_utilities.metadata import is_raw_scanimage
-from .assembly import HAS_SUITE2P
 from .file_io import Scan_MBO, read_scan, get_files
 from mbo_utilities.metadata import has_mbo_metadata
-if HAS_SUITE2P:
+try:
     from suite2p.io import BinaryFile
-else:
+    HAS_SUITE2P = True
+except ImportError:
+    HAS_SUITE2P = False
     BinaryFile = None
 
 logger = log.get("file_reader")
@@ -23,6 +24,10 @@ logger = log.get("file_reader")
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
+
+class Loader(Protocol):
+    fpath: Path | str | Sequence[Path | str]
+    def load(self) -> Tuple[Any, List[str]]: ...
 
 class _Suite2pLazyArray:
     def __init__(self, ops: dict):
@@ -76,10 +81,6 @@ class _Suite2pLazyArray:
 
     def close(self):
         self._bf.file.close()
-
-
-class Loader(Protocol):
-    def load(self) -> Tuple[Any, List[str]]: ...
 
 
 @dataclass
@@ -170,19 +171,19 @@ class MBOTiffLoader:
 
 @dataclass
 class NpyLoader:
-    path: list[Path]
+    fpath: list[Path]
 
     def load(self) -> Tuple[np.ndarray, List[str]]:
-        arr = np.load(str(self.path), mmap_mode="r")
+        arr = np.load(str(self.fpath), mmap_mode="r")
         return arr
 
 
 @dataclass
 class TifLoader:
-    path: list[Path]
+    fpath: list[Path]
 
     def load(self) -> memmap[Any, Any]:
-        arr = tifffile.memmap(str(self.path))
+        arr = tifffile.memmap(str(self.fpath))
         return arr
 
 
@@ -194,54 +195,65 @@ class LazyArrayLoader:
 
     def __post_init__(self):
         # normalize into a list of Path
+        if isinstance(self.inputs, np.ndarray):
+            array = self.inputs
+            self.loader = lambda: array
+            self.fpath = None
+            return
+        paths: list[Path]
         if isinstance(self.inputs, (str, Path)):
             p = Path(self.inputs)
             if not p.exists():
                 raise ValueError(f"Input path does not exist: {p}")
             if p.is_dir():
-                self.inputs = [Path(f) for f in get_files(p)]
+                paths = [Path(f) for f in get_files(p)]
             else:
-                self.inputs = [p]
+                paths = [Path(p)]
+        elif isinstance(self.inputs, (list, tuple)):
+            paths = [Path(p) for p in self.inputs]
         else:
-            self.inputs = [Path(p) for p in self.inputs]
+            raise TypeError(
+                f"Unsupported input type: {type(self.inputs)}. "
+                "Expected str, Path, or a sequence of str/Path."
+            )
 
-        if not self.inputs:
+        if not paths:
             raise ValueError("No input files found.")
 
-        # filter only supported extensions
+        # check for mixed‐type in a single directory
         supported = {".npy", ".tif", ".tiff", ".bin"}
-        filtered = [p for p in self.inputs if p.suffix.lower() in supported]
+        filtered = [p for p in paths if p.suffix.lower() in supported]
         if not filtered:
             raise ValueError(f"No supported files in {self.inputs}")
+        self.fpath = filtered
 
-        self.inputs = filtered
-        first = Path(self.inputs[0])
+        exts = {p.suffix.lower() for p in filtered}
+        first = filtered[0]
 
-        # check for mixed‐type in a single directory
-        exts = {p.suffix.lower() for p in self.inputs}
+        # now parse for loader
         if len(exts) > 1:
             # if there is a single .bin and .npy, its a suite2p bin
             # leaving the code below because
             if exts == {".bin", ".npy"}:
-                metadata_file = Path(self.inputs[0]).parent.joinpath("ops.npy")
-                bin_file = Path(self.inputs[0]).parent.joinpath("data_raw.bin")
-                self.loader = Suite2pLoader(bin_file, metadata=np.load(metadata_file, allow_pickle=True).item())
+                parent = first.parent
+                npy_file = parent / "ops.npy"
+                bin_file = parent / "data_raw.bin"
+                md = np.load(str(npy_file), allow_pickle=True).item()
+                self.loader = Suite2pLoader(bin_file, md)
                 return
             raise ValueError(f"Multiple file types found in directory: {exts!r}")
-
-        # TIFF
         if first.suffix in [".tif", ".tiff"]:
             if is_raw_scanimage(first):
-                self.loader = MBOScanLoader(self.inputs, roi=self.roi)
+                self.loader = MBOScanLoader(filtered, roi=self.roi)
             elif has_mbo_metadata(first):
-                self.loader = MBOTiffLoader(self.inputs)
+                self.loader = MBOTiffLoader(filtered)
             else:
                 raise ValueError("Unsupported TIFF file type or missing metadata.")
         elif first.suffix.lower() == ".bin":
-            metadata_file = first.parent.joinpath("ops.npy")
-            if metadata_file.is_file():
-                metadata = np.load(metadata_file, allow_pickle=True).item()
-                bin_file = self.inputs[0]
+            npy_file = first.parent.joinpath("ops.npy")
+            bin_file = first.parent.joinpath("data_raw.bin")
+            if npy_file.is_file():
+                metadata = np.load(npy_file, allow_pickle=True).item()
                 self.loader = Suite2pLoader(bin_file, metadata)
             else:
                 raise NotImplementedError("BIN files with metadata are not yet supported.")
@@ -249,4 +261,6 @@ class LazyArrayLoader:
             raise TypeError(f"Unsupported file type: {first.suffix}")
 
     def load(self) -> Any:
-        return self.loader.load()
+        if hasattr(self.loader, "load"):
+            return self.loader.load()
+        return self.loader()
