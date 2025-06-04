@@ -20,6 +20,18 @@ class FileDialog:
         self._open_multi = None
         self._select_folder = None
         self._threading_enabled = MBO_THREADING_ENABLED
+        self._widget_enabled = True
+
+    @property
+    def widget_enabled(self):
+        return self._widget_enabled
+
+    @widget_enabled.setter
+    def widget_enabled(self, value):
+        self._widget_enabled = value
+        if not value:
+            # which logger to use ?
+            print("Widget disabled.")
 
     @property
     def threading_enabled(self):
@@ -28,6 +40,8 @@ class FileDialog:
     @threading_enabled.setter
     def threading_enabled(self, value):
         self._threading_enabled = value
+        # print a warning because
+        # this is generally done to fix a bug
         if not value:
             print(
                 "Threading disabled,"
@@ -62,7 +76,11 @@ class FileDialog:
             imgui.dummy(hello_imgui.em_to_vec2(0, 5))
 
             # centre prompt ------------------------------------------
-            txt = "Select a file, multiple files, or a folder to preview:"
+            txt = (
+                "Select a file,"
+                   " multiple files,"
+                   " or a folder to preview:"
+               )
             imgui.set_cursor_pos_x((imgui.get_window_width() - imgui.calc_text_size(txt).x) * 0.5)
             imgui.text_colored(imgui.ImVec4(1, 0.85, 0.3, 1), txt)
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.5))
@@ -78,7 +96,7 @@ class FileDialog:
                     "Select files", options=pfd.opt.multiselect
                 )
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Open one or more TIFF / NPY files.")
+                imgui.set_tooltip("Open one or more TIFF / BIN files.")
 
             imgui.same_line(spacing=gap)
             if imgui.button("Select Folder", bsz):
@@ -99,6 +117,15 @@ class FileDialog:
                 "Useful to turn this off if you experience issues with the widget or for debugging."
                 "For issues, please report here: "
                 "https://github.com/MillerBrainObservatory/mbo_utilities/issues/new"
+            )
+            _, self.widget_enabled = imgui.checkbox(
+                "Enable 'Data Preview' widget", self._widget_enabled
+            )
+            set_tooltip(
+                "Enable/disable the 'Data Preview' widget. "
+                "This widget allows you to visualize projections,"
+                " mean-subtraction,"
+                " and preview scan-phase correction."
             )
             imgui.end_group()
 
