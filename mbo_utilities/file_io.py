@@ -320,6 +320,11 @@ class Scan_MBO(scans.ScanMultiROI):
         )
 
     @property
+    def rois(self):
+        """Read‐only access to the ROI list."""
+        return self._rois
+
+    @property
     def offset(self):
         return self._offset
 
@@ -391,6 +396,14 @@ class Scan_MBO(scans.ScanMultiROI):
         If value is None, sets roi to -1 to indicate no specific ROI.
         """
         self._selected_roi = value
+
+
+    @property
+    def num_rois(self):
+        if isinstance(self.rois, list):
+            return len(self.rois)
+        elif isinstance(self.rois, int):
+            return self.rois
 
     def _read_pages(
         self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
