@@ -34,26 +34,27 @@ def find_si_rois(file):
 
 
 if __name__ == "__main__":
-    # input_tiff = "/home/flynn/lbm_data/tif/roi2/plane_11.tif"
-    # data = tifffile.memmap(input_tiff, mode="r")
+    # input_tiff = "/home/flynn/lbm_data/assembled/roi2/plane11.tif"
+    # metadata = {"plane": 11}
     # mbo.save_nonscan(
-    #     data,
-    #     "/home/flynn/lbm_data/bigtemp2",
+    #     input_tiff,
+    #     "/home/flynn/lbm_data/assembled",
     #     ext=".tif",
     #     overwrite=True,
+    #     metadata=metadata,
     # )
     test_scan = mbo.read_scan(
         "/home/flynn/lbm_data/raw",
         roi=0,
         phasecorr_method="mean",
     )
-    savedir = r"/home/flynn/lbm_data/bin"
-    test_scan.rois = 0
+    savedir = r"/home/flynn/lbm_data/assembled"
+    test_scan.roi = 0
     mbo.save_as(
         test_scan,
         savedir,
         ext=".tif",
-        overwrite=True,
+        overwrite=False,
         fix_phase=True,
         debug=True,
         planes=[7, 8, 9, 10, 11],
