@@ -879,8 +879,8 @@ def write_ops(metadata, raw_filename):
 
     shape = metadata["shape"]
     nt = shape[0]
-    Ly = shape[-2]
-    Lx = shape[-1]
+    Lx = shape[-2]
+    Ly = shape[-1]
 
     if "pixel_resolution" not in metadata:
         logger.warning("No pixel resolution found in metadata, using default [2, 2].")
