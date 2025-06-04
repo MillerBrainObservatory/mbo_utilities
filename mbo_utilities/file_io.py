@@ -1,13 +1,10 @@
 import re
 from collections.abc import Sequence
 from itertools import product
-from pathlib import Path
 
 from icecream import ic
 
 import dask.array as da
-import numpy as np
-import tifffile
 
 from . import log
 from .metadata import is_raw_scanimage
@@ -87,57 +84,6 @@ def normalize_file_url(path):
             if suffix.isdigit():
                 return f"{tag}{int(suffix)}"
     return name
-
-def ensure_bin_and_ops_from_tiff(input_tiff: Path, save_root: Path) -> tuple[Path, dict]:
-    """
-    Given a TIFF time‐series, guarantee that its “data_raw.bin” and “ops.npy”
-    in the corresponding plane folder under `save_root` both exist and
-    match the TIFF’s dimensions. If they already exist but dimensions differ,
-    they are overwritten.
-
-    Parameters
-    ----------
-    input_tiff : Path
-        Path to the source TIFF stack.
-    save_root : Path
-        Base directory under which the plane folder will be created.
-
-    Returns
-    -------
-    output_dir : Path
-        Directory named by `normalize_folder(input_tiff)` under `save_root`.
-    ops0 : dict
-        The resulting ops dictionary, saved at `output_dir/ops.npy`.
-
-    Side effects
-    ------------
-    - Creates (or clears) `output_dir/data_raw.bin`.
-    - Loads metadata via `mbo_utilities.metadata.get_metadata`.
-    - Calls `write_ops` to write `ops.npy` under `output_dir`.
-    """
-    folder = normalize_file_url(input_tiff)
-    output_dir = save_root / folder
-    output_dir.mkdir(exist_ok=True, parents=True)
-
-    raw_bin = output_dir / "data_raw.bin"
-    ops_path = output_dir / "ops.npy"
-
-    # Read TIFF memory‐map to inspect shape
-    data = tifffile.memmap(str(input_tiff))
-    nt, ny, nx = data.shape  # (frames, height, width)
-
-    # Either raw_bin didn’t exist or was invalid—create fresh
-    logger.info(f"Writing new raw binary to {raw_bin}.")
-    _write_raw_binary(input_tiff, raw_bin)
-
-    # Build metadata and ops
-    metadata = get_metadata(str(input_tiff))
-    metadata["shape"] = (nt, nx, ny)  # match what write_ops expects: (nframes, Lx, Ly)
-    planes = [1]
-    write_ops(metadata, output_dir, planes)
-
-    ops0 = load_ops(ops_path)
-    return output_dir, ops0
 
 
 def npy_to_dask(files, name="", axis=1, astype=None):
@@ -936,12 +882,15 @@ def write_ops(metadata, raw_filename):
 
     dx, dy = metadata.get("pixel_resolution", [2, 2])
     ops = {
+        # suite2p needs these
         "Ly": Ly,
         "Lx": Lx,
         "fs": metadata['fs'],
         "nframes": nt,
         "dx": dx,
         "dy": dy,
+        "ops_path": str(ops_path),
+        # and dump the rest of the metadata
         **metadata,
     }
     np.save(ops_path, ops)
