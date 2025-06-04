@@ -176,15 +176,19 @@ def save_as(
     )
     metadata["save_path"] = str(savedir.resolve())
 
-    # which rois to save
+    # which ROIs to save
     if scan.selected_roi is None:
-        roi_list = [None]  # full‐stack
+        # None ⇒ full (tiled) stack
+        roi_list = [None]
     elif scan.selected_roi == 0:
-        roi_list = list(range(1, scan.num_rois + 1))  # all individual ROIs
+        # 0 ⇒ split into every individual ROI
+        roi_list = list(range(1, scan.num_rois + 1))
     elif isinstance(scan.selected_roi, int):
-        roi_list = [scan.selected_roi]  # single ROI
+        # a single 1‐based ROI
+        roi_list = [scan.selected_roi]
     else:
-        roi_list = list(scan.selected_roi)  # list of ROIs
+        # an explicit list of ROI indices
+        roi_list = list(scan.selected_roi)
 
     logger.info(f"Saving ROIs: {roi_list} (0 means full stack, None means all ROIs).")
 
@@ -268,6 +272,7 @@ def save_nonscan(
     metadata["dims"] = ["time", "width", "height"]
     metadata["trimmed"] = [left, right, top, bottom]
     metadata["nframes"] = nt
+    metadata["n_frames"] = nt    # alias
     metadata["num_frames"] = nt  # alias
 
     final_shape = (nt, new_height, new_width)
@@ -295,7 +300,7 @@ def save_nonscan(
     metadata["save_path"] = str(fname.expanduser().resolve())
 
     if fname.exists() and not overwrite:
-        logger.info(f"File {fname} exists with overwrite=False; skipping.")
+        print(f"File {fname} exists with overwrite=False; skipping.", flush=True)
         return
 
     pre_exists = False
@@ -418,7 +423,7 @@ def _save_data(
         metadata_plane["plane_index"] = chan_index
 
         if fname.exists() and not overwrite:
-            logger.info(f"File {fname} already exists with overwrite=True; skipping save.")
+            print(f"File {fname} already exists with overwrite=False; skipping save.", flush=True)
             if pbar:
                 pbar.update(1)
             break
