@@ -15,6 +15,7 @@ import h5py
 
 from . import log
 from .file_io import _make_json_serializable, Scan_MBO, write_ops
+from .lazy_array import LazyArrayLoader
 from .metadata import get_metadata
 from .util import is_running_jupyter
 
@@ -244,6 +245,7 @@ def save_nonscan(
     if ext == "tiff":
         ext = "tif"
 
+    array = LazyArrayLoader(data)
     savepath = Path(savepath)
     savepath.mkdir(exist_ok=True)
 
@@ -280,7 +282,6 @@ def save_nonscan(
     writer = _get_file_writer(
         ext,
         overwrite=overwrite,
-        metadata=metadata
     )
 
     chunk_size = target_chunk_mb * 1024 * 1024
@@ -295,7 +296,14 @@ def save_nonscan(
     if ext == "bin":
         fname = savepath / "data_raw.bin"
     else:
-        fname = savepath / f"data.{ext}"
+        if "plane" in metadata:
+            logger.info(f"Using 'plane' from metadata: {metadata['plane']}")
+            fname = savepath / f"plane{metadata["plane"]}.{ext}"
+        elif "name" in metadata:
+            logger.info(f"Using 'name' from metadata: {metadata['name']}")
+        else:
+            logger.info("No 'plane' or 'name' in metadata; using default naming.")
+            fname = f"data_{final_shape[0]}_{final_shape[1]}_{final_shape[2]}.{ext}"
 
     metadata["save_path"] = str(fname.expanduser().resolve())
 
@@ -431,7 +439,7 @@ def _save_data(
         pre_exists = False
         if save_phase_png:
             png_dir = path / f"scan_phase_check_plane_{chan_index + 1:02d}"
-            png_dir.mkdir(exist_ok=True)
+            # png_dir.mkdir(exist_ok=True)
 
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
         num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
@@ -470,18 +478,16 @@ def _save_data(
         close_tiff_writers()
 
 
-def _get_file_writer(ext, overwrite, metadata=None):
+def _get_file_writer(ext, overwrite):
     if ext in ["tif", "tiff"]:
         return functools.partial(
             _write_tiff,
             overwrite=overwrite,
-            metadata=metadata
         )
     elif ext in ["h5", "hdf5"]:
         return functools.partial(
             _write_h5,
             overwrite=overwrite,
-            metadata=metadata,
         )
     elif ext == "bin":
         if not HAS_SUITE2P:
@@ -489,7 +495,6 @@ def _get_file_writer(ext, overwrite, metadata=None):
         return functools.partial(
             _write_bin,
             overwrite=overwrite,
-            metadata=metadata,
         )
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
