@@ -104,12 +104,15 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
             print("No file or folder selected, exiting.")
             return
     ic(data_in)
-    data, fpath = to_lazy_array(data_in, roi=roi)
+    # data, fpath = to_lazy_array(data_in, roi=roi)
+    array_object = LazyArrayLoader(data_in, roi=roi)
+    data = array_object.load()
+    fpath = array_object.fpath
     if hasattr(data, "rois"):
         arrs = []
-        for roi in range(len(data.rois)):
+        for roi in range(1, data.num_rois + 1):
             scan_copy = copy.copy(data)
-            scan_copy.selected_roi = roi + 1
+            scan_copy.selected_roi = roi
             arrs.append(scan_copy)
 
         nx, ny = data.shape[-2:]

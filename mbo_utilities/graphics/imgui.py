@@ -304,6 +304,212 @@ def draw_tabs(parent):
                 imgui.end_tab_item()
             imgui.end_tab_bar()
 
+def draw_popups(parent):
+    if getattr(parent, "_saveas_popup_open"):
+        imgui.open_popup("Save As")
+        parent._saveas_popup_open = False
+
+    if imgui.begin_popup_modal("Save As")[0]:
+        imgui.dummy(ImVec2(0, 5))
+
+        imgui.set_next_item_width(hello_imgui.em_size(25))
+
+        # Directory + Ext
+        _, parent._saveas_outdir = imgui.input_text(
+            "Save Dir",
+            str(Path(parent._saveas_outdir).expanduser().resolve()),
+            256,
+        )
+        imgui.same_line()
+        if imgui.button("Browse"):
+            home = Path().home()
+            res = pfd.select_folder(str(home))
+            if res:
+                parent._saveas_outdir = res.result()
+
+        imgui.set_next_item_width(hello_imgui.em_size(25))
+        _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, SAVE_AS_TYPES)
+        parent._ext = SAVE_AS_TYPES[parent._ext_idx]
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Options Section
+        parent._saveas_rois = checkbox_with_tooltip(
+            "Save ROI's",
+            parent._saveas_rois,
+            "Enable to save each ROI individually. Saved to subfolders like roi1/, roi2/, etc.",
+        )
+        if parent._saveas_rois:
+            try:
+                num_rois = parent.image_widget.data[0].num_rois
+            except Exception as e:
+                num_rois = 1
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.text_colored(
+                imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose ROI(s):"
+            )
+            imgui.dummy(ImVec2(0, 5))
+
+            if imgui.button("All##roi"):
+                parent._saveas_selected_roi = set(range(num_rois))
+            imgui.same_line()
+            if imgui.button("None##roi"):
+                parent._saveas_selected_roi = set()
+
+            imgui.columns(2, borders=False)
+            for i in range(num_rois):
+                imgui.push_id(f"roi_{i}")
+                selected = i in parent._saveas_selected_roi
+                _, selected = imgui.checkbox(f"ROI {i + 1}", selected)
+                if selected:
+                    parent._saveas_selected_roi.add(i)
+                else:
+                    parent._saveas_selected_roi.discard(i)
+                imgui.pop_id()
+                imgui.next_column()
+            imgui.columns(1)
+
+        imgui.spacing()
+        imgui.separator()
+
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Options")
+        set_tooltip(
+            "Note: Current values for upsample and max-offset are applied during scan-phase correction.",
+            True,
+        )
+
+        imgui.dummy(ImVec2(0, 5))
+
+        parent._overwrite = checkbox_with_tooltip(
+            "Overwrite", parent._overwrite, "Replace any existing output files."
+        )
+        parent.fix_phase = checkbox_with_tooltip(
+            "Fix Phase",
+            parent._fix_phase,
+            "Apply scan-phase correction to interleaved lines.",
+        )
+        parent._debug = checkbox_with_tooltip(
+            "Debug",
+            parent._debug,
+            "Run with debugging, settings -> debug to view the outputs.",
+        )
+        parent._saveas_save_phase_png = checkbox_with_tooltip(
+            "Save Phase Images",
+            parent._saveas_save_phase_png,
+            "Saves pre-post scan-phase images as PNGs to the save-directory.",
+        )
+
+        imgui.spacing()
+        imgui.text("Chunk Size (MB)")
+        set_tooltip(
+            "Target chunk size when saving TIFF or binary. Affects I/O and memory usage."
+        )
+
+        imgui.set_next_item_width(hello_imgui.em_size(20))
+        _, parent._saveas_chunk_mb = imgui.drag_int(
+            "##target_chunk_mb",
+            parent._saveas_chunk_mb,
+            v_speed=1,
+            v_min=1,
+            v_max=1024,
+        )
+
+        imgui.spacing()
+        imgui.separator()
+
+        # Z-plane selection
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose z-planes:")
+        imgui.dummy(ImVec2(0, 5))
+
+        try:
+            num_planes = parent.image_widget.data[0].num_channels  # noqa
+        except Exception as e:
+            num_planes = 1
+            hello_imgui.log(
+                hello_imgui.LogLevel.error,
+                f"Could not read number of planes: {e}",
+            )
+
+        if imgui.button("All"):
+            parent._selected_planes = set(range(num_planes))
+        imgui.same_line()
+        if imgui.button("None"):
+            parent._selected_planes = set()
+
+        imgui.columns(2, borders=False)
+        for i in range(num_planes):
+            imgui.push_id(i)
+            selected = i in parent._selected_planes
+            _, selected = imgui.checkbox(f"Plane {i + 1}", selected)
+            if selected:
+                parent._selected_planes.add(i)
+            else:
+                parent._selected_planes.discard(i)
+            imgui.pop_id()
+            imgui.next_column()
+        imgui.columns(1)
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        if imgui.button("Save", imgui.ImVec2(100, 0)):
+            if not parent._saveas_outdir:
+                parent._saveas_outdir = get_mbo_dirs()["base"].joinpath("data")
+            try:
+                save_planes = [p + 1 for p in parent._selected_planes]
+                parent._saveas_total = len(save_planes)
+                if parent._saveas_rois:
+                    if (
+                            not parent._saveas_selected_roi
+                            or len(parent._saveas_selected_roi) == set()
+                    ):
+                        parent._saveas_selected_roi = set(
+                            range(1, parent.num_arrays + 1)
+                        )
+                    rois = sorted(parent._saveas_selected_roi)
+                else:
+                    rois = None
+
+                save_kwargs = {
+                    "path": parent.fpath,
+                    "savedir": parent._saveas_outdir,
+                    "planes": save_planes,
+                    "roi": rois,
+                    "overwrite": parent._overwrite,
+                    "fix_phase": parent._fix_phase,
+                    "debug": parent._debug,
+                    "ext": parent._ext,
+                    "save_phase_png": parent._saveas_save_phase_png,
+                    "target_chunk_mb": parent._saveas_chunk_mb,
+                    "progress_callback": lambda frac,
+                                                current_plane: parent.gui_progress_callback(
+                        frac, current_plane
+                    ),
+                }
+                parent.logger.info(f"Saving planes {save_planes}")
+                parent.logger.info(
+                    f"Saving to {parent._saveas_outdir} as {parent._ext}"
+                )
+                threading.Thread(
+                    target=_save_as, kwargs=save_kwargs, daemon=True
+                ).start()
+                imgui.close_current_popup()
+            except Exception as e:
+                parent.logger.info(f"Error saving data: {e}")
+                imgui.close_current_popup()
+
+        imgui.same_line()
+        if imgui.button("Cancel"):
+            imgui.close_current_popup()
+
+        imgui.end_popup()
+    pass
+
 
 class PreviewDataWidget(EdgeWindow):
     def __init__(
@@ -411,7 +617,7 @@ class PreviewDataWidget(EdgeWindow):
         self._proj = "mean"
 
         self._selected_pipelines = None
-        self._selected_roi = 0
+        self._selected_array = 0
 
         # properties for saving to another filetype
         self._ext = str(getattr(self, "_ext", ".tiff"))
@@ -457,7 +663,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @property
     def current_offset(self):
-        if not self._fix_phase:
+        if not self.fix_phase:
             return self._current_offset
         if all(hasattr(array, "offset") for array in self.image_widget.data):
             if isinstance(self.image_widget.data[0].offset, float):
@@ -493,8 +699,9 @@ class PreviewDataWidget(EdgeWindow):
         if not value:
             for i, arr in enumerate(self.image_widget.data):
                 if self.is_mbo_scan:
-                    arr.offset = 0.0
+                    arr.fix_phase = False
                     self.current_offset[i] = 0.0
+                    self.image_widget.current_index = self.image_widget.current_index
                 else:
                     self.current_offset[i] = 0.0
                 self.logger.info(f"Resetting phase for array {i}.")
@@ -548,18 +755,18 @@ class PreviewDataWidget(EdgeWindow):
         return len(self.image_widget.managed_graphics)
 
     @property
-    def selected_roi(self):
-        return self._selected_roi
+    def selected_array(self):
+        return self._selected_array
 
-    @selected_roi.setter
-    def selected_roi(self, value):
+    @selected_array.setter
+    def selected_array(self, value):
         if value < 0 or value >= len(self.image_widget.data):
             raise ValueError(
-                f"Invalid ROI index: {value}. "
+                f"Invalid array index: {value}. "
                 f"Must be between 0 and {len(self.image_widget.managed_graphics) - 1}."
             )
-        self._selected_roi = value
-        self.logger.info(f"Selected ROI index set to {value}.")
+        self._selected_array = value
+        self.logger.info(f"Selected array index set to {value}.")
         # self.image_widget.current_index = {"roi": value}
         self.update_frame_apply()
 
@@ -620,6 +827,7 @@ class PreviewDataWidget(EdgeWindow):
             )
 
     def update(self):
+        draw_popups(self)
         draw_menu(self)
         draw_tabs(self)
 
@@ -634,22 +842,22 @@ class PreviewDataWidget(EdgeWindow):
         imgui.spacing()
 
         # ROI selector
-        roi_labels = [
-            f"ROI {i + 1}"
+        array_labels = [
+            f"Array {i + 1}"
             for i in range(len(stats_list))
             if stats_list[i] and "mean" in stats_list[i]
         ]
-        roi_labels.append("Combined")
-        for i, label in enumerate(roi_labels):
-            if imgui.radio_button(label, self._selected_roi == i):
-                self._selected_roi = i
-            if i < len(roi_labels) - 1:
+        array_labels.append("Combined")
+        for i, label in enumerate(array_labels):
+            if imgui.radio_button(label, self._selected_array == i):
+                self._selected_array = i
+            if i < len(array_labels) - 1:
                 imgui.same_line()
 
         imgui.separator()
 
-        if self._selected_roi == len(roi_labels) - 1:  # Combined
-            imgui.text("Stats for Combined ROIs")
+        if self._selected_array == len(array_labels) - 1:  # Combined
+            imgui.text("Stats for Combined Arrays")
             mean_vals = np.mean(
                 [np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0
             )
@@ -671,7 +879,7 @@ class PreviewDataWidget(EdgeWindow):
                 "##SummaryCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
             ):
                 if imgui.begin_table(
-                    "Stats, averaged over ROI's",
+                    "Stats, averaged over arrays",
                     4,
                     imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,  # type: ignore # noqa
                 ):  # type: ignore # noqa
@@ -714,23 +922,23 @@ class PreviewDataWidget(EdgeWindow):
                     implot.end_plot()
 
         else:
-            roi_idx = self._selected_roi
-            stats = stats_list[roi_idx]
+            array_idx = self._selected_array
+            stats = stats_list[array_idx]
 
             if not stats or "mean" not in stats:
                 return
 
-            imgui.text(f"Stats for ROI {roi_idx + 1}")
+            imgui.text(f"Stats for array {array_idx + 1}")
             mean_vals = np.array(stats["mean"])
             std_vals = np.array(stats["std"])
             snr_vals = np.array(stats["snr"])
             z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
 
             with imgui_ctx.begin_child(
-                f"##Summary{roi_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
+                f"##Summary{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
             ):
                 if imgui.begin_table(
-                    f"zstats{roi_idx}",
+                    f"zstats{array_idx}",
                     4,
                     imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
                 ):  # type: ignore # noqa
@@ -751,7 +959,7 @@ class PreviewDataWidget(EdgeWindow):
             ):
                 imgui.text("Z-plane Signal: Mean ± Std")
                 if implot.begin_plot(
-                    f"Z-Plane Signal {roi_idx}", size=imgui.ImVec2(-1, 300)
+                    f"Z-Plane Signal {array_idx}", size=imgui.ImVec2(-1, 300)
                 ):
                     z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
                     implot.setup_axes(
@@ -760,7 +968,6 @@ class PreviewDataWidget(EdgeWindow):
                         implot.AxisFlags_.none.value,
                         implot.AxisFlags_.auto_fit.value,
                     )
-                    # implot.setup_axis_limits(implot.ImAxis_.x1.value, z_vals[0], z_vals[-1])
                     implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, self.nz)
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
                     style_seaborn_dark()
@@ -776,209 +983,6 @@ class PreviewDataWidget(EdgeWindow):
             imgui.ImVec2(0, 0),
             cflags,
         ):
-            if getattr(self, "_saveas_popup_open", False):
-                imgui.open_popup("Save As")
-                self._saveas_popup_open = False
-
-            if imgui.begin_popup_modal("Save As")[0]:
-                imgui.dummy(ImVec2(0, 5))
-
-                imgui.set_next_item_width(hello_imgui.em_size(25))
-
-                # Directory + Ext
-                _, self._saveas_outdir = imgui.input_text(
-                    "Save Dir",
-                    str(Path(self._saveas_outdir).expanduser().resolve()),
-                    256,
-                )
-                imgui.same_line()
-                if imgui.button("Browse"):
-                    home = Path().home()
-                    res = pfd.select_folder(str(home))
-                    if res:
-                        self._saveas_outdir = res.result()
-
-                imgui.set_next_item_width(hello_imgui.em_size(25))
-                _, self._ext_idx = imgui.combo("Ext", self._ext_idx, SAVE_AS_TYPES)
-                self._ext = SAVE_AS_TYPES[self._ext_idx]
-
-                imgui.spacing()
-                imgui.separator()
-                imgui.spacing()
-
-                # Options Section
-                self._saveas_rois = checkbox_with_tooltip(
-                    "Save ROI's",
-                    self._saveas_rois,
-                    "Enable to save each ROI individually. Saved to subfolders like roi1/, roi2/, etc.",
-                )
-                if self._saveas_rois:
-                    try:
-                        num_rois = self.image_widget.data[0].num_rois
-                    except Exception as e:
-                        num_rois = 1
-
-                    imgui.spacing()
-                    imgui.separator()
-                    imgui.text_colored(
-                        imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose ROI(s):"
-                    )
-                    imgui.dummy(ImVec2(0, 5))
-
-                    if imgui.button("All##roi"):
-                        self._saveas_selected_roi = set(range(num_rois))
-                    imgui.same_line()
-                    if imgui.button("None##roi"):
-                        self._saveas_selected_roi = set()
-
-                    imgui.columns(2, borders=False)
-                    for i in range(num_rois):
-                        imgui.push_id(f"roi_{i}")
-                        selected = i in self._saveas_selected_roi
-                        _, selected = imgui.checkbox(f"ROI {i + 1}", selected)
-                        if selected:
-                            self._saveas_selected_roi.add(i)
-                        else:
-                            self._saveas_selected_roi.discard(i)
-                        imgui.pop_id()
-                        imgui.next_column()
-                    imgui.columns(1)
-
-                imgui.spacing()
-                imgui.separator()
-
-                imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Options")
-                set_tooltip(
-                    "Note: Current values for upsample and max-offset are applied during scan-phase correction.",
-                    True,
-                )
-
-                imgui.dummy(ImVec2(0, 5))
-
-                self._overwrite = checkbox_with_tooltip(
-                    "Overwrite", self._overwrite, "Replace any existing output files."
-                )
-                self.fix_phase = checkbox_with_tooltip(
-                    "Fix Phase",
-                    self._fix_phase,
-                    "Apply scan-phase correction to interleaved lines.",
-                )
-                self._debug = checkbox_with_tooltip(
-                    "Debug",
-                    self._debug,
-                    "Run with debugging, settings -> debug to view the outputs.",
-                )
-                self._saveas_save_phase_png = checkbox_with_tooltip(
-                    "Save Phase Images",
-                    self._saveas_save_phase_png,
-                    "Saves pre-post scan-phase images as PNGs to the save-directory.",
-                )
-
-                imgui.spacing()
-                imgui.text("Chunk Size (MB)")
-                set_tooltip(
-                    "Target chunk size when saving TIFF or binary. Affects I/O and memory usage."
-                )
-
-                imgui.set_next_item_width(hello_imgui.em_size(20))
-                _, self._saveas_chunk_mb = imgui.drag_int(
-                    "##target_chunk_mb",
-                    self._saveas_chunk_mb,
-                    v_speed=1,
-                    v_min=1,
-                    v_max=1024,
-                )
-
-                imgui.spacing()
-                imgui.separator()
-
-                # Z-plane selection
-                imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose z-planes:")
-                imgui.dummy(ImVec2(0, 5))
-
-                try:
-                    num_planes = self.image_widget.data[0].num_channels  # noqa
-                except Exception as e:
-                    num_planes = 1
-                    hello_imgui.log(
-                        hello_imgui.LogLevel.error,
-                        f"Could not read number of planes: {e}",
-                    )
-
-                if imgui.button("All"):
-                    self._selected_planes = set(range(num_planes))
-                imgui.same_line()
-                if imgui.button("None"):
-                    self._selected_planes = set()
-
-                imgui.columns(2, borders=False)
-                for i in range(num_planes):
-                    imgui.push_id(i)
-                    selected = i in self._selected_planes
-                    _, selected = imgui.checkbox(f"Plane {i + 1}", selected)
-                    if selected:
-                        self._selected_planes.add(i)
-                    else:
-                        self._selected_planes.discard(i)
-                    imgui.pop_id()
-                    imgui.next_column()
-                imgui.columns(1)
-
-                imgui.spacing()
-                imgui.separator()
-                imgui.spacing()
-
-                if imgui.button("Save", imgui.ImVec2(100, 0)):
-                    if not self._saveas_outdir:
-                        self._saveas_outdir = get_mbo_dirs()["base"].joinpath("data")
-                    try:
-                        save_planes = [p + 1 for p in self._selected_planes]
-                        self._saveas_total = len(save_planes)
-                        if self._saveas_rois:
-                            if (
-                                not self._saveas_selected_roi
-                                or len(self._saveas_selected_roi) == set()
-                            ):
-                                self._saveas_selected_roi = set(
-                                    range(1, self.num_arrays + 1)
-                                )
-                            rois = sorted(self._saveas_selected_roi)
-                        else:
-                            rois = None
-
-                        save_kwargs = {
-                            "path": self.fpath,
-                            "savedir": self._saveas_outdir,
-                            "planes": save_planes,
-                            "roi": rois,
-                            "overwrite": self._overwrite,
-                            "fix_phase": self._fix_phase,
-                            "debug": self._debug,
-                            "ext": self._ext,
-                            "save_phase_png": self._saveas_save_phase_png,
-                            "target_chunk_mb": self._saveas_chunk_mb,
-                            "progress_callback": lambda frac,
-                            current_plane: self.gui_progress_callback(
-                                frac, current_plane
-                            ),
-                        }
-                        self.logger.info(f"Saving planes {save_planes}")
-                        self.logger.info(
-                        f"Saving to {self._saveas_outdir} as {self._ext}"
-                        )
-                        threading.Thread(
-                            target=_save_as, kwargs=save_kwargs, daemon=True
-                        ).start()
-                        imgui.close_current_popup()
-                    except Exception as e:
-                        self.logger.info(f"Error saving data: {e}")
-                        imgui.close_current_popup()
-
-                imgui.same_line()
-                if imgui.button("Cancel"):
-                    imgui.close_current_popup()
-
-                imgui.end_popup()
             # Section: Window Functions
             imgui.spacing()
             imgui.separator()
@@ -1073,10 +1077,7 @@ class PreviewDataWidget(EdgeWindow):
 
             imgui.columns(2, "offsets", False)
             for i, iw in enumerate(self.image_widget.data):
-                if not hasattr(iw, "offset"):
-                    ofs = self.current_offset[i]
-                else:
-                    ofs = iw.offset if isinstance(iw.offset, (float, int)) else iw.offset[i]
+                ofs = self.current_offset[i]
                 imgui.text(f"Array {i}:")
                 imgui.next_column()
                 imgui.text(f"{ofs:.3f}")
@@ -1146,7 +1147,7 @@ class PreviewDataWidget(EdgeWindow):
         """alter final frame only once, in ImageWidget.frame_apply"""
         if self._gaussian_sigma > 0:
             frame = gaussian_filter(frame, sigma=self.gaussian_sigma)
-        if not self.is_mbo_scan:
+        if (not self.is_mbo_scan) and self._fix_phase:
             frame = apply_scan_phase_offsets(frame, self.current_offset[arr_idx])
         if self.proj == "mean-sub" and self._zstats_means:
             z = self.image_widget.current_index.get("z", 0)
