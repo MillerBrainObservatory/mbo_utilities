@@ -10,7 +10,7 @@ from icecream import ic
 import glfw
 from rendercanvas.glfw import GlfwRenderCanvas, loop
 import fastplotlib as fpl
-from imgui_bundle import immapp, imgui, hello_imgui
+from imgui_bundle import immapp, hello_imgui
 
 from mbo_utilities import get_mbo_dirs
 from mbo_utilities.file_io import Scan_MBO
