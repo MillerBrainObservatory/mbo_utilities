@@ -245,12 +245,15 @@ def save_nonscan(
     if ext == "tiff":
         ext = "tif"
 
-    array = LazyArrayLoader(data)
+    array_object = LazyArrayLoader(data)
+    data = array_object.load().squeeze()
+    fpath = array_object.fpath
+
     savepath = Path(savepath)
     savepath.mkdir(exist_ok=True)
 
     if data.ndim == 3:
-        nt, nx, ny = data.shape
+        nt, ny, nx = data.shape
         use_planes = [0]
     else:
         raise ValueError(f"Unsupported data.ndim={data.ndim}; expected 3.")
@@ -298,7 +301,7 @@ def save_nonscan(
     else:
         if "plane" in metadata:
             logger.info(f"Using 'plane' from metadata: {metadata['plane']}")
-            fname = savepath / f"plane{metadata["plane"]}.{ext}"
+            fname = savepath / f"plane{metadata['plane']}.{ext}"
         elif "name" in metadata:
             logger.info(f"Using 'name' from metadata: {metadata['name']}")
         else:
