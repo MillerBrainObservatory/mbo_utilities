@@ -44,7 +44,7 @@ def load_ops(ops_input: str | Path | list[str | Path]):
     print("Warning: No valid ops file provided, returning None.")
     return {}
 
-def normalize_folder(path):
+def normalize_file_url(path):
     """
     Derive a folder tag from a filename based on “planeN”, “roiN”, or "tagN" patterns.
 
@@ -62,19 +62,19 @@ def normalize_folder(path):
 
     Examples
     --------
-    >>> normalize_folder("plane_01.tif")
+    >>> normalize_file_url("plane_01.tif")
     'plane1'
-    >>> normalize_folder("plane2.bin")
+    >>> normalize_file_url("plane2.bin")
     'plane2'
-    >>> normalize_folder("roi5.raw")
+    >>> normalize_file_url("roi5.raw")
     'roi5'
-    >>> normalize_folder("ROI_10.dat")
+    >>> normalize_file_url("ROI_10.dat")
     'roi10'
-    >>> normalize_folder("res-3.h5")
+    >>> normalize_file_url("res-3.h5")
     'res3'
-    >>> normalize_folder("assembled_data_1.tiff")
+    >>> normalize_file_url("assembled_data_1.tiff")
     'assembled_data_1'
-    >>> normalize_folder("file_12.tif")
+    >>> normalize_file_url("file_12.tif")
     'file_12'
     """
     name = Path(path).stem
@@ -115,7 +115,7 @@ def ensure_bin_and_ops_from_tiff(input_tiff: Path, save_root: Path) -> tuple[Pat
     - Loads metadata via `mbo_utilities.metadata.get_metadata`.
     - Calls `write_ops` to write `ops.npy` under `output_dir`.
     """
-    folder = normalize_folder(input_tiff)
+    folder = normalize_file_url(input_tiff)
     output_dir = save_root / folder
     output_dir.mkdir(exist_ok=True, parents=True)
 
@@ -897,39 +897,6 @@ def _intersect_slice(user: slice, mask: slice):
     return slice(start, stop)
 
 
-def write_ops_(metadata: dict, base_path: str | Path, planes):
-    base_path = Path(base_path).expanduser().resolve()
-    if "si" in metadata.keys():
-        del metadata["si"]
-
-    if isinstance(planes, int):
-        planes = [planes]
-    for plane_idx in planes:
-        plane_dir = Path(base_path) / f"plane{plane_idx}"
-
-        raw_bin = plane_dir.joinpath("data_raw.bin")
-        ops_path = plane_dir.joinpath("ops.npy")
-
-        # TODO: This is not an accurate way to get a metadata value that should not have
-        #        to be calculated. We use shape to account for the trimmed pixels
-        shape = metadata["shape"]
-        nt = shape[0]
-        Ly = shape[-2]
-        Lx = shape[-1]
-        dx, dy = metadata.get("pixel_resolution", [2, 2])
-        ops = {
-            "Ly": Ly,
-            "Lx": Lx,
-            "fs": np.round(metadata.get("frame_rate"), 2),
-            "nframes": nt,
-            "raw_file": str(raw_bin.resolve()),
-            "reg_file": str(raw_bin.resolve()),
-            "dx": dx,
-            "dy": dy,
-            "metadata": metadata,
-        }
-        np.save(ops_path, ops)
-
 def write_ops(metadata, raw_filename):
     """
     Write metadata to an ops file alongside the given filename.
@@ -947,10 +914,9 @@ def write_ops(metadata, raw_filename):
         root = filename.parent
     else:
         root = filename
-    raw_bin = root.joinpath("data_raw.bin")
-    ops_path = root.joinpath("ops.npy")
 
-    logger.debug(f"Writing ops file to {ops_path} with raw_bin: {raw_bin}")
+    ops_path = root.joinpath("ops.npy")
+    logger.debug(f"Writing ops file to {ops_path}.")
 
     shape = metadata["shape"]
     nt = shape[0]
@@ -974,11 +940,9 @@ def write_ops(metadata, raw_filename):
         "Lx": Lx,
         "fs": metadata['fs'],
         "nframes": nt,
-        "raw_file": str(raw_bin.resolve()),
-        "reg_file": str(raw_bin.resolve()),
         "dx": dx,
         "dy": dy,
-        "metadata": metadata,
+        **metadata,
     }
     np.save(ops_path, ops)
     logger.debug(f"Ops file written to {ops_path} with metadata:\n"
