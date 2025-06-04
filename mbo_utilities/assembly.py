@@ -321,6 +321,7 @@ def save_nonscan(
 
     if ext in ["tif", "tiff"]:
         close_tiff_writers()
+    return fname
 
 
 def _save_data(
