@@ -6,8 +6,7 @@ from typing import Sequence, List, Tuple, Any, Protocol
 import numpy as np
 import tifffile
 import dask.array as da
-from dask.array import Array
-from numpy import memmap
+from numpy import memmap, ndarray
 
 from . import log
 from mbo_utilities.metadata import is_raw_scanimage
@@ -20,7 +19,7 @@ except ImportError:
     HAS_SUITE2P = False
     BinaryFile = None
 
-logger = log.get("file_reader")
+logger = log.get("lazy_array")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
@@ -170,6 +169,9 @@ class MBOTiffLoader:
                 # should make this a parameter
                 out = stack.transpose(1, 0, 2, 3)  # (T,Z,Y,X)
                 return out
+            elif len(self.fpath) == 1:
+                # if there is only one file, just return a memmap
+                return tifffile.memmap(self.fpath[0], mode="r")
         return tifffile.memmap(self.fpath[0], mode="r")
 
 
@@ -186,9 +188,15 @@ class NpyLoader:
 class TifLoader:
     fpath: list[Path]
 
-    def load(self) -> memmap[Any, Any]:
-        arr = tifffile.memmap(str(self.fpath))
-        return arr
+    def load(self) -> np.memmap | ndarray:
+        try:
+            return tifffile.memmap(str(self.fpath))
+        except (ValueError, MemoryError) as e:
+            print(
+                f"cannot memmap TIFF file {self.fpath}: {e}\n"
+                f" falling back to imread"
+            )
+            return tifffile.imread(str(self.fpath), mode="r")
 
 
 @dataclass
@@ -252,7 +260,7 @@ class LazyArrayLoader:
             elif has_mbo_metadata(first):
                 self.loader = MBOTiffLoader(filtered)
             else:
-                raise ValueError("Unsupported TIFF file type or missing metadata.")
+                self.loader = TifLoader(filtered)
         elif first.suffix.lower() == ".bin":
             npy_file = first.parent.joinpath("ops.npy")
             bin_file = first.parent.joinpath("data_raw.bin")

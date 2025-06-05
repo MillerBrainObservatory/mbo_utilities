@@ -8,27 +8,20 @@ import dask.array as da
 
 from . import log
 from .metadata import is_raw_scanimage
-from .phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets, _apply_offset
+from .phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets, MBO_WINDOW_METHODS
 from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
 from .util import subsample_array
 
-# subpixel fft, cross-correlation,
-# or first cross-correlation then subpixel
-PHASECORR_METHODS = ["subpix", "mean", "max", "std"]
-
-
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
-
 
 SAVE_AS_TYPES = [".tiff", ".bin", ".h5"]
 
 from pathlib import Path
 import numpy as np
 import tifffile
-import logging
 
-logger = logging.getLogger("mbo.save_as")
+logger = log.get("file_io")
 
 PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
@@ -200,11 +193,11 @@ def read_scan(
         pathnames,
         dtype=np.int16,
         roi=None,
-        fix_phase: bool = False,
-        phasecorr_method: str = "subpix",
+        fix_phase: bool = True,
+        phasecorr_method: str = "frame",
         border: int | tuple[int, int, int, int] = 0,
-        upsample: int = 20,
-        max_offset: int = 8,
+        upsample: int = 10,
+        max_offset: int = 4,
 ):
     """
     Reads a ScanImage scan from a given file or set of file paths and returns a
@@ -286,7 +279,7 @@ class Scan_MBO(scans.ScanMultiROI):
             self,
             roi: int | Sequence[int] | None = None,
             fix_phase: bool = False,
-            phasecorr_method: str = "subpix",
+            phasecorr_method: str = "frame",
             border: int | tuple[int, int, int, int] = 0,
             upsample: int = 20,
             max_offset: int = 8,
@@ -308,7 +301,7 @@ class Scan_MBO(scans.ScanMultiROI):
             "roi_array_shape": False,
             "phase_offset": False,
         }
-        self.logger = log.get("scan")
+        self.logger = logger
         self.logger.info(
             f"Initializing MBO Scan with parameters:\n"
             f"roi: {roi}, "
@@ -335,12 +328,9 @@ class Scan_MBO(scans.ScanMultiROI):
         If value is a scalar, it applies the same offset to all frames.
         If value is an array, it must match the number of frames.
         """
-        if isinstance(value, (int, float)):
+        if isinstance(value, int):
             self._offset = float(value)
-        elif isinstance(value, np.ndarray):
-            self._offset = value
-        else:
-            raise TypeError("Offset must be a scalar or a 1D numpy array.")
+        self._offset = value
 
     @property
     def phasecorr_method(self):
@@ -356,10 +346,10 @@ class Scan_MBO(scans.ScanMultiROI):
         Set the phase correction method.
         Options are 'two_step', 'subpix', or 'crosscorr'.
         """
-        if value not in PHASECORR_METHODS:
+        if value not in MBO_WINDOW_METHODS:
             raise ValueError(
                 f"Unsupported phase correction method: {value}. "
-                f"Supported methods are: {PHASECORR_METHODS}"
+                f"Supported methods are: {MBO_WINDOW_METHODS}"
             )
         self._phasecorr_method = value
 
@@ -397,9 +387,8 @@ class Scan_MBO(scans.ScanMultiROI):
         """
         self._selected_roi = value
 
-
     @property
-    def num_rois(self):
+    def num_rois(self) -> int:
         if isinstance(self.rois, list):
             return len(self.rois)
         elif isinstance(self.rois, int):
@@ -419,35 +408,32 @@ class Scan_MBO(scans.ScanMultiROI):
         for tf in self.tiff_files:
             end = start + len(tf.pages)
             idxs = [i for i, p in enumerate(pages) if start <= p < end]
-            if idxs:
-                frame_idx = [pages[i] - start for i in idxs]
-                chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
-                if self.fix_phase:
-                    if self.phasecorr_method == "mean":
-                        self.logger.debug("Applying mean‐based phase correction to chunk")
-                        mean_img = chunk.mean(axis=0)
-                        self.logger.debug(f"Mean image shape: {mean_img.shape}")
-                        single_offset = compute_scan_phase_offsets(
-                            mean_img,
-                            upsample=self.upsample,
-                            max_offset=self.max_offset,
-                            border=self.border,
-                        )
-                        self.offset = single_offset
-                        # apply that same offset to every frame in the chunk
-                        for i, frm in enumerate(chunk):
-                            buf[idxs[i]] = _apply_offset(frm, single_offset)
-                    else:
-                        offs = compute_scan_phase_offsets(
-                            chunk,
-                            upsample=self.upsample,
-                            max_offset=self.max_offset,
-                            border=self.border,
-                        )
-                        self.offset = offs
-                        buf[idxs] = apply_scan_phase_offsets(chunk, offs)
-                else:
-                    buf[idxs] = chunk
+            if not idxs:
+                start = end
+                continue
+
+            frame_idx = [pages[i] - start for i in idxs]
+
+            # shape = (n_frames_in_chunk, H, W)
+            chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
+
+            if self.fix_phase:
+                self.logger.debug(f"Applying phase correction with strategy: {self.phasecorr_method}")
+                offs = compute_scan_phase_offsets(
+                    chunk,
+                    method=self.phasecorr_method,
+                    upsample=self.upsample,
+                    max_offset=self.max_offset,
+                    border=self.border,
+                )
+                corrected = apply_scan_phase_offsets(chunk, offs)
+                self.offset = offs
+                self.logger.info(
+                    f"Offset for chunk: {offs}"
+                )
+                buf[idxs] = corrected
+            else:
+                buf[idxs] = chunk
             start = end
         return buf.reshape(len(frames), len(chans), H, W)
 
@@ -835,6 +821,7 @@ def get_mbo_dirs() -> dict:
         "assets": assets,
         "settings": settings,
     }
+
 
 def _make_json_serializable(obj):
     """Convert metadata to JSON serializable format."""

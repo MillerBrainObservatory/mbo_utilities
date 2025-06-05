@@ -31,19 +31,13 @@ if is_running_jupyter():
 else:
     from tqdm.auto import tqdm
 
-MBO_DEBUG = bool(int(os.getenv("MBO_DEBUG", "0")))  # export MBO_DEV=1 to enable
-logging.basicConfig(level=logging.INFO if MBO_DEBUG else logging.WARNING)
-
-# set a name the gui can use to identify this module
-logger = log.get("save_as")
-logger.propagate = False
+logger = log.get("assembly")
 
 ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
 
 CHUNKS = {0: "auto", 1: -1, 2: -1}
 
 warnings.filterwarnings("ignore")
-
 
 def close_tiff_writers():
     if hasattr(_write_tiff, "_writers"):
@@ -122,6 +116,7 @@ def save_as(
     else:
         logger.setLevel(logging.WARNING)
         logger.info("Debug mode disabled; setting log level to WARNING.")
+        logger.propagate = False  # don't send to terminal
 
     # save path
     savedir = Path(savedir)
