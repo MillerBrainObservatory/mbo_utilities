@@ -82,7 +82,7 @@ def draw_tab_process(self):
     """Draws the pipeline selection and configuration section."""
 
     if not hasattr(self, "_rectangle_selectors"):
-        self._rectangle_selectors = set()
+        self._rectangle_selectors = {}
     if not hasattr(self, "_current_pipeline"):
         self._current_pipeline = USER_PIPELINES[0]
     if not hasattr(self, "_install_error"):
@@ -95,27 +95,35 @@ def draw_tab_process(self):
         self._show_install_button = False
     if not hasattr(self, "_region_idx"):
         self._region_idx = 0
+    if not hasattr(self, "_subregions"):
+        self._subregions = {}
+    if not hasattr(self, "_array_type"):
+        self._array_type = "array"
 
     imgui.begin_group()
-    imgui.text_colored(
-        imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Process full FOV or elected subregion?"
-    )
-
     imgui.dummy(imgui.ImVec2(0, 5))
 
-    _, self._region_idx = imgui.combo("Region type", self._region_idx, REGION_TYPES)
-    self._region = REGION_TYPES[self._region_idx]
-    if self._region == "Sub-FOV":
-        if not self._rectangle_selectors:
-            for iw in self.image_widget.managed_graphics:
-                _widget_selector = iw.add_rectangle_selector()
-                self._rectangle_selectors.add(_widget_selector)
-    # elif self._region == "Full FOV":
-    #     if self._rectangle_selectors is not None:
-    #         for iw in self.image_widget.managed_graphics:
-    #             self._rectangle_selectors.clear()
+    imgui.text_colored(
+        imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Spatial-crop before processing:"
+    )
 
-    imgui.spacing()
+    self._region = REGION_TYPES[self._region_idx]
+    for i, graphic in enumerate(self.image_widget.managed_graphics):
+        selected = self._rectangle_selectors.get(i) is not None
+        label = f"{'Remove Crop Selector: ' if selected else 'Add Crop Selector: '}{self._array_type} {i + 1}"
+        if imgui.button(label):
+            g = self.image_widget.managed_graphics[i]
+            sel = self._rectangle_selectors.get(i)
+            if sel:  # already exists → remove
+                self.image_widget.figure[0, i].delete_graphic(sel)
+                self._rectangle_selectors[i] = None
+            else:  # doesn’t exist → add
+                g.add_rectangle_selector()
+                self._rectangle_selectors[i] = g._plot_area.selectors[0]
+
+    imgui.dummy(imgui.ImVec2(0, 5))
+    imgui.separator()
+
     imgui.text_colored(
         imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Select a processing pipeline:"
     )
@@ -125,10 +133,7 @@ def draw_tab_process(self):
 
     if changed:
         self._current_pipeline = USER_PIPELINES[selected_idx]
-
     set_tooltip("Select a processing pipeline to configure.")
-    imgui.spacing()
-    imgui.separator()
 
     if self._current_pipeline == "suite2p":
         draw_section_suite2p(self)
