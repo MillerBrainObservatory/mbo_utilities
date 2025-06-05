@@ -447,13 +447,21 @@ class PreviewDataWidget(EdgeWindow):
             implot.create_context()
 
         # backend.create_fonts_texture()
-        self.io = imgui.get_io()
+        io = imgui.get_io()
         fd_settings_dir = Path(get_mbo_dirs()["imgui"]).joinpath(
             "assets",
             "app_settings",
             "preview_settings.ini"
         ).expanduser().resolve()
-        self.io.set_ini_filename(str(fd_settings_dir))
+        io.set_ini_filename(str(fd_settings_dir))
+
+        fonts_path = Path(get_mbo_dirs()["assets"]).joinpath("fonts")
+        self._fonts = []
+        for font_file in fonts_path.rglob("*.ttf"):
+            self._fonts.append(io.fonts.add_font_from_file_ttf(
+                str(font_file), 16
+            ))
+        io.fonts.build()
 
         self.font_size = 12
         self.fpath = fpath if fpath else getattr(iw, "fpath", None)
