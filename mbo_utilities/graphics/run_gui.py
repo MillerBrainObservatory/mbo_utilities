@@ -26,32 +26,6 @@ except ImportError:
     print("Failed to set up imgui. GUI functionality may not work as expected.")
 
 
-def to_lazy_array(
-    data_in: str | Path | Sequence[str | Path] | Scan_MBO | np.ndarray,
-    roi: int | None = None,
-) -> tuple[Scan_MBO | np.ndarray | list[np.ndarray], str | None] | None:
-    """
-    Load any of your supported formats lazily and return (data, filepaths).
-    """
-    lazy_array = LazyArrayLoader(data_in, roi=roi)
-    if hasattr(lazy_array.loader, "fpath"):
-        return lazy_array.loader.load(), lazy_array.loader.fpath
-    data = lazy_array.load()
-    if isinstance(data, Scan_MBO):
-        if hasattr(data, "fpath"):
-            path = data.fpath
-        else:
-            path = data_in
-    elif isinstance(data_in, np.ndarray):
-        if hasattr(data, "fpath"):
-            path = data.fpath
-        else:
-            path = None
-    else:
-        return None
-    return data, path
-
-
 @click.command()
 @click.option("--roi", type=click.IntRange(-1, 10), default=None)
 @click.option(
@@ -100,11 +74,12 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
 
         data_in = file_dialog.selected_path
         threading = file_dialog.threading_enabled
+        widget = file_dialog.widget_enabled
         if not data_in:
             print("No file or folder selected, exiting.")
             return
     ic(data_in)
-    # data, fpath = to_lazy_array(data_in, roi=roi)
+
     array_object = LazyArrayLoader(data_in, roi=roi)
     data = array_object.load()
     fpath = array_object.fpath
