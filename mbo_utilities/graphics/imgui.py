@@ -56,7 +56,7 @@ REGION_TYPES = ["Full FOV", "Sub-FOV"]
 USER_PIPELINES = ["suite2p", "masknmf"]
 
 
-def _save_as(
+def _save_as_worker(
     path: str | Path,
     savedir: str | Path,
     planes: list | tuple = None,
@@ -66,7 +66,6 @@ def _save_as(
     order: list | tuple = None,
     trim_edge: list | tuple = (0, 0, 0, 0),
     fix_phase: bool = False,
-    save_phase_png: bool = False,
     target_chunk_mb: int = 20,
     debug: bool = False,
     progress_callback=None,
@@ -88,7 +87,6 @@ def _save_as(
         ext=ext,
         order=order,
         trim_edge=trim_edge,
-        save_phase_png=save_phase_png,
         target_chunk_mb=target_chunk_mb,
         progress_callback=progress_callback,
         debug=debug,
@@ -386,7 +384,7 @@ def draw_popups(parent):
                     f"Saving to {parent._saveas_outdir} as {parent._ext}"
                 )
                 threading.Thread(
-                    target=_save_as, kwargs=save_kwargs, daemon=True
+                    target=_save_as_worker, kwargs=save_kwargs, daemon=True
                 ).start()
                 imgui.close_current_popup()
             except Exception as e:
@@ -398,7 +396,6 @@ def draw_popups(parent):
             imgui.close_current_popup()
 
         imgui.end_popup()
-
 
 class PreviewDataWidget(EdgeWindow):
     def __init__(

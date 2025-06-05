@@ -34,6 +34,60 @@ def load_ops(ops_input: str | Path | list[str | Path]):
     print("Warning: No valid ops file provided, returning None.")
     return {}
 
+def write_ops(metadata, raw_filename):
+    """
+    Write metadata to an ops file alongside the given filename.
+    metadata must contain
+    'shape'
+    'pixel_resolution',
+    'frame_rate' keys.
+    """
+    logger.info(f"Writing ops file for {raw_filename} with metadata: {metadata}")
+    assert isinstance(raw_filename, (str, Path)), "filename must be a string or Path object"
+    filename = Path(raw_filename).expanduser().resolve()
+
+    # this convention means input can be either
+    if filename.is_file():
+        root = filename.parent
+    else:
+        root = filename
+
+    ops_path = root.joinpath("ops.npy")
+    logger.debug(f"Writing ops file to {ops_path}.")
+
+    shape = metadata["shape"]
+    nt = shape[0]
+    Lx = shape[-2]
+    Ly = shape[-1]
+
+    if "pixel_resolution" not in metadata:
+        logger.warning("No pixel resolution found in metadata, using default [2, 2].")
+    if "fs" not in metadata:
+        if "frame_rate" in metadata:
+            metadata["fs"] = metadata["frame_rate"]
+        elif "framerate" in metadata:
+            metadata["fs"] = metadata["framerate"]
+        else:
+            logger.debug("No frame rate found in metadata; defaulting fs=10")
+            metadata["fs"] = 10
+
+    dx, dy = metadata.get("pixel_resolution", [2, 2])
+    ops = {
+        # suite2p needs these
+        "Ly": Ly,
+        "Lx": Lx,
+        "fs": metadata['fs'],
+        "nframes": nt,
+        "dx": dx,
+        "dy": dy,
+        "ops_path": str(ops_path),
+        # and dump the rest of the metadata
+        **metadata,
+    }
+    np.save(ops_path, ops)
+    logger.debug(f"Ops file written to {ops_path} with metadata:\n"
+                 f" {ops}")
+
 def normalize_file_url(path):
     """
     Derive a folder tag from a filename based on “planeN”, “roiN”, or "tagN" patterns.
@@ -77,7 +131,6 @@ def normalize_file_url(path):
             if suffix.isdigit():
                 return f"{tag}{int(suffix)}"
     return name
-
 
 def npy_to_dask(files, name="", axis=1, astype=None):
     """
@@ -138,10 +191,8 @@ def npy_to_dask(files, name="", axis=1, astype=None):
 
     return arr
 
-
 def is_escaped_string(path: str) -> bool:
     return bool(re.search(r"\\[a-zA-Z]", path))
-
 
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     """
@@ -188,15 +239,14 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
     return sorted(p.resolve() for p in result if p.is_file())
 
-
 def read_scan(
         pathnames,
         dtype=np.int16,
         roi=None,
         fix_phase: bool = True,
         phasecorr_method: str = "frame",
-        border: int | tuple[int, int, int, int] = 0,
-        upsample: int = 10,
+        border: int | tuple[int, int, int, int] = 3,
+        upsample: int = 1,
         max_offset: int = 4,
 ):
     """
@@ -267,7 +317,6 @@ def read_scan(
     )
     scan.read_data(filenames, dtype=dtype)
     return scan
-
 
 class Scan_MBO(scans.ScanMultiROI):
     """
@@ -641,7 +690,6 @@ class Scan_MBO(scans.ScanMultiROI):
         """
         return subsample_array(self, ignore_dims=[-1, -2, -3])
 
-
 def get_files(
     base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
 ) -> list | Path:
@@ -727,7 +775,6 @@ def get_files(
 
     return [str(file) for file in files]
 
-
 def stack_from_files(files: list, proj="mean"):
     """
     Creates a Z-Stack image by applying a projection to each TIFF file in the provided list and stacking the results into a NumPy array.
@@ -778,7 +825,6 @@ def stack_from_files(files: list, proj="mean"):
 
     return np.stack(lazy_arrays, axis=0)
 
-
 def _is_arraylike(obj) -> bool:
     """
     Checks if the object is array-like.
@@ -790,11 +836,9 @@ def _is_arraylike(obj) -> bool:
 
     return True
 
-
 def _get_mbo_project_root() -> Path:
     """Return the root path of the mbo_utilities repository (based on this file)."""
     return Path(__file__).resolve().parent.parent
-
 
 def get_mbo_dirs() -> dict:
     """
@@ -806,11 +850,12 @@ def get_mbo_dirs() -> dict:
     imgui = base.joinpath("imgui")
     cache = base.joinpath("cache")
     logs = base.joinpath("logs")
+    data = base.joinpath("data")
 
     assets = imgui.joinpath("assets")
     settings = assets.joinpath("app_settings")
 
-    for d in (base, imgui, cache, logs, assets):
+    for d in (base, imgui, cache, logs, assets, data):
         d.mkdir(exist_ok=True)
 
     return {
@@ -820,8 +865,8 @@ def get_mbo_dirs() -> dict:
         "logs": logs,
         "assets": assets,
         "settings": settings,
+        "data": data,
     }
-
 
 def _make_json_serializable(obj):
     """Convert metadata to JSON serializable format."""
@@ -835,68 +880,11 @@ def _make_json_serializable(obj):
         return obj.item()
     return obj
 
-
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
-
 
 def _intersect_slice(user: slice, mask: slice):
     ic(user, mask)
     start = max(user.start or 0, mask.start)
     stop = min(user.stop or mask.stop, mask.stop)
     return slice(start, stop)
-
-
-def write_ops(metadata, raw_filename):
-    """
-    Write metadata to an ops file alongside the given filename.
-    metadata must contain
-    'shape'
-    'pixel_resolution',
-    'frame_rate' keys.
-    """
-    logger.info(f"Writing ops file for {raw_filename} with metadata: {metadata}")
-    assert isinstance(raw_filename, (str, Path)), "filename must be a string or Path object"
-    filename = Path(raw_filename).expanduser().resolve()
-
-    # this convention means input can be either
-    if filename.is_file():
-        root = filename.parent
-    else:
-        root = filename
-
-    ops_path = root.joinpath("ops.npy")
-    logger.debug(f"Writing ops file to {ops_path}.")
-
-    shape = metadata["shape"]
-    nt = shape[0]
-    Lx = shape[-2]
-    Ly = shape[-1]
-
-    if "pixel_resolution" not in metadata:
-        logger.warning("No pixel resolution found in metadata, using default [2, 2].")
-    if "fs" not in metadata:
-        if "frame_rate" in metadata:
-            metadata["fs"] = metadata["frame_rate"]
-        elif "framerate" in metadata:
-            metadata["fs"] = metadata["framerate"]
-        else:
-            logger.debug("No frame rate found in metadata; defaulting fs=10")
-            metadata["fs"] = 10
-
-    dx, dy = metadata.get("pixel_resolution", [2, 2])
-    ops = {
-        # suite2p needs these
-        "Ly": Ly,
-        "Lx": Lx,
-        "fs": metadata['fs'],
-        "nframes": nt,
-        "dx": dx,
-        "dy": dy,
-        "ops_path": str(ops_path),
-        # and dump the rest of the metadata
-        **metadata,
-    }
-    np.save(ops_path, ops)
-    logger.debug(f"Ops file written to {ops_path} with metadata:\n"
-                 f" {ops}")
