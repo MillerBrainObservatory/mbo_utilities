@@ -19,7 +19,7 @@ logger = log.get("phasecorr")
 
 def _phase_offset(
         frame,
-        upsample=10,
+        upsample=1,
         border=0,
         max_offset=4
 ):
@@ -61,7 +61,7 @@ def _apply_offset(frame, shift):
 def compute_scan_phase_offsets(
         arr,
         method="mean",
-        upsample=10,
+        upsample=1,
         max_offset=4,
         border=2,
 ):
