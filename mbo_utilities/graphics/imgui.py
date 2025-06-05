@@ -555,17 +555,24 @@ class PreviewDataWidget(EdgeWindow):
     def current_offset(self)->list[float]:
         if not self.fix_phase:
             return [0.0 for _ in self.image_widget.data]
+        if not self.is_mbo_scan:
+            self.logger.critical(
+                "Scan-phase correction is only implemented for MBO scans. "
+                "Returning zero offsets."
+            )
+            return [0.0 for _ in self.image_widget.data]
         if all(hasattr(array, "offset") for array in self.image_widget.data):
             self.logger.debug(f"All arrays have offset attribute. Setting from array.offset")
             return [array.offset for array in self.image_widget.data]
         else:
-            frame: tuple[np.ndarray, ...] = self.get_raw_frame()
-            return compute_scan_phase_offsets(
-                frame,
-                upsample=self.phase_upsample,
-                border=self.border,
-                max_offset=self.max_offset,
-            )
+            raise NotImplementedError("Scan-phase correction is only implemented for MBO scans.")
+            # frame: tuple[np.ndarray, ...] = self.get_raw_frame()
+            # return [compute_scan_phase_offsets(
+            #     frame,
+            #     upsample=self.phase_upsample,
+            #     border=self.border,
+            #     max_offset=self.max_offset,
+            # ) for _ in self.image_widget.data]
 
     @property
     def fix_phase(self):
@@ -926,6 +933,9 @@ class PreviewDataWidget(EdgeWindow):
             imgui.pop_style_var()
 
             # Section: Scan-phase Correction
+            if not self.is_mbo_scan:
+                return
+
             imgui.spacing()
             imgui.separator()
             imgui.text_colored(
