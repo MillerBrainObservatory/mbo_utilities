@@ -7,6 +7,7 @@ from functools import partial
 from dataclasses import dataclass, field
 
 import numpy as np
+from numpy import ndarray
 from scipy.ndimage import gaussian_filter
 from skimage.registration import phase_cross_correlation
 
@@ -420,7 +421,7 @@ class PreviewDataWidget(EdgeWindow):
         """
         self.debug_panel = GuiLogger()
         gui_handler = GuiLogHandler(self.debug_panel)
-        for name in ("mbo", "gui", "file_io",):
+        for name in GUI_LOGGERS:
             lg = log.get(name)
             lg.addHandler(gui_handler)
             lg.setLevel(logging.WARNING)
@@ -471,10 +472,7 @@ class PreviewDataWidget(EdgeWindow):
         else:
             self.nz = 1
 
-        if isinstance(self.image_widget.data[0], Scan_MBO):
-            self.is_mbo_scan = True
-        else:
-            self.is_mbo_scan = False
+        self.is_mbo_scan = True if isinstance(self.image_widget.data[0], Scan_MBO) else False
         if self.is_mbo_scan:
             for arr in self.image_widget.data:
                 arr.fix_phase = False
@@ -483,6 +481,10 @@ class PreviewDataWidget(EdgeWindow):
             subplot.toolbar = False
 
         self.image_widget._image_widget_sliders._loop = True  # noqa
+        if hasattr(self.image_widget, "roi") or hasattr(self.image_widget.data[0], "roi"):
+            self._array_type = "roi"
+        else:
+            self._array_type = "array"
 
         # boolean flags: imgui.begin() calls that are drawn
         # when these are set to true.
@@ -550,26 +552,14 @@ class PreviewDataWidget(EdgeWindow):
         self.image_widget.figure.canvas.set_title(str(title))
 
     @property
-    def current_offset(self):
+    def current_offset(self)->list[float]:
         if not self.fix_phase:
-            return self._current_offset
+            return [0.0 for _ in self.image_widget.data]
         if all(hasattr(array, "offset") for array in self.image_widget.data):
-            if isinstance(self.image_widget.data[0].offset, float):
-                self.logger.info(f"All arrays have offset attribute. Setting from array.offset")
-                return [array.offset for array in self.image_widget.data]
-            else:
-                self.logger.info(f"Arrays don't have offset attribute. ")
-                return [
-                    compute_scan_phase_offsets(
-                        arr,
-                        "subpix",
-                        self.phase_upsample,
-                        self.max_offset,
-                        self.border
-                    ) for i, arr in enumerate(self.image_widget.data)
-                ]
+            self.logger.debug(f"All arrays have offset attribute. Setting from array.offset")
+            return [array.offset for array in self.image_widget.data]
         else:
-            frame = self.get_raw_frame()
+            frame: tuple[np.ndarray, ...] = self.get_raw_frame()
             return compute_scan_phase_offsets(
                 frame,
                 upsample=self.phase_upsample,
@@ -722,7 +712,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # ROI selector
         array_labels = [
-            f"Array {i + 1}"
+            f"{self._array_type} {i + 1}"
             for i in range(len(stats_list))
             if stats_list[i] and "mean" in stats_list[i]
         ]
@@ -736,7 +726,7 @@ class PreviewDataWidget(EdgeWindow):
         imgui.separator()
 
         if self._selected_array == len(array_labels) - 1:  # Combined
-            imgui.text("Stats for Combined Arrays")
+            imgui.text(f"Stats for Combined {self._array_type}s")
             mean_vals = np.mean(
                 [np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0
             )
@@ -758,7 +748,7 @@ class PreviewDataWidget(EdgeWindow):
                 "##SummaryCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
             ):
                 if imgui.begin_table(
-                    "Stats, averaged over arrays",
+                    f"Stats, averaged over {self._array_type}s",
                     4,
                     imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,  # type: ignore # noqa
                 ):  # type: ignore # noqa
@@ -807,7 +797,7 @@ class PreviewDataWidget(EdgeWindow):
             if not stats or "mean" not in stats:
                 return
 
-            imgui.text(f"Stats for array {array_idx + 1}")
+            imgui.text(f"Stats for {self._array_type} {array_idx + 1}")
             mean_vals = np.array(stats["mean"])
             std_vals = np.array(stats["std"])
             snr_vals = np.array(stats["snr"])
@@ -957,9 +947,41 @@ class PreviewDataWidget(EdgeWindow):
             imgui.columns(2, "offsets", False)
             for i, iw in enumerate(self.image_widget.data):
                 ofs = self.current_offset[i]
-                imgui.text(f"Array {i}:")
+                is_sequence = isinstance(ofs, (list, np.ndarray))
+
+                # Compute the “maximum absolute offset” we'll use to decide if text should be red
+                if is_sequence:
+                    # turn it into a flat Python list of floats
+                    ofs_list = [float(x) for x in ofs]
+                    max_abs_offset = max(abs(x) for x in ofs_list) if ofs_list else 0.0
+                else:
+                    ofs_list = None
+                    max_abs_offset = abs(ofs)
+
+                imgui.text(f"{self._array_type} {i}:")
                 imgui.next_column()
-                imgui.text(f"{ofs:.3f}")
+
+                if is_sequence:
+                    display_text = "⧗"
+                else:
+                    display_text = f"{ofs:.3f}"
+
+                # ffset ≥ self.max_offset, color red
+                if max_abs_offset >= self.max_offset:
+                    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 0.0, 0.0, 1.0))
+
+                imgui.text(display_text)
+
+                if max_abs_offset >= self.max_offset:
+                    imgui.pop_style_color()
+
+                # If it’s a sequence and the user hovers, show all per‐frame offsets in a tooltip
+                if is_sequence and imgui.is_item_hovered():
+                    imgui.begin_tooltip()
+                    imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Per‐frame offsets:")
+                    for frame_idx, val in enumerate(ofs_list):
+                        imgui.text(f"  Frame {frame_idx}: {val:.3f}")
+                    imgui.end_tooltip()
                 imgui.next_column()
             imgui.columns(1)
 
@@ -1003,7 +1025,7 @@ class PreviewDataWidget(EdgeWindow):
         draw_zstats_progress(self)
         draw_saveas_progress(self)
 
-    def get_raw_frame(self):
+    def get_raw_frame(self) -> tuple[ndarray, ...]:
         idx = self.image_widget.current_index
         t = idx.get("t", 0)
         z = idx.get("z", 0)

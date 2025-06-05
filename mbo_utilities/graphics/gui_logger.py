@@ -3,6 +3,7 @@ import time
 from imgui_bundle import imgui
 from .. import log
 
+GUI_LOGGERS = log.get_package_loggers()
 
 class GuiLogHandler(logging.Handler):
     def __init__(self, gui_logger):
@@ -30,12 +31,10 @@ class GuiLogger:
         self.messages = []  # now holds tuples (time, level, logger_name, text)
         self.window_flags = imgui.WindowFlags_.none
         self.active_loggers = {
-            "mbo": True,
-            "gui": True,
-            "scan": True,
-            "save_as": True,
+            name: True for name in GUI_LOGGERS
         }
-        
+        # self.sub_loggers = log.get_all_loggers()
+
     def draw(self):
         # Log‐level checkboxes
         _, self.filters["debug"] = imgui.checkbox("Debug", self.filters["debug"])
