@@ -481,7 +481,7 @@ class PreviewDataWidget(EdgeWindow):
             subplot.toolbar = False
 
         self.image_widget._image_widget_sliders._loop = True  # noqa
-        if hasattr(self.image_widget, "roi") or hasattr(self.image_widget.data[0], "roi"):
+        if hasattr(self.image_widget, "rois") or hasattr(self.image_widget.data[0], "rois"):
             self._array_type = "roi"
         else:
             self._array_type = "array"
@@ -578,7 +578,7 @@ class PreviewDataWidget(EdgeWindow):
             for arr in self.image_widget.data:
                 if isinstance(arr, Scan_MBO):
                     arr.fix_phase = value
-                    self.logger.info(f"Set fix_phase to {value} for MBO Scan object.")
+                    self.logger.debug(f"Set fix_phase to {value} for MBO Scan object.")
         else:
             self.update_frame_apply()
 
@@ -947,7 +947,7 @@ class PreviewDataWidget(EdgeWindow):
             imgui.columns(2, "offsets", False)
             for i, iw in enumerate(self.image_widget.data):
                 ofs = self.current_offset[i]
-                is_sequence = isinstance(ofs, (list, np.ndarray))
+                is_sequence = isinstance(ofs, (list, np.ndarray, tuple))
 
                 # Compute the “maximum absolute offset” we'll use to decide if text should be red
                 if is_sequence:
@@ -958,13 +958,17 @@ class PreviewDataWidget(EdgeWindow):
                     ofs_list = None
                     max_abs_offset = abs(ofs)
 
-                imgui.text(f"{self._array_type} {i}:")
+                imgui.text(f"{self._array_type} {i + 1}:")
                 imgui.next_column()
 
                 if is_sequence:
-                    display_text = "⧗"
+                    display_text = "avg."
+                    if len(ofs_list) > 1:
+                        display_text += f" {np.round(np.mean(ofs_list),2)}"
+                    else:
+                        display_text += f" {np.round(ofs_list[0], 2):.3f}"
                 else:
-                    display_text = f"{ofs:.3f}"
+                    display_text = f"{np.round(ofs, 2):.3f}"
 
                 # ffset ≥ self.max_offset, color red
                 if max_abs_offset >= self.max_offset:
@@ -975,12 +979,12 @@ class PreviewDataWidget(EdgeWindow):
                 if max_abs_offset >= self.max_offset:
                     imgui.pop_style_color()
 
-                # If it’s a sequence and the user hovers, show all per‐frame offsets in a tooltip
+                # show all frame offsets in a tooltip
                 if is_sequence and imgui.is_item_hovered():
                     imgui.begin_tooltip()
                     imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Per‐frame offsets:")
                     for frame_idx, val in enumerate(ofs_list):
-                        imgui.text(f"  Frame {frame_idx}: {val:.3f}")
+                        imgui.text(f"  frame {frame_idx}: {val:.3f}")
                     imgui.end_tooltip()
                 imgui.next_column()
             imgui.columns(1)
