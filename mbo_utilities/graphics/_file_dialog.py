@@ -36,9 +36,6 @@ class FileDialog:
     @widget_enabled.setter
     def widget_enabled(self, value):
         self._widget_enabled = value
-        if not value:
-            # which logger to use ?
-            print("Widget disabled.")
 
     @property
     def threading_enabled(self):
