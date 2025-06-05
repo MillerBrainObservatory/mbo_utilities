@@ -2,6 +2,20 @@ import numpy as np
 from scipy.ndimage import fourier_shift
 from skimage.registration import phase_cross_correlation
 
+from . import log
+
+TWO_DIM_PHASECORR_METHODS = {"frame", "mean", "max", "std", "mean-sub", "mean-sub-std"}
+THREE_DIM_PHASECORR_METHODS = ["mean", "max", "std", "mean-sub"]
+
+MBO_WINDOW_METHODS = {
+    "mean": lambda X: np.mean(X, axis=0),
+    "max": lambda X: np.max(X, axis=0),
+    "std": lambda X: np.std(X, axis=0),
+    "mean-sub": lambda X: X - np.mean(X, axis=0),
+    "mean-sub-std": lambda X: (X - np.mean(X, axis=0)) / (np.std(X, axis=0) + 1e-8),
+}
+
+logger = log.get("phasecorr")
 
 def _phase_offset(
         frame,
@@ -9,8 +23,8 @@ def _phase_offset(
         border=0,
         max_offset=4
 ):
-    if frame.ndim == 3:
-        frame = frame.mean(axis=0)
+    if frame.ndim != 2:
+        raise ValueError("Expected a 2D frame, got a 3D array.")
 
     h, w = frame.shape
 
@@ -46,47 +60,51 @@ def _apply_offset(frame, shift):
 
 def compute_scan_phase_offsets(
         arr,
-        method="subpix",
+        method="mean",
         upsample=10,
         max_offset=4,
-        border=0
+        border=2,
 ):
+    """
+    Compute scan‐phase offsets. If `arr` is 2D, always run a single‐image offset.
+    If `arr` is 3D (time × height × width), one of:
+
+      - "frame"      → compute offset frame‐by‐frame (returns a 1D array of length T)
+      - "mean", "max", "std"       → collapse along time with np.mean/np.max/np.std first
+      - "mean-sub"   → subtract the temporal mean from each frame, then run offset on that difference
+      - "mean-sub-std" → first z‐score each pixel over time, then compute offset on that z‐scored image
+
+    """
     a = np.asarray(arr)
     if a.ndim == 2:
+        if method not in TWO_DIM_PHASECORR_METHODS:
+            logger.debug(
+                "Attempted to use a windowed phase-corr method on 2D data."
+                f"Available 2D methods: {TWO_DIM_PHASECORR_METHODS}"
+            )
         return _phase_offset(
             a,
             upsample=upsample,
             border=border,
             max_offset=max_offset
         )
+    # flatten z/t
     flat = a.reshape(a.shape[0], *a.shape[-2:])
-    if method == "subpix":
+
+    # one offset per frame
+    if method == "frame":
         return np.array([_phase_offset(
             f,
             upsample=upsample,
             border=border,
             max_offset=max_offset,
         ) for f in flat])  # dtype=np.float32)
-    if method == "two_step":
-        offs = []
-        for f in flat:
-            o1 = _phase_offset(
-                f,
-                upsample=upsample,
-                border=border,
-                max_offset=max_offset,
-            )
-            f2 = _apply_offset(f.copy(), o1)
-            o2 = _phase_offset(
-                f2,
-                upsample=upsample,
-                border=border,
-                max_offset=max_offset,
-            )
-            offs.append(o1 + o2)
-        return np.array(offs, dtype=np.float32)
-    raise ValueError(method)
 
+    if method not in MBO_WINDOW_METHODS:
+        raise ValueError(f"Unknown phase‐corr method: {method!r}")
+
+    image = MBO_WINDOW_METHODS[method](flat)
+    return _phase_offset(image, upsample=upsample, border=border, max_offset=max_offset)
 
 def apply_scan_phase_offsets(arr, offs):
     out = np.asarray(arr).copy()
