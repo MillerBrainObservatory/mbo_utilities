@@ -33,7 +33,7 @@ class _Suite2pLazyArray:
     def __init__(self, ops: dict):
         Ly = ops["Ly"]
         Lx = ops["Lx"]
-        n_frames = ops.get("nframes", ops.get("nframes", None))
+        n_frames = ops.get("nframes", ops.get("n_frames", None))
         if n_frames is None:
             raise ValueError(
                 f"Could not locate 'nframes' or `n_frames` in ops: {ops.keys()}"
