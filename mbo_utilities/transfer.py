@@ -4,7 +4,14 @@ import sys
 import threading
 from pathlib import Path
 
-from fabric import Connection
+try:
+    from fabric import Connection
+except ImportError:
+    print(
+        "Error: Fabric library is not installed. Please install it with 'pip install fabric'.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 from tqdm import tqdm
 
 

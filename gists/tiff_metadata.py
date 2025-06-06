@@ -11,10 +11,36 @@
 # lbm_suite2p_python = { git = "https://github.com/MillerBrainObservatory/lbm_suite2p_python", branch = "master" }
 import os
 import tifffile
+import re
+import json
+
+
+def find_scanimage_metadata(path):
+    with tf.TiffFile(path) as tif:
+        if hasattr(tif, "scanimage_metadata"):
+            return tif.scanimage_metadata
+        p = tif.pages[0]
+        cand = []
+        for tag in ("ImageDescription", "Software"):
+            if tag in p.tags:
+                cand.append(p.tags[tag].value)
+        if getattr(p, "description", None):
+            cand.append(p.description)
+        cand.extend(str(tif.__dict__.get(k, "")) for k in tif.__dict__)
+        for s in cand:
+            if isinstance(s, bytes):
+                s = s.decode(errors="ignore")
+            m = re.search(r"{.*ScanImage.*}", s, re.S)
+            if m:
+                try:
+                    return json.loads(m.group(0))
+                except Exception:
+                    return m.group(0)
+    return None
 
 
 def main():
-    directory = r"D:\W2_DATA\wsnyder\2025_03_06\raw\dot_lv6"
+    directory = r"/home/flynn/lbm_data/raw"
     for fname in os.listdir(directory):
         if not fname.lower().endswith((".tif", ".tiff")):
             continue

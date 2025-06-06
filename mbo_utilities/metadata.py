@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
+import json
 import os
+from pathlib import Path
 
 import numpy as np
 import tifffile
@@ -29,7 +32,6 @@ def _params_from_metadata_caiman(metadata):
         print("No metadata found. Using default parameters.")
         return params
 
-    split_frames = params["main"]["num_frames_split"]
     params["main"]["fr"] = metadata["frame_rate"]
     params["main"]["dxy"] = metadata["pixel_resolution"]
 
@@ -147,7 +149,55 @@ def _params_from_metadata_suite2p(metadata, ops):
     return ops
 
 
-def is_raw_scanimage(file: os.PathLike | str):
+def report_missing_metadata(file: os.PathLike | str):
+    tiff_file = tifffile.TiffFile(file)
+    if not tiff_file.software == "SI":
+        print(f"Missing SI software tag.")
+    if not tiff_file.description[:6] == "state.":
+        print(f"Missing 'state' software tag.")
+    if not "scanimage.SI" in tiff_file.description[-256:]:
+        print(f"Missing 'scanimage.SI' in description tag.")
+
+
+def has_mbo_metadata(file: os.PathLike | str) -> bool:
+    """
+    Check if a TIFF file has metadata from the Miller Brain Observatory.
+
+    Specifically, this checks for tiff_file.shaped_metadata, which is used to store system and user
+    supplied metadata.
+
+    Parameters
+    ----------
+    file: os.PathLike
+        Path to the TIFF file.
+
+    Returns
+    -------
+    bool
+        True if the TIFF file has MBO metadata; False otherwise.
+    """
+    if not file or not isinstance(file, (str, os.PathLike)):
+        raise ValueError(
+            "Invalid file path provided: must be a string or os.PathLike object."
+            f"Got: {file} of type {type(file)}"
+        )
+    # Tiffs
+    if Path(file).suffix in [".tif", ".tiff"]:
+        try:
+            tiff_file = tifffile.TiffFile(file)
+            if (
+                hasattr(tiff_file, "shaped_metadata")
+                and tiff_file.shaped_metadata is not None
+            ):
+                return True
+            else:
+                return False
+        except Exception:
+            return False
+    return False
+
+
+def is_raw_scanimage(file: os.PathLike | str, verbose=False) -> bool:
     """
     Check if a TIFF file is a raw ScanImage TIFF.
 
@@ -161,22 +211,28 @@ def is_raw_scanimage(file: os.PathLike | str):
     bool
         True if the TIFF file is a raw ScanImage TIFF; False otherwise.
     """
-    if not file:
+    if not file or not isinstance(file, (str, os.PathLike)):
         return False
-
-    tiff_file = tifffile.TiffFile(file)
-    # TiffFile.shaped_metadata is where we store metadata for processed tifs
-    # if this is not empty, we have a processed file
-    # otherwise, we have a raw scanimage tiff
-    if (
-        hasattr(tiff_file, "shaped_metadata")
-        and tiff_file.shaped_metadata is not None
-        and isinstance(tiff_file.shaped_metadata, (list, tuple))
-        and tiff_file.shaped_metadata[0] not in ([], (), None)
-    ):
+    elif Path(file).suffix not in [".tif", ".tiff"]:
         return False
-    else:
-        return True
+    try:
+        tiff_file = tifffile.TiffFile(file)
+        if (
+            # TiffFile.shaped_metadata is where we store metadata for processed tifs
+            # if this is not empty, we have a processed file
+            # otherwise, we have a raw scanimage tiff
+            hasattr(tiff_file, "shaped_metadata")
+            and tiff_file.shaped_metadata is not None
+            and isinstance(tiff_file.shaped_metadata, (list, tuple))
+        ):
+            return False
+        else:
+            if tiff_file.scanimage_metadata is None:
+                print(f"No ScanImage metadata found in {file}.")
+                return False
+            return True
+    except Exception:
+        return False
 
 
 def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
@@ -243,9 +299,7 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
         if not si:
             print(f"No FrameData found in {file}.")
             return None
-        print("Reading tiff series data...")
         series = tiff_file.series[0]
-        print("Reading tiff pages...")
         pages = tiff_file.pages
         print("Raw tiff fully read.")
 
@@ -311,9 +365,6 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
             "ndim": series.ndim,
             "dtype": "int16",
             "size": series.size,
-            "raw_frames": len(pages) / num_planes,
-            "raw_height": pages[0].shape[0],
-            "raw_width": pages[0].shape[1],
             "tiff_pages": len(pages),
             "roi_width_px": num_pixel_xy[0],
             "roi_height_px": num_pixel_xy[1],
@@ -396,3 +447,53 @@ def params_from_metadata(metadata, base_ops, pipeline="suite2p"):
         raise ValueError(
             f"Pipeline {pipeline} not recognized. Use 'caiman' or 'suite2'"
         )
+
+
+def _parse_value(value_str):
+    if value_str.startswith("'") and value_str.endswith("'"):
+        return value_str[1:-1]
+    if value_str == "true":
+        return True
+    if value_str == "false":
+        return False
+    if value_str == "NaN":
+        return float("nan")
+    if value_str == "Inf":
+        return float("inf")
+    if re.match(r"^\d+(\.\d+)?$", value_str):
+        return float(value_str) if "." in value_str else int(value_str)
+    if re.match(r"^\[(.*)]$", value_str):
+        return [_parse_value(v.strip()) for v in value_str[1:-1].split()]
+    return value_str
+
+
+def _parse_key_value(parse_line):
+    key_str, value_str = parse_line.split(" = ", 1)
+    return key_str, _parse_value(value_str)
+
+
+def parse(metadata_str):
+    """
+    Parses the metadata string from a ScanImage Tiff file.
+
+    :param metadata_str:
+    :return metadata_kv, metadata_json:
+    """
+    lines = metadata_str.split("\n")
+    metadata_kv = {}
+    json_portion = []
+    parsing_json = False
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("SI."):
+            key, value = _parse_key_value(line)
+            metadata_kv[key] = value
+        elif line.startswith("{"):
+            parsing_json = True
+        if parsing_json:
+            json_portion.append(line)
+    metadata_json = json.loads("\n".join(json_portion))
+    return metadata_kv, metadata_json

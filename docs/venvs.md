@@ -9,7 +9,14 @@ Otherwise, install and learn a bit about [uv](https://docs.astral.sh/uv/) and us
 
 Most bugs and frustration in Python come from mismanaging virtual environments.
 
-It's tempting to want a firm grasp on all the options, their pros/cons, use cases. Just don't.
+Example: You install Python 3.10 on Windows or Linux. You must add this to your system PATH to use it, or it is added to your system path by default.
+Now you want to install a package that requires Python 3.11. You're screwed because Python 3.10 being on you PATH means it will always be used unless
+explicitly told not to (e.g. by activating a conda/venv virtual environment). The behavior that you will experience will vary drastically depending on if 
+you use `conda`, `venv`, or `uv`. In most circumstances, you will be using Python 3.10 and you won't know it.
+
+This happens to experienced developers the same as anyone else. You could learn the in's and out's for all of the virtual environments below.
+
+You will only confuse yourself doing this.
 
 There are three camps:
 
@@ -114,17 +121,10 @@ imgui-bundle              1.6.2
 
 So even if you're using conda, `uv` will work all the same.
 
----
+We highly recommend turning off automatic environment activation for `conda` in this case:
 
-````{tab-set-code}
-
-```{code-block} python
-# Example: python file
-def example():
-    print("Hello World")
+``` bash
+conda config --set auto_activate_base false
 ```
 
-```{code-block} bash
-# Example: bash command
-uv pip install .
-```
+You can still call `conda activate myenv`, but only if `conda` is called explicitily.

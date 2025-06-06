@@ -13,6 +13,8 @@ import mbo_utilities as mbo
 from pathlib import Path
 import tifffile
 
+import mbo_utilities.plot_util
+
 save_path = Path().home().joinpath("dev")
 
 files = mbo.get_files(save_path, "tif", 4)
@@ -22,27 +24,27 @@ fps = 17
 duration_s = 5
 
 # For each call:
-mbo.save_mp4(
+mbo_utilities.plot_util.save_mp4(
     save_path.joinpath("default.mp4"),
     data[: duration_s * fps],  # no speedup
     framerate=fps,
 )
 
-mbo.save_mp4(
+mbo_utilities.plot_util.save_mp4(
     save_path.joinpath("speedup_2x.mp4"),
     data[: duration_s * fps * 2],
     framerate=fps,
     speedup=2,
 )
 
-mbo.save_mp4(
+mbo_utilities.plot_util.save_mp4(
     save_path.joinpath("17_frame_window.mp4"),
     data[: duration_s * fps],
     framerate=fps,
     win=17,
 )
 
-mbo.save_mp4(
+mbo_utilities.plot_util.save_mp4(
     save_path.joinpath("windowed_speedup_6x.mp4"),
     data[: duration_s * fps * 6],
     framerate=fps,
