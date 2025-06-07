@@ -34,7 +34,7 @@ from mbo_utilities.graphics.progress_bar import (
     draw_saveas_progress,
 )
 from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
-from mbo_utilities.phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets
+from mbo_utilities.phasecorr import nd_windowed, apply_scan_phase_offsets
 from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler, GUI_LOGGERS
 from mbo_utilities import log
 
