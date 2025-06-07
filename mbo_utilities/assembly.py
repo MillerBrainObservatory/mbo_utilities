@@ -416,17 +416,12 @@ def _save_data(
 
     pre_exists = True
     for chan_index in planes:
-        metadata_plane = metadata.copy()
-        if pbar:
-            pbar.set_description(f"Saving plane {chan_index + 1}")
+        pre_exists = False
+
         if ext == "bin":
             fname = path / f"plane{chan_index + 1}" / "data_raw.bin"
         else:
             fname = path / f"plane{chan_index + 1}.{ext}"
-
-        metadata["save_path"] = str(fname.parent.expanduser().resolve())
-        metadata_plane["plane"] = chan_index + 1 # 1-based indexing
-        metadata_plane["plane_index"] = chan_index
 
         if fname.exists() and not overwrite:
             print(f"File {fname} already exists with overwrite=False; skipping save.", flush=True)
@@ -434,10 +429,18 @@ def _save_data(
                 pbar.update(1)
             break
 
-        pre_exists = False
+        if pbar:
+            pbar.set_description(f"Saving plane {chan_index + 1}")
+
         if save_phase_png:
             png_dir = path / f"scan_phase_check_plane_{chan_index + 1:02d}"
             # png_dir.mkdir(exist_ok=True)
+
+        metadata_plane = metadata.copy()
+
+        metadata["save_path"] = str(fname.parent.expanduser().resolve())
+        metadata_plane["plane"] = chan_index + 1 # 1-based indexing
+        metadata_plane["plane_index"] = chan_index
 
         nbytes_chan = scan.shape[0] * scan.shape[2] * scan.shape[3] * 2
         num_chunks = min(scan.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
