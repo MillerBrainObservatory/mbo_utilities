@@ -43,17 +43,18 @@ if __name__ == "__main__":
     #     overwrite=True,
     #     metadata=metadata,
     # )
+    path = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green"
     test_scan = mbo.read_scan(
-        "/home/flynn/lbm_data/raw",
+        path,
         roi=0,
         phasecorr_method="mean",
     )
-    savedir = r"/home/flynn/lbm_data/assembled"
+    savedir = r"D:\W2_DATA\h5"
     test_scan.roi = 0
     mbo.save_as(
         test_scan,
         savedir,
-        ext=".tif",
+        ext=".h5",
         overwrite=False,
         fix_phase=True,
         debug=True,

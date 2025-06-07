@@ -206,12 +206,14 @@ class LazyArrayLoader:
     loader: Any = field(init=False)
 
     def __post_init__(self):
-        # normalize into a list of Path
+        # everything that isn't a direct array should have a filepath
         if isinstance(self.inputs, np.ndarray):
             array = self.inputs
             self.loader = lambda: array
             self.fpath = None
             return
+
+        # normalize into a list of Path
         paths: list[Path]
         if isinstance(self.inputs, (str, Path)):
             p = Path(self.inputs)
