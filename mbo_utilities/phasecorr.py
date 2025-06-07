@@ -2,22 +2,30 @@ import numpy as np
 from scipy.ndimage import fourier_shift
 from skimage.registration import phase_cross_correlation
 
-from . import log
+from mbo_utilities import log
 
-TWO_DIM_PHASECORR_METHODS = {"frame", "mean", "max", "std", "mean-sub", "mean-sub-std"}
+TWO_DIM_PHASECORR_METHODS = {"frame"}
 THREE_DIM_PHASECORR_METHODS = ["mean", "max", "std", "mean-sub"]
 
 MBO_WINDOW_METHODS = {
-    "mean": lambda X: np.mean(X, axis=0),
-    "max": lambda X: np.max(X, axis=0),
-    "std": lambda X: np.std(X, axis=0),
-    "mean-sub": lambda X: X - np.mean(X, axis=0),
-    "mean-sub-std": lambda X: (X - np.mean(X, axis=0)) / (np.std(X, axis=0) + 1e-8),
+    "mean":      lambda X: np.mean(X, axis=0),
+    "max":       lambda X: np.max(X, axis=0),
+    "std":       lambda X: np.std(X, axis=0),
+    # pick first frame then subtract global mean
+    "mean-sub":  lambda X: X[0] - np.mean(X, axis=0),
 }
+#
+# MBO_WINDOW_METHODS = {
+#     "mean": lambda X: np.mean(X, axis=0),
+#     "max": lambda X: np.max(X, axis=0),
+#     "std": lambda X: np.std(X, axis=0),
+#     "mean-sub": lambda X: np.mean(X - np.mean(X, axis=0), axis=0),
+#}
 
 logger = log.get("phasecorr")
 
-def _phase_offset(
+
+def _phase_corr_2d(
         frame,
         upsample=1,
         border=0,
@@ -50,61 +58,48 @@ def _phase_offset(
         return np.sign(dx) * min(abs(dx), max_offset)
     return dx
 
-def _apply_offset(frame, shift):
-    rows = frame[1::2]
-    f = np.fft.fftn(rows)
-    f = fourier_shift(f, (0, shift))
-    frame[1::2] = np.fft.ifftn(f).real
-    return frame
-
-
-def compute_scan_phase_offsets(
-        arr,
-        method="mean",
-        upsample=1,
-        max_offset=4,
-        border=2,
-):
+def _apply_offset(img, shift):
     """
-    Compute scan‐phase offsets. If `arr` is 2D, always run a single‐image offset.
-    If `arr` is 3D (time × height × width), one of:
-
-      - "frame"      → compute offset frame‐by‐frame (returns a 1D array of length T)
-      - "mean", "max", "std"       → collapse along time with np.mean/np.max/np.std first
-      - "mean-sub"   → subtract the temporal mean from each frame, then run offset on that difference
-      - "mean-sub-std" → first z‐score each pixel over time, then compute offset on that z‐scored image
-
+    Apply one scalar `shift` (in X) to every *odd* row of an
+    (..., Y, X) array.  Works for 2-D or 3-D stacks.
     """
+    if img.ndim < 2:
+        return img
+
+    rows = img[..., 1::2, :]
+
+    f = np.fft.fftn(rows, axes=(-2, -1))
+    shift_vec = (0,) * (f.ndim - 1) + (shift,)   # e.g. (0,0,dx) for 3-D
+    rows[:] = np.fft.ifftn(fourier_shift(f, shift_vec),
+                           axes=(-2, -1)).real
+    return img
+
+def nd_windowed(arr, *, method="mean", upsample=1,
+                max_offset=4, border=2):
+    """Return (corrected array, offsets)."""
     a = np.asarray(arr)
     if a.ndim == 2:
-        if method not in TWO_DIM_PHASECORR_METHODS:
-            logger.debug(
-                "Attempted to use a windowed phase-corr method on 2D data."
-                f"Available 2D methods: {TWO_DIM_PHASECORR_METHODS}"
+        offs = _phase_corr_2d(a, upsample, border, max_offset)
+    else:
+        flat = a.reshape(a.shape[0], *a.shape[-2:])
+        if method == "frame":
+            offs = np.array(
+                [_phase_corr_2d(f, upsample, border, max_offset) for f in flat]
             )
-        return _phase_offset(
-            a,
-            upsample=upsample,
-            border=border,
-            max_offset=max_offset
+        else:
+            if method not in MBO_WINDOW_METHODS:
+                raise ValueError(f"unknown method {method}")
+            img = MBO_WINDOW_METHODS[method](flat)
+            offs = _phase_corr_2d(img, upsample, border, max_offset)
+    if np.ndim(offs) == 0:  # scalar
+        corrected = _apply_offset(a.copy(), float(offs))
+    else:
+        corrected = np.stack(
+            [_apply_offset(f.copy(), float(s))  # or _apply_offset
+             for f, s in zip(a, offs)]
         )
-    # flatten z/t
-    flat = a.reshape(a.shape[0], *a.shape[-2:])
+    return corrected, offs
 
-    # one offset per frame
-    if method == "frame":
-        return np.array([_phase_offset(
-            f,
-            upsample=upsample,
-            border=border,
-            max_offset=max_offset,
-        ) for f in flat])  # dtype=np.float32)
-
-    if method not in MBO_WINDOW_METHODS:
-        raise ValueError(f"Unknown phase‐corr method: {method!r}")
-
-    image = MBO_WINDOW_METHODS[method](flat)
-    return _phase_offset(image, upsample=upsample, border=border, max_offset=max_offset)
 
 def apply_scan_phase_offsets(arr, offs):
     out = np.asarray(arr).copy()
@@ -113,3 +108,29 @@ def apply_scan_phase_offsets(arr, offs):
     for k, off in enumerate(offs):
         out[k] = _apply_offset(out[k], off)
     return out
+
+if __name__ == "__main__":
+    from mbo_utilities import get_files
+    from mbo_utilities.lazy_array import LazyArrayLoader
+
+    files = get_files(r"D:\tests\data", "tif")
+    if not files:
+        raise ValueError("No files found matching '*.tif'")
+
+    import matplotlib.pyplot as plt
+    # fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+
+    array_object = LazyArrayLoader(files[0])
+    lazy_array = array_object.load()
+    lazy_array.fix_phase = False
+    array = lazy_array[:20, 8, :, :]
+
+    methods = ["frame", "mean", "max", "std", "mean-sub", "mean-sub-std"]
+    fig, axs = plt.subplots(2, 3, figsize=(12, 8))
+    for ax, m in zip(axs.flat, methods):
+        corr, offs = nd_windowed(array, method=m, upsample=2)
+        ax.imshow(corr.mean(0)[150:170, 330:350], cmap="gray")
+        ax.set_title(f"{m}\nμ={np.mean(offs):.2f}")
+        ax.axis("off")
+    plt.tight_layout()
+    plt.show()
