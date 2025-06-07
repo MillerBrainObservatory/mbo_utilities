@@ -78,7 +78,6 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
         if not data_in:
             print("No file or folder selected, exiting.")
             return
-    ic(data_in)
 
     array_object = LazyArrayLoader(data_in, roi=roi)
     data = array_object.load()

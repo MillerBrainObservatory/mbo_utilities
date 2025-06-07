@@ -18,6 +18,11 @@ MBO_THREADING_ENABLED = bool(
 MBO_ASSETS_PATH = get_mbo_dirs()["assets"]
 MBO_LOGO_PATH = Path(MBO_ASSETS_PATH).joinpath("static", "logo_utilities.png")
 
+HAS_LOGO = MBO_LOGO_PATH.exists() and MBO_LOGO_PATH.is_file()
+
+if not HAS_LOGO:
+    print("Warning: MBO logo not found at", MBO_LOGO_PATH)
+
 
 class FileDialog:
     def __init__(self):
@@ -63,7 +68,8 @@ class FileDialog:
             imgui.separator()
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.5))
 
-            hello_imgui.image_from_asset(str(self._logo_path))
+            # if HAS_LOGO:
+            #     hello_imgui.image_from_asset(str(self._logo_path.expanduser().resolve().absolute()))
 
             imgui_md.render_unindented("""
             # General Python and shell utilities developed for the Miller Brain Observatory (MBO) workflows.
