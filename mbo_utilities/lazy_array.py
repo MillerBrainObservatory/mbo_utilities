@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence, List, Tuple, Any, Protocol
 
+import h5py
 import numpy as np
 import tifffile
 import dask.array as da
@@ -127,6 +128,41 @@ class MBOScanLoader:
         return scan
 
 
+class _LazyH5Dataset:
+    def __init__(self, fpath: Path | str, ds: str = "mov"):
+        self._f = h5py.File(fpath, "r")
+        self._d = self._f[ds]
+        self.shape = self._d.shape
+        self.dtype = self._d.dtype
+        self.ndim = self._d.ndim
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    def __getitem__(self, key):
+        return self._d[key]
+
+    def min(self) -> float:
+        return float(self._d[0].min())
+
+    def max(self) -> float:
+        return float(self._d[0].max())
+
+    def __array__(self):
+        n = min(10, self.shape[0])
+        return self._d[:n]
+
+    def close(self):
+        self._f.close()
+
+
+@dataclass
+class H5Loader:
+    fpath: Path | str
+    dataset: str = "mov"
+
+    def load(self) -> _LazyH5Dataset:
+        return _LazyH5Dataset(self.fpath, self.dataset)
 @dataclass
 class MBOTiffLoader:
     fpath: list[Path]
@@ -235,7 +271,7 @@ class LazyArrayLoader:
             raise ValueError("No input files found.")
 
         # check for mixed‐type in a single directory
-        supported = {".npy", ".tif", ".tiff", ".bin"}
+        supported = {".npy", ".tif", ".tiff", ".bin", ".h5"}
         filtered = [p for p in paths if p.suffix.lower() in supported]
         if not filtered:
             raise ValueError(f"No supported files in {self.inputs}")
@@ -271,6 +307,8 @@ class LazyArrayLoader:
                 self.loader = Suite2pLoader(bin_file, metadata)
             else:
                 raise NotImplementedError("BIN files with metadata are not yet supported.")
+        elif first.suffix.lower() == ".h5":
+            self.loader = H5Loader(first)
         else:
             raise TypeError(f"Unsupported file type: {first.suffix}")
 
