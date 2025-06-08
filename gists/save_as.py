@@ -45,11 +45,9 @@ if __name__ == "__main__":
     # )
     test_scan = mbo.read_scan(
         "/home/flynn/lbm_data/raw",
-        roi=0,
         phasecorr_method="mean",
     )
     savedir = r"/home/flynn/lbm_data/assembled"
-    test_scan.roi = 0
     mbo.save_as(
         test_scan,
         savedir,
