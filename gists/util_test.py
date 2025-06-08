@@ -15,7 +15,7 @@ from pathlib import Path
 import tifffile
 import fastplotlib as fpl
 
-from mbo_utilities.phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets
+from mbo_utilities.phasecorr import nd_windowed_compute_optimal_offset, apply_scan_phase_offsets
 
 def _phase_offset(frame, upsample=10, border=0, max_offset=3):
     if frame.ndim == 3:

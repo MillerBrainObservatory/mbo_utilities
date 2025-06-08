@@ -197,7 +197,7 @@ def has_mbo_metadata(file: os.PathLike | str) -> bool:
     return False
 
 
-def is_raw_scanimage(file: os.PathLike | str, verbose=False) -> bool:
+def is_raw_scanimage(file: os.PathLike | str) -> bool:
     """
     Check if a TIFF file is a raw ScanImage TIFF.
 

@@ -8,7 +8,7 @@ import dask.array as da
 
 from . import log
 from .metadata import is_raw_scanimage
-from .phasecorr import compute_scan_phase_offsets, apply_scan_phase_offsets, MBO_WINDOW_METHODS
+from .phasecorr import nd_windowed, apply_scan_phase_offsets, MBO_WINDOW_METHODS
 from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
 from .util import subsample_array
@@ -327,11 +327,11 @@ class Scan_MBO(scans.ScanMultiROI):
     def __init__(
             self,
             roi: int | Sequence[int] | None = None,
-            fix_phase: bool = False,
+            fix_phase: bool = True,
             phasecorr_method: str = "frame",
-            border: int | tuple[int, int, int, int] = 0,
-            upsample: int = 20,
-            max_offset: int = 8,
+            border: int | tuple[int, int, int, int] = 3,
+            upsample: int =5,
+            max_offset: int = 4,
     ):
         super().__init__(join_contiguous=True)
         self._selected_roi = roi
@@ -442,6 +442,10 @@ class Scan_MBO(scans.ScanMultiROI):
             return len(self.rois)
         elif isinstance(self.rois, int):
             return self.rois
+        else:
+            raise TypeError(
+                f"No rois. Has scan been initialized with `read_data`? "
+            )
 
     def _read_pages(
         self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
@@ -468,17 +472,15 @@ class Scan_MBO(scans.ScanMultiROI):
 
             if self.fix_phase:
                 self.logger.debug(f"Applying phase correction with strategy: {self.phasecorr_method}")
-                offs = compute_scan_phase_offsets(
+                corrected, self.offset = nd_windowed(
                     chunk,
                     method=self.phasecorr_method,
                     upsample=self.upsample,
                     max_offset=self.max_offset,
                     border=self.border,
                 )
-                corrected = apply_scan_phase_offsets(chunk, offs)
-                self.offset = offs
                 self.logger.info(
-                    f"Offset for chunk: {offs}"
+                    f"Offset for chunk: {self.offset}"
                 )
                 buf[idxs] = corrected
             else:
