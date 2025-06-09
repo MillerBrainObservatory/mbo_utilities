@@ -774,56 +774,6 @@ def get_files(
 
     return [str(file) for file in files]
 
-def stack_from_files(files: list, proj="mean"):
-    """
-    Creates a Z-Stack image by applying a projection to each TIFF file in the provided list and stacking the results into a NumPy array.
-
-    Parameters
-    ----------
-    files : list of str or Path
-        A list of file paths to TIFF images. Files whose extensions are not '.tif' or '.tiff' are ignored.
-    proj : str, optional
-        The type of projection to apply to each TIFF image. Valid options are 'mean', 'max', and 'std'. Default is 'mean'.
-
-    Returns
-    -------
-    numpy.ndarray
-        A stacked array of projected images with the new dimension corresponding to the file order. For example, for N input files,
-        the output shape will be (N, height, width).
-
-    Raises
-    ------
-    ValueError
-        If an unsupported projection type is provided.
-
-    Examples
-    --------
-    >>> import mbo_utilities as mbo
-    >>> files = mbo.get_files("/path/to/files", "tif")
-    >>> z_stack = mbo.stack_from_files(files, proj="max")
-    >>> z_stack.shape  # (3, height, width)
-    """
-    lazy_arrays = []
-    for file in files:
-        if Path(file).suffix not in [".tif", ".tiff"]:
-            continue
-        try:
-            arr = tifffile.memmap(file)
-        except ValueError:
-            ic(f"Failed to memmap {file}, trying to read directly.")
-            arr = tifffile.imread(file)
-        if proj == "mean":
-            img = np.mean(arr, axis=0)
-        elif proj == "max":
-            img = np.max(arr, axis=0)
-        elif proj == "std":
-            img = np.std(arr, axis=0)
-        else:
-            raise ValueError(f"Unsupported projection '{proj}'")
-        lazy_arrays.append(img)
-
-    return np.stack(lazy_arrays, axis=0)
-
 def _is_arraylike(obj) -> bool:
     """
     Checks if the object is array-like.

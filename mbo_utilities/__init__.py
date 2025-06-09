@@ -2,7 +2,6 @@ from pathlib import Path
 
 from .file_io import (
     get_files,
-    stack_from_files,
     npy_to_dask,
     read_scan,
     expand_paths,
@@ -36,7 +35,6 @@ __all__ = [
     "scanreader",
     "npy_to_dask",
     "get_files",
-    "stack_from_files",
     "read_scan",
     "subsample_array",
     # metadata
