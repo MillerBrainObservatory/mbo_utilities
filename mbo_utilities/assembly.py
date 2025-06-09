@@ -539,9 +539,7 @@ def _write_bin(
     logger.info(f"Wrote {data.shape[0]} frames to {fname}.")
 
 
-def _write_h5(
-    path, data, overwrite=True, metadata=None
-):
+def _write_h5(path, data, *, overwrite=True, metadata=None):
     filename = Path(path).with_suffix(".h5")
 
     if not hasattr(_write_h5, "_initialized"):
@@ -549,17 +547,20 @@ def _write_h5(
         _write_h5._offsets = {}
 
     if filename not in _write_h5._initialized:
+        nframes = metadata["nframes"]
+        h, w = data.shape[-2:]
         with h5py.File(filename, "w" if overwrite else "a") as f:
             f.create_dataset(
-                "mov", shape=data.shape, dtype=data.dtype, chunks=True, compression=None
+                "mov",
+                shape=(nframes, h, w),
+                maxshape=(None, h, w),
+                chunks=(1, h, w),
+                dtype=data.dtype,
+                compression=None,
             )
-
             if metadata:
                 for k, v in metadata.items():
-                    try:
-                        f.attrs[k] = v
-                    except TypeError:
-                        f.attrs[k] = str(v)
+                    f.attrs[k] = v if np.isscalar(v) else str(v)
 
         _write_h5._initialized[filename] = True
         _write_h5._offsets[filename] = 0
@@ -568,7 +569,7 @@ def _write_h5(
     with h5py.File(filename, "a") as f:
         f["mov"][offset : offset + data.shape[0]] = data
 
-    _write_h5._offsets[filename] += data.shape[0]
+    _write_h5._offsets[filename] = offset + data.shape[0]
 
 
 def _write_tiff(
