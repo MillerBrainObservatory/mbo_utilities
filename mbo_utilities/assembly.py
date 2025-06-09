@@ -597,12 +597,19 @@ def _write_tiff(
     writer = _write_tiff._writers[filename]
     is_first = _write_tiff._first_write.get(filename, False)
 
+    smin, smax = int(data.min()), int(data.max())
+
     for frame in data:
         writer.write(
             frame,
             contiguous=True,
             photometric="minisblack",
+            bitspersample=16,
             metadata=_make_json_serializable(metadata) if is_first else None,
+            extratags=[
+                (340, "i", 1, (smin,), False),
+                (341, "i", 1, (smax,), False),
+            ] if is_first else None,
         )
         _write_tiff._first_write[filename] = False
 
