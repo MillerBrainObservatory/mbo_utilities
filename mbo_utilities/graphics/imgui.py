@@ -275,11 +275,19 @@ def draw_popups(parent):
         parent._overwrite = checkbox_with_tooltip(
             "Overwrite", parent._overwrite, "Replace any existing output files."
         )
-        parent.fix_phase = checkbox_with_tooltip(
-            "Fix Phase",
-            parent._fix_phase,
-            "Apply scan-phase correction to interleaved lines.",
-        )
+
+        fix_phase_changed, fix_phase_value = imgui.checkbox("Fix Scan Phase", parent._fix_phase)
+        imgui.same_line()
+        imgui.text_disabled("(?)")
+        if imgui.is_item_hovered():
+            imgui.begin_tooltip()
+            imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+            imgui.text_unformatted("Apply scan-phase correction to interleaved lines.")
+            imgui.pop_text_wrap_pos()
+            imgui.end_tooltip()
+        if fix_phase_changed:
+            parent.fix_phase = fix_phase_value
+
         parent._debug = checkbox_with_tooltip(
             "Debug",
             parent._debug,

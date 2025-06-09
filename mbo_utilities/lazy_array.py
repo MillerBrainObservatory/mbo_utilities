@@ -271,7 +271,7 @@ class LazyArrayLoader:
             raise ValueError("No input files found.")
 
         # check for mixed‐type in a single directory
-        supported = {".npy", ".tif", ".tiff", ".bin", ".h5"}
+        supported = {".npy", ".tif", ".tiff", ".bin", ".h5", ".zarr"}
         filtered = [p for p in paths if p.suffix.lower() in supported]
         if not filtered:
             raise ValueError(f"No supported files in {self.inputs}")
@@ -309,6 +309,8 @@ class LazyArrayLoader:
                 raise NotImplementedError("BIN files with metadata are not yet supported.")
         elif first.suffix.lower() == ".h5":
             self.loader = H5Loader(first)
+        elif first.suffix.lower() == ".zarr":
+            raise NotImplementedError("Zarr files are not yet supported.")
         else:
             raise TypeError(f"Unsupported file type: {first.suffix}")
 

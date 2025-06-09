@@ -8,14 +8,14 @@ import dask.array as da
 
 from . import log
 from .metadata import is_raw_scanimage
-from .phasecorr import nd_windowed, apply_scan_phase_offsets, MBO_WINDOW_METHODS
+from .phasecorr import nd_windowed, MBO_WINDOW_METHODS
 from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
 from .util import subsample_array
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-SAVE_AS_TYPES = [".tiff", ".bin", ".h5"]
+SAVE_AS_TYPES = [".tiff", ".bin", ".h5", ".zarr"]
 
 from pathlib import Path
 import numpy as np

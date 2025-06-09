@@ -490,6 +490,11 @@ def _get_file_writer(ext, overwrite):
             _write_h5,
             overwrite=overwrite,
         )
+    elif ext in ["zarr"]:
+        return functools.partial(
+            _write_zarr,
+            overwrite=overwrite,
+        )
     elif ext == "bin":
         if not HAS_SUITE2P:
             raise ValueError("Suite2p not installed.")
@@ -601,34 +606,57 @@ def _write_tiff(
         )
         _write_tiff._first_write[filename] = False
 
-
-def _write_zarr(
-    path, data, overwrite=True, metadata=None
-):
-    try:
-        import zarr
-    except ImportError:
-        raise ImportError("Please install zarr to use ext='.zarr'")
-
-    # data is assumed to have shape (n, H, W)
+def _write_zarr(path, data, *, overwrite=True, metadata=None):
+    import asyncio, zarr
     filename = Path(path).with_suffix(".zarr")
-    if not hasattr(_write_zarr, "_initialized"):
-        _write_zarr._initialized = {}
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    if not hasattr(_write_zarr, "_arrays"):
+        _write_zarr._arrays, _write_zarr._offsets = {}, {}
+    if filename not in _write_zarr._arrays:
+        if overwrite and filename.exists():
+            shutil.rmtree(filename)
+        nframes = metadata["nframes"]
+        h, w = data.shape[-2:]
+        z = zarr.open(store=str(filename), mode="w",
+                      shape=(nframes, h, w), chunks=(1, h, w), dtype=data.dtype)
+        if metadata:
+            for k, v in metadata.items():
+                try:
+                    z.attrs[k] = v if np.isscalar(v) else str(v)
+                except Exception:
+                    z.attrs[k] = str(v)
+        _write_zarr._arrays[filename] = z
+        _write_zarr._offsets[filename] = 0
+    z = _write_zarr._arrays[filename]
+    offset = _write_zarr._offsets[filename]
+    z[offset: offset + data.shape[0]] = data
+    _write_zarr._offsets[filename] = offset + data.shape[0]
 
-    if filename not in _write_zarr._initialized:
+
+def _write_zarr_v2(path, data, *, overwrite=True, metadata=None):
+    filename = Path(path).with_suffix(".zarr")
+
+    if not hasattr(_write_zarr, "_arrays"):
+        _write_zarr._arrays = {}
+        _write_zarr._offsets = {}
+
+    if filename not in _write_zarr._arrays:
         if filename.exists() and overwrite:
             shutil.rmtree(filename)
-        # Instead of using data.shape as the initial shape,
-        # start with zero along the appending axis.
-        empty_shape = (0,) + data.shape[1:]
-        max_shape = (None,) + data.shape[1:]
-        z = zarr.create(
+
+        import zarr
+
+        nframes = metadata["nframes"]
+        h, w = data.shape[-2:]
+        z = zarr.open(
             store=str(filename),
-            shape=empty_shape,
-            chunks=(1,) + data.shape[1:],  # one slice per chunk
+            mode="w",
+            shape=(nframes, h, w),
+            chunks=(1, h, w),
             dtype=data.dtype,
-            overwrite=True,
-            max_shape=max_shape,
         )
         if metadata:
             for k, v in metadata.items():
@@ -636,11 +664,11 @@ def _write_zarr(
                     z.attrs[k] = v
                 except TypeError:
                     z.attrs[k] = str(v)
-        _write_zarr._initialized[filename] = 0
 
-    # Open the array in append mode
-    z = zarr.open_array(str(filename), mode="a")
-    # Append new data along the 0th axis
-    z.append(data)
-    # Update the count (optional, since append grows the array automatically)
-    _write_zarr._initialized[filename] = z.shape[0]
+        _write_zarr._arrays[filename] = z
+        _write_zarr._offsets[filename] = 0
+
+    z = _write_zarr._arrays[filename]
+    offset = _write_zarr._offsets[filename]
+    z[offset : offset + data.shape[0]] = data
+    _write_zarr._offsets[filename] = offset + data.shape[0]
