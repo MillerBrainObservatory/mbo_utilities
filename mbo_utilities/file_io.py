@@ -479,9 +479,6 @@ class Scan_MBO(scans.ScanMultiROI):
                     max_offset=self.max_offset,
                     border=self.border,
                 )
-                self.logger.info(
-                    f"Offset for chunk: {self.offset}"
-                )
                 buf[idxs] = corrected
             else:
                 buf[idxs] = chunk

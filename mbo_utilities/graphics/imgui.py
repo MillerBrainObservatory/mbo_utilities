@@ -590,7 +590,6 @@ class PreviewDataWidget(EdgeWindow):
             for arr in self.image_widget.data:
                 if isinstance(arr, Scan_MBO):
                     arr.fix_phase = value
-                    self.logger.debug(f"Set fix_phase to {value} for MBO Scan object.")
         else:
             self.update_frame_apply()
 
