@@ -1,6 +1,8 @@
-import re
 from collections.abc import Sequence
 from itertools import product
+
+from pathlib import Path
+import numpy as np
 
 from icecream import ic
 
@@ -16,9 +18,6 @@ from .util import subsample_array
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
 SAVE_AS_TYPES = [".tiff", ".bin", ".h5", ".zarr"]
-
-from pathlib import Path
-import numpy as np
 
 logger = log.get("file_io")
 
