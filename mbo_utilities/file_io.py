@@ -19,7 +19,6 @@ SAVE_AS_TYPES = [".tiff", ".bin", ".h5", ".zarr"]
 
 from pathlib import Path
 import numpy as np
-import tifffile
 
 logger = log.get("file_io")
 
@@ -190,9 +189,6 @@ def npy_to_dask(files, name="", axis=1, astype=None):
         arr = arr.astype(astype)
 
     return arr
-
-def is_escaped_string(path: str) -> bool:
-    return bool(re.search(r"\\[a-zA-Z]", path))
 
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     """
@@ -831,9 +827,3 @@ def _make_json_serializable(obj):
 
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
-
-def _intersect_slice(user: slice, mask: slice):
-    ic(user, mask)
-    start = max(user.start or 0, mask.start)
-    stop = min(user.stop or mask.stop, mask.stop)
-    return slice(start, stop)
