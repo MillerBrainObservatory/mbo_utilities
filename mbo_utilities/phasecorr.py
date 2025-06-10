@@ -25,6 +25,52 @@ MBO_WINDOW_METHODS = {
 logger = log.get("phasecorr")
 
 
+# ------------------------------------------------------------------ legacy helpers
+from scipy import signal
+
+def _return_scan_offset(
+        img: np.ndarray,
+        nvals: int = 8
+) -> np.ndarray:
+    """legacy cross-correlation offset on a 2-D image
+
+    Translated to Python from Demas et al. 2021: https://www.nature.com/articles/s41592-021-01239-8#Sec2
+    """
+    in_pre, in_post = img[::2], img[1::2]
+    n = min(in_pre.shape[0], in_post.shape[0])
+    in_pre, in_post = in_pre[:n], in_post[:n]
+
+    in_pre = np.hstack([np.zeros((n, nvals)), in_pre, np.zeros((n, nvals))]).T.ravel("F")
+    in_post = np.hstack([np.zeros((n, nvals)), in_post, np.zeros((n, nvals))]).T.ravel("F")
+
+    in_post -= in_post.mean()
+    in_post[in_post < 0] = 0
+    in_pre[in_pre < 0] = 0
+
+    r = signal.correlate(in_pre, in_post, mode="full") \
+        / (len(in_pre) - np.abs(np.arange(-len(in_pre)+1, len(in_pre))))
+    lags = np.arange(-nvals, nvals + 1)
+    return lags[np.argmax(r[len(r)//2-nvals : len(r)//2+nvals+1])]
+
+def _fix_scan_phase(img: np.ndarray, dx: int) -> np.ndarray:
+    """integer-pixel phase fix (even rows ←→ odd rows)
+
+    Translated to Python from Demas et al. 2021: https://www.nature.com/articles/s41592-021-01239-8#Sec2
+    """
+    if dx == 0:
+        return img
+    out = np.zeros_like(img)
+    if img.ndim == 2:
+        even, odd = img[0::2], img[1::2]
+        if dx > 0:
+            out[0::2,:-dx], out[1::2,dx:] = even[:,dx:], odd[:,:-dx]
+        else:
+            dx = -dx
+            out[0::2,dx:], out[1::2,:-dx] = even[:,:-dx], odd[:,dx:]
+    else:                               # 3-D or 4-D stack
+        out[:] = np.stack([_fix_scan_phase(f, dx) for f in img])
+    return out
+
 def _phase_corr_2d(
         frame,
         upsample=1,
@@ -124,6 +170,10 @@ if __name__ == "__main__":
     lazy_array = array_object.load()
     lazy_array.fix_phase = False
     array = lazy_array[:20, 8, :, :]
+
+    # test legacy scanphase correction
+    dx = _return_scan_offset(array[0])
+    array = _fix_scan_phase(array, dx)
 
     methods = ["frame", "mean", "max", "std", "mean-sub", "mean-sub-std"]
     fig, axs = plt.subplots(2, 3, figsize=(12, 8))
