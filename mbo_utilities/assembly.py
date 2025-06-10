@@ -190,8 +190,10 @@ def save_as(
 
     start_time = time.time()
 
-    # this is a bit confusing. If roi=None, that atttribute is set on the scan object and
-    # when it is inddexed e.g. scan[0], it will return a stack with each roi assembled.
+    # this is a bit confusing.
+    # If roi=None, that atttribute is set on the scan object and
+    # when it is inddexed e.g. scan[0],
+    # it will return a stack with each roi assembled.
     if 0 in roi_list:
         if len(roi_list) > 1:
             roi_list = [r + 1 for r in roi_list if r is not None]
@@ -577,9 +579,7 @@ def _write_h5(path, data, *, overwrite=True, metadata=None):
     _write_h5._offsets[filename] = offset + data.shape[0]
 
 
-def _write_tiff(
-    path, data, overwrite=True, metadata=None
-):
+def _write_tiff(path, data, overwrite=True, metadata=None):
     filename = Path(path).with_suffix(".tif")
 
     if not hasattr(_write_tiff, "_writers"):
@@ -597,8 +597,6 @@ def _write_tiff(
     writer = _write_tiff._writers[filename]
     is_first = _write_tiff._first_write.get(filename, False)
 
-    smin, smax = int(data.min()), int(data.max())
-
     for frame in data:
         writer.write(
             frame,
@@ -606,10 +604,10 @@ def _write_tiff(
             photometric="minisblack",
             bitspersample=16,
             metadata=_make_json_serializable(metadata) if is_first else None,
-            extratags=[
-                (340, "i", 1, (smin,), False),
-                (341, "i", 1, (smax,), False),
-            ] if is_first else None,
+            # extratags=[
+            #     (340, "i", 1, (smin,), False),
+            #     (341, "i", 1, (smax,), False),
+            # ] if is_first else None,
         )
         _write_tiff._first_write[filename] = False
 
