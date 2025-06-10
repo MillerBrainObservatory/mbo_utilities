@@ -9,7 +9,7 @@ from icecream import ic
 import dask.array as da
 
 from . import log
-from .metadata import is_raw_scanimage
+from .metadata import is_raw_scanimage, get_metadata
 from .phasecorr import nd_windowed, MBO_WINDOW_METHODS
 from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
@@ -329,6 +329,7 @@ class Scan_MBO(scans.ScanMultiROI):
             max_offset: int = 4,
     ):
         super().__init__(join_contiguous=True)
+        self._metadata = None # set when pages are read
         self._selected_roi = roi
         self._fix_phase = fix_phase
         self._phasecorr_method = phasecorr_method
@@ -355,6 +356,30 @@ class Scan_MBO(scans.ScanMultiROI):
             f"upsample: {upsample}, "
             f"max_offset: {max_offset}"
         )
+
+    def read_data(self, filenames, dtype=np.int16):
+        super().read_data(filenames, dtype)
+        self._metadata = get_metadata(self.tiff_files[0].filehandle.path)  # from the file
+        self._metadata.update({"si": _make_json_serializable(self.tiff_files[0].scanimage_metadata)})
+        self._rois = self._create_rois()
+        self.fields = self._create_fields()
+        if self.join_contiguous:
+            self._join_contiguous_fields()
+
+    @property
+    def metadata(self):
+        return self._metadata.update({
+            "fix_phase": self.fix_phase,
+            "phasecorr_method": self.phasecorr_method,
+            "offset": self.offset,
+            "border": self.border,
+            "upsample": self.upsample,
+            "max_offset": self.max_offset,
+        })
+
+    @metadata.setter
+    def metadata(self, value):
+        self._metadata.update(value)
 
     @property
     def rois(self):
