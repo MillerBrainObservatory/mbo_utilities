@@ -211,7 +211,7 @@ class MBOTiffLoader:
         if isinstance(self.fpath, list):
             if len(self.fpath) > 1:
                 for p in self.fpath:
-                    mm = tifffile.memmap(p, mode="r").view(np.int16)
+                    mm = tifffile.memmap(p, mode="r")
                     mms.append(mm)
 
                 # wrap every mem-map in a dask.Array
@@ -230,8 +230,22 @@ class MBOTiffLoader:
                 return out
             elif len(self.fpath) == 1:
                 # if there is only one file, just return a memmap
-                return tifffile.memmap(self.fpath[0], mode="r")
-        return tifffile.memmap(self.fpath[0], mode="r")
+                try:
+                    return tifffile.memmap(self.fpath[0], mode="r")
+                except (ValueError, MemoryError) as e:
+                    logger.debug(
+                        f"cannot memmap TIFF file {self.fpath[0]}: {e}\n"
+                        f" falling back to imread"
+                    )
+                    return tifffile.imread(self.fpath[0], mode="r")
+        try:
+            return tifffile.memmap(self.fpath[0], mode="r")
+        except (ValueError, MemoryError) as e:
+            logger.debug(
+                f"cannot memmap TIFF file {self.fpath[0]}: {e}\n"
+                f" falling back to imread"
+            )
+            return tifffile.imread(self.fpath[0], mode="r")
 
 
 @dataclass
