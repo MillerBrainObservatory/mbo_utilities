@@ -70,7 +70,10 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
 
     # arrays  = lazy_obj.loader.rois or [lazy_obj.loader.load()]  # fall back to whole data
     arrays  = lazy_obj.load()
-    names   = [f"ROI {i+1}" for i in range(len(arrays))]
+    if isinstance(arrays, list):
+        names   = [f"ROI {i+1}" for i in range(len(arrays))]
+    else:
+        names   = [f"Data with shape: {arrays.shape}"]
 
     a0 = arrays[0] if isinstance(arrays, list) else arrays
     nx, ny = a0.shape[-2:]
