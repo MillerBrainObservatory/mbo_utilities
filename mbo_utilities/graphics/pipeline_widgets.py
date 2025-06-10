@@ -430,7 +430,7 @@ def run_plane_from_data(self, arr_idx):
     loader = LazyArrayLoader(self.fpath)
     if hasattr(loader, "roi") or hasattr(loader, "rois"):
         self.logger.info("Using LazyArrayLoader with ROI support. ")
-        arr = loader.roi
+        arr = loader.rois
 
     if self.fpath.suffix.lower() in [".tif", ".tiff"]:
         metadata = get_metadata(self.fpath)
