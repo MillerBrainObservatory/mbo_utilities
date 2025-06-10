@@ -411,7 +411,7 @@ class PreviewDataWidget(EdgeWindow):
         iw: fpl.ImageWidget,
         fpath: str | None = None,
         threading_enabled: bool = True,
-        size: int = 350,
+        size: int = None,
         location: Literal["bottom", "right"] = "right",
         title: str = "Data Preview",
         show_title: bool = False,
@@ -446,7 +446,7 @@ class PreviewDataWidget(EdgeWindow):
         )
         super().__init__(
             figure=iw.figure,
-            size=size,
+            size=350 if size is None else size,
             location=location,
             title=title,
             window_flags=flags,
