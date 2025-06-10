@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence, List, Tuple, Any, Protocol
@@ -25,6 +27,14 @@ logger = log.get("lazy_array")
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
+SUPPORTED_FTYPES = (
+    ".npy",
+    ".tif",
+    ".tiff",
+    ".bin",
+    ".h5",
+    ".zarr",
+)
 
 class Loader(Protocol):
     fpath: Path | str | Sequence[Path | str]
@@ -44,7 +54,9 @@ class _Suite2pLazyArray:
             raise ValueError(
                 f"Could not locate 'reg_file' or 'raw_file' in ops: {ops.keys()}"
             )
-        self._bf = BinaryFile(Ly=Ly, Lx=Lx, filename=reg_file, n_frames=n_frames)
+        self._bf = BinaryFile(
+            Ly=Ly, Lx=Lx, filename=str(reg_file), n_frames=n_frames
+        )
         self.shape = (n_frames, Ly, Lx)
         self.ndim = 3
         self.dtype = np.int16
@@ -118,14 +130,24 @@ class Suite2pLoader:
 class MBOScanLoader:
     fpath: list[Path]
     roi: int | Sequence[int] | None = None
-    shape: tuple[int, ...] = ()
+    _scan: Scan_MBO | None = field(init=False, default=None)
 
-    def load(self) -> Scan_MBO:
-        scan = read_scan(self.fpath, roi=self.roi)
-        scan.fpath = Path(self.fpath[0].parent)
-        scan.read_data(self.fpath)
-        self.shape = scan.shape
-        return scan
+    def __post_init__(self):
+        self._scan = read_scan(self.fpath, roi=self.roi)
+
+    def load(self) -> Scan_MBO | None | list[Scan_MBO | None]:
+        if self._scan.selected_roi is None:
+            return self._scan
+        out = []
+        for r in range(1, self._scan.num_rois + 1):
+            s = copy.copy(self._scan)
+            s.selected_roi = r
+            out.append(s)
+        return out
+
+    @property
+    def metadata(self):  # anything you like
+        return getattr(self._scan, "metadata", None)
 
 
 class _LazyH5Dataset:
@@ -163,6 +185,7 @@ class H5Loader:
 
     def load(self) -> _LazyH5Dataset:
         return _LazyH5Dataset(self.fpath, self.dataset)
+
 @dataclass
 class MBOTiffLoader:
     fpath: list[Path]
@@ -238,18 +261,17 @@ class TifLoader:
 @dataclass
 class LazyArrayLoader:
     inputs: str | Path | Sequence[str | Path]
-    roi: int | None = None
+    rois: int | None = None
     loader: Any = field(init=False)
 
     def __post_init__(self):
-        # everything that isn't a direct array should have a filepath
+
         if isinstance(self.inputs, np.ndarray):
-            array = self.inputs
-            self.loader = lambda: array
+            # return a list of the input array
+            self.loader = lambda: [self.inputs]
             self.fpath = None
             return
 
-        # normalize into a list of Path
         paths: list[Path]
         if isinstance(self.inputs, (str, Path)):
             p = Path(self.inputs)
@@ -260,7 +282,18 @@ class LazyArrayLoader:
             else:
                 paths = [Path(p)]
         elif isinstance(self.inputs, (list, tuple)):
-            paths = [Path(p) for p in self.inputs]
+            # list of numpy arrays, return as is
+            if isinstance(self.inputs[0], np.ndarray):
+                self.loader = lambda: self.inputs
+                self.fpath = None
+                return
+            # convert all inputs to Path objects
+            if all(isinstance(p, (str, Path)) for p in self.inputs):
+                paths = [Path(p) for p in self.inputs]
+            else:
+                raise TypeError(
+                    f"Unsupported input type in sequence: {type(self.inputs[0])}. "
+                )
         else:
             raise TypeError(
                 f"Unsupported input type: {type(self.inputs)}. "
@@ -271,8 +304,7 @@ class LazyArrayLoader:
             raise ValueError("No input files found.")
 
         # check for mixed‐type in a single directory
-        supported = {".npy", ".tif", ".tiff", ".bin", ".h5", ".zarr"}
-        filtered = [p for p in paths if p.suffix.lower() in supported]
+        filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
         if not filtered:
             raise ValueError(f"No supported files in {self.inputs}")
         self.fpath = filtered
@@ -294,7 +326,7 @@ class LazyArrayLoader:
             raise ValueError(f"Multiple file types found in directory: {exts!r}")
         if first.suffix in [".tif", ".tiff"]:
             if is_raw_scanimage(first):
-                self.loader = MBOScanLoader(filtered, roi=self.roi)
+                self.loader = MBOScanLoader(filtered, roi=self.rois)
             elif has_mbo_metadata(first):
                 self.loader = MBOTiffLoader(filtered)
             else:
