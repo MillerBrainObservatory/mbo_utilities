@@ -8,9 +8,12 @@
 #
 # [tool.uv.sources]
 # mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "dev" }
-import mbo_utilities as mbo
 import tifffile
+from pathlib import Path
+import tifffile as tiff
+import numpy as np
 
+import mbo_utilities as mbo
 from mbo_utilities import is_raw_scanimage
 from mbo_utilities.metadata import has_mbo_metadata
 
@@ -33,8 +36,32 @@ def find_si_rois(file):
     return rois
 
 
+def write_u16(infile: str | Path, outfile: str | Path):
+    img = tiff.imread(infile).astype(np.int32)
+    off  = img.min()
+    rng  = img.max() - off
+    u16  = (img - off).astype(np.uint16)
+
+    tiff.imwrite(
+        outfile,
+        u16,
+        photometric="minisblack",
+        bitspersample=16,
+        extratags=[
+            (340, "H", 1, (0,),   False),
+            (341, "H", 1, (rng if rng < 65536 else 65535,), False),
+            (65535, "d", 2, (float(off), float(rng)), False)
+        ],
+    )
+
+
+
 if __name__ == "__main__":
-    # input_tiff = "/home/flynn/lbm_data/assembled/roi2/plane11.tif"
+    input_tiff = "/home/flynn/lbm_data/assembled/roi2/plane7.tif"
+    output_tiff = "/home/flynn/lbm_data/assembled/roi2/plane7_uint.tif"
+    # add_smin_smax(input_tiff, output_tiff)
+    write_u16(input_tiff, output_tiff)
+    x = 2
     # metadata = {"plane": 11}
     # mbo.save_nonscan(
     #     input_tiff,
