@@ -132,7 +132,7 @@ Most IDE's like VS Code and Pycharm will recognize this folder as an environment
 There have been issues, especially with Pycharm, using named environments.
 ```
 
-2) (Kind of optional) Activate the environment
+2) Activate the environment (optional but good practice)
 
 On Linux/Mac:
 `source .venv/bin/activate`
