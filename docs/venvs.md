@@ -4,51 +4,63 @@
 :class: dropdown
 If you know conda, just use that.
 
-Otherwise, install and learn a bit about [uv](https://docs.astral.sh/uv/) and use it purely with `uv pip install <PACKAGE>` until you learn more about its high-level features.
+Otherwise, install and learn a bit about [uv](https://docs.astral.sh/uv/) and substitute `pip install <PACKAGE>` with `uv pip install <PACKAGE>` until you learn more about its high-level features.
 ```
 
 Most bugs and frustration in Python come from mismanaging virtual environments.
 
-Example: You install Python 3.10 on Windows or Linux. You must add this to your system PATH to use it, or it is added to your system path by default.
-Now you want to install a package that requires Python 3.11. You're screwed because Python 3.10 being on you PATH means it will always be used unless
-explicitly told not to (e.g. by activating a conda/venv virtual environment). The behavior that you will experience will vary drastically depending on if 
-you use `conda`, `venv`, or `uv`. In most circumstances, you will be using Python 3.10 and you won't know it.
+## Mixing `conda` and `pip`
 
-This happens to experienced developers the same as anyone else. You could learn the in's and out's for all of the virtual environments below.
+You `conda install <PACKAGE>` as the installation instructions told you to do.
+But you missed the [extra](https://packaging.python.org/en/latest/specifications/dependency-specifiers/#extras) `[notebook]` dependency, so you `pip install jupyter`.
+`jupyter` is one of several libraries that will not work when mixing `conda` and `pip`.
 
-You will only confuse yourself doing this.
+## Which Python is being used?
 
-There are three camps:
+You install Python 3.10 on Windows or Linux.
+You must add this to your system [PATH](https://superuser.com/questions/284342/what-are-path-and-other-environment-variables-and-how-can-i-set-or-use-them) to use it,
+or it is added to your system path by default.
+Now you want to install a package that requires Python 3.11.
+Because Python 3.10 is on your PATH means it will always be used unless explicitly told not to (e.g. by activating a conda/venv virtual environment).
+The behavior that you will experience will vary drastically depending on if you use `conda`, `venv`, or `uv`.
+In many circumstances, you will be using Python 3.10 and you won't know it.
 
-1. Tools that also handle system dependencies like ffmpeg, opencv, cuda (mamba, conda)
-2. Tools that handle only Python packages (venv, pyenv)
-3. Tools that wrap the above packages to make them easier to use (pixi, uv)
+This happens to experienced developers the same as anyone else.
 
-## Your Options
+You could learn the in's and out's for all of the virtual environments below.
+Don't do this (use [UV](https://docs.astral.sh/uv/getting-started/), the community is finally settling on a standard).
+
+## Virtual environment options
+
+There are generally three camps:
+
+1. Tools that handle only Python packages (venv, pyenv)
+2. Tools that handle python packages AND system dependencies like ffmpeg, opencv, cuda (mamba, conda)
+3. Tools built on top of the above to make them easier to use, faster, etc. (UV, pixi, which uses UV under the hood).
 
 ::::{grid}
 :::{grid-item-card} System + Python
-- conda
-- miniconda
-- miniforge
-- anaconda
-- mamba
-- micromamba
-- pixi
+ conda
+ miniconda
+ miniforge
+ anaconda
+ mamba
+ micromamba
+ pixi
 :::
 
 :::{grid-item-card} Python-only
-- pip
-- pip-tools
-- pipx
-- venv / pyvenv
-- virtualenv
-- pipenv
-- poetry
-- twine
-- hatch
-- uv
-- asdf
+ pip
+ pip-tools
+ pipx
+ venv / pyvenv
+ virtualenv
+ pipenv
+ poetry
+ twine
+ hatch
+ uv
+ asdf
 :::
 ::::
 
@@ -68,10 +80,13 @@ If you already know conda, that's fine — just **avoid mixing** `pip install` a
 
 ---
 
-## uv: Super pip
+## Guide to using UV
 
 [uv](https://docs.astral.sh/uv/) is a complete drop-in replacement for `pip`.  
 If you know `pip`, you already know `uv`.
+
+If you have a mess of environments, maybe you mixed `conda`, `venv`, and `pyenv`, installing and using `uv` will 
+not conflict with your current environment.
 
 You just prefix commands:
 
@@ -85,21 +100,57 @@ Using `uv` has a huge upside:
 - Packages are cached globally
 - Install once, and you can recreate environments almost instantly
 
+You want a directory to put your code. If you don't have any code (e.g. you just want to run `uv run mbo`), the directory can even be empty!
+Each "project", "repository", "codebase", whatever you want to call it, get's its own folder.
+
+You will have a different environment for each.
+
+``` {tip}
+UV makes it very cheap to delete your entire environment thanks to it's [dependency caching](https://docs.astral.sh/uv/concepts/cache/#dependency-caching).
+
+So don't be afraid to delete the environment and make a new one (delete the .venv folder, or whatever you named it doing uv venv .myname). It should be nearly instant to recreate it.
+```
+
+1) In your terminal (MBO developers primarily use powershell or git bash on Windows) make an environment:
+
+`uv venv`
+
+```{warning} 
+We stronly discourage naming the environment. `uv venv` will make a folder `.venv`, which is a python standard.
+Most IDE's like VS Code and Pycharm will recognize this folder as an environment automatically.
+There have been issues, especially with Pycharm, using named environments.
+```
+
+2) (Kind of optional) Activate the environment
+
+On Linux/Mac:
+`source .venv/bin/activate`
+On Windows:
+`source .venv/Scripts/activate`
+
+If you don't activate the environment, but you are running code from a directory that has a `.venv` folder, it will be used as the environment.
+
+Activating your environment is good practice. 
+
+3) Install packages
+
+`uv pip install` works just like pip. If you like to `git clone` repositories, you can `uv pip install .`.
+
+You can also `uv sync` if you're inside a repository.
+
 ---
 
 (uv_cheatsheet)=
-```{list-table} UV CLI Cheatsheet (WIP)
+```{list-table} Most helpful UV Commands
 :header-rows: 1
 :name: uv-commands
 
 * - **Command**
   - **Description**
-* - `pyproject.toml`, `uv.lock`
-  - Core files
-* - `uv sync`, `uv run`
-  - Create envs (auto-creates a venv on first use)
-* - `uv sync` / `uv run`
-  - Install & sync deps
+* - `uv venv`, `uv venv .myvenv`
+  - Create an env, optionally name it myenv (not recommended)
+* - `uv sync` / `uv lock --upgrade`
+  - Update your environment based on the current most up to date packages
 * - `uv add <package>` / `uv remove <package>`
   - Add/remove packages (updates `pyproject.toml`, `uv.lock`, and your env)
 * - `uv sync --upgrade-package <pkg>` / `uv lock --upgrade`
@@ -113,9 +164,9 @@ Using `uv` has a huge upside:
 `uv` will automatically fallback to using a conda environment if no `.venv/` folder is found:
 
 ```bash
-flynn at pop-os in ~/repos/work/mbo_utilities (master●)
+USER at pop-os in ~/repos/work/mbo_utilities (master●)
 $ uv pip list | grep imgui
-Using Python 3.12.6 environment at: /home/flynn/miniforge3
+Using Python 3.12.6 environment at: /home/USER/miniforge3
 imgui-bundle              1.6.2
 ```
 

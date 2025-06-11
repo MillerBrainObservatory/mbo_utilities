@@ -12,10 +12,8 @@ pip install "mbo_utilities[all]"
 :class: dropdown
 
 This package is compatible with python 3.10. 
-
 The gui dependencies often install in under a minute with `python 3.11` and `python 3.12`.
 On `3.10`, pip will have to build wheels for `imgui-bundle`, which can take ~8 to 10 minutes.
-
 For example, a `gui` install on Python 3.10 will build `imgui-bundle` from source, increasing the install time by several minutes.
 ```
 
