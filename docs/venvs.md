@@ -122,22 +122,31 @@ UV makes it very cheap to delete your entire environment thanks to it's [depende
 So don't be afraid to delete the environment and make a new one (delete the .venv folder, or whatever you named it doing uv venv .myname). It should be nearly instant to recreate it.
 ```
 
-1) In your terminal (MBO developers primarily use powershell or git bash on Windows) make an environment:
+1. In your terminal (MBO developers primarily use powershell or git bash on Windows) make an environment:
 
-`uv venv`
+  ```bash
+  uv venv
+  ```
 
-```{warning} 
-We stronly discourage naming the environment. `uv venv` will make a folder `.venv`, which is a python standard.
-Most IDE's like VS Code and Pycharm will recognize this folder as an environment automatically.
-There have been issues, especially with Pycharm, using named environments.
-```
+  ```{warning} 
+  We stronly discourage naming the environment. `uv venv` will make a folder `.venv`, which is a python standard.
+  Most IDE's like VS Code and Pycharm will recognize this folder as an environment automatically.
+  There have been issues, especially with Pycharm, using named environments.
+  ```
 
-2) Activate the environment (optional but good practice)
+2. Activate the environment (optional but good practice)
 
-On Linux/Mac:
-`source .venv/bin/activate`
-On Windows:
-`source .venv/Scripts/activate`
+  On Linux/Mac:
+
+  ```bash
+  source .venv/bin/activate
+  ```
+
+  On Windows:
+
+  ```bash
+  source .venv/Scripts/activate
+  ```
 
 If you don't activate the environment, but you are running code from a directory that has a `.venv` folder, it will be used as the environment.
 
@@ -145,9 +154,26 @@ Activating your environment is good practice.
 
 3) Install packages
 
-`uv pip install` works just like pip. If you like to `git clone` repositories, you can `uv pip install .`.
+```bash
+uv pip install <PACKAGE>
+```
 
-You can also `uv sync` if you're inside a repository.
+This works just like pip.
+
+If you like to `git clone` repositories, you can:
+
+```bash
+uv pip install .
+```
+
+If you are in a directory with a `pyproject.toml` like many python projects will have:
+
+```bash
+cd repository
+uv sync --all-extras
+```
+
+The `--all-extras` get's all extra dependencies, like [notebook, gui], if the repository has any.
 
 ---
 
