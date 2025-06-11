@@ -9,28 +9,39 @@ Otherwise, install and learn a bit about [uv](https://docs.astral.sh/uv/) and su
 
 Most bugs and frustration in Python come from mismanaging virtual environments.
 
-## Mixing `conda` and `pip`
+## Two common examples
+
+**Mixing `conda` and `pip`**
 
 You `conda install <PACKAGE>` as the installation instructions told you to do.
 But you missed the [extra](https://packaging.python.org/en/latest/specifications/dependency-specifiers/#extras) `[notebook]` dependency, so you `pip install jupyter`.
 `jupyter` is one of several libraries that will not work when mixing `conda` and `pip`.
 
-## Which Python is being used?
+**Wrong Python is being used**
 
-You install Python 3.10 on Windows or Linux.
-You must add this to your system [PATH](https://superuser.com/questions/284342/what-are-path-and-other-environment-variables-and-how-can-i-set-or-use-them) to use it,
-or it is added to your system path by default.
-Now you want to install a package that requires Python 3.11.
-Because Python 3.10 is on your PATH means it will always be used unless explicitly told not to (e.g. by activating a conda/venv virtual environment).
-The behavior that you will experience will vary drastically depending on if you use `conda`, `venv`, or `uv`.
-In many circumstances, you will be using Python 3.10 and you won't know it.
+There are a tens of options for how to install Python on any of the operating systems.
+One of the most detrimental mistakes is adding Python to your system
+[PATH](https://superuser.com/questions/284342/what-are-path-and-other-environment-variables-and-how-can-i-set-or-use-them).
+`conda` warns you not to do this, [Windows Python Installer](https://docs.python.org/3/_images/win_installer.png) does too.
+Though for some reason users so often end up with system versions of python, often from the package managers.
+The problem here is that you will be using this system python and you won't know it.
+You will run a `jupyter lab` command, which will open properly but your environments are nowhere to be found.
 
-This happens to experienced developers the same as anyone else.
+This can often be incredibly difficult and time-consuming to debug. This happens to experienced developers the same as anyone else.
+
+## How to prevent environment issues
+
+No matter what command you're running, check the terminal outputs for a filepath that points to python.
+
+For jupyterlab:
+
+```{figure} ./_images/venv_jlab.png
+```
+
+## Virtual environment options
 
 You could learn the in's and out's for all of the virtual environments below.
 Don't do this (use [UV](https://docs.astral.sh/uv/getting-started/), the community is finally settling on a standard).
-
-## Virtual environment options
 
 There are generally three camps:
 
@@ -68,15 +79,15 @@ There are generally three camps:
 
 ## Why not `conda`?
 
-- `venv` can build most system packages you need from source.
+- `pip` (and UV) can build most system packages you need from source.
 - Most Python libraries now ship prebuilt wheels (binaries).
 - The main selling point for `conda` (handling system binaries) is much less relevant today.
-- Even the conda maintainers have moved toward venv-based setups (especially uv).
+- The `conda` maintainers have moved toward venv-based setups (pixi and uv).
 
-If you **must** use conda, **only** use `miniforge3`.  
+If you **must** use conda, **only** use `miniforge3`.
 Many recommended setup steps for miniconda/anaconda are basically mimicking the defaults of `miniforge3`.
 
-If you already know conda, that's fine — just **avoid mixing** `pip install` and `conda install` after your initial setup.
+If you already know conda, that's fine — just **avoid mixing** `pip install` and `conda install` after your initial setup unless you have to.
 
 ---
 
