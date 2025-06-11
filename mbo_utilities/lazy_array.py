@@ -142,6 +142,7 @@ class MBOScanLoader:
         for r in range(1, self._scan.num_rois + 1):
             s = copy.copy(self._scan)
             s.selected_roi = r
+            s.phasecorr_method = "frame"
             out.append(s)
         return out
 

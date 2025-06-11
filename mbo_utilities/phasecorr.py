@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.signal import correlate
 from scipy.ndimage import fourier_shift
 from skimage.registration import phase_cross_correlation
 
@@ -8,30 +9,21 @@ TWO_DIM_PHASECORR_METHODS = {"frame"}
 THREE_DIM_PHASECORR_METHODS = ["mean", "max", "std", "mean-sub"]
 
 MBO_WINDOW_METHODS = {
+    "frame":     lambda X: np.mean(X, axis=0),
     "mean":      lambda X: np.mean(X, axis=0),
     "max":       lambda X: np.max(X, axis=0),
     "std":       lambda X: np.std(X, axis=0),
     # pick first frame then subtract global mean
     "mean-sub":  lambda X: X[0] - np.mean(X, axis=0),
 }
-#
-# MBO_WINDOW_METHODS = {
-#     "mean": lambda X: np.mean(X, axis=0),
-#     "max": lambda X: np.max(X, axis=0),
-#     "std": lambda X: np.std(X, axis=0),
-#     "mean-sub": lambda X: np.mean(X - np.mean(X, axis=0), axis=0),
-#}
 
 logger = log.get("phasecorr")
 
 
-# ------------------------------------------------------------------ legacy helpers
-from scipy import signal
-
 def _return_scan_offset(
         img: np.ndarray,
         nvals: int = 8
-) -> np.ndarray:
+) -> int:
     """legacy cross-correlation offset on a 2-D image
 
     Translated to Python from Demas et al. 2021: https://www.nature.com/articles/s41592-021-01239-8#Sec2
@@ -47,28 +39,29 @@ def _return_scan_offset(
     in_post[in_post < 0] = 0
     in_pre[in_pre < 0] = 0
 
-    r = signal.correlate(in_pre, in_post, mode="full") \
+    r = correlate(in_pre, in_post, mode="full") \
         / (len(in_pre) - np.abs(np.arange(-len(in_pre)+1, len(in_pre))))
     lags = np.arange(-nvals, nvals + 1)
-    return lags[np.argmax(r[len(r)//2-nvals : len(r)//2+nvals+1])]
+    return lags[np.argmax(r[len(r)//2-nvals : len(r)//2+nvals+1])]  # noqa
 
-def _fix_scan_phase(img: np.ndarray, dx: int) -> np.ndarray:
+def _fix_scan_phase(img: np.ndarray, offset: int) -> np.ndarray:
     """integer-pixel phase fix (even rows ←→ odd rows)
 
     Translated to Python from Demas et al. 2021: https://www.nature.com/articles/s41592-021-01239-8#Sec2
     """
-    if dx == 0:
+    # flip the sign of the offset to match the original code
+    if offset == 0:
         return img
     out = np.zeros_like(img)
     if img.ndim == 2:
         even, odd = img[0::2], img[1::2]
-        if dx > 0:
-            out[0::2,:-dx], out[1::2,dx:] = even[:,dx:], odd[:,:-dx]
+        if offset > 0:
+            out[0::2,:-offset], out[1::2, offset:] = even[:, offset:], odd[:, :-offset]
         else:
-            dx = -dx
-            out[0::2,dx:], out[1::2,:-dx] = even[:,:-dx], odd[:,dx:]
+            offset = -offset
+            out[0::2, offset:], out[1::2, :-offset] = even[:, :-offset], odd[:, offset:]
     else:                               # 3-D or 4-D stack
-        out[:] = np.stack([_fix_scan_phase(f, dx) for f in img])
+        out[:] = np.stack([_fix_scan_phase(f, offset) for f in img])
     return out
 
 def _phase_corr_2d(
@@ -169,18 +162,37 @@ if __name__ == "__main__":
     array_object = LazyArrayLoader(files[0])
     lazy_array = array_object.load()
     lazy_array.fix_phase = False
-    array = lazy_array[:20, 8, :, :]
+    array = lazy_array[:200, 11, :, :]
 
     # test legacy scanphase correction
     dx = _return_scan_offset(array[0])
-    array = _fix_scan_phase(array, dx)
+    array_1 = _fix_scan_phase(array, dx)
 
-    methods = ["frame", "mean", "max", "std", "mean-sub", "mean-sub-std"]
-    fig, axs = plt.subplots(2, 3, figsize=(12, 8))
-    for ax, m in zip(axs.flat, methods):
+
+    methods = ["frame", "mean", "max", "std", "mean-sub",]
+    arrs = [array_1]
+    ofs = [dx]
+    for m in methods:
         corr, offs = nd_windowed(array, method=m, upsample=2)
-        ax.imshow(corr.mean(0)[150:170, 330:350], cmap="gray")
-        ax.set_title(f"{m}\nμ={np.mean(offs):.2f}")
-        ax.axis("off")
-    plt.tight_layout()
-    plt.show()
+        arrs.append(corr)
+        ofs.append(offs)
+
+    import fastplotlib as fpl
+    iw = fpl.ImageWidget(
+        data=arrs,
+        names=["Cross-Corr"] + methods,
+        histogram_widget=True,
+        figure_kwargs={"size": (1200, 800)},
+        graphic_kwargs={"vmin": array.min(), "vmax": array.max()},
+        window_funcs={"t": (np.mean, 0)},
+    )
+    iw.show()
+    fpl.loop.run()
+    # fig, axs = plt.subplots(2, 3, figsize=(12, 8))
+    # for ax, m in zip(axs.flat, methods):
+    #     corr, offs = nd_windowed(array, method=m, upsample=2)
+    #     ax.imshow(corr.mean(0)[150:170, 330:350], cmap="gray")
+    #     ax.set_title(f"{m}\nμ={np.mean(offs):.2f}")
+    #     ax.axis("off")
+    # plt.tight_layout()
+    # plt.show()
