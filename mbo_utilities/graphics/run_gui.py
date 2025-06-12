@@ -68,7 +68,6 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
 
     lazy_obj  = LazyArrayLoader(data_in, rois=roi)
 
-    # arrays  = lazy_obj.loader.rois or [lazy_obj.loader.load()]  # fall back to whole data
     arrays  = lazy_obj.load()
     if isinstance(arrays, list):
         names   = [f"ROI {i+1}" for i in range(len(arrays))]
@@ -94,81 +93,6 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
     iw.show()
     fpl.loop.run()
 
-    # if hasattr(data, "rois"):
-    #     arrs = []
-    #     for roi in range(1, data.num_rois + 1):
-    #         scan_copy = copy.copy(data)
-    #         scan_copy.selected_roi = roi
-    #         arrs.append(scan_copy)
-    #
-    #     nx, ny = data.shape[-2:]
-    #     iw = fpl.ImageWidget(
-    #         data=arrs,
-    #         names=[f"ROI {i + 1}" for i in range(len(arrs))],
-    #         histogram_widget=False,
-    #         figure_kwargs={"size": (nx * 2, ny * 2)},
-    #         graphic_kwargs={"vmin": data.min(), "vmax": data.max()},
-    #         window_funcs={"t": (np.mean, 0)},
-    #     )
-    #
-    #     if widget:
-    #         gui = PreviewDataWidget(
-    #             iw=iw,
-    #             fpath=fpath,
-    #             threading_enabled=threading,
-    #             size=350,
-    #             location="right",
-    #             title="Data Preview",
-    #             show_title=True,
-    #             movable=True,
-    #             resizable=True,
-    #             scrollable=True,
-    #             auto_resize=True,
-    #             window_flags=None,
-    #         )
-    #         iw.figure.add_gui(gui)
-    #
-    #     iw.show()
-    #     fpl.loop.run()
-    #
-    # else:
-    #     if isinstance(data, list):
-    #         sample = data[0]
-    #     else:
-    #         sample = data
-    #
-    #     if sample.ndim < 2:
-    #         raise ValueError(f"Invalid input shape: expected >=2D, got {sample.shape}")
-    #
-    #     nx, ny = sample.shape[-2:]
-    #     iw = fpl.ImageWidget(
-    #         data=data,
-    #         histogram_widget=True,
-    #         figure_kwargs={"size": (nx * 2, ny * 2)},
-    #         graphic_kwargs={"vmin": sample.min(), "vmax": sample.max()},
-    #         window_funcs={"t": (np.mean, 0)},
-    #     )
-    #
-    #     if widget:
-    #         gui = PreviewDataWidget(
-    #             iw=iw,
-    #             fpath=fpath,
-    #             threading_enabled=threading,
-    #             size=350,
-    #             location="right",
-    #             title="Data Preview",
-    #             show_title=True,
-    #             movable=True,
-    #             resizable=True,
-    #             scrollable=True,
-    #             auto_resize=True,
-    #             window_flags=None,
-    #         )
-    #         iw.figure.add_gui(gui)
-    #
-    #     iw.show()
-    #     fpl.loop.run()
-    #
 
 if __name__ == "__main__":
     run_gui()  # type: ignore # noqa
