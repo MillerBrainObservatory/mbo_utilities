@@ -13,6 +13,7 @@ Assembly <assembly>
 Usage <usage/index>
 API <api/index>
 venvs
+rastermap
 image_gallery
 ```
 

@@ -7,6 +7,7 @@ from .file_io import (
     expand_paths,
     get_mbo_dirs,
     normalize_file_url,
+    save_mp4,
 )
 from .assembly import save_as, save_nonscan
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
@@ -51,4 +52,5 @@ __all__ = [
     # assembly
     "save_as",
     "save_nonscan",
+    "save_mp4",
 ]
