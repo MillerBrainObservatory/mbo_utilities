@@ -57,11 +57,6 @@ def write_u16(infile: str | Path, outfile: str | Path):
 
 
 if __name__ == "__main__":
-    input_tiff = "/home/flynn/lbm_data/assembled/roi2/plane7.tif"
-    output_tiff = "/home/flynn/lbm_data/assembled/roi2/plane7_uint.tif"
-    # add_smin_smax(input_tiff, output_tiff)
-    write_u16(input_tiff, output_tiff)
-    x = 2
     # metadata = {"plane": 11}
     # mbo.save_nonscan(
     #     input_tiff,
@@ -71,19 +66,18 @@ if __name__ == "__main__":
     #     metadata=metadata,
     # )
     path = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green"
+    savedir = r"D:\tests_bigmem\no_phase"
     test_scan = mbo.read_scan(
         path,
         roi=0,
         phasecorr_method="mean",
     )
-    savedir = r"D:\W2_DATA\h5"
     test_scan.roi = 0
+    test_scan.fix_phase = False
     mbo.save_as(
         test_scan,
         savedir,
-        ext=".h5",
-        overwrite=False,
-        fix_phase=True,
-        debug=True,
+        ext=".tiff",
+        overwrite=True,
         planes=[7, 8, 9, 10, 11],
     )

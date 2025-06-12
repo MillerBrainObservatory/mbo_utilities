@@ -114,22 +114,32 @@ if __name__ == "__main__":
     from mbo_utilities.lazy_array import LazyArrayLoader
 
     files = get_files(r"D:\tests\data", "tif")
+    fpath = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green"
     if not files:
         raise ValueError("No files found matching '*.tif'")
 
     import matplotlib.pyplot as plt
     # fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 
-    array_object = LazyArrayLoader(files[0])
+    array_object = LazyArrayLoader(fpath)
     lazy_array = array_object.load()
     lazy_array.fix_phase = False
-    array = lazy_array[:20, 8, :, :]
-
-    fig, axs = plt.subplots(2, 3, figsize=(12, 8))
-    for ax, m in zip(axs.flat, MBO_WINDOW_METHODS):
-        corr, offs = nd_windowed(array, method=m, upsample=2)
-        ax.imshow(corr.mean(0)[150:170, 330:350], cmap="gray")
-        ax.set_title(f"{m}\nμ={np.mean(offs):.2f}")
-        ax.axis("off")
-    plt.tight_layout()
+    array = lazy_array[:2000, 8, :, :]
+    fig, ax = plt.subplots()
+    for i in [1, 3, 9]:
+        _, ofs = nd_windowed(array, method="frame", upsample=i)
+        ax.plot(ofs, label=f"upsample={i}")
+    ax.axhline(0, color="k", ls="--")
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("Offset (pixels)")
+    ax.legend()
     plt.show()
+
+    # fig, axs = plt.subplots(2, 3, figsize=(12, 8))
+    # for ax, m in zip(axs.flat, MBO_WINDOW_METHODS):
+    #     corr, offs = nd_windowed(array, method=m, upsample=2)
+    #     ax.imshow(corr.mean(0)[150:170, 330:350], cmap="gray")
+    #     ax.set_title(f"{m}\nμ={np.mean(offs):.2f}")
+    #     ax.axis("off")
+    # plt.tight_layout()
+    # plt.show()

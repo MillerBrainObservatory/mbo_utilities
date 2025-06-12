@@ -46,7 +46,7 @@ def _select_file() -> tuple[str | None, bool, bool]:
 
 
 @click.command()
-@click.option("--roi", type=click.IntRange(-1, 10), default=0)
+@click.option("--roi", type=click.IntRange(0, 10), default=0)
 @click.option(
     "--widget/--no-widget",
     default=True,
@@ -68,6 +68,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
 
     lazy_obj  = LazyArrayLoader(data_in, rois=roi)
 
+    # arrays  = lazy_obj.loader.rois or [lazy_obj.loader.load()]  # fall back to whole data
     arrays  = lazy_obj.load()
     if isinstance(arrays, list):
         names   = [f"ROI {i+1}" for i in range(len(arrays))]
