@@ -129,7 +129,7 @@ So don't be afraid to delete the environment and make a new one (delete the .ven
   ```
 
   ```{warning} 
-  We stronly discourage naming the environment. `uv venv` will make a folder `.venv`, which is a python standard.
+  We strongly discourage naming the environment. `uv venv` will make a folder `.venv`, which is a python standard.
   Most IDE's like VS Code and Pycharm will recognize this folder as an environment automatically.
   There have been issues, especially with Pycharm, using named environments.
   ```
@@ -215,4 +215,4 @@ We highly recommend turning off automatic environment activation for `conda` in 
 conda config --set auto_activate_base false
 ```
 
-You can still call `conda activate myenv`, but only if `conda` is called explicitily.
+You can still call `conda activate myenv`, but only if `conda` is called explicitly.
