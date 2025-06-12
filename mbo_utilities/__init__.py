@@ -8,7 +8,6 @@ from .file_io import (
     get_mbo_dirs,
     normalize_file_url,
 )
-from .plot_util import save_png, save_mp4
 from .assembly import save_as, save_nonscan
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
 from .util import (
@@ -31,6 +30,7 @@ __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
 
 __all__ = [
     # file_io
+    "run_gui",
     "get_mbo_dirs",
     "scanreader",
     "npy_to_dask",

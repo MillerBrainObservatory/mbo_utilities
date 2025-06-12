@@ -40,6 +40,15 @@ class Loader(Protocol):
     fpath: Path | str | Sequence[Path | str]
     def load(self) -> Tuple[Any, List[str]]: ...
 
+@dataclass
+class DemixingResultsLoader:
+    plane_dir: Path
+
+    def load(self):
+        from mbo_utilities.graphics.analysis_io import load_from_dir
+        data = load_from_dir(self.plane_dir)
+        return data["pmd_demixer"].results
+
 class _Suite2pLazyArray:
     def __init__(self, ops: dict):
         Ly = ops["Ly"]
