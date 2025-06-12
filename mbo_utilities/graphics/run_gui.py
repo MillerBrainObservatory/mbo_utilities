@@ -22,6 +22,13 @@ except ImportError:
     IMGUI_SETUP_COMPLETE = False
     print("Failed to set up imgui. GUI functionality may not work as expected.")
 
+try:
+    from masknmf.visualization.interactive_guis import make_demixing_video
+    HAS_MASKNMF = True
+except ImportError:
+    HAS_MASKNMF = False
+    make_demixing_video = None
+
 
 def _select_file() -> tuple[str | None, bool, bool]:
     dlg = FileDialog()
@@ -78,15 +85,17 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
     a0 = arrays[0] if isinstance(arrays, list) else arrays
     nx, ny = a0.shape[-2:]
 
-    iw = fpl.ImageWidget(
-        data=arrays,
-        names=names,
-        histogram_widget=True,
-        figure_kwargs={"size": (nx * 2, ny * 2),},  # "canvas": canvas},
-        graphic_kwargs={"vmin": a0.min(), "vmax": a0.max()},
-        window_funcs={"t": (np.mean, 0)},
-    )
-
+    if hasattr(arrays, "pmd_array"):
+        iw = make_demixing_video(arrays, device='cpu', v_range=(-300, 2400),)
+    else:
+        iw = fpl.ImageWidget(
+            data=arrays,
+            names=names,
+            histogram_widget=True,
+            figure_kwargs={"size": (nx * 2, ny * 2),},  # "canvas": canvas},
+            graphic_kwargs={"vmin": a0.min(), "vmax": a0.max()},
+            window_funcs={"t": (np.mean, 0)},
+        )
     if widget:
         gui = PreviewDataWidget(iw=iw, fpath=data_in, threading_enabled=threading, size=350)
         iw.figure.add_gui(gui)

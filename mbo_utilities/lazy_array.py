@@ -45,7 +45,7 @@ class DemixingResultsLoader:
     plane_dir: Path
 
     def load(self):
-        from mbo_utilities.graphics.analysis_io import load_from_dir
+        from mbo_utilities.pipelines.masknmf import load_from_dir
         data = load_from_dir(self.plane_dir)
         return data["pmd_demixer"].results
 
@@ -367,7 +367,14 @@ class LazyArrayLoader:
             self.loader = H5Loader(first)
         elif first.suffix.lower() == ".zarr":
             raise NotImplementedError("Zarr files are not yet supported.")
+        elif first.suffix.lower() == ".npy":
+            logger.info(f"Checking for demixer in {first.parent}")
+            if (first.parent / "pmd_demixer.npy").is_file():
+                logger.info(f"Found demixer in {first.parent}, loading demixer results.")
+                self.loader = DemixingResultsLoader(first.parent)
+                return
         else:
+            logger.error(f"Unsupported file type: {first.suffix}")
             raise TypeError(f"Unsupported file type: {first.suffix}")
 
     def load(self) -> Any:

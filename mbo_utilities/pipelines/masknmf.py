@@ -44,4 +44,3 @@ def load_from_dir(plane_dir):
     if c_path.exists():
         results["c"] = np.load(c_path)
     return results
-

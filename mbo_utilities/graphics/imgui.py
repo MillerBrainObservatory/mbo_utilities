@@ -49,6 +49,13 @@ except ImportError:
     HAS_CUPY = False
     register_translation = phase_cross_correlation  # noqa
 
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+    torch = None
+
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
 
@@ -477,6 +484,8 @@ class PreviewDataWidget(EdgeWindow):
         # image widget setup
         self.image_widget = iw
         self.shape = self.image_widget.data[0].shape
+        if self.image_widget.window_funcs is None:
+            self.image_widget.window_funcs = {"t": (np.mean, 0)}
 
         if len(self.shape) == 4:
             self.nz = self.shape[1]
@@ -785,10 +794,10 @@ class PreviewDataWidget(EdgeWindow):
                     imgui.end_table()
 
             with imgui_ctx.begin_child(
-                "##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
+                    "##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
             ):
                 imgui.text("Z-plane Signal: Combined")
-                if implot.begin_plot("Z-Plane Plot", ImVec2(-1, 0)):
+                if implot.begin_plot("Z-Plane Plot", ImVec2(-1, 300)):
                     implot.setup_axes(
                         "Z-Plane",
                         "Mean Fluorescence",
@@ -798,15 +807,12 @@ class PreviewDataWidget(EdgeWindow):
                     implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, self.nz)
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
                     style_seaborn_dark()
-
-                    for i, stats in enumerate(stats_list):
-                        if not stats or "mean" not in stats:
-                            continue
-
-                        z_vals_ind = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
-                        mean_vals_ind = np.array(stats["mean"])
-                        implot.plot_line(f"ROI {i + 1}", z_vals_ind, mean_vals_ind)
-
+                    if len(z_vals) == 1:
+                        implot.plot_bars("Mean", z_vals, mean_vals, 0.5)
+                        implot.plot_error_bars("Std", z_vals, mean_vals, std_vals)
+                    else:
+                        implot.plot_error_bars("Mean ± Std", z_vals, mean_vals, std_vals)
+                        implot.plot_line("Mean", z_vals, mean_vals)
                     implot.end_plot()
 
         else:
@@ -859,8 +865,12 @@ class PreviewDataWidget(EdgeWindow):
                     implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, self.nz)
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
                     style_seaborn_dark()
-                    implot.plot_error_bars("Mean ± Std", z_vals, mean_vals, std_vals)
-                    implot.plot_line("Mean", z_vals, mean_vals)
+                    if len(z_vals) == 1:
+                        implot.plot_bars("Mean", z_vals, mean_vals, 0.5)
+                        implot.plot_error_bars("Std", z_vals, mean_vals, std_vals)
+                    else:
+                        implot.plot_error_bars("Mean ± Std", z_vals, mean_vals, std_vals)
+                        implot.plot_line("Mean", z_vals, mean_vals)
                     implot.end_plot()
 
     def draw_preview_section(self):
@@ -1084,8 +1094,9 @@ class PreviewDataWidget(EdgeWindow):
     def _compute_zstats_single_roi(self, data_ix, arr):
         self.logger.info(f"Computing z-statistics for ROI {data_ix + 1}")
 
+        arr = arr[:]  # materialize as dense array (torch.Tensor or ndarray)
         if arr.ndim == 3:
-            arr = arr[:, np.newaxis, :, :]  # TZYX
+            arr = arr[:, None, :, :] if HAS_TORCH and isinstance(arr, torch.Tensor) else arr[:, np.newaxis, :, :]
 
         stats = {"mean": [], "std": [], "snr": []}
         means = []
