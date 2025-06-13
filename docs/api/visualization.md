@@ -8,7 +8,6 @@ Functions to help visualize datasets.
 .. currentmodule:: mbo_utilities
 
 .. autofunction:: save_mp4
-.. autofunction:: save_png
 .. autofunction:: run_gui
 
 ```
