@@ -20,3 +20,4 @@ seaborn
 scipy
 scikit-image
 suite2p_mbo
+cellpose
