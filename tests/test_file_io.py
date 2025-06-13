@@ -18,9 +18,6 @@ skip_if_missing_data = pytest.mark.skipif(
 )
 
 
-# Note the perfect phase of frame 1058
-
-
 @skip_if_missing_data
 def test_metadata():
     """Test that metadata can be read from a file."""
@@ -78,6 +75,7 @@ def test_imgui_check():
     assert isinstance(result, bool)
 
 
+@skip_if_missing_data
 @pytest.mark.parametrize(
     "roi,subdir",
     [
@@ -86,7 +84,7 @@ def test_imgui_check():
         (None, "full"),  # full‐stack in ASSEMBLED/full
     ],
 )
-def test_demo_files(tmp_path, roi, subdir):
+def test_demo_files(roi, subdir):
     ASSEMBLED.mkdir(exist_ok=True)
     files = mbo.get_files(BASE, "tif")
 
@@ -126,6 +124,7 @@ def test_full_contains_rois_side_by_side(plane_paths):
     np.testing.assert_array_equal(right, roi2)
 
 
+@skip_if_missing_data
 def test_overwrite_false_skips_existing(tmp_path, capsys):
     # First write with overwrite=True
     files = mbo.get_files(BASE, "tif")
@@ -143,6 +142,7 @@ def test_overwrite_false_skips_existing(tmp_path, capsys):
     assert "All output files exist; skipping save." in captured
 
 
+@skip_if_missing_data
 def test_overwrite_true_rewrites(tmp_path, capsys):
     # first write with overwrite=True
     files = mbo.get_files(BASE, "tif")
