@@ -1,0 +1,22 @@
+selector_to_html = {"a[href=\"#useful\"]": "<h2 class=\"tippy-header\" style=\"margin-top: 0;\">Useful<a class=\"headerlink\" href=\"#useful\" title=\"Link to this heading\">#</a></h2><p><a class=\"reference external\" href=\"https://www.saaspegasus.com/guides/uv-deep-dive/#cheatsheet-common-operations-in-uvs-workflows\">uv-cheatsheet</a></p>", "a[href=\"install.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Installation Guide<a class=\"headerlink\" href=\"#installation-guide\" title=\"Link to this heading\">#</a></h1><h2>Quick Install<a class=\"headerlink\" href=\"#quick-install\" title=\"Link to this heading\">#</a></h2><p>mbo_utilities has been developed to be a pure <code class=\"docutils literal notranslate\"><span class=\"pre\">pip</span></code> install.</p><p>This makes the choice of virtual-environment less relevant, you can use <code class=\"docutils literal notranslate\"><span class=\"pre\">venv</span></code>, <code class=\"docutils literal notranslate\"><span class=\"pre\">uv</span> <span class=\"pre\">(recommended)</span></code>, <code class=\"docutils literal notranslate\"><span class=\"pre\">conda</span></code>, it does not matter.</p>", "a[href=\"api/index.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">API<a class=\"headerlink\" href=\"#api\" title=\"Link to this heading\">#</a></h1><p>Python API provides helper functions for saving, loading, processing and visualizing mbo datasets.</p>", "a[href=\"rastermap.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Rastermap<a class=\"headerlink\" href=\"#rastermap\" title=\"Link to this heading\">#</a></h1><h2>Clustering: <code class=\"docutils literal notranslate\"><span class=\"pre\">n_clusters=None</span></code> vs specified values<a class=\"headerlink\" href=\"#clustering-n-clusters-none-vs-specified-values\" title=\"Link to this heading\">#</a></h2><p><strong>Example:</strong></p>", "a[href=\"image_gallery.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Image gallery<a class=\"headerlink\" href=\"#image-gallery\" title=\"Link to this heading\">#</a></h1><p>A place to render images so that they can be linked/referenced to with inline citations.</p>", "a[href=\"usage/index.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Function Usage<a class=\"headerlink\" href=\"#function-usage\" title=\"Link to this heading\">#</a></h1><p>Examples of some common function use cases.</p>", "a[href=\"assembly.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Image Assembly<a class=\"headerlink\" href=\"#image-assembly\" title=\"Link to this heading\">#</a></h1><h2>Overview<a class=\"headerlink\" href=\"#overview\" title=\"Link to this heading\">#</a></h2><p>This section covers the steps to convert raw scanimage-tiff files into assembled, planar timeseries.</p>", "a[href=\"venvs.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Virtual Environments<a class=\"headerlink\" href=\"#virtual-environments\" title=\"Link to this heading\">#</a></h1><p>Most bugs and frustration in Python come from mismanaging virtual environments.</p>", "a[href=\"#overview\"]": "<h2 class=\"tippy-header\" style=\"margin-top: 0;\">Overview<a class=\"headerlink\" href=\"#overview\" title=\"Link to this heading\">#</a></h2>", "a[href=\"#miller-brain-observatory-python-utilities\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Miller Brain Observatory: Python Utilities<a class=\"headerlink\" href=\"#miller-brain-observatory-python-utilities\" title=\"Link to this heading\">#</a></h1><p>This repository contains python functions to pre/post process datasets recording at the <a class=\"reference external\" href=\"https://mbo.rockefeller.edu\">Miller Brain Observatory</a></p>"}
+skip_classes = ["headerlink", "sd-stretched-link"]
+
+window.onload = function () {
+    for (const [select, tip_html] of Object.entries(selector_to_html)) {
+        const links = document.querySelectorAll(` ${select}`);
+        for (const link of links) {
+            if (skip_classes.some(c => link.classList.contains(c))) {
+                continue;
+            }
+
+            tippy(link, {
+                content: tip_html,
+                allowHTML: true,
+                arrow: true,
+                placement: 'auto-start', maxWidth: 500, interactive: false,
+
+            });
+        };
+    };
+    console.log("tippy tips loaded!");
+};
