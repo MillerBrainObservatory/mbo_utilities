@@ -27,7 +27,7 @@ logger = log.get("phasecorr")
 
 def _phase_corr_2d(
         frame,
-        upsample=1,
+        upsample=4,
         border=0,
         max_offset=4
 ):
