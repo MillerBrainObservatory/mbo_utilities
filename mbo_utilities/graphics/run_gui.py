@@ -83,13 +83,12 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
         names   = [f"Data with shape: {arrays.shape}"]
 
     a0 = arrays[0] if isinstance(arrays, list) else arrays
-    nx, ny = a0.shape[-2:]
 
     if hasattr(arrays, "pmd_array"):
         iw = make_demixing_video(
-            arrays, device='cpu',
-            v_range=(-300, 2400)
-        )
+                arrays, device='cpu',
+                v_range=(-300, 2400)
+            )
     else:
         iw = fpl.ImageWidget(
             data=arrays,
