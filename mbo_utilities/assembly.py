@@ -47,7 +47,7 @@ def close_tiff_writers():
 
 
 def save_as(
-    scan: Scan_MBO,
+    lazy_array: Scan_MBO | LazyArrayLoader,
     savedir: str | Path,
     planes: list | tuple = None,
     metadata: dict = None,
@@ -67,7 +67,7 @@ def save_as(
 
     Parameters
     ----------
-    scan : scanreader.Scan_MBO
+    lazy_array : Scan_MBO | LazyArrayLoader
         An object representing scan data. Must have attributes such as `num_channels`,
         `num_frames`, `fields`, and `rois`, and support indexing for retrieving frame data.
     savedir : os.PathLike
@@ -120,31 +120,39 @@ def save_as(
 
     # save path
     savedir = Path(savedir)
-
     if not savedir.parent.is_dir():
         raise ValueError(f"{savedir} is not inside a valid directory.")
     savedir.mkdir(exist_ok=True)
 
-    # handle channels and planes
-    if not hasattr(scan, "num_channels"):
-        raise ValueError(
-            "Unable to determine the number of planes in this recording from 'scan.num_channels'"
-        )
+    # Determine number of planes from lazy_array attributes
+    # fallback to shape
+    if hasattr(lazy_array, "num_planes"):
+        num_planes = lazy_array.num_planes
+    elif hasattr(lazy_array, "num_channels"):
+        num_planes = lazy_array.num_channels
+    elif hasattr(lazy_array, 'ndim') and lazy_array.ndim >= 3:
+        num_planes = lazy_array.shape[1] if lazy_array.ndim == 4 else 1
+    else:
+        raise ValueError("Cannot determine the number of planes.")
 
+    # convert to 0 based indexing
     if isinstance(planes, int):
-        logger.info(f"Saving only plane {planes}.")
         planes = [planes - 1]
-    elif planes is None:  # DON'T use "if not planes", then 0 will be treated as falsy
-        logger.info(f"Saving all {scan.num_channels} planes.")
-        planes = list(range(scan.num_channels))
+    elif planes is None:
+        planes = list(range(num_planes))
     else:
         planes = [p - 1 for p in planes]
 
-    over_idx = [p for p in planes if p < 0 or p >= scan.num_planes]
+    # make sure indexes are valid
+    over_idx = [p for p in planes if p < 0 or p >= num_planes]
     if over_idx:
         raise ValueError(
-            f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{scan.num_channels}"
+            f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{lazy_array.num_channels}"
         )
+
+    if debug:
+        logger.info(f"Total number of planes: {num_planes}")
+        logger.info(f"Planes to be saved: {planes}")
 
     if order is not None:
         if len(order) != len(planes):
@@ -153,53 +161,52 @@ def save_as(
             )
         planes = [planes[i] for i in order]
 
-    # handle metadata
-    if metadata is None:
-        logger.info("No metadata provided; using empty dictionary.")
-        metadata = {}
-    if not isinstance(metadata, dict):
-        raise ValueError(
-            f"Metadata must be a dictionary, got {type(metadata)} instead."
-        )
+    # Handle metadata
+    file_metadata = lazy_array.metadata if hasattr(lazy_array, 'metadata') else {}
+    logger.info(f"Extracted file metadata keys: {list(file_metadata.keys())}")
 
-    # metadata is now either {} or None, so we can safely update it
-    metadata = get_metadata(scan.tiff_files[0].filehandle.path)  # from the file
-    logger.info("Using metadata from the first TIFF file in the scan." f" Metadata keys: {list(metadata.keys())}")
+    if metadata:
+        if not isinstance(metadata, dict):
+            raise ValueError(
+                f"Provided metadata must be a dictionary, got {type(metadata)} instead."
+            )
+        file_metadata.update(metadata)
 
-    # keep the scanimage metadata under the "si" key
-    metadata.update(
-        {"si": _make_json_serializable(scan.tiff_files[0].scanimage_metadata)}
-    )
-    metadata["save_path"] = str(savedir.resolve())
+    file_metadata["save_path"] = str(savedir.resolve())
+    logger.info(f"Final metadata: {file_metadata}")
 
-    # which ROIs to save
-    if scan.selected_roi is None:
-        # None ⇒ full (tiled) stack
-        roi_list = [None]
-    elif scan.selected_roi == 0:
-        # 0 ⇒ split into every individual ROI
-        roi_list = list(range(1, scan.num_rois + 1))
-    elif isinstance(scan.selected_roi, int):
-        # a single 1‐based ROI
-        roi_list = [scan.selected_roi]
+    # Determine ROI list based on lazy_array's properties
+    if hasattr(lazy_array, 'selected_roi'):
+        selected_roi = getattr(lazy_array, 'selected_roi', None)
+        num_rois = getattr(lazy_array, 'num_rois', 1)
+        shape = getattr(lazy_array, 'shape', None)
+
+        if selected_roi is None:
+            roi_list = [None]
+        elif selected_roi == 0:
+            # All rois as individual
+            roi_list = list(range(1, num_rois + 1))
+        elif isinstance(selected_roi, int):
+            # Single ROI
+            roi_list = [selected_roi]
+        elif isinstance(selected_roi, (list, tuple)):
+            roi_list = list(selected_roi)
+        else:
+            roi_list = [selected_roi]
     else:
-        # an explicit list of ROI indices
-        roi_list = list(scan.selected_roi)
+        # fallback OR default: no ROI
+        roi_list = [None]
 
     logger.info(f"Saving ROIs: {roi_list} (0 means full stack, None means all ROIs).")
 
     start_time = time.time()
 
-    # this is a bit confusing.
-    # If roi=None, that atttribute is set on the scan object and
-    # when it is inddexed e.g. scan[0],
-    # it will return a stack with each roi assembled.
     if 0 in roi_list:
         if len(roi_list) > 1:
             roi_list = [r + 1 for r in roi_list if r is not None]
     for roi in roi_list:
-        logger.info(f"Saving ROI {roi} of {scan.num_rois}.")
-        subscan = copy.copy(scan)
+        logger.info(f"Saving ROI {roi} of {lazy_array.num_rois}.")
+        subscan = copy.copy(lazy_array)
         subscan.selected_roi = roi
 
         target = savedir if roi is None else savedir / f"roi{roi}"
