@@ -505,7 +505,7 @@ class Scan_MBO(scans.ScanMultiROI):
             start = end
         return buf.reshape(len(frames), len(chans), H, W)
 
-    def __getitem__(self, key):
+    def __getitem__2(self, key):
         if not isinstance(key, tuple):
             key = (key,)
         t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (
@@ -549,6 +549,7 @@ class Scan_MBO(scans.ScanMultiROI):
                 roi_outputs.append(data)
             return tuple(roi_outputs)
 
+        # If a single ROI is selected, return only that ROI
         elif self.selected_roi is not None and self.selected_roi > 0:
             oxs = self.fields[0].output_xslices[0]
             oys = self.fields[0].output_yslices[self.selected_roi - 1]
@@ -592,6 +593,56 @@ class Scan_MBO(scans.ScanMultiROI):
             if squeeze:
                 out = out.squeeze(axis=tuple(squeeze))
             return out
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+        t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (4 - len(key))
+        frames = utils.listify_index(t_key, self.num_frames)
+        chans = utils.listify_index(z_key, self.num_channels)
+        if not frames or not chans:
+            return np.empty(0)
+
+        H_out = self.field_heights[0]
+        W_out = self.field_widths[0]
+
+        if isinstance(self.selected_roi, list) or self.selected_roi == 0:
+            return tuple(self.process_roi(roi_idx) for roi_idx in range(self.num_rois))
+
+        elif self.selected_roi is not None and self.selected_roi > 0:
+            roi_idx = self.selected_roi - 1
+            return self.process_roi(roi_idx, frames, chans)
+
+        else:
+            out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
+            for roi_idx in range(self.num_rois):
+                roi_data = self.process_roi(roi_idx, frames, chans)
+                oys = self.fields[0].output_yslices[roi_idx]
+                oxs = self.fields[0].output_xslices[roi_idx]
+                out[:, :, oys, oxs] = roi_data
+
+        squeeze = []
+        if isinstance(t_key, int):
+            squeeze.append(0)
+        if isinstance(z_key, int):
+            squeeze.append(1)
+        if squeeze:
+            out = out.squeeze(axis=tuple(squeeze))
+        return out
+
+    def process_roi(self, roi_idx, frames, chans):
+        oxs = self.fields[0].output_xslices[roi_idx]
+        oys = self.fields[0].output_yslices[roi_idx]
+        xs = self.fields[0].xslices[roi_idx]
+        ys = self.fields[0].yslices[roi_idx]
+
+        H_roi = oys.stop - oys.start
+        W_roi = oxs.stop - oxs.start
+        if W_roi <= 0 or H_roi <= 0:
+            return np.empty((len(frames), len(chans), H_roi, W_roi), dtype=self.dtype)
+
+        data = self._read_pages(frames, chans, yslice=ys, xslice=xs)
+        return data
 
     @property
     def total_frames(self):

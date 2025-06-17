@@ -819,6 +819,23 @@ class ScanMultiROI(NewerScan, BaseScan):
         if self.join_contiguous:
             self._join_contiguous_fields()
 
+    def _create_rois(self):
+        """
+        Create scan rois from the configuration file. Override the base method to force
+        ROI's that have multiple 'zs' to a single depth.
+        """
+        try:
+            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
+        except KeyError:
+            raise RuntimeError("This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata.")
+        roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
+        roi_infos = list(filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos))
+        for roi_info in roi_infos:
+            roi_info["zs"] = [0]
+
+        rois = [ROI(roi_info) for roi_info in roi_infos]
+        return rois
+
     @property
     def num_fields(self):
         return len(self.fields)
