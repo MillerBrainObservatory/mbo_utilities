@@ -171,9 +171,6 @@ exclude/
 docs/examples/
 data/
 
-# dev nbs
-dev*.ipynb*
-
 # ini files
 **/*.ini
 __marimo__
