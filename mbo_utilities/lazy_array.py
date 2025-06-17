@@ -12,8 +12,8 @@ import dask.array as da
 from numpy import memmap, ndarray
 
 from . import log
-from mbo_utilities.metadata import is_raw_scanimage
-from .file_io import Scan_MBO, read_scan, get_files
+from mbo_utilities.metadata import is_raw_scanimage, get_metadata
+from .file_io import Scan_MBO, read_scan, get_files, _make_json_serializable
 from mbo_utilities.metadata import has_mbo_metadata
 try:
     from suite2p.io import BinaryFile
@@ -64,7 +64,7 @@ class _Suite2pLazyArray:
                 f"Could not locate 'reg_file' or 'raw_file' in ops: {ops.keys()}"
             )
         self._bf = BinaryFile(
-            Ly=Ly, Lx=Lx, filename=str(reg_file), n_frames=n_frames
+            Ly=Ly, Lx=Lx, filename=str(reg_file), n_frames=n_frames  # type: ignore # noqa
         )
         self.shape = (n_frames, Ly, Lx)
         self.ndim = 3
@@ -283,9 +283,10 @@ class TifLoader:
 
 
 @dataclass
-class LazyArrayLoader:
+class LazyArrayLoader2:
     inputs: str | Path | Sequence[str | Path]
     rois: int | None = None
+    metadata: dict | None = None
     loader: Any = field(init=False)
 
     def __post_init__(self):
@@ -327,7 +328,7 @@ class LazyArrayLoader:
         if not paths:
             raise ValueError("No input files found.")
 
-        # check for mixed‐type in a single directory
+        # filter by supported file types
         filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
         if not filtered:
             raise ValueError(f"No supported files in {self.inputs}")
@@ -376,6 +377,113 @@ class LazyArrayLoader:
         else:
             logger.error(f"Unsupported file type: {first.suffix}")
             raise TypeError(f"Unsupported file type: {first.suffix}")
+
+    def load(self) -> Any:
+        if hasattr(self.loader, "load"):
+            return self.loader.load()
+        return self.loader()
+
+
+@dataclass
+class LazyArrayLoader:
+    inputs: str | Path | Sequence[str | Path]
+    rois: int | None = None
+    loader: Any = field(init=False)
+    _metadata: dict = field(init=False, default_factory=dict)
+
+    def __post_init__(self):
+        if isinstance(self.inputs, np.ndarray):
+            # If input is already an ndarray, set a basic loader
+            self.loader = lambda: [self.inputs]
+            self.fpath = None
+            return
+
+        paths: list[Path]
+        if isinstance(self.inputs, (str, Path)):
+            p = Path(self.inputs)
+            if not p.exists():
+                raise ValueError(f"Input path does not exist: {p}")
+            paths = [Path(f) for f in get_files(p)] if p.is_dir() else [p]
+        elif isinstance(self.inputs, (list, tuple)):
+            if isinstance(self.inputs[0], np.ndarray):
+                self.loader = lambda: self.inputs
+                self.fpath = None
+                return
+            paths = [Path(p) for p in self.inputs if isinstance(p, (str, Path))]
+        else:
+            raise TypeError(
+                f"Unsupported input type: {type(self.inputs)}. "
+                "Expected str, Path, or a sequence of str/Path."
+            )
+
+        if not paths:
+            raise ValueError("No input files found.")
+
+        # Filter for supported file types
+        filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
+        if not filtered:
+            raise ValueError(f"No supported files in {self.inputs}")
+        self.fpath = filtered
+
+        exts = {p.suffix.lower() for p in filtered}
+        first = filtered[0]
+
+        # Select appropriate loader
+        if len(exts) > 1:
+            if exts == {".bin", ".npy"}:
+                parent = first.parent
+                npy_file = parent / "ops.npy"
+                bin_file = parent / "data_raw.bin"
+                md = np.load(str(npy_file), allow_pickle=True).item()
+                self.loader = Suite2pLoader(bin_file, md)
+                self._extract_metadata()
+                return
+            raise ValueError(f"Multiple file types found in directory: {exts!r}")
+
+        # Handling file loaders
+        self._select_loader(first, filtered, exts)
+        self._extract_metadata()
+
+    def _select_loader(self, first, filtered, exts):
+        if first.suffix in [".tif", ".tiff"]:
+            if is_raw_scanimage(first):
+                self.loader = MBOScanLoader(filtered, roi=self.rois)
+            elif has_mbo_metadata(first):
+                self.loader = MBOTiffLoader(filtered)
+            else:
+                self.loader = TifLoader(filtered)
+        elif first.suffix.lower() == ".bin":
+            npy_file = first.parent.joinpath("ops.npy")
+            bin_file = first.parent.joinpath("data_raw.bin")
+            if npy_file.is_file():
+                metadata = np.load(npy_file, allow_pickle=True).item()
+                self.loader = Suite2pLoader(bin_file, metadata)
+            else:
+                raise NotImplementedError("BIN files with metadata are not yet supported.")
+        elif first.suffix.lower() == ".h5":
+            self.loader = H5Loader(first)
+        elif first.suffix.lower() == ".npy":
+            if (first.parent / "pmd_demixer.npy").is_file():
+                self.loader = DemixingResultsLoader(first.parent)
+        else:
+            logger.error(f"Unsupported file type: {first.suffix}")
+            raise TypeError(f"Unsupported file type: {first.suffix}")
+
+    def _extract_metadata(self):
+        """Extracts and initializes metadata."""
+        if isinstance(self.loader, MBOScanLoader):
+            example_tiff = self.fpath[0]
+            logger.info("Extracting metadata from first TIFF file.")
+            self._metadata = get_metadata(example_tiff)
+            logger.info(f"Metadata keys: {list(self._metadata.keys())}")
+            si_metadata = _make_json_serializable(read_scan([example_tiff]).metadata)
+            self._metadata.update({"si": si_metadata})
+        else:
+            self._metadata = {}
+
+    @property
+    def metadata(self):
+        return self._metadata
 
     def load(self) -> Any:
         if hasattr(self.loader, "load"):
