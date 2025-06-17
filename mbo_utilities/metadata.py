@@ -3,10 +3,14 @@ from __future__ import annotations
 import re
 import json
 import os
+import struct
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import tifffile
+from tifffile import read_scanimage_metadata, matlabstr2py
+from tifffile.tifffile import bytes2str, read_json, FileHandle
 
 
 def _params_from_metadata_caiman(metadata):
@@ -448,6 +452,67 @@ def params_from_metadata(metadata, base_ops, pipeline="suite2p"):
             f"Pipeline {pipeline} not recognized. Use 'caiman' or 'suite2'"
         )
 
+
+def read_scanimage_metadata_tifffile(
+    fh: FileHandle, /
+) -> tuple[dict[str, Any], dict[str, Any], int]:
+    """ FROM TIFFFILE for DEVELOPMENT
+
+    Read ScanImage BigTIFF v3 or v4 static and ROI metadata from file.
+
+    The settings can be used to read image and metadata without parsing
+    the TIFF file.
+
+    Frame data and ROI groups can alternatively be obtained from the Software
+    and Artist tags of any TIFF page.
+
+    Parameters:
+        fh: Binary file handle to read from.
+
+    Returns:
+        - Non-varying frame data, parsed with :py:func:`matlabstr2py`.
+        - ROI group data, parsed from JSON.
+        - Version of metadata (3 or 4).
+
+    Raises:
+        ValueError: File does not contain valid ScanImage metadata.
+
+    """
+    fh.seek(0)
+    try:
+        byteorder, version = struct.unpack('<2sH', fh.read(4))
+        if byteorder != b'II' or version != 43:
+            raise ValueError('not a BigTIFF file')
+        fh.seek(16)
+        magic, version, size0, size1 = struct.unpack('<IIII', fh.read(16))
+        if magic != 117637889 or version not in {3, 4}:
+            raise ValueError(
+                f'invalid magic {magic} or version {version} number'
+            )
+    except UnicodeDecodeError as exc:
+        raise ValueError('file must be opened in binary mode') from exc
+    except Exception as exc:
+        raise ValueError('not a ScanImage BigTIFF v3 or v4 file') from exc
+
+    frame_data = matlabstr2py(bytes2str(fh.read(size0)[:-1]))
+    roi_data = read_json(fh, '<', 0, size1, 0) if size1 > 1 else {}
+    return frame_data, roi_data, version
+
+
+def matlabstr(obj):
+    """Convert Python dict to ScanImage-style MATLAB string."""
+    def _format(v):
+        if isinstance(v, list):
+            if all(isinstance(i, str) for i in v):
+                return '{' + ' '.join(f"'{i}'" for i in v) + '}'
+            return '[' + ' '.join(str(i) for i in v) + ']'
+        if isinstance(v, str):
+            return f"'{v}'"
+        if isinstance(v, bool):
+            return 'true' if v else 'false'
+        return str(v)
+
+    return '\n'.join(f"{k} = {_format(v)}" for k, v in obj.items())
 
 def _parse_value(value_str):
     if value_str.startswith("'") and value_str.endswith("'"):

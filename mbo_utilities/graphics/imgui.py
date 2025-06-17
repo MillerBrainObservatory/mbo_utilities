@@ -1103,7 +1103,9 @@ class PreviewDataWidget(EdgeWindow):
     def _compute_zstats_single_roi(self, data_ix, arr):
         self.logger.info(f"Computing z-statistics for ROI {data_ix + 1}")
 
-        arr = arr[:]  # materialize as dense array (torch.Tensor or ndarray)
+        if isinstance(arr, torch.Tensor):
+            if HAS_TORCH:
+                arr = arr[:]  # dense array (torch.Tensor or ndarray)
         if arr.ndim == 3:
             arr = arr[:, None, :, :] if HAS_TORCH and isinstance(arr, torch.Tensor) else arr[:, np.newaxis, :, :]
 
@@ -1141,12 +1143,7 @@ class PreviewDataWidget(EdgeWindow):
     def compute_zstats(self):
         if not self.image_widget or not self.image_widget.data:
             return
-
-        if all(hasattr(arr, "__array__") for arr in self.image_widget.data):
-            arrs = [np.array(arr) for arr in self.image_widget.data]
-        else:
-            arrs = self.image_widget.data
-        for data_ix, arr in enumerate(arrs):
+        for data_ix, arr in enumerate(self.image_widget.data):
             self.logger.debug(f"Sending array index {data_ix} for z-stat computation..")
             threading.Thread(
                 target=self._compute_zstats_single_roi, args=(data_ix, arr), daemon=True

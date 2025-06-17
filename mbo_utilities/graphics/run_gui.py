@@ -95,7 +95,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
             data=arrays,
             names=names,
             histogram_widget=True,
-            figure_kwargs={"size": (nx * 2, ny * 2),},  # "canvas": canvas},
+            figure_kwargs={"size": (800, 1000),},  # "canvas": canvas},
             graphic_kwargs={"vmin": a0.min(), "vmax": a0.max()},
             window_funcs={"t": (np.mean, 0)},
         )
