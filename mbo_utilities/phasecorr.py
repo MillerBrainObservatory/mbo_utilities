@@ -11,16 +11,10 @@ MBO_WINDOW_METHODS = {
     "mean":      lambda X: np.mean(X, axis=0),
     "max":       lambda X: np.max(X, axis=0),
     "std":       lambda X: np.std(X, axis=0),
-    # pick first frame then subtract global mean
-    "mean-sub":  lambda X: X[0] - np.mean(X, axis=0),
+    "mean-sub":  lambda X: X[0] - np.mean(X, axis=0),  # mostly for compatibility with gui window functions
 }
-#
-# MBO_WINDOW_METHODS = {
-#     "mean": lambda X: np.mean(X, axis=0),
-#     "max": lambda X: np.max(X, axis=0),
-#     "std": lambda X: np.std(X, axis=0),
-#     "mean-sub": lambda X: np.mean(X - np.mean(X, axis=0), axis=0),
-#}
+
+ALL_PHASECORR_METHODS = set(TWO_DIM_PHASECORR_METHODS) | set(THREE_DIM_PHASECORR_METHODS)
 
 logger = log.get("phasecorr")
 

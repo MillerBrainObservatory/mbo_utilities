@@ -10,7 +10,7 @@ import dask.array as da
 
 from . import log
 from .metadata import is_raw_scanimage, get_metadata
-from .phasecorr import nd_windowed, MBO_WINDOW_METHODS
+from .phasecorr import nd_windowed, MBO_WINDOW_METHODS, ALL_PHASECORR_METHODS
 from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
 from .util import subsample_array
@@ -415,10 +415,10 @@ class Scan_MBO(scans.ScanMultiROI):
         Set the phase correction method.
         Options are 'two_step', 'subpix', or 'crosscorr'.
         """
-        if value not in MBO_WINDOW_METHODS:
+        if value not in ALL_PHASECORR_METHODS:
             raise ValueError(
                 f"Unsupported phase correction method: {value}. "
-                f"Supported methods are: {MBO_WINDOW_METHODS}"
+                f"Supported methods are: {ALL_PHASECORR_METHODS}"
             )
         self._phasecorr_method = value
 
@@ -851,132 +851,4 @@ def _make_json_serializable(obj):
 
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
-
-def save_mp4(
-    fname: str | Path | np.ndarray,
-    images,
-    framerate=60,
-    speedup=1,
-    chunk_size=100,
-    cmap="gray",
-    win=7,
-    vcodec="libx264",
-    normalize=True,
-):
-    """
-    Save a video from a 3D array or TIFF stack to `.mp4`.
-
-    Parameters
-    ----------
-    fname : str
-        Output video file name.
-    images : numpy.ndarray or str
-        Input 3D array (T x H x W) or a file path to a TIFF stack.
-    framerate : int, optional
-        Original framerate of the video, by default 60.
-    speedup : int, optional
-        Factor to increase the playback speed, by default 1 (no speedup).
-    chunk_size : int, optional
-        Number of frames to process and write in a single chunk, by default 100.
-    cmap : str, optional
-        Colormap to apply to the video frames, by default "gray".
-        Must be a valid Matplotlib colormap name.
-    win : int, optional
-        Temporal averaging window size. If `win > 1`, frames are averaged over
-        the specified window using convolution. By default, 7.
-    vcodec : str, optional
-        Video codec to use, by default 'libx264'.
-    normalize : bool, optional
-        Flag to min-max normalize the video frames, by default True.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the input file does not exist when `images` is provided as a file path.
-    ValueError
-        If `images` is not a valid 3D NumPy array or a file path to a TIFF stack.
-
-    Notes
-    -----
-    - The input array `images` must have the shape (T, H, W), where T is the number of frames,
-      H is the height, and W is the width.
-    - The `win` parameter performs temporal smoothing by averaging over adjacent frames.
-
-    Examples
-    --------
-    Save a video from a 3D NumPy array with a gray colormap and 2x speedup:
-
-    >>> import numpy as np
-    >>> images = np.random.rand(100, 600, 576) * 255
-    >>> save_mp4('output.mp4', images, framerate=17, cmap='gray', speedup=2)
-
-    Save a video with temporal averaging applied over a 5-frame window at 4x speed:
-
-    >>> save_mp4('output_smoothed.mp4', images, framerate=30, speedup=4, cmap='gray', win=5)
-
-    Save a video from a TIFF stack:
-
-    >>> save_mp4('output.mp4', 'path/to/stack.tiff', framerate=60, cmap='gray')
-    """
-    if not isinstance(fname, (str, Path)):
-        raise TypeError(f"Expected fname to be str or Path, got {type(fname)}")
-    if isinstance(images, (str, Path)):
-        print(f"Loading TIFF stack from {images}")
-        if Path(images).is_file():
-            try:
-                images = tifffile.memmap(images)
-            except MemoryError:
-                images = tifffile.imread(images)
-        else:
-            raise FileNotFoundError(
-                f"Images given as a string or path, but not a valid file: {images}"
-            )
-    elif not isinstance(images, np.ndarray):
-        raise ValueError(
-            f"Expected images to be a numpy array or a file path, got {type(images)}"
-        )
-
-    T, height, width = images.shape
-    colormap = cm.get_cmap(cmap)
-
-    if normalize:
-        print("Normalizing mp4 images to [0, 1]")
-        images = norm_minmax(images)
-
-    if win and win > 1:
-        print(f"Applying temporal averaging with window size {win}")
-        kernel = np.ones(win) / win
-        images = np.apply_along_axis(
-            lambda x: np.convolve(x, kernel, mode="same"), axis=0, arr=images
-        )
-
-    print(f"Saving {T} frames to {fname}")
-    output_framerate = int(framerate * speedup)
-    try:
-        process = (
-            ffmpeg.input(
-                "pipe:",
-                format="rawvideo",
-                pix_fmt="rgb24",
-                s=f"{width}x{height}",
-                framerate=output_framerate,
-            )
-            .output(str(fname), pix_fmt="yuv420p", vcodec=vcodec, r=output_framerate)
-            .overwrite_output()
-            .run_async(pipe_stdin=True)
-        )
-    except Exception as e:
-        print(e)
-        return
-
-    for start in range(0, T, chunk_size):
-        end = min(start + chunk_size, T)
-        chunk = images[start:end]
-        colored_chunk = (colormap(chunk)[:, :, :, :3] * 255).astype(np.uint8)
-        for frame in colored_chunk:
-            process.stdin.write(frame.tobytes())
-
-    process.stdin.close()
-    process.wait()
-    print(f"Video saved to {fname}")
 

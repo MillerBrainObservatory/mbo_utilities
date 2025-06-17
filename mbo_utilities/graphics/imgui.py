@@ -745,10 +745,19 @@ class PreviewDataWidget(EdgeWindow):
             if stats_list[i] and "mean" in stats_list[i]
         ]
         array_labels.append("Combined")
+        avail = imgui.get_content_region_avail().x
+        xpos = 0
+
         for i, label in enumerate(array_labels):
             if imgui.radio_button(label, self._selected_array == i):
                 self._selected_array = i
-            if i < len(array_labels) - 1:
+            button_width = imgui.calc_text_size(label).x + imgui.get_style().frame_padding.x * 4
+            xpos += button_width + imgui.get_style().item_spacing.x
+
+            if xpos >= avail:
+                xpos = button_width
+                imgui.new_line()
+            else:
                 imgui.same_line()
 
         imgui.separator()
