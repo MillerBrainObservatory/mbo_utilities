@@ -8,14 +8,27 @@
 #
 # [tool.uv.sources]
 # mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "dev" }
+import time
+from functools import partial
+from typing import Literal
+
 import tifffile
 from pathlib import Path
 import tifffile as tiff
 import numpy as np
 
+import fastplotlib as fpl
+from fastplotlib.ui import EdgeWindow
+from fastplotlib.widgets import ImageWidget
+from scipy.ndimage import fourier_shift
+
+from mbo_utilities.lazy_array import LazyArrayLoader
 import mbo_utilities as mbo
 from mbo_utilities import is_raw_scanimage
+from mbo_utilities.graphics._imgui import ndim_to_frame
 from mbo_utilities.metadata import has_mbo_metadata
+
+from imgui_bundle import imgui
 
 
 def find_si_rois(file):
@@ -54,30 +67,96 @@ def write_u16(infile: str | Path, outfile: str | Path):
         ],
     )
 
+def timeit(func):
+    """
+    Decorator to time a function.
+    """
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        end = time.time()
+        print(f"Function {func.__name__} took {end - start:.4f} seconds")
+        return result
+    return wrapper
+
+class ShiftOffsetWidget(EdgeWindow):
+    def __init__(
+        self,
+        iw: ImageWidget,
+        size: int = 300,
+        location: Literal["bottom", "right"] = "right",
+        title: str = "Shift Pixels",
+    ):
+        super().__init__(figure=iw.figure, size=size, location=location, title=title)
+        self.image_widget = iw
+        self._x_shift = 0
+        if self.image_widget.frame_apply is None:
+            self.image_widget.frame_apply = {"t": self._apply_offset}
+
+    def update(self):
+        imgui.text("Shift current frame")
+        imgui.spacing()
+
+        changed_x, x = imgui.slider_float("Shift", self._x_shift, -4, 4)
+        if changed_x:
+            print(f"X shift changed to {x}")
+            self._x_shift = x
+            self.update_frame_apply()
+
+    def get_raw_frame(self):
+        idx = self.image_widget.current_index
+        t = idx.get("t", 0)
+        return self.image_widget.data[t]
+
+    @staticmethod
+    def _apply_offset(frame, shift):
+        if shift == 0 or shift == 0.0 or frame.ndim < 2:
+            return frame
+        rows = frame[1::2]
+        f = np.fft.fftn(rows)
+        shift_vec = (0, shift)[:rows.ndim]
+        rows[:] = np.fft.ifftn(fourier_shift(f, shift_vec)).real
+        return frame
+
+    def update_frame_apply(self):
+        """Update the frame_apply function of the image widget."""
+        self.image_widget.frame_apply = {
+            i: partial(self._combined_frame_apply, arr_idx=i)
+            for i in range(len(self.image_widget.managed_graphics))
+        }
+
+    def _combined_frame_apply(self, frame: np.ndarray, arr_idx: int=0) -> np.ndarray:
+        """alter final frame only once, in ImageWidget.frame_apply"""
+        frame = self._apply_offset(self.get_raw_frame(), self._x_shift)
+        return frame
 
 
 if __name__ == "__main__":
-    # metadata = {"plane": 11}
-    # mbo.save_nonscan(
-    #     input_tiff,
-    #     "/home/flynn/lbm_data/assembled",
-    #     ext=".tif",
-    #     overwrite=True,
-    #     metadata=metadata,
-    # )
+    scan = LazyArrayLoader(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green").load()
+    scan.roi = 2
+    scan.fix_phase = False
+    start = time.time()
+    data = scan[:, 10, :, :]
+    print(data.shape)
+    iw = fpl.ImageWidget(data)
+    gui = ShiftOffsetWidget(iw)
+    iw.figure.add_gui(gui)
+    iw.show()
+    fpl.loop.run()
+
     path = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green"
-    savedir = r"D:\tests_bigmem\no_phase"
+    savedir = r"D:\tests_plane11"
     test_scan = mbo.read_scan(
         path,
-        roi=0,
+        roi=2,
         phasecorr_method="mean",
     )
-    test_scan.roi = 0
+    test_scan.roi = 2
     test_scan.fix_phase = False
     mbo.save_as(
         test_scan,
         savedir,
         ext=".tiff",
-        overwrite=True,
-        planes=[7, 8, 9, 10, 11],
+        overwrite=False,
+        planes=[11, 12, 13, 14]
     )
