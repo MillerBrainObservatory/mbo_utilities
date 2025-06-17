@@ -76,7 +76,7 @@ class BaseScan:
     @property
     def tiff_files(self):
         if self._tiff_files is None:
-            self._tiff_files = [TiffFile(filename) for filename in self.filenames]
+            self._tiff_files = [TiffFile(filename, mode="r",) for filename in self.filenames]
         return self._tiff_files
 
     @tiff_files.deleter
