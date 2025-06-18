@@ -4,13 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import tifffile
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
-from mbo_utilities import get_metadata, save_as, get_mbo_dirs
+from mbo_utilities import get_metadata, get_mbo_dirs
 from mbo_utilities.file_io import _make_json_serializable
 from mbo_utilities.graphics._widgets import set_tooltip
-from mbo_utilities.lazy_array import LazyArrayLoader
+from mbo_utilities.lazy_array import imread
 
 try:
     import lbm_suite2p_python as lsp
@@ -401,12 +400,14 @@ def run_plane_from_data(self, arr_idx):
         ind_x, ind_y = slice(None), slice(None)
 
     if self.is_mbo_scan:
-        save_as(
-            self.image_widget.data[arr_idx],
-            self._saveas_outdir,
-            planes=[current_z + 1],
-            ext=".bin",
-        )
+        # TODO
+        raise NotImplementedError()
+        # save_as(
+        #     self.image_widget.data[arr_idx],
+        #     self._saveas_outdir,
+        #     planes=[current_z + 1],
+        #     ext=".bin",
+        # )
 
     # move to property?
     if not self._saveas_outdir:
@@ -427,7 +428,7 @@ def run_plane_from_data(self, arr_idx):
     out_dir.mkdir(exist_ok=True)
 
     self.fpath = self.fpath
-    loader = LazyArrayLoader(self.fpath)
+    loader = imread(self.fpath)
     if hasattr(loader, "roi") or hasattr(loader, "rois"):
         self.logger.info("Using LazyArrayLoader with ROI support. ")
         arr = loader.rois
@@ -437,14 +438,16 @@ def run_plane_from_data(self, arr_idx):
         metadata = _make_json_serializable(metadata)
         input_file = out_dir / "plane_7.tif"
         metadata["shape"] = data.shape
-        save_as(
-            data,
-            input_file,
-            metadata
-        )
-        tifffile.imwrite(input_file, data, metadata=metadata)
-        self.logger.info(f"Temporary file created:"
-                    f" {input_file}")
+        # TODO
+        raise NotImplementedError()
+        # save_as(
+        #     data,
+        #     input_file,
+        #     metadata
+        # )
+        # tifffile.imwrite(input_file, data, metadata=metadata)
+        # self.logger.info(f"Temporary file created:"
+        #             f" {input_file}")
 
     elif self.fpath.suffix.lower() == ".bin":
         metadata = np.load(self.fpath.parent / "ops.npy", allow_pickle=True).item()

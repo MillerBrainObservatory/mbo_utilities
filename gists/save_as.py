@@ -22,7 +22,7 @@ from fastplotlib.ui import EdgeWindow
 from fastplotlib.widgets import ImageWidget
 from scipy.ndimage import fourier_shift
 
-from mbo_utilities.lazy_array import LazyArrayLoader
+from mbo_utilities.lazy_array import imread, imwrite
 import mbo_utilities as mbo
 from mbo_utilities import is_raw_scanimage
 from mbo_utilities.graphics._imgui import ndim_to_frame
@@ -135,8 +135,13 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     Path("/tmp/01").mkdir(exist_ok=True,)
 
-    # scan = LazyArrayLoader(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green").load()
-    scan = LazyArrayLoader(r"/home/flynn/lbm_data/raw").load()
+    scan = imread(r"/home/flynn/lbm_data/raw")
+    scan.save_as(
+        "/tmp/01/output",
+        ext=".tiff",
+        overwrite=False,
+        planes=[10, 11, 12]
+    )
     scan.roi = 0
     scan.fix_phase = True
     zplane = 10

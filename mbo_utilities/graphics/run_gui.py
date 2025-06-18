@@ -12,7 +12,7 @@ from imgui_bundle import immapp, hello_imgui
 
 from mbo_utilities import get_mbo_dirs
 from mbo_utilities.graphics.imgui import PreviewDataWidget
-from mbo_utilities.lazy_array import LazyArrayLoader
+from mbo_utilities.lazy_array import imread
 from mbo_utilities.graphics._file_dialog import FileDialog
 
 try:
@@ -73,7 +73,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
             click.echo("No file selected, exiting.")
             return
 
-    lazy_obj  = LazyArrayLoader(data_in, rois=roi)
+    lazy_obj  = imread(data_in, rois=roi)
 
     # arrays  = lazy_obj.loader.rois or [lazy_obj.loader.load()]  # fall back to whole data
     arrays  = lazy_obj.load()

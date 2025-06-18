@@ -20,7 +20,6 @@ from imgui_bundle import (
     ImVec2,
 )
 
-from mbo_utilities.assembly import save_as
 from mbo_utilities.file_io import (
     Scan_MBO,
     SAVE_AS_TYPES,
@@ -85,19 +84,21 @@ def _save_as_worker(
     scan = read_scan(path, roi=kwargs.get("roi", None))
     if fix_phase:
         scan.fix_phase = True
-    save_as(
-        scan,
-        savedir=savedir,
-        planes=planes,
-        metadata=metadata,
-        overwrite=overwrite,
-        ext=ext,
-        order=order,
-        trim_edge=trim_edge,
-        target_chunk_mb=target_chunk_mb,
-        progress_callback=progress_callback,
-        debug=debug,
-    )
+    # TODO
+    pass
+    # save_as(
+    #     scan,
+    #     savedir=savedir,
+    #     planes=planes,
+    #     metadata=metadata,
+    #     overwrite=overwrite,
+    #     ext=ext,
+    #     order=order,
+    #     trim_edge=trim_edge,
+    #     target_chunk_mb=target_chunk_mb,
+    #     progress_callback=progress_callback,
+    #     debug=debug,
+    # )
 
 
 @dataclass
