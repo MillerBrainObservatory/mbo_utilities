@@ -45,6 +45,26 @@ def close_tiff_writers():
             writer.close()
         _write_tiff._writers.clear()
 
+def supports_roi(obj):
+    return hasattr(obj, "selected_roi") and hasattr(obj, "num_rois")
+
+def iter_rois(obj):
+    if not supports_roi(obj):
+        yield None
+        return
+
+    selected_roi = getattr(obj, "selected_roi", None)
+    num_rois = getattr(obj, "num_rois", 1)
+
+    if selected_roi is None:
+        yield from range(1, num_rois + 1)
+    elif isinstance(selected_roi, int):
+        yield selected_roi
+    elif isinstance(selected_roi, (list, tuple)):
+        yield from selected_roi
+    else:
+        yield selected_roi
+
 
 def save_as(
     lazy_array: Scan_MBO | LazyArrayLoader,
@@ -118,6 +138,8 @@ def save_as(
         logger.info("Debug mode disabled; setting log level to WARNING.")
         logger.propagate = False  # don't send to terminal
 
+    lazy_array = LazyArrayLoader(lazy_array)
+
     # save path
     savedir = Path(savedir)
     if not savedir.parent.is_dir():
@@ -130,6 +152,11 @@ def save_as(
         num_planes = lazy_array.num_planes
     elif hasattr(lazy_array, "num_channels"):
         num_planes = lazy_array.num_channels
+    if hasattr(lazy_array, "metadata"):
+        if "num_planes" in lazy_array.metadata:
+            num_planes = lazy_array.metadata["num_planes"]
+        elif "num_channels" in lazy_array.metadata:
+            num_planes = lazy_array.metadata["num_channels"]
     elif hasattr(lazy_array, 'ndim') and lazy_array.ndim >= 3:
         num_planes = lazy_array.shape[1] if lazy_array.ndim == 4 else 1
     else:
@@ -162,9 +189,7 @@ def save_as(
         planes = [planes[i] for i in order]
 
     # Handle metadata
-    file_metadata = lazy_array.metadata if hasattr(lazy_array, 'metadata') else {}
-    logger.info(f"Extracted file metadata keys: {list(file_metadata.keys())}")
-
+    file_metadata = lazy_array.metadata or {}
     if metadata:
         if not isinstance(metadata, dict):
             raise ValueError(
@@ -175,35 +200,14 @@ def save_as(
     file_metadata["save_path"] = str(savedir.resolve())
     logger.info(f"Final metadata: {file_metadata}")
 
+    lazy_array = lazy_array.load()
+    roi_list = list(iter_rois(lazy_array))
+
     # Determine ROI list based on lazy_array's properties
-    if hasattr(lazy_array, 'selected_roi'):
-        selected_roi = getattr(lazy_array, 'selected_roi', None)
-        num_rois = getattr(lazy_array, 'num_rois', 1)
-        shape = getattr(lazy_array, 'shape', None)
-
-        if selected_roi is None:
-            roi_list = [None]
-        elif selected_roi == 0:
-            # All rois as individual
-            roi_list = list(range(1, num_rois + 1))
-        elif isinstance(selected_roi, int):
-            # Single ROI
-            roi_list = [selected_roi]
-        elif isinstance(selected_roi, (list, tuple)):
-            roi_list = list(selected_roi)
-        else:
-            roi_list = [selected_roi]
-    else:
-        # fallback OR default: no ROI
-        roi_list = [None]
-
-    logger.info(f"Saving ROIs: {roi_list} (0 means full stack, None means all ROIs).")
+    for roi in roi_list:
+        logger.info(f"Saving ROI {roi}" + (f" of {lazy_array.num_rois}" if supports_roi(lazy_array) else ""))
 
     start_time = time.time()
-
-    if 0 in roi_list:
-        if len(roi_list) > 1:
-            roi_list = [r + 1 for r in roi_list if r is not None]
     for roi in roi_list:
         logger.info(f"Saving ROI {roi} of {lazy_array.num_rois}.")
         subscan = copy.copy(lazy_array)

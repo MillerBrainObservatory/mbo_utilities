@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import copy
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence, List, Tuple, Any, Protocol
+from typing import Sequence, List, Tuple, Any, Protocol, Callable
 
 import h5py
 import numpy as np
@@ -35,6 +36,26 @@ SUPPORTED_FTYPES = (
     ".h5",
     ".zarr",
 )
+
+def supports_roi(obj):
+    return hasattr(obj, "selected_roi") and hasattr(obj, "num_rois")
+
+def iter_rois(obj):
+    if not supports_roi(obj):
+        yield None
+        return
+
+    selected_roi = getattr(obj, "selected_roi", None)
+    num_rois = getattr(obj, "num_rois", 1)
+
+    if selected_roi is None:
+        yield from range(1, num_rois + 1)
+    elif isinstance(selected_roi, int):
+        yield selected_roi
+    elif isinstance(selected_roi, (list, tuple)):
+        yield from selected_roi
+    else:
+        yield selected_roi
 
 class Loader(Protocol):
     fpath: Path | str | Sequence[Path | str]
@@ -397,6 +418,11 @@ class LazyArrayLoader:
             self.loader = lambda: [self.inputs]
             self.fpath = None
             return
+        if isinstance(self.inputs, Scan_MBO):
+            # If input is a Scan_MBO object, set the loader to return it
+            self.loader = lambda: [self.inputs]
+            self.fpath = None
+            return
 
         paths: list[Path]
         if isinstance(self.inputs, (str, Path)):
@@ -480,6 +506,104 @@ class LazyArrayLoader:
             self._metadata.update({"si": si_metadata})
         else:
             self._metadata = {}
+
+    def save_as(
+            self,
+            savedir: str | Path,
+            planes: list | tuple = None,
+            metadata: dict = None,
+            overwrite: bool = True,
+            ext: str = ".tiff",
+            order: list | tuple = None,
+            trim_edge: list | tuple = (0, 0, 0, 0),
+            fix_phase: bool = False,
+            save_phase_png: bool = False,
+            target_chunk_mb: int = 20,
+            progress_callback: Callable = None,
+            upsample: int = 20,
+            debug: bool = False,
+    ):
+        # Logging
+        if debug:
+            logger.setLevel(logging.INFO)
+            logger.info("Debug mode enabled; setting log level to INFO.")
+            logger.propagate = True  # send to terminal
+        else:
+            logger.setLevel(logging.WARNING)
+            logger.info("Debug mode disabled; setting log level to WARNING.")
+            logger.propagate = False  # don't send to terminal
+
+        lazy_array = LazyArrayLoader(lazy_array)
+
+        # save path
+        savedir = Path(savedir)
+        if not savedir.parent.is_dir():
+            raise ValueError(f"{savedir} is not inside a valid directory.")
+        savedir.mkdir(exist_ok=True)
+
+        # Determine number of planes from lazy_array attributes
+        # fallback to shape
+        if hasattr(lazy_array, "num_planes"):
+            num_planes = lazy_array.num_planes
+        elif hasattr(lazy_array, "num_channels"):
+            num_planes = lazy_array.num_channels
+        if hasattr(lazy_array, "metadata"):
+            if "num_planes" in lazy_array.metadata:
+                num_planes = lazy_array.metadata["num_planes"]
+            elif "num_channels" in lazy_array.metadata:
+                num_planes = lazy_array.metadata["num_channels"]
+        elif hasattr(lazy_array, 'ndim') and lazy_array.ndim >= 3:
+            num_planes = lazy_array.shape[1] if lazy_array.ndim == 4 else 1
+        else:
+            raise ValueError("Cannot determine the number of planes.")
+
+        # convert to 0 based indexing
+        if isinstance(planes, int):
+            planes = [planes - 1]
+        elif planes is None:
+            planes = list(range(num_planes))
+        else:
+            planes = [p - 1 for p in planes]
+
+        # make sure indexes are valid
+        over_idx = [p for p in planes if p < 0 or p >= num_planes]
+        if over_idx:
+            raise ValueError(
+                f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{lazy_array.num_channels}"
+            )
+
+        if debug:
+            logger.info(f"Total number of planes: {num_planes}")
+            logger.info(f"Planes to be saved: {planes}")
+
+        if order is not None:
+            if len(order) != len(planes):
+                raise ValueError(
+                    f"The length of the `order` ({len(order)}) does not match the number of planes ({len(planes)})."
+                )
+            planes = [planes[i] for i in order]
+
+        # Handle metadata
+        file_metadata = lazy_array.metadata or {}
+        if metadata:
+            if not isinstance(metadata, dict):
+                raise ValueError(
+                    f"Provided metadata must be a dictionary, got {type(metadata)} instead."
+                )
+            file_metadata.update(metadata)
+
+        file_metadata["save_path"] = str(savedir.resolve())
+        logger.info(f"Final metadata: {file_metadata}")
+
+        lazy_array = lazy_array.load()
+        roi_list = list(iter_rois(lazy_array))
+
+        # Determine ROI list based on lazy_array's properties
+        for roi in roi_list:
+            logger.info(f"Saving ROI {roi}" + (f" of {lazy_array.num_rois}" if supports_roi(lazy_array) else ""))
+
+        start_time = time.time()
+        pass
 
     @property
     def metadata(self):

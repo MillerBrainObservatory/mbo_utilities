@@ -330,7 +330,7 @@ class Scan_MBO(scans.ScanMultiROI):
             max_offset: int = 4,
     ):
         super().__init__(join_contiguous=True)
-        self._metadata = None # set when pages are read
+        self._metadata = {} # set when pages are read
         self._selected_roi = roi
         self._fix_phase = fix_phase
         self._phasecorr_method = phasecorr_method
@@ -631,7 +631,7 @@ class Scan_MBO(scans.ScanMultiROI):
             * self.field_heights[0]
             * self.field_widths[0]
         )
-    
+
     @property
     def scanning_depths(self):
         """

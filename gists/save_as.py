@@ -132,10 +132,11 @@ class ShiftOffsetWidget(EdgeWindow):
 
 
 if __name__ == "__main__":
-    scan = LazyArrayLoader(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green").load()
-    scan.roi = 2
+    # scan = LazyArrayLoader(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green").load()
+    scan = LazyArrayLoader(r"/home/flynn/lbm_data/raw").load()
+
+    scan.roi = 0
     scan.fix_phase = False
-    start = time.time()
     data = scan[:, 10, :, :]
     print(data.shape)
     iw = fpl.ImageWidget(data)
