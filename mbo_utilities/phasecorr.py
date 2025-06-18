@@ -105,7 +105,7 @@ def apply_scan_phase_offsets(arr, offs):
 
 if __name__ == "__main__":
     from mbo_utilities import get_files
-    from mbo_utilities.lazy_array import LazyArrayLoader
+    from mbo_utilities.lazy_array import BaseLazyArray
 
     files = get_files(r"D:\tests\data", "tif")
     fpath = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green"
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     # fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 
-    array_object = LazyArrayLoader(fpath)
+    array_object = BaseLazyArray(fpath)
     lazy_array = array_object.load()
     lazy_array.fix_phase = False
     array = lazy_array[:2000, 8, :, :]

@@ -1,11 +1,10 @@
 from __future__ import annotations
 import time
 
-import copy
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence, List, Tuple, Any, Protocol, Callable
+from typing import Sequence, List, Tuple, Any,  Callable
 
 import h5py
 import numpy as np
@@ -17,7 +16,7 @@ from . import log
 from mbo_utilities.file_io import Scan_MBO, read_scan, get_files, _make_json_serializable
 from mbo_utilities.metadata import is_raw_scanimage, get_metadata
 from mbo_utilities.metadata import has_mbo_metadata
-from mbo_utilities.assembly import _save_data
+from .assembly import _save_data
 
 try:
     from suite2p.io import BinaryFile
@@ -67,12 +66,8 @@ def iter_rois(obj):
     else:
         yield selected_roi
 
-class Loader(Protocol):
-    fpath: Path | str | Sequence[Path | str]
-    def load(self) -> Tuple[Any, List[str]]: ...
-
 @dataclass
-class DemixingResultsLoader:
+class DemixingResultsArray:
     plane_dir: Path
 
     def load(self):
@@ -93,14 +88,14 @@ class _Suite2pLazyArray:
             raise ValueError(
                 f"Could not locate 'reg_file' or 'raw_file' in ops: {ops.keys()}"
             )
-        self._bf = BinaryFile(
-            Ly=Ly, Lx=Lx, filename=str(reg_file), n_frames=n_frames  # type: ignore # noqa
+        self._bf = BinaryFile(  # type: ignore  # noqa
+            Ly=Ly, Lx=Lx, filename=str(reg_file), n_frames=n_frames
         )
         self.shape = (n_frames, Ly, Lx)
         self.ndim = 3
         self.dtype = np.int16
 
-    def __len__(self) -> int:
+    def __len__(self) -> None | int:
         return self.shape[0]
 
     def __getitem__(self, key):
@@ -134,9 +129,8 @@ class _Suite2pLazyArray:
     def close(self):
         self._bf.file.close()
 
-
 @dataclass
-class Suite2pLoader:
+class Suite2pArray:
     fpath: Path | str
     metadata: dict
     shape: tuple[int, ...] = ()
@@ -164,66 +158,54 @@ class Suite2pLoader:
         """
         return _Suite2pLazyArray(self.metadata)
 
-
 @dataclass
-class MBOScanLoader:
+class MBOScanArray:
     fpath: list[Path]
     roi: int | Sequence[int] | None = None
-    _scan: Scan_MBO | None = field(init=False, default=None)
+    data: Scan_MBO | None = field(init=False, default=None)
+    shape: tuple[int, ...] = field(init=False, default=())
+    _metadata: dict = field(init=False, default_factory=dict)
+
+    def __getitem__(self, item):
+        """Allow indexing into the Scan_MBO data."""
+        if self.data is None:
+            raise ValueError("Data not loaded yet. Call `load()` first.")
+        return self.data[item]
 
     def __post_init__(self):
-        self._scan = read_scan(self.fpath, roi=self.roi)
+        self.data = read_scan(self.fpath, roi=self.roi)
+        self._metadata.update(self.data.metadata)
+        self.shape = self.data.shape
 
-    def load(self) -> Scan_MBO | None | list[Scan_MBO | None]:
-        if self._scan.selected_roi is None:
-            return self._scan
-        out = []
-        for r in range(1, self._scan.num_rois + 1):
-            s = copy.copy(self._scan)
-            s.selected_roi = r
-            s.phasecorr_method = "frame"
-            out.append(s)
-        return out
-
-    def write(self, scan: Scan_MBO, **kwargs):
-
-        planes = kwargs.get("planes")
-        overwrite = kwargs.get("overwrite", True)
-        ext = kwargs.get("ext", ".tiff")
-        trim_edge = kwargs.get("trim_edge", (0, 0, 0, 0))
-        fix_phase = kwargs.get("fix_phase", False)
-        save_phase_png = kwargs.get("save_phase_png", False)
-        target_chunk_mb = kwargs.get("target_chunk_mb", 20)
-        metadata = kwargs.get("metadata", {})
-        progress_callback = kwargs.get("progress_callback")
-        upsample = kwargs.get("upsample", 20)
-        debug = kwargs.get("debug", False)
-        savedir = Path(metadata["save_path"])
-
+    def imwrite(
+            self,
+            outpath: Path | str | None = None,
+            overwrite = False,
+            target_chunk_mb = 50,
+            ext = '.tiff',
+            progress_callback = None,
+            debug = None,
+            planes = None,
+    ):
         start_time = time.time()
-        for roi in [None] if scan.selected_roi is None else [scan.selected_roi]:
-            logger.info(f"Writing ROI {roi} to {savedir}")
-            target = savedir if roi is None else savedir / f"roi{roi}"
+        for roi in iter_rois(self):
+            logger.info(f"Writing ROI {roi} to {outpath}")
+            target = outpath if roi is None else outpath / f"roi{roi}"
             target.mkdir(exist_ok=True)
-
-            scan.selected_roi = roi
-            md = metadata.copy()
+            self.selected_roi = roi
+            md = self.metadata.copy()
             if roi is not None:
                 md["roi"] = roi
 
             _save_data(
-                scan,
+                self,
                 target,
                 planes=planes,
                 overwrite=overwrite,
                 ext=ext,
-                trim_edge=trim_edge,
-                fix_phase=fix_phase,
-                save_phase_png=save_phase_png,
                 target_chunk_mb=target_chunk_mb,
                 metadata=md,
                 progress_callback=progress_callback,
-                upsample=upsample,
                 debug=debug,
             )
 
@@ -232,9 +214,13 @@ class MBOScanLoader:
 
     @property
     def metadata(self):  # anything you like
-        return getattr(self._scan, "metadata", None)
+        return self._metadata
 
-
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise ValueError(f"Metadata must be a dictionary, got {type(value)} instead.")
+        self._metadata.update(value)
 
 class _LazyH5Dataset:
     def __init__(self, fpath: Path | str, ds: str = "mov"):
@@ -263,9 +249,8 @@ class _LazyH5Dataset:
     def close(self):
         self._f.close()
 
-
 @dataclass
-class H5Loader:
+class H5Array:
     fpath: Path | str
     dataset: str = "mov"
 
@@ -273,7 +258,7 @@ class H5Loader:
         return _LazyH5Dataset(self.fpath, self.dataset)
 
 @dataclass
-class MBOTiffLoader:
+class MBOTiffArray:
     fpath: list[Path]
     shape: tuple[int, ...] = ()
     _chunks: tuple[int, ...] | dict | None = None
@@ -335,7 +320,7 @@ class MBOTiffLoader:
 
 
 @dataclass
-class NpyLoader:
+class NpyArray:
     fpath: list[Path]
 
     def load(self) -> Tuple[np.ndarray, List[str]]:
@@ -344,7 +329,7 @@ class NpyLoader:
 
 
 @dataclass
-class TifLoader:
+class TiffArray:
     fpath: list[Path]
 
     def load(self) -> np.memmap | ndarray:
@@ -358,311 +343,166 @@ class TifLoader:
             return tifffile.imread(str(self.fpath), mode="r")
 
 
-@dataclass
-class LazyArrayLoader2:
-    inputs: str | Path | Sequence[str | Path]
-    rois: int | None = None
-    metadata: dict | None = None
-    loader: Any = field(init=False)
+def imwrite(
+        lazy_array,
+        outpath: str | Path,
+        planes: list | tuple = None,
+        metadata: dict = None,
+        overwrite: bool = True,
+        ext: str = ".tiff",
+        order: list | tuple = None,
+        target_chunk_mb: int = 20,
+        progress_callback: Callable = None,
+        debug: bool = False,
+):
+    # Logging
+    if debug:
+        logger.setLevel(logging.INFO)
+        logger.info("Debug mode enabled; setting log level to INFO.")
+        logger.propagate = True  # send to terminal
+    else:
+        logger.setLevel(logging.WARNING)
+        logger.info("Debug mode disabled; setting log level to WARNING.")
+        logger.propagate = False  # don't send to terminal
 
-    def __post_init__(self):
+    # save path
+    outpath = Path(outpath)
+    if not outpath.parent.is_dir():
+        raise ValueError(f"{outpath} is not inside a valid directory.")
+    outpath.mkdir(exist_ok=True)
 
-        if isinstance(self.inputs, np.ndarray):
-            # return a list of the input array
-            self.loader = lambda: [self.inputs]
-            self.fpath = None
-            return
+    # Determine number of planes from lazy_array attributes
+    # fallback to shape
+    num_planes = 1
+    if hasattr(lazy_array, "num_planes"):
+        num_planes = lazy_array.num_planes
+    elif hasattr(lazy_array, "num_channels"):
+        num_planes = lazy_array.num_channels
+    if hasattr(lazy_array, "metadata"):
+        if "num_planes" in lazy_array.metadata:
+            num_planes = lazy_array.metadata["num_planes"]
+        elif "num_channels" in lazy_array.metadata:
+            num_planes = lazy_array.metadata["num_channels"]
+    elif hasattr(lazy_array, 'ndim') and lazy_array.ndim >= 3:
+        num_planes = lazy_array.shape[1] if lazy_array.ndim == 4 else 1
+    else:
+        raise ValueError("Cannot determine the number of planes.")
 
-        paths: list[Path]
-        if isinstance(self.inputs, (str, Path)):
-            p = Path(self.inputs)
-            if not p.exists():
-                raise ValueError(f"Input path does not exist: {p}")
-            if p.is_dir():
-                paths = [Path(f) for f in get_files(p)]
-            else:
-                paths = [Path(p)]
-        elif isinstance(self.inputs, (list, tuple)):
-            # list of numpy arrays, return as is
-            if isinstance(self.inputs[0], np.ndarray):
-                self.loader = lambda: self.inputs
-                self.fpath = None
-                return
-            # convert all inputs to Path objects
-            if all(isinstance(p, (str, Path)) for p in self.inputs):
-                paths = [Path(p) for p in self.inputs]
-            else:
-                raise TypeError(
-                    f"Unsupported input type in sequence: {type(self.inputs[0])}. "
-                )
-        else:
-            raise TypeError(
-                f"Unsupported input type: {type(self.inputs)}. "
-                "Expected str, Path, or a sequence of str/Path."
-            )
+    # convert to 0 based indexing
+    if isinstance(planes, int):
+        planes = [planes - 1]
+    elif planes is None:
+        planes = list(range(num_planes))
+    else:
+        planes = [p - 1 for p in planes]
 
-        if not paths:
-            raise ValueError("No input files found.")
+    # make sure indexes are valid
+    over_idx = [p for p in planes if p < 0 or p >= num_planes]
+    if over_idx:
+        raise ValueError(
+            f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{lazy_array.num_channels}"
+        )
 
-        # filter by supported file types
-        filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
-        if not filtered:
-            raise ValueError(f"No supported files in {self.inputs}")
-        self.fpath = filtered
-
-        exts = {p.suffix.lower() for p in filtered}
-        first = filtered[0]
-
-        # now parse for loader
-        if len(exts) > 1:
-            # if there is a single .bin and .npy, its a suite2p bin
-            # leaving the code below because
-            if exts == {".bin", ".npy"}:
-                parent = first.parent
-                npy_file = parent / "ops.npy"
-                bin_file = parent / "data_raw.bin"
-                md = np.load(str(npy_file), allow_pickle=True).item()
-                self.loader = Suite2pLoader(bin_file, md)
-                return
-            raise ValueError(f"Multiple file types found in directory: {exts!r}")
-        if first.suffix in [".tif", ".tiff"]:
-            if is_raw_scanimage(first):
-                self.loader = MBOScanLoader(filtered, roi=self.rois)
-            elif has_mbo_metadata(first):
-                self.loader = MBOTiffLoader(filtered)
-            else:
-                self.loader = TifLoader(filtered)
-        elif first.suffix.lower() == ".bin":
-            npy_file = first.parent.joinpath("ops.npy")
-            bin_file = first.parent.joinpath("data_raw.bin")
-            if npy_file.is_file():
-                metadata = np.load(npy_file, allow_pickle=True).item()
-                self.loader = Suite2pLoader(bin_file, metadata)
-            else:
-                raise NotImplementedError("BIN files with metadata are not yet supported.")
-        elif first.suffix.lower() == ".h5":
-            self.loader = H5Loader(first)
-        elif first.suffix.lower() == ".zarr":
-            raise NotImplementedError("Zarr files are not yet supported.")
-        elif first.suffix.lower() == ".npy":
-            logger.info(f"Checking for demixer in {first.parent}")
-            if (first.parent / "pmd_demixer.npy").is_file():
-                logger.info(f"Found demixer in {first.parent}, loading demixer results.")
-                self.loader = DemixingResultsLoader(first.parent)
-                return
-        else:
-            logger.error(f"Unsupported file type: {first.suffix}")
-            raise TypeError(f"Unsupported file type: {first.suffix}")
-
-    def load(self) -> Any:
-        if hasattr(self.loader, "load"):
-            return self.loader.load()
-        return self.loader()
-
-
-@dataclass
-class LazyArrayLoader:
-    inputs: str | Path | Sequence[str | Path]
-    rois: int | None = None
-    loader: Any = field(init=False)
-    _metadata: dict = field(init=False, default_factory=dict)
-
-    def __post_init__(self):
-        if isinstance(self.inputs, np.ndarray):
-            # If input is already an ndarray, set a basic loader
-            self.loader = lambda: [self.inputs]
-            self.fpath = None
-            return
-        if isinstance(self.inputs, Scan_MBO):
-            # If input is a Scan_MBO object, set the loader to return it
-            self.loader = lambda: [self.inputs]
-            self.fpath = None
-            return
-
-        paths: list[Path]
-        if isinstance(self.inputs, (str, Path)):
-            p = Path(self.inputs)
-            if not p.exists():
-                raise ValueError(f"Input path does not exist: {p}")
-            paths = [Path(f) for f in get_files(p)] if p.is_dir() else [p]
-        elif isinstance(self.inputs, (list, tuple)):
-            if isinstance(self.inputs[0], np.ndarray):
-                self.loader = lambda: self.inputs
-                self.fpath = None
-                return
-            paths = [Path(p) for p in self.inputs if isinstance(p, (str, Path))]
-        else:
-            raise TypeError(
-                f"Unsupported input type: {type(self.inputs)}. "
-                "Expected str, Path, or a sequence of str/Path."
-            )
-
-        if not paths:
-            raise ValueError("No input files found.")
-
-        # Filter for supported file types
-        filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
-        if not filtered:
-            raise ValueError(f"No supported files in {self.inputs}")
-        self.fpath = filtered
-
-        exts = {p.suffix.lower() for p in filtered}
-        first = filtered[0]
-
-        # Select appropriate loader
-        if len(exts) > 1:
-            if exts == {".bin", ".npy"}:
-                parent = first.parent
-                npy_file = parent / "ops.npy"
-                bin_file = parent / "data_raw.bin"
-                md = np.load(str(npy_file), allow_pickle=True).item()
-                self.loader = Suite2pLoader(bin_file, md)
-                self._extract_metadata()
-                return
-            raise ValueError(f"Multiple file types found in directory: {exts!r}")
-
-        # Handling file loaders
-        self._select_loader(first, filtered, exts)
-        self._extract_metadata()
-
-    def _select_loader(self, first, filtered, exts):
-        if first.suffix in [".tif", ".tiff"]:
-            if is_raw_scanimage(first):
-                self.loader = MBOScanLoader(filtered, roi=self.rois)
-            elif has_mbo_metadata(first):
-                self.loader = MBOTiffLoader(filtered)
-            else:
-                self.loader = TifLoader(filtered)
-        elif first.suffix.lower() == ".bin":
-            npy_file = first.parent.joinpath("ops.npy")
-            bin_file = first.parent.joinpath("data_raw.bin")
-            if npy_file.is_file():
-                metadata = np.load(npy_file, allow_pickle=True).item()
-                self.loader = Suite2pLoader(bin_file, metadata)
-            else:
-                raise NotImplementedError("BIN files with metadata are not yet supported.")
-        elif first.suffix.lower() == ".h5":
-            self.loader = H5Loader(first)
-        elif first.suffix.lower() == ".npy":
-            if (first.parent / "pmd_demixer.npy").is_file():
-                self.loader = DemixingResultsLoader(first.parent)
-        else:
-            logger.error(f"Unsupported file type: {first.suffix}")
-            raise TypeError(f"Unsupported file type: {first.suffix}")
-
-    def _extract_metadata(self):
-        """Extracts and initializes metadata."""
-        if isinstance(self.loader, MBOScanLoader):
-            example_tiff = self.fpath[0]
-            logger.info("Extracting metadata from first TIFF file.")
-            self._metadata = get_metadata(example_tiff)
-            logger.info(f"Metadata keys: {list(self._metadata.keys())}")
-            si_metadata = _make_json_serializable(read_scan([example_tiff]).metadata)
-            self._metadata.update({"si": si_metadata})
-        else:
-            self._metadata = {}
-
-    def save_as(
-            self,
-            savedir: str | Path,
-            planes: list | tuple = None,
-            metadata: dict = None,
-            overwrite: bool = True,
-            ext: str = ".tiff",
-            order: list | tuple = None,
-            trim_edge: list | tuple = (0, 0, 0, 0),
-            fix_phase: bool = False,
-            save_phase_png: bool = False,
-            target_chunk_mb: int = 20,
-            progress_callback: Callable = None,
-            upsample: int = 20,
-            debug: bool = False,
-    ):
-        # Logging
-        if debug:
-            logger.setLevel(logging.INFO)
-            logger.info("Debug mode enabled; setting log level to INFO.")
-            logger.propagate = True  # send to terminal
-        else:
-            logger.setLevel(logging.WARNING)
-            logger.info("Debug mode disabled; setting log level to WARNING.")
-            logger.propagate = False  # don't send to terminal
-
-        self = LazyArrayLoader(self)
-
-        # save path
-        savedir = Path(savedir)
-        if not savedir.parent.is_dir():
-            raise ValueError(f"{savedir} is not inside a valid directory.")
-        savedir.mkdir(exist_ok=True)
-
-        # Determine number of planes from lazy_array attributes
-        # fallback to shape
-        if hasattr(self, "num_planes"):
-            num_planes = self.num_planes
-        elif hasattr(self, "num_channels"):
-            num_planes = self.num_channels
-        if hasattr(self, "metadata"):
-            if "num_planes" in self.metadata:
-                num_planes = self.metadata["num_planes"]
-            elif "num_channels" in self.metadata:
-                num_planes = self.metadata["num_channels"]
-        elif hasattr(self, 'ndim') and self.ndim >= 3:
-            num_planes = self.shape[1] if self.ndim == 4 else 1
-        else:
-            raise ValueError("Cannot determine the number of planes.")
-
-        # convert to 0 based indexing
-        if isinstance(planes, int):
-            planes = [planes - 1]
-        elif planes is None:
-            planes = list(range(num_planes))
-        else:
-            planes = [p - 1 for p in planes]
-
-        # make sure indexes are valid
-        over_idx = [p for p in planes if p < 0 or p >= num_planes]
-        if over_idx:
+    if order is not None:
+        if len(order) != len(planes):
             raise ValueError(
-                f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{self.num_channels}"
+                f"The length of the `order` ({len(order)}) does not match the number of planes ({len(planes)})."
             )
+        planes = [planes[i] for i in order]
 
-        if debug:
-            logger.info(f"Total number of planes: {num_planes}")
-            logger.info(f"Planes to be saved: {planes}")
+    # Handle metadata
+    file_metadata = lazy_array.metadata or {}
+    if metadata:
+        if not isinstance(metadata, dict):
+            raise ValueError(
+                f"Provided metadata must be a dictionary, got {type(metadata)} instead."
+            )
+        file_metadata.update(metadata)
 
-        if order is not None:
-            if len(order) != len(planes):
-                raise ValueError(
-                    f"The length of the `order` ({len(order)}) does not match the number of planes ({len(planes)})."
-                )
-            planes = [planes[i] for i in order]
+    file_metadata["save_path"] = str(outpath.resolve())
+    lazy_array.metadata.update(file_metadata)
 
-        # Handle metadata
-        file_metadata = self.metadata or {}
-        if metadata:
-            if not isinstance(metadata, dict):
-                raise ValueError(
-                    f"Provided metadata must be a dictionary, got {type(metadata)} instead."
-                )
-            file_metadata.update(metadata)
+    lazy_array.imwrite(
+        outpath,
+        overwrite=overwrite,
+        target_chunk_mb=target_chunk_mb,
+        ext=ext,
+        progress_callback=progress_callback,
+        planes=planes,
+        debug=debug
+    )
 
-        file_metadata["save_path"] = str(savedir.resolve())
-        logger.info(f"Final metadata: {file_metadata}")
+def _extract_metadata(lazy_array):
+    """Extracts and initializes metadata."""
+    if isinstance(lazy_array, MBOScanArray):
+        example_tiff = lazy_array.fpath[0]
+        si_metadata = _make_json_serializable(read_scan([example_tiff]).metadata)
+        lazy_array.metadata = get_metadata(example_tiff)
+        lazy_array.metadata.update({"si": si_metadata})
+    else:
+        lazy_array.metadata = {}
 
-        self = self.load()
-        roi_list = list(iter_rois(self))
+def imread(
+        inputs: str | Path | Sequence[str | Path],
+        *,
+        roi: int | None = None,
+        **kwargs
+):
+    if isinstance(inputs, np.ndarray):
+        return inputs
+    if isinstance(inputs, Scan_MBO):
+        return inputs
 
-        # Determine ROI list based on lazy_array's properties
-        for roi in roi_list:
-            logger.info(f"Saving ROI {roi}" + (f" of {self.num_rois}" if supports_roi(self) else ""))
-        self.loader.write(self)
+    if isinstance(inputs, (str, Path)):
+        p = Path(inputs)
+        if not p.exists():
+            raise ValueError(f"Input path does not exist: {p}")
+        paths = [Path(f) for f in get_files(p)] if p.is_dir() else [p]
+    elif isinstance(inputs, (list, tuple)):
+        if isinstance(inputs[0], np.ndarray):
+            return inputs
+        paths = [Path(p) for p in inputs if isinstance(p, (str, Path))]
+    else:
+        raise TypeError(f"Unsupported input type: {type(inputs)}")
 
-    @property
-    def metadata(self):
-        return self._metadata
+    if not paths:
+        raise ValueError("No input files found.")
 
-    def load(self) -> Any:
-        if hasattr(self.loader, "load"):
-            return self.loader.load()
-        return self.loader()
+    filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
+    if not filtered:
+        raise ValueError(f"No supported files in {inputs}")
+    paths = filtered
+
+    exts = {p.suffix.lower() for p in paths}
+    first = paths[0]
+
+    if len(exts) > 1:
+        if exts == {".bin", ".npy"}:
+            npy_file = first.parent / "ops.npy"
+            bin_file = first.parent / "data_raw.bin"
+            md = np.load(str(npy_file), allow_pickle=True).item()
+            return Suite2pArray(bin_file, md)
+        raise ValueError(f"Multiple file types found in input: {exts!r}")
+
+    if first.suffix in [".tif", ".tiff"]:
+        if is_raw_scanimage(first):
+            return MBOScanArray(paths, roi=roi)
+        if has_mbo_metadata(first):
+            return MBOTiffArray(paths)
+        return TiffArray(paths)
+
+    if first.suffix == ".bin":
+        npy_file = first.parent / "ops.npy"
+        bin_file = first.parent / "data_raw.bin"
+        if npy_file.exists():
+            md = np.load(str(npy_file), allow_pickle=True).item()
+            return Suite2pArray(bin_file, md)
+        raise NotImplementedError("BIN files with metadata are not yet supported.")
+
+    if first.suffix == ".h5":
+        return H5Array(first)
+
+    if first.suffix == ".npy" and (first.parent / "pmd_demixer.npy").is_file():
+        return DemixingResultsArray(first.parent)
+
+    raise TypeError(f"Unsupported file type: {first.suffix}")

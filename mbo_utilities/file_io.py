@@ -331,7 +331,8 @@ class Scan_MBO(scans.ScanMultiROI):
     ):
         super().__init__(join_contiguous=True)
         self._metadata = {} # set when pages are read
-        self._selected_roi = roi
+        self._selected_roi = roi  # alias
+        self._roi = roi
         self._fix_phase = fix_phase
         self._phasecorr_method = phasecorr_method
         self.border: int | tuple[int, int, int, int] = border
@@ -369,7 +370,8 @@ class Scan_MBO(scans.ScanMultiROI):
 
     @property
     def metadata(self):
-        return self._metadata.update({
+        md = self._metadata.copy()
+        md.update({
             "fix_phase": self.fix_phase,
             "phasecorr_method": self.phasecorr_method,
             "offset": self.offset,
@@ -377,7 +379,7 @@ class Scan_MBO(scans.ScanMultiROI):
             "upsample": self.upsample,
             "max_offset": self.max_offset,
         })
-
+        return md
     @metadata.setter
     def metadata(self, value):
         self._metadata.update(value)
@@ -440,6 +442,22 @@ class Scan_MBO(scans.ScanMultiROI):
         if not isinstance(value, bool):
             raise ValueError("do_phasecorr must be a boolean value.")
         self._fix_phase = value
+
+    @property
+    def roi(self):
+        """
+        Get the current ROI index.
+        If roi is None, returns -1 to indicate no specific ROI.
+        """
+        return self._roi
+
+    @roi.setter
+    def roi(self, value):
+        """
+        Set the current ROI index.
+        If value is None, sets roi to -1 to indicate no specific ROI.
+        """
+        self._roi = value
 
     @property
     def selected_roi(self):

@@ -10,8 +10,6 @@ from .file_io import (
 )
 from .plot_util import save_png, save_mp4
 
-
-from .assembly import save_as, save_nonscan
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
 from .util import (
     norm_minmax,
@@ -52,8 +50,6 @@ __all__ = [
     "is_running_jupyter",
     "is_imgui_installed",  # we may just enforce imgui?
     # assembly
-    "save_as",
-    "save_nonscan",
     "save_mp4",
     "save_png",
 ]
