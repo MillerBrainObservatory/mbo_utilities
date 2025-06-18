@@ -107,8 +107,12 @@ def _save_data(
         if fname.exists() and not overwrite:
             print(f"File {fname} already exists with overwrite=False; skipping save.", flush=True)
             if pbar:
-                pbar.update(1)
-            break
+                # simulate full save for skipped file
+                nbytes_chan = data.shape[0] * data.shape[2] * data.shape[3] * 2
+                num_chunks = min(data.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
+                pbar.update(num_chunks)
+                pbar.set_description(f"Skipped plane {chan_index + 1}")
+            continue
 
         if pbar:
             pbar.set_description(f"Saving plane {chan_index + 1}")
@@ -132,7 +136,7 @@ def _save_data(
             )
             end = start + frames_in_this_chunk
             data_chunk = data[start:end, chan_index, :, :]
-            logger.info(
+            logger.debug(
                 f"Saving chunk {chunk + 1}/{num_chunks} for plane {chan_index + 1}:"
                 f" {data_chunk.shape} (frames, height, width)"
             )
