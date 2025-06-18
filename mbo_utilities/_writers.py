@@ -95,10 +95,7 @@ def _save_data(
     else:
         pbar=None
 
-    pre_exists = True
     for chan_index in planes:
-        pre_exists = False
-
         if ext == "bin":
             fname = outpath / f"plane{chan_index + 1}" / "data_raw.bin"
         else:

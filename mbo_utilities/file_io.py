@@ -331,7 +331,7 @@ class Scan_MBO(scans.ScanMultiROI):
     ):
         super().__init__(join_contiguous=True)
         self._metadata = {} # set when pages are read
-        self._selected_roi = roi  # alias
+        self.roi = roi  # alias
         self._roi = roi
         self._fix_phase = fix_phase
         self._phasecorr_method = phasecorr_method
@@ -461,21 +461,6 @@ class Scan_MBO(scans.ScanMultiROI):
         self._roi = value
 
     @property
-    def selected_roi(self):
-        """
-        Get the current ROI index.
-        If roi is None, returns -1 to indicate no specific ROI.
-        """
-        return self._selected_roi
-
-    @selected_roi.setter
-    def selected_roi(self, value):
-        """
-        Set the current ROI index.
-        """
-        self._selected_roi = value
-
-    @property
     def num_rois(self) -> int:
         if isinstance(self.rois, list):
             return len(self.rois)
@@ -548,10 +533,10 @@ class Scan_MBO(scans.ScanMultiROI):
         return out
 
     def process_rois(self, frames, chans):
-        if isinstance(self.selected_roi, list) or self.selected_roi == 0:
+        if isinstance(self.roi, list) or self.roi == 0:
             return tuple(self.process_single_roi(roi_idx, frames, chans) for roi_idx in range(self.num_rois))
-        elif self.selected_roi is not None and self.selected_roi > 0:
-            return self.process_single_roi(self.selected_roi - 1, frames, chans)
+        elif self.roi is not None and self.roi > 0:
+            return self.process_single_roi(self.roi - 1, frames, chans)
         else:
             # assembled
             H_out, W_out = self.field_heights[0], self.field_widths[0]
@@ -608,10 +593,10 @@ class Scan_MBO(scans.ScanMultiROI):
     @property
     def shape(self):
         """Shape is relative to the current ROI."""
-        if self.selected_roi is not None:
-            if not isinstance(self.selected_roi, (list, tuple)):
-                if self.selected_roi > 0:
-                    s = self.fields[0].output_xslices[self.selected_roi - 1]
+        if self.roi is not None:
+            if not isinstance(self.roi, (list, tuple)):
+                if self.roi > 0:
+                    s = self.fields[0].output_xslices[self.roi - 1]
                     width = s.stop - s.start
                     return (
                         self.total_frames,
