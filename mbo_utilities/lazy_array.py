@@ -47,24 +47,24 @@ SUPPORTED_FTYPES = (
 )
 
 def supports_roi(obj):
-    return hasattr(obj, "selected_roi") and hasattr(obj, "num_rois")
+    return hasattr(obj, "roi") and hasattr(obj, "num_rois")
 
 def iter_rois(obj):
     if not supports_roi(obj):
         yield None
         return
 
-    selected_roi = getattr(obj, "selected_roi", None)
+    roi = getattr(obj, "roi", None)
     num_rois = getattr(obj, "num_rois", 1)
 
-    if selected_roi is None:
+    if roi is None:
         yield from range(1, num_rois + 1)
-    elif isinstance(selected_roi, int):
-        yield selected_roi
-    elif isinstance(selected_roi, (list, tuple)):
-        yield from selected_roi
+    elif isinstance(roi, int):
+        yield roi
+    elif isinstance(roi, (list, tuple)):
+        yield from roi
     else:
-        yield selected_roi
+        yield roi
 
 @dataclass
 class DemixingResultsArray:
@@ -177,14 +177,13 @@ class MBOScanArray:
         self.data = Scan_MBO(self.roi,)
         self.data.read_data(self.fpath)  # metadata is set
         print('setting roi')
-        self.data.selected_roi = self.roi
         self._metadata.update(self.data.metadata)
         self.shape = self.data.shape
 
     @property
     def roi(self):
         if self.data is not None:
-            return self.data.selected_roi
+            return self.data.roi
         return self._roi
 
     @roi.setter
@@ -196,7 +195,7 @@ class MBOScanArray:
             self._roi = list(value)
         else:
             raise ValueError(f"Invalid ROI type: {type(value)}. Must be int, list, or None.")
-        self.data.selected_roi = self._roi
+        self.data.roi = self._roi
 
     def _imwrite(
             self,
@@ -209,23 +208,26 @@ class MBOScanArray:
             planes = None,
     ):
         start_time = time.time()
-        target = outpath if self.roi is None else outpath / f"roi{self.roi}"
-        target.mkdir(exist_ok=True)
 
-        md = self.metadata.copy()
-        self.selected_roi = self.roi
-        md["roi"] = self.roi
-        _save_data(
-            self,
-            target,
-            planes=planes,
-            overwrite=overwrite,
-            ext=ext,
-            target_chunk_mb=target_chunk_mb,
-            metadata=md,
-            progress_callback=progress_callback,
-            debug=debug,
-        )
+        for roi in self.roi:
+
+            target = outpath if self.roi is None else outpath / f"roi{roi}"
+            target.mkdir(exist_ok=True)
+
+            md = self.metadata.copy()
+            self.roi = roi
+            md["roi"] = roi
+            _save_data(
+                self,
+                target,
+                planes=planes,
+                overwrite=overwrite,
+                ext=ext,
+                target_chunk_mb=target_chunk_mb,
+                metadata=md,
+                progress_callback=progress_callback,
+                debug=debug,
+            )
 
         elapsed_time = time.time() - start_time
         print(f"Done saving ROI {roi}: {int(elapsed_time // 60)} min {int(elapsed_time % 60)} sec")
@@ -365,6 +367,7 @@ def imwrite(
         lazy_array,
         outpath: str | Path,
         planes: list | tuple = None,
+        roi: int | Sequence[int] | None = None,
         metadata: dict = None,
         overwrite: bool = True,
         ext: str = ".tiff",
@@ -388,6 +391,13 @@ def imwrite(
     if not outpath.parent.is_dir():
         raise ValueError(f"{outpath} is not inside a valid directory.")
     outpath.mkdir(exist_ok=True)
+
+    if roi is not None:
+        if not supports_roi(lazy_array):
+            raise ValueError(
+                f"{type(lazy_array)} does not support ROIs, but `roi` was provided."
+            )
+        lazy_array.roi = roi
 
     # Determine number of planes from lazy_array attributes
     # fallback to shape

@@ -376,9 +376,9 @@ class ROIMode(Enum):
 @property
 def roi_mode(self):
     # TODO: make this self.roi once Scan_MBO.roi is changed
-    if self.selected_roi is None:
+    if self.roi is None:
         return ROIMode.ALL
-    elif isinstance(self.selected_roi, int):
+    elif isinstance(self.roi, int):
         return ROIMode.SINGLE
     else:
         return ROIMode.MULTIPLE

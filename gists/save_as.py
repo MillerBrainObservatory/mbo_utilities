@@ -138,7 +138,6 @@ if __name__ == "__main__":
     scan = imread(
         r"/home/flynn/lbm_data/raw"
     )
-    scan.roi = [1, 2]
     scan.selected_roi = [1, 2]
     imwrite(
         scan,
