@@ -360,6 +360,7 @@ class Scan_MBO(scans.ScanMultiROI):
         )
 
     def read_data(self, filenames, dtype=np.int16):
+        filenames = expand_paths(filenames)
         super().read_data(filenames, dtype)
         self._metadata = get_metadata(self.tiff_files[0].filehandle.path)  # from the file
         self._metadata.update({"si": _make_json_serializable(self.tiff_files[0].scanimage_metadata)})
@@ -471,7 +472,6 @@ class Scan_MBO(scans.ScanMultiROI):
     def selected_roi(self, value):
         """
         Set the current ROI index.
-        If value is None, sets roi to -1 to indicate no specific ROI.
         """
         self._selected_roi = value
 
@@ -541,7 +541,10 @@ class Scan_MBO(scans.ScanMultiROI):
         if isinstance(z_key, int):
             squeeze.append(1)
         if squeeze:
-            out = out.squeeze(axis=tuple(squeeze))
+            if isinstance(out, tuple):
+                out = tuple(np.squeeze(x, axis=tuple(squeeze)) for x in out)
+            else:
+                out = np.squeeze(out, axis=tuple(squeeze))
         return out
 
     def process_rois(self, frames, chans):
@@ -560,13 +563,11 @@ class Scan_MBO(scans.ScanMultiROI):
             return out
 
     def process_single_roi(self, roi_idx, frames, chans):
-        xs = self.fields[0].xslices[roi_idx]
-        ys = self.fields[0].yslices[roi_idx]
         return self._read_pages(
             frames,
             chans,
-            yslice=ys,
-            xslice=xs
+            yslice=self.fields[0].yslices[roi_idx],
+            xslice=self.fields[0].xslices[roi_idx],
         )
 
     @property
