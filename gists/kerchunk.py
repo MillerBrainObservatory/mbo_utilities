@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 
-import asyncio
+import glfw
+from rendercanvas.glfw import GlfwRenderCanvas
+from rendercanvas.auto import loop
 import io
 import json
 from pathlib import Path
 import tempfile
 import shutil
+import zarr.core.sync
+import asyncio
+import zarr
+from zarr.core import sync
+import dask.array as da
 
 import numpy as np
 import tifffile
@@ -82,15 +89,15 @@ def create_combined_kerchunk_reference(tif_files: list[Path], base_dir: Path) ->
         {"_ARRAY_DIMENSIONS": ["T", "C", "Y", "X"][:len(total_shape)]}
     )
 
-    axis0_offset = 0
-    for inner_refs, shape in per_file_refs:
-        chunksize0 = total_chunks[0]
-        for key, val in inner_refs.items():
-            idx = list(map(int, key.strip("/").split(".")))
-            idx[0] += axis0_offset // chunksize0
-            new_key = ".".join(map(str, idx))
-            combined_refs[new_key] = val
-        axis0_offset += shape[0]
+    # axis0_offset = 0
+    # for inner_refs, shape in per_file_refs:
+    #     chunksize0 = total_chunks[0]
+    #     for key, val in inner_refs.items():
+    #         idx = list(map(int, key.strip("/").split(".")))
+    #         idx[0] += axis0_offset // chunksize0
+    #         new_key = ".".join(map(str, idx))
+    #         combined_refs[new_key] = val
+    #     axis0_offset += shape[0]
 
     return combined_refs
 
@@ -115,20 +122,20 @@ def save_fsspec(tiff_path: str | Path):
 def load_zarr_data(spec_path):
     store = zarr.storage.FsspecStore(ReferenceFileSystem(str(spec_path)))
     z_arr = zarr.open(store, mode="r",)
-    return z_arr
+    arr = da.from_zarr(z_arr, chunks=z_arr.chunks)
+    return arr
 
 # async def main():
-def main():
-    # spec_path = await asyncio.to_thread(save_fsspec, "/home/flynn/lbm_data/raw")
-    # z_arr = await load_zarr_data(spec_path)
+def get_iw():
     spec_path = save_fsspec("/home/flynn/lbm_data/raw")
     z_arr = load_zarr_data(spec_path)
     iw = fpl.ImageWidget(z_arr)
-    iw.show()
-    # begin main GUI rendering loop
-    fpl.loop.run()
-    # await fpl.loop.run()
+    return iw
 
 if __name__ == "__main__":
-    main()
+    import sniffio
+    libname = sniffio.current_async_library()
+    iw = get_iw()
+    iw.show()
+    loop.run()
     # asyncio.run(main())
