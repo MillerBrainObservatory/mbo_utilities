@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 
 import copy
 import logging
@@ -13,15 +14,24 @@ import dask.array as da
 from numpy import memmap, ndarray
 
 from . import log
+from mbo_utilities.file_io import Scan_MBO, read_scan, get_files, _make_json_serializable
 from mbo_utilities.metadata import is_raw_scanimage, get_metadata
-from .file_io import Scan_MBO, read_scan, get_files, _make_json_serializable
 from mbo_utilities.metadata import has_mbo_metadata
+from mbo_utilities.assembly import _save_data
+
 try:
     from suite2p.io import BinaryFile
     HAS_SUITE2P = True
 except ImportError:
     HAS_SUITE2P = False
     BinaryFile = None
+
+try:
+    from mbo_utilities.pipelines.masknmf import load_from_dir
+    HAS_MASKNMF = True
+except ImportError:
+    HAS_MASKNMF = False
+    load_from_dir = None
 
 logger = log.get("lazy_array")
 
@@ -66,7 +76,6 @@ class DemixingResultsLoader:
     plane_dir: Path
 
     def load(self):
-        from mbo_utilities.pipelines.masknmf import load_from_dir
         data = load_from_dir(self.plane_dir)
         return data["pmd_demixer"].results
 
@@ -176,9 +185,55 @@ class MBOScanLoader:
             out.append(s)
         return out
 
+    def write(self, scan: Scan_MBO, **kwargs):
+
+        planes = kwargs.get("planes")
+        overwrite = kwargs.get("overwrite", True)
+        ext = kwargs.get("ext", ".tiff")
+        trim_edge = kwargs.get("trim_edge", (0, 0, 0, 0))
+        fix_phase = kwargs.get("fix_phase", False)
+        save_phase_png = kwargs.get("save_phase_png", False)
+        target_chunk_mb = kwargs.get("target_chunk_mb", 20)
+        metadata = kwargs.get("metadata", {})
+        progress_callback = kwargs.get("progress_callback")
+        upsample = kwargs.get("upsample", 20)
+        debug = kwargs.get("debug", False)
+        savedir = Path(metadata["save_path"])
+
+        start_time = time.time()
+        for roi in [None] if scan.selected_roi is None else [scan.selected_roi]:
+            logger.info(f"Writing ROI {roi} to {savedir}")
+            target = savedir if roi is None else savedir / f"roi{roi}"
+            target.mkdir(exist_ok=True)
+
+            scan.selected_roi = roi
+            md = metadata.copy()
+            if roi is not None:
+                md["roi"] = roi
+
+            _save_data(
+                scan,
+                target,
+                planes=planes,
+                overwrite=overwrite,
+                ext=ext,
+                trim_edge=trim_edge,
+                fix_phase=fix_phase,
+                save_phase_png=save_phase_png,
+                target_chunk_mb=target_chunk_mb,
+                metadata=md,
+                progress_callback=progress_callback,
+                upsample=upsample,
+                debug=debug,
+            )
+
+        elapsed_time = time.time() - start_time
+        print(f"Done saving ROI {roi}: {int(elapsed_time // 60)} min {int(elapsed_time % 60)} sec")
+
     @property
     def metadata(self):  # anything you like
         return getattr(self._scan, "metadata", None)
+
 
 
 class _LazyH5Dataset:
@@ -533,7 +588,7 @@ class LazyArrayLoader:
             logger.info("Debug mode disabled; setting log level to WARNING.")
             logger.propagate = False  # don't send to terminal
 
-        lazy_array = LazyArrayLoader(lazy_array)
+        self = LazyArrayLoader(self)
 
         # save path
         savedir = Path(savedir)
@@ -543,17 +598,17 @@ class LazyArrayLoader:
 
         # Determine number of planes from lazy_array attributes
         # fallback to shape
-        if hasattr(lazy_array, "num_planes"):
-            num_planes = lazy_array.num_planes
-        elif hasattr(lazy_array, "num_channels"):
-            num_planes = lazy_array.num_channels
-        if hasattr(lazy_array, "metadata"):
-            if "num_planes" in lazy_array.metadata:
-                num_planes = lazy_array.metadata["num_planes"]
-            elif "num_channels" in lazy_array.metadata:
-                num_planes = lazy_array.metadata["num_channels"]
-        elif hasattr(lazy_array, 'ndim') and lazy_array.ndim >= 3:
-            num_planes = lazy_array.shape[1] if lazy_array.ndim == 4 else 1
+        if hasattr(self, "num_planes"):
+            num_planes = self.num_planes
+        elif hasattr(self, "num_channels"):
+            num_planes = self.num_channels
+        if hasattr(self, "metadata"):
+            if "num_planes" in self.metadata:
+                num_planes = self.metadata["num_planes"]
+            elif "num_channels" in self.metadata:
+                num_planes = self.metadata["num_channels"]
+        elif hasattr(self, 'ndim') and self.ndim >= 3:
+            num_planes = self.shape[1] if self.ndim == 4 else 1
         else:
             raise ValueError("Cannot determine the number of planes.")
 
@@ -569,7 +624,7 @@ class LazyArrayLoader:
         over_idx = [p for p in planes if p < 0 or p >= num_planes]
         if over_idx:
             raise ValueError(
-                f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{lazy_array.num_channels}"
+                f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{self.num_channels}"
             )
 
         if debug:
@@ -584,7 +639,7 @@ class LazyArrayLoader:
             planes = [planes[i] for i in order]
 
         # Handle metadata
-        file_metadata = lazy_array.metadata or {}
+        file_metadata = self.metadata or {}
         if metadata:
             if not isinstance(metadata, dict):
                 raise ValueError(
@@ -595,15 +650,13 @@ class LazyArrayLoader:
         file_metadata["save_path"] = str(savedir.resolve())
         logger.info(f"Final metadata: {file_metadata}")
 
-        lazy_array = lazy_array.load()
-        roi_list = list(iter_rois(lazy_array))
+        self = self.load()
+        roi_list = list(iter_rois(self))
 
         # Determine ROI list based on lazy_array's properties
         for roi in roi_list:
-            logger.info(f"Saving ROI {roi}" + (f" of {lazy_array.num_rois}" if supports_roi(lazy_array) else ""))
-
-        start_time = time.time()
-        pass
+            logger.info(f"Saving ROI {roi}" + (f" of {self.num_rois}" if supports_roi(self) else ""))
+        self.loader.write(self)
 
     @property
     def metadata(self):
