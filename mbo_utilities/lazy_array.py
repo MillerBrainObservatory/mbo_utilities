@@ -161,21 +161,42 @@ class Suite2pArray:
 @dataclass
 class MBOScanArray:
     fpath: list[Path]
-    roi: int | Sequence[int] | None = None
+    _roi: int | Sequence[int] | None = None
+    fix_phase: bool = False
+    upsample: int = 4
+    max_offset: int = 3
     data: Scan_MBO | None = field(init=False, default=None)
     shape: tuple[int, ...] = field(init=False, default=())
     _metadata: dict = field(init=False, default_factory=dict)
 
     def __getitem__(self, item):
         """Allow indexing into the Scan_MBO data."""
-        if self.data is None:
-            raise ValueError("Data not loaded yet. Call `load()` first.")
         return self.data[item]
 
     def __post_init__(self):
-        self.data = read_scan(self.fpath, roi=self.roi)
+        self.data = Scan_MBO(self.roi,)
+        self.data.read_data(self.fpath)  # metadata is set
+        print('setting roi')
+        self.data.selected_roi = self.roi
         self._metadata.update(self.data.metadata)
         self.shape = self.data.shape
+
+    @property
+    def roi(self):
+        if self.data is not None:
+            return self.data.selected_roi
+        return self._roi
+
+    @roi.setter
+    def roi(self, value: int | Sequence[int] | None):
+        """Set the ROI for the Scan_MBO data."""
+        if value is None or isinstance(value, int):
+            self._roi = value
+        elif isinstance(value, (list, tuple)):
+            self._roi = list(value)
+        else:
+            raise ValueError(f"Invalid ROI type: {type(value)}. Must be int, list, or None.")
+        self.data.selected_roi = self._roi
 
     def _imwrite(
             self,
@@ -188,26 +209,23 @@ class MBOScanArray:
             planes = None,
     ):
         start_time = time.time()
-        for roi in iter_rois(self):
-            logger.info(f"Writing ROI {roi} to {outpath}")
-            target = outpath if roi is None else outpath / f"roi{roi}"
-            target.mkdir(exist_ok=True)
-            self.selected_roi = roi
-            md = self.metadata.copy()
-            if roi is not None:
-                md["roi"] = roi
+        target = outpath if self.roi is None else outpath / f"roi{self.roi}"
+        target.mkdir(exist_ok=True)
 
-            _save_data(
-                self,
-                target,
-                planes=planes,
-                overwrite=overwrite,
-                ext=ext,
-                target_chunk_mb=target_chunk_mb,
-                metadata=md,
-                progress_callback=progress_callback,
-                debug=debug,
-            )
+        md = self.metadata.copy()
+        self.selected_roi = self.roi
+        md["roi"] = self.roi
+        _save_data(
+            self,
+            target,
+            planes=planes,
+            overwrite=overwrite,
+            ext=ext,
+            target_chunk_mb=target_chunk_mb,
+            metadata=md,
+            progress_callback=progress_callback,
+            debug=debug,
+        )
 
         elapsed_time = time.time() - start_time
         print(f"Done saving ROI {roi}: {int(elapsed_time // 60)} min {int(elapsed_time % 60)} sec")
@@ -480,9 +498,9 @@ def imread(
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            return MBOScanArray(paths, roi=roi)
+            return MBOScanArray(paths, **kwargs)
         if has_mbo_metadata(first):
-            return MBOTiffArray(paths)
+            return MBOTiffArray(paths, **kwargs)
         return TiffArray(paths)
 
     if first.suffix == ".bin":

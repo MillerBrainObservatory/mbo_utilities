@@ -135,8 +135,11 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     Path("/tmp/01").mkdir(exist_ok=True,)
 
-    scan = imread(r"/home/flynn/lbm_data/raw")
-    scan.roi = 2
+    scan = imread(
+        r"/home/flynn/lbm_data/raw"
+    )
+    scan.roi = [1, 2]
+    scan.selected_roi = [1, 2]
     imwrite(
         scan,
         "/tmp/01/output",
