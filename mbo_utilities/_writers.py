@@ -18,8 +18,8 @@ try:
     from suite2p.io import BinaryFile
     HAS_SUITE2P = True
 except ImportError:
-    HAS_SUITE2P = True
-    BInaryFIle = None
+    HAS_SUITE2P = False
+    BinaryFile = None
 
 if is_running_jupyter():
     from tqdm.notebook import tqdm
@@ -168,7 +168,8 @@ def _get_file_writer(ext, overwrite):
         )
     elif ext == "bin":
         if not HAS_SUITE2P:
-            raise ValueError("Suite2p not installed.")
+            raise ValueError("Suite2p needed to write binary files, please install it:\n"
+                             "pip install suite2p[io]")
         return functools.partial(
             _write_bin,
             overwrite=overwrite,

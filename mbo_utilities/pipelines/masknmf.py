@@ -1,12 +1,7 @@
 import numpy as np
 from pathlib import Path
 
-try:
-    import masknmf
-    HAS_MASKNMF = True
-except ImportError:
-    HAS_MASKNMF = False
-    masknmf = None
+import masknmf
 
 def load_from_dir(plane_dir):
     """
