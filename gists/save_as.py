@@ -136,11 +136,12 @@ if __name__ == "__main__":
     Path("/tmp/01").mkdir(exist_ok=True,)
 
     scan = imread(r"/home/flynn/lbm_data/raw")
-    scan.save_as(
+    imwrite(
+        scan,
         "/tmp/01/output",
         ext=".tiff",
         overwrite=False,
-        planes=[10, 11, 12]
+        planes=[10, 11],
     )
     scan.roi = 0
     scan.fix_phase = True

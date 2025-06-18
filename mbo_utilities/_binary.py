@@ -8,11 +8,14 @@
 # ///
 
 import os
-import shutil
-from pathlib import Path
-
-import fastplotlib as fpl
 import numpy as np
+from pathlib import Path
+import tifffile
+
+try:
+    from suite2p.io.binary import BinaryFile
+except ImportError:
+    BinaryFile = None
 
 
 class VolumetricBinaryFile:
@@ -51,7 +54,7 @@ class VolumetricBinaryFile:
             self._shape = shape
             mode = "r+"
 
-        self._file = np.memmap(
+        self._file = np.memmap(  # type: ignore # noqa: E501
             self.filename, mode=mode, dtype=self.dtype, shape=self._shape
         )
 
@@ -89,7 +92,7 @@ class VolumetricBinaryFile:
     def close(self):
         """Closes the memmap."""
         if hasattr(self._file, "_mmap"):
-            self._file._mmap.close()
+            self._file._mmap.close()  # type: ignore # noqa: E501
 
     def __enter__(self):
         return self
@@ -101,36 +104,19 @@ class VolumetricBinaryFile:
     def ndim(self):
         return len(self._shape)
 
+def tiff_to_binary(tiff_path, out_path, dtype="int16"):
+    data = tifffile.memmap(tiff_path)
+    out_path = Path(out_path).with_suffix(".bin")
 
-if __name__ == "__main__":
-    # 3D version (T, Y, X)
-    shape3d = (1000, 512, 512)
-    outfile3d = "movie_3d.bin"
-    # Create a new binary file and write data into it
-    data3d = np.random.randint(0, 2**15 - 1, size=shape3d, dtype="int16")
-    bf3d = VolumetricBinaryFile(shape3d, outfile3d, dtype="int16")
-    bf3d[:] = data3d
-    print("3D file saved. Shape:", bf3d.shape)
-    bf3d.close()
-    del bf3d
+    if data.ndim != 3:
+        raise ValueError("Must be assembled, 3D (T, Y, X)")
 
-    # Example for a 4D dataset (Z, T, Y, X)
-    shape4d = (5, 200, 512, 512)
-    outfile4d = "movie_4d.bin"
-    data4d = np.random.randint(0, 2**15 - 1, size=shape4d, dtype="int16")
-    bf4d = VolumetricBinaryFile(shape4d, outfile4d, dtype="int16")
-    bf4d[:] = data4d
-    print("4D file saved. Shape:", bf4d.shape)
-    bf4d.close()
-    del bf4d
+    nframes, x, y = data.shape
+    bf = BinaryFile(  # type: ignore # noqa
+        Ly=y, Lx=x, filename=str(Path(out_path)), n_frames=nframes, dtype=dtype
+    )
 
-    loaded = VolumetricBinaryFile(shape4d, outfile4d, dtype="int16")
-    iw = fpl.ImageWidget(loaded)
-    iw.show()
-    fpl.loop.run()
+    bf[:] = data
+    bf.close()
 
-    # delete the files
-    if Path("movie_3d.bin").exists():
-        shutil.rmtree("movie_3d.bin")
-    if Path("movie_4d.bin").exists():
-        shutil.rmtree("movie_4d.bin")
+    print(f"Wrote binary file '{out_path}' with {nframes} frames of shape ({x},{y}).")

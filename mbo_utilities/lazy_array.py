@@ -16,7 +16,7 @@ from . import log
 from mbo_utilities.file_io import Scan_MBO, read_scan, get_files, _make_json_serializable
 from mbo_utilities.metadata import is_raw_scanimage, get_metadata
 from mbo_utilities.metadata import has_mbo_metadata
-from .assembly import _save_data
+from ._writers import _save_data
 
 try:
     from suite2p.io import BinaryFile
@@ -177,9 +177,9 @@ class MBOScanArray:
         self._metadata.update(self.data.metadata)
         self.shape = self.data.shape
 
-    def imwrite(
+    def _imwrite(
             self,
-            outpath: Path | str | None = None,
+            outpath: Path | str,
             overwrite = False,
             target_chunk_mb = 50,
             ext = '.tiff',
@@ -420,17 +420,21 @@ def imwrite(
         file_metadata.update(metadata)
 
     file_metadata["save_path"] = str(outpath.resolve())
-    lazy_array.metadata.update(file_metadata)
+    if hasattr(lazy_array, "metadata"):
+        lazy_array.metadata.update(file_metadata)
 
-    lazy_array.imwrite(
-        outpath,
-        overwrite=overwrite,
-        target_chunk_mb=target_chunk_mb,
-        ext=ext,
-        progress_callback=progress_callback,
-        planes=planes,
-        debug=debug
-    )
+    if hasattr(lazy_array, "_imwrite"):
+        return lazy_array._imwrite(  # noqa
+            outpath,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            ext=ext,
+            progress_callback=progress_callback,
+            planes=planes,
+            debug=debug
+        )
+    else:
+        raise TypeError(f"{type(lazy_array)} does not implement an `imwrite()` method.")
 
 def _extract_metadata(lazy_array):
     """Extracts and initializes metadata."""
