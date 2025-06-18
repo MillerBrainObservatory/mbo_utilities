@@ -550,6 +550,7 @@ class Scan_MBO(scans.ScanMultiROI):
         elif self.selected_roi is not None and self.selected_roi > 0:
             return self.process_single_roi(self.selected_roi - 1, frames, chans)
         else:
+            # assembled
             H_out, W_out = self.field_heights[0], self.field_widths[0]
             out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
             for roi_idx in range(self.num_rois):
@@ -559,16 +560,14 @@ class Scan_MBO(scans.ScanMultiROI):
             return out
 
     def process_single_roi(self, roi_idx, frames, chans):
-        oxs = self.fields[0].output_xslices[roi_idx]
-        oys = self.fields[0].output_yslices[roi_idx]
         xs = self.fields[0].xslices[roi_idx]
         ys = self.fields[0].yslices[roi_idx]
-
-        H_roi, W_roi = oys.stop - oys.start, oxs.stop - oxs.start
-        if W_roi <= 0 or H_roi <= 0:
-            return np.empty((len(frames), len(chans), H_roi, W_roi), dtype=self.dtype)
-
-        return self._read_pages(frames, chans, yslice=ys, xslice=xs)
+        return self._read_pages(
+            frames,
+            chans,
+            yslice=ys,
+            xslice=xs
+        )
 
     @property
     def total_frames(self):
@@ -595,7 +594,6 @@ class Scan_MBO(scans.ScanMultiROI):
         """
         Returns the minimum value of the first tiff page.
         """
-        # page = self[(0, 0, slice(None), slice(None))]
         page = self.tiff_files[0].pages[0]
         return np.min(page.asarray())
 
@@ -656,14 +654,6 @@ class Scan_MBO(scans.ScanMultiROI):
         We override this because LBM should always be at a single scanning depth.
         """
         return [0]
-
-    def get_roi(self, tiff_file):
-        roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
-        roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
-        for roi_info in roi_infos:
-            roi_info["zs"] = [0]
-        rois = [ROI(roi_info) for roi_info in roi_infos]
-        return rois
 
     def _create_rois(self):
         """
