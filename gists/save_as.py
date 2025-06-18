@@ -132,32 +132,28 @@ class ShiftOffsetWidget(EdgeWindow):
 
 
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    Path("/tmp/01").mkdir(exist_ok=True,)
+
     # scan = LazyArrayLoader(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green").load()
     scan = LazyArrayLoader(r"/home/flynn/lbm_data/raw").load()
-
     scan.roi = 0
-    scan.fix_phase = False
-    data = scan[:, 10, :, :]
-    print(data.shape)
-    iw = fpl.ImageWidget(data)
-    gui = ShiftOffsetWidget(iw)
-    iw.figure.add_gui(gui)
-    iw.show()
-    fpl.loop.run()
+    scan.fix_phase = True
+    zplane = 10
+    data = scan[:20, zplane, :, :]
 
-    path = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green"
-    savedir = r"D:\tests_plane11"
-    test_scan = mbo.read_scan(
-        path,
-        roi=2,
-        phasecorr_method="mean",
-    )
-    test_scan.roi = 2
-    test_scan.fix_phase = False
+    title = f"200 frames, {data.shape[0]} planes, plane {zplane}"
+    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+    ax[0].imshow(data.mean(axis=0)[200:280, 300:380], cmap="gray", vmin=-300, vmax=2500)
+    ax[1].imshow(data.mean(axis=0), cmap="gray", vmin=-300, vmax=2500)
+    plt.title(title)
+    plt.savefig("/tmp/01/both.png")
+    print(data.shape)
+
     mbo.save_as(
-        test_scan,
-        savedir,
+        "/home/flynn/lbm_data/raw",
+        "/tmp/01/output",
         ext=".tiff",
         overwrite=False,
-        planes=[11, 12, 13, 14]
+        planes=[10, 11, 12]
     )
