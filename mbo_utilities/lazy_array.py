@@ -13,7 +13,7 @@ import dask.array as da
 from numpy import memmap, ndarray
 
 from . import log
-from mbo_utilities.file_io import Scan_MBO, read_scan, get_files
+from mbo_utilities.file_io import Scan_MBO, get_files
 from mbo_utilities.metadata import is_raw_scanimage
 from mbo_utilities.metadata import has_mbo_metadata
 from ._writers import _save_data
@@ -176,7 +176,6 @@ class MBOScanArray:
     def __post_init__(self):
         self.data = Scan_MBO(self.roi,)
         self.data.read_data(self.fpath)  # metadata is set
-        print('setting roi')
         self._metadata.update(self.data.metadata)
         self.shape = self.data.shape
 
@@ -210,7 +209,6 @@ class MBOScanArray:
         start_time = time.time()
 
         for roi in self.roi:
-
             target = outpath if self.roi is None else outpath / f"roi{roi}"
             target.mkdir(exist_ok=True)
 
@@ -228,9 +226,8 @@ class MBOScanArray:
                 progress_callback=progress_callback,
                 debug=debug,
             )
-
-        elapsed_time = time.time() - start_time
-        print(f"Done saving ROI {roi}: {int(elapsed_time // 60)} min {int(elapsed_time % 60)} sec")
+            elapsed_time = time.time() - start_time
+            print(f"Done saving ROI {roi}: {int(elapsed_time // 60)} min {int(elapsed_time % 60)} sec")
 
     @property
     def metadata(self):  # anything you like
@@ -508,7 +505,7 @@ def imread(
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            return MBOScanArray(paths, **kwargs)
+            return MBOScanArray(paths, _roi=roi, **kwargs)
         if has_mbo_metadata(first):
             return MBOTiffArray(paths, **kwargs)
         return TiffArray(paths)
