@@ -13,8 +13,8 @@ import dask.array as da
 from numpy import memmap, ndarray
 
 from . import log
-from mbo_utilities.file_io import Scan_MBO, read_scan, get_files, _make_json_serializable
-from mbo_utilities.metadata import is_raw_scanimage, get_metadata
+from mbo_utilities.file_io import Scan_MBO, read_scan, get_files
+from mbo_utilities.metadata import is_raw_scanimage
 from mbo_utilities.metadata import has_mbo_metadata
 from ._writers import _save_data
 
@@ -103,7 +103,7 @@ class _Suite2pLazyArray:
             return self._bf[key]
 
         if isinstance(key, slice):
-            idxs = range(*key.indices(self.shape[0]))
+            idxs = range(*key.indices(self.shape[0]))   # type: ignore
             return np.stack([self._bf[i] for i in idxs], axis=0)
 
         t, y, x = key
@@ -435,16 +435,6 @@ def imwrite(
         )
     else:
         raise TypeError(f"{type(lazy_array)} does not implement an `imwrite()` method.")
-
-def _extract_metadata(lazy_array):
-    """Extracts and initializes metadata."""
-    if isinstance(lazy_array, MBOScanArray):
-        example_tiff = lazy_array.fpath[0]
-        si_metadata = _make_json_serializable(read_scan([example_tiff]).metadata)
-        lazy_array.metadata = get_metadata(example_tiff)
-        lazy_array.metadata.update({"si": si_metadata})
-    else:
-        lazy_array.metadata = {}
 
 def imread(
         inputs: str | Path | Sequence[str | Path],
