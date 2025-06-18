@@ -1,4 +1,6 @@
 import pytest
+import time
+import json
 from pathlib import Path
 
 import numpy as np
@@ -6,6 +8,15 @@ from icecream import ic
 from tifffile import imread
 
 import mbo_utilities as mbo
+
+try:
+    import dask.array as da
+    import zarr
+except ImportError:
+    raise ImportError(
+        "Dask and Zarr are required for this test. "
+        "Please install them with `pip install dask zarr`."
+    )
 
 ic.enable()
 
@@ -16,6 +27,61 @@ DATA_ROOT = Path(r"D:\tests\data")
 skip_if_missing_data = pytest.mark.skipif(
     not DATA_ROOT.is_dir(), reason=f"Test data directory not found: {DATA_ROOT}"
 )
+
+
+def _benchmark_indexing(
+        arrays: dict[str, np.ndarray | da.Array | zarr.Array],
+        save_path: Path,
+        num_repeats: int = 5,
+        index_slices: dict[str, tuple[slice | int, ...]] = None,
+        label: str = None,
+):
+
+    if index_slices is None:
+        index_slices = {
+            "[:200,0,:,:]": (slice(0, 200), 0, slice(None), slice(None)),
+            "[:,0,:40,:40]": (slice(None), 0, slice(0, 40), slice(0, 40)),
+        }
+
+    results = {}
+    for name, array in arrays.items():
+        results[name] = {}
+        for label_idx, idx in index_slices.items():
+            times = []
+            for _ in range(num_repeats):
+                t0 = time.perf_counter()
+                _ = array[idx]
+                if isinstance(_, da.Array):
+                    _.compute()
+                elif hasattr(_, "read"):  # lazy zarr reads
+                    np.array(_)  # force read
+                t1 = time.perf_counter()
+                times.append(t1 - t0)
+            results[name][label_idx] = {
+                "min": min(times),
+                "max": max(times),
+                "mean": sum(times) / len(times),
+            }
+
+    # Append to log
+    save_path = Path(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    entry = {
+        "label": label or "Unnamed Run",
+        "index_slices": list(index_slices.keys()),
+        "results": results,
+    }
+
+    if save_path.exists():
+        with save_path.open("a") as f:
+            f.write("\n" + "-" * 80 + "\n")
+            json.dump(entry, f, indent=2)
+    else:
+        with save_path.open("w") as f:
+            json.dump(entry, f, indent=2)
+
+    return results
 
 
 @skip_if_missing_data
