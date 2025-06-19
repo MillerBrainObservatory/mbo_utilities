@@ -23,7 +23,6 @@ from imgui_bundle import (
 from mbo_utilities.file_io import (
     SAVE_AS_TYPES,
     get_mbo_dirs,
-    read_scan,
 )
 from mbo_utilities.array_types import MboRawArray
 from mbo_utilities.graphics._imgui import begin_popup_size, ndim_to_frame, style_seaborn_dark
@@ -34,7 +33,7 @@ from mbo_utilities.graphics.progress_bar import (
 )
 from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
 from mbo_utilities.lazy_array import imread, imwrite
-from mbo_utilities.phasecorr import nd_windowed, apply_scan_phase_offsets
+from mbo_utilities.phasecorr import apply_scan_phase_offsets
 from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler, GUI_LOGGERS
 from mbo_utilities import log
 
@@ -1061,27 +1060,32 @@ class PreviewDataWidget(EdgeWindow):
 
     def _compute_zstats_single_roi(self, data_ix, arr):
         self.logger.info(f"Computing z-statistics for ROI {data_ix + 1}")
-        if HAS_TORCH:
-            if isinstance(arr, torch.Tensor):
-                arr = arr[:]  # dense array (torch.Tensor or ndarray)
+
+        if HAS_TORCH and isinstance(arr, torch.Tensor):
+            arr = arr[:]  # make sure it's dense
+
         if arr.ndim == 3:
-            arr = arr[:, None, :, :] if HAS_TORCH and isinstance(arr, torch.Tensor) else arr[:, np.newaxis, :, :]
+            arr = arr[:, np.newaxis, :, :]
 
         stats = {"mean": [], "std": [], "snr": []}
         means = []
 
         for z in range(self.nz):
-            self.logger.info(
-                f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {data_ix + 1} --",
-            )
-            stack = arr[:, z].astype(np.float32)
+            self.logger.info(f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {data_ix + 1} --")
+
+            stack = arr[:, z]
+            if hasattr(stack, "astype"):  # works for Dask and NumPy
+                stack = stack.astype(np.float32)
+            if hasattr(stack, "compute"):
+                stack = stack.compute()
+
             mean_img = np.mean(stack, axis=0)
             std_img = np.std(stack, axis=0)
             snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
 
-            stats["mean"].append(np.mean(mean_img))
-            stats["std"].append(np.mean(std_img))
-            stats["snr"].append(np.mean(snr_img))
+            stats["mean"].append(float(np.mean(mean_img)))
+            stats["std"].append(float(np.mean(std_img)))
+            stats["snr"].append(float(np.mean(snr_img)))
             means.append(mean_img)
 
             self.logger.info(
