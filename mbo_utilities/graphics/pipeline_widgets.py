@@ -7,7 +7,7 @@ import numpy as np
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
 from mbo_utilities import get_metadata, get_mbo_dirs
-from mbo_utilities.file_io import _make_json_serializable
+from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities.graphics._widgets import set_tooltip
 from mbo_utilities.lazy_array import imread
 

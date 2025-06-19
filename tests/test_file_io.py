@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 import time
 import json
@@ -5,9 +7,11 @@ from pathlib import Path
 
 import numpy as np
 from icecream import ic
-from tifffile import imread
+from tifffile import imread as tfile_imread
 
 import mbo_utilities as mbo
+from mbo_utilities.lazy_array import imread as mbo_imread, imwrite as mbo_imwrite
+from mbo_utilities._parsing import _get_git_commit, _increment_label, _load_existing
 
 try:
     import dask.array as da
@@ -28,15 +32,13 @@ skip_if_missing_data = pytest.mark.skipif(
     not DATA_ROOT.is_dir(), reason=f"Test data directory not found: {DATA_ROOT}"
 )
 
-
 def _benchmark_indexing(
-        arrays: dict[str, np.ndarray | da.Array | zarr.Array],
-        save_path: Path,
-        num_repeats: int = 5,
-        index_slices: dict[str, tuple[slice | int, ...]] = None,
-        label: str = None,
+    arrays: dict[str, np.ndarray | da.Array | zarr.Array],
+    save_path: Path,
+    num_repeats: int = 5,
+    index_slices: dict[str, tuple[slice | int, ...]] = None,
+    label: str = None,
 ):
-
     if index_slices is None:
         index_slices = {
             "[:200,0,:,:]": (slice(0, 200), 0, slice(None), slice(None)),
@@ -50,39 +52,36 @@ def _benchmark_indexing(
             times = []
             for _ in range(num_repeats):
                 t0 = time.perf_counter()
-                _ = array[idx]
-                if isinstance(_, da.Array):
-                    _.compute()
-                elif hasattr(_, "read"):  # lazy zarr reads
-                    np.array(_)  # force read
+                val = array[idx]
+                if isinstance(val, da.Array):
+                    val.compute()
+                elif hasattr(val, "read"):
+                    np.array(val)
                 t1 = time.perf_counter()
                 times.append(t1 - t0)
             results[name][label_idx] = {
-                "min": min(times),
-                "max": max(times),
-                "mean": sum(times) / len(times),
+                "min": round(min(times), 3),
+                "max": round(max(times), 3),
+                "mean": round(sum(times) / len(times), 3),
             }
 
-    # Append to log
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
+    existing = _load_existing(save_path)
+    final_label = _increment_label(existing, label or "Unnamed Run")
+
     entry = {
-        "label": label or "Unnamed Run",
+        "uuid": str(uuid.uuid4()),
+        "git_commit": _get_git_commit(),
+        "label": final_label,
         "index_slices": list(index_slices.keys()),
         "results": results,
     }
 
-    if save_path.exists():
-        with save_path.open("a") as f:
-            f.write("\n" + "-" * 80 + "\n")
-            json.dump(entry, f, indent=2)
-    else:
-        with save_path.open("w") as f:
-            json.dump(entry, f, indent=2)
-
+    existing.append(entry)
+    save_path.write_text(json.dumps(existing, indent=2))
     return results
-
 
 @skip_if_missing_data
 def test_metadata():
@@ -153,33 +152,33 @@ def test_imgui_check():
 def test_demo_files(roi, subdir):
     ASSEMBLED.mkdir(exist_ok=True)
     files = mbo.get_files(BASE, "tif")
+    lazy_array = mbo_imread(files, roi=roi)
 
     save_dir = ASSEMBLED / subdir if subdir else ASSEMBLED
-    scan = mbo.read_scan(files, roi=roi)
-    mbo.save_as(
-        scan,
+    mbo_imwrite(
+        lazy_array,
         save_dir,
         ext=".tiff",
         overwrite=True,
-        fix_phase=False,
         planes=[1, 7, 14],
     )
 
-    out = mbo.get_files(ASSEMBLED, "plane", max_depth=2)
+    out = mbo.get_files(save_dir, "plane", max_depth=2)
     assert out, "No plane files written"
+    assert len(out) == 3, "Expected 3 plane files"
 
 
 @pytest.fixture
 def plane_paths():
-    return mbo.get_files(ASSEMBLED, "plane_01.tif", max_depth=3)
+    return mbo.get_files(ASSEMBLED, "plane", max_depth=3)
 
 
 def test_full_contains_rois_side_by_side(plane_paths):
     # map parent‐dir → path, e.g. "full", "roi1", "roi2"
     by_dir = {Path(p).parent.name: Path(p) for p in plane_paths}
-    full = imread(by_dir["full"])
-    roi1 = imread(by_dir["roi1"])
-    roi2 = imread(by_dir["roi2"])
+    full = tfile_imread(by_dir["full"])
+    roi1 = tfile_imread(by_dir["roi1"])
+    roi2 = tfile_imread(by_dir["roi2"])
 
     T, H, W = full.shape
     assert roi1.shape == (T, H, W // 2)
@@ -194,15 +193,11 @@ def test_full_contains_rois_side_by_side(plane_paths):
 def test_overwrite_false_skips_existing(tmp_path, capsys):
     # First write with overwrite=True
     files = mbo.get_files(BASE, "tif")
-    scan = mbo.read_scan(files, roi=None)
-    mbo.save_as(
-        scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1]
-    )
-
+    scan = mbo_imread(files)
+    scan.data.fix_phase = False
+    mbo_imwrite(scan, ASSEMBLED, ext=".tiff", overwrite=True, planes=[1])
     # Capture output of second call with overwrite=False
-    mbo.save_as(
-        scan, ASSEMBLED, ext=".tiff", overwrite=False, fix_phase=False, planes=[1]
-    )
+    mbo_imwrite(scan, ASSEMBLED, ext=".tiff", overwrite=False, planes=[1])
     captured = capsys.readouterr().out
 
     assert "All output files exist; skipping save." in captured
@@ -210,21 +205,15 @@ def test_overwrite_false_skips_existing(tmp_path, capsys):
 
 @skip_if_missing_data
 def test_overwrite_true_rewrites(tmp_path, capsys):
-    # first write with overwrite=True
+    # First write with overwrite=True
     files = mbo.get_files(BASE, "tif")
-    scan = mbo.read_scan(files, roi=None)
-    mbo.save_as(
-        scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1]
-    )
-
-    # second write with overwrite=True
-    mbo.save_as(
-        scan, ASSEMBLED, ext=".tiff", overwrite=True, fix_phase=False, planes=[1]
-    )
+    scan = mbo_imread(files)
+    scan.data.fix_phase = False
+    mbo_imwrite(scan, ASSEMBLED, ext=".tiff", overwrite=True, planes=[1])
+    # Capture output of second call with overwrite=True
+    mbo_imwrite(scan, ASSEMBLED, ext=".tiff", overwrite=True, planes=[1])
     captured = capsys.readouterr().out
-
-    # Should not skip entirely
-    assert "All output files exist; skipping save." not in captured
+    assert "Overwriting existing files." in captured
 
     # And it should print the elapsed‐time message twice (once per call)
     assert captured.count("Time elapsed:") >= 2

@@ -13,6 +13,7 @@ import dask.array as da
 from tifffile import TiffFile
 
 from . import log
+from ._parsing import _make_json_serializable
 from .metadata import is_raw_scanimage, get_metadata
 from .phasecorr import nd_windowed, ALL_PHASECORR_METHODS
 from .scanreader import scans, utils
@@ -934,18 +935,5 @@ def get_mbo_dirs() -> dict:
         "data": data,
     }
 
-def _make_json_serializable(obj):
-    """Convert metadata to JSON serializable format."""
-    if isinstance(obj, dict):
-        return {k: _make_json_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_make_json_serializable(v) for v in obj]
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, (np.integer, np.floating)):
-        return obj.item()
-    return obj
-
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
-
