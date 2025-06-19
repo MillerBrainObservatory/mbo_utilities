@@ -2,6 +2,8 @@
 Some classes used for MultiROI scan processing.
 Adapted from the Tolias Laboratory https://github.com/atlab/scanreader.
 """
+from __future__ import annotations
+
 from enum import Enum
 import numpy as np
 
@@ -382,3 +384,28 @@ def roi_mode(self):
         return ROIMode.SINGLE
     else:
         return ROIMode.MULTIPLE
+
+
+def supports_roi(obj):
+    return hasattr(obj, "roi") and hasattr(obj, "num_rois")
+
+
+def iter_rois(obj):
+    if not supports_roi(obj):
+        yield None
+        return
+
+    roi = getattr(obj, "roi", None)
+    num_rois = getattr(obj, "num_rois", 1)
+
+    if roi == 0:
+        for i in range(1, num_rois + 1):
+            yield i
+    elif roi is None:
+        yield None
+    elif isinstance(roi, int):
+        yield roi
+    elif isinstance(roi, (list, tuple)):
+        yield from roi
+    else:
+        yield roi

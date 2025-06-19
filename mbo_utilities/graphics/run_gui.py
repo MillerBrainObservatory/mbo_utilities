@@ -2,18 +2,14 @@ import copy
 from pathlib import Path
 
 import click
-import numpy as np
 
-# force import to ensure glfw is initialized before fastplotlib
-import glfw
-from rendercanvas.glfw import GlfwRenderCanvas, loop
 import fastplotlib as fpl
 from imgui_bundle import immapp, hello_imgui
 
-from mbo_utilities import get_mbo_dirs
-from mbo_utilities.graphics.imgui import PreviewDataWidget
+from mbo_utilities.graphics.display import imshow_lazy_array
 from mbo_utilities.lazy_array import imread
 from mbo_utilities.graphics._file_dialog import FileDialog
+from mbo_utilities.file_io import get_mbo_dirs
 
 try:
     # setup_imgui()
@@ -75,31 +71,21 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
 
     data_array = imread(data_in, roi=roi)
     if hasattr(data_array, "imshow"):
-        data_array.imshow()
-        fpl.loop.run()
-        return
-
-    if isinstance(data_array, list):
-        names   = [f"ROI {i+1}" for i in range(len(data_array))]
+        iw = imshow_lazy_array(data_array, widget=widget, threading_enabled=threading)
     else:
-        names   = [f"Data with shape: {data_array.shape}"]
-
-    a0 = data_array[0] if isinstance(data_array, list) else data_array
-    iw = fpl.ImageWidget(
-        data=data_array,
-        names=names,
-        histogram_widget=True,
-        figure_kwargs={"size": (800, 1000),},  # "canvas": canvas},
-        graphic_kwargs={"vmin": a0.min(), "vmax": a0.max()},
-        window_funcs={"t": (np.mean, 0)},
+        iw = fpl.ImageWidget(
+            data=data_array,
+            histogram_widget=True,
+            figure_kwargs={"size": (800, 1000)},
+            graphic_kwargs={"vmin": data_array.min(), "vmax": data_array.max()},
         )
-    if widget:
-        gui = PreviewDataWidget(iw=iw, fpath=data_in, threading_enabled=threading, size=350)
-        iw.figure.add_gui(gui)
-
     iw.show()
+    if widget:
+        from mbo_utilities.graphics.imgui import PreviewDataWidget
+        gui = PreviewDataWidget(iw=iw, fpath=data_array.filenames, threading_enabled=threading, size=350)
+        iw.figure.add_gui(gui)
     fpl.loop.run()
-
+    return
 
 if __name__ == "__main__":
     run_gui()  # type: ignore # noqa
