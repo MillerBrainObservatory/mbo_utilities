@@ -25,7 +25,7 @@ from mbo_utilities.file_io import (
     get_mbo_dirs,
     read_scan,
 )
-from mbo_utilities.lazy_array import MboRawArray
+from mbo_utilities.array_types import MboRawArray
 from mbo_utilities.graphics._imgui import begin_popup_size, ndim_to_frame, style_seaborn_dark
 from mbo_utilities.graphics._widgets import set_tooltip, checkbox_with_tooltip, draw_scope
 from mbo_utilities.graphics.progress_bar import (
@@ -33,6 +33,7 @@ from mbo_utilities.graphics.progress_bar import (
     draw_saveas_progress,
 )
 from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
+from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.phasecorr import nd_windowed, apply_scan_phase_offsets
 from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler, GUI_LOGGERS
 from mbo_utilities import log
@@ -61,45 +62,9 @@ from fastplotlib.ui import EdgeWindow
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
 USER_PIPELINES = ["suite2p", "masknmf"]
 
-
-def _save_as_worker(
-    path: str | Path,
-    savedir: str | Path,
-    planes: list | tuple = None,
-    metadata: dict = None,
-    overwrite: bool = True,
-    ext: str = ".tiff",
-    order: list | tuple = None,
-    trim_edge: list | tuple = (0, 0, 0, 0),
-    fix_phase: bool = False,
-    target_chunk_mb: int = 20,
-    debug: bool = False,
-    progress_callback=None,
-    **kwargs,
-):
-    """
-    read scan from path for threading
-    there must be a better way to do this
-    """
-    scan = read_scan(path, roi=kwargs.get("roi", None))
-    if fix_phase:
-        scan.fix_phase = True
-    # TODO
-    pass
-    # save_as(
-    #     scan,
-    #     savedir=savedir,
-    #     planes=planes,
-    #     metadata=metadata,
-    #     overwrite=overwrite,
-    #     ext=ext,
-    #     order=order,
-    #     trim_edge=trim_edge,
-    #     target_chunk_mb=target_chunk_mb,
-    #     progress_callback=progress_callback,
-    #     debug=debug,
-    # )
-
+def _save_as_worker(path, **imwrite_kwargs):
+    data = imread(path, roi=imwrite_kwargs.pop("roi", None))
+    imwrite(data, **imwrite_kwargs)
 
 @dataclass
 class SaveStatus:
@@ -363,7 +328,7 @@ def draw_popups(parent):
 
         if imgui.button("Save", imgui.ImVec2(100, 0)):
             if not parent._saveas_outdir:
-                parent._saveas_outdir = get_mbo_dirs()["base"].joinpath("data")
+                parent._saveas_outdir = get_mbo_dirs()["data"].joinpath("data")
             try:
                 save_planes = [p + 1 for p in parent._selected_planes]
                 parent._saveas_total = len(save_planes)
@@ -381,17 +346,14 @@ def draw_popups(parent):
 
                 save_kwargs = {
                     "path": parent.fpath,
-                    "savedir": parent._saveas_outdir,
+                    "outpath": parent._saveas_outdir,
                     "planes": save_planes,
                     "roi": rois,
                     "overwrite": parent._overwrite,
-                    "fix_phase": parent._fix_phase,
                     "debug": parent._debug,
                     "ext": parent._ext,
-                    "save_phase_png": parent._saveas_save_phase_png,
                     "target_chunk_mb": parent._saveas_chunk_mb,
-                    "progress_callback": lambda frac,
-                                                current_plane: parent.gui_progress_callback(
+                    "progress_callback": lambda frac, current_plane: parent.gui_progress_callback(
                         frac, current_plane
                     ),
                 }
@@ -571,7 +533,10 @@ class PreviewDataWidget(EdgeWindow):
             threading.Thread(target=self.compute_zstats, daemon=True).start()
 
     def set_context_info(self):
-        title = f"Filepath: {self.fpath}"
+        if isinstance(self.fpath, list):
+            title = f"{[Path(f).stem for f in self.fpath]}"
+        else:
+            title = f"Filepath: {Path(self.fpath).stem}"
         self.image_widget.figure.canvas.set_title(str(title))
 
     @property
@@ -589,13 +554,6 @@ class PreviewDataWidget(EdgeWindow):
             return [array.offset for array in self.image_widget.data]
         else:
             raise NotImplementedError("Scan-phase correction is only implemented for MBO scans.")
-            # frame: tuple[np.ndarray, ...] = self.get_raw_frame()
-            # return [compute_scan_phase_offsets(
-            #     frame,
-            #     upsample=self.phase_upsample,
-            #     border=self.border,
-            #     max_offset=self.max_offset,
-            # ) for _ in self.image_widget.data]
 
     @property
     def fix_phase(self):
@@ -1103,9 +1061,8 @@ class PreviewDataWidget(EdgeWindow):
 
     def _compute_zstats_single_roi(self, data_ix, arr):
         self.logger.info(f"Computing z-statistics for ROI {data_ix + 1}")
-
-        if isinstance(arr, torch.Tensor):
-            if HAS_TORCH:
+        if HAS_TORCH:
+            if isinstance(arr, torch.Tensor):
                 arr = arr[:]  # dense array (torch.Tensor or ndarray)
         if arr.ndim == 3:
             arr = arr[:, None, :, :] if HAS_TORCH and isinstance(arr, torch.Tensor) else arr[:, np.newaxis, :, :]

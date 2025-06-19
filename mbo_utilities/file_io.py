@@ -366,7 +366,7 @@ def read_scan(
 
     Returns
     -------
-    mbo_utilities.lazy_array.MboRawArray
+    mbo_utilities.array_types.MboRawArray
         A scan object with metadata and lazily loaded data. Raises FileNotFoundError
         if no files match the specified path(s).
 
