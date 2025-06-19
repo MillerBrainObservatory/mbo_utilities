@@ -934,12 +934,13 @@ def get_mbo_dirs() -> dict:
     imgui = base.joinpath("imgui")
     cache = base.joinpath("cache")
     logs = base.joinpath("logs")
+    tests = base.joinpath("tests")
     data = base.joinpath("data")
 
     assets = imgui.joinpath("assets")
     settings = assets.joinpath("app_settings")
 
-    for d in (base, imgui, cache, logs, assets, data):
+    for d in (base, imgui, cache, logs, assets, data, tests):
         d.mkdir(exist_ok=True)
 
     return {
@@ -950,6 +951,7 @@ def get_mbo_dirs() -> dict:
         "assets": assets,
         "settings": settings,
         "data": data,
+        "tests": tests,
     }
 
 def _convert_range_to_slice(k):
