@@ -25,7 +25,7 @@ from mbo_utilities.file_io import (
     get_mbo_dirs,
     read_scan,
 )
-from mbo_utilities.lazy_array import Scan_MBO
+from mbo_utilities.lazy_array import MboRawArray
 from mbo_utilities.graphics._imgui import begin_popup_size, ndim_to_frame, style_seaborn_dark
 from mbo_utilities.graphics._widgets import set_tooltip, checkbox_with_tooltip, draw_scope
 from mbo_utilities.graphics.progress_bar import (
@@ -495,7 +495,7 @@ class PreviewDataWidget(EdgeWindow):
         else:
             self.nz = 1
 
-        self.is_mbo_scan = True if isinstance(self.image_widget.data[0], Scan_MBO) else False
+        self.is_mbo_scan = True if isinstance(self.image_widget.data[0], MboRawArray) else False
         if self.is_mbo_scan:
             for arr in self.image_widget.data:
                 arr.fix_phase = False
@@ -606,7 +606,7 @@ class PreviewDataWidget(EdgeWindow):
         self._fix_phase = value
         if self.is_mbo_scan:
             for arr in self.image_widget.data:
-                if isinstance(arr, Scan_MBO):
+                if isinstance(arr, MboRawArray):
                     arr.fix_phase = value
         else:
             self.update_frame_apply()
@@ -622,7 +622,7 @@ class PreviewDataWidget(EdgeWindow):
     def border(self, value):
         self._border = value
         for arr in self.image_widget.data:
-            if isinstance(arr, Scan_MBO):
+            if isinstance(arr, MboRawArray):
                 arr.border = value
                 self.logger.info(f"Border set to {value}.")
             else:
@@ -639,7 +639,7 @@ class PreviewDataWidget(EdgeWindow):
     def max_offset(self, value):
         self._max_offset = value
         for arr in self.image_widget.data:
-            if isinstance(arr, Scan_MBO):
+            if isinstance(arr, MboRawArray):
                 arr.max_offset = value
                 self.logger.info(f"Max offset set to {value}.")
             else:
@@ -716,7 +716,7 @@ class PreviewDataWidget(EdgeWindow):
         self._phase_upsample = value
         if self.is_mbo_scan:
             for arr in self.image_widget.data:
-                if isinstance(arr, Scan_MBO):
+                if isinstance(arr, MboRawArray):
                     arr.upsample = value
         else:
             self.logger.warning(

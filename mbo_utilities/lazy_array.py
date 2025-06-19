@@ -170,7 +170,7 @@ class Suite2pArray:
         return _Suite2pLazyArray(self.metadata)
 
 @dataclass
-class MBOScanArray:
+class MBORawArray2:
     fpath: list[Path]
     init_roi: int | None = None
     fix_phase: bool = False
@@ -178,7 +178,7 @@ class MBOScanArray:
     max_offset: int = 3
     phasecorr_method: str = "frame"
     metadata: dict = field(init=False, default_factory=dict)
-    data: Scan_MBO | None = field(init=False, default=None)
+    data: MboRawArray | None = field(init=False, default=None)
     shape: tuple[int, ...] = field(init=False, default=())
 
     @property
@@ -205,7 +205,7 @@ class MBOScanArray:
         return self.data[item]
 
     def __post_init__(self):
-        self.data = Scan_MBO(
+        self.data = MboRawArray(
             roi=self.init_roi,
             phasecorr_method=self.phasecorr_method,
             fix_phase=self.fix_phase,
@@ -215,54 +215,6 @@ class MBOScanArray:
         self.data.read_data(self.fpath)  # metadata is set
         self.metadata.update(self.data.metadata)
         self.shape = self.data.shape
-
-    def _imwrite(
-            self,
-            outpath: Path | str,
-            overwrite = False,
-            target_chunk_mb = 50,
-            ext = '.tiff',
-            progress_callback = None,
-            debug = None,
-            planes = None,
-    ):
-        for roi in iter_rois(self.data):
-            target = outpath if self.roi is None else outpath / f"roi{roi}"
-            target.mkdir(exist_ok=True)
-
-            md = self.metadata.copy()
-            md["roi"] = roi
-            if self.data.reference:
-                data = ZarrScanView(
-                    self.data.as_zarr(),
-                    ys=self.yslices,
-                    xs=self.xslices,
-                    oys=self.output_yslices,
-                    oxs=self.output_xslices,
-                    roi=roi,
-                )
-            else:
-                data = self
-
-            print(self.data.roi)
-            _save_data(
-                data,
-                target,
-                planes=planes,
-                overwrite=overwrite,
-                ext=ext,
-                target_chunk_mb=target_chunk_mb,
-                metadata=md,
-                progress_callback=progress_callback,
-                debug=debug,
-            )
-
-    def imshow(self, **kwargs):
-        try:
-            from mbo_utilities.graphics.display import imshow_lazy_array
-        except ImportError:
-            raise ImportError("fastplotlib must be installed to use `.imshow()`.")
-        return imshow_lazy_array(self, **kwargs)
 
 class _LazyH5Dataset:
     def __init__(self, fpath: Path | str, ds: str = "mov"):
@@ -368,7 +320,6 @@ class NpyArray:
         arr = np.load(str(self.fpath), mmap_mode="r")
         return arr
 
-
 @dataclass
 class TiffArray:
     fpath: list[Path]
@@ -382,7 +333,6 @@ class TiffArray:
                 f" falling back to imread"
             )
             return tifffile.imread(str(self.fpath), mode="r")
-
 
 def imwrite(
         lazy_array,
@@ -493,7 +443,7 @@ def imread(
 ):
     if isinstance(inputs, np.ndarray):
         return inputs
-    if isinstance(inputs, Scan_MBO):
+    if isinstance(inputs, MboRawArray):
         return inputs
 
     if isinstance(inputs, (str, Path)):
@@ -529,7 +479,7 @@ def imread(
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            return MBOScanArray(paths, init_roi=roi, **kwargs)
+            return MBORawArray(paths, init_roi=roi, **kwargs)
         if has_mbo_metadata(first):
             return MBOTiffArray(paths, **kwargs)
         return TiffArray(paths)
@@ -550,55 +500,7 @@ def imread(
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
 
-
-class ZarrScanView:
-    def __init__(self, zarr_array, ys, xs, oys, oxs, roi=None, metadata=None):
-        self.z = zarr_array
-        self.yslices = ys
-        self.xslices = xs
-        self.oyslices = oys
-        self.oxslices = oxs
-        self.num_rois = len(ys)
-        self.shape = zarr_array.shape
-        self.roi = roi
-        self.metadata = metadata or {}
-
-    def __getitem__(self, key):
-        key = (key,) if not isinstance(key, tuple) else key
-        t_key, z_key, *_ = (key + (slice(None),) * 4)[:4]
-
-        if self.roi is not None:
-            def extract_roi(r):
-                return self.z[t_key, z_key, self.yslices[r], self.xslices[r]]
-            if self.roi == 0:
-                return tuple(extract_roi(r) for r in range(self.num_rois))
-            if isinstance(self.roi, (list, tuple)):
-                return tuple(extract_roi(r - 1) for r in self.roi)
-            if isinstance(self.roi, int):
-                return extract_roi(self.roi - 1)
-            raise ValueError(f"Invalid ROI type: {type(self.roi)}")
-
-        t_len = 1 if isinstance(t_key, int) else len(np.arange(*t_key.indices(self.shape[0])))
-        z_len = 1 if isinstance(z_key, int) else len(np.arange(*z_key.indices(self.shape[1])))
-        h = self.oyslices[0].stop - self.oyslices[0].start
-        w = max(s.stop for s in self.oxslices)
-        print((h, w))
-        assembled = np.zeros((t_len, z_len, h, w), dtype=self.z.dtype)
-
-        for ys, xs, oys, oxs in zip(self.yslices, self.xslices, self.oyslices, self.oxslices):
-            sub = self.z[t_key, z_key, ys, xs]
-            if sub.ndim == 3:
-                sub = sub[:, np.newaxis, :, :]
-            elif sub.ndim == 2:
-                sub = sub[np.newaxis, np.newaxis, :, :]
-            h, w = sub.shape[-2:]
-            print("--")
-            print((h, w))
-            assembled[..., oys.start:oys.start + h, oxs.start:oxs.start + w] = sub
-        return assembled
-
-
-class Scan_MBO(scans.ScanMultiROI):
+class MboRawArray(scans.ScanMultiROI):
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
@@ -1030,3 +932,84 @@ class Scan_MBO(scans.ScanMultiROI):
         Calculate the size of the scan and subsample to keep under memory limits.
         """
         return subsample_array(self, ignore_dims=[-1, -2, -3])
+
+    def _imwrite(
+            self,
+            outpath: Path | str,
+            overwrite = False,
+            target_chunk_mb = 50,
+            ext = '.tiff',
+            progress_callback = None,
+            debug = None,
+            planes = None,
+    ):
+        for roi in iter_rois(self):
+            target = outpath if self.roi is None else outpath / f"roi{roi}"
+            target.mkdir(exist_ok=True)
+
+            md = self.metadata.copy()
+            md["roi"] = roi
+            _save_data(
+                self,
+                target,
+                planes=planes,
+                overwrite=overwrite,
+                ext=ext,
+                target_chunk_mb=target_chunk_mb,
+                metadata=md,
+                progress_callback=progress_callback,
+                debug=debug,
+            )
+
+    def imshow(self, **kwargs):
+        try:
+            from mbo_utilities.graphics.display import imshow_lazy_array
+        except ImportError:
+            raise ImportError("fastplotlib must be installed to use `.imshow()`.")
+        return imshow_lazy_array(self, **kwargs)
+
+class ZarrScanView:
+    def __init__(self, zarr_array, ys, xs, oys, oxs, roi=None, metadata=None):
+        self.z = zarr_array
+        self.yslices = ys
+        self.xslices = xs
+        self.oyslices = oys
+        self.oxslices = oxs
+        self.num_rois = len(ys)
+        self.shape = zarr_array.shape
+        self.roi = roi
+        self.metadata = metadata or {}
+
+    def __getitem__(self, key):
+        key = (key,) if not isinstance(key, tuple) else key
+        t_key, z_key, *_ = (key + (slice(None),) * 4)[:4]
+
+        if self.roi is not None:
+            def extract_roi(r):
+                return self.z[t_key, z_key, self.yslices[r], self.xslices[r]]
+            if self.roi == 0:
+                return tuple(extract_roi(r) for r in range(self.num_rois))
+            if isinstance(self.roi, (list, tuple)):
+                return tuple(extract_roi(r - 1) for r in self.roi)
+            if isinstance(self.roi, int):
+                return extract_roi(self.roi - 1)
+            raise ValueError(f"Invalid ROI type: {type(self.roi)}")
+
+        t_len = 1 if isinstance(t_key, int) else len(np.arange(*t_key.indices(self.shape[0])))
+        z_len = 1 if isinstance(z_key, int) else len(np.arange(*z_key.indices(self.shape[1])))
+        h = self.oyslices[0].stop - self.oyslices[0].start
+        w = max(s.stop for s in self.oxslices)
+        print((h, w))
+        assembled = np.zeros((t_len, z_len, h, w), dtype=self.z.dtype)
+
+        for ys, xs, oys, oxs in zip(self.yslices, self.xslices, self.oyslices, self.oxslices):
+            sub = self.z[t_key, z_key, ys, xs]
+            if sub.ndim == 3:
+                sub = sub[:, np.newaxis, :, :]
+            elif sub.ndim == 2:
+                sub = sub[np.newaxis, np.newaxis, :, :]
+            h, w = sub.shape[-2:]
+            print("--")
+            print((h, w))
+            assembled[..., oys.start:oys.start + h, oxs.start:oxs.start + w] = sub
+        return assembled

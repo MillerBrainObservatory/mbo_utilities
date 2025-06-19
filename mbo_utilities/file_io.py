@@ -13,7 +13,7 @@ import dask.array as da
 from tifffile import TiffFile
 
 from . import log
-from .lazy_array import Scan_MBO
+from .lazy_array import MboRawArray
 from .metadata import is_raw_scanimage
 
 try:
@@ -367,7 +367,7 @@ def read_scan(
 
     Returns
     -------
-    mbo_utilities.lazy_array.Scan_MBO
+    mbo_utilities.lazy_array.MboRawArray
         A scan object with metadata and lazily loaded data. Raises FileNotFoundError
         if no files match the specified path(s).
 
@@ -395,7 +395,7 @@ def read_scan(
             f"The file {filenames[0]} does not appear to be a raw ScanImage TIFF file."
         )
 
-    scan = Scan_MBO(
+    scan = MboRawArray(
         roi=roi,
         fix_phase=fix_phase,
         phasecorr_method=phasecorr_method,
