@@ -73,10 +73,8 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
             click.echo("No file selected, exiting.")
             return
 
-    lazy_obj  = imread(data_in, rois=roi)
+    arrays = imread(data_in, roi=roi)
 
-    # arrays  = lazy_obj.loader.rois or [lazy_obj.loader.load()]  # fall back to whole data
-    arrays  = lazy_obj.load()
     if isinstance(arrays, list):
         names   = [f"ROI {i+1}" for i in range(len(arrays))]
     else:
