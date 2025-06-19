@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import pandas as pd
 import glfw
 import time
 from typing import Any
@@ -31,24 +32,30 @@ import subprocess
 tests_dir = get_mbo_dirs()["tests"]
 
 if __name__ == "__main__":
+    from mbo_utilities.file_io import Scan_MBO, get_files, ZarrScanView
     from mbo_utilities._benchmark import _benchmark_indexing
+
     data = imread(r"/home/flynn/lbm_data/raw")
     zarray = data.as_zarr()
     darray = data.as_dask()
-
-    _benchmark_indexing(
-        arrays={
-            "Zarr": zarray,
-            "Dask": darray,
-        },
-        save_path=tests_dir / "benchmark_indexing.json",
-        num_repeats=5,
-        index_slices={
-            "[:200,0,:,:]": (slice(0, 200), 0, slice(None), slice(None)),
-            "[:,0,:40,:40]": (slice(None), 0, slice(0, 40), slice(0, 40)),
-            "[0,0,:,:]": (0, 0, slice(None), slice(None)),
-        },
+    zarray_view = ZarrScanView(
+        data.as_zarr(),
+        yslices=data.data.yslices,
+        xslices=data.data.xslices
     )
+    print(f"Zarr shape: {zarray.shape}, Dask shape: {darray.shape}, Zarr-View shape: {zarray_view.shape}")
+
+    # _benchmark_indexing(
+    #     label="No Sub",
+    #     arrays={
+    #         "Zarr": zarray,
+    #         "Dask": darray,
+    #         "Zarr-View": zarray_view,
+    #     },
+    #     save_path=tests_dir / "benchmark.json",
+    #     num_repeats=5,
+    # )
+    #
     # fpl.ImageWidget([zarray, darray], names=["Zarr", "Dask"], histogram_widget=True).show()
 
     # data.imshow()

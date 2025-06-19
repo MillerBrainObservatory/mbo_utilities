@@ -410,6 +410,110 @@ def read_scan(
     scan.read_data(filenames, dtype=dtype)
     return scan
 
+class ZarrScanView2:
+    def __init__(self, zarr_array, ys, xs, oys, oxs, roi=None, metadata={}):
+        self.z = zarr_array  # zarr or dask backed
+        self.yslices = ys
+        self.xslices = xs
+        self.oyslices = oys
+        self.oxslices = oxs
+        self.num_rois = len(ys)
+        self.shape = self.z.shape
+        self.roi = roi
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+        t_key, z_key, y_key, x_key = (key + (slice(None),) * 4)[:4]
+
+        if self.roi is not None:
+            if isinstance(self.roi, (list, tuple)):
+                return tuple(
+                    self.z[t_key, z_key, self.yslices[r - 1], self.xslices[r - 1]]
+                    for r in self.roi
+                )
+            elif self.roi == 0:
+                return tuple(
+                    self.z[t_key, z_key, self.yslices[r], self.xslices[r]]
+                    for r in range(self.num_rois)
+                )
+            elif isinstance(self.roi, int):
+                return self.z[t_key, z_key, self.yslices[self.roi - 1], self.xslices[self.roi - 1]]
+            else:
+                raise ValueError(f"Invalid ROI type: {type(self.roi)}. Expected int, list, or None.")
+        else:
+            print("Concatenating ROI's")
+            t_len = 1 if isinstance(t_key, int) else len(np.arange(*t_key.indices(self.shape[0])))
+            z_len = 1 if isinstance(z_key, int) else len(np.arange(*z_key.indices(self.shape[1])))
+            assembled = np.zeros(
+                (t_len, z_len,
+                 self.oyslices[0].stop - self.oyslices[0].start,
+                 max(s.stop for s in self.oxslices)),
+                dtype=self.z.dtype
+            )
+            for r in range(self.num_rois):
+                xs, ys = self.xslices[r], self.yslices[r]
+                oxs, oys = self.oxslices[r], self.oyslices[r]
+                print(f"ROI {r}: ys={ys}, xs={xs}")
+                print(f"ROI {r}: oys={oys}, oxs={oxs}")
+                print(f"ROI {r}: input zarr shape={self.z.shape}")
+
+                sub = self.z[t_key, z_key, ys, xs]
+                if sub.ndim == 3:
+                    sub = sub[:, np.newaxis, :, :]
+                elif sub.ndim == 2:
+                    sub = sub[np.newaxis, np.newaxis, :, :]
+                h, w = sub.shape[-2:]
+                assembled[..., oys.start:oys.start + h, oxs.start:oxs.start + w] = sub
+            return assembled
+
+class ZarrScanView:
+    def __init__(self, zarr_array, ys, xs, oys, oxs, roi=None, metadata=None):
+        self.z = zarr_array
+        self.yslices = ys
+        self.xslices = xs
+        self.oyslices = oys
+        self.oxslices = oxs
+        self.num_rois = len(ys)
+        self.shape = zarr_array.shape
+        self.roi = roi
+        self.metadata = metadata or {}
+
+    def __getitem__(self, key):
+        key = (key,) if not isinstance(key, tuple) else key
+        t_key, z_key, *_ = (key + (slice(None),) * 4)[:4]
+
+        if self.roi is not None:
+            def extract_roi(r):
+                return self.z[t_key, z_key, self.yslices[r], self.xslices[r]]
+            if self.roi == 0:
+                return tuple(extract_roi(r) for r in range(self.num_rois))
+            if isinstance(self.roi, (list, tuple)):
+                return tuple(extract_roi(r - 1) for r in self.roi)
+            if isinstance(self.roi, int):
+                return extract_roi(self.roi - 1)
+            raise ValueError(f"Invalid ROI type: {type(self.roi)}")
+
+        t_len = 1 if isinstance(t_key, int) else len(np.arange(*t_key.indices(self.shape[0])))
+        z_len = 1 if isinstance(z_key, int) else len(np.arange(*z_key.indices(self.shape[1])))
+        h = self.oyslices[0].stop - self.oyslices[0].start
+        w = max(s.stop for s in self.oxslices)
+        print((h, w))
+        assembled = np.zeros((t_len, z_len, h, w), dtype=self.z.dtype)
+
+        for ys, xs, oys, oxs in zip(self.yslices, self.xslices, self.oyslices, self.oxslices):
+            sub = self.z[t_key, z_key, ys, xs]
+            if sub.ndim == 3:
+                sub = sub[:, np.newaxis, :, :]
+            elif sub.ndim == 2:
+                sub = sub[np.newaxis, np.newaxis, :, :]
+            h, w = sub.shape[-2:]
+            print("--")
+            print((h, w))
+            assembled[..., oys.start:oys.start + h, oxs.start:oxs.start + w] = sub
+        return assembled
+
+
 class Scan_MBO(scans.ScanMultiROI):
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
@@ -437,6 +541,7 @@ class Scan_MBO(scans.ScanMultiROI):
         self.pbar = None
         self.show_pbar = False
         self._offset = 0.0
+        self.use_zarr = True
 
         # Debugging toggles
         self.debug_flags = {
@@ -632,16 +737,33 @@ class Scan_MBO(scans.ScanMultiROI):
     def output_yslices(self):
         return self.fields[0].output_yslices
 
-    def _read_pages(
-        self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
-    ):
+    def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs):
         C = self.num_channels
         pages = [f * C + c for f in frames for c in chans]
 
         H = len(utils.listify_index(yslice, self._page_height))
         W = len(utils.listify_index(xslice, self._page_width))
-        buf = np.empty((len(pages), H, W), dtype=self.dtype)
 
+        if getattr(self, "use_zarr", False):
+            zarray = self.as_zarr()
+            buf = np.empty((len(pages), H, W), dtype=self.dtype)
+            for i, page in enumerate(pages):
+                f, c = divmod(page, C)
+                buf[i] = zarray[f, c, yslice, xslice]
+
+            if self.fix_phase:
+                self.logger.debug(f"Applying phase correction with strategy: {self.phasecorr_method}")
+                buf, self.offset = nd_windowed(
+                    buf,
+                    method=self.phasecorr_method,
+                    upsample=self.upsample,
+                    max_offset=self.max_offset,
+                    border=self.border,
+                )
+            return buf.reshape(len(frames), len(chans), H, W)
+
+        # TIFF path
+        buf = np.empty((len(pages), H, W), dtype=self.dtype)
         start = 0
         for tf in self.tiff_files:
             end = start + len(tf.pages)
@@ -651,8 +773,50 @@ class Scan_MBO(scans.ScanMultiROI):
                 continue
 
             frame_idx = [pages[i] - start for i in idxs]
+            chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
 
-            # shape = (n_frames_in_chunk, H, W)
+            if self.fix_phase:
+                self.logger.debug(f"Applying phase correction with strategy: {self.phasecorr_method}")
+                corrected, self.offset = nd_windowed(
+                    chunk,
+                    method=self.phasecorr_method,
+                    upsample=self.upsample,
+                    max_offset=self.max_offset,
+                    border=self.border,
+                )
+                buf[idxs] = corrected
+            else:
+                buf[idxs] = chunk
+            start = end
+
+        return buf.reshape(len(frames), len(chans), H, W)
+
+    def _read_pages2(
+        self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
+    ):
+        C = self.num_channels
+        pages = [f * C + c for f in frames for c in chans]
+
+        H = len(utils.listify_index(yslice, self._page_height))
+        W = len(utils.listify_index(xslice, self._page_width))
+        if getattr(self, "use_zarr", False):
+            zarray = self.as_zarr()
+            buf = np.empty((len(frames), len(chans), H, W), dtype=self.dtype)
+            for fi, f in enumerate(frames):
+                for ci, c in enumerate(chans):
+                    buf[fi, ci] = zarray[f, c, yslice, xslice]
+            return buf
+
+        buf = np.empty((len(pages), H, W), dtype=self.dtype)
+        start = 0
+        for tf in self.tiff_files:
+            end = start + len(tf.pages)
+            idxs = [i for i, p in enumerate(pages) if start <= p < end]
+            if not idxs:
+                start = end
+                continue
+
+            frame_idx = [pages[i] - start for i in idxs]
             chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
 
             if self.fix_phase:
@@ -669,6 +833,35 @@ class Scan_MBO(scans.ScanMultiROI):
                 buf[idxs] = chunk
             start = end
         return buf.reshape(len(frames), len(chans), H, W)
+
+    def _read_from_zarr(self, t_key, z_key):
+        if self.roi is not None:
+            def extract(r):
+                return self.zarr_array[t_key, z_key, self.yslices[r], self.xslices[r]]
+
+            if self.roi == 0:
+                return tuple(extract(r) for r in range(self.num_rois))
+            if isinstance(self.roi, (list, tuple)):
+                return tuple(extract(r - 1) for r in self.roi)
+            if isinstance(self.roi, int):
+                return extract(self.roi - 1)
+            raise ValueError(f"Invalid ROI type: {type(self.roi)}")
+
+        t_len = 1 if isinstance(t_key, int) else len(np.arange(*t_key.indices(self.shape[0])))
+        z_len = 1 if isinstance(z_key, int) else len(np.arange(*z_key.indices(self.shape[1])))
+        h = self.output_yslices[0].stop - self.output_yslices[0].start
+        w = max(s.stop for s in self.output_xslices)
+        assembled = np.zeros((t_len, z_len, h, w), dtype=self.zarr_array.dtype)
+
+        for ys, xs, oys, oxs in zip(self.yslices, self.xslices, self.output_yslices, self.output_xslices):
+            sub = self.zarr_array[t_key, z_key, ys, xs]
+            if sub.ndim == 3:
+                sub = sub[:, np.newaxis, :, :]
+            elif sub.ndim == 2:
+                sub = sub[np.newaxis, np.newaxis, :, :]
+            h, w = sub.shape[-2:]
+            assembled[..., oys.start:oys.start + h, oxs.start:oxs.start + w] = sub
+        return assembled
 
     def __getitem__(self, key):
         if not isinstance(key, tuple):
@@ -699,12 +892,14 @@ class Scan_MBO(scans.ScanMultiROI):
         return out
 
     def process_rois(self, frames, chans):
-        if isinstance(self.roi, list) or self.roi == 0:
-            return tuple(self.process_single_roi(roi_idx, frames, chans) for roi_idx in range(self.num_rois))
-        elif self.roi is not None and self.roi > 0:
-            return self.process_single_roi(self.roi - 1, frames, chans)
+        if self.roi is not None:
+            if isinstance(self.roi, list):
+                return tuple(self.process_single_roi(roi_idx - 1, frames, chans) for roi_idx in self.roi)
+            elif self.roi == 0:
+                return tuple(self.process_single_roi(roi_idx, frames, chans) for roi_idx in range(self.num_rois))
+            elif isinstance(self.roi, int):
+                return self.process_single_roi(self.roi - 1, frames, chans)
         else:
-            # assembled
             H_out, W_out = self.field_heights[0], self.field_widths[0]
             out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
             for roi_idx in range(self.num_rois):
@@ -724,7 +919,6 @@ class Scan_MBO(scans.ScanMultiROI):
     @property
     def total_frames(self):
         return sum(len(tf.pages) // self.num_channels for tf in self.tiff_files)
-
 
     @property
     def num_planes(self):

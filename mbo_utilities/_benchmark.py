@@ -35,25 +35,37 @@ def _benchmark_indexing(
 ):
     if index_slices is None:
         index_slices = {
-            "[:200,0,:,:]": (slice(0, 200), 0, slice(None), slice(None)),
-            "[:,0,:40,:40]": (slice(None), 0, slice(0, 40), slice(0, 40)),
+            "[:10, :, 100:200, 100:200]": (slice(0, 10), slice(None), slice(100, 200), slice(100, 200)),
+            "[5, 0, :, :]": (5, 0, slice(None), slice(None)),
+            "[:200, 0, ::2, ::2]": (slice(None), slice(None), slice(None, None, 2), slice(None, None, 2)),
+            "[-1, :, :, :]": (-1, slice(None), slice(None), slice(None)),
+            "[:5, :2, :100, :]": (slice(0, 5), slice(0, 2), slice(0, 100), slice(None)),
+            "[0, :, 50, :]": (0, slice(None), 50, slice(None)),
         }
 
     results = {}
     for name, array in arrays.items():
         results[name] = {}
-        for label_idx, idx in index_slices.items():
+        for label_idx, indices in index_slices.items():
             times = []
+            val = None
             for _ in range(num_repeats):
                 t0 = time.perf_counter()
-                val = array[idx]
+                try:
+                    val = array[indices]
+                except (IndexError, ValueError):
+                    print(f"Error indexing {name} with {indices}")
+                    continue
                 if isinstance(val, da.Array):
                     val.compute()
                 elif hasattr(val, "read"):
                     np.array(val)
+
                 t1 = time.perf_counter()
                 times.append(t1 - t0)
+            out_shape = tuple(val.shape) if hasattr(val, "shape") else None
             results[name][label_idx] = {
+                "shape": out_shape,
                 "min": round(min(times), 3),
                 "max": round(max(times), 3),
                 "mean": round(sum(times) / len(times), 3),
