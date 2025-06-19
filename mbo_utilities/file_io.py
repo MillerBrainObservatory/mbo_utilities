@@ -475,6 +475,23 @@ class Scan_MBO(scans.ScanMultiROI):
         self.reference = combined_json_path
         return combined_json_path
 
+    def as_dask(self):
+        """
+        Convert the current scan data to a Dask array.
+        This will create a Dask array in the same directory as the reference file.
+        """
+        if not HAS_ZARR:
+            raise ImportError("Zarr is not installed. Please install it to use this method.")
+        if not Path(self.reference).is_file():
+            raise FileNotFoundError(
+                f"Reference file {self.reference} does not exist. "
+                "Please call save_fsspec() first."
+            )
+        return da.from_zarr(
+            FsspecStore(ReferenceFileSystem(str(self.reference))),
+            chunks=CHUNKS,
+        )
+
     def as_zarr(self):
         """
         Convert the current scan data to a Zarr array.
