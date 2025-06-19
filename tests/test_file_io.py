@@ -1,3 +1,4 @@
+import os
 import uuid
 
 import pytest
@@ -24,9 +25,10 @@ except ImportError:
 
 ic.enable()
 
-BASE = Path(r"D:\tests\data")
+DEFAULT_DATA_ROOT = Path(r"D:\tests\data")
+DATA_ROOT = Path(os.getenv("MBO_TEST_DATA", DEFAULT_DATA_ROOT))
+BASE = DATA_ROOT
 ASSEMBLED = BASE / "assembled"
-DATA_ROOT = Path(r"D:\tests\data")
 
 skip_if_missing_data = pytest.mark.skipif(
     not DATA_ROOT.is_dir(), reason=f"Test data directory not found: {DATA_ROOT}"
@@ -217,3 +219,30 @@ def test_overwrite_true_rewrites(tmp_path, capsys):
 
     # And it should print the elapsed‐time message twice (once per call)
     assert captured.count("Time elapsed:") >= 2
+
+@skip_if_missing_data
+def benchmark_indexing_test(tmp_path):
+    """Benchmark indexing performance for different array types."""
+    files = mbo.get_files(BASE, "tif")
+    scan = mbo_imread(files)
+
+    # Convert to dask and zarr
+    dask_array = scan.data.as_dask()
+    zarr_array = scan.data.as_zarr()
+
+    arrays = {
+        "numpy": scan.data,
+        "dask": dask_array,
+        "zarr": zarr_array,
+    }
+
+    save_path = tmp_path / "benchmark_results.json"
+    results = _benchmark_indexing(
+        arrays=arrays,
+        save_path=save_path,
+        num_repeats=3,
+        label="Indexing Benchmark",
+    )
+
+    assert isinstance(results, dict)
+    assert len(results) == 3
