@@ -118,7 +118,7 @@ def _save_data(
         metadata_plane = metadata.copy()
 
         metadata["save_path"] = str(fname.parent.expanduser().resolve())
-        metadata_plane["plane"] = chan_index + 1 # 1-based indexing
+        metadata_plane["plane"] = chan_index + 1
         metadata_plane["plane_index"] = chan_index
 
         nbytes_chan = data.shape[0] * data.shape[2] * data.shape[3] * 2
