@@ -41,6 +41,7 @@ def _close_tiff_writers():
             writer.close()
         _write_tiff._writers.clear()
 
+
 def _save_data(
     data: Any | list[Any],
     outpath: str | Path,

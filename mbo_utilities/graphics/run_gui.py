@@ -73,28 +73,25 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
             click.echo("No file selected, exiting.")
             return
 
-    arrays = imread(data_in, roi=roi)
+    data_array = imread(data_in, roi=roi)
+    if hasattr(data_array, "imshow"):
+        data_array.imshow()
+        fpl.loop.run()
+        return
 
-    if isinstance(arrays, list):
-        names   = [f"ROI {i+1}" for i in range(len(arrays))]
+    if isinstance(data_array, list):
+        names   = [f"ROI {i+1}" for i in range(len(data_array))]
     else:
-        names   = [f"Data with shape: {arrays.shape}"]
+        names   = [f"Data with shape: {data_array.shape}"]
 
-    a0 = arrays[0] if isinstance(arrays, list) else arrays
-
-    if hasattr(arrays, "pmd_array"):
-        iw = make_demixing_video(
-                arrays, device='cpu',
-                v_range=(-300, 2400)
-            )
-    else:
-        iw = fpl.ImageWidget(
-            data=arrays,
-            names=names,
-            histogram_widget=True,
-            figure_kwargs={"size": (800, 1000),},  # "canvas": canvas},
-            graphic_kwargs={"vmin": a0.min(), "vmax": a0.max()},
-            window_funcs={"t": (np.mean, 0)},
+    a0 = data_array[0] if isinstance(data_array, list) else data_array
+    iw = fpl.ImageWidget(
+        data=data_array,
+        names=names,
+        histogram_widget=True,
+        figure_kwargs={"size": (800, 1000),},  # "canvas": canvas},
+        graphic_kwargs={"vmin": a0.min(), "vmax": a0.max()},
+        window_funcs={"t": (np.mean, 0)},
         )
     if widget:
         gui = PreviewDataWidget(iw=iw, fpath=data_in, threading_enabled=threading, size=350)

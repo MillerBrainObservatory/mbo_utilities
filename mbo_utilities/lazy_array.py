@@ -62,7 +62,6 @@ def iter_rois(obj):
 
     roi = getattr(obj, "roi", None)
     num_rois = getattr(obj, "num_rois", 1)
-    print((roi, num_rois))
 
     if roi == 0:
         for i in range(1, num_rois + 1):
@@ -75,6 +74,7 @@ def iter_rois(obj):
         yield from roi
     else:
         yield roi
+
 
 @dataclass
 class DemixingResultsArray:
@@ -168,53 +168,6 @@ class Suite2pArray:
         """
         return _Suite2pLazyArray(self.metadata)
 
-@dataclass
-class MBORawArray2:
-    fpath: list[Path]
-    init_roi: int | None = None
-    fix_phase: bool = False
-    upsample: int = 4
-    max_offset: int = 3
-    phasecorr_method: str = "frame"
-    metadata: dict = field(init=False, default_factory=dict)
-    data: MboRawArray | None = field(init=False, default=None)
-    shape: tuple[int, ...] = field(init=False, default=())
-
-    @property
-    def roi(self):
-        return self.data.roi
-
-    @roi.setter
-    def roi(self, value):
-        self.data.roi = value
-
-    def __getattr__(self, name):
-        return getattr(self.data, name)
-
-    def __setattr__(self, name, value):
-        if name in {"data", "_roi", "shape", "_metadata", "fpath"} or name.startswith("_"):
-            super().__setattr__(name, value)
-        elif hasattr(self, "data") and self.data is not None and hasattr(self.data, name):
-            setattr(self.data, name, value)
-        else:
-            super().__setattr__(name, value)
-
-    def __getitem__(self, item):
-        """Allow indexing into the Scan_MBO data."""
-        return self.data[item]
-
-    def __post_init__(self):
-        self.data = MboRawArray(
-            roi=self.init_roi,
-            phasecorr_method=self.phasecorr_method,
-            fix_phase=self.fix_phase,
-            upsample=self.upsample,
-            max_offset=self.max_offset
-        )
-        self.data.read_data(self.fpath)  # metadata is set
-        self.metadata.update(self.data.metadata)
-        self.shape = self.data.shape
-
 class _LazyH5Dataset:
     def __init__(self, fpath: Path | str, ds: str = "mov"):
         self._f = h5py.File(fpath, "r")
@@ -258,6 +211,24 @@ class MBOTiffArray:
 
     def __post_init__(self):
         self.chunks = CHUNKS_4D
+
+    def __getitem__(self, key: int | slice | tuple[int, ...]) -> np.ndarray:
+        """
+        Allows indexing into the TIFF array.
+        """
+        return self.load()[key]
+
+    def min(self) -> float:
+        """
+        Return the minimum value of the first plane.
+        """
+        return float(self.load()[0].min())
+
+    def max(self) -> float:
+        """
+        Return the maximum value of the first plane.
+        """
+        return float(self.load()[0].max())
 
     @property
     def chunks(self) -> tuple[int, ...] | dict:
@@ -310,6 +281,12 @@ class MBOTiffArray:
                 f" falling back to imread"
             )
             return tifffile.imread(self.fpath[0], mode="r")
+
+    def min(self):
+        """
+        Return the minimum value of the first plane.
+        """
+        return
 
 @dataclass
 class NpyArray:
@@ -970,49 +947,3 @@ class MboRawArray(scans.ScanMultiROI):
         except ImportError:
             raise ImportError("fastplotlib must be installed to use `.imshow()`.")
         return imshow_lazy_array(self, **kwargs)
-
-class ZarrScanView:
-    def __init__(self, zarr_array, ys, xs, oys, oxs, roi=None, metadata=None):
-        self.z = zarr_array
-        self.yslices = ys
-        self.xslices = xs
-        self.oyslices = oys
-        self.oxslices = oxs
-        self.num_rois = len(ys)
-        self.shape = zarr_array.shape
-        self.roi = roi
-        self.metadata = metadata or {}
-
-    def __getitem__(self, key):
-        key = (key,) if not isinstance(key, tuple) else key
-        t_key, z_key, *_ = (key + (slice(None),) * 4)[:4]
-
-        if self.roi is not None:
-            def extract_roi(r):
-                return self.z[t_key, z_key, self.yslices[r], self.xslices[r]]
-            if self.roi == 0:
-                return tuple(extract_roi(r) for r in range(self.num_rois))
-            if isinstance(self.roi, (list, tuple)):
-                return tuple(extract_roi(r - 1) for r in self.roi)
-            if isinstance(self.roi, int):
-                return extract_roi(self.roi - 1)
-            raise ValueError(f"Invalid ROI type: {type(self.roi)}")
-
-        t_len = 1 if isinstance(t_key, int) else len(np.arange(*t_key.indices(self.shape[0])))
-        z_len = 1 if isinstance(z_key, int) else len(np.arange(*z_key.indices(self.shape[1])))
-        h = self.oyslices[0].stop - self.oyslices[0].start
-        w = max(s.stop for s in self.oxslices)
-        print((h, w))
-        assembled = np.zeros((t_len, z_len, h, w), dtype=self.z.dtype)
-
-        for ys, xs, oys, oxs in zip(self.yslices, self.xslices, self.oyslices, self.oxslices):
-            sub = self.z[t_key, z_key, ys, xs]
-            if sub.ndim == 3:
-                sub = sub[:, np.newaxis, :, :]
-            elif sub.ndim == 2:
-                sub = sub[np.newaxis, np.newaxis, :, :]
-            h, w = sub.shape[-2:]
-            print("--")
-            print((h, w))
-            assembled[..., oys.start:oys.start + h, oxs.start:oxs.start + w] = sub
-        return assembled

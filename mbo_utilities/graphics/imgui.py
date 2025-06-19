@@ -417,7 +417,7 @@ class PreviewDataWidget(EdgeWindow):
     def __init__(
         self,
         iw: fpl.ImageWidget,
-        fpath: str | None = None,
+        fpath: str | None | list = None,
         threading_enabled: bool = True,
         size: int = None,
         location: Literal["bottom", "right"] = "right",
