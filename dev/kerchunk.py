@@ -23,7 +23,7 @@ from fsspec.implementations.reference import ReferenceFileSystem
 from skimage import data as skdata
 import fastplotlib as fpl
 from tifffile import TiffFile
-from mbo_utilities.lazy_array import imread, imwrite
+from mbo_utilities.lazy_array import imread, imwrite, ZarrScanView, Scan_MBO
 from mbo_utilities import get_mbo_dirs
 
 import uuid
@@ -32,7 +32,7 @@ import subprocess
 tests_dir = get_mbo_dirs()["tests"]
 
 if __name__ == "__main__":
-    from mbo_utilities.file_io import Scan_MBO, get_files, ZarrScanView
+    from mbo_utilities.file_io import get_files
     from mbo_utilities._benchmark import _benchmark_indexing
 
     data = imread(r"/home/flynn/lbm_data/raw")
