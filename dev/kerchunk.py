@@ -23,7 +23,7 @@ from fsspec.implementations.reference import ReferenceFileSystem
 from skimage import data as skdata
 import fastplotlib as fpl
 from tifffile import TiffFile
-from mbo_utilities.lazy_array import imread, imwrite, ZarrScanView, Scan_MBO
+from mbo_utilities.lazy_array import imread, imwrite, ZarrScanView, MboRawArray
 from mbo_utilities import get_mbo_dirs
 
 import uuid
