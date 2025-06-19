@@ -164,13 +164,24 @@ class Suite2pArray:
 @dataclass
 class MBOScanArray:
     fpath: list[Path]
-    _roi: int | Sequence[int] | None = None
+    roi: int | Sequence[int] | None = None
     fix_phase: bool = False
     upsample: int = 4
     max_offset: int = 3
+    metadata: dict = field(init=False, default_factory=dict)
     data: Scan_MBO | None = field(init=False, default=None)
     shape: tuple[int, ...] = field(init=False, default=())
-    _metadata: dict = field(init=False, default_factory=dict)
+
+    def __getattr__(self, name):
+        return getattr(self.data, name)
+
+    def __setattr__(self, name, value):
+        if name in {"data", "_roi", "shape", "_metadata", "fpath"} or name.startswith("_"):
+            super().__setattr__(name, value)
+        elif hasattr(self, "data") and self.data is not None and hasattr(self.data, name):
+            setattr(self.data, name, value)
+        else:
+            super().__setattr__(name, value)
 
     def __getitem__(self, item):
         """Allow indexing into the Scan_MBO data."""
@@ -179,25 +190,8 @@ class MBOScanArray:
     def __post_init__(self):
         self.data = Scan_MBO(self.roi,)
         self.data.read_data(self.fpath)  # metadata is set
-        self._metadata.update(self.data.metadata)
+        self.metadata.update(self.data.metadata)
         self.shape = self.data.shape
-
-    @property
-    def roi(self):
-        if self.data is not None:
-            return self.data.roi
-        return self._roi
-
-    @roi.setter
-    def roi(self, value: int | Sequence[int] | None):
-        """Set the ROI for the Scan_MBO data."""
-        if value is None or isinstance(value, int):
-            self._roi = value
-        elif isinstance(value, (list, tuple)):
-            self._roi = list(value)
-        else:
-            raise ValueError(f"Invalid ROI type: {type(value)}. Must be int, list, or None.")
-        self.data.roi = self._roi
 
     def _imwrite(
             self,
@@ -228,37 +222,6 @@ class MBOScanArray:
                 debug=debug,
             )
 
-    @property
-    def metadata(self):  # anything you like
-        return self._metadata
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise ValueError(f"Metadata must be a dictionary, got {type(value)} instead.")
-        self._metadata.update(value)
-
-    def min(self) -> float:
-        """Return the minimum value in the data."""
-        if self.data is not None:
-            return float(self.data.min())
-        return float("inf")
-
-    def max(self) -> float:
-        """Return the minimum value in the data."""
-        if self.data is not None:
-            return float(self.data.max())
-        return float("inf")
-
-    @property
-    def ndim(self) -> int:
-        """Return the number of dimensions in the data."""
-        return 4
-
-    def __array__(self):
-        """Return a small sample of the data as a numpy array."""
-        return np.asarray(self.data)
-
     def imshow(self, **kwargs):
         try:
             from mbo_utilities.graphics.display import imshow_lazy_array
@@ -266,17 +229,36 @@ class MBOScanArray:
             raise ImportError("fastplotlib must be installed to use `.imshow()`.")
         return imshow_lazy_array(self, **kwargs)
 
-    def imshow2(self):
-        if hasattr(self.data, "reference"):
-            spec_path = self.data.reference
-            store = FsspecStore(ReferenceFileSystem(str(spec_path)))
-            z_arr = zarr.open(store, mode="r", )
-            iw = fpl.ImageWidget(z_arr)
-            iw.show()
-            return iw
-        else:
-            # should never happen, reference file is created on initialization
-            raise ValueError("No reference file found. Please call save_fsspec() first.")
+    # @property
+    # def metadata(self):  # anything you like
+    #     return self._metadata
+    #
+    # @metadata.setter
+    # def metadata(self, value: dict):
+    #     if not isinstance(value, dict):
+    #         raise ValueError(f"Metadata must be a dictionary, got {type(value)} instead.")
+    #     self._metadata.update(value)
+    #
+    # def min(self) -> float:
+    #     """Return the minimum value in the data."""
+    #     if self.data is not None:
+    #         return float(self.data.min())
+    #     return float("inf")
+    #
+    # def max(self) -> float:
+    #     """Return the minimum value in the data."""
+    #     if self.data is not None:
+    #         return float(self.data.max())
+    #     return float("inf")
+    #
+    # @property
+    # def ndim(self) -> int:
+    #     """Return the number of dimensions in the data."""
+    #     return 4
+    #
+    # def __array__(self):
+    #     """Return a small sample of the data as a numpy array."""
+    #     return np.asarray(self.data)
 
 
 class _LazyH5Dataset:
@@ -545,7 +527,7 @@ def imread(
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            return MBOScanArray(paths, _roi=roi, **kwargs)
+            return MBOScanArray(paths, roi=roi, **kwargs)
         if has_mbo_metadata(first):
             return MBOTiffArray(paths, **kwargs)
         return TiffArray(paths)

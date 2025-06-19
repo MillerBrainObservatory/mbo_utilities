@@ -1,9 +1,6 @@
 import os
-import uuid
 
 import pytest
-import time
-import json
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +8,9 @@ from icecream import ic
 from tifffile import imread as tfile_imread
 
 import mbo_utilities as mbo
+from mbo_utilities import get_mbo_dirs
+from mbo_utilities._benchmark import _benchmark_indexing
 from mbo_utilities.lazy_array import imread as mbo_imread, imwrite as mbo_imwrite
-from mbo_utilities._parsing import _get_git_commit, _increment_label, _load_existing
 
 try:
     import dask.array as da
@@ -25,7 +23,7 @@ except ImportError:
 
 ic.enable()
 
-DEFAULT_DATA_ROOT = Path(r"D:\tests\data")
+DEFAULT_DATA_ROOT = get_mbo_dirs()["tests"]
 DATA_ROOT = Path(os.getenv("MBO_TEST_DATA", DEFAULT_DATA_ROOT))
 BASE = DATA_ROOT
 ASSEMBLED = BASE / "assembled"
@@ -34,56 +32,6 @@ skip_if_missing_data = pytest.mark.skipif(
     not DATA_ROOT.is_dir(), reason=f"Test data directory not found: {DATA_ROOT}"
 )
 
-def _benchmark_indexing(
-    arrays: dict[str, np.ndarray | da.Array | zarr.Array],
-    save_path: Path,
-    num_repeats: int = 5,
-    index_slices: dict[str, tuple[slice | int, ...]] = None,
-    label: str = None,
-):
-    if index_slices is None:
-        index_slices = {
-            "[:200,0,:,:]": (slice(0, 200), 0, slice(None), slice(None)),
-            "[:,0,:40,:40]": (slice(None), 0, slice(0, 40), slice(0, 40)),
-        }
-
-    results = {}
-    for name, array in arrays.items():
-        results[name] = {}
-        for label_idx, idx in index_slices.items():
-            times = []
-            for _ in range(num_repeats):
-                t0 = time.perf_counter()
-                val = array[idx]
-                if isinstance(val, da.Array):
-                    val.compute()
-                elif hasattr(val, "read"):
-                    np.array(val)
-                t1 = time.perf_counter()
-                times.append(t1 - t0)
-            results[name][label_idx] = {
-                "min": round(min(times), 3),
-                "max": round(max(times), 3),
-                "mean": round(sum(times) / len(times), 3),
-            }
-
-    save_path = Path(save_path)
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-
-    existing = _load_existing(save_path)
-    final_label = _increment_label(existing, label or "Unnamed Run")
-
-    entry = {
-        "uuid": str(uuid.uuid4()),
-        "git_commit": _get_git_commit(),
-        "label": final_label,
-        "index_slices": list(index_slices.keys()),
-        "results": results,
-    }
-
-    existing.append(entry)
-    save_path.write_text(json.dumps(existing, indent=2))
-    return results
 
 @skip_if_missing_data
 def test_metadata():
@@ -175,6 +123,7 @@ def plane_paths():
     return mbo.get_files(ASSEMBLED, "plane", max_depth=3)
 
 
+@skip_if_missing_data
 def test_full_contains_rois_side_by_side(plane_paths):
     # map parent‐dir → path, e.g. "full", "roi1", "roi2"
     by_dir = {Path(p).parent.name: Path(p) for p in plane_paths}
