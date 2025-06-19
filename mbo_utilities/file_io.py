@@ -1,4 +1,6 @@
+import json
 from collections.abc import Sequence
+from io import StringIO
 from itertools import product
 import re
 
@@ -8,6 +10,7 @@ import numpy as np
 from icecream import ic
 
 import dask.array as da
+from tifffile import TiffFile
 
 from . import log
 from .metadata import is_raw_scanimage, get_metadata
@@ -15,6 +18,17 @@ from .phasecorr import nd_windowed, ALL_PHASECORR_METHODS
 from .scanreader import scans, utils
 from .scanreader.multiroi import ROI
 from .util import subsample_array
+
+try:
+    from zarr import open as zarr_open
+    from zarr.storage import FsspecStore
+    from fsspec.implementations.reference import ReferenceFileSystem
+    HAS_ZARR = True
+except ImportError:
+    HAS_ZARR = False
+    zarr_open = None
+    ReferenceFileSystem = None
+    FsspecStore = None
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
@@ -235,6 +249,87 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
     return sorted(p.resolve() for p in result if p.is_file())
 
+def _tiff_to_fsspec(tif_path: Path, base_dir: Path) -> dict:
+    """
+    Create a kerchunk reference for a single TIFF file.
+
+    Parameters
+    ----------
+    tif_path : Path
+        Path to the TIFF file on disk.
+    base_dir : Path
+        Directory representing the “root” URI for the reference.
+
+    Returns
+    -------
+    refs : dict
+        A kerchunk reference dict (in JSON form) for this single TIFF.
+    """
+    with TiffFile(str(tif_path.expanduser().resolve())) as tif:
+        with StringIO() as f:
+            store = tif.aszarr()
+            store.write_fsspec(f, url=base_dir.as_uri())
+            refs = json.loads(f.getvalue())  # type: ignore
+    return refs
+
+def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
+    assert len(tif_files) > 1, "Need at least two TIFF files to combine."
+
+    combined_refs: dict[str, str] = {}
+    per_file_refs = []
+    total_shape = None
+    total_chunks = None
+    zarr_meta = {}
+    for tif_path in tif_files:
+
+        # Create a json reference for each TIFF file
+        inner_refs = _tiff_to_fsspec(tif_path, base_dir)
+        zarr_meta = json.loads(inner_refs.pop(".zarray"))
+        inner_refs.pop(".zattrs", None)
+
+        shape = zarr_meta["shape"]
+        chunks = zarr_meta["chunks"]
+
+        if total_shape is None:
+            total_shape = shape.copy()
+            total_chunks = chunks
+        else:
+            assert shape[1:] == total_shape[1:], f"Shape mismatch in {tif_path}"
+            assert chunks == total_chunks, f"Chunk mismatch in {tif_path}"
+            total_shape[0] += shape[0]  # accumulate along axis 0
+
+        per_file_refs.append((inner_refs, shape))
+
+    combined_zarr_meta = {
+        "shape": total_shape,  # total shape tracks the full-assembled image shape
+        "chunks": total_chunks,
+        "dtype": zarr_meta["dtype"],
+        "compressor": zarr_meta["compressor"],
+        "filters": zarr_meta.get("filters", None),
+        "order": zarr_meta["order"],
+        "zarr_format": zarr_meta["zarr_format"],
+        "fill_value": zarr_meta.get("fill_value", 0),
+    }
+
+    combined_refs[".zarray"] = json.dumps(combined_zarr_meta)
+    combined_refs[".zattrs"] = json.dumps(
+        {"_ARRAY_DIMENSIONS": ["T", "C", "Y", "X"][:len(total_shape)]}
+    )
+
+    axis0_offset = 0
+    # since we are combining along axis 0, we need to adjust the keys
+    # in the inner_refs to account for the offset along that axis.
+    for inner_refs, shape in per_file_refs:
+        chunksize0 = total_chunks[0]
+        for key, val in inner_refs.items():
+            idx = list(map(int, key.strip("/").split(".")))
+            idx[0] += axis0_offset // chunksize0
+            new_key = ".".join(map(str, idx))
+            combined_refs[new_key] = val
+        axis0_offset += shape[0]
+
+    return combined_refs
+
 def read_scan(
         pathnames,
         dtype=np.int16,
@@ -359,8 +454,46 @@ class Scan_MBO(scans.ScanMultiROI):
             f"max_offset: {max_offset}"
         )
 
+    def save_fsspec(self, filenames):
+        base_dir = Path(filenames[0]).parent
+
+        combined_json_path = base_dir / "combined_refs.json"
+
+        if combined_json_path.is_file():
+            # delete it, its cheap to create
+            logger.debug(f"Removing existing combined reference file: {combined_json_path}")
+            combined_json_path.unlink()
+
+        print(f"Generating combined kerchunk reference for {len(filenames)} files…")
+        combined_refs = _multi_tiff_to_fsspec(tif_files=filenames, base_dir=base_dir)
+
+        with open(combined_json_path, "w") as _f:
+            json.dump(combined_refs, _f)
+
+        print(f"Combined kerchunk reference written to {combined_json_path}")
+        self.reference = combined_json_path
+        return combined_json_path
+
+    def as_zarr(self):
+        """
+        Convert the current scan data to a Zarr array.
+        This will create a Zarr store in the same directory as the reference file.
+        """
+        if not HAS_ZARR:
+            raise ImportError("Zarr is not installed. Please install it to use this method.")
+        if not Path(self.reference).is_file():
+            raise FileNotFoundError(
+                f"Reference file {self.reference} does not exist. "
+                "Please call save_fsspec() first."
+            )
+        return zarr_open(
+            FsspecStore(ReferenceFileSystem(str(self.reference))),
+            mode="r",
+        )
+
     def read_data(self, filenames, dtype=np.int16):
         filenames = expand_paths(filenames)
+        self.save_fsspec(filenames)
         super().read_data(filenames, dtype)
         self._metadata = get_metadata(self.tiff_files[0].filehandle.path)  # from the file
         self._metadata.update({"si": _make_json_serializable(self.tiff_files[0].scanimage_metadata)})
@@ -381,13 +514,14 @@ class Scan_MBO(scans.ScanMultiROI):
             "max_offset": self.max_offset,
         })
         return md
+
     @metadata.setter
     def metadata(self, value):
         self._metadata.update(value)
 
     @property
     def rois(self):
-        """Read‐only access to the ROI list."""
+        """ROI's hold information about the size, position and shape of the ROIs."""
         return self._rois
 
     @property
@@ -462,14 +596,23 @@ class Scan_MBO(scans.ScanMultiROI):
 
     @property
     def num_rois(self) -> int:
-        if isinstance(self.rois, list):
-            return len(self.rois)
-        elif isinstance(self.rois, int):
-            return self.rois
-        else:
-            raise TypeError(
-                f"No rois. Has scan been initialized with `read_data`? "
-            )
+        return len(self.rois)
+
+    @property
+    def xslices(self):
+        return self.fields[0].xslices
+
+    @property
+    def yslices(self):
+        return self.fields[0].yslices
+
+    @property
+    def output_xslices(self):
+        return self.fields[0].output_xslices
+
+    @property
+    def output_yslices(self):
+        return self.fields[0].output_yslices
 
     def _read_pages(
         self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
@@ -518,6 +661,11 @@ class Scan_MBO(scans.ScanMultiROI):
         if not frames or not chans:
             return np.empty(0)
 
+        logger.debug(
+            f"Phase-corrected: {self.fix_phase}/{self.phasecorr_method},"
+            f" channels: {chans},"
+            f" roi: {self.roi}",
+        )
         out = self.process_rois(frames, chans)
 
         squeeze = []
@@ -559,17 +707,6 @@ class Scan_MBO(scans.ScanMultiROI):
     def total_frames(self):
         return sum(len(tf.pages) // self.num_channels for tf in self.tiff_files)
 
-    def xslices(self):
-        return self.fields[0].xslices
-
-    def yslices(self):
-        return self.fields[0].yslices
-
-    def output_xslices(self):
-        return self.fields[0].output_xslices
-
-    def output_yslices(self):
-        return self.fields[0].output_yslices
 
     @property
     def num_planes(self):

@@ -10,7 +10,10 @@ import h5py
 import numpy as np
 import tifffile
 import dask.array as da
+import zarr
+from fsspec.implementations.reference import ReferenceFileSystem
 from numpy import memmap, ndarray
+from zarr.storage import FsspecStore
 
 from . import log
 from mbo_utilities.file_io import Scan_MBO, get_files
@@ -206,8 +209,6 @@ class MBOScanArray:
             debug = None,
             planes = None,
     ):
-        start_time = time.time()
-
         for roi in self.roi:
             target = outpath if self.roi is None else outpath / f"roi{roi}"
             target.mkdir(exist_ok=True)
@@ -226,8 +227,6 @@ class MBOScanArray:
                 progress_callback=progress_callback,
                 debug=debug,
             )
-            elapsed_time = time.time() - start_time
-            print(f"Done saving ROI {roi}: {int(elapsed_time // 60)} min {int(elapsed_time % 60)} sec")
 
     @property
     def metadata(self):  # anything you like
@@ -238,6 +237,47 @@ class MBOScanArray:
         if not isinstance(value, dict):
             raise ValueError(f"Metadata must be a dictionary, got {type(value)} instead.")
         self._metadata.update(value)
+
+    def min(self) -> float:
+        """Return the minimum value in the data."""
+        if self.data is not None:
+            return float(self.data.min())
+        return float("inf")
+
+    def max(self) -> float:
+        """Return the minimum value in the data."""
+        if self.data is not None:
+            return float(self.data.max())
+        return float("inf")
+
+    @property
+    def ndim(self) -> int:
+        """Return the number of dimensions in the data."""
+        return 4
+
+    def __array__(self):
+        """Return a small sample of the data as a numpy array."""
+        return np.asarray(self.data)
+
+    def imshow(self, **kwargs):
+        try:
+            from mbo_utilities.graphics.display import imshow_lazy_array
+        except ImportError:
+            raise ImportError("fastplotlib must be installed to use `.imshow()`.")
+        return imshow_lazy_array(self, **kwargs)
+
+    def imshow2(self):
+        if hasattr(self.data, "reference"):
+            spec_path = self.data.reference
+            store = FsspecStore(ReferenceFileSystem(str(spec_path)))
+            z_arr = zarr.open(store, mode="r", )
+            iw = fpl.ImageWidget(z_arr)
+            iw.show()
+            return iw
+        else:
+            # should never happen, reference file is created on initialization
+            raise ValueError("No reference file found. Please call save_fsspec() first.")
+
 
 class _LazyH5Dataset:
     def __init__(self, fpath: Path | str, ds: str = "mov"):
