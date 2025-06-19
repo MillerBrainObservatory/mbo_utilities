@@ -135,22 +135,19 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     Path("/tmp/01").mkdir(exist_ok=True,)
 
-    scan = imread(
+    data = imread(
         r"/home/flynn/lbm_data/raw"
     )
-    scan.selected_roi = [1, 2]
+    data.roi = [1, 2]
     imwrite(
-        scan,
+        data,
         "/tmp/01/output",
-        ext=".tiff",
+        ext=".h5",
         overwrite=True,
         planes=[10, 11],
     )
-    scan.roi = 0
-    scan.fix_phase = True
-    zplane = 10
-    data = scan[:20, zplane, :, :]
 
+    data = scan[:20, 11, :, :]
     title = f"200 frames, {data.shape[0]} planes, plane {zplane}"
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
     ax[0].imshow(data.mean(axis=0)[200:280, 300:380], cmap="gray", vmin=-300, vmax=2500)
@@ -158,11 +155,3 @@ if __name__ == "__main__":
     plt.title(title)
     plt.savefig("/tmp/01/both.png")
     print(data.shape)
-
-    mbo.save_as(
-        "/home/flynn/lbm_data/raw",
-        "/tmp/01/output",
-        ext=".tiff",
-        overwrite=False,
-        planes=[10, 11, 12]
-    )

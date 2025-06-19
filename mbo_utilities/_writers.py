@@ -207,7 +207,7 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None):
         raw_filename = fname  # points to data_raw.bin
         write_ops(metadata, raw_filename)
 
-    logger.info(f"Wrote {data.shape[0]} frames to {fname}.")
+    logger.debug(f"Wrote {data.shape[0]} frames to {fname}.")
 
 def _write_h5(path, data, *, overwrite=True, metadata=None):
     filename = Path(path).with_suffix(".h5")
