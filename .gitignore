@@ -170,3 +170,7 @@ exclude/
 *.egg-info
 docs/examples/
 data/
+
+# ini files
+**/*.ini
+__marimo__

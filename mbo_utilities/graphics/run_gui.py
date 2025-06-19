@@ -1,59 +1,91 @@
+import copy
 from pathlib import Path
-import numpy as np
 
-from ..util import is_imgui_installed, is_qt_installed, is_running_jupyter
-from ..file_io import ScanMultiROIReordered, to_lazy_array
+import click
 
-if is_imgui_installed():
-    import fastplotlib as fpl
-if is_qt_installed():
-    from .qt import render_qt_widget
+import fastplotlib as fpl
+from imgui_bundle import immapp, hello_imgui
+
+from mbo_utilities.graphics.display import imshow_lazy_array
+from mbo_utilities.lazy_array import imread
+from mbo_utilities.graphics._file_dialog import FileDialog
+from mbo_utilities.file_io import get_mbo_dirs
+
+try:
+    # setup_imgui()
+    IMGUI_SETUP_COMPLETE = True
+except ImportError:
+    IMGUI_SETUP_COMPLETE = False
+    print("Failed to set up imgui. GUI functionality may not work as expected.")
+
+try:
+    from masknmf.visualization.interactive_guis import make_demixing_video
+    HAS_MASKNMF = True
+except ImportError:
+    HAS_MASKNMF = False
+    make_demixing_video = None
 
 
-def run_gui(
-    data_in: None | str | Path | ScanMultiROIReordered | np.ndarray = None, **kwargs
-):
-    """Open a GUI to preview data."""
-    # Handle data_in, which can be a path to files
+def _select_file() -> tuple[str | None, bool, bool]:
+    dlg = FileDialog()
+
+    def _render():
+        dlg.render()
+
+    params = hello_imgui.RunnerParams()
+    params.app_window_params.window_title = "MBO Utilities – Data Selection"
+    params.app_window_params.window_geometry.size = (1400, 950)
+    params.ini_filename = str(Path(get_mbo_dirs()["settings"], "fd_settings.ini").expanduser())
+    params.callbacks.show_gui = _render
+
+    addons = immapp.AddOnsParams()
+    addons.with_markdown = True
+    addons.with_implot = False
+    addons.with_implot3d = False
+
+    hello_imgui.set_assets_folder(str(get_mbo_dirs()["assets"]))
+    immapp.run(runner_params=params, add_ons_params=addons)
+    return dlg.selected_path, dlg.widget_enabled, dlg.threading_enabled
+
+
+@click.command()
+@click.option("--roi", type=click.IntRange(0, 10), default=0)
+@click.option(
+    "--widget/--no-widget",
+    default=True,
+    help="Enable or disable PreviewDataWidget (default enabled).",
+)
+@click.option(
+    "--threading/--no-threading",
+    default=True,
+    help="Enable or disable threading (only effects widgets).",
+)
+@click.argument("data_in", required=False)
+def run_gui(data_in=None, widget=None, roi=None, threading=True):
+    """Open a GUI to preview data of any supported type."""
     if data_in is None:
-        print("No data provided")
-        if not is_qt_installed():
-            raise ValueError(
-                f"No `data_in` argument provided and no qt installation. "
-                f"Support for file loading is only available with Qt installs."
-                f"Install with `pip install -U 'mbo_utilities[all]'`."
-            )
-        else:
-            # set to None, we will load a dialog folder in QT later
-            print("Setting data to None")
-            data = None
+        data_in, widget, threading = _select_file()
+        if not data_in:
+            click.echo("No file selected, exiting.")
+            return
+
+    data_array = imread(data_in, roi=roi)
+    if hasattr(data_array, "imshow"):
+        iw = imshow_lazy_array(data_array, widget=widget, threading_enabled=threading)
     else:
-        print("Data provided and set.")
+        iw = fpl.ImageWidget(
+            data=data_array,
+            histogram_widget=True,
+            figure_kwargs={"size": (800, 1000)},
+            graphic_kwargs={"vmin": data_array.min(), "vmax": data_array.max()},
+        )
+    iw.show()
+    if widget:
+        from mbo_utilities.graphics.imgui import PreviewDataWidget
+        gui = PreviewDataWidget(iw=iw, fpath=data_array.filenames, threading_enabled=threading, size=350)
+        iw.figure.add_gui(gui)
+    fpl.loop.run()
+    return
 
-        if isinstance(data_in, ScanMultiROIReordered):
-            data = data_in
-        else:
-            data = to_lazy_array(data_in)
-
-    if is_running_jupyter():
-        print("Is running jupyter")
-        # TODO: load dialog when qt isn't installed
-        if data_in is None:
-            print("Running jupyter, no data provided")
-            if not is_qt_installed():
-                raise ValueError(
-                    f"No `data_in` argument provided and no qt installation. "
-                    f"Support for file loading is only available with Qt installs."
-                    f"Install with `pip install -U 'mbo_utilities[all]'`."
-                )
-            return None
-        else:
-            # no data, in Jupyter, we need a QT dialog to load a data path
-            # can remove this once we have a means to load a native file-dialog from within jupyter
-            iw = fpl.ImageWidget(data=data, histogram_widget=True, **kwargs)
-            iw.show()
-            return iw
-    else:  # not runniing jupyter
-        print(f"Not running Jupyter, Rendering qt widget")
-        render_qt_widget(data=data)
-        return None
+if __name__ == "__main__":
+    run_gui()  # type: ignore # noqa

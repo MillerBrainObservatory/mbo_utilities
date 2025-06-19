@@ -76,7 +76,7 @@ class BaseScan:
     @property
     def tiff_files(self):
         if self._tiff_files is None:
-            self._tiff_files = [TiffFile(filename) for filename in self.filenames]
+            self._tiff_files = [TiffFile(filename, mode="r",) for filename in self.filenames]
         return self._tiff_files
 
     @tiff_files.deleter
@@ -809,16 +809,36 @@ class ScanMultiROI(NewerScan, BaseScan):
     def __init__(self, join_contiguous):
         super().__init__()
         self.join_contiguous = join_contiguous
-        self.rois = None
+        self._rois = []
         self.fields = None
+
+    def read_data(self, filenames, dtype=np.int16):
+        super().read_data(filenames, dtype)
+        self._rois = self._create_rois()
+        self.fields = self._create_fields()
+        if self.join_contiguous:
+            self._join_contiguous_fields()
+
+    def _create_rois(self):
+        """
+        Create scan rois from the configuration file. Override the base method to force
+        ROI's that have multiple 'zs' to a single depth.
+        """
+        try:
+            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
+        except KeyError:
+            raise RuntimeError("This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata.")
+        roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
+        roi_infos = list(filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos))
+        for roi_info in roi_infos:
+            roi_info["zs"] = [0]
+
+        rois = [ROI(roi_info) for roi_info in roi_infos]
+        return rois
 
     @property
     def num_fields(self):
         return len(self.fields)
-
-    @property
-    def num_rois(self):
-        return len(self.rois)
 
     @property
     def field_heights(self):
@@ -878,13 +898,13 @@ class ScanMultiROI(NewerScan, BaseScan):
         microns = (degrees * float(match.group("deg2um_factor"))) if match else None
         return microns
 
-    def read_data(self, filenames, dtype):
-        """Set the header, create rois and fields (joining them if necessary)."""
-        super().read_data(filenames, dtype)
-        self.rois = self._create_rois()
-        self.fields = self._create_fields()
-        if self.join_contiguous:
-            self._join_contiguous_fields()
+    # def read_data(self, filenames, dtype=np.int16):
+    #     """Set the header, create rois and fields (joining them if necessary)."""
+    #     super().read_data(filenames, dtype)
+    #     self.rois = self._create_rois()
+    #     self.fields = self._create_fields()
+    #     if self.join_contiguous:
+    #         self._join_contiguous_fields()
 
     def _create_rois(self):
         """Create scan rois from the configuration file."""

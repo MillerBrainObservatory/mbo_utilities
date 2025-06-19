@@ -1,31 +1,145 @@
-from __future__ import annotations
-
-import os
-import re
+import json
 from collections.abc import Sequence
+from io import StringIO
 from itertools import product
+import re
+
 from pathlib import Path
+import numpy as np
+
+from icecream import ic
 
 import dask.array as da
-import ffmpeg
-import numpy as np
-import tifffile
-from matplotlib import cm
+from tifffile import TiffFile
 
+from . import log
 from .metadata import is_raw_scanimage
-from .scanreader import scans
-from .scanreader.multiroi import ROI
-from .util import norm_minmax, subsample_array
+
+try:
+    from zarr import open as zarr_open
+    from zarr.storage import FsspecStore
+    from fsspec.implementations.reference import ReferenceFileSystem
+    HAS_ZARR = True
+except ImportError:
+    HAS_ZARR = False
+    zarr_open = None
+    ReferenceFileSystem = None
+    FsspecStore = None
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
+SAVE_AS_TYPES = [".tiff", ".bin", ".h5", ".zarr"]
 
-def zarr_to_dask(zarr_parent):
-    """Convert directory of zarr arrays into a Z-stack."""
-    # search 3 dirs deep for arrays within our zarr group
-    files = get_files(zarr_parent, ".zarray", 3)
-    return da.stack([da.from_zarr(Path(x).parent) for x in files], axis=1)
+logger = log.get("file_io")
 
+PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
+
+def load_ops(ops_input: str | Path | list[str | Path]):
+    """Simple utility load a suite2p npy file"""
+    if isinstance(ops_input, (str, Path)):
+        return np.load(ops_input, allow_pickle=True).item()
+    elif isinstance(ops_input, dict):
+        return ops_input
+    print("Warning: No valid ops file provided, returning None.")
+    return {}
+
+def write_ops(metadata, raw_filename):
+    """
+    Write metadata to an ops file alongside the given filename.
+    metadata must contain
+    'shape'
+    'pixel_resolution',
+    'frame_rate' keys.
+    """
+    logger.info(f"Writing ops file for {raw_filename} with metadata: {metadata}")
+    assert isinstance(raw_filename, (str, Path)), "filename must be a string or Path object"
+    filename = Path(raw_filename).expanduser().resolve()
+
+    # this convention means input can be either
+    if filename.is_file():
+        root = filename.parent
+    else:
+        root = filename
+
+    ops_path = root.joinpath("ops.npy")
+    logger.debug(f"Writing ops file to {ops_path}.")
+
+    shape = metadata["shape"]
+    nt = shape[0]
+    Lx = shape[-2]
+    Ly = shape[-1]
+
+    if "pixel_resolution" not in metadata:
+        logger.warning("No pixel resolution found in metadata, using default [2, 2].")
+    if "fs" not in metadata:
+        if "frame_rate" in metadata:
+            metadata["fs"] = metadata["frame_rate"]
+        elif "framerate" in metadata:
+            metadata["fs"] = metadata["framerate"]
+        else:
+            logger.debug("No frame rate found in metadata; defaulting fs=10")
+            metadata["fs"] = 10
+
+    dx, dy = metadata.get("pixel_resolution", [2, 2])
+    ops = {
+        # suite2p needs these
+        "Ly": Ly,
+        "Lx": Lx,
+        "fs": metadata['fs'],
+        "nframes": nt,
+        "dx": dx,
+        "dy": dy,
+        "ops_path": str(ops_path),
+        # and dump the rest of the metadata
+        **metadata,
+    }
+    np.save(ops_path, ops)
+    logger.debug(f"Ops file written to {ops_path} with metadata:\n"
+                 f" {ops}")
+
+def normalize_file_url(path):
+    """
+    Derive a folder tag from a filename based on “planeN”, “roiN”, or "tagN" patterns.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        File path or name whose stem will be parsed.
+
+    Returns
+    -------
+    str
+        If the stem starts with “plane”, “roi”, or “res” followed by an integer,
+        returns that tag plus the integer (e.g. “plane3”, “roi7”, “res2”).
+        Otherwise returns the original stem unchanged.
+
+    Examples
+    --------
+    >>> normalize_file_url("plane_01.tif")
+    'plane1'
+    >>> normalize_file_url("plane2.bin")
+    'plane2'
+    >>> normalize_file_url("roi5.raw")
+    'roi5'
+    >>> normalize_file_url("ROI_10.dat")
+    'roi10'
+    >>> normalize_file_url("res-3.h5")
+    'res3'
+    >>> normalize_file_url("assembled_data_1.tiff")
+    'assembled_data_1'
+    >>> normalize_file_url("file_12.tif")
+    'file_12'
+    """
+    name = Path(path).stem
+    for tag in PIPELINE_TAGS:
+        low = name.lower()
+        if low.startswith(tag):
+            suffix = name[len(tag):]
+            if suffix and (suffix[0] in ("_", "-")):
+                suffix = suffix[1:]
+            if suffix.isdigit():
+                return f"{tag}{int(suffix)}"
+    return name
 
 def npy_to_dask(files, name="", axis=1, astype=None):
     """
@@ -86,24 +200,6 @@ def npy_to_dask(files, name="", axis=1, astype=None):
 
     return arr
 
-
-def is_escaped_string(path: str) -> bool:
-    return bool(re.search(r"\\[a-zA-Z]", path))
-
-
-def _make_json_serializable(obj):
-    """Convert metadata to JSON serializable format."""
-    if isinstance(obj, dict):
-        return {k: _make_json_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_make_json_serializable(v) for v in obj]
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, (np.integer, np.floating)):
-        return obj.item()
-    return obj
-
-
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     """
     Expand a path, list of paths, or wildcard pattern into a sorted list of actual files.
@@ -149,8 +245,97 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
     return sorted(p.resolve() for p in result if p.is_file())
 
+def _tiff_to_fsspec(tif_path: Path, base_dir: Path) -> dict:
+    """
+    Create a kerchunk reference for a single TIFF file.
 
-def read_scan(pathnames, dtype=np.int16):
+    Parameters
+    ----------
+    tif_path : Path
+        Path to the TIFF file on disk.
+    base_dir : Path
+        Directory representing the “root” URI for the reference.
+
+    Returns
+    -------
+    refs : dict
+        A kerchunk reference dict (in JSON form) for this single TIFF.
+    """
+    with TiffFile(str(tif_path.expanduser().resolve())) as tif:
+        with StringIO() as f:
+            store = tif.aszarr()
+            store.write_fsspec(f, url=base_dir.as_uri())
+            refs = json.loads(f.getvalue())  # type: ignore
+    return refs
+
+def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
+    assert len(tif_files) > 1, "Need at least two TIFF files to combine."
+
+    combined_refs: dict[str, str] = {}
+    per_file_refs = []
+    total_shape = None
+    total_chunks = None
+    zarr_meta = {}
+    for tif_path in tif_files:
+
+        # Create a json reference for each TIFF file
+        inner_refs = _tiff_to_fsspec(tif_path, base_dir)
+        zarr_meta = json.loads(inner_refs.pop(".zarray"))
+        inner_refs.pop(".zattrs", None)
+
+        shape = zarr_meta["shape"]
+        chunks = zarr_meta["chunks"]
+
+        if total_shape is None:
+            total_shape = shape.copy()
+            total_chunks = chunks
+        else:
+            assert shape[1:] == total_shape[1:], f"Shape mismatch in {tif_path}"
+            assert chunks == total_chunks, f"Chunk mismatch in {tif_path}"
+            total_shape[0] += shape[0]  # accumulate along axis 0
+
+        per_file_refs.append((inner_refs, shape))
+
+    combined_zarr_meta = {
+        "shape": total_shape,  # total shape tracks the full-assembled image shape
+        "chunks": total_chunks,
+        "dtype": zarr_meta["dtype"],
+        "compressor": zarr_meta["compressor"],
+        "filters": zarr_meta.get("filters", None),
+        "order": zarr_meta["order"],
+        "zarr_format": zarr_meta["zarr_format"],
+        "fill_value": zarr_meta.get("fill_value", 0),
+    }
+
+    combined_refs[".zarray"] = json.dumps(combined_zarr_meta)
+    combined_refs[".zattrs"] = json.dumps(
+        {"_ARRAY_DIMENSIONS": ["T", "C", "Y", "X"][:len(total_shape)]}
+    )
+
+    axis0_offset = 0
+    # since we are combining along axis 0, we need to adjust the keys
+    # in the inner_refs to account for the offset along that axis.
+    for inner_refs, shape in per_file_refs:
+        chunksize0 = total_chunks[0]
+        for key, val in inner_refs.items():
+            idx = list(map(int, key.strip("/").split(".")))
+            idx[0] += axis0_offset // chunksize0
+            new_key = ".".join(map(str, idx))
+            combined_refs[new_key] = val
+        axis0_offset += shape[0]
+
+    return combined_refs
+
+def read_scan(
+        pathnames,
+        dtype=np.int16,
+        roi=None,
+        fix_phase: bool = True,
+        phasecorr_method: str = "frame",
+        border: int | tuple[int, int, int, int] = 3,
+        upsample: int = 1,
+        max_offset: int = 4,
+):
     """
     Reads a ScanImage scan from a given file or set of file paths and returns a
     ScanMultiROIReordered object with lazy-loaded data.
@@ -160,12 +345,28 @@ def read_scan(pathnames, dtype=np.int16):
     pathnames : str, Path, or sequence of str/Path
         A single path to, a wildcard pattern (e.g. ``*.tif``), or a list of paths
         specifying the ScanImage TIFF files to read.
+    roi : int, optional
+        Specify ROI to export if only exporting a single ROI. 1-based.
+        Defaults to None, which exports pre-assembled (tiled) rois.
+    fix_phase : bool, optional
+        If True, applies phase correction to the scan data. Default is False.
+    phasecorr_method : str, optional
+        The method to use for phase correction. Options are 'subpix', 'two_step',
+    border : int or tuple of int, optional
+        The border size to use for phase correction. If an int, applies the same
+        border to all sides. If a tuple, specifies (top, bottom, left, right) borders.
+    upsample : int, optional
+        The for subpixel correction, upsample factor for phase correction.
+        A value of 1 clamps to whole-pixel. Default is 10.
+    max_offset : int, optional
+        The maximum allowed phase offset in pixels. If the computed offset exceeds
+        this value, it is clamped to the maximum. Default is 3.
     dtype : numpy.dtype, optional
         The data type to use when reading the scan data. Default is np.int16.
 
     Returns
     -------
-    ScanMultiROIReordered
+    mbo_utilities.array_types.MboRawArray
         A scan object with metadata and lazily loaded data. Raises FileNotFoundError
         if no files match the specified path(s).
 
@@ -179,137 +380,30 @@ def read_scan(pathnames, dtype=np.int16):
     --------
     >>> import mbo_utilities as mbo
     >>> import matplotlib.pyplot as plt
-    >>> scan = mbo.read_scan(r"C:\\path\to\\scan\\*.tif")
+    >>> scan = mbo.read_scan(r"D:\\demo\\raw")
     >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # First frame of z-plane 6
+    >>> scan = mbo.read_scan(r"D:\\demo\\raw", roi=1) # First ROI
+    >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # indexing works the same
     """
     filenames = expand_paths(pathnames)
     if len(filenames) == 0:
         error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
         raise FileNotFoundError(error_msg)
-
-    scan = ScanMultiROIReordered(join_contiguous=True)
-    scan.read_data(filenames, dtype=dtype)
-
-    return scan
-
-
-def _convert_range_to_slice(k):
-    return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
-
-
-class ScanMultiROIReordered(scans.ScanMultiROI):
-    """
-    A subclass of ScanMultiROI that ignores the num_fields dimension
-    and reorders the output to [time, z, x, y].
-    """
-
-    def __getitem__(self, key):
-        """Index like a 4D numpy array [t, z, x, y]"""
-        if key == slice(None):  # asking for full scan, give them a subsample?
-            return np.squeeze(
-                subsample_array(self, ignore_dims=[-1, -2])
-            )  # retain image dims
-        elif not isinstance(key, tuple):
-            key = (key,)
-        key = tuple(map(_convert_range_to_slice, key))
-        t_key, z_key, x_key, y_key = key + (slice(None),) * (4 - len(key))
-        reordered_key = (0, y_key, x_key, z_key, t_key)
-        item = super().__getitem__(reordered_key)
-        ndim = item.ndim
-        if ndim == 2:
-            return item
-        if ndim == 3:
-            return np.transpose(item, (2, 0, 1))
-        if ndim == 4:
-            return np.transpose(item, (3, 2, 0, 1))
-        raise ValueError(f"Unexpected ndim: {ndim}")
-
-    @property
-    def total_frames(self):
-        """Number of frames across all tiff files."""
-        return sum([int(len(tf.pages) / 14) for tf in self.tiff_files])
-
-    @property
-    def num_planes(self):
-        """LBM alias for num_channels."""
-        return self.num_channels
-
-    @property
-    def min(self):
-        """
-        Returns the minimum value of the first tiff page.
-        """
-        page = super().__getitem__((0, slice(None), slice(None), 0, 0))
-        return np.min(page)
-
-    @property
-    def max(self):
-        """
-        Returns the maximum value of the first tiff page.
-        """
-        page = super().__getitem__((0, slice(None), slice(None), 0, 0))
-        return np.max(page)
-
-    @property
-    def shape(self):
-        return (
-            self.total_frames,
-            self.num_channels,
-            self.field_heights[0],
-            self.field_widths[0],
+    if not is_raw_scanimage(filenames[0]):
+        raise ValueError(
+            f"The file {filenames[0]} does not appear to be a raw ScanImage TIFF file."
         )
 
-    @property
-    def ndim(self):
-        return 4
-
-    @property
-    def size(self):
-        return (
-            self.num_frames
-            * self.num_channels
-            * self.field_heights[0]
-            * self.field_widths[0]
-        )
-
-    @property
-    def scanning_depths(self):
-        """
-        We override this because LBM should always be at a single scanning depth.
-        """
-        return [0]
-
-    def _create_rois(self):
-        """
-        Create scan rois from the configuration file. Override the base method to force
-        ROI's that have multiple 'zs' to a single depth.
-        """
-        try:
-            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"][
-                "imagingRoiGroup"
-            ]["rois"]
-        except KeyError:
-            raise RuntimeError(
-                "This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata."
-            )
-        roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
-        roi_infos = list(
-            filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos)
-        )  # discard empty/malformed ROIs
-        for roi_info in roi_infos:
-            # LBM uses a single depth that is not stored in metadata, so force this to be 0
-            roi_info["zs"] = [0]
-
-        rois = [ROI(roi_info) for roi_info in roi_infos]
-        return rois
-
-    def __array__(self):
-        """
-        Convert the scan data to a NumPy array.
-        Calculate the size of the scan and subsample to keep under memory limits.
-        """
-        return subsample_array(self, ignore_dims=[-1, -2])
-
+    # scan = MboRawArray(
+    #     roi=roi,
+    #     fix_phase=fix_phase,
+    #     phasecorr_method=phasecorr_method,
+    #     border=border,
+    #     upsample=upsample,
+    #     max_offset=max_offset,
+    # )
+    # scan.read_data(filenames, dtype=dtype)
+    # return scan
 
 def get_files(
     base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
@@ -365,7 +459,7 @@ def get_files(
     if not base_path.is_dir():
         raise NotADirectoryError(f"'{base_path}' is not a directory.")
     if max_depth == 0:
-        print("Max-depth of 0 is not allowed. Setting to 1.")
+        ic("Max-depth of 0 is not allowed. Setting to 1.")
         max_depth = 1
 
     base_depth = len(base_path.parts)
@@ -386,7 +480,6 @@ def get_files(
     ]
 
     if sort_ascending:
-        import re
 
         def numerical_sort_key(path):
             match = re.search(r"\d+", path.name)
@@ -395,209 +488,6 @@ def get_files(
         files.sort(key=numerical_sort_key)
 
     return [str(file) for file in files]
-
-
-def zstack_from_files(files: list, proj="mean"):
-    """
-    Creates a Z-Stack image by applying a projection to each TIFF file in the provided list and stacking the results into a NumPy array.
-
-    Parameters
-    ----------
-    files : list of str or Path
-        A list of file paths to TIFF images. Files whose extensions are not '.tif' or '.tiff' are ignored.
-    proj : str, optional
-        The type of projection to apply to each TIFF image. Valid options are 'mean', 'max', and 'std'. Default is 'mean'.
-
-    Returns
-    -------
-    numpy.ndarray
-        A stacked array of projected images with the new dimension corresponding to the file order. For example, for N input files,
-        the output shape will be (N, height, width).
-
-    Raises
-    ------
-    ValueError
-        If an unsupported projection type is provided.
-
-    Examples
-    --------
-    >>> import mbo_utilities as mbo
-    >>> files = mbo.get_files("/path/to/files", "tif")
-    >>> z_stack = mbo.zstack_from_files(files, proj="max")
-    >>> z_stack.shape  # (3, height, width)
-    """
-    lazy_arrays = []
-    for file in files:
-        if Path(file).suffix not in [".tif", ".tiff"]:
-            continue
-        arr = tifffile.memmap(file)
-        if proj == "mean":
-            img = np.mean(arr, axis=0)
-        elif proj == "max":
-            img = np.max(arr, axis=0)
-        elif proj == "std":
-            img = np.std(arr, axis=0)
-        else:
-            raise ValueError(f"Unsupported projection '{proj}'")
-        lazy_arrays.append(img)
-
-    return np.stack(lazy_arrays, axis=0)
-
-
-def save_png(fname, data):
-    """
-    Saves a given image array as a PNG file using Matplotlib.
-
-    Parameters
-    ----------
-    fname : str or Path
-        The file name (or full path) where the PNG image will be saved.
-    data : array-like
-        The image data to be visualized and saved. Can be any 2D or 3D array that Matplotlib can display.
-
-    Examples
-    --------
-    >>> import mbo_utilities as mbo
-    >>> import tifffile
-    >>> data = tifffile.memmap("path/to/plane_0.tiff")
-    >>> frame = data[0, ...]
-    >>> mbo.save_png("plane_0_frame_1.png", frame)
-    """
-    # TODO: move this to a separate module that imports matplotlib
-    import matplotlib.pyplot as plt
-
-    plt.imshow(data)
-    plt.axis("tight")
-    plt.axis("off")
-    plt.tight_layout()
-    plt.savefig(fname, dpi=300, bbox_inches="tight")
-    print(f"Saved data to {fname}")
-
-
-def save_mp4(
-    fname: str | Path | np.ndarray,
-    images,
-    framerate=60,
-    speedup=1,
-    chunk_size=100,
-    cmap="gray",
-    win=7,
-    vcodec="libx264",
-    normalize=True,
-):
-    """
-    Save a video from a 3D array or TIFF stack to `.mp4`.
-
-    Parameters
-    ----------
-    fname : str
-        Output video file name.
-    images : numpy.ndarray or str
-        Input 3D array (T x H x W) or a file path to a TIFF stack.
-    framerate : int, optional
-        Original framerate of the video, by default 60.
-    speedup : int, optional
-        Factor to increase the playback speed, by default 1 (no speedup).
-    chunk_size : int, optional
-        Number of frames to process and write in a single chunk, by default 100.
-    cmap : str, optional
-        Colormap to apply to the video frames, by default "gray".
-        Must be a valid Matplotlib colormap name.
-    win : int, optional
-        Temporal averaging window size. If `win > 1`, frames are averaged over
-        the specified window using convolution. By default, 7.
-    vcodec : str, optional
-        Video codec to use, by default 'libx264'.
-    normalize : bool, optional
-        Flag to min-max normalize the video frames, by default True.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the input file does not exist when `images` is provided as a file path.
-    ValueError
-        If `images` is not a valid 3D NumPy array or a file path to a TIFF stack.
-
-    Notes
-    -----
-    - The input array `images` must have the shape (T, H, W), where T is the number of frames,
-      H is the height, and W is the width.
-    - The `win` parameter performs temporal smoothing by averaging over adjacent frames.
-
-    Examples
-    --------
-    Save a video from a 3D NumPy array with a gray colormap and 2x speedup:
-
-    >>> import numpy as np
-    >>> images = np.random.rand(100, 600, 576) * 255
-    >>> save_mp4('output.mp4', images, framerate=17, cmap='gray', speedup=2)
-
-    Save a video with temporal averaging applied over a 5-frame window at 4x speed:
-
-    >>> save_mp4('output_smoothed.mp4', images, framerate=30, speedup=4, cmap='gray', win=5)
-
-    Save a video from a TIFF stack:
-
-    >>> save_mp4('output.mp4', 'path/to/stack.tiff', framerate=60, cmap='gray')
-    """
-    if not isinstance(fname, (str, Path)):
-        raise TypeError(f"Expected fname to be str or Path, got {type(fname)}")
-    if isinstance(images, (str, Path)):
-        print(f"Loading TIFF stack from {images}")
-        if Path(images).is_file():
-            try:
-                images = tifffile.memmap(images)
-            except MemoryError:
-                images = tifffile.imread(images)
-        else:
-            raise FileNotFoundError(
-                f"Images given as a string or path, but not a valid file: {images}"
-            )
-    elif not isinstance(images, np.ndarray):
-        raise ValueError(
-            f"Expected images to be a numpy array or a file path, got {type(images)}"
-        )
-
-    T, height, width = images.shape
-    colormap = cm.get_cmap(cmap)
-
-    if normalize:
-        print("Normalizing mp4 images to [0, 1]")
-        images = norm_minmax(images)
-
-    if win and win > 1:
-        print(f"Applying temporal averaging with window size {win}")
-        kernel = np.ones(win) / win
-        images = np.apply_along_axis(
-            lambda x: np.convolve(x, kernel, mode="same"), axis=0, arr=images
-        )
-
-    print(f"Saving {T} frames to {fname}")
-    output_framerate = int(framerate * speedup)
-    process = (
-        ffmpeg.input(
-            "pipe:",
-            format="rawvideo",
-            pix_fmt="rgb24",
-            s=f"{width}x{height}",
-            framerate=output_framerate,
-        )
-        .output(str(fname), pix_fmt="yuv420p", vcodec=vcodec, r=output_framerate)
-        .overwrite_output()
-        .run_async(pipe_stdin=True)
-    )
-
-    for start in range(0, T, chunk_size):
-        end = min(start + chunk_size, T)
-        chunk = images[start:end]
-        colored_chunk = (colormap(chunk)[:, :, :, :3] * 255).astype(np.uint8)
-        for frame in colored_chunk:
-            process.stdin.write(frame.tobytes())
-
-    process.stdin.close()
-    process.wait()
-    print(f"Video saved to {fname}")
-
 
 def _is_arraylike(obj) -> bool:
     """
@@ -610,25 +500,39 @@ def _is_arraylike(obj) -> bool:
 
     return True
 
+def _get_mbo_project_root() -> Path:
+    """Return the root path of the mbo_utilities repository (based on this file)."""
+    return Path(__file__).resolve().parent.parent
 
-def to_lazy_array(data_in: os.PathLike | np.ndarray | list[os.PathLike | np.ndarray]):
+def get_mbo_dirs() -> dict:
     """
-    Convencience function to resolve various data_in variants into lazy arrays.
+    Ensure ~/mbo and its subdirectories exist.
+
+    Returns a dict with paths to the root, settings, and cache directories.
     """
-    if _is_arraylike(data_in):
-        return data_in
-    if isinstance(data_in, list):
-        if is_raw_scanimage(data_in[0]):
-            return read_scan(data_in)
-        else:
-            return zstack_from_files(data_in)
-    if isinstance(data_in, (str, Path)):
-        data_in = Path(data_in).expanduser().resolve()
-        if data_in.is_file():
-            # check suffix
-            if data_in.suffix in [".tif", ".tiff"]:
-                return tifffile.memmap(data_in)
-            elif data_in.suffix == ".npy":
-                return np.memmap(data_in)
-    else:
-        raise TypeError(f"Invalid type {type(data_in)}")
+    base = Path.home().joinpath("mbo")
+    imgui = base.joinpath("imgui")
+    cache = base.joinpath("cache")
+    logs = base.joinpath("logs")
+    tests = base.joinpath("tests")
+    data = base.joinpath("data")
+
+    assets = imgui.joinpath("assets")
+    settings = assets.joinpath("app_settings")
+
+    for d in (base, imgui, cache, logs, assets, data, tests):
+        d.mkdir(exist_ok=True)
+
+    return {
+        "base": base,
+        "imgui": imgui,
+        "cache": cache,
+        "logs": logs,
+        "assets": assets,
+        "settings": settings,
+        "data": data,
+        "tests": tests,
+    }
+
+def _convert_range_to_slice(k):
+    return slice(k.start, k.stop, k.step) if isinstance(k, range) else k

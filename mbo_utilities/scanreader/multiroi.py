@@ -132,7 +132,6 @@ class ROI:
                     field.width_in_degrees = np.interp(
                         scanning_depth, scanfield_depths, scanfield_widths
                     )
-
         return field
 
 

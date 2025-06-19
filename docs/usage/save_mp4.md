@@ -38,26 +38,38 @@ data.shape  # should be [T, Y, X]
 ::::{tab-set}
 
 :::{tab-item} Default
+
 ```python
-mbo.save_mp4(save_path / "default.mp4", data)
+import mbo_utilities.plot_util
+
+mbo_utilities.plot_util.save_mp4(save_path / "default.mp4", data)
 ```
 :::
 
 :::{tab-item} 2× Speedup
+
 ```python
-mbo.save_mp4(save_path / "speedup_2x.mp4", data, speedup=2)
+import mbo_utilities.plot_util
+
+mbo_utilities.plot_util.save_mp4(save_path / "speedup_2x.mp4", data, speedup=2)
 ```
 :::
 
 :::{tab-item} 4× Speedup
+
 ```python
-mbo.save_mp4(save_path / "speedup_4x.mp4", data, speedup=4)
+import mbo_utilities.plot_util
+
+mbo_utilities.plot_util.save_mp4(save_path / "speedup_4x.mp4", data, speedup=4)
 ```
 :::
 
 :::{tab-item} Smoothing + Speedup
+
 ```python
-mbo.save_mp4(save_path / "windowed_5frames_4x.mp4", data, speedup=4, win=5)
+import mbo_utilities.plot_util
+
+mbo_utilities.plot_util.save_mp4(save_path / "windowed_5frames_4x.mp4", data, speedup=4, win=5)
 ```
 :::
 

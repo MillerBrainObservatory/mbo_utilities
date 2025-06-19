@@ -1,6 +1,7 @@
 from typing import Sequence
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 
 def align_images_zstack(images, mode="trim"):
@@ -249,7 +250,9 @@ def is_running_jupyter():
         return False
 
 
-def subsample_array(arr, max_size: int = 1e6, ignore_dims: Sequence[int] | None = None):
+def subsample_array(
+    arr: ArrayLike, max_size: int = 1e6, ignore_dims: Sequence[int] | None = None
+):
     """
     Subsamples an input array while preserving its relative dimensional proportions.
 
@@ -318,3 +321,27 @@ def subsample_array(arr, max_size: int = 1e6, ignore_dims: Sequence[int] | None 
     slices = tuple(slices)
 
     return np.asarray(arr[slices])
+
+
+def _process_slice_str(slice_str):
+    if not isinstance(slice_str, str):
+        raise ValueError(f"Expected a string argument, received: {slice_str}")
+    if slice_str.isdigit():
+        return int(slice_str)
+    else:
+        parts = slice_str.split(":")
+    return slice(*[int(p) if p else None for p in parts])
+
+
+def _process_slice_objects(slice_str):
+    return tuple(map(_process_slice_str, slice_str.split(",")))
+
+
+def _print_params(params, indent=5):
+    for k, v in params.items():
+        # if value is a dictionary, recursively call the function
+        if isinstance(v, dict):
+            print(" " * indent + f"{k}:")
+            _print_params(v, indent + 4)
+        else:
+            print(" " * indent + f"{k}: {v}")
