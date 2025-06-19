@@ -11,7 +11,8 @@ from tifffile import TiffWriter
 import h5py
 
 from . import log
-from .file_io import _make_json_serializable, write_ops
+from .file_io import write_ops
+from ._parsing import _make_json_serializable
 from .util import is_running_jupyter
 
 try:
