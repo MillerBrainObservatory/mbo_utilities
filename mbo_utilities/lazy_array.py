@@ -16,7 +16,7 @@ from numpy import memmap, ndarray
 from zarr.storage import FsspecStore
 
 from . import log
-from mbo_utilities.file_io import Scan_MBO, get_files
+from mbo_utilities.file_io import Scan_MBO, get_files, ZarrScanView
 from mbo_utilities.metadata import is_raw_scanimage
 from mbo_utilities.metadata import has_mbo_metadata
 from ._writers import _save_data
@@ -54,7 +54,7 @@ def supports_roi(obj):
 
 def iter_rois(obj):
     if not supports_roi(obj):
-        yield None
+        yield [None]
         return
 
     roi = getattr(obj, "roi", None)
@@ -164,13 +164,22 @@ class Suite2pArray:
 @dataclass
 class MBOScanArray:
     fpath: list[Path]
-    roi: int | Sequence[int] | None = None
+    init_roi: int | None = None
     fix_phase: bool = False
     upsample: int = 4
     max_offset: int = 3
+    phasecorr_method: str = "frame"
     metadata: dict = field(init=False, default_factory=dict)
     data: Scan_MBO | None = field(init=False, default=None)
     shape: tuple[int, ...] = field(init=False, default=())
+
+    @property
+    def roi(self):
+        return self.data.roi
+
+    @roi.setter
+    def roi(self, value):
+        self.data.roi = value
 
     def __getattr__(self, name):
         return getattr(self.data, name)
@@ -188,7 +197,13 @@ class MBOScanArray:
         return self.data[item]
 
     def __post_init__(self):
-        self.data = Scan_MBO(self.roi,)
+        self.data = Scan_MBO(
+            roi=self.init_roi,
+            phasecorr_method=self.phasecorr_method,
+            fix_phase=self.fix_phase,
+            upsample=self.upsample,
+            max_offset=self.max_offset
+        )
         self.data.read_data(self.fpath)  # metadata is set
         self.metadata.update(self.data.metadata)
         self.shape = self.data.shape
@@ -203,15 +218,27 @@ class MBOScanArray:
             debug = None,
             planes = None,
     ):
-        for roi in self.roi:
+        for roi in iter_rois(self.data):
             target = outpath if self.roi is None else outpath / f"roi{roi}"
             target.mkdir(exist_ok=True)
 
             md = self.metadata.copy()
-            self.roi = roi
             md["roi"] = roi
+            if self.data.reference:
+                data = ZarrScanView(
+                    self.data.as_zarr(),
+                    ys=self.yslices,
+                    xs=self.xslices,
+                    oys=self.output_yslices,
+                    oxs=self.output_xslices,
+                    roi=roi,
+                )
+            else:
+                data = self
+
+            print(self.data.roi)
             _save_data(
-                self,
+                data,
                 target,
                 planes=planes,
                 overwrite=overwrite,
@@ -228,38 +255,6 @@ class MBOScanArray:
         except ImportError:
             raise ImportError("fastplotlib must be installed to use `.imshow()`.")
         return imshow_lazy_array(self, **kwargs)
-
-    # @property
-    # def metadata(self):  # anything you like
-    #     return self._metadata
-    #
-    # @metadata.setter
-    # def metadata(self, value: dict):
-    #     if not isinstance(value, dict):
-    #         raise ValueError(f"Metadata must be a dictionary, got {type(value)} instead.")
-    #     self._metadata.update(value)
-    #
-    # def min(self) -> float:
-    #     """Return the minimum value in the data."""
-    #     if self.data is not None:
-    #         return float(self.data.min())
-    #     return float("inf")
-    #
-    # def max(self) -> float:
-    #     """Return the minimum value in the data."""
-    #     if self.data is not None:
-    #         return float(self.data.max())
-    #     return float("inf")
-    #
-    # @property
-    # def ndim(self) -> int:
-    #     """Return the number of dimensions in the data."""
-    #     return 4
-    #
-    # def __array__(self):
-    #     """Return a small sample of the data as a numpy array."""
-    #     return np.asarray(self.data)
-
 
 class _LazyH5Dataset:
     def __init__(self, fpath: Path | str, ds: str = "mov"):
@@ -356,7 +351,6 @@ class MBOTiffArray:
                 f" falling back to imread"
             )
             return tifffile.imread(self.fpath[0], mode="r")
-
 
 @dataclass
 class NpyArray:
@@ -527,7 +521,7 @@ def imread(
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            return MBOScanArray(paths, roi=roi, **kwargs)
+            return MBOScanArray(paths, init_roi=roi, **kwargs)
         if has_mbo_metadata(first):
             return MBOTiffArray(paths, **kwargs)
         return TiffArray(paths)
