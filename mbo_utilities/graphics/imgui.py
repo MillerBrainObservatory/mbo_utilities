@@ -21,11 +21,11 @@ from imgui_bundle import (
 )
 
 from mbo_utilities.file_io import (
-    Scan_MBO,
     SAVE_AS_TYPES,
     get_mbo_dirs,
     read_scan,
 )
+from mbo_utilities.lazy_array import Scan_MBO
 from mbo_utilities.graphics._imgui import begin_popup_size, ndim_to_frame, style_seaborn_dark
 from mbo_utilities.graphics._widgets import set_tooltip, checkbox_with_tooltip, draw_scope
 from mbo_utilities.graphics.progress_bar import (

@@ -49,36 +49,6 @@ def find_si_rois(file):
     return rois
 
 
-def write_u16(infile: str | Path, outfile: str | Path):
-    img = tiff.imread(infile).astype(np.int32)
-    off  = img.min()
-    rng  = img.max() - off
-    u16  = (img - off).astype(np.uint16)
-
-    tiff.imwrite(
-        outfile,
-        u16,
-        photometric="minisblack",
-        bitspersample=16,
-        extratags=[
-            (340, "H", 1, (0,),   False),
-            (341, "H", 1, (rng if rng < 65536 else 65535,), False),
-            (65535, "d", 2, (float(off), float(rng)), False)
-        ],
-    )
-
-def timeit(func):
-    """
-    Decorator to time a function.
-    """
-    def wrapper(*args, **kwargs):
-        start = time.time()
-        result = func(*args, **kwargs)
-        end = time.time()
-        print(f"Function {func.__name__} took {end - start:.4f} seconds")
-        return result
-    return wrapper
-
 class ShiftOffsetWidget(EdgeWindow):
     def __init__(
         self,
