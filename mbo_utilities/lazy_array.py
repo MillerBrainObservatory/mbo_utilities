@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
 
 import logging
 from dataclasses import dataclass, field
@@ -11,18 +10,14 @@ from typing import Sequence, List, Tuple, Any,  Callable
 import h5py
 import numpy as np
 import tifffile
-import dask.array as da
-import zarr
 from dask import array as da
-from fsspec.implementations.reference import ReferenceFileSystem
 from numpy import memmap, ndarray
-from zarr.storage import FsspecStore
 
-from . import log, expand_paths, get_metadata, subsample_array
-from mbo_utilities.file_io import get_files, logger, _multi_tiff_to_fsspec, HAS_ZARR, FsspecStore, ReferenceFileSystem, \
-    CHUNKS, zarr_open as zarr_open, _convert_range_to_slice
-from mbo_utilities.metadata import is_raw_scanimage
-from mbo_utilities.metadata import has_mbo_metadata
+from . import log
+from .file_io import get_files, logger, _multi_tiff_to_fsspec, HAS_ZARR, FsspecStore, ReferenceFileSystem, \
+    CHUNKS, zarr_open as zarr_open, _convert_range_to_slice, expand_paths
+from .metadata import is_raw_scanimage, has_mbo_metadata, get_metadata
+from .util import subsample_array
 from ._parsing import _make_json_serializable
 from ._writers import _save_data
 from .phasecorr import ALL_PHASECORR_METHODS, nd_windowed
@@ -62,14 +57,18 @@ def supports_roi(obj):
 
 def iter_rois(obj):
     if not supports_roi(obj):
-        yield [None]
+        yield None
         return
 
     roi = getattr(obj, "roi", None)
     num_rois = getattr(obj, "num_rois", 1)
+    print((roi, num_rois))
 
-    if roi is None:
-        yield from range(1, num_rois + 1)
+    if roi == 0:
+        for i in range(1, num_rois + 1):
+            yield i
+    elif roi is None:
+        yield None
     elif isinstance(roi, int):
         yield roi
     elif isinstance(roi, (list, tuple)):
@@ -437,9 +436,8 @@ def imwrite(
 
 def imread(
         inputs: str | Path | Sequence[str | Path],
-        *,
-        roi: int | None = None,
-        **kwargs
+        *args,
+        **kwargs, # for the reader
 ):
     if isinstance(inputs, np.ndarray):
         return inputs
@@ -479,7 +477,7 @@ def imread(
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            return MBORawArray(paths, init_roi=roi, **kwargs)
+            return MboRawArray(files=paths, **kwargs)
         if has_mbo_metadata(first):
             return MBOTiffArray(paths, **kwargs)
         return TiffArray(paths)
@@ -508,6 +506,7 @@ class MboRawArray(scans.ScanMultiROI):
 
     def __init__(
             self,
+            files: str | Path | list = None,
             roi: int | Sequence[int] | None = None,
             fix_phase: bool = True,
             phasecorr_method: str = "frame",
@@ -516,6 +515,8 @@ class MboRawArray(scans.ScanMultiROI):
             max_offset: int = 4,
     ):
         super().__init__(join_contiguous=True)
+        if files:
+            self.read_data(files)
         self._metadata = {} # set when pages are read
         self.roi = roi  # alias
         self._roi = roi
@@ -944,10 +945,12 @@ class MboRawArray(scans.ScanMultiROI):
             planes = None,
     ):
         for roi in iter_rois(self):
-            target = outpath if self.roi is None else outpath / f"roi{roi}"
+            print(roi)
+            target = outpath if roi is None else outpath / f"roi{roi}"
             target.mkdir(exist_ok=True)
 
             md = self.metadata.copy()
+            self.roi = roi
             md["roi"] = roi
             _save_data(
                 self,

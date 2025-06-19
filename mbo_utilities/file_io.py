@@ -13,7 +13,6 @@ import dask.array as da
 from tifffile import TiffFile
 
 from . import log
-from .lazy_array import MboRawArray
 from .metadata import is_raw_scanimage
 
 try:
@@ -395,17 +394,16 @@ def read_scan(
             f"The file {filenames[0]} does not appear to be a raw ScanImage TIFF file."
         )
 
-    scan = MboRawArray(
-        roi=roi,
-        fix_phase=fix_phase,
-        phasecorr_method=phasecorr_method,
-        border=border,
-        upsample=upsample,
-        max_offset=max_offset,
-    )
-    scan.read_data(filenames, dtype=dtype)
-    return scan
-
+    # scan = MboRawArray(
+    #     roi=roi,
+    #     fix_phase=fix_phase,
+    #     phasecorr_method=phasecorr_method,
+    #     border=border,
+    #     upsample=upsample,
+    #     max_offset=max_offset,
+    # )
+    # scan.read_data(filenames, dtype=dtype)
+    # return scan
 
 def get_files(
     base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None

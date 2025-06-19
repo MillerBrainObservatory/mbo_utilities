@@ -104,15 +104,13 @@ class ShiftOffsetWidget(EdgeWindow):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     Path("/tmp/01").mkdir(exist_ok=True,)
-
-    data = imread(
-        r"/home/flynn/lbm_data/raw"
-    )
-    x = data[:, 0, :, :]
-    print(x.shape)
+    data = imread(r"/home/flynn/lbm_data/raw")
+    data.roi = 0
+    assert len(data[0, 0, ...]) == 2, "Data should be 2D after ROI selection"
+    assert data[0][0].ndim == 3, "Data should be 2D after ROI selection"
     imwrite(
         data,
-        "/tmp/01/fsspec",
+        "/tmp/testing",
         ext=".tiff",
         overwrite=True,
         planes=[10, 11],
@@ -120,7 +118,23 @@ if __name__ == "__main__":
     data.roi = None
     imwrite(
         data,
-        "/tmp/01/fsspec/full",
+        "/tmp/01/testing/full",
+        ext=".tiff",
+        overwrite=True,
+        planes=[10, 11],
+    )
+    data.roi = [1, 2]
+    imwrite(
+        data,
+        "/tmp/testing/list",
+        ext=".tiff",
+        overwrite=True,
+        planes=[10, 11],
+    )
+    data.roi = [1, 2]
+    imwrite(
+        data,
+        "/tmp/testing/single",
         ext=".tiff",
         overwrite=True,
         planes=[10, 11],
