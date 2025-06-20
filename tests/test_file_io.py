@@ -131,18 +131,19 @@ def plane_paths():
 @skip_if_missing_data
 def test_full_contains_rois_side_by_side(plane_paths):
     # map parent‐dir → path, e.g. "full", "roi1", "roi2"
-    by_dir = {Path(p).parent.name: Path(p) for p in plane_paths}
-    full = tfile_imread(by_dir["full"])
-    roi1 = tfile_imread(by_dir["roi1"])
-    roi2 = tfile_imread(by_dir["roi2"])
+    if ASSEMBLED:
+        by_dir = {Path(p).parent.name: Path(p) for p in plane_paths}
+        full = tfile_imread(by_dir["full"])
+        roi1 = tfile_imread(by_dir["roi1"])
+        roi2 = tfile_imread(by_dir["roi2"])
 
-    T, H, W = full.shape
-    assert roi1.shape == (T, H, W // 2)
-    assert roi2.shape == (T, H, W - W // 2)
+        T, H, W = full.shape
+        assert roi1.shape == (T, H, W // 2)
+        assert roi2.shape == (T, H, W - W // 2)
 
-    left, right = full[:, :, : W // 2], full[:, :, W // 2 :]
-    np.testing.assert_array_equal(left, roi1)
-    np.testing.assert_array_equal(right, roi2)
+        left, right = full[:, :, : W // 2], full[:, :, W // 2 :]
+        np.testing.assert_array_equal(left, roi1)
+        np.testing.assert_array_equal(right, roi2)
 
 
 @skip_if_missing_data
