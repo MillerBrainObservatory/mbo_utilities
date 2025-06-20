@@ -184,14 +184,14 @@ def test_overwrite_true_rewrites(tmp_path, capsys):
 def test_benchmark_indexing_test(tmp_path):
     """Benchmark indexing performance for different array types."""
     files = mbo.get_files(BASE, "tif")
-    scan = mbo_imread(files)
+    data = mbo_imread(files)
 
     # Convert to dask and zarr
-    dask_array = scan.data.as_dask()
-    zarr_array = scan.data.as_zarr()
+    dask_array = data.as_dask()
+    zarr_array = data.as_zarr()
 
     arrays = {
-        "numpy": scan.data,
+        "numpy": data,
         "dask": dask_array,
         "zarr": zarr_array,
     }
