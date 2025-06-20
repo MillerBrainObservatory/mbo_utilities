@@ -1,5 +1,6 @@
 # Calculating DF/F
 
+This table summarizes Calcium Activity (ΔF/F) detection methods reviewed by Paudel et al. [(2024)](https://doi.org/10.3390/biom14010138).
 | **Method**                         | **How It's Performed**                                                                 | **Pros**                                                      | **Cons**                                                             |
 |-----------------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------|------------------------------------------------------------------------|
 | **Manual Spike Counting**         | Visual inspection of raw fluorescence or dF/F traces to count events.                  | Simple; no code needed.                                        | Subjective; non-scalable; low reproducibility.                       |
@@ -12,3 +13,12 @@
 | **Savitzky-Golay Filtering**      | Smooth trace to reduce noise while preserving spikes.                                  | Good for noisy signals.                                        | Requires tuning; can mask small or fast events.                      |
 | **Tensor Voting / Cluster Detection**| Identify spatially coordinated activity from 2D/3D image stacks.                       | Detects population events (e.g., waves).                       | Not standard; needs spatially dense data.                            |
 | **Standard Deviation (SD) Masking**| Define active frames/regions where ΔF exceeds N×SD of baseline.                        | Objective thresholding for event detection.                    | Threshold choice heavily affects results.                            |
+
+
+```{figure} ./_images/dff_1.png
+:name: fig-dff-example
+:width: 600px
+:alt: Example ΔF/F trace baseline comparisons
+
+Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1 of {cite}`10.3390/biom14010138`.
+```
