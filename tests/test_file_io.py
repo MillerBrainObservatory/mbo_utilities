@@ -109,12 +109,13 @@ def test_demo_files(roi, subdir):
     files = mbo.get_files(BASE, "tif")
     lazy_array = mbo_imread(files)
     save_dir = ASSEMBLED / subdir if subdir else ASSEMBLED
+    lazy_array.roi = roi
     mbo_imwrite(
         lazy_array,
         save_dir,
         ext=".tiff",
         overwrite=True,
-        planes=[1, 7, 14],
+        planes=[7, 10],
     )
 
     out = mbo.get_files(save_dir, "plane", max_depth=2)
@@ -145,7 +146,7 @@ def test_full_contains_rois_side_by_side(plane_paths):
 
 
 @skip_if_missing_data
-def test_overwrite_false_skips_existing(tmp_path, capsys):
+def test_overwrite_false_skips_existing():
     # First write with overwrite=True
     files = mbo.get_files(BASE, "tif")
     data = mbo_imread(files)
@@ -164,7 +165,7 @@ def test_overwrite_false_skips_existing(tmp_path, capsys):
 
 
 @skip_if_missing_data
-def test_overwrite_true_rewrites(tmp_path, capsys):
+def test_overwrite_true_rewrites():
     # First write with overwrite=True
     files = mbo.get_files(BASE, "tif")
     data = mbo_imread(files)
