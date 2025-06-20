@@ -1,4 +1,5 @@
 import os
+import functools
 
 import pytest
 from pathlib import Path
@@ -28,9 +29,13 @@ DATA_ROOT = Path(os.getenv("MBO_TEST_DATA", DEFAULT_DATA_ROOT))
 BASE = DATA_ROOT
 ASSEMBLED = BASE / "assembled"
 
-skip_if_missing_data = pytest.mark.skipif(
-    not DATA_ROOT.is_dir(), reason=f"Test data directory not found: {DATA_ROOT}"
-)
+def skip_if_missing_data(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if not DATA_ROOT.exists() or len(list(DATA_ROOT.glob("*.tif"))) == 0:
+            pytest.skip("Required TIFF files not found.")
+        return func(*args, **kwargs)
+    return wrapper
 
 
 @skip_if_missing_data
