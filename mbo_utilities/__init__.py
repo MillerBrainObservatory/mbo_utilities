@@ -3,10 +3,11 @@ from pathlib import Path
 from .file_io import (
     get_files,
     npy_to_dask,
-    read_scan,
     expand_paths,
     get_mbo_dirs,
     normalize_file_url,
+    load_ops,
+    write_ops,
 )
 from .plot_util import save_png, save_mp4
 
@@ -18,6 +19,8 @@ from .util import (
     is_imgui_installed,
     subsample_array,
 )
+from .lazy_array import imread, imwrite
+
 
 if is_imgui_installed():
     from .graphics import run_gui
@@ -31,13 +34,16 @@ __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
 
 __all__ = [
     # file_io
+    "imread",
+    "imwrite",
     "run_gui",
     "get_mbo_dirs",
     "scanreader",
     "npy_to_dask",
     "get_files",
-    "read_scan",
     "subsample_array",
+    "load_ops",
+    "write_ops",
     # metadata
     "is_raw_scanimage",
     "get_metadata",

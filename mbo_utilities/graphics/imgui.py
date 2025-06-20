@@ -1070,33 +1070,35 @@ class PreviewDataWidget(EdgeWindow):
         stats = {"mean": [], "std": [], "snr": []}
         means = []
 
+        self._tiff_lock = threading.Lock()
         for z in range(self.nz):
             self.logger.info(f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {data_ix + 1} --")
+            with self._tiff_lock:
 
-            stack = arr[:, z]
-            if hasattr(stack, "astype"):  # works for Dask and NumPy
-                stack = stack.astype(np.float32)
-            if hasattr(stack, "compute"):
-                stack = stack.compute()
+                stack = arr[:, z]
+                if hasattr(stack, "astype"):  # works for Dask and NumPy
+                    stack = stack.astype(np.float32)
+                if hasattr(stack, "compute"):
+                    stack = stack.compute()
 
-            mean_img = np.mean(stack, axis=0)
-            std_img = np.std(stack, axis=0)
-            snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
+                mean_img = np.mean(stack, axis=0)
+                std_img = np.std(stack, axis=0)
+                snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
 
-            stats["mean"].append(float(np.mean(mean_img)))
-            stats["std"].append(float(np.mean(std_img)))
-            stats["snr"].append(float(np.mean(snr_img)))
-            means.append(mean_img)
+                stats["mean"].append(float(np.mean(mean_img)))
+                stats["std"].append(float(np.mean(std_img)))
+                stats["snr"].append(float(np.mean(snr_img)))
+                means.append(mean_img)
 
-            self.logger.info(
-                f"ROI {data_ix + 1} - Z-plane {z + 1}: "
-                f"Mean: {stats['mean'][-1]:.2f}, "
-                f"Std: {stats['std'][-1]:.2f}, "
-                f"SNR: {stats['snr'][-1]:.2f}",
-            )
+                self.logger.info(
+                    f"ROI {data_ix + 1} - Z-plane {z + 1}: "
+                    f"Mean: {stats['mean'][-1]:.2f}, "
+                    f"Std: {stats['std'][-1]:.2f}, "
+                    f"SNR: {stats['snr'][-1]:.2f}",
+                )
 
-            self._zstats_progress[data_ix] = (z + 1) / self.nz
-            self._zstats_current_z[data_ix] = z
+                self._zstats_progress[data_ix] = (z + 1) / self.nz
+                self._zstats_current_z[data_ix] = z
 
         self._zstats[data_ix] = stats
         self._zstats_means[data_ix] = np.stack(means)
