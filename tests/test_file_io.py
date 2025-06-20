@@ -125,6 +125,7 @@ def test_demo_files(roi, subdir):
 
 @pytest.fixture
 def plane_paths():
+    ASSEMBLED.mkdir(exist_ok=True)
     return mbo.get_files(ASSEMBLED, "plane", max_depth=3)
 
 
