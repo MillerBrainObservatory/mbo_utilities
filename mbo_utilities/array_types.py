@@ -218,6 +218,9 @@ class MBOTiffArray:
     def __getitem__(self, key: int | slice | tuple[int, ...]) -> np.ndarray:
         return self.dask[key]
 
+    def __getattr__(self, attr):
+        return getattr(self.dask, attr)
+
     def min(self) -> float:
         return float(self.dask[0].min().compute())
 
@@ -231,9 +234,6 @@ class MBOTiffArray:
     @property
     def shape(self) -> tuple[int, ...]:
         return tuple(self.dask.shape)
-
-    def reshape(self, *shape):
-        return self.dask.reshape(*shape)
 
     def imshow(self):
         pass
