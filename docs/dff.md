@@ -1,6 +1,27 @@
-# Calculating DF/F
+# Calculating ΔF/F0
+
+Before reading the below guide, please read [this blog-post](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by the great Dr Peter Rupprecht at the University of Zurich.
+
+This guide covers common approaches to extracting calcium activity and how this will differ depending on which pipeline you are using.
+
+## Key takeaways
+
+- ∆F/F reflects intracellular calcium levels, but often in a nonlinear way
+- ∆F/F was initially introduced for organic dye calcium indicators in the 1980s
+- GCaMP behaves differently due to its low baseline brightness and its nonlinearity
+- There is no single recipe on how to compute ∆F/F
+- Computation of ∆F/F must be adapted to cell types, activity patterns, and noise
+- Interpretation of ∆F/F requires knowledge about indicators, cell types, and confounds
+- Potential confounds are brain motion, neuropil contamination, and response variability across neurons
+
+## What is ΔF/F0
+
+"Delta F over F naught", abbr. ΔF/F0, is the change in calcium signal over time, normalized by the baseline signal.
+
+## Overview
 
 This table summarizes Calcium Activity (ΔF/F) detection methods reviewed by Paudel et al. [(2024)](https://doi.org/10.3390/biom14010138).
+
 | **Method**                         | **How It's Performed**                                                                 | **Pros**                                                      | **Cons**                                                             |
 |-----------------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------|------------------------------------------------------------------------|
 | **Manual Spike Counting**         | Visual inspection of raw fluorescence or dF/F traces to count events.                  | Simple; no code needed.                                        | Subjective; non-scalable; low reproducibility.                       |
@@ -14,6 +35,9 @@ This table summarizes Calcium Activity (ΔF/F) detection methods reviewed by Pau
 | **Tensor Voting / Cluster Detection**| Identify spatially coordinated activity from 2D/3D image stacks.                       | Detects population events (e.g., waves).                       | Not standard; needs spatially dense data.                            |
 | **Standard Deviation (SD) Masking**| Define active frames/regions where ΔF exceeds N×SD of baseline.                        | Objective thresholding for event detection.                    | Threshold choice heavily affects results.                            |
 
+## Calculating ΔF/F
+
+The most important consideration you must consider is how you calculate your baseline activity.
 
 ```{figure} ./_images/dff_1.png
 :name: fig-dff-example
@@ -22,3 +46,7 @@ This table summarizes Calcium Activity (ΔF/F) detection methods reviewed by Pau
 
 Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1 of {cite}`10.3390/biom14010138`.
 ```
+
+## References 
+
+https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data
