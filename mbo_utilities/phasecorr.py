@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.ndimage import fourier_shift
+from scipy.ndimage import fourier_shift, shift
 from skimage.registration import phase_cross_correlation
 
 from mbo_utilities import log
@@ -46,13 +46,13 @@ def _phase_corr_2d(
     a = pre[row_start:row_end, col_start:col_end]
     b_ = post[row_start:row_end, col_start:col_end]
 
-    shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
-    dx = float(shift[1])
+    _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
+    dx = float(_shift[1])
     if max_offset:
         return np.sign(dx) * min(abs(dx), max_offset)
     return dx
 
-def _apply_offset(img, shift):
+def _apply_offset(img, offset):
     """
     Apply one scalar `shift` (in X) to every *odd* row of an
     (..., Y, X) array.  Works for 2-D or 3-D stacks.
@@ -63,13 +63,13 @@ def _apply_offset(img, shift):
     rows = img[..., 1::2, :]
 
     f = np.fft.fftn(rows, axes=(-2, -1))
-    shift_vec = (0,) * (f.ndim - 1) + (shift,)   # e.g. (0,0,dx) for 3-D
+    shift_vec = (0,) * (f.ndim - 1) + (offset,)   # e.g. (0,0,dx) for 3-D
     rows[:] = np.fft.ifftn(fourier_shift(f, shift_vec),
                            axes=(-2, -1)).real
     return img
 
-def nd_windowed(arr, *, method="mean", upsample=1,
-                max_offset=4, border=2):
+def nd_windowed(arr, *, method="frame", upsample=4,
+                max_offset=4, border=0):
     """Return (corrected array, offsets)."""
     a = np.asarray(arr)
     if a.ndim == 2:
@@ -103,9 +103,124 @@ def apply_scan_phase_offsets(arr, offs):
         out[k] = _apply_offset(out[k], off)
     return out
 
+def apply_patchwise_offsets(data, xsplits, offsets, blend=True, blend_width=16):
+    t, h, w = data.shape
+    n_parts = len(xsplits) - 1
+    offsets = np.asarray(offsets)  # shape (n_parts, t)
+
+    out = np.empty_like(data, dtype=np.float32)
+    x = np.arange(w)
+
+    # Centers for interpolation
+    centers = xsplits[:-1] + np.diff(xsplits) // 2
+
+    for frame_i in range(t):
+        dx_parts = offsets[:, frame_i]
+        dx_map = np.interp(
+            x,
+            centers,
+            dx_parts,
+            left=dx_parts[0],
+            right=dx_parts[-1]
+        )
+
+        if blend:
+            # Linear ramp blend mask to reduce seam artifacts
+            blend_mask = np.ones(w, dtype=np.float32)
+            for i in range(1, n_parts):
+                l = max(xsplits[i] - blend_width, xsplits[i - 1])
+                r = min(xsplits[i] + blend_width, xsplits[i + 1])
+                ramp = np.linspace(0, 1, r - l, dtype=np.float32)
+                blend_mask[l:xsplits[i]] *= 1 - ramp[:xsplits[i] - l]
+                blend_mask[xsplits[i]:r] *= ramp[xsplits[i] - l:]
+
+        for col in range(w):
+            col_data = data[frame_i, :, col]
+            col_shifted = col_data.copy()
+            col_shifted[1::2] = shift(col_data[1::2],
+                                      shift=(dx_map[col],),
+                                      order=1, mode="nearest", prefilter=False)
+            if blend:
+                out[frame_i, :, col] = (1 - blend_mask[col]) * col_data + blend_mask[col] * col_shifted
+            else:
+                out[frame_i, :, col] = col_shifted
+
+    return out
+
+def apply_patchwise_offsets_v2(data, xsplits, offsets, blend="edge", extrapolate=True):
+    t, h, w = data.shape
+    n_parts = len(xsplits) - 1
+    offsets = np.asarray(offsets)  # (n_parts, t)
+    out = data.copy().astype(np.float32)
+
+    x = np.arange(w)
+
+    for frame_i in range(t):
+        dx_parts = offsets[:, frame_i]
+
+        if blend == "center":
+            centers = xsplits[:-1] + np.diff(xsplits) // 2
+            dx_map = np.interp(x, centers, dx_parts, left=dx_parts[0], right=dx_parts[-1])
+        elif blend == "edge":
+            dx_map = np.zeros_like(x, dtype=np.float32)
+            for i in range(n_parts):
+                x0, x1 = xsplits[i], xsplits[i + 1]
+                dx_map[x0:x1] = dx_parts[i]
+        else:
+            raise ValueError("Invalid blend mode")
+
+        for col in range(w):
+            col_data = data[frame_i, :, col]
+            col_shifted = col_data.copy()
+            col_shifted[1::2] = shift(
+                col_data[1::2],
+                shift=(dx_map[col],),
+                order=1,
+                mode="nearest",
+                prefilter=False,
+            )
+            out[frame_i, :, col] = col_shifted
+
+    return out
+
+def phase_offsets_timecourse(
+        data,
+        n_parts=3,
+        upsample=10,
+        max_offset=4,
+        border=0,
+        method="frame"
+):
+    t, h, w = data.shape
+    xsplits = np.linspace(0, w, n_parts + 1, dtype=int)
+    offsets = []
+
+    flat = data.reshape(t, h, w)
+
+    for i in range(n_parts):
+        x0, x1 = xsplits[i], xsplits[i + 1]
+        patch = flat[:, :, x0:x1]
+
+        if method == "frame":
+            patch_offsets = [
+                _phase_corr_2d(f, upsample, border, max_offset)
+                for f in patch
+            ]
+        else:
+            if method not in MBO_WINDOW_METHODS:
+                raise ValueError(f"unknown method: {method}")
+            summary_img = MBO_WINDOW_METHODS[method](patch)
+            patch_offsets = _phase_corr_2d(summary_img, upsample, border, max_offset)
+            patch_offsets = [patch_offsets] * t
+
+        offsets.append(patch_offsets)
+
+    return xsplits, np.array(offsets)
+
+
+
 if __name__ == "__main__":
-    from mbo_utilities import get_files
-    from mbo_utilities.lazy_array import BaseLazyArray
+    from mbo_utilities import get_files, imread
 
     files = get_files(r"D:\tests\data", "tif")
     fpath = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green"
@@ -115,14 +230,14 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     # fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 
-    array_object = BaseLazyArray(fpath)
-    lazy_array = array_object.load()
+    array_object = imread(fpath)
+    lazy_array = array_object
     lazy_array.fix_phase = False
     array = lazy_array[:2000, 8, :, :]
     fig, ax = plt.subplots()
-    for i in [1, 3, 9]:
-        _, ofs = nd_windowed(array, method="frame", upsample=i)
-        ax.plot(ofs, label=f"upsample={i}")
+    for num in [1, 3, 9]:
+        _, ofs = nd_windowed(array, method="frame", upsample=num)
+        ax.plot(ofs, label=f"upsample={num}")
     ax.axhline(0, color="k", ls="--")
     ax.set_xlabel("Frame")
     ax.set_ylabel("Offset (pixels)")
