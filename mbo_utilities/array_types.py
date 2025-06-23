@@ -232,6 +232,9 @@ class MBOTiffArray:
     def shape(self) -> tuple[int, ...]:
         return tuple(self.dask.shape)
 
+    def reshape(self, *shape):
+        return self.dask.reshape(*shape)
+
     def imshow(self):
         pass
 
