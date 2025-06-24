@@ -6,6 +6,10 @@ from __future__ import annotations
 
 from enum import Enum
 import numpy as np
+import tifffile
+
+from mbo_utilities import is_raw_scanimage
+from mbo_utilities.metadata import has_mbo_metadata
 
 
 class ROI:
@@ -415,3 +419,21 @@ def iter_rois(obj):
             yield r
     else:
         yield roi
+
+
+def find_si_rois(file):
+    """
+    Find the ROIs in the current ScanImage session.
+
+    Returns
+    -------
+    list
+        List of ROI names.
+    """
+    with tifffile.TiffFile(file, mode="r") as _tf:
+        if is_raw_scanimage(file):
+            si_metadata = _tf.scanimage_metadata
+        if has_mbo_metadata(file):
+            si_metadata = _tf.shaped_metadata[0]["si"]
+        rois = si_metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
+    return rois

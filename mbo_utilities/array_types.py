@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,13 +14,14 @@ from fsspec.implementations.reference import ReferenceFileSystem
 from numpy import ndarray
 from zarr import open as zarr_open
 from zarr.storage import FsspecStore
+import fastplotlib as fpl
 
 from mbo_utilities.metadata import get_metadata
 from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities._writers import _save_data
 from mbo_utilities.file_io import _multi_tiff_to_fsspec, HAS_ZARR, CHUNKS, _convert_range_to_slice, expand_paths
 from mbo_utilities.util import subsample_array
-from mbo_utilities.pipelines import load_from_dir, HAS_SUITE2P
+from mbo_utilities.pipelines import HAS_SUITE2P, HAS_MASKNMF, load_from_dir
 
 from mbo_utilities import log
 from mbo_utilities.roi import iter_rois
@@ -44,69 +46,24 @@ class DemixingResultsArray:
         """
         Display the demixing results as an image widget.
         """
-        pass
-        # return imshow_lazy_array(self.load(), **kwargs)
+        if not HAS_MASKNMF:
+            raise ImportError("MaskNMF is not installed. Cannot display demixing results.")
+        import fastplotlib as fpl
 
-
-class _Suite2pLazyArray:
-    def __init__(self, ops: dict):
-        Ly = ops["Ly"]
-        Lx = ops["Lx"]
-        n_frames = ops.get("nframes", ops.get("n_frames", None))
-        if n_frames is None:
-            raise ValueError(
-                f"Could not locate 'nframes' or `n_frames` in ops: {ops.keys()}"
-            )
-        reg_file = ops.get("reg_file", ops.get("raw_file", None))
-        if reg_file is None:
-            raise ValueError(
-                f"Could not locate 'reg_file' or 'raw_file' in ops: {ops.keys()}"
-            )
-        self._bf = BinaryFile(  # type: ignore  # noqa
-            Ly=Ly, Lx=Lx, filename=str(reg_file), n_frames=n_frames
+        histogram_widget = kwargs.get("histogram_widget", True)
+        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000), })
+        window_funcs = kwargs.get("window_funcs", None)
+        return fpl.ImageWidget(
+            data=self.load(),
+            histogram_widget=histogram_widget,
+            figure_kwargs=figure_kwargs,  # "canvas": canvas},
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
+            window_funcs=window_funcs,
         )
-        self.shape = (n_frames, Ly, Lx)
-        self.ndim = 3
-        self.dtype = np.int16
-
-    def __len__(self) -> None | int:
-        return self.shape[0]
-
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return self._bf[key]
-
-        if isinstance(key, slice):
-            idxs = range(*key.indices(self.shape[0]))   # type: ignore
-            return np.stack([self._bf[i] for i in idxs], axis=0)
-
-        t, y, x = key
-        if isinstance(t, int):
-            frame = self._bf[t]
-            return frame[y, x]
-        elif isinstance(t, range):
-            idxs = t
-        else:
-            idxs = range(*t.indices(self.shape[0]))
-        return np.stack([self._bf[i][y, x] for i in idxs], axis=0)
-
-    def min(self) -> float:
-        return float(self._bf[0].min())
-
-    def max(self) -> float:
-        return float(self._bf[0].max())
-
-    def __array__(self):
-        n = min(10, self.shape[0])
-        return np.stack([self._bf[i] for i in range(n)], axis=0)
-
-    def close(self):
-        self._bf.file.close()
-
 
 @dataclass
 class Suite2pArray:
-    filenames: Path | str
+    filenames: Path | None
     metadata: dict
     shape: tuple[int, ...] = ()
     nframes: int = 0
@@ -114,32 +71,84 @@ class Suite2pArray:
 
     def __post_init__(self):
         if not HAS_SUITE2P:
-            logger.info("No suite2p detected, cannot initialize Suite2pLoader.")
-            return None
-        if isinstance(self.filenames, list):
-            self.metadata = np.load([p for p in self.filenames if p.suffix == ".npy"][0], allow_pickle=True).item()
-            self.filenames = [p for p in self.filenames if p.suffix == ".bin"][0]
+            logger.info("No suite2p detected, cannot initialize Suite2pArray.")
+            return
+
         if isinstance(self.metadata, (str, Path)):
             self.metadata = np.load(self.metadata, allow_pickle=True).item()
-        self.nframes = self.metadata["nframes"]
+
+        self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
+        if self.nframes is None:
+            raise ValueError(f"Missing nframes in metadata: {self.metadata.keys()}")
         self.Lx = self.metadata["Lx"]
         self.Ly = self.metadata["Ly"]
+        self.shape = (self.nframes, self.Ly, self.Lx)
+        self.ndim = 3
+        self.dtype = np.int16
 
-    def load(self) -> _Suite2pLazyArray:
-        """
-        Instead of returning a raw np.memmap, wrap the binary in a LazySuite2pMovie.
-        That way we never load all frames at once—ImageWidget (or anything else) can
-        index it on demand.
-        """
-        return _Suite2pLazyArray(self.metadata)
+        if self.filenames is not None:
+            from suite2p.io import BinaryFile
+            self._bf = BinaryFile(Ly=self.Ly, Lx=self.Lx, filename=str(self.filenames), n_frames=self.nframes)
+        else:
+            self._bf = None
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __getitem__(self, key):
+        if self._bf is None:
+            raise ValueError("No binary file was loaded.")
+
+        # Convert to array if advanced indexing is used
+        if isinstance(key, tuple) and len(key) != 1 and len(key) != 3:
+            return np.asarray(self)[key]
+
+        if isinstance(key, int):
+            return self._bf[key]
+        if isinstance(key, slice):
+            idxs = range(*key.indices(self.shape[0]))
+            return np.stack([self._bf[i] for i in idxs], axis=0)
+
+        t, y, x = key
+        if isinstance(t, int):
+            return self._bf[t][y, x]
+        idxs = t if isinstance(t, range) else range(*t.indices(self.shape[0]))
+        return np.stack([self._bf[i][y, x] for i in idxs], axis=0)
+
+    def min(self):
+        if self._bf is None:
+            raise ValueError("No binary file was loaded.")
+        return float(self._bf[0].min())
+
+    def max(self):
+        if self._bf is None:
+            raise ValueError("No binary file was loaded.")
+        return float(self._bf[0].max())
+
+    def __array__(self):
+        if self._bf is None:
+            raise ValueError("No binary file was loaded.")
+        n = min(10, self.shape[0])
+        return np.stack([self._bf[i] for i in range(n)], axis=0)
+
+    def close(self):
+        if self._bf is not None:
+            self._bf.file.close()
 
     def imshow(self, **kwargs):
-        """
-        Display the Suite2p movie as an image widget.
-        """
-        pass
-        # from mbo_utilities.graphics.display import imshow_lazy_array
-        # return imshow_lazy_array(self.load(), **kwargs)
+        if not HAS_SUITE2P:
+            raise ImportError("Suite2p is not installed.")
+        if self._bf is None:
+            raise ValueError("No binary file to display.")
+
+        import fastplotlib as fpl
+        return fpl.ImageWidget(
+            data=self,
+            histogram_widget=kwargs.get("histogram_widget", True),
+            figure_kwargs=kwargs.get("figure_kwargs", {"size": (800, 1000)}),
+            graphic_kwargs={"vmin": self.min(), "vmax": self.max()},
+            window_funcs=kwargs.get("window_funcs", None),
+        )
 
 class H5Array:
     def __init__(self, filenames: Path | str, dataset: str = "mov"):
@@ -286,8 +295,19 @@ class MBOTiffArray:
     def shape(self) -> tuple[int, ...]:
         return tuple(self.dask.shape)
 
+    @property
+    def metadata(self) -> dict:
+        """
+        Return metadata from the first TIFF file.
+        Assumes all files have the same metadata structure.
+        """
+        if not self.filenames:
+            return {}
+        return get_metadata(self.filenames[0])
+
     def imshow(self):
         pass
+
 
 @dataclass
 class NpyArray:
@@ -785,6 +805,24 @@ class MboRawArray(scans.ScanMultiROI):
             )
 
     def imshow(self, **kwargs):
-        pass
-        # from mbo_utilities.graphics.display import imshow_lazy_array
-        # return imshow_lazy_array(self, **kwargs)
+        arrays = []
+        names = []
+        # if roi is None, use a single array.roi = None
+        # if roi is 0, get a list of all ROIs by deeepcopying the array and setting each roi
+        for roi in iter_rois(self):
+            arr = copy.copy(self)
+            arr.roi = roi
+            arrays.append(arr)
+            names.append(f"ROI {roi}" if roi else "Full Image")
+
+        histogram_widget = kwargs.get("histogram_widget", True)
+        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000), })
+        window_funcs = kwargs.get("window_funcs", None)
+        return fpl.ImageWidget(
+            data=arrays,
+            names=names,
+            histogram_widget=histogram_widget,
+            figure_kwargs=figure_kwargs,  # "canvas": canvas},
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
+            window_funcs=window_funcs,
+        )

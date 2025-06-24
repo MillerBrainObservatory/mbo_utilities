@@ -169,8 +169,28 @@ def imread(
         raise ValueError(f"No supported files in {inputs}")
     paths = filtered
 
+    parent = paths[0].parent if paths else None
+    ops_file = parent / "ops.npy" if parent else None
+
+    if ops_file and ops_file.exists():
+        md = np.load(str(ops_file), allow_pickle=True).item()
+        # Prefer raw > registered > tif
+        if (parent / "data_raw.bin").exists():
+            return Suite2pArray(parent / "data_raw.bin", md)
+        elif (parent / "data.bin").exists():
+            return Suite2pArray(parent / "data.bin", md)
+        elif (parent / "data.npy").exists():
+            return np.load(parent / "data.npy", mmap_mode="r")
+        elif (parent / "reg_tif").is_dir():
+            tifs = sorted((parent / "reg_tif").glob("*.tif"))
+            if tifs:
+                return TiffArray(tifs)
+        else:
+            return Suite2pArray(None, md)
+
     exts = {p.suffix.lower() for p in paths}
     first = paths[0]
+    parent = Path(first).parent
 
     if len(exts) > 1:
         if exts == {".bin", ".npy"}:

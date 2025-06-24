@@ -28,11 +28,10 @@ except ImportError:
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-SAVE_AS_TYPES = [".tiff", ".bin", ".h5", ".zarr"]
+MBO_SUPPORTED_FTYPES = [".tiff", ".bin", ".h5", ".zarr"]
+MBO_PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
 logger = log.get("file_io")
-
-PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
 def load_ops(ops_input: str | Path | list[str | Path]):
     """Simple utility load a suite2p npy file"""
@@ -131,7 +130,7 @@ def normalize_file_url(path):
     'file_12'
     """
     name = Path(path).stem
-    for tag in PIPELINE_TAGS:
+    for tag in MBO_PIPELINE_TAGS:
         low = name.lower()
         if low.startswith(tag):
             suffix = name[len(tag):]
