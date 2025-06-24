@@ -210,7 +210,7 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     Parameters
     ----------
     paths : str, Path, or list of (str or Path)
-        Can be a single path, a wildcard pattern like '*.tif', a folder, or a list of those.
+        Can be a single path, a wildcard pattern like "\\*.tif", a folder, or a list of those.
 
     Returns
     -------
@@ -219,14 +219,14 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
     Examples
     --------
-    >>> expand_paths("data/*.tif")
-    [Path('data/img_000.tif'), Path('data/img_001.tif'), ...]
+    >>> expand_paths("data/\\*.tif")
+    [Path("data/img_000.tif"), Path("data/img_001.tif"), ...]
 
     >>> expand_paths(Path("data"))
-    [Path('data/img_000.tif'), Path('data/img_001.tif'), ...]
+    [Path("data/img_000.tif"), Path("data/img_001.tif"), ...]
 
-    >>> expand_paths(["data/*.tif", Path("more_data")])
-    [Path('data/img_000.tif'), Path('more_data/img_050.tif'), ...]
+    >>> expand_paths(["data/\\*.tif", Path("more_data")])
+    [Path("data/img_000.tif"), Path("more_data/img_050.tif"), ...]
     """
     if isinstance(paths, (str, Path)):
         paths = [paths]

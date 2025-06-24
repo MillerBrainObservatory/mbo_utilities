@@ -23,10 +23,11 @@ def main():
         print(f"v{__version__}")
         return
 
-    input_path = Path(args.input)
-    output_path = Path(args.output)
+    input_path = Path(args.input).expanduser().resolve()
+    output_path = Path(args.output).expanduser().resolve()
 
     lazy_array = imread(input_path, roi=args.roi)
+    print(type(lazy_array))
 
     imwrite(
         lazy_array=lazy_array,
