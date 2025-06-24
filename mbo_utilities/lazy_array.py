@@ -103,8 +103,8 @@ def imwrite(
     # make sure indexes are valid
     over_idx = [p for p in planes if p < 0 or p >= num_planes]
     if over_idx:
-        raise ValueError(
-            f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{lazy_array.num_channels}"
+        raise Warning(
+            f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{num_planes}"
         )
 
     if order is not None:

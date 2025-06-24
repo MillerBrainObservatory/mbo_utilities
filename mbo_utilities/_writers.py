@@ -53,6 +53,17 @@ def _save_data(
     progress_callback=None,
     debug=False,
 ):
+    if data.ndim == 2:
+        data = data[np.newaxis, np.newaxis, ...]  # → (1, 1, Y, X)
+    elif data.ndim == 3:
+        data = data[np.newaxis, ...]  # → (1, T, Y, X)
+    elif data.ndim == 4:
+        pass  # already (Z, T, Y, X)
+    else:
+        raise ValueError(f"Unsupported data shape: {data.shape}")
+
+    nz, nt, ny, nx = data.shape
+
     if "." in ext:
         ext = ext.split(".")[-1]
     if ext == "tiff":
@@ -61,7 +72,6 @@ def _save_data(
     outpath = Path(outpath)
     outpath.mkdir(exist_ok=True)
 
-    nt, nz, nx, ny = data.shape
     final_shape = (nt, ny, nx)
     logger.info(f"Final shape: {final_shape} (nt, height, width)")
 

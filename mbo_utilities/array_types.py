@@ -10,7 +10,7 @@ import numpy as np
 import tifffile
 from dask import array as da
 from fsspec.implementations.reference import ReferenceFileSystem
-from numpy import memmap, ndarray
+from numpy import ndarray
 from zarr import open as zarr_open
 from zarr.storage import FsspecStore
 
@@ -19,7 +19,7 @@ from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities._writers import _save_data
 from mbo_utilities.file_io import _multi_tiff_to_fsspec, HAS_ZARR, CHUNKS, _convert_range_to_slice, expand_paths
 from mbo_utilities.util import subsample_array
-from mbo_utilities.pipelines import load_from_dir, HAS_MASKNMF, HAS_SUITE2P
+from mbo_utilities.pipelines import load_from_dir, HAS_SUITE2P
 
 from mbo_utilities import log
 from mbo_utilities.roi import iter_rois
@@ -141,20 +141,51 @@ class Suite2pArray:
         # from mbo_utilities.graphics.display import imshow_lazy_array
         # return imshow_lazy_array(self.load(), **kwargs)
 
-
-class _LazyH5Dataset:
-    def __init__(self, filenames: Path | str, ds: str = "mov"):
-        self._f = h5py.File(filenames, "r")
-        self._d = self._f[ds]
+class H5Array:
+    def __init__(self, filenames: Path | str, dataset: str = "mov"):
+        self.filenames = Path(filenames)
+        self._f = h5py.File(self.filenames, "r")
+        self._d = self._f[dataset]
         self.shape = self._d.shape
         self.dtype = self._d.dtype
         self.ndim = self._d.ndim
+
+    @property
+    def num_planes(self) -> int:
+        # TODO
+        return 14
 
     def __len__(self) -> int:
         return self.shape[0]
 
     def __getitem__(self, key):
-        return self._d[key]
+        if not isinstance(key, tuple):
+            key = (key,)
+
+        # Expand ellipsis to match ndim
+        if Ellipsis in key:
+            idx = key.index(Ellipsis)
+            n_missing = self.ndim - (len(key) - 1)
+            key = key[:idx] + (slice(None),) * n_missing + key[idx + 1:]
+
+        # Remove None axes (np.newaxis) and track their positions
+        slices = []
+        result_shape = []
+        dim = 0
+        for k in key:
+            if k is None:
+                result_shape.append(1)
+            else:
+                slices.append(k)
+                dim += 1
+
+        data = self._d[tuple(slices)]
+
+        for i, k in enumerate(key):
+            if k is None:
+                data = np.expand_dims(data, axis=i)
+
+        return data
 
     def min(self) -> float:
         return float(self._d[0].min())
@@ -169,14 +200,34 @@ class _LazyH5Dataset:
     def close(self):
         self._f.close()
 
+    @property
+    def metadata(self) -> dict:
+        return dict(self._f.attrs)
 
-@dataclass
-class H5Array:
-    filenames: Path | str
-    dataset: str = "mov"
-
-    def load(self) -> _LazyH5Dataset:
-        return _LazyH5Dataset(self.filenames, self.dataset)
+    def _imwrite(
+            self,
+            outpath: Path | str,
+            overwrite = False,
+            target_chunk_mb = 50,
+            ext = '.tiff',
+            progress_callback = None,
+            debug = None,
+            planes = None,
+    ):
+        target = outpath
+        target.mkdir(exist_ok=True)
+        md = self.metadata.copy()
+        _save_data(
+            self,
+            target,
+            planes=planes,
+            overwrite=overwrite,
+            ext=ext,
+            target_chunk_mb=target_chunk_mb,
+            metadata=md,
+            progress_callback=progress_callback,
+            debug=debug,
+        )
 
 
 @dataclass

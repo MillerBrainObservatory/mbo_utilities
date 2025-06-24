@@ -7,14 +7,13 @@ import numpy as np
 
 
 def _make_json_serializable(obj):
-    """Convert metadata to JSON serializable format."""
     if isinstance(obj, dict):
         return {k: _make_json_serializable(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_make_json_serializable(v) for v in obj]
     if isinstance(obj, np.ndarray):
         return obj.tolist()
-    if isinstance(obj, (np.integer, np.floating)):
+    if isinstance(obj, (np.integer, np.floating, np.bool_)):
         return obj.item()
     return obj
 
