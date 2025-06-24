@@ -6,7 +6,6 @@ from typing import Sequence, Callable
 
 import numpy as np
 
-from . import log
 from .array_types import DemixingResultsArray, Suite2pArray, H5Array, MBOTiffArray, TiffArray, MboRawArray, NpyArray
 from .file_io import get_files
 from .metadata import is_raw_scanimage, has_mbo_metadata
@@ -202,4 +201,5 @@ def imread(
         return DemixingResultsArray(first.parent)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
+
 
