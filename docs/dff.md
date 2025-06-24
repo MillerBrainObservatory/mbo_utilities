@@ -14,9 +14,7 @@ The gold-standard formula for measuring cellular activity is "Delta F over F₀"
 ```
 Here, F₀ a user-defined baseline that may be static (e.g., median over all frames) or dynamically estimated using a rolling window.
 
-<div style="text-align: center; font-size: 1.5em; margin-top: 1em; margin-bottom: 1em;">
-This guide assumes you've read this please read [this blog-post](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
-</div>
+This guide assumes you've read this please read [this scientifica article](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
 
 ::::{grid}
 :::{grid-item-card} Blog-Post Takeaways
@@ -54,9 +52,11 @@ require data to have particular units.
 ```{admonition} Example
 :class: dropdown
 
-[This blog post](https://gcamp6f.com/2021/10/04/large-scale-calcium-imaging-noise-levels/), which details how to calculate noise for a variety of datasets, used traces that had [the background signal subtracted](https://github.com/cajal/microns_phase3_nda/issues/21).
+[This discussion](https://gcamp6f.com/2021/10/04/large-scale-calcium-imaging-noise-levels/), which details how to calculate noise for a variety of datasets, used traces that had [the background signal subtracted](https://github.com/cajal/microns_phase3_nda/issues/21).
 
-This happens because the [CaImAn] pipeline subtracts the background signal from each neuron under the hood. So the resulting units are no longer raw signal, they are background-subtracted raw-signal. This process reduces the baseline F0 to nearly zero and heavily skew DF/F calculations.
+This happens because CaImAn subtracts the background signal from each neuron under the hood.
+The resulting units are no longer raw signal, they are background-subtracted raw-signal.
+This process reduces the baseline F₀ to nearly zero and heavily skew ΔF/F₀ calculations.
 ```
 
 ### [CaImAn](https://github.com/flatironinstitute/CaImAn)
@@ -95,7 +95,7 @@ EXTRACT outputs raw fluorescence signals without built-in ΔF/F₀ calculation. 
 
 {cite:t}`extract2017`, {cite:t}`extract2021`
 
-| **Pipeline** | **F₀ Method**                       | **ΔF/F₀**                 | **Neuropil Handling**                            |
+| **Pipeline** | **F₀ Method**                       | **ΔF/F₀**                 | **Neuropil**                            |
 | ------------ | ----------------------------------- | ------------------------- | ------------------------------------------------ |
 | **CaImAn**   | 8th percentile, 500-frame window    | Yes, in pipeline          | Modeled via CNMF, no manual subtraction          |
 | **Suite2p**  | Maximin (default) or 8th percentile | No, user divides post hoc | 0.7 × F<sub>neu</sub> subtracted before baseline |
