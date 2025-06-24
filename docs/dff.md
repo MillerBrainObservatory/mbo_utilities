@@ -26,7 +26,7 @@ The below guide assumes you've read this please read [this blog-post](https://ww
 
 ## Overview
 
-This table summarizes Calcium Activity detection methods reviewed by Paudel et al. [(2024)](https://doi.org/10.3390/biom14010138).
+This table summarizes Calcium Activity detection methods reviewed by {cite:t}`huang`.
 
 | **Method**                         | **How It's Performed**                                                                 | **Pros**                                                      | **Cons**                                                             |
 |-----------------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------|------------------------------------------------------------------------|
@@ -42,10 +42,7 @@ You need to know the output units f
 
 ### CaImAn
 
-[`detrend_df_f`](https://caiman.readthedocs.io/en/latest/core_functions.html#caiman.source_extraction.cnmf.utilities.detrend_df_f)
-
-{py:obj}`detrend_df_f`
-{ref}`detrend_df_f`
+See: {func}`detrend_df_f <caiman:caiman.source_extraction.cnmf.utilities.detrend_df_f>`
 
 CaImAn computes ΔF/F₀ using a **running low-percentile baseline**.
 By default, it uses the **8th percentile** over a **500 frame** window.
@@ -54,7 +51,7 @@ The idea is to track the lower envelope of the signal to get F₀ without being 
 **Neuropil/background:** CaImAn handles this as part of its CNMF model {cite:p}`cnmf`.
 Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are already cleaned.
 
-{cite}`caiman`
+{cite:t}`caiman`
 
 ### Suite2p
 
@@ -68,11 +65,16 @@ If you want ΔF/F₀, you divide the detrended trace by an F₀ value manually a
 Suite2p subtracts **0.7 × F<sub>neu</sub>** (surrounding fluorescence) from each ROI trace before baseline correction.
 This is a fixed fraction, applied uniformly.
 
+{cite:t}`suite2p`
+
 ### EXTRACT
 
 EXTRACT outputs raw fluorescence signals without built-in ΔF/F₀ calculation. You compute it yourself using something like a low-percentile (e.g. 10%) as F₀. Most people use a global or sliding percentile window.
 
 **Neuropil:** Handled implicitly. The algorithm uses robust factorization to ignore background and neuropil. There’s no explicit subtraction or coefficient to tune. It isolates only what fits a consistent spatial footprint and suppresses outliers by design.
+
+{cite:t}`extract2017`, {cite:t}`extract2021`
+
 
 ## Comparison Table
 
@@ -91,7 +93,7 @@ The most important consideration you must consider is how you calculate your bas
 :width: 600px
 :alt: Example ΔF/F trace baseline comparisons
 
-Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1 of {cite:p}`huang2021`.
+Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1.
 ```
 
 1. Spike inference from mouse spinal cord calcium imaging data ({cite:t}`rupprecht2024`)
@@ -101,7 +103,7 @@ Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1 
 2. Spike inference on GCaMP8 indicators {cite:t}`rupprecht2025`  
 - GCaMP8, GCaMP7f
 
-3. GCaMP6 calibration study {cite:t}`huang2021`
+3. GCaMP6 calibration study {cite:t}`huang`
 - ΔF/F = (F − F₀,local)/F₀,global, where F₀,local is the mean fluorescence over 100 ms before the first AP, and F₀,global is the minimum F₀,local across trials  
 - GCaMP6f
 
