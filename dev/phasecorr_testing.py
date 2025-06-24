@@ -3,8 +3,6 @@ import fastplotlib as fpl
 import tifffile
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import sobel
-from skimage.metrics import structural_similarity as ssim
 
 try:
     import mbo_utilities as mbo
