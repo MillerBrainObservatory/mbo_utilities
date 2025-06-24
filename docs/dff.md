@@ -5,11 +5,11 @@ bibliography:
 
 # Quantifying Cell Activity (ΔF/F₀)
 
+The gold-standard formula for measuring cellular activity is "Delta F over F₀", or the change in fluorescence intensity normalized by the baseline activity:
+
 $\Delta F/F_0 = \frac{F - F_0}{F_0}$
 
-This guide covers common approaches to extracting calcium activity and how this will differ depending on which pipeline you are using.
-
-The below guide assumes you've read this please read [this blog-post](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
+This guide assumes you've read this please read [this blog-post](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
 
 ::::{grid}
 :::{grid-item-card} Blog-Post Takeaways
@@ -38,9 +38,21 @@ This table summarizes Calcium Activity detection methods reviewed by {cite:t}`hu
 
 ## Pipelines
 
-You need to know the output units f
+There are several pipelines for users to choose from when deciding how to process calcium imaging datasets.
 
-### CaImAn
+Often times, the outputs of these pipelines are in units that are not well documented. Even worse, the *inputs* to downstream pipelines pipelines
+require data to have particular units.
+
+(bg_sub_example)=
+```{admonition} Example
+:class: dropdown
+
+[This blog post](https://gcamp6f.com/2021/10/04/large-scale-calcium-imaging-noise-levels/), which details how to calculate noise for a variety of datasets, used traces that had [the background signal subtracted](https://github.com/cajal/microns_phase3_nda/issues/21).
+
+This happens because the [CaImAn] pipeline subtracts the background signal from each neuron under the hood. So the resulting units are no longer raw signal, they are background-subtracted raw-signal. This process reduces the baseline F0 to nearly zero and heavily skew DF/F calculations.
+```
+
+### [CaImAn](https://github.com/flatironinstitute/CaImAn)
 
 See: {func}`detrend_df_f <caiman:caiman.source_extraction.cnmf.utilities.detrend_df_f>`
 
@@ -49,11 +61,12 @@ By default, it uses the **8th percentile** over a **500 frame** window.
 The idea is to track the lower envelope of the signal to get F₀ without being biased by transients.
 
 **Neuropil/background:** CaImAn handles this as part of its CNMF model {cite:p}`cnmf`.
-Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are already cleaned.
+Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are background subtracted, 
+as was the issue in the above {ref}`example <bg_sub_example>`.
 
 {cite:t}`caiman`
 
-### Suite2p
+### [Suite2p](https://github.com/MouseLand/suite2p/tree/main)
 
 Suite2p does **not** output traces in ΔF/F₀ format directly.
 Instead, it gives you baseline-detrended fluorescence (i.e., $\Delta F$).
@@ -67,16 +80,13 @@ This is a fixed fraction, applied uniformly.
 
 {cite:t}`suite2p`
 
-### EXTRACT
+### [EXTRACT](https://github.com/schnitzer-lab/EXTRACT-public?tab=readme-ov-file)
 
 EXTRACT outputs raw fluorescence signals without built-in ΔF/F₀ calculation. You compute it yourself using something like a low-percentile (e.g. 10%) as F₀. Most people use a global or sliding percentile window.
 
 **Neuropil:** Handled implicitly. The algorithm uses robust factorization to ignore background and neuropil. There’s no explicit subtraction or coefficient to tune. It isolates only what fits a consistent spatial footprint and suppresses outliers by design.
 
 {cite:t}`extract2017`, {cite:t}`extract2021`
-
-
-## Comparison Table
 
 | **Pipeline** | **F₀ Method**                       | **ΔF/F₀**                 | **Neuropil Handling**                            |
 | ------------ | ----------------------------------- | ------------------------- | ------------------------------------------------ |
