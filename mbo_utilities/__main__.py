@@ -3,8 +3,8 @@ from pathlib import Path
 from mbo_utilities import imread, imwrite, __version__
 
 def add_args(parser):
-    parser.add_argument("--input", "-i", required=True, help="Input file or directory")
-    parser.add_argument("--output", "-o", required=True, help="Output directory or filename")
+    parser.add_argument("input", help="Input file or directory")
+    parser.add_argument("output", help="Output directory or filename")
     parser.add_argument("--ext", default=".tiff", help="File extension for output (e.g., .tif, .npy)")
     parser.add_argument("--planes", nargs="*", type=int, help="Planes to export (1-based index)")
     parser.add_argument("--roi", nargs="*", type=int, help="ROI indices to include")
