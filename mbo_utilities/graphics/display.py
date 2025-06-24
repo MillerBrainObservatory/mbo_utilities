@@ -43,19 +43,11 @@ def mbo_raw_display(array: MboRawArray, **kwargs):
         window_funcs={"t": (np.mean, 0)},
     )
 
-def demixing_display(array, **kwargs):
-    if HAS_MASKNMF:
-        return make_demixing_video(  # type: ignore  # noqa
-            array,
-            device=MBO_DEVICE,
-            **kwargs
-        )
-
 def imshow_lazy_array(array, **kwargs):
+    if hasattr(array, "imshow"):
+        return array.imshow(**kwargs)
     if isinstance(array, MBOTiffArray):
         return mbo_tiff_display(array, **kwargs)
     elif isinstance(array, MboRawArray):
         return mbo_raw_display(array, **kwargs)
-    elif isinstance(array, DemixingResultsArray):
-        return demixing_display(array, **kwargs)
     raise ValueError("No supported lazy array type found for display.")

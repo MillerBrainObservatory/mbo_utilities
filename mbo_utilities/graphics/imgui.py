@@ -21,7 +21,7 @@ from imgui_bundle import (
 )
 
 from mbo_utilities.file_io import (
-    SAVE_AS_TYPES,
+    MBO_SUPPORTED_FTYPES,
     get_mbo_dirs,
 )
 from mbo_utilities.array_types import MboRawArray
@@ -188,8 +188,8 @@ def draw_popups(parent):
                 parent._saveas_outdir = res.result()
 
         imgui.set_next_item_width(hello_imgui.em_size(25))
-        _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, SAVE_AS_TYPES)
-        parent._ext = SAVE_AS_TYPES[parent._ext_idx]
+        _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_SUPPORTED_FTYPES)
+        parent._ext = MBO_SUPPORTED_FTYPES[parent._ext_idx]
 
         imgui.spacing()
         imgui.separator()
@@ -495,7 +495,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # properties for saving to another filetype
         self._ext = str(getattr(self, "_ext", ".tiff"))
-        self._ext_idx = SAVE_AS_TYPES.index(".tiff")
+        self._ext_idx = MBO_SUPPORTED_FTYPES.index(".tiff")
         self._selected_planes = set()
         self._planes_str = str(getattr(self, "_planes_str", ""))
         self._overwrite = True
