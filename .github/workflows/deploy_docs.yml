@@ -27,7 +27,7 @@ jobs:
 
       - name: Sync and build docs
         run: |
-          GIT_LFS_SKIP_SMUDGE=1 uv sync --group docs
+          GIT_LFS_SKIP_SMUDGE=1 uv sync --all-extras
           GIT_LFS_SKIP_SMUDGE=1 uv run sphinx-build -b html docs docs/_build/html
 
       - name: Deploy docs

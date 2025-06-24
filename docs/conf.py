@@ -24,6 +24,7 @@ myst_enable_extensions = [
 ]
 
 extensions = [
+    "sphinxcontrib.bibtex",
     "sphinx.ext.autodoc",
     "sphinxcontrib.video",
     "myst_nb",
@@ -36,6 +37,12 @@ extensions = [
     "sphinx_design",
     "sphinx_tippy",
 ]
+
+bibtex_bibfiles = [
+    "references.bib",
+]
+
+bibtex_default_style = "plain"
 
 source_suffix = {
     ".rst": "restructuredtext",
@@ -77,9 +84,8 @@ intersphinx_mapping = {
     "mbo": ("https://millerbrainobservatory.github.io/", None),
     "lbm_suite2p_python": ("https://millerbrainobservatory.github.io/LBM-Suite2p-Python/", None),
     "suite2p": ("https://suite2p.readthedocs.io/en/latest/", None),
+    "caiman": ("https://caiman.readthedocs.io/en/latest/", None),
 }
-
-intersphinx_disabled_reftypes = ["*"]
 
 html_theme_options = {
     "path_to_docs": "docs",

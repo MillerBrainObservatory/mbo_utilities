@@ -12,6 +12,7 @@ sphinx-copybutton
 sphinx_book_theme
 pydata_sphinx_theme
 sphinx_design
+sphinxcontrib-bibtex
 sphinxcontrib-images
 sphinxcontrib-video
 jupytext

@@ -399,13 +399,19 @@ def iter_rois(obj):
     num_rois = getattr(obj, "num_rois", 1)
 
     if roi == 0:
-        for i in range(1, num_rois + 1):
-            yield i
+        yield from range(1, num_rois + 1)
     elif roi is None:
         yield None
     elif isinstance(roi, int):
+        if roi < 1:
+            raise ValueError(f"Invalid ROI index: {roi}")
         yield roi
     elif isinstance(roi, (list, tuple)):
-        yield from roi
+        if 0 in roi:
+            roi = [r + 1 for r in roi]
+        for r in roi:
+            if r < 1:
+                raise ValueError(f"Invalid ROI index in list: {r}")
+            yield r
     else:
         yield roi

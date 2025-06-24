@@ -218,6 +218,9 @@ class MBOTiffArray:
     def __getitem__(self, key: int | slice | tuple[int, ...]) -> np.ndarray:
         return self.dask[key]
 
+    def __getattr__(self, attr):
+        return getattr(self.dask, attr)
+
     def min(self) -> float:
         return float(self.dask[0].min().compute())
 
@@ -276,6 +279,8 @@ class MboRawArray(scans.ScanMultiROI):
             max_offset: int = 4,
     ):
         super().__init__(join_contiguous=True)
+        self.use_zarr = False
+        self.reference = ""
         if files:
             self.read_data(files)
         self._metadata = {} # set when pages are read
@@ -289,7 +294,6 @@ class MboRawArray(scans.ScanMultiROI):
         self.pbar = None
         self.show_pbar = False
         self._offset = 0.0
-        self.use_zarr = True
 
         # Debugging toggles
         self.debug_flags = {
@@ -353,10 +357,7 @@ class MboRawArray(scans.ScanMultiROI):
         if not HAS_ZARR:
             raise ImportError("Zarr is not installed. Please install it to use this method.")
         if not Path(self.reference).is_file():
-            raise FileNotFoundError(
-                f"Reference file {self.reference} does not exist. "
-                "Please call save_fsspec() first."
-            )
+            return None
         return zarr_open(
             FsspecStore(ReferenceFileSystem(str(self.reference))),
             mode="r",
@@ -364,7 +365,13 @@ class MboRawArray(scans.ScanMultiROI):
 
     def read_data(self, filenames, dtype=np.int16):
         filenames = expand_paths(filenames)
-        self.save_fsspec(filenames)
+        try:
+            self.save_fsspec(filenames)
+            self.use_zarr = True
+        except Exception as e:
+            logger.error(f"Failed to save fsspec: {e}")
+            self.use_zarr = False
+            self.reference = None
         super().read_data(filenames, dtype)
         self._metadata = get_metadata(self.tiff_files[0].filehandle.path)  # from the file
         self._metadata.update({"si": _make_json_serializable(self.tiff_files[0].scanimage_metadata)})
@@ -494,21 +501,22 @@ class MboRawArray(scans.ScanMultiROI):
 
         if getattr(self, "use_zarr", False):
             zarray = self.as_zarr()
-            buf = np.empty((len(pages), H, W), dtype=self.dtype)
-            for i, page in enumerate(pages):
-                f, c = divmod(page, C)
-                buf[i] = zarray[f, c, yslice, xslice]
+            if zarray is not None:
+                buf = np.empty((len(pages), H, W), dtype=self.dtype)
+                for i, page in enumerate(pages):
+                    f, c = divmod(page, C)
+                    buf[i] = zarray[f, c, yslice, xslice]
 
-            if self.fix_phase:
-                self.logger.debug(f"Applying phase correction with strategy: {self.phasecorr_method}")
-                buf, self.offset = nd_windowed(
-                    buf,
-                    method=self.phasecorr_method,
-                    upsample=self.upsample,
-                    max_offset=self.max_offset,
-                    border=self.border,
-                )
-            return buf.reshape(len(frames), len(chans), H, W)
+                if self.fix_phase:
+                    self.logger.debug(f"Applying phase correction with strategy: {self.phasecorr_method}")
+                    buf, self.offset = nd_windowed(
+                        buf,
+                        method=self.phasecorr_method,
+                        upsample=self.upsample,
+                        max_offset=self.max_offset,
+                        border=self.border,
+                    )
+                return buf.reshape(len(frames), len(chans), H, W)
 
         # TIFF path
         buf = np.empty((len(pages), H, W), dtype=self.dtype)
