@@ -20,9 +20,11 @@ if __name__ == "__main__":
     path = Path().home().joinpath("temp")
     path.mkdir(exist_ok=True)
     data = imread(r"D://W2_DATA//kbarber//2025_03_01//mk301//green")
+    # data = imread(r"D://demo//roi2//plane11.h5")
     data.roi = 2
     # for ftype in MBO_SUPPORTED_FTYPES:
-    for ftype in [".bin"]:
+    # for ftype in [".bin"]:
+    for ftype in [".tif"]:
             imwrite(
             data,
             path,
@@ -31,11 +33,12 @@ if __name__ == "__main__":
             planes=[10, 11],
         )
     files = [x for x in Path(path).glob("*.tif*")]
-    check = tifffile.imread(files[0])
+    check = [tifffile.imread(files[i]) for i in range(len(files))]
     fpl.ImageWidget(check,
+                    names=[f.name for f in files],
                     histogram_widget=True,
                     figure_kwargs={"size": (800, 1000),},
-                    graphic_kwargs={"vmin": check.min(), "vmax": check.max()},
+                    graphic_kwargs={"vmin": -300, "vmax": 3000},
                     window_funcs={"t": (np.mean, 0)},
                    ).show()
     fpl.loop.run()
