@@ -1,11 +1,17 @@
+---
+bibliography:
+  - references.bib
+---
+
 # Quantifying Cell Activity (ΔF/F₀)
+
+$\Delta F/F_0 = \frac{F - F_0}{F_0}$
 
 This guide covers common approaches to extracting calcium activity and how this will differ depending on which pipeline you are using.
 
-The below guide assumes you've read this please read [this blog-post](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by the great Dr Peter Rupprecht at the University of Zurich.
+The below guide assumes you've read this please read [this blog-post](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
 
 ::::{grid}
-
 :::{grid-item-card} Blog-Post Takeaways
 :columns: 12
 
@@ -15,8 +21,8 @@ The below guide assumes you've read this please read [this blog-post](https://ww
 - There is no single recipe on how to compute $\Delta F/F$  
 - Computation of $\Delta F/F$ must be adapted to cell types, activity patterns, and noise  
 - Interpretation of $\Delta F/F$ requires knowledge about indicators, cell types, and confounds
-
 :::
+::::
 
 ## Overview
 
@@ -32,15 +38,23 @@ This table summarizes Calcium Activity detection methods reviewed by Paudel et a
 
 ## Pipelines
 
+You need to know the output units f
+
 ### CaImAn
 
 [`detrend_df_f`](https://caiman.readthedocs.io/en/latest/core_functions.html#caiman.source_extraction.cnmf.utilities.detrend_df_f)
 
-CaImAn computes ΔF/F₀ using a **running low-percentile baseline**. By default, it uses the **8th percentile** over a **500 frame** window. The idea is to track the lower envelope of the signal to get F₀ without being biased by transients. It subtracts this from the trace, then divides by it:
+{py:obj}`detrend_df_f`
+{ref}`detrend_df_f`
 
-$\Delta F/F_0 = \frac{F - F_0}{F_0}$
+CaImAn computes ΔF/F₀ using a **running low-percentile baseline**.
+By default, it uses the **8th percentile** over a **500 frame** window.
+The idea is to track the lower envelope of the signal to get F₀ without being biased by transients.
 
-**Neuropil/background:** CaImAn handles this as part of its CNMF model. Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are already cleaned. No manual subtraction is needed.
+**Neuropil/background:** CaImAn handles this as part of its CNMF model {cite:p}`cnmf`.
+Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are already cleaned.
+
+{cite}`caiman`
 
 ### Suite2p
 
@@ -77,9 +91,21 @@ The most important consideration you must consider is how you calculate your bas
 :width: 600px
 :alt: Example ΔF/F trace baseline comparisons
 
-Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1 of {cite}`10.3390/biom14010138`.
+Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1 of {cite:p}`huang2021`.
 ```
 
-## References 
+1. Spike inference from mouse spinal cord calcium imaging data ({cite:t}`rupprecht2024`)
+- DF/F = Lower 10th percentile  
+- GCaMP6s
 
-https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data
+2. Spike inference on GCaMP8 indicators {cite:t}`rupprecht2025`  
+- GCaMP8, GCaMP7f
+
+3. GCaMP6 calibration study {cite:t}`huang2021`
+- ΔF/F = (F − F₀,local)/F₀,global, where F₀,local is the mean fluorescence over 100 ms before the first AP, and F₀,global is the minimum F₀,local across trials  
+- GCaMP6f
+
+## References
+
+```{bibliography}
+```

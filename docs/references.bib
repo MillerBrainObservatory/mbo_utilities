@@ -1,0 +1,78 @@
+# References and Footnotes
+
+@article {rupprecht2025,
+author = {Rupprecht, Peter and R{\'o}zsa, M{\'a}rton and Fang, Xusheng and Svoboda, Karel and Helmchen, Fritjof},
+title = {Spike inference from calcium imaging data acquired with GCaMP8 indicators},
+elocation-id = {2025.03.03.641129},
+year = {2025},
+doi = {10.1101/2025.03.03.641129},
+publisher = {Cold Spring Harbor Laboratory},
+abstract = {Neuroscience can only be reproducible when its key methods are quantitative and interpretable. Calcium imaging is such a key method which, however, records neuronal activity only indirectly and is therefore difficult to interpret. These difficulties arise primarily from the kinetics, nonlinearity, and sensitivity of the calcium indicator, but also depend on the methods for calcium signal analysis. Here, we evaluate the ability of the recently developed calcium indicator GCaMP8 to reveal neuronal spiking, and we investigate how existing spike inference methods (CASCADE, OASIS, MLSpike) should be adapted for optimal performance. We demonstrate, both for principal cells and interneurons, that algorithms require fine-tuning to obtain optimal results with GCaMP8 data. Specifically, supervised algorithms adapted for GCaMP8 result in more linear and therefore more accurate recovery of complex spiking events. In addition, our analysis of cortical ground truth recordings shows that GCaMP8s and GCaMP8m {\textendash} but not GCaMP6, GCaMP7f or GCaMP8f {\textendash} are able to reliably detect isolated action potentials for realistic noise levels. Finally, we demonstrate that, due to their fast rise times, GCaMP8 indicators support shorter closed-loop latencies for real-time detection of neuronal activity. Together, our study provides demonstrations, tools, and guidelines to optimally process and quantitatively interpret calcium signals obtained with GCaMP8.Competing Interest StatementThe authors have declared no competing interest.Swiss National Science Foundation, PZ00P3_209114},
+URL = {https://www.biorxiv.org/content/early/2025/05/26/2025.03.03.641129},
+eprint = {https://www.biorxiv.org/content/early/2025/05/26/2025.03.03.641129.full.pdf},
+journal = {bioRxiv}
+}
+
+
+@article {rupprecht2024,
+author = {Rupprecht, Peter and Fan, Wei and Sullivan, Steve J. and Helmchen, Fritjof and Sdrulla, Andrei D.},
+title = {Spike inference from mouse spinal cord calcium imaging data},
+elocation-id = {2024.07.17.603957},
+year = {2024},
+doi = {10.1101/2024.07.17.603957},
+publisher = {Cold Spring Harbor Laboratory},
+abstract = {Calcium imaging is a key method to record the spiking activity of identified and genetically targeted neurons. However, the observed calcium signals are only an indirect readout of the underlying electrophysiological events (single spikes or bursts of spikes) and require dedicated algorithms to recover the spike rate. These algorithms for spike inference can be optimized using ground truth data from combined electrical and optical recordings, but it is not clear how such optimized algorithms perform on cell types and brain regions for which ground truth does not exist. Here, we use a state-of-the-art algorithm based on supervised deep learning (CASCADE) and a non-supervised algorithm based on non-negative deconvolution (OASIS) to test spike inference in spinal cord neurons. To enable these tests, we recorded specific ground truth from glutamatergic and GABAergic somatosensory neurons in the dorsal horn of spinal cord in mice of both sexes. We find that CASCADE and OASIS algorithms that were designed for cortical excitatory neurons generalize well to both spinal cord cell types. However, CASCADE models re-trained on our ground truth further improved the performance, resulting in a more accurate inference of spiking activity from spinal cord neurons. We openly provide re-trained models that can be flexibly applied to spinal cord data of variable noise levels and frame rates. Together, our ground-truth recordings and analyses provide a solid foundation for the interpretation of calcium imaging data from spinal cord and showcase how spike inference can generalize between different regions of the nervous system.Competing Interest StatementThe authors have declared no competing interest.},
+URL = {https://www.biorxiv.org/content/early/2024/07/22/2024.07.17.603957},
+eprint = {https://www.biorxiv.org/content/early/2024/07/22/2024.07.17.603957.full.pdf},
+journal = {bioRxiv}
+}
+
+@article {huang2021,
+article_type = {journal},
+title = {Relationship between simultaneously recorded spiking activity and fluorescence signal in GCaMP6 transgenic mice},
+author = {Huang, Lawrence and Ledochowitsch, Peter and Knoblich, Ulf and Lecoq, Jérôme and Murphy, Gabe J and Reid, R Clay and de Vries, Saskia EJ and Koch, Christof and Zeng, Hongkui and Buice, Michael A and Waters, Jack and Li, Lu},
+editor = {Westbrook, Gary L and Svoboda, Karel and Higley, Michael and Sabatini, Bernardo L},
+volume = 10,
+year = 2021,
+month = {mar},
+pub_date = {2021-03-08},
+pages = {e51675},
+citation = {eLife 2021;10:e51675},
+doi = {10.7554/eLife.51675},
+abstract = {Fluorescent calcium indicators are often used to investigate neural dynamics, but the relationship between fluorescence and action potentials (APs) remains unclear. Most APs can be detected when the soma almost fills the microscope’s field of view, but calcium indicators are used to image populations of neurons, necessitating a large field of view, generating fewer photons per neuron, and compromising AP detection. Here, we characterized the AP-fluorescence transfer function in vivo for 48 layer 2/3 pyramidal neurons in primary visual cortex, with simultaneous calcium imaging and cell-attached recordings from transgenic mice expressing GCaMP6s or GCaMP6f. While most APs were detected under optimal conditions, under conditions typical of population imaging studies, only a minority of 1 AP and 2 AP events were detected (often <10\% and \textasciitilde20–30\%, respectively), emphasizing the limits of AP detection under more realistic imaging conditions.},
+keywords = {calcium imaging, genetically encoded calcium indicator, action potential, excitatory neurons, cell-attached recording, calibration},
+journal = {eLife},
+issn = {2050-084X},
+publisher = {eLife Sciences Publications, Ltd},
+}
+
+@article {cnmf,
+  author={Haifeng Liu and Zhaohui Wu and Xuelong Li and Deng Cai and Huang, Thomas S.},
+  journal={IEEE Transactions on Pattern Analysis and Machine Intelligence}, 
+  title={Constrained Nonnegative Matrix Factorization for Image Representation}, 
+  year={2012},
+  volume={34},
+  number={7},
+  pages={1299-1311},
+  keywords={Matrix decomposition;Clustering algorithms;Optimization;Convergence;Vectors;Principal component analysis;Approximation algorithms;Nonnegative matrix factorization;semi-supervised learning;dimension reduction;clustering.},
+  doi={10.1109/TPAMI.2011.217}}
+
+@article {caiman,
+article_type = {journal},
+title = {CaImAn an open source tool for scalable calcium imaging data analysis},
+author = {Giovannucci, Andrea and Friedrich, Johannes and Gunn, Pat and Kalfon, Jérémie and Brown, Brandon L and Koay, Sue Ann and Taxidis, Jiannis and Najafi, Farzaneh and Gauthier, Jeffrey L and Zhou, Pengcheng and Khakh, Baljit S and Tank, David W and Chklovskii, Dmitri B and Pnevmatikakis, Eftychios A},
+editor = {Kleinfeld, David and King, Andrew J},
+volume = 8,
+year = 2019,
+month = {jan},
+pub_date = {2019-01-17},
+pages = {e38173},
+citation = {eLife 2019;8:e38173},
+doi = {10.7554/eLife.38173},
+url = {https://doi.org/10.7554/eLife.38173},
+abstract = {Advances in fluorescence microscopy enable monitoring larger brain areas in-vivo with finer time resolution. The resulting data rates require reproducible analysis pipelines that are reliable, fully automated, and scalable to datasets generated over the course of months. We present C\textsc{a}I\textsc{m}A\textsc{n}, an open-source library for calcium imaging data analysis. C\textsc{a}I\textsc{m}A\textsc{n} provides automatic and scalable methods to address problems common to pre-processing, including motion correction, neural activity identification, and registration across different sessions of data collection. It does this while requiring minimal user intervention, with good scalability on computers ranging from laptops to high-performance computing clusters. C\textsc{a}I\textsc{m}A\textsc{n} is suitable for two-photon and one-photon imaging, and also enables real-time analysis on streaming data. To benchmark the performance of C\textsc{a}I\textsc{m}A\textsc{n} we collected and combined a corpus of manual annotations from multiple labelers on nine mouse two-photon datasets. We demonstrate that C\textsc{a}I\textsc{m}A\textsc{n} achieves near-human performance in detecting locations of active neurons.},
+keywords = {calcium imaging, open source, software, two-photon, one-photon, data analysis},
+journal = {eLife},
+issn = {2050-084X},
+publisher = {eLife Sciences Publications, Ltd},
+}
