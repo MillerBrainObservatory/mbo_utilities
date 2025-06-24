@@ -93,6 +93,7 @@ def imwrite(
 
     # Determine number of planes from lazy_array attributes
     # fallback to shape
+    # TODO: This should only apply to 4D, otherwise it should be 1. Also need the Z-index for 3D inputs
     num_planes = 1
     if hasattr(lazy_array, "num_planes"):
         num_planes = lazy_array.num_planes

@@ -29,7 +29,7 @@ except ImportError:
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-MBO_SUPPORTED_FTYPES = [".tiff", ".bin", ".h5", ".zarr"]
+MBO_SUPPORTED_FTYPES = [".tiff", ".bin", ".h5"]
 MBO_PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
 logger = log.get("file_io")
