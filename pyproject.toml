@@ -68,6 +68,10 @@ all = [
     "pytest",
     "ruff",
 ]
+
+[tool.uv.dependency-groups]
+docs = ["docs"]
+
 # [tool.uv.sources]
 # fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib", branch = "main" }
 # pygfx = { git = "https://github.com/pygfx/pygfx", branch = "main" }
