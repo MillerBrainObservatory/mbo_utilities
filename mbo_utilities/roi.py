@@ -2,6 +2,7 @@
 Some classes used for MultiROI scan processing.
 Adapted from the Tolias Laboratory https://github.com/atlab/scanreader.
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -374,10 +375,12 @@ class Position:
     LEFT = 3
     RIGHT = 4
 
+
 class ROIMode(Enum):
     ALL = 0
     SINGLE = 1
     MULTIPLE = 2
+
 
 @property
 def roi_mode(self):

@@ -19,7 +19,13 @@ import fastplotlib as fpl
 from mbo_utilities.metadata import get_metadata
 from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities._writers import _save_data
-from mbo_utilities.file_io import _multi_tiff_to_fsspec, HAS_ZARR, CHUNKS, _convert_range_to_slice, expand_paths
+from mbo_utilities.file_io import (
+    _multi_tiff_to_fsspec,
+    HAS_ZARR,
+    CHUNKS,
+    _convert_range_to_slice,
+    expand_paths,
+)
 from mbo_utilities.util import subsample_array
 from mbo_utilities.pipelines import HAS_SUITE2P, HAS_MASKNMF, load_from_dir
 
@@ -34,6 +40,7 @@ CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
 logger = log.get("array_types")
 
+
 @dataclass
 class DemixingResultsArray:
     plane_dir: Path
@@ -47,11 +54,18 @@ class DemixingResultsArray:
         Display the demixing results as an image widget.
         """
         if not HAS_MASKNMF:
-            raise ImportError("MaskNMF is not installed. Cannot display demixing results.")
+            raise ImportError(
+                "MaskNMF is not installed. Cannot display demixing results."
+            )
         import fastplotlib as fpl
 
         histogram_widget = kwargs.get("histogram_widget", True)
-        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000), })
+        figure_kwargs = kwargs.get(
+            "figure_kwargs",
+            {
+                "size": (800, 1000),
+            },
+        )
         window_funcs = kwargs.get("window_funcs", None)
         return fpl.ImageWidget(
             data=self.load(),
@@ -60,6 +74,7 @@ class DemixingResultsArray:
             graphic_kwargs={"vmin": -300, "vmax": 4000},
             window_funcs=window_funcs,
         )
+
 
 @dataclass
 class Suite2pArray:
@@ -88,7 +103,13 @@ class Suite2pArray:
 
         if self.filenames is not None:
             from suite2p.io import BinaryFile
-            self._bf = BinaryFile(Ly=self.Ly, Lx=self.Lx, filename=str(self.filenames), n_frames=self.nframes)
+
+            self._bf = BinaryFile(
+                Ly=self.Ly,
+                Lx=self.Lx,
+                filename=str(self.filenames),
+                n_frames=self.nframes,
+            )
         else:
             self._bf = None
 
@@ -142,6 +163,7 @@ class Suite2pArray:
             raise ValueError("No binary file to display.")
 
         import fastplotlib as fpl
+
         return fpl.ImageWidget(
             data=self,
             histogram_widget=kwargs.get("histogram_widget", True),
@@ -149,6 +171,7 @@ class Suite2pArray:
             graphic_kwargs={"vmin": self.min(), "vmax": self.max()},
             window_funcs=kwargs.get("window_funcs", None),
         )
+
 
 class H5Array:
     def __init__(self, filenames: Path | str, dataset: str = "mov"):
@@ -175,7 +198,7 @@ class H5Array:
         if Ellipsis in key:
             idx = key.index(Ellipsis)
             n_missing = self.ndim - (len(key) - 1)
-            key = key[:idx] + (slice(None),) * n_missing + key[idx + 1:]
+            key = key[:idx] + (slice(None),) * n_missing + key[idx + 1 :]
 
         # Remove None axes (np.newaxis) and track their positions
         slices = []
@@ -214,14 +237,14 @@ class H5Array:
         return dict(self._f.attrs)
 
     def _imwrite(
-            self,
-            outpath: Path | str,
-            overwrite = False,
-            target_chunk_mb = 50,
-            ext = '.tiff',
-            progress_callback = None,
-            debug = None,
-            planes = None,
+        self,
+        outpath: Path | str,
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
+        progress_callback=None,
+        debug=None,
+        planes=None,
     ):
         target = outpath
         target.mkdir(exist_ok=True)
@@ -267,7 +290,7 @@ class MBOTiffArray:
             planes.append(da.from_array(mm, chunks=self.chunks))
 
         dstack = da.concatenate(planes, axis=0)  # (Z, T, Y, X)
-        return dstack.transpose(1, 0, 2, 3)       # (T, Z, Y, X)
+        return dstack.transpose(1, 0, 2, 3)  # (T, Z, Y, X)
 
     @property
     def dask(self) -> da.Array:
@@ -340,21 +363,21 @@ class MboRawArray(scans.ScanMultiROI):
     """
 
     def __init__(
-            self,
-            files: str | Path | list = None,
-            roi: int | Sequence[int] | None = None,
-            fix_phase: bool = True,
-            phasecorr_method: str = "frame",
-            border: int | tuple[int, int, int, int] = 3,
-            upsample: int =5,
-            max_offset: int = 4,
+        self,
+        files: str | Path | list = None,
+        roi: int | Sequence[int] | None = None,
+        fix_phase: bool = True,
+        phasecorr_method: str = "frame",
+        border: int | tuple[int, int, int, int] = 3,
+        upsample: int = 5,
+        max_offset: int = 4,
     ):
         super().__init__(join_contiguous=True)
         self.use_zarr = False
         self.reference = ""
         if files:
             self.read_data(files)
-        self._metadata = {} # set when pages are read
+        self._metadata = {}  # set when pages are read
         self.roi = roi  # alias
         self._roi = roi
         self._fix_phase = fix_phase
@@ -390,7 +413,9 @@ class MboRawArray(scans.ScanMultiROI):
 
         if combined_json_path.is_file():
             # delete it, its cheap to create
-            logger.debug(f"Removing existing combined reference file: {combined_json_path}")
+            logger.debug(
+                f"Removing existing combined reference file: {combined_json_path}"
+            )
             combined_json_path.unlink()
 
         print(f"Generating combined kerchunk reference for {len(filenames)} files…")
@@ -409,7 +434,9 @@ class MboRawArray(scans.ScanMultiROI):
         This will create a Dask array in the same directory as the reference file.
         """
         if not HAS_ZARR:
-            raise ImportError("Zarr is not installed. Please install it to use this method.")
+            raise ImportError(
+                "Zarr is not installed. Please install it to use this method."
+            )
         if not Path(self.reference).is_file():
             raise FileNotFoundError(
                 f"Reference file {self.reference} does not exist. "
@@ -426,7 +453,9 @@ class MboRawArray(scans.ScanMultiROI):
         This will create a Zarr store in the same directory as the reference file.
         """
         if not HAS_ZARR:
-            raise ImportError("Zarr is not installed. Please install it to use this method.")
+            raise ImportError(
+                "Zarr is not installed. Please install it to use this method."
+            )
         if not Path(self.reference).is_file():
             return None
         return zarr_open(
@@ -444,8 +473,12 @@ class MboRawArray(scans.ScanMultiROI):
             self.use_zarr = False
             self.reference = None
         super().read_data(filenames, dtype)
-        self._metadata = get_metadata(self.tiff_files[0].filehandle.path)  # from the file
-        self._metadata.update({"si": _make_json_serializable(self.tiff_files[0].scanimage_metadata)})
+        self._metadata = get_metadata(
+            self.tiff_files[0].filehandle.path
+        )  # from the file
+        self._metadata.update(
+            {"si": _make_json_serializable(self.tiff_files[0].scanimage_metadata)}
+        )
         self._rois = self._create_rois()
         self.fields = self._create_fields()
         if self.join_contiguous:
@@ -454,14 +487,16 @@ class MboRawArray(scans.ScanMultiROI):
     @property
     def metadata(self):
         md = self._metadata.copy()
-        md.update({
-            "fix_phase": self.fix_phase,
-            "phasecorr_method": self.phasecorr_method,
-            "offset": self.offset,
-            "border": self.border,
-            "upsample": self.upsample,
-            "max_offset": self.max_offset,
-        })
+        md.update(
+            {
+                "fix_phase": self.fix_phase,
+                "phasecorr_method": self.phasecorr_method,
+                "offset": self.offset,
+                "border": self.border,
+                "upsample": self.upsample,
+                "max_offset": self.max_offset,
+            }
+        )
         return md
 
     @metadata.setter
@@ -563,7 +598,9 @@ class MboRawArray(scans.ScanMultiROI):
     def output_yslices(self):
         return self.fields[0].output_yslices
 
-    def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs):
+    def _read_pages(
+        self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
+    ):
         C = self.num_channels
         pages = [f * C + c for f in frames for c in chans]
 
@@ -579,7 +616,9 @@ class MboRawArray(scans.ScanMultiROI):
                     buf[i] = zarray[f, c, yslice, xslice]
 
                 if self.fix_phase:
-                    self.logger.debug(f"Applying phase correction with strategy: {self.phasecorr_method}")
+                    self.logger.debug(
+                        f"Applying phase correction with strategy: {self.phasecorr_method}"
+                    )
                     buf, self.offset = nd_windowed(
                         buf,
                         method=self.phasecorr_method,
@@ -603,7 +642,9 @@ class MboRawArray(scans.ScanMultiROI):
             chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
 
             if self.fix_phase:
-                self.logger.debug(f"Applying phase correction with strategy: {self.phasecorr_method}")
+                self.logger.debug(
+                    f"Applying phase correction with strategy: {self.phasecorr_method}"
+                )
                 corrected, self.offset = nd_windowed(
                     chunk,
                     method=self.phasecorr_method,
@@ -621,7 +662,9 @@ class MboRawArray(scans.ScanMultiROI):
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
-        t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (4 - len(key))
+        t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (
+            slice(None),
+        ) * (4 - len(key))
         frames = utils.listify_index(t_key, self.num_frames)
         chans = utils.listify_index(z_key, self.num_channels)
         if not frames or not chans:
@@ -649,9 +692,15 @@ class MboRawArray(scans.ScanMultiROI):
     def process_rois(self, frames, chans):
         if self.roi is not None:
             if isinstance(self.roi, list):
-                return tuple(self.process_single_roi(roi_idx - 1, frames, chans) for roi_idx in self.roi)
+                return tuple(
+                    self.process_single_roi(roi_idx - 1, frames, chans)
+                    for roi_idx in self.roi
+                )
             elif self.roi == 0:
-                return tuple(self.process_single_roi(roi_idx, frames, chans) for roi_idx in range(self.num_rois))
+                return tuple(
+                    self.process_single_roi(roi_idx, frames, chans)
+                    for roi_idx in range(self.num_rois)
+                )
             elif isinstance(self.roi, int):
                 return self.process_single_roi(self.roi - 1, frames, chans)
         else:
@@ -659,7 +708,10 @@ class MboRawArray(scans.ScanMultiROI):
             out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
             for roi_idx in range(self.num_rois):
                 roi_data = self.process_single_roi(roi_idx, frames, chans)
-                oys, oxs = self.fields[0].output_yslices[roi_idx], self.fields[0].output_xslices[roi_idx]
+                oys, oxs = (
+                    self.fields[0].output_yslices[roi_idx],
+                    self.fields[0].output_xslices[roi_idx],
+                )
                 out[:, :, oys, oxs] = roi_data
             return out
 
@@ -751,13 +803,19 @@ class MboRawArray(scans.ScanMultiROI):
         ROI's that have multiple 'zs' to a single depth.
         """
         try:
-            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
+            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"][
+                "imagingRoiGroup"
+            ]["rois"]
         except KeyError:
-            raise RuntimeError("This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata.")
+            raise RuntimeError(
+                "This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata."
+            )
         roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
 
         # discard empty/malformed ROIs
-        roi_infos = list(filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos))
+        roi_infos = list(
+            filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos)
+        )
 
         # LBM uses a single depth that is not stored in metadata,
         # so force this to be 0.
@@ -775,14 +833,14 @@ class MboRawArray(scans.ScanMultiROI):
         return subsample_array(self, ignore_dims=[-1, -2, -3])
 
     def _imwrite(
-            self,
-            outpath: Path | str,
-            overwrite = False,
-            target_chunk_mb = 50,
-            ext = '.tiff',
-            progress_callback = None,
-            debug = None,
-            planes = None,
+        self,
+        outpath: Path | str,
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
+        progress_callback=None,
+        debug=None,
+        planes=None,
     ):
         for roi in iter_rois(self):
             print(roi)
@@ -816,7 +874,12 @@ class MboRawArray(scans.ScanMultiROI):
             names.append(f"ROI {roi}" if roi else "Full Image")
 
         histogram_widget = kwargs.get("histogram_widget", True)
-        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000), })
+        figure_kwargs = kwargs.get(
+            "figure_kwargs",
+            {
+                "size": (800, 1000),
+            },
+        )
         window_funcs = kwargs.get("window_funcs", None)
         return fpl.ImageWidget(
             data=arrays,

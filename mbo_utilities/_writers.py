@@ -1,6 +1,5 @@
 import functools
 import warnings
-import logging
 from typing import Any
 
 import numpy as np
@@ -17,6 +16,7 @@ from .util import is_running_jupyter
 
 try:
     from suite2p.io import BinaryFile
+
     HAS_SUITE2P = True
 except ImportError:
     HAS_SUITE2P = False
@@ -80,12 +80,10 @@ def _save_data(
     metadata["shape"] = (nt, nx, ny)
     metadata["dims"] = ["time", "width", "height"]
     metadata["nframes"] = nt
-    metadata["n_frames"] = nt    # alias
+    metadata["n_frames"] = nt  # alias
     metadata["num_frames"] = nt  # alias
 
-    writer = _get_file_writer(
-        ext, overwrite=overwrite
-    )
+    writer = _get_file_writer(ext, overwrite=overwrite)
 
     chunk_size = target_chunk_mb * 1024 * 1024
     total_chunks = sum(
@@ -102,11 +100,13 @@ def _save_data(
         )
         for _ in planes
     )
-    logger.info(f"Total chunks to save: {total_chunks} (target chunk size: {chunk_size / 1024 / 1024:.2f} MB)")
+    logger.info(
+        f"Total chunks to save: {total_chunks} (target chunk size: {chunk_size / 1024 / 1024:.2f} MB)"
+    )
     if not debug:
         pbar = tqdm(total=total_chunks, desc="Saving plane ", position=0)
     else:
-        pbar=None
+        pbar = None
 
     for chan_index in planes:
         if ext == "bin":
@@ -115,11 +115,16 @@ def _save_data(
             fname = outpath / f"plane{chan_index + 1}.{ext}"
 
         if fname.exists() and not overwrite:
-            print(f"File {fname} already exists with overwrite=False; skipping save.", flush=True)
+            print(
+                f"File {fname} already exists with overwrite=False; skipping save.",
+                flush=True,
+            )
             if pbar:
                 # simulate full save for skipped file
                 nbytes_chan = data.shape[0] * data.shape[2] * data.shape[3] * 2
-                num_chunks = min(data.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size))))
+                num_chunks = min(
+                    data.shape[0], max(1, int(np.ceil(nbytes_chan / chunk_size)))
+                )
                 pbar.update(num_chunks)
                 pbar.set_description(f"Skipped plane {chan_index + 1}")
             continue
@@ -163,6 +168,7 @@ def _save_data(
     if ext in ["tiff", "tif"]:
         _close_tiff_writers()
 
+
 def _get_file_writer(ext, overwrite):
     if ext in ["tif", "tiff"]:
         return functools.partial(
@@ -181,14 +187,17 @@ def _get_file_writer(ext, overwrite):
         )
     elif ext == "bin":
         if not HAS_SUITE2P:
-            raise ValueError("Suite2p needed to write binary files, please install it:\n"
-                             "pip install suite2p[io]")
+            raise ValueError(
+                "Suite2p needed to write binary files, please install it:\n"
+                "pip install suite2p[io]"
+            )
         return functools.partial(
             _write_bin,
             overwrite=overwrite,
         )
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
+
 
 def _write_bin(path, data, *, overwrite: bool = False, metadata=None):
     if not hasattr(_write_bin, "_writers"):
@@ -222,6 +231,7 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None):
 
     logger.debug(f"Wrote {data.shape[0]} frames to {fname}.")
 
+
 def _write_h5(path, data, *, overwrite=True, metadata=None):
     filename = Path(path).with_suffix(".h5")
 
@@ -254,7 +264,8 @@ def _write_h5(path, data, *, overwrite=True, metadata=None):
 
     _write_h5._offsets[filename] = offset + data.shape[0]
 
-def _write_tiff(path, data, *,overwrite=True, metadata=None):
+
+def _write_tiff(path, data, *, overwrite=True, metadata=None):
     filename = Path(path).with_suffix(".tif")
 
     if not hasattr(_write_tiff, "_writers"):
@@ -286,13 +297,11 @@ def _write_tiff(path, data, *,overwrite=True, metadata=None):
         )
         _write_tiff._first_write[filename] = False
 
+
 def _write_zarr(path, data, *, overwrite=True, metadata=None):
-    import asyncio, zarr
+    import zarr
+
     filename = Path(path).with_suffix(".zarr")
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        asyncio.set_event_loop(asyncio.new_event_loop())
     if not hasattr(_write_zarr, "_arrays"):
         _write_zarr._arrays, _write_zarr._offsets = {}, {}
     if filename not in _write_zarr._arrays:
@@ -300,8 +309,13 @@ def _write_zarr(path, data, *, overwrite=True, metadata=None):
             shutil.rmtree(filename)
         nframes = metadata["nframes"]
         h, w = data.shape[-2:]
-        z = zarr.open(store=str(filename), mode="w",
-                      shape=(nframes, h, w), chunks=(1, h, w), dtype=data.dtype)
+        z = zarr.open(
+            store=str(filename),
+            mode="w",
+            shape=(nframes, h, w),
+            chunks=(1, h, w),
+            dtype=data.dtype,
+        )
         if metadata:
             for k, v in metadata.items():
                 try:
@@ -312,8 +326,9 @@ def _write_zarr(path, data, *, overwrite=True, metadata=None):
         _write_zarr._offsets[filename] = 0
     z = _write_zarr._arrays[filename]
     offset = _write_zarr._offsets[filename]
-    z[offset: offset + data.shape[0]] = data
+    z[offset : offset + data.shape[0]] = data
     _write_zarr._offsets[filename] = offset + data.shape[0]
+
 
 def _write_zarr_v2(path, data, *, overwrite=True, metadata=None):
     filename = Path(path).with_suffix(".zarr")

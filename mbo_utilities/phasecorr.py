@@ -8,23 +8,21 @@ TWO_DIM_PHASECORR_METHODS = {"frame"}
 THREE_DIM_PHASECORR_METHODS = ["mean", "max", "std", "mean-sub"]
 
 MBO_WINDOW_METHODS = {
-    "mean":      lambda X: np.mean(X, axis=0),
-    "max":       lambda X: np.max(X, axis=0),
-    "std":       lambda X: np.std(X, axis=0),
-    "mean-sub":  lambda X: X[0] - np.mean(X, axis=0),  # mostly for compatibility with gui window functions
+    "mean": lambda X: np.mean(X, axis=0),
+    "max": lambda X: np.max(X, axis=0),
+    "std": lambda X: np.std(X, axis=0),
+    "mean-sub": lambda X: X[0]
+    - np.mean(X, axis=0),  # mostly for compatibility with gui window functions
 }
 
-ALL_PHASECORR_METHODS = set(TWO_DIM_PHASECORR_METHODS) | set(THREE_DIM_PHASECORR_METHODS)
+ALL_PHASECORR_METHODS = set(TWO_DIM_PHASECORR_METHODS) | set(
+    THREE_DIM_PHASECORR_METHODS
+)
 
 logger = log.get("phasecorr")
 
 
-def _phase_corr_2d(
-        frame,
-        upsample=4,
-        border=0,
-        max_offset=4
-):
+def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4):
     if frame.ndim != 2:
         raise ValueError("Expected a 2D frame, got a 3D array.")
 
@@ -52,6 +50,7 @@ def _phase_corr_2d(
         return np.sign(dx) * min(abs(dx), max_offset)
     return dx
 
+
 def _apply_offset(img, offset):
     """
     Apply one scalar `shift` (in X) to every *odd* row of an
@@ -63,13 +62,12 @@ def _apply_offset(img, offset):
     rows = img[..., 1::2, :]
 
     f = np.fft.fftn(rows, axes=(-2, -1))
-    shift_vec = (0,) * (f.ndim - 1) + (offset,)   # e.g. (0,0,dx) for 3-D
-    rows[:] = np.fft.ifftn(fourier_shift(f, shift_vec),
-                           axes=(-2, -1)).real
+    shift_vec = (0,) * (f.ndim - 1) + (offset,)  # e.g. (0,0,dx) for 3-D
+    rows[:] = np.fft.ifftn(fourier_shift(f, shift_vec), axes=(-2, -1)).real
     return img
 
-def nd_windowed(arr, *, method="frame", upsample=4,
-                max_offset=4, border=0):
+
+def nd_windowed(arr, *, method="frame", upsample=4, max_offset=4, border=0):
     """Return (corrected array, offsets)."""
     a = np.asarray(arr)
     if a.ndim == 2:
@@ -89,8 +87,10 @@ def nd_windowed(arr, *, method="frame", upsample=4,
         corrected = _apply_offset(a.copy(), float(offs))
     else:
         corrected = np.stack(
-            [_apply_offset(f.copy(), float(s))  # or _apply_offset
-             for f, s in zip(a, offs)]
+            [
+                _apply_offset(f.copy(), float(s))  # or _apply_offset
+                for f, s in zip(a, offs)
+            ]
         )
     return corrected, offs
 
@@ -102,6 +102,7 @@ def apply_scan_phase_offsets(arr, offs):
     for k, off in enumerate(offs):
         out[k] = _apply_offset(out[k], off)
     return out
+
 
 def apply_patchwise_offsets(data, xsplits, offsets, blend=True, blend_width=16):
     t, h, w = data.shape
@@ -116,13 +117,7 @@ def apply_patchwise_offsets(data, xsplits, offsets, blend=True, blend_width=16):
 
     for frame_i in range(t):
         dx_parts = offsets[:, frame_i]
-        dx_map = np.interp(
-            x,
-            centers,
-            dx_parts,
-            left=dx_parts[0],
-            right=dx_parts[-1]
-        )
+        dx_map = np.interp(x, centers, dx_parts, left=dx_parts[0], right=dx_parts[-1])
 
         if blend:
             # Linear ramp blend mask to reduce seam artifacts
@@ -131,21 +126,28 @@ def apply_patchwise_offsets(data, xsplits, offsets, blend=True, blend_width=16):
                 l = max(xsplits[i] - blend_width, xsplits[i - 1])
                 r = min(xsplits[i] + blend_width, xsplits[i + 1])
                 ramp = np.linspace(0, 1, r - l, dtype=np.float32)
-                blend_mask[l:xsplits[i]] *= 1 - ramp[:xsplits[i] - l]
-                blend_mask[xsplits[i]:r] *= ramp[xsplits[i] - l:]
+                blend_mask[l : xsplits[i]] *= 1 - ramp[: xsplits[i] - l]
+                blend_mask[xsplits[i] : r] *= ramp[xsplits[i] - l :]
 
         for col in range(w):
             col_data = data[frame_i, :, col]
             col_shifted = col_data.copy()
-            col_shifted[1::2] = shift(col_data[1::2],
-                                      shift=(dx_map[col],),
-                                      order=1, mode="nearest", prefilter=False)
+            col_shifted[1::2] = shift(
+                col_data[1::2],
+                shift=(dx_map[col],),
+                order=1,
+                mode="nearest",
+                prefilter=False,
+            )
             if blend:
-                out[frame_i, :, col] = (1 - blend_mask[col]) * col_data + blend_mask[col] * col_shifted
+                out[frame_i, :, col] = (1 - blend_mask[col]) * col_data + blend_mask[
+                    col
+                ] * col_shifted
             else:
                 out[frame_i, :, col] = col_shifted
 
     return out
+
 
 def apply_patchwise_offsets_v2(data, xsplits, offsets, blend="edge", extrapolate=True):
     t, h, w = data.shape
@@ -160,7 +162,9 @@ def apply_patchwise_offsets_v2(data, xsplits, offsets, blend="edge", extrapolate
 
         if blend == "center":
             centers = xsplits[:-1] + np.diff(xsplits) // 2
-            dx_map = np.interp(x, centers, dx_parts, left=dx_parts[0], right=dx_parts[-1])
+            dx_map = np.interp(
+                x, centers, dx_parts, left=dx_parts[0], right=dx_parts[-1]
+            )
         elif blend == "edge":
             dx_map = np.zeros_like(x, dtype=np.float32)
             for i in range(n_parts):
@@ -183,13 +187,9 @@ def apply_patchwise_offsets_v2(data, xsplits, offsets, blend="edge", extrapolate
 
     return out
 
+
 def phase_offsets_timecourse(
-        data,
-        n_parts=3,
-        upsample=10,
-        max_offset=4,
-        border=0,
-        method="frame"
+    data, n_parts=3, upsample=10, max_offset=4, border=0, method="frame"
 ):
     t, h, w = data.shape
     xsplits = np.linspace(0, w, n_parts + 1, dtype=int)
@@ -203,8 +203,7 @@ def phase_offsets_timecourse(
 
         if method == "frame":
             patch_offsets = [
-                _phase_corr_2d(f, upsample, border, max_offset)
-                for f in patch
+                _phase_corr_2d(f, upsample, border, max_offset) for f in patch
             ]
         else:
             if method not in MBO_WINDOW_METHODS:
@@ -216,7 +215,6 @@ def phase_offsets_timecourse(
         offsets.append(patch_offsets)
 
     return xsplits, np.array(offsets)
-
 
 
 if __name__ == "__main__":

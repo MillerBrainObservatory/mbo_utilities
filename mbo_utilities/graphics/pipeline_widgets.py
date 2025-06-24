@@ -351,9 +351,7 @@ def draw_section_masknmf(self):
 def run_process(self):
     """Runs the selected processing pipeline."""
     if self._current_pipeline == "suite2p":
-        self.logger.info(
-            f"Running Suite2p pipeline with settings: {self.s2p}"
-        )
+        self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
         try:
             import lbm_suite2p_python as lsp
         except ImportError:
@@ -365,7 +363,7 @@ def run_process(self):
             return
     if not self._install_error:
         for i, arr in enumerate(self.image_widget.data):
-            kwargs = {"self": self, "arr_idx" : i}
+            kwargs = {"self": self, "arr_idx": i}
             threading.Thread(target=run_plane_from_data, kwargs=kwargs).start()
     elif self._current_pipeline == "masknmf":
         self.logger.info("Running MaskNMF pipeline (not yet implemented).")
@@ -463,9 +461,7 @@ def run_plane_from_data(self, arr_idx):
     ops.update(metadata)
     if input_file:
         lsp.run_plane(input_file, out_dir, ops=ops)
-        self.logger.info(
-            f"Plane 7 saved to {out_dir / 'plane_7.tif'}"
-        )
+        self.logger.info(f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
     else:
         self.logger.error("No valid input file found for processing.")
         return

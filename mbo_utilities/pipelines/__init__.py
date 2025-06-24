@@ -1,6 +1,7 @@
 try:
     import masknmf
     from .masknmf import load_from_dir
+
     HAS_MASKNMF = True
 except ImportError:
     masknmf = None
@@ -9,6 +10,7 @@ except ImportError:
 
 try:
     import torch
+
     MBO_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     HAS_TORCH = True
 except ImportError:
@@ -17,6 +19,7 @@ except ImportError:
 
 try:
     from suite2p.io import BinaryFile
+
     HAS_SUITE2P = True
 except ImportError:
     suite2p = None

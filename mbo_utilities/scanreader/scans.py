@@ -76,7 +76,13 @@ class BaseScan:
     @property
     def tiff_files(self):
         if self._tiff_files is None:
-            self._tiff_files = [TiffFile(filename, mode="r",) for filename in self.filenames]
+            self._tiff_files = [
+                TiffFile(
+                    filename,
+                    mode="r",
+                )
+                for filename in self.filenames
+            ]
         return self._tiff_files
 
     @tiff_files.deleter
@@ -825,11 +831,17 @@ class ScanMultiROI(NewerScan, BaseScan):
         ROI's that have multiple 'zs' to a single depth.
         """
         try:
-            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
+            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"][
+                "imagingRoiGroup"
+            ]["rois"]
         except KeyError:
-            raise RuntimeError("This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata.")
+            raise RuntimeError(
+                "This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata."
+            )
         roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
-        roi_infos = list(filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos))
+        roi_infos = list(
+            filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos)
+        )
         for roi_info in roi_infos:
             roi_info["zs"] = [0]
 

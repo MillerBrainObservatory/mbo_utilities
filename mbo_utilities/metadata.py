@@ -456,7 +456,7 @@ def params_from_metadata(metadata, base_ops, pipeline="suite2p"):
 def read_scanimage_metadata_tifffile(
     fh: FileHandle, /
 ) -> tuple[dict[str, Any], dict[str, Any], int]:
-    """ FROM TIFFFILE for DEVELOPMENT
+    """FROM TIFFFILE for DEVELOPMENT
 
     Read ScanImage BigTIFF v3 or v4 static and ROI metadata from file.
 
@@ -480,39 +480,39 @@ def read_scanimage_metadata_tifffile(
     """
     fh.seek(0)
     try:
-        byteorder, version = struct.unpack('<2sH', fh.read(4))
-        if byteorder != b'II' or version != 43:
-            raise ValueError('not a BigTIFF file')
+        byteorder, version = struct.unpack("<2sH", fh.read(4))
+        if byteorder != b"II" or version != 43:
+            raise ValueError("not a BigTIFF file")
         fh.seek(16)
-        magic, version, size0, size1 = struct.unpack('<IIII', fh.read(16))
+        magic, version, size0, size1 = struct.unpack("<IIII", fh.read(16))
         if magic != 117637889 or version not in {3, 4}:
-            raise ValueError(
-                f'invalid magic {magic} or version {version} number'
-            )
+            raise ValueError(f"invalid magic {magic} or version {version} number")
     except UnicodeDecodeError as exc:
-        raise ValueError('file must be opened in binary mode') from exc
+        raise ValueError("file must be opened in binary mode") from exc
     except Exception as exc:
-        raise ValueError('not a ScanImage BigTIFF v3 or v4 file') from exc
+        raise ValueError("not a ScanImage BigTIFF v3 or v4 file") from exc
 
     frame_data = matlabstr2py(bytes2str(fh.read(size0)[:-1]))
-    roi_data = read_json(fh, '<', 0, size1, 0) if size1 > 1 else {}
+    roi_data = read_json(fh, "<", 0, size1, 0) if size1 > 1 else {}
     return frame_data, roi_data, version
 
 
 def matlabstr(obj):
     """Convert Python dict to ScanImage-style MATLAB string."""
+
     def _format(v):
         if isinstance(v, list):
             if all(isinstance(i, str) for i in v):
-                return '{' + ' '.join(f"'{i}'" for i in v) + '}'
-            return '[' + ' '.join(str(i) for i in v) + ']'
+                return "{" + " ".join(f"'{i}'" for i in v) + "}"
+            return "[" + " ".join(str(i) for i in v) + "]"
         if isinstance(v, str):
             return f"'{v}'"
         if isinstance(v, bool):
-            return 'true' if v else 'false'
+            return "true" if v else "false"
         return str(v)
 
-    return '\n'.join(f"{k} = {_format(v)}" for k, v in obj.items())
+    return "\n".join(f"{k} = {_format(v)}" for k, v in obj.items())
+
 
 def _parse_value(value_str):
     if value_str.startswith("'") and value_str.endswith("'"):

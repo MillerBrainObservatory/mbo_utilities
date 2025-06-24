@@ -17,13 +17,15 @@ def mbo_tiff_display(array: MBOTiffArray, **kwargs):
     return fpl.ImageWidget(
         data=array,
         histogram_widget=True,
-        figure_kwargs={"size": (800, 1000),},  # "canvas": canvas},
+        figure_kwargs={
+            "size": (800, 1000),
+        },  # "canvas": canvas},
         graphic_kwargs={"vmin": array.min(), "vmax": array.max()},
         window_funcs={"t": (np.mean, 0)},
     )
 
-def mbo_raw_display(array: MboRawArray, **kwargs):
 
+def mbo_raw_display(array: MboRawArray, **kwargs):
     arrays = []
     names = []
     # if roi is None, use a single array.roi = None
@@ -38,10 +40,13 @@ def mbo_raw_display(array: MboRawArray, **kwargs):
         data=arrays,
         names=names,
         histogram_widget=True,
-        figure_kwargs={"size": (800, 1000),},  # "canvas": canvas},
+        figure_kwargs={
+            "size": (800, 1000),
+        },  # "canvas": canvas},
         graphic_kwargs={"vmin": array.min(), "vmax": array.max()},
         window_funcs={"t": (np.mean, 0)},
     )
+
 
 def imshow_lazy_array(array, **kwargs):
     if hasattr(array, "imshow"):

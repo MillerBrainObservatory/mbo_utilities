@@ -39,6 +39,6 @@ def _increment_label(existing: list[dict[str, Any]], base_label: str) -> str:
     labels = {e["label"] for e in existing if "label" in e}
     if base_label not in labels:
         return base_label
-    while f"{base_label} [{count+1}]" in labels:
+    while f"{base_label} [{count + 1}]" in labels:
         count += 1
-    return f"{base_label} [{count+1}]"
+    return f"{base_label} [{count + 1}]"

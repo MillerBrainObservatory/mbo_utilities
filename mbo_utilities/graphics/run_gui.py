@@ -20,6 +20,7 @@ except ImportError:
 
 try:
     from masknmf.visualization.interactive_guis import make_demixing_video
+
     HAS_MASKNMF = True
 except ImportError:
     HAS_MASKNMF = False
@@ -35,7 +36,9 @@ def _select_file() -> tuple[str | None, bool, bool]:
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "MBO Utilities – Data Selection"
     params.app_window_params.window_geometry.size = (1400, 950)
-    params.ini_filename = str(Path(get_mbo_dirs()["settings"], "fd_settings.ini").expanduser())
+    params.ini_filename = str(
+        Path(get_mbo_dirs()["settings"], "fd_settings.ini").expanduser()
+    )
     params.callbacks.show_gui = _render
 
     addons = immapp.AddOnsParams()
@@ -82,10 +85,14 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
     iw.show()
     if widget:
         from mbo_utilities.graphics.imgui import PreviewDataWidget
-        gui = PreviewDataWidget(iw=iw, fpath=data_array.filenames, threading_enabled=threading, size=350)
+
+        gui = PreviewDataWidget(
+            iw=iw, fpath=data_array.filenames, threading_enabled=threading, size=350
+        )
         iw.figure.add_gui(gui)
     fpl.loop.run()
     return
+
 
 if __name__ == "__main__":
     run_gui()  # type: ignore # noqa

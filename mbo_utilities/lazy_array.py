@@ -7,7 +7,15 @@ from typing import Sequence, Callable
 import numpy as np
 
 from . import log
-from .array_types import DemixingResultsArray, Suite2pArray, H5Array, MBOTiffArray, TiffArray, MboRawArray, NpyArray
+from .array_types import (
+    DemixingResultsArray,
+    Suite2pArray,
+    H5Array,
+    MBOTiffArray,
+    TiffArray,
+    MboRawArray,
+    NpyArray,
+)
 from .file_io import get_files
 from .metadata import is_raw_scanimage, has_mbo_metadata
 from .roi import supports_roi
@@ -25,7 +33,14 @@ SUPPORTED_FTYPES = (
 )
 
 _ARRAY_TYPE_KWARGS = {
-    MboRawArray: {"roi", "fix_phase", "phasecorr_method", "border", "upsample", "max_offset"},
+    MboRawArray: {
+        "roi",
+        "fix_phase",
+        "phasecorr_method",
+        "border",
+        "upsample",
+        "max_offset",
+    },
     MBOTiffArray: set(),  # accepts no kwargs
     Suite2pArray: set(),  # accepts no kwargs
     H5Array: {"dataset"},
@@ -34,23 +49,24 @@ _ARRAY_TYPE_KWARGS = {
     DemixingResultsArray: set(),
 }
 
+
 def _filter_kwargs(cls, kwargs):
     allowed = _ARRAY_TYPE_KWARGS.get(cls, set())
     return {k: v for k, v in kwargs.items() if k in allowed}
 
 
 def imwrite(
-        lazy_array,
-        outpath: str | Path,
-        planes: list | tuple = None,
-        roi: int | Sequence[int] | None = None,
-        metadata: dict = None,
-        overwrite: bool = True,
-        ext: str = ".tiff",
-        order: list | tuple = None,
-        target_chunk_mb: int = 20,
-        progress_callback: Callable = None,
-        debug: bool = False,
+    lazy_array,
+    outpath: str | Path,
+    planes: list | tuple = None,
+    roi: int | Sequence[int] | None = None,
+    metadata: dict = None,
+    overwrite: bool = True,
+    ext: str = ".tiff",
+    order: list | tuple = None,
+    target_chunk_mb: int = 20,
+    progress_callback: Callable = None,
+    debug: bool = False,
 ):
     # Logging
     if debug:
@@ -87,7 +103,7 @@ def imwrite(
             num_planes = lazy_array.metadata["num_planes"]
         elif "num_channels" in lazy_array.metadata:
             num_planes = lazy_array.metadata["num_channels"]
-    elif hasattr(lazy_array, 'ndim') and lazy_array.ndim >= 3:
+    elif hasattr(lazy_array, "ndim") and lazy_array.ndim >= 3:
         num_planes = lazy_array.shape[1] if lazy_array.ndim == 4 else 1
     else:
         raise ValueError("Cannot determine the number of planes.")
@@ -135,14 +151,15 @@ def imwrite(
             ext=ext,
             progress_callback=progress_callback,
             planes=planes,
-            debug=debug
+            debug=debug,
         )
     else:
         raise TypeError(f"{type(lazy_array)} does not implement an `imwrite()` method.")
 
+
 def imread(
-        inputs: str | Path | Sequence[str | Path],
-        **kwargs, # for the reader
+    inputs: str | Path | Sequence[str | Path],
+    **kwargs,  # for the reader
 ):
     if isinstance(inputs, np.ndarray):
         return inputs
@@ -202,7 +219,7 @@ def imread(
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            return MboRawArray(files=paths, ** _filter_kwargs(MboRawArray, kwargs))
+            return MboRawArray(files=paths, **_filter_kwargs(MboRawArray, kwargs))
         if has_mbo_metadata(first):
             return MBOTiffArray(paths)
         return TiffArray(paths)
@@ -222,5 +239,3 @@ def imread(
         return DemixingResultsArray(first.parent)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
-
-

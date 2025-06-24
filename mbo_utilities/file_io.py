@@ -19,6 +19,7 @@ try:
     from zarr import open as zarr_open
     from zarr.storage import FsspecStore
     from fsspec.implementations.reference import ReferenceFileSystem
+
     HAS_ZARR = True
 except ImportError:
     HAS_ZARR = False
@@ -33,6 +34,7 @@ MBO_PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
 logger = log.get("file_io")
 
+
 def load_ops(ops_input: str | Path | list[str | Path]):
     """Simple utility load a suite2p npy file"""
     if isinstance(ops_input, (str, Path)):
@@ -41,6 +43,7 @@ def load_ops(ops_input: str | Path | list[str | Path]):
         return ops_input
     print("Warning: No valid ops file provided, returning None.")
     return {}
+
 
 def write_ops(metadata, raw_filename):
     """
@@ -51,7 +54,9 @@ def write_ops(metadata, raw_filename):
     'frame_rate' keys.
     """
     logger.info(f"Writing ops file for {raw_filename} with metadata: {metadata}")
-    assert isinstance(raw_filename, (str, Path)), "filename must be a string or Path object"
+    assert isinstance(raw_filename, (str, Path)), (
+        "filename must be a string or Path object"
+    )
     filename = Path(raw_filename).expanduser().resolve()
 
     # this convention means input can be either
@@ -84,7 +89,7 @@ def write_ops(metadata, raw_filename):
         # suite2p needs these
         "Ly": Ly,
         "Lx": Lx,
-        "fs": metadata['fs'],
+        "fs": metadata["fs"],
         "nframes": nt,
         "dx": dx,
         "dy": dy,
@@ -93,8 +98,8 @@ def write_ops(metadata, raw_filename):
         **metadata,
     }
     np.save(ops_path, ops)
-    logger.debug(f"Ops file written to {ops_path} with metadata:\n"
-                 f" {ops}")
+    logger.debug(f"Ops file written to {ops_path} with metadata:\n {ops}")
+
 
 def normalize_file_url(path):
     """
@@ -133,12 +138,13 @@ def normalize_file_url(path):
     for tag in MBO_PIPELINE_TAGS:
         low = name.lower()
         if low.startswith(tag):
-            suffix = name[len(tag):]
+            suffix = name[len(tag) :]
             if suffix and (suffix[0] in ("_", "-")):
                 suffix = suffix[1:]
             if suffix.isdigit():
                 return f"{tag}{int(suffix)}"
     return name
+
 
 def npy_to_dask(files, name="", axis=1, astype=None):
     """
@@ -199,6 +205,7 @@ def npy_to_dask(files, name="", axis=1, astype=None):
 
     return arr
 
+
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     """
     Expand a path, list of paths, or wildcard pattern into a sorted list of actual files.
@@ -244,6 +251,7 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
     return sorted(p.resolve() for p in result if p.is_file())
 
+
 def _tiff_to_fsspec(tif_path: Path, base_dir: Path) -> dict:
     """
     Create a kerchunk reference for a single TIFF file.
@@ -267,6 +275,7 @@ def _tiff_to_fsspec(tif_path: Path, base_dir: Path) -> dict:
             refs = json.loads(f.getvalue())  # type: ignore
     return refs
 
+
 def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
     assert len(tif_files) > 1, "Need at least two TIFF files to combine."
 
@@ -276,7 +285,6 @@ def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
     total_chunks = None
     zarr_meta = {}
     for tif_path in tif_files:
-
         # Create a json reference for each TIFF file
         inner_refs = _tiff_to_fsspec(tif_path, base_dir)
         zarr_meta = json.loads(inner_refs.pop(".zarray"))
@@ -308,7 +316,7 @@ def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
 
     combined_refs[".zarray"] = json.dumps(combined_zarr_meta)
     combined_refs[".zattrs"] = json.dumps(
-        {"_ARRAY_DIMENSIONS": ["T", "C", "Y", "X"][:len(total_shape)]}
+        {"_ARRAY_DIMENSIONS": ["T", "C", "Y", "X"][: len(total_shape)]}
     )
 
     axis0_offset = 0
@@ -325,8 +333,10 @@ def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
 
     return combined_refs
 
+
 def read_scan():
     raise DeprecationWarning("read_scan is deprecated, use mbo.imread() instead.")
+
 
 def get_files(
     base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
@@ -412,6 +422,7 @@ def get_files(
 
     return [str(file) for file in files]
 
+
 def _is_arraylike(obj) -> bool:
     """
     Checks if the object is array-like.
@@ -423,9 +434,11 @@ def _is_arraylike(obj) -> bool:
 
     return True
 
+
 def _get_mbo_project_root() -> Path:
     """Return the root path of the mbo_utilities repository (based on this file)."""
     return Path(__file__).resolve().parent.parent
+
 
 def get_mbo_dirs() -> dict:
     """
@@ -456,6 +469,7 @@ def get_mbo_dirs() -> dict:
         "data": data,
         "tests": tests,
     }
+
 
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k

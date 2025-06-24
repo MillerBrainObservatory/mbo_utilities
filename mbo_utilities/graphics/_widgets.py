@@ -2,7 +2,8 @@ import inspect
 import numbers
 from collections import abc as cab
 from imgui_bundle import (
-    imgui, imgui_ctx,
+    imgui,
+    imgui_ctx,
 )
 
 _NAME_COLORS = (
@@ -42,16 +43,14 @@ def draw_scope():
     with imgui_ctx.begin_child("Scope Inspector"):
         frame = inspect.currentframe().f_back
         vars_all = {**frame.f_locals}
-        imgui.push_style_var( # type: ignore # noqa
-            imgui.StyleVar_.item_spacing,
-            imgui.ImVec2(8, 4)
+        imgui.push_style_var(  # type: ignore # noqa
+            imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4)
         )
         try:
             for name, val in sorted(vars_all.items()):
                 if (
                     inspect.ismodule(val)
-                    or (name.startswith("_")
-                    or name.endswith("_"))
+                    or (name.startswith("_") or name.endswith("_"))
                     or callable(val)
                 ):
                     continue
@@ -67,8 +66,11 @@ def _render_item(name, val, prefix=""):
     # Dictionaries
     if isinstance(val, Mapping):
         # filter out all-underscore keys and callables
-        children = [(k, v) for k, v in val.items()
-                    if not (k.startswith("__") and k.endswith("__")) and not callable(v)]
+        children = [
+            (k, v)
+            for k, v in val.items()
+            if not (k.startswith("__") and k.endswith("__")) and not callable(v)
+        ]
         if children:
             if imgui.tree_node(full_name):
                 for k, v in children:
@@ -97,14 +99,14 @@ def _render_item(name, val, prefix=""):
         cls = type(val)
         # gather all @property names on the class
         prop_names = [
-            name_ for name_, attr in cls.__dict__.items()
-            if isinstance(attr, property)
+            name_ for name_, attr in cls.__dict__.items() if isinstance(attr, property)
         ]
         # gather instance attributes from __dict__, excluding private and callable
         fields = {}
         if hasattr(val, "__dict__"):
             fields = {
-                n: v for n, v in vars(val).items()
+                n: v
+                for n, v in vars(val).items()
                 if not n.startswith("_") and not callable(v)
             }
         # if there are any fields or properties, show a tree node
@@ -142,4 +144,3 @@ def _fmt(x):
         except TypeError:
             pass
     return f"<{type(x).__name__}>"
-
