@@ -8,8 +8,8 @@
 pip install "mbo_utilities[all]"
 ```
 
-```{note} If you need python3.10
-:class: dropdown
+```{admonition} If you need python3.10
+:class: note
 
 This package is compatible with python 3.10. 
 The gui dependencies often install in under a minute with `python 3.11` and `python 3.12`.

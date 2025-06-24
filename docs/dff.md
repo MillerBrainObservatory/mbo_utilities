@@ -1,52 +1,130 @@
-# Calculating ΔF/F0
+---
+bibliography:
+  - references.bib
+---
 
-Before reading the below guide, please read [this blog-post](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by the great Dr Peter Rupprecht at the University of Zurich.
+# Quantifying Cell Activity (ΔF/F₀)
 
-This guide covers common approaches to extracting calcium activity and how this will differ depending on which pipeline you are using.
+The gold-standard formula for measuring cellular activity is "Delta F over F₀", or the change in fluorescence intensity normalized by the baseline activity:
 
-## Key takeaways
+```{math}
+:class: center large
 
-- ∆F/F reflects intracellular calcium levels, but often in a nonlinear way
-- ∆F/F was initially introduced for organic dye calcium indicators in the 1980s
-- GCaMP behaves differently due to its low baseline brightness and its nonlinearity
-- There is no single recipe on how to compute ∆F/F
-- Computation of ∆F/F must be adapted to cell types, activity patterns, and noise
-- Interpretation of ∆F/F requires knowledge about indicators, cell types, and confounds
-- Potential confounds are brain motion, neuropil contamination, and response variability across neurons
+\Delta F/F_0 = \frac{F - F_0}{F_0}
+```
+Here, F₀ a user-defined baseline that may be static (e.g., median over all frames) or dynamically estimated using a rolling window.
 
-## What is ΔF/F0
+This guide assumes you've read this please read [this scientifica article](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
 
-"Delta F over F naught", abbr. ΔF/F0, is the change in calcium signal over time, normalized by the baseline signal.
+::::{grid}
+:::{grid-item-card} Blog-Post Takeaways
+:columns: 12
+
+- $\Delta F/F$ reflects intracellular calcium levels, but often in a nonlinear way  
+- $\Delta F/F$ was initially introduced for organic dye calcium indicators in the 1930s  
+- GCaMP behaves differently due to its low baseline brightness and its nonlinearity  
+- There is no single recipe on how to compute $\Delta F/F$  
+- Computation of $\Delta F/F$ must be adapted to cell types, activity patterns, and noise  
+- Interpretation of $\Delta F/F$ requires knowledge about indicators, cell types, and confounds
+:::
+::::
 
 ## Overview
 
-This table summarizes Calcium Activity (ΔF/F) detection methods reviewed by Paudel et al. [(2024)](https://doi.org/10.3390/biom14010138).
+This table summarizes Calcium Activity detection methods reviewed by {cite:t}`huang`.
 
 | **Method**                         | **How It's Performed**                                                                 | **Pros**                                                      | **Cons**                                                             |
 |-----------------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------|------------------------------------------------------------------------|
-| **Manual Spike Counting**         | Visual inspection of raw fluorescence or dF/F traces to count events.                  | Simple; no code needed.                                        | Subjective; non-scalable; low reproducibility.                       |
-| **dF/F Thresholding**             | Compute (F − F₀)/F₀ and define a fixed or adaptive threshold for events.              | Widely used; compatible with GCaMP, Fluo dyes.                | Sensitive to F₀ definition; arbitrary thresholds can bias results.  |
-| **Z-Score Thresholding**          | Normalize trace by mean/SD, define events above N standard deviations.                | Removes baseline drift; good for noisy data.                   | Sensitive to noise if SD is low; assumes Gaussian distribution.      |
 | **Percentile Baseline Subtraction**| Use a moving window to define F₀ as low percentile (e.g., 10–20th) of the trace.       | Adaptive baseline; handles long-term drift.                    | Choice of window size/percentile affects sensitivity.                |
-| **Ratiometric Imaging (Fura, YC2)**| Compute ratio of Ca²⁺-sensitive and insensitive fluorophores per ROI.                 | Controls for volume/motion artifacts; yields [Ca²⁺].          | Requires dual excitation/emission; reduced spatial/temporal res.    |
-| **Photon Counting (Aequorin)**    | Count emitted photons per ROI/pixel over time; map to Ca²⁺ levels via calibration.     | Quantitative; good dynamic range.                              | Low spatial resolution; complex calibration.                         |
-| **Image Subtraction (Frame-to-Frame)**| Compute ΔF = Fₙ − Fₙ₋₁ or F − background to detect sudden changes.                   | Simple, fast; used for wave detection.                         | Sensitive to noise; misses gradual changes.                          |
-| **Savitzky-Golay Filtering**      | Smooth trace to reduce noise while preserving spikes.                                  | Good for noisy signals.                                        | Requires tuning; can mask small or fast events.                      |
-| **Tensor Voting / Cluster Detection**| Identify spatially coordinated activity from 2D/3D image stacks.                       | Detects population events (e.g., waves).                       | Not standard; needs spatially dense data.                            |
+| **Z-Score Thresholding**          | Normalize trace by mean/SD, define events above N standard deviations.                | Removes baseline drift; good for noisy data.                   | Sensitive to noise if SD is low; assumes Gaussian distribution.      |
+| **dF/F Thresholding**             | Compute (F − F₀)/F₀ and define a fixed or adaptive threshold for events.              | Widely used; compatible with GCaMP, Fluo dyes.                | Sensitive to F₀ definition; arbitrary thresholds can bias results.  |
 | **Standard Deviation (SD) Masking**| Define active frames/regions where ΔF exceeds N×SD of baseline.                        | Objective thresholding for event detection.                    | Threshold choice heavily affects results.                            |
+| **Image Subtraction (Frame-to-Frame)**| Compute ΔF = Fₙ − Fₙ₋₁ or F − background to detect sudden changes.                   | Simple, fast; used for wave detection.                         | Sensitive to noise; misses gradual changes.                          |
+
+## Pipelines
+
+There are several pipelines for users to choose from when deciding how to process calcium imaging datasets.
+
+Often times, the outputs of these pipelines are in units that are not well documented. Even worse, the *inputs* to downstream pipelines pipelines
+require data to have particular units.
+
+(bg_sub_example)=
+```{admonition} Example
+:class: dropdown
+
+[This discussion](https://gcamp6f.com/2021/10/04/large-scale-calcium-imaging-noise-levels/), which details how to calculate noise for a variety of datasets, used traces that had [the background signal subtracted](https://github.com/cajal/microns_phase3_nda/issues/21).
+
+This happens because CaImAn subtracts the background signal from each neuron under the hood.
+The resulting units are no longer raw signal, they are background-subtracted raw-signal.
+This process reduces the baseline F₀ to nearly zero and heavily skew ΔF/F₀ calculations.
+```
+
+### [CaImAn](https://github.com/flatironinstitute/CaImAn)
+
+See: {func}`detrend_df_f <caiman:caiman.source_extraction.cnmf.utilities.detrend_df_f>`
+
+CaImAn computes ΔF/F₀ using a **running low-percentile baseline**.
+By default, it uses the **8th percentile** over a **500 frame** window.
+The idea is to track the lower envelope of the signal to get F₀ without being biased by transients.
+
+**Neuropil/background:** CaImAn handles this as part of its CNMF model {cite:p}`cnmf`.
+Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are background subtracted, 
+as was the issue in the above {ref}`example <bg_sub_example>`.
+
+{cite:t}`caiman`
+
+### [Suite2p](https://github.com/MouseLand/suite2p/tree/main)
+
+Suite2p does **not** output traces in ΔF/F₀ format directly.
+Instead, it gives you baseline-detrended fluorescence (i.e., $\Delta F$).
+
+The default F₀ estimate comes from a **"maximin"** filter: smooth the trace with a Gaussian (default \~10 s), take a rolling **min**, then a **max** over a 60 s window. Alternatively, you can use a **constant F₀**, either the **8th percentile** or the minimum of a smoothed trace.
+
+If you want ΔF/F₀, you divide the detrended trace by an F₀ value manually after the fact.
+
+Suite2p subtracts **0.7 × F<sub>neu</sub>** (surrounding fluorescence) from each ROI trace before baseline correction.
+This is a fixed fraction, applied uniformly.
+
+{cite:t}`suite2p`
+
+### [EXTRACT](https://github.com/schnitzer-lab/EXTRACT-public?tab=readme-ov-file)
+
+EXTRACT outputs raw fluorescence signals without built-in ΔF/F₀ calculation. You compute it yourself using something like a low-percentile (e.g. 10%) as F₀. Most people use a global or sliding percentile window.
+
+**Neuropil:** Handled implicitly. The algorithm uses robust factorization to ignore background and neuropil. There’s no explicit subtraction or coefficient to tune. It isolates only what fits a consistent spatial footprint and suppresses outliers by design.
+
+{cite:t}`extract2017`, {cite:t}`extract2021`
+
+| **Pipeline** | **F₀ Method**                       | **ΔF/F₀**                 | **Neuropil**                            |
+| ------------ | ----------------------------------- | ------------------------- | ------------------------------------------------ |
+| **CaImAn**   | 8th percentile, 500-frame window    | Yes, in pipeline          | Modeled via CNMF, no manual subtraction          |
+| **Suite2p**  | Maximin (default) or 8th percentile | No, user divides post hoc | 0.7 × F<sub>neu</sub> subtracted before baseline |
+| **EXTRACT**  | User-defined (e.g. 10th percentile) | No, user computes         | Implicitly handled via robust model              |
 
 ## Calculating ΔF/F
 
-The most important consideration you must consider is how you calculate your baseline activity.
+The most important consideration you must consider is how you calculate your baseline activity, which depends on your experimental question.
 
 ```{figure} ./_images/dff_1.png
 :name: fig-dff-example
 :width: 600px
 :alt: Example ΔF/F trace baseline comparisons
 
-Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1 of {cite}`10.3390/biom14010138`.
+Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1.
 ```
 
-## References 
+1. Spike inference from mouse spinal cord calcium imaging data ({cite:t}`rupprecht2024`)
+- DF/F = Lower 10th percentile  
+- GCaMP6s
 
-https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data
+2. Spike inference on GCaMP8 indicators {cite:t}`rupprecht2025`  
+- GCaMP8, GCaMP7f
+
+3. GCaMP6 calibration study {cite:t}`huang`
+- ΔF/F = (F − F₀,local)/F₀,global, where F₀,local is the mean fluorescence over 100 ms before the first AP, and F₀,global is the minimum F₀,local across trials  
+- GCaMP6f
+
+## References
+
+```{bibliography}
+```

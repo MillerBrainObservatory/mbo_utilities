@@ -203,3 +203,4 @@ def imread(
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
 
+
