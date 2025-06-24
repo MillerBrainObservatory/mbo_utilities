@@ -18,7 +18,7 @@ import fastplotlib as fpl
 
 from mbo_utilities.metadata import get_metadata
 from mbo_utilities._parsing import _make_json_serializable
-from mbo_utilities._writers import _save_data
+from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
     _multi_tiff_to_fsspec,
     HAS_ZARR,
@@ -184,7 +184,7 @@ class H5Array:
 
     @property
     def num_planes(self) -> int:
-        # TODO
+        # TODO: not sure what to do here
         return 14
 
     def __len__(self) -> int:
@@ -236,7 +236,18 @@ class H5Array:
     def metadata(self) -> dict:
         return dict(self._f.attrs)
 
-    def _imwrite(
+    def _imwrite(self, outpath, **kwargs):
+        _write_plane(
+            self._d, Path(outpath),
+            ext=kwargs.get("ext", ".tiff"),
+            overwrite=kwargs.get("overwrite", False),
+            metadata=self.metadata,
+            target_chunk_mb=kwargs.get("target_chunk_mb", 20),
+            progress_callback=kwargs.get("progress_callback", None),
+            debug=kwargs.get("debug", False),
+        )
+
+    def _imwrite2(
         self,
         outpath: Path | str,
         overwrite=False,
@@ -249,10 +260,9 @@ class H5Array:
         target = outpath
         target.mkdir(exist_ok=True)
         md = self.metadata.copy()
-        _save_data(
+        _write_plane(
             self,
             target,
-            planes=planes,
             overwrite=overwrite,
             ext=ext,
             target_chunk_mb=target_chunk_mb,
@@ -332,6 +342,7 @@ class MBOTiffArray:
         pass
 
 
+# NOT YET IMPLEMENTED FULLY
 @dataclass
 class NpyArray:
     filenames: list[Path]
@@ -341,6 +352,7 @@ class NpyArray:
         return arr
 
 
+# NOT YET IMPLEMENTED FULLY
 @dataclass
 class TiffArray:
     filenames: list[Path]
@@ -843,24 +855,30 @@ class MboRawArray(scans.ScanMultiROI):
         planes=None,
     ):
         for roi in iter_rois(self):
-            print(roi)
-            target = outpath if roi is None else outpath / f"roi{roi}"
-            target.mkdir(exist_ok=True)
+            if planes is None:
+                planes = range(1, self.num_planes + 1)
+            for plane in planes:
+                self.roi = roi
+                if roi is None:
+                    fname = f"plane{plane:02d}_stitched{ext}"
+                else:
+                    fname = f"plane{plane:02d}_roi{roi}{ext}"
+                target = outpath.joinpath(fname)
+                target.parent.mkdir(exist_ok=True)
 
-            md = self.metadata.copy()
-            self.roi = roi
-            md["roi"] = roi
-            _save_data(
-                self,
-                target,
-                planes=planes,
-                overwrite=overwrite,
-                ext=ext,
-                target_chunk_mb=target_chunk_mb,
-                metadata=md,
-                progress_callback=progress_callback,
-                debug=debug,
-            )
+                md = self.metadata.copy()
+                md["roi"] = roi
+                _write_plane(
+                    self,
+                    target,
+                    overwrite=overwrite,
+                    target_chunk_mb=target_chunk_mb,
+                    metadata=md,
+                    progress_callback=progress_callback,
+                    debug=debug,
+                    dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+                    plane_index=plane - 1,  # convert to 0-based index
+                )
 
     def imshow(self, **kwargs):
         arrays = []

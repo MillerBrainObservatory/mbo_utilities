@@ -1,7 +1,6 @@
 try:
     import masknmf
     from .masknmf import load_from_dir
-
     HAS_MASKNMF = True
 except ImportError:
     masknmf = None

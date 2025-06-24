@@ -42,7 +42,55 @@ def _close_tiff_writers():
         _write_tiff._writers.clear()
 
 
-def _save_data(
+def _write_plane(
+    data: np.ndarray | Any,
+    filename: Path,
+    *,
+    overwrite=False,
+    metadata=None,
+    target_chunk_mb=20,
+    progress_callback=None,
+    debug=False,
+    dshape=None,
+    plane_index=None,
+):
+    if dshape is None:
+        dshape = data.shape
+
+    metadata = metadata or {}
+
+    fname = filename
+    writer = _get_file_writer(fname.suffix, overwrite=overwrite)
+
+    chunk_size = target_chunk_mb * 1024 * 1024
+    nbytes = np.prod(dshape) * np.dtype(data.dtype).itemsize
+    nchunks = max(1, int(np.ceil(nbytes / chunk_size)))
+
+    # this works for txy and tzxy
+    ntime = data.shape[0]
+    base = ntime // nchunks
+    extra = ntime % nchunks
+
+    if not debug:
+        pbar = tqdm(total=nchunks, desc=f"Saving {fname.name}")
+    else:
+        pbar = None
+
+    start = 0
+    for i in range(nchunks):
+        end = start + base + (1 if i < extra else 0)
+        chunk = data[start:end, plane_index, :, :] if plane_index is not None else data[start:end, :, :]
+        writer(fname, chunk, metadata=metadata)
+        if pbar:
+            pbar.update(1)
+        if progress_callback:
+            progress_callback(pbar.n / pbar.total)
+        start = end
+
+    if pbar:
+        pbar.close()
+
+def _save_data_old(
     data: Any | list[Any],
     outpath: str | Path,
     planes=None,
@@ -54,12 +102,10 @@ def _save_data(
     debug=False,
 ):
     metadata = metadata or {}
-    if data.ndim == 2:
-        data = data[np.newaxis, np.newaxis, ...]  # → (1, 1, Y, X)
-    elif data.ndim == 3:
-        data = data[np.newaxis, ...]  # → (1, T, Y, X)
+    if data.ndim == 3:
+        data = data[:, np.newaxis, ...]
     elif data.ndim == 4:
-        pass  # already (Z, T, Y, X)
+        pass
     else:
         raise ValueError(f"Unsupported data shape: {data.shape}")
 
@@ -170,6 +216,8 @@ def _save_data(
 
 
 def _get_file_writer(ext, overwrite):
+    if ext.startswith("."):
+        ext = ext.lstrip(".")
     if ext in ["tif", "tiff"]:
         return functools.partial(
             _write_tiff,

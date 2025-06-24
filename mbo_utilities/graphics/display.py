@@ -47,7 +47,6 @@ def mbo_raw_display(array: MboRawArray, **kwargs):
         window_funcs={"t": (np.mean, 0)},
     )
 
-
 def imshow_lazy_array(array, **kwargs):
     if hasattr(array, "imshow"):
         return array.imshow(**kwargs)
