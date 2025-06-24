@@ -325,84 +325,8 @@ def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
 
     return combined_refs
 
-def read_scan(
-        pathnames,
-        dtype=np.int16,
-        roi=None,
-        fix_phase: bool = True,
-        phasecorr_method: str = "frame",
-        border: int | tuple[int, int, int, int] = 3,
-        upsample: int = 1,
-        max_offset: int = 4,
-):
-    """
-    Reads a ScanImage scan from a given file or set of file paths and returns a
-    ScanMultiROIReordered object with lazy-loaded data.
-
-    Parameters
-    ----------
-    pathnames : str, Path, or sequence of str/Path
-        A single path to, a wildcard pattern (e.g. ``*.tif``), or a list of paths
-        specifying the ScanImage TIFF files to read.
-    roi : int, optional
-        Specify ROI to export if only exporting a single ROI. 1-based.
-        Defaults to None, which exports pre-assembled (tiled) rois.
-    fix_phase : bool, optional
-        If True, applies phase correction to the scan data. Default is False.
-    phasecorr_method : str, optional
-        The method to use for phase correction. Options are 'subpix', 'two_step',
-    border : int or tuple of int, optional
-        The border size to use for phase correction. If an int, applies the same
-        border to all sides. If a tuple, specifies (top, bottom, left, right) borders.
-    upsample : int, optional
-        The for subpixel correction, upsample factor for phase correction.
-        A value of 1 clamps to whole-pixel. Default is 10.
-    max_offset : int, optional
-        The maximum allowed phase offset in pixels. If the computed offset exceeds
-        this value, it is clamped to the maximum. Default is 3.
-    dtype : numpy.dtype, optional
-        The data type to use when reading the scan data. Default is np.int16.
-
-    Returns
-    -------
-    mbo_utilities.array_types.MboRawArray
-        A scan object with metadata and lazily loaded data. Raises FileNotFoundError
-        if no files match the specified path(s).
-
-    Notes
-    -----
-    If the provided path string appears to include escaped characters (for example,
-    unintentional backslashes), a warning message is printed suggesting the use of a
-    raw string (r'...') or double backslashes.
-
-    Examples
-    --------
-    >>> import mbo_utilities as mbo
-    >>> import matplotlib.pyplot as plt
-    >>> scan = mbo.read_scan(r"D:\\demo\\raw")
-    >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # First frame of z-plane 6
-    >>> scan = mbo.read_scan(r"D:\\demo\\raw", roi=1) # First ROI
-    >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # indexing works the same
-    """
-    filenames = expand_paths(pathnames)
-    if len(filenames) == 0:
-        error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
-        raise FileNotFoundError(error_msg)
-    if not is_raw_scanimage(filenames[0]):
-        raise ValueError(
-            f"The file {filenames[0]} does not appear to be a raw ScanImage TIFF file."
-        )
-
-    # scan = MboRawArray(
-    #     roi=roi,
-    #     fix_phase=fix_phase,
-    #     phasecorr_method=phasecorr_method,
-    #     border=border,
-    #     upsample=upsample,
-    #     max_offset=max_offset,
-    # )
-    # scan.read_data(filenames, dtype=dtype)
-    # return scan
+def read_scan():
+    raise DeprecationWarning("read_scan is deprecated, use mbo.imread() instead.")
 
 def get_files(
     base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
