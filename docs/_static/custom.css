@@ -111,3 +111,14 @@ pre {
   background-color: #0F111A;
 }
 
+.math.center {
+    text-align: center;
+    display: block;
+    margin: 1em auto;
+}
+
+.math.large {
+    font-size: 150%;
+}
+
+

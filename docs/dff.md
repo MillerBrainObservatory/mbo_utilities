@@ -7,9 +7,16 @@ bibliography:
 
 The gold-standard formula for measuring cellular activity is "Delta F over F₀", or the change in fluorescence intensity normalized by the baseline activity:
 
-$\Delta F/F_0 = \frac{F - F_0}{F_0}$
+```{math}
+:class: center large
 
+\Delta F/F_0 = \frac{F - F_0}{F_0}
+```
+Here, F₀ a user-defined baseline that may be static (e.g., median over all frames) or dynamically estimated using a rolling window.
+
+<div style="text-align: center; font-size: 1.5em; margin-top: 1em; margin-bottom: 1em;">
 This guide assumes you've read this please read [this blog-post](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
+</div>
 
 ::::{grid}
 :::{grid-item-card} Blog-Post Takeaways
