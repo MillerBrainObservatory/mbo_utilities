@@ -58,6 +58,7 @@ def _write_plane(
         dshape = data.shape
 
     metadata = metadata or {}
+    metadata["shape"] = dshape
 
     fname = filename
     writer = _get_file_writer(fname.suffix, overwrite=overwrite)
