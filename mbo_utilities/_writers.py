@@ -80,6 +80,8 @@ def _write_plane(
     for i in range(nchunks):
         end = start + base + (1 if i < extra else 0)
         chunk = data[start:end, plane_index, :, :] if plane_index is not None else data[start:end, :, :]
+        print(chunk.shape)
+        print(chunk.mean(axis=0))
         writer(fname, chunk, metadata=metadata)
         if pbar:
             pbar.update(1)
@@ -318,19 +320,21 @@ def _write_tiff(path, data, *, overwrite=True, metadata=None):
 
     if not hasattr(_write_tiff, "_writers"):
         _write_tiff._writers = {}
+    if not hasattr(_write_tiff, "_first_write"):
+        _write_tiff._first_write = {}
 
     if filename not in _write_tiff._writers:
         if filename.exists() and overwrite:
             filename.unlink()
         _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
-
-        _write_tiff._first_write = {filename: True}
-    else:
-        _write_tiff._first_write = {filename: False}
+        _write_tiff._first_write[filename] = True
 
     writer = _write_tiff._writers[filename]
     is_first = _write_tiff._first_write.get(filename, False)
 
+    print(writer)
+    print(is_first)
+    print(path)
     for frame in data:
         writer.write(
             frame,

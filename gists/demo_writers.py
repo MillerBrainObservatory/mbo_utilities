@@ -24,13 +24,13 @@ if __name__ == "__main__":
     data.roi = 2
     # for ftype in MBO_SUPPORTED_FTYPES:
     # for ftype in [".bin"]:
-    for ftype in [".tif"]:
+    for ftype in [".h5"]:
             imwrite(
             data,
             path,
             ext=ftype,
             overwrite=True,
-            planes=[10, 11],
+            planes=[10],
         )
     files = [x for x in Path(path).glob("*.tif*")]
     check = [tifffile.imread(files[i]) for i in range(len(files))]

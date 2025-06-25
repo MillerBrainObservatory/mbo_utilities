@@ -385,11 +385,11 @@ class MboRawArray(scans.ScanMultiROI):
         max_offset: int = 4,
     ):
         super().__init__(join_contiguous=True)
+        self._metadata = {}  # set when pages are read
         self.use_zarr = False
         self.reference = ""
         if files:
             self.read_data(files)
-        self._metadata = {}  # set when pages are read
         self.roi = roi  # alias
         self._roi = roi
         self._fix_phase = fix_phase
@@ -488,9 +488,10 @@ class MboRawArray(scans.ScanMultiROI):
         self._metadata = get_metadata(
             self.tiff_files[0].filehandle.path
         )  # from the file
-        self._metadata.update(
+        self.metadata = (
             {"si": _make_json_serializable(self.tiff_files[0].scanimage_metadata)}
         )
+        self.metadata["num_frames"] = self.num_frames
         self._rois = self._create_rois()
         self.fields = self._create_fields()
         if self.join_contiguous:
