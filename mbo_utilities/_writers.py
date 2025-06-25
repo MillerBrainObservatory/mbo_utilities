@@ -60,6 +60,10 @@ def _write_plane(
     metadata = metadata or {}
     metadata["shape"] = dshape
 
+    if plane_index:
+        assert type(plane_index) is int, "plane_index must be an integer"
+        metadata["plane"] = plane_index + 1
+
     fname = filename
     writer = _get_file_writer(fname.suffix, overwrite=overwrite)
 

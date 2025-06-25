@@ -13,7 +13,6 @@ import dask.array as da
 from tifffile import TiffFile
 
 from . import log
-from .metadata import is_raw_scanimage
 
 try:
     from zarr import open as zarr_open
@@ -99,51 +98,6 @@ def write_ops(metadata, raw_filename):
     }
     np.save(ops_path, ops)
     logger.debug(f"Ops file written to {ops_path} with metadata:\n {ops}")
-
-
-def normalize_file_url(path):
-    """
-    Derive a folder tag from a filename based on “planeN”, “roiN”, or "tagN" patterns.
-
-    Parameters
-    ----------
-    path : str or pathlib.Path
-        File path or name whose stem will be parsed.
-
-    Returns
-    -------
-    str
-        If the stem starts with “plane”, “roi”, or “res” followed by an integer,
-        returns that tag plus the integer (e.g. “plane3”, “roi7”, “res2”).
-        Otherwise returns the original stem unchanged.
-
-    Examples
-    --------
-    >>> normalize_file_url("plane_01.tif")
-    'plane1'
-    >>> normalize_file_url("plane2.bin")
-    'plane2'
-    >>> normalize_file_url("roi5.raw")
-    'roi5'
-    >>> normalize_file_url("ROI_10.dat")
-    'roi10'
-    >>> normalize_file_url("res-3.h5")
-    'res3'
-    >>> normalize_file_url("assembled_data_1.tiff")
-    'assembled_data_1'
-    >>> normalize_file_url("file_12.tif")
-    'file_12'
-    """
-    name = Path(path).stem
-    for tag in MBO_PIPELINE_TAGS:
-        low = name.lower()
-        if low.startswith(tag):
-            suffix = name[len(tag) :]
-            if suffix and (suffix[0] in ("_", "-")):
-                suffix = suffix[1:]
-            if suffix.isdigit():
-                return f"{tag}{int(suffix)}"
-    return name
 
 
 def npy_to_dask(files, name="", axis=1, astype=None):
@@ -421,6 +375,18 @@ def get_files(
         files.sort(key=numerical_sort_key)
 
     return [str(file) for file in files]
+
+
+def get_plane_from_filename(path, fallback=None):
+    path = Path(path)
+    for part in path.stem.lower().split("_"):
+        if part.startswith("plane"):
+            suffix = part[5:]
+            if suffix.isdigit():
+                return int(suffix.lstrip("0") or "0")
+    if fallback is not None:
+        return fallback
+    raise ValueError(f"Could not extract plane number from filename: {path.name}")
 
 
 def _is_arraylike(obj) -> bool:
