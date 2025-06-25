@@ -24,7 +24,7 @@ if __name__ == "__main__":
     data.roi = 2
     # for ftype in MBO_SUPPORTED_FTYPES:
     # for ftype in [".bin"]:
-    for ftype in [".tif", ".h5", ".bin"]:
+    for ftype in [".tif"]:
             imwrite(
             data,
             path,
@@ -33,7 +33,7 @@ if __name__ == "__main__":
             planes=[10],
         )
     files = [x for x in Path(path).glob("*")]
-    check = imread(files[-1])
+    check = imread(files[0])
     fpl.ImageWidget(check,
                     names=[f.name for f in files],
                     histogram_widget=True,

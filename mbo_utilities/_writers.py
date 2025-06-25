@@ -91,6 +91,9 @@ def _write_plane(
     if pbar:
         pbar.close()
 
+    if fname.suffix in [".tiff", ".tif"]:
+        _close_tiff_writers()
+
 def _save_data_old(
     data: Any | list[Any],
     outpath: str | Path,
