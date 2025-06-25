@@ -386,17 +386,15 @@ class MboRawArray(scans.ScanMultiROI):
     ):
         super().__init__(join_contiguous=True)
         self._metadata = {}  # set when pages are read
-        self.use_zarr = False
-        self.reference = ""
-        if files:
-            self.read_data(files)
-        self.roi = roi  # alias
-        self._roi = roi
         self._fix_phase = fix_phase
         self._phasecorr_method = phasecorr_method
         self.border: int | tuple[int, int, int, int] = border
         self.max_offset: int = max_offset
         self.upsample: int = upsample
+        self.use_zarr = False
+        self.reference = ""
+        self.roi = roi  # alias
+        self._roi = roi
         self.pbar = None
         self.show_pbar = False
         self._offset = 0.0
@@ -417,6 +415,8 @@ class MboRawArray(scans.ScanMultiROI):
             f"upsample: {upsample}, "
             f"max_offset: {max_offset}"
         )
+        if files:
+            self.read_data(files)
 
     def save_fsspec(self, filenames):
         base_dir = Path(filenames[0]).parent
@@ -491,7 +491,6 @@ class MboRawArray(scans.ScanMultiROI):
         self.metadata = (
             {"si": _make_json_serializable(self.tiff_files[0].scanimage_metadata)}
         )
-        self.metadata["num_frames"] = self.num_frames
         self._rois = self._create_rois()
         self.fields = self._create_fields()
         if self.join_contiguous:
@@ -508,6 +507,7 @@ class MboRawArray(scans.ScanMultiROI):
                 "border": self.border,
                 "upsample": self.upsample,
                 "max_offset": self.max_offset,
+                "num_frames": self.num_frames,
             }
         )
         return md

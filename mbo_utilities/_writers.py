@@ -80,8 +80,6 @@ def _write_plane(
     for i in range(nchunks):
         end = start + base + (1 if i < extra else 0)
         chunk = data[start:end, plane_index, :, :] if plane_index is not None else data[start:end, :, :]
-        print(chunk.shape)
-        print(chunk.mean(axis=0))
         writer(fname, chunk, metadata=metadata)
         if pbar:
             pbar.update(1)
@@ -263,8 +261,14 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None):
             fname.unlink()
 
         Ly, Lx = data.shape[1], data.shape[2]
+        nframes = metadata.get("nframes", None)
+        if nframes is None:
+            nframes = metadata.get("num_frames", None)
+        if nframes is None:
+            raise ValueError("Metadata must contain 'nframes' or 'num_frames'.")
+
         _write_bin._writers[key] = BinaryFile(
-            Ly, Lx, key, n_frames=metadata["nframes"], dtype=np.int16
+            Ly, Lx, key, n_frames=metadata["num_frames"], dtype=np.int16
         )
         _write_bin._offsets[key] = 0
         first_write = True
@@ -290,7 +294,9 @@ def _write_h5(path, data, *, overwrite=True, metadata=None):
         _write_h5._offsets = {}
 
     if filename not in _write_h5._initialized:
-        nframes = metadata["nframes"]
+        nframes = metadata.get("num_frames", None)
+        if nframes is None:
+            raise ValueError("Metadata must contain 'nframes' or 'nun_frames'.")
         h, w = data.shape[-2:]
         with h5py.File(filename, "w" if overwrite else "a") as f:
             f.create_dataset(
@@ -315,7 +321,36 @@ def _write_h5(path, data, *, overwrite=True, metadata=None):
     _write_h5._offsets[filename] = offset + data.shape[0]
 
 
-def _write_tiff(path, data, *, overwrite=True, metadata=None):
+def _write_tiff(
+    path, data, overwrite=True, metadata=None,
+):
+    filename = Path(path).with_suffix(".tif")
+
+    if not hasattr(_write_tiff, "_writers"):
+        _write_tiff._writers = {}
+    if not hasattr(_write_tiff, "_first_write"):
+        _write_tiff._first_write = {}
+
+    if filename not in _write_tiff._writers:
+        if filename.exists() and overwrite:
+            filename.unlink()
+        _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
+        _write_tiff._first_write[filename] = True
+
+    writer = _write_tiff._writers[filename]
+    is_first = _write_tiff._first_write.get(filename, True)
+
+    for frame in data:
+        writer.write(
+            frame,
+            contiguous=True,
+            photometric="minisblack",
+            metadata=_make_json_serializable(metadata) if is_first else None,
+        )
+        _write_tiff._first_write[filename] = False
+
+
+def _write_tiff2(path, data, *, overwrite=True, metadata=None):
     filename = Path(path).with_suffix(".tif")
 
     if not hasattr(_write_tiff, "_writers"):
@@ -332,9 +367,6 @@ def _write_tiff(path, data, *, overwrite=True, metadata=None):
     writer = _write_tiff._writers[filename]
     is_first = _write_tiff._first_write.get(filename, False)
 
-    print(writer)
-    print(is_first)
-    print(path)
     for frame in data:
         writer.write(
             frame,
