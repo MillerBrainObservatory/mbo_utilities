@@ -53,7 +53,7 @@ def write_ops(metadata, raw_filename):
     'pixel_resolution',
     'frame_rate' keys.
     """
-    logger.info(f"Writing ops file for {raw_filename} with metadata: {metadata}")
+    logger.debug(f"Writing ops file for {raw_filename} with metadata: {metadata}")
     assert isinstance(raw_filename, (str, Path)), (
         "filename must be a string or Path object"
     )

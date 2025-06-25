@@ -22,9 +22,7 @@ if __name__ == "__main__":
     data = imread(r"D://W2_DATA//kbarber//2025_03_01//mk301//green")
     # data = imread(r"D://demo//roi2//plane11.h5")
     data.roi = 2
-    # for ftype in MBO_SUPPORTED_FTYPES:
-    # for ftype in [".bin"]:
-    for ftype in [".tif"]:
+    for ftype in MBO_SUPPORTED_FTYPES:
             imwrite(
             data,
             path,
