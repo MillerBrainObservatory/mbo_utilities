@@ -341,6 +341,46 @@ class MBOTiffArray:
     def imshow(self):
         pass
 
+    def _imwrite(
+            self,
+            outpath: Path | str,
+            overwrite=False,
+            target_chunk_mb=50,
+            ext=".tiff",
+            progress_callback=None,
+            debug=None,
+            planes=None,
+    ):
+        if "plane" in self.metadata.keys():
+            plane = self.metadata["plane"]
+        else:
+            raise ValueError("Cannot determine plane from metadata.")
+
+        outpath = Path(outpath)
+        ext = ext.lower().lstrip(".")
+
+        if ext in {"bin"}:
+            fname = "data_raw.bin"
+        else:
+            fname = f"plane{plane:03d}.{ext}"
+
+        if outpath.is_dir():
+            target = outpath.joinpath(fname)
+        else:
+            target = outpath.parent.joinpath(fname)
+
+        _write_plane(
+            self,
+            target,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            metadata=self.metadata,
+            progress_callback=progress_callback,
+            debug=debug,
+            dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+            plane_index=None,  # convert to 0-based index
+        )
+
 
 # NOT YET IMPLEMENTED FULLY
 @dataclass
@@ -856,8 +896,13 @@ class MboRawArray(scans.ScanMultiROI):
         planes=None,
     ):
         for roi in iter_rois(self):
-            if planes is None:
-                planes = range(1, self.num_planes + 1)
+            # convert to 0 based indexing
+            if isinstance(planes, int):
+                planes = [planes - 1]
+            elif planes is None:
+                planes = list(range(self.num_planes))
+            else:
+                planes = [p - 1 for p in planes]
             for plane in planes:
                 self.roi = roi
                 if roi is None:
