@@ -3,7 +3,7 @@ bibliography:
   - references.bib
 ---
 
-# Quantifying Cell Activity (ΔF/F₀)
+# Quantifying Cell Activity
 
 The gold-standard formula for measuring cellular activity is "Delta F over F₀", or the change in fluorescence intensity normalized by the baseline activity:
 
@@ -123,6 +123,21 @@ Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1.
 3. GCaMP6 calibration study {cite:t}`huang`
 - ΔF/F = (F − F₀,local)/F₀,global, where F₀,local is the mean fluorescence over 100 ms before the first AP, and F₀,global is the minimum F₀,local across trials  
 - GCaMP6f
+
+(dynamics)=
+## Indicator Dynamics
+
+| **GCaMP Variant**     | **Optimal Tau (s)** | **Notes / Sources** |
+|-----------------------|---------------------|----------------------|
+| **GCaMP6f (fast)**    | ~0.5–0.7 s          | Suite2p: ~0.7 s ([docs](https://suite2p.readthedocs.io)). OASIS/CNMF: ~0.5–0.7 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~0.4 s ([docs](https://caiman.readthedocs.io)). |
+| **GCaMP6m (medium)**  | ~1.0–1.25 s         | Suite2p: ~1.0 s. OASIS: ~1.25 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~1.0 s ([docs](https://caiman.readthedocs.io)). |
+| **GCaMP6s (slow)**    | ~1.5–2.0 s          | Suite2p: 1.25–1.5 s. OASIS/Suite2p: ~2.0 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~1.5–2.0 s. |
+| **GCaMP7f (fast)**    | ~0.5 s              | Spike inference tuning ([bioRxiv](https://www.biorxiv.org)). Similar to GCaMP6f. |
+| **GCaMP7m (medium)**  | ~1.0 s (est.)       | Estimated by analogy to GCaMP6m. No default in tools. |
+| **GCaMP7s (slow)**    | ~1.0–1.5 s          | In vivo half-decay ~0.7 s ([eLife](https://elifesciences.org)). Tau ≈ 1.0 s. |
+| **GCaMP8f (fast)**    | ~0.3 s              | OASIS fine-tuning ([bioRxiv](https://www.biorxiv.org)). Fastest decay; tenfold faster than 6f/7f ([Nature](https://www.nature.com)). |
+| **GCaMP8m (medium)**  | ~0.3 s              | Slightly slower than 8f, still ~0.3 s ([bioRxiv](https://www.biorxiv.org); [Nature](https://www.nature.com)). |
+| **GCaMP8s (slow)**    | ~0.7 s              | Spike inference optimal tau ~0.7 s ([bioRxiv](https://www.biorxiv.org)). Faster than 6s ([Nature](https://www.nature.com)). |
 
 ## References
 
