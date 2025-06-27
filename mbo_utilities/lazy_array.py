@@ -82,7 +82,6 @@ def imwrite(
     outpath = Path(outpath)
     if not outpath.parent.is_dir():
         raise ValueError(f"{outpath} is not inside a valid directory.")
-    outpath.mkdir(exist_ok=True)
 
     if roi is not None:
         if not supports_roi(lazy_array):
@@ -90,39 +89,6 @@ def imwrite(
                 f"{type(lazy_array)} does not support ROIs, but `roi` was provided."
             )
         lazy_array.roi = roi
-
-    # Determine number of planes from lazy_array attributes
-    # fallback to shape
-    # TODO: This should only apply to 4D, otherwise it should be 1. Also need the Z-index for 3D inputs
-    num_planes = 1
-    if hasattr(lazy_array, "num_planes"):
-        num_planes = lazy_array.num_planes
-    elif hasattr(lazy_array, "num_channels"):
-        num_planes = lazy_array.num_channels
-    if hasattr(lazy_array, "metadata"):
-        if "num_planes" in lazy_array.metadata:
-            num_planes = lazy_array.metadata["num_planes"]
-        elif "num_channels" in lazy_array.metadata:
-            num_planes = lazy_array.metadata["num_channels"]
-    elif hasattr(lazy_array, "ndim") and lazy_array.ndim >= 3:
-        num_planes = lazy_array.shape[1] if lazy_array.ndim == 4 else 1
-    else:
-        raise ValueError("Cannot determine the number of planes.")
-
-    # convert to 0 based indexing
-    if isinstance(planes, int):
-        planes = [planes - 1]
-    elif planes is None:
-        planes = list(range(num_planes))
-    else:
-        planes = [p - 1 for p in planes]
-
-    # make sure indexes are valid
-    over_idx = [p for p in planes if p < 0 or p >= num_planes]
-    if over_idx:
-        raise Warning(
-            f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{num_planes}"
-        )
 
     if order is not None:
         if len(order) != len(planes):
