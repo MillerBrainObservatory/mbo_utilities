@@ -29,9 +29,7 @@ This guide assumes you've read this please read [this scientifica article](https
 :::
 ::::
 
-## Overview
-
-This table summarizes Calcium Activity detection methods reviewed by {cite:t}`huang`.
+This table summarizes Calcium Activity detection methods used in embryoinic development reviewed by {cite:t}`huang`.
 
 | **Method**                         | **How It's Performed**                                                                 | **Pros**                                                      | **Cons**                                                             |
 |-----------------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------|------------------------------------------------------------------------|
@@ -45,8 +43,8 @@ This table summarizes Calcium Activity detection methods reviewed by {cite:t}`hu
 
 There are several pipelines for users to choose from when deciding how to process calcium imaging datasets.
 
-Often times, the outputs of these pipelines are in units that are not well documented. Even worse, the *inputs* to downstream pipelines pipelines
-require data to have particular units.
+Often times, the outputs of these pipelines are in units that are not well documented.
+Even worse, the *inputs* to downstream pipelines pipelines require data to have particular units.
 
 (bg_sub_example)=
 ```{admonition} Example
@@ -64,26 +62,41 @@ This process reduces the baseline F₀ to nearly zero and heavily skew ΔF/F₀ 
 See: {func}`detrend_df_f <caiman:caiman.source_extraction.cnmf.utilities.detrend_df_f>`
 
 CaImAn computes ΔF/F₀ using a **running low-percentile baseline**.
+
+```{figure}
+
+```
+
 By default, it uses the **8th percentile** over a **500 frame** window.
 The idea is to track the lower envelope of the signal to get F₀ without being biased by transients.
 
 **Neuropil/background:** CaImAn handles this as part of its CNMF model {cite:p}`cnmf`.
-Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are background subtracted, 
-as was the issue in the above {ref}`example <bg_sub_example>`.
+
+Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are background subtracted during this [factorization](https://en.wikipedia.org/wiki/Matrix_decomposition) (as was the issue in the above {ref}`example <bg_sub_example>`).
+
+There is a strong argument to be made that a matrix factorization `CNMF` is not complex enough to model the true background and neuropil.
 
 {cite:t}`caiman`
 
 ### [Suite2p](https://github.com/MouseLand/suite2p/tree/main)
 
 Suite2p does **not** output traces in ΔF/F₀ format directly.
-Instead, it gives you baseline-detrended fluorescence (i.e., $\Delta F$).
 
-The default F₀ estimate comes from a **"maximin"** filter: smooth the trace with a Gaussian (default \~10 s), take a rolling **min**, then a **max** over a 60 s window. Alternatively, you can use a **constant F₀**, either the **8th percentile** or the minimum of a smoothed trace.
+Instead, it gives you the raw trace and the neuropil, along with spike estimates if you ran [deconvolution](https://suite2p.readthedocs.io/en/latest/deconvolution.html).
+The neuropil represents fluorescence from the surrounding non-somatic tissue. 
+As an optional step, many experimentors apply a fixed subtraction:
 
-If you want ΔF/F₀, you divide the detrended trace by an F₀ value manually after the fact.
+```python
+# F is an [n_neurons x time] array of raw signal
+# Fneu is an [n_neurons x time] array of neuropil
+F_corrected = F - 0.7 * Fneu
+```
 
-Suite2p subtracts **0.7 × F<sub>neu</sub>** (surrounding fluorescence) from each ROI trace before baseline correction.
-This is a fixed fraction, applied uniformly.
+The 0.7 is an empirically chosen scalar to account for the partial contamination.
+
+To compute ΔF/F₀, you divide trace, be that neuropil-corrected or not, by an F₀ you calculate yourself.
+
+The default F₀ estimate comes from a **"maximin"** filter: smooth the trace with a Gaussian (default \~10 s), take a rolling **min**, then a **max** over a 60 s window.
 
 {cite:t}`suite2p`
 
