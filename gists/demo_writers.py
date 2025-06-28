@@ -12,16 +12,19 @@ from pathlib import Path
 import numpy as np
 
 import fastplotlib as fpl
+import mbo_utilities as mbo
 from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.file_io import MBO_SUPPORTED_FTYPES
 
 if __name__ == "__main__":
-    path = Path(r"D://demo//test")
-    path.mkdir(exist_ok=True)
-    data = imread(r"D://W2_DATA//kbarber//2025_03_01//mk301//green")
+    path = Path(r"D://demo")
+    data = imread(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green")
+    data.roi = 2
+    imwrite(data, path, planes=[10], ext=".tif", overwrite=False)
+    # data = imread(r"D://demo//test//plane09_roi2.tif")
     # data = imread(r"D://demo//roi2//plane11.h5")
     data.roi = 2
-    for ftype in [".tif"]:
+    for ftype in [".bin"]:
             imwrite(
             data,
             path,

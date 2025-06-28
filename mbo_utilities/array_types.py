@@ -906,9 +906,9 @@ class MboRawArray(scans.ScanMultiROI):
             for plane in planes:
                 self.roi = roi
                 if roi is None:
-                    fname = f"plane{plane:02d}_stitched{ext}"
+                    fname = f"plane{plane+1:02d}_stitched{ext}"
                 else:
-                    fname = f"plane{plane:02d}_roi{roi}{ext}"
+                    fname = f"plane{plane+1:02d}_roi{roi}{ext}"
                 target = outpath.joinpath(fname)
                 target.parent.mkdir(exist_ok=True)
 
@@ -923,7 +923,7 @@ class MboRawArray(scans.ScanMultiROI):
                     progress_callback=progress_callback,
                     debug=debug,
                     dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
-                    plane_index=plane - 1,  # convert to 0-based index
+                    plane_index=plane,
                 )
 
     def imshow(self, **kwargs):
