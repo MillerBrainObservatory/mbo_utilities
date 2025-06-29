@@ -35,6 +35,14 @@ ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
 CHUNKS = {0: "auto", 1: -1, 2: -1}
 
 
+def _close_bin_writers():
+    if hasattr(_write_bin, "_writers"):
+        for bf in _write_bin._writers.values():
+            bf.close()
+        _write_bin._writers.clear()
+        _write_bin._offsets.clear()
+
+
 def _close_tiff_writers():
     if hasattr(_write_tiff, "_writers"):
         for writer in _write_tiff._writers.values():
@@ -97,6 +105,8 @@ def _write_plane(
 
     if fname.suffix in [".tiff", ".tif"]:
         _close_tiff_writers()
+    elif fname.suffix in [".bin"]:
+        _close_bin_writers()
 
 def _get_file_writer(ext, overwrite):
     if ext.startswith("."):
@@ -269,3 +279,4 @@ def _write_zarr(path, data, *, overwrite=True, metadata=None):
     offset = _write_zarr._offsets[filename]
     z[offset : offset + data.shape[0]] = data
     _write_zarr._offsets[filename] = offset + data.shape[0]
+
