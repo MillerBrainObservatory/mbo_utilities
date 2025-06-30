@@ -2,7 +2,6 @@
 bibliography:
   - references.bib
 ---
-
 # Quantifying Cell Activity
 
 The gold-standard formula for measuring cellular activity is "Delta F over F₀", or the change in fluorescence intensity normalized by the baseline activity:
@@ -12,9 +11,11 @@ The gold-standard formula for measuring cellular activity is "Delta F over F₀"
 
 \Delta F/F_0 = \frac{F - F_0}{F_0}
 ```
-Here, F₀ a user-defined baseline that may be static (e.g., median over all frames) or dynamically estimated using a rolling window.
 
-This guide assumes you've read this please read [this scientifica article](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
+Here, F₀ a user-defined baseline that may be static (e.g., median over all frames)
+or dynamically estimated using a rolling window.
+
+This guide assumes you've read [this scientifica article](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
 
 ::::{grid}
 :::{grid-item-card} Blog-Post Takeaways
@@ -29,7 +30,25 @@ This guide assumes you've read this please read [this scientifica article](https
 :::
 ::::
 
-This table summarizes Calcium Activity detection methods used in embryoinic development reviewed by {cite:t}`huang`.
+```{figure} ./_images/cell_activity.png
+:alt: Cell Activity (DF/F)
+:figclass: full-width
+:name: fig-dff-strategies
+
+ΔF/F traces for 30 cells, sorted by similarity using the [Rastermap](https://github.com/MouseLand/rastermap) algorithm.
+```
+
+## Baseline F₀ Strategies
+
+Choosing the correct baseline strategy depends on many factors:
+
+- Cell type 
+- Brain location
+- Frame-rate
+- Virus Kinetics
+- Scientific question
+
+This table summarizes Calcium Activity detection strategies used in embryoinic development reviewed by {cite:t}`huang`.
 
 | **Method**                         | **How It's Performed**                                                                 | **Pros**                                                      | **Cons**                                                             |
 |-----------------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------|------------------------------------------------------------------------|
@@ -39,10 +58,58 @@ This table summarizes Calcium Activity detection methods used in embryoinic deve
 | **Standard Deviation (SD) Masking**| Define active frames/regions where ΔF exceeds N×SD of baseline.                        | Objective thresholding for event detection.                    | Threshold choice heavily affects results.                            |
 | **Image Subtraction (Frame-to-Frame)**| Compute ΔF = Fₙ − Fₙ₋₁ or F − background to detect sudden changes.                   | Simple, fast; used for wave detection.                         | Sensitive to noise; misses gradual changes.                          |
 
+```{figure} ./_images/dff_baseline_strategies2.png
+:alt: Comparison of dF/F baseline strategies
+:figclass: full-width
+:name: fig-dff-strategies
+
+Comparison of different ΔF/F₀ baseline correction methods across selected cells.
+```
+
+```{figure} ./_images/dff_baseline_strategies_dff.png
+:alt: Resulting DFF values from baseline strategies
+:figclass: full-width
+:name: fig-dff-dff
+
+The resulting ΔF/F₀ traces can look different depending on the chosen baseline strategy.
+```
+
+```{figure} ./_images/dff_baseline_strategies_events.png
+:alt: Resulting DFF values from baseline strategies with Events
+:figclass: full-width
+:name: fig-dff-dff-ev
+
+The resulting ΔF/F₀ traces can look different depending on the chosen baseline strategy.
+```
+
+## Standardized Noise Levels
+
+```{math}
+:class: center large
+
+\nu = \frac{\mathrm{median}_t\left( \left| \frac{\Delta F_t}{F_0} - \frac{\Delta F_{t+1}}{F_0} \right| \right)}{\sqrt{f_r}}
+```
+- Compare shot-noise levels across datasets, recordings, experiments
+- Takes advantage of the slow calcium signal, which is typically similar between adjacent frames
+- Median to exclude outlies stemming from fast onset
+- Norm by sqrt(framerate) makes metric comparable across datasets with different framerates
+- Shot-noise decreases with #samples with a square root dependency
+
+The resulting units, `% for dF/F, divided by the square root of seconds`, is strange.
+
+This metric should be used relative to other datasets.
+
+```{figure} ./_images/noise_comp.png
+:alt: High vs Low Noise Levels
+:figclass: full-width
+:name: fig-noise-high-low
+
+Top N neurons with highest and lowest standardized noise levels.
+```
+
 ## Pipelines
 
 There are several pipelines for users to choose from when deciding how to process calcium imaging datasets.
-
 Often times, the outputs of these pipelines are in units that are not well documented.
 Even worse, the *inputs* to downstream pipelines pipelines require data to have particular units.
 
@@ -63,10 +130,6 @@ See: {func}`detrend_df_f <caiman:caiman.source_extraction.cnmf.utilities.detrend
 
 CaImAn computes ΔF/F₀ using a **running low-percentile baseline**.
 
-```{figure}
-
-```
-
 By default, it uses the **8th percentile** over a **500 frame** window.
 The idea is to track the lower envelope of the signal to get F₀ without being biased by transients.
 
@@ -75,6 +138,14 @@ The idea is to track the lower envelope of the signal to get F₀ without being 
 Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are background subtracted during this [factorization](https://en.wikipedia.org/wiki/Matrix_decomposition) (as was the issue in the above {ref}`example <bg_sub_example>`).
 
 There is a strong argument to be made that a matrix factorization `CNMF` is not complex enough to model the true background and neuropil.
+
+```{figure} ./_images/dff_baseline_strategies_caiman.png
+:alt: CaImAn default DF/F strategy
+:figclass: full-width
+:name: fig-dff-caiman
+
+[CaImAn](https://github.com/flatironinstitute/CaImAn) uses a default baseline of the `lower 8th percentile` and a moving window of `200 frames`.
+```
 
 {cite:t}`caiman`
 
@@ -93,10 +164,16 @@ F_corrected = F - 0.7 * Fneu
 ```
 
 The 0.7 is an empirically chosen scalar to account for the partial contamination.
+Essentially you subtract 70% of the signal contained in the surrounding neuropil.
 
 To compute ΔF/F₀, you divide trace, be that neuropil-corrected or not, by an F₀ you calculate yourself.
 
-The default F₀ estimate comes from a **"maximin"** filter: smooth the trace with a Gaussian (default \~10 s), take a rolling **min**, then a **max** over a 60 s window.
+Internally, when running spike deconvolution, suite2p will convert your data into DF/F0 internally.
+For this, the default F₀ estimate comes from a **"maximin"** filter: smooth the trace with a Gaussian (default \~10 s), take a rolling **min**, then a **max** over a 60 s window.
+
+```{figure} ./_images/dff_oasis.png
+Raw, neuropil, ΔF/F₀ and resulting deconvolved spikes as output by [Suite2p](https://github.com/MouseLand/suite2p)
+```
 
 {cite:t}`suite2p`
 

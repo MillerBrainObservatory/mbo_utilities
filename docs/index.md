@@ -16,6 +16,7 @@ venvs
 rastermap
 dff
 image_gallery
+glossary
 ```
 
 ## Useful 
