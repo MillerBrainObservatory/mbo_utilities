@@ -17,21 +17,19 @@ from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.file_io import MBO_SUPPORTED_FTYPES
 
 if __name__ == "__main__":
-    path = Path(r"D://demo")
+    path = Path(r"D://demo//outputs2")
+    path.mkdir(exist_ok=True)
     data = imread(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green")
-    data.roi = 2
-    imwrite(data, path, planes=[10], ext=".tif", overwrite=False)
-    # data = imread(r"D://demo//test//plane09_roi2.tif")
-    # data = imread(r"D://demo//roi2//plane11.h5")
-    data.roi = 2
-    for ftype in [".bin"]:
-            imwrite(
-            data,
-            path,
-            ext=ftype,
-            overwrite=True,
-            planes=[10],
-        )
+    data.roi = 0
+    imwrite(data, path,ext=".tif", overwrite=False, planes=[1, 14])
+    # for ftype in [".bin"]:
+    #         imwrite(
+    #         data,
+    #         path,
+    #         ext=ftype,
+    #         overwrite=True,
+    #         planes=[10],
+    #     )
     # files = [x for x in Path(path).glob("*")]
     # check = imread(files[0])
     # fpl.ImageWidget(check,

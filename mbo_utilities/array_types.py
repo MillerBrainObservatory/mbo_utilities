@@ -895,14 +895,14 @@ class MboRawArray(scans.ScanMultiROI):
         debug=None,
         planes=None,
     ):
+        # convert to 0 based indexing
+        if isinstance(planes, int):
+            planes = [planes - 1]
+        elif planes is None:
+            planes = list(range(self.num_planes))
+        else:
+            planes = [p - 1 for p in planes]
         for roi in iter_rois(self):
-            # convert to 0 based indexing
-            if isinstance(planes, int):
-                planes = [planes - 1]
-            elif planes is None:
-                planes = list(range(self.num_planes))
-            else:
-                planes = [p - 1 for p in planes]
             for plane in planes:
                 self.roi = roi
                 if roi is None:
