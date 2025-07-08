@@ -20,7 +20,7 @@ dependencies = [
 	"matplotlib>=3.10.1",
 	"h5py",
 	"tqdm",
-	"imgui-bundle",
+	"imgui-bundle==1.6.3",
 	"jupyter_rfb>=0.5.1",
 	"fastplotlib>=0.5.0",
 	"jupyterlab>=4.5.0a0",
