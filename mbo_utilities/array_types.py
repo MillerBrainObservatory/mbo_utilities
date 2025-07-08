@@ -913,6 +913,7 @@ class MboRawArray(scans.ScanMultiROI):
                 target.parent.mkdir(exist_ok=True)
 
                 md = self.metadata.copy()
+                md["plane"] = plane + 1  # back to 1-based indexing
                 md["roi"] = roi
                 _write_plane(
                     self,
