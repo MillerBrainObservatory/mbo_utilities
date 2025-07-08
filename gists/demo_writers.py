@@ -17,11 +17,24 @@ from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.file_io import MBO_SUPPORTED_FTYPES
 
 if __name__ == "__main__":
-    path = Path(r"D://demo//outputs2")
+    path = Path(r"D://demo")
     path.mkdir(exist_ok=True)
+
     data = imread(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green")
-    data.roi = 0
-    imwrite(data, path,ext=".tif", overwrite=False, planes=[1, 14])
+    data.roi = 2
+    data.phasecorr_method = "mean"
+    data.fix_phase = True
+    imwrite(data, path.joinpath("mean_phase"),ext=".tif", overwrite=True, planes=[10])
+
+    data.phasecorr_method = "frame"
+    data.fix_phase = True
+    imwrite(
+        data,
+        path.joinpath("frame_phase"),
+        ext=".tif",
+        overwrite=True,
+        planes=[10]
+    )
     # for ftype in [".bin"]:
     #         imwrite(
     #         data,
