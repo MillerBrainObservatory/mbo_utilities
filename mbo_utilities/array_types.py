@@ -338,8 +338,26 @@ class MBOTiffArray:
             return {}
         return get_metadata(self.filenames[0])
 
-    def imshow(self):
-        pass
+    def imshow(self, **kwargs) -> fpl.ImageWidget:
+        if len(self.filenames) == 1:
+            data = tifffile.memmap(self.filenames[0], mode="r")
+        else:
+            data = self.dask
+        histogram_widget = kwargs.get("histogram_widget", True)
+        figure_kwargs = kwargs.get(
+            "figure_kwargs",
+            {
+                "size": (800, 1000),
+            },
+        )
+        window_funcs = kwargs.get("window_funcs", None)
+        return fpl.ImageWidget(
+            data=data,
+            histogram_widget=histogram_widget,
+            figure_kwargs=figure_kwargs,  # "canvas": canvas},
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
+            window_funcs=window_funcs,
+        )
 
     def _imwrite(
             self,
@@ -877,6 +895,49 @@ class MboRawArray(scans.ScanMultiROI):
 
         rois = [ROI(roi_info) for roi_info in roi_infos]
         return rois
+
+    def _create_fields(self):
+        """Go over each slice depth and each roi generating the scanned fields."""
+        fields = []
+        previous_lines = 0
+        for slice_id, scanning_depth in enumerate(self.scanning_depths):
+            next_line_in_page = 0  # each slice is one tiff page
+            for roi_id, roi in enumerate(self.rois):
+                new_field = roi.get_field_at(scanning_depth)
+                if new_field is not None:
+                    print(f"Scanning depth {scanning_depth}, ROI {roi_id} ")
+                    # if next_line_in_page + new_field.height > self._page_height:
+                    #     error_msg = (
+                    #         "Overestimated number of fly to lines ({}) at "
+                    #         "scanning depth {}".format(
+                    #             self._num_fly_to_lines, scanning_depth
+                    #         )
+                    #     )
+                    #     raise RuntimeError(error_msg)
+
+                    # Set xslice and yslice (from where in the page to cut it)
+                    new_field.yslices = [
+                        slice(next_line_in_page, next_line_in_page + new_field.height)
+                    ]
+                    new_field.xslices = [slice(0, new_field.width)]
+
+                    # Set output xslice and yslice (where to paste it in output)
+                    new_field.output_yslices = [slice(0, new_field.height)]
+                    new_field.output_xslices = [slice(0, new_field.width)]
+
+                    # Set slice and roi id
+                    new_field.slice_id = slice_id
+                    new_field.roi_ids = [roi_id]
+
+                    offsets = self._compute_offsets(
+                        new_field.height, previous_lines + next_line_in_page
+                    )
+                    new_field.offsets = [offsets]
+                    next_line_in_page += new_field.height + self._num_fly_to_lines
+                    fields.append(new_field)
+            previous_lines += self._num_lines_between_fields
+        return fields
+
 
     def __array__(self):
         """
