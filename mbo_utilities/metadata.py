@@ -239,7 +239,7 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
         return False
 
 
-def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
+def get_metadata(file: os.PathLike | str, z_step=None, verbose=False, strict=False):
     """
     Extract metadata from a TIFF file produced by ScanImage or processed via the save_as function.
 
@@ -335,12 +335,13 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False):
                 ]
 
             # see if each item in sizes is the same
-            assert all([sizes[0] == size for size in sizes]), (
-                "ROIs have different sizes"
-            )
-            assert all(
-                [num_pixel_xys[0] == num_pixel_xy for num_pixel_xy in num_pixel_xys]
-            ), "ROIs have different pixel resolutions"
+            if strict:
+                assert all([sizes[0] == size for size in sizes]), (
+                    "ROIs have different sizes"
+                )
+                assert all(
+                    [num_pixel_xys[0] == num_pixel_xy for num_pixel_xy in num_pixel_xys]
+                ), "ROIs have different pixel resolutions"
             size_xy = sizes[0]
             num_pixel_xy = num_pixel_xys[0]
         else:
