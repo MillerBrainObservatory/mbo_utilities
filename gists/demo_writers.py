@@ -17,32 +17,18 @@ from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.file_io import MBO_SUPPORTED_FTYPES
 
 if __name__ == "__main__":
-    path = Path(r"D://demo")
-    path.mkdir(exist_ok=True)
-
-    data = imread(r"D:\W2_DATA\kbarber\2025_03_01\mk301\green")
+    raw = Path().home().joinpath("lbm_data", "raw")
+    data = imread(raw)
     data.roi = 2
-    data.phasecorr_method = "mean"
-    data.fix_phase = True
-    imwrite(data, path.joinpath("mean_phase"),ext=".tif", overwrite=True, planes=[10])
-
-    data.phasecorr_method = "frame"
     data.fix_phase = True
     imwrite(
         data,
-        path.joinpath("frame_phase"),
+        raw.parent.joinpath("fused"),
         ext=".tif",
         overwrite=True,
-        planes=[10]
+        planes=[4, 10]
     )
-    # for ftype in [".bin"]:
-    #         imwrite(
-    #         data,
-    #         path,
-    #         ext=ftype,
-    #         overwrite=True,
-    #         planes=[10],
-    #     )
+
     # files = [x for x in Path(path).glob("*")]
     # check = imread(files[0])
     # fpl.ImageWidget(check,
