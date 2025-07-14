@@ -86,8 +86,12 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True):
     if widget:
         from mbo_utilities.graphics.imgui import PreviewDataWidget
 
+        if hasattr(data_array, "num_rois"):
+            rois = data_array.num_rois
+        else:
+            rois = 1 if roi is None else roi + 1
         gui = PreviewDataWidget(
-            iw=iw, fpath=data_array.filenames, threading_enabled=threading, size=350
+            iw=iw, fpath=data_array.filenames, threading_enabled=threading, size=350, rois=rois
         )
         iw.figure.add_gui(gui)
     fpl.loop.run()

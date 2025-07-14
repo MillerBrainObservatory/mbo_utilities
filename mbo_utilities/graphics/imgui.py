@@ -403,6 +403,7 @@ class PreviewDataWidget(EdgeWindow):
         scrollable: bool = False,
         auto_resize: bool = True,
         window_flags: int | None = None,
+        rois: int = 1,
     ):
         """
         Fastplotlib attachment, callable with fastplotlib.ImageWidget.add_gui(PreviewDataWidget)
@@ -458,6 +459,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # image widget setup
         self.image_widget = iw
+        self.rois = rois
         self.shape = self.image_widget.data[0].shape
         if self.image_widget.window_funcs is None:
             self.image_widget.window_funcs = {"t": (np.mean, 0)}
@@ -1086,8 +1088,9 @@ class PreviewDataWidget(EdgeWindow):
             frame = frame - self._zstats_means[arr_idx][z]
         return frame
 
-    def _compute_zstats_single_roi(self, data_ix, arr):
-        self.logger.info(f"Computing z-statistics for ROI {data_ix + 1}")
+    def _compute_zstats_single_roi(self, roi, fpath):
+        arr = imread(fpath)
+        arr.roi = roi
 
         if HAS_TORCH and isinstance(arr, torch.Tensor):
             arr = arr[:]  # make sure it's dense
@@ -1101,7 +1104,7 @@ class PreviewDataWidget(EdgeWindow):
         self._tiff_lock = threading.Lock()
         for z in range(self.nz):
             self.logger.info(
-                f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {data_ix + 1} --"
+                f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {roi + 1} --"
             )
             with self._tiff_lock:
                 stack = arr[:, z]
@@ -1120,24 +1123,34 @@ class PreviewDataWidget(EdgeWindow):
                 means.append(mean_img)
 
                 self.logger.info(
-                    f"ROI {data_ix + 1} - Z-plane {z + 1}: "
+                    f"ROI {roi + 1} - Z-plane {z + 1}: "
                     f"Mean: {stats['mean'][-1]:.2f}, "
                     f"Std: {stats['std'][-1]:.2f}, "
                     f"SNR: {stats['snr'][-1]:.2f}",
                 )
 
-                self._zstats_progress[data_ix] = (z + 1) / self.nz
-                self._zstats_current_z[data_ix] = z
+                self._zstats_progress[roi] = (z + 1) / self.nz
+                self._zstats_current_z[roi] = z
 
-        self._zstats[data_ix] = stats
-        self._zstats_means[data_ix] = np.stack(means)
-        self._zstats_done[data_ix] = True
+        self._zstats[roi] = stats
+        self._zstats_means[roi] = np.stack(means)
+        self._zstats_done[roi] = True
 
     def compute_zstats(self):
         if not self.image_widget or not self.image_widget.data:
             return
-        for data_ix, arr in enumerate(self.image_widget.data):
-            self.logger.debug(f"Sending array index {data_ix} for z-stat computation..")
+        if self.rois is not None:
+            for roi in range(self.rois):
+                threading.Thread(
+                    target=self._compute_zstats_single_roi, args=(roi, self.fpath), daemon=True
+                ).start()
+        else:
             threading.Thread(
-                target=self._compute_zstats_single_roi, args=(data_ix, arr), daemon=True
+                target=self._compute_zstats_single_roi, args=(self.rois, self.fpath), daemon=True
             ).start()
+
+        # for data_ix, arr in enumerate(self.image_widget.data):
+        #     self.logger.debug(f"Sending array index {data_ix} for z-stat computation..")
+        #     threading.Thread(
+        #         target=self._compute_zstats_single_roi, args=(data_ix, arr), daemon=True
+        #     ).start()
