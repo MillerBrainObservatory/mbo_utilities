@@ -51,7 +51,7 @@ pip install .   # old
 uv pip install . # new
 ```
 
-Using `uv` has a huge upside: Packages are cached globally, so you can quickly recreate them without worrying about contaminating your base environment.
+Using `uv` has a key advantage: packages are cached globally, so you can quickly recreate them without worrying about contaminating your base environment.
 
 ``` {tip}
 With UV, re-creating your environment is much faster than with `conda` thanks to it's [dependency caching](https://docs.astral.sh/uv/concepts/cache/#dependency-caching).
@@ -94,11 +94,13 @@ Creating virtual environment at: myenv
 `uv venv` will create a folder in your current directory named `.venv`, which is a python standard and will be automatically chosen by many development environments e.g. `VSCode`.
 
 To distinguish between environments, name the environment by substituting <VENV-NAME> with the name you wish to assign to that virtual environment.
+
+Some IDE's may struggle to locate named environments (e.g. some versions of Pycharm).
 ```
 
 ### Activate the environment (optional, good practice)
 
-If you named your environment, replace `.venv` below with the name of your environment.
+If you named your environment, replace `.venv` below with the name of your environment:
 
 ::::{tab-set}
 :::{tab-item} Linux/macOS
@@ -128,19 +130,17 @@ uv pip install <PACKAGE>
 
 This works just like pip.
 
-If you like to `git clone` repositories, you can:
+You can install packages from the filesystem just as you can with `pip`:
 
 ```bash
 uv pip install .
 ```
 
-If you are in a directory with a `pyproject.toml` like many python projects will have:
+Or use higher-level `uv` features like `sync`:
 
 ```bash
-cd repository
 uv sync --all-extras
 ```
-
 The `--all-extras` get's all extra dependencies, like [notebook, gui], if the repository has any.
 
 (uv_cheatsheet)=
