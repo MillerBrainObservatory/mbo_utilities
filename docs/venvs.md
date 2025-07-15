@@ -63,10 +63,31 @@ This makes deleting your environment an appropriate solution if you run into env
 
 By default, `uv venv` will create a folder `.venv` which is used as your environemnt.
 
-This folder will be placed in your current working directory.
+This folder will be placed in your current working directory:
 
 ```bash
-uv venv
+USER@SERVER ~/repos/mypackage
+$ uv venv
+Using CPython 3.11.12
+Creating virtual environment at: .venv
+```
+
+You can specify a name for the environment:
+
+```bash
+USER@SERVER ~/repos/mypackage
+$ uv venv myenv
+Using CPython 3.11.12
+Creating virtual environment at: myenv
+```
+
+You can also indicate which python to use:
+
+```bash
+USER@SERVER ~/repos/mypackage
+$ uv venv myenv --python=39  # or 310, 311, 312, 313
+Using CPython 3.9.22
+Creating virtual environment at: myenv
 ```
 
 ```{warning}
@@ -76,6 +97,8 @@ To distinguish between environments, name the environment by substituting <VENV-
 ```
 
 ### Activate the environment (optional, good practice)
+
+If you named your environment, replace `.venv` below with the name of your environment.
 
 ::::{tab-set}
 :::{tab-item} Linux/macOS
