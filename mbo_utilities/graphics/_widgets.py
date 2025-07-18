@@ -5,6 +5,7 @@ from imgui_bundle import (
     imgui,
     imgui_ctx,
 )
+from imgui_bundle._imgui_bundle import imgui_md
 
 _NAME_COLORS = (
     imgui.ImVec4(0.95, 0.80, 0.30, 1.0),
@@ -37,6 +38,19 @@ def set_tooltip(_tooltip, _show_mark=True):
         imgui.text_unformatted(_tooltip)
         imgui.pop_text_wrap_pos()
         imgui.end_tooltip()
+
+def draw_metadata_inspector(metadata: dict):
+    with imgui_ctx.begin_child("Metadata Viewer"):
+        imgui_md.render("# Metadata Viewer")
+        imgui.separator()
+        imgui.push_style_var(
+            imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4)  # noqa
+        )
+        try:
+            for k, v in sorted(metadata.items()):
+                _render_item(k, v)
+        finally:
+            imgui.pop_style_var()
 
 
 def draw_scope():
@@ -131,16 +145,20 @@ def _render_item(name, val, prefix=""):
 
 
 def _fmt(x):
-    if isinstance(x, (str, bool, numbers.Number)):
+    if isinstance(x, (str, bool, int, float)):
         return repr(x)
     if isinstance(x, (bytes, bytearray)):
         return f"<{len(x)} bytes>"
-    if isinstance(x, cab.Sequence) and not isinstance(x, (str, bytes)):
-        return f"[len={len(x)}]" if len(x) > 8 else repr(x)
-    shp = getattr(x, "shape", None)
-    if shp is not None and not isinstance(shp, property):
+    if isinstance(x, (tuple, list)):
+        if len(x) <= 8:
+            return repr(x)
+        return f"[len={len(x)}]"
+    if hasattr(x, "shape") and hasattr(x, "dtype"):
         try:
-            return f"<shape={tuple(shp)} dtype={getattr(x, 'dtype', '')}>"
-        except TypeError:
-            pass
+            # Try converting small arrays to list
+            if x.size <= 8:
+                return repr(x.tolist())
+            return f"<shape={tuple(x.shape)}, dtype={x.dtype}>"
+        except Exception:
+            return f"<array dtype={x.dtype}>"
     return f"<{type(x).__name__}>"
