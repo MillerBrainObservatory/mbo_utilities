@@ -174,7 +174,6 @@ def imread(
 
     exts = {p.suffix.lower() for p in paths}
     first = paths[0]
-    parent = Path(first).parent
 
     if len(exts) > 1:
         if exts == {".bin", ".npy"}:

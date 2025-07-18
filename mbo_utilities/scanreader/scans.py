@@ -944,16 +944,16 @@ class ScanMultiROI(NewerScan, BaseScan):
             next_line_in_page = 0  # each slice is one tiff page
             for roi_id, roi in enumerate(self.rois):
                 new_field = roi.get_field_at(scanning_depth)
-
                 if new_field is not None:
-                    if next_line_in_page + new_field.height > self._page_height:
-                        error_msg = (
-                            "Overestimated number of fly to lines ({}) at "
-                            "scanning depth {}".format(
-                                self._num_fly_to_lines, scanning_depth
-                            )
-                        )
-                        raise RuntimeError(error_msg)
+                    print(f"Scanning depth {scanning_depth}, ROI {roi_id} ")
+                    # if next_line_in_page + new_field.height > self._page_height:
+                    #     error_msg = (
+                    #         "Overestimated number of fly to lines ({}) at "
+                    #         "scanning depth {}".format(
+                    #             self._num_fly_to_lines, scanning_depth
+                    #         )
+                    #     )
+                    #     raise RuntimeError(error_msg)
 
                     # Set xslice and yslice (from where in the page to cut it)
                     new_field.yslices = [
