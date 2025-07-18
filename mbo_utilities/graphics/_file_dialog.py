@@ -33,6 +33,7 @@ class FileDialog:
         self._select_folder = None
         self._threading_enabled = MBO_THREADING_ENABLED
         self._widget_enabled = True
+        self.metadata_only = False
 
     @property
     def widget_enabled(self):
@@ -130,6 +131,16 @@ class FileDialog:
             )
             _, self.widget_enabled = imgui.checkbox(
                 "Enable 'Data Preview' widget", self._widget_enabled
+            )
+            set_tooltip(
+                "Enable/disable the 'Data Preview' widget. "
+                "This widget allows you to visualize projections,"
+                " mean-subtraction,"
+                " and preview scan-phase correction."
+            )
+
+            _, self.metadata_only = imgui.checkbox(
+                "Metadata Preview Only", self.metadata_only
             )
             set_tooltip(
                 "Enable/disable the 'Data Preview' widget. "

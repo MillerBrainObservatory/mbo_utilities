@@ -178,7 +178,7 @@ def draw_tabs(parent):
             imgui.end_tab_bar()
 
 
-def draw_popups(parent):
+def draw_saveas_popup(parent):
     if getattr(parent, "_saveas_popup_open"):
         imgui.open_popup("Save As")
         parent._saveas_popup_open = False
@@ -703,7 +703,7 @@ class PreviewDataWidget(EdgeWindow):
             )
 
     def update(self):
-        draw_popups(self)
+        draw_saveas_popup(self)
         draw_menu(self)
         draw_tabs(self)
 

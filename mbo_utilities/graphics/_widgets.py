@@ -1,11 +1,10 @@
 import inspect
-import numbers
-from collections import abc as cab
+from collections.abc import Mapping, Sequence
 from imgui_bundle import (
     imgui,
     imgui_ctx,
 )
-from imgui_bundle._imgui_bundle import imgui_md
+from imgui_bundle import imgui_md
 
 _NAME_COLORS = (
     imgui.ImVec4(0.95, 0.80, 0.30, 1.0),
@@ -44,7 +43,7 @@ def draw_metadata_inspector(metadata: dict):
         imgui_md.render("# Metadata Viewer")
         imgui.separator()
         imgui.push_style_var(
-            imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4)  # noqa
+            imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4)
         )
         try:
             for k, v in sorted(metadata.items()):
@@ -74,10 +73,8 @@ def draw_scope():
 
 
 def _render_item(name, val, prefix=""):
-    from collections.abc import Mapping, Sequence
 
     full_name = f"{prefix}{name}"
-    # Dictionaries
     if isinstance(val, Mapping):
         # filter out all-underscore keys and callables
         children = [
@@ -91,31 +88,31 @@ def _render_item(name, val, prefix=""):
                     _render_item(str(k), v, prefix=full_name + ".")
                 imgui.tree_pop()
         else:
-            # no valid children → render as a leaf
             imgui.text_colored(_NAME_COLORS[0], full_name)
             imgui.same_line(spacing=16)
             imgui.text_colored(_VALUE_COLOR, _fmt(val))
-    # Lists/tuples/etc.
     elif isinstance(val, Sequence) and not isinstance(val, (str, bytes, bytearray)):
-        children = [(i, v) for i, v in enumerate(val) if not callable(v)]
-        if children:
-            if imgui.tree_node(f"{full_name} [{type(val).__name__}]"):
-                for i, v in children:
-                    _render_item(f"{i}", v, prefix=full_name + "[")
-                imgui.tree_pop()
-        else:
+        if len(val) <= 8 and all(isinstance(v, (int, float, str, bool)) for v in val):
             imgui.text_colored(_NAME_COLORS[0], full_name)
             imgui.same_line(spacing=16)
-            imgui.text_colored(_VALUE_COLOR, _fmt(val))
+            imgui.text_colored(_VALUE_COLOR, repr(val))
+        else:
+            children = [(i, v) for i, v in enumerate(val) if not callable(v)]
+            if children:
+                if imgui.tree_node(f"{full_name} [{type(val).__name__}]"):
+                    for i, v in children:
+                        _render_item(f"{i}", v, prefix=full_name + "[")
+                    imgui.tree_pop()
+            else:
+                imgui.text_colored(_NAME_COLORS[0], full_name)
+                imgui.same_line(spacing=16)
+                imgui.text_colored(_VALUE_COLOR, _fmt(val))
 
-    # Other objects: show only settable attributes and @property values
     else:
         cls = type(val)
-        # gather all @property names on the class
         prop_names = [
             name_ for name_, attr in cls.__dict__.items() if isinstance(attr, property)
         ]
-        # gather instance attributes from __dict__, excluding private and callable
         fields = {}
         if hasattr(val, "__dict__"):
             fields = {
@@ -155,7 +152,7 @@ def _fmt(x):
         return f"[len={len(x)}]"
     if hasattr(x, "shape") and hasattr(x, "dtype"):
         try:
-            # Try converting small arrays to list
+            # convert small arrays to list
             if x.size <= 8:
                 return repr(x.tolist())
             return f"<shape={tuple(x.shape)}, dtype={x.dtype}>"
