@@ -121,6 +121,10 @@ def imwrite(
             debug=debug,
         )
     else:
+        if isinstance(lazy_array, Suite2pArray):
+            raise TypeError("Attempting to write a Suite2pArray directly."
+                            " Is there an ops.npy file in a directory with a tiff file?"
+                            "Please make write these to separate directories.")
         raise TypeError(f"{type(lazy_array)} does not implement an `imwrite()` method.")
 
 
