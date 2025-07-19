@@ -97,7 +97,7 @@ def _write_plane(
         if pbar:
             pbar.update(1)
         if progress_callback:
-            progress_callback(pbar.n / pbar.total)
+            progress_callback(pbar.n / pbar.total, current_plane=plane_index)
         start = end
 
     if pbar:
