@@ -164,7 +164,7 @@ def imread(
         md = np.load(str(ops_file), allow_pickle=True).item()
         # Prefer raw > registered > tif
         if (parent / "data_raw.bin").exists():
-            return Suite2pArray(parent / "data_raw.bin", md)
+            return Suite2pArray(md)
         elif (parent / "data.bin").exists():
             return Suite2pArray(parent / "data.bin", md)
         elif (parent / "data.npy").exists():

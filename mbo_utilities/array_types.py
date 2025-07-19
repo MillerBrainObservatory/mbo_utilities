@@ -5,9 +5,12 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Tuple, List, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+import numpy as np
+import os
 
 import h5py
-import numpy as np
 import tifffile
 from dask import array as da
 from fsspec.implementations.reference import ReferenceFileSystem
@@ -39,7 +42,6 @@ CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
 logger = log.get("array_types")
-
 
 @dataclass
 class DemixingResultsArray:
@@ -78,6 +80,51 @@ class DemixingResultsArray:
 
 @dataclass
 class Suite2pArray:
+    metadata: dict
+
+    def __post_init__(self):
+        self.Ly = self.metadata["Ly"]
+        self.Lx = self.metadata["Lx"]
+        self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
+        if self.nframes is None:
+            raise ValueError("Missing 'nframes' or 'n_frames' in metadata")
+
+        self.filename = self.metadata.get("reg_file", self.metadata.get("raw_file"))
+        if self.filename is None:
+            raise ValueError("Missing 'reg_file' or 'raw_file' in metadata")
+
+        self.filename = str(self.filename)
+        self.shape = (self.nframes, self.Ly, self.Lx)
+        self.dtype = np.int16
+        self._file = np.memmap(
+            self.filename, mode="r", dtype=self.dtype, shape=self.shape
+        )
+
+    def __getitem__(self, key):
+        return self._file[key]
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __array__(self):
+        n = min(10, self.nframes)
+        return np.stack([self._file[i] for i in range(n)], axis=0)
+
+    def ndim(self):
+        return len(self.shape)
+
+    def min(self):
+        return float(self._file[0].min())
+
+    def max(self):
+        return float(self._file[0].max())
+
+    def close(self):
+        self._file._mmap.close()
+
+
+@dataclass
+class Suite2pArray2:
     filenames: Path | None
     metadata: dict
     shape: tuple[int, ...] = ()
