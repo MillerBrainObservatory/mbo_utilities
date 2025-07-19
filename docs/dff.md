@@ -33,7 +33,7 @@ This guide assumes you've read [this scientifica article](https://www.scientific
 ```{figure} ./_images/cell_activity.png
 :alt: Cell Activity (DF/F)
 :figclass: full-width
-:name: fig-dff-strategies
+:name: fig-dff-activity
 
 ΔF/F traces for 30 cells, sorted by similarity using the [Rastermap](https://github.com/MouseLand/rastermap) algorithm.
 ```
