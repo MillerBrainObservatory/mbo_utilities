@@ -999,6 +999,8 @@ class MboRawArray(scans.ScanMultiROI):
             arrays.append(arr)
             names.append(f"ROI {roi}" if roi else "Full Image")
 
+        figure_shape = (1, len(arrays))
+
         histogram_widget = kwargs.get("histogram_widget", True)
         figure_kwargs = kwargs.get(
             "figure_kwargs",
@@ -1012,6 +1014,7 @@ class MboRawArray(scans.ScanMultiROI):
             names=names,
             histogram_widget=histogram_widget,
             figure_kwargs=figure_kwargs,  # "canvas": canvas},
+            figure_shape=figure_shape,
             graphic_kwargs={"vmin": -300, "vmax": 4000},
             window_funcs=window_funcs,
         )
