@@ -87,6 +87,8 @@ def merge_rois(roi_left, roi_right, save_path):
         ops['meanImg'] = np.hstack([ops_l['meanImg'], ops_r['meanImg']])
     if 'meanImgE' in ops_l and 'meanImgE' in ops_r:
         ops['meanImgE'] = np.hstack([ops_l['meanImgE'], ops_r['meanImgE']])
+    if 'max_img' in ops_l and 'max_img' in ops_r:
+        ops['max_img'] = np.hstack([ops_l['max_img'], ops_r['max_img']])
     if 'Vcorr' in ops_l and 'Vcorr' in ops_r:
         V_l = embed_into_full_frame(ops_l['Vcorr'], ops_l['yrange'], ops_l['xrange'], Ly, Lx_l)
         V_r = embed_into_full_frame(ops_r['Vcorr'], ops_r['yrange'], ops_r['xrange'], Ly, Lx_r)
