@@ -1,9 +1,11 @@
 from pathlib import Path
 import numpy as np
-import fastplotlib as fpl
 import mbo_utilities as mbo
 import lbm_suite2p_python as lsp
 import suite2p
+from lbm_suite2p_python import load_ops, rgb_to_hsv, hsv_to_rgb
+import matplotlib.pyplot as plt
+import fastplotlib as fpl
 
 data = mbo.imread(r"D:\W2_DATA\kbarber\2025_07_17\mk355\green")
 mbo.imwrite(data, r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed", planes=[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], roi=0)
@@ -120,17 +122,10 @@ ops2 = np.load(folder2 + "/ops.npy", allow_pickle=True).item()
 stat2 = np.load(folder2 + "/stat.npy", allow_pickle=True)
 iscell2 = np.load(folder2 + "/iscell.npy", allow_pickle=True)
 ov(ops_merged, stat_merged, iscell_merged, proj="max_proj")
-# lsp.suite2p_roi_overlay(ops2, stat2, iscell2, "max_proj", color_mode="random")
 
+# lsp.suite2p_roi_overlay(ops2, stat2, iscell2, "max_proj", color_mode="random")
 ##
 
-from lbm_suite2p_python import load_ops
-from lbm_suite2p_python import rgb_to_hsv, hsv_to_rgb
-
-from lbm_suite2p_python import load_ops, rgb_to_hsv, hsv_to_rgb
-import numpy as np
-import matplotlib.pyplot as plt
-from skimage.segmentation import find_boundaries
 
 def ov(ops, stat, iscell, proj=None, plot_indices=None, savepath=None,
        color_mode='random', red_border=False, colors=None):
