@@ -162,19 +162,17 @@ def imread(
 
     if ops_file and ops_file.exists():
         md = np.load(str(ops_file), allow_pickle=True).item()
-        # Prefer raw > registered > tif
-        if (parent / "data_raw.bin").exists():
+        if (parent / "ops.npy").exists():
             return Suite2pArray(md)
-        elif (parent / "data.bin").exists():
-            return Suite2pArray(parent / "data.bin", md)
-        elif (parent / "data.npy").exists():
-            return np.load(parent / "data.npy", mmap_mode="r")
         elif (parent / "reg_tif").is_dir():
             tifs = sorted((parent / "reg_tif").glob("*.tif"))
             if tifs:
                 return TiffArray(tifs)
         else:
-            return Suite2pArray(None, md)
+            raise ValueError(
+                f"Unable to open suite2p data from {parent}.\n"
+                "Please ensure the directory structure is correct."
+            )
 
     exts = {p.suffix.lower() for p in paths}
     first = paths[0]

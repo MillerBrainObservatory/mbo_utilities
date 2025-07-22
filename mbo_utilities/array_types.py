@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import copy
 import json
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import field
 from typing import Any, Tuple, List, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
-import os
 
 import h5py
 import tifffile
@@ -110,114 +108,20 @@ class Suite2pArray:
         n = min(10, self.nframes)
         return np.stack([self._file[i] for i in range(n)], axis=0)
 
+    @property
     def ndim(self):
         return len(self.shape)
 
+    @property
     def min(self):
         return float(self._file[0].min())
 
+    @property
     def max(self):
         return float(self._file[0].max())
 
     def close(self):
         self._file._mmap.close()
-
-
-@dataclass
-class Suite2pArray2:
-    filenames: Path | None
-    metadata: dict
-    shape: tuple[int, ...] = ()
-    nframes: int = 0
-    frame_rate: float = 0.0
-
-    def __post_init__(self):
-        if not HAS_SUITE2P:
-            logger.info("No suite2p detected, cannot initialize Suite2pArray.")
-            return
-
-        if isinstance(self.metadata, (str, Path)):
-            self.metadata = np.load(self.metadata, allow_pickle=True).item()
-
-        self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
-        if self.nframes is None:
-            raise ValueError(f"Missing nframes in metadata: {self.metadata.keys()}")
-        self.Lx = self.metadata["Lx"]
-        self.Ly = self.metadata["Ly"]
-        self.shape = (self.nframes, self.Ly, self.Lx)
-        self.ndim = 3
-        self.dtype = np.int16
-
-        if self.filenames is not None:
-            from suite2p.io import BinaryFile
-
-            self._bf = BinaryFile(
-                Ly=self.Ly,
-                Lx=self.Lx,
-                filename=str(self.filenames),
-                n_frames=self.nframes,
-            )
-        else:
-            self._bf = None
-
-    def __len__(self):
-        return self.shape[0]
-
-    def __getitem__(self, key):
-        if self._bf is None:
-            raise ValueError("No binary file was loaded.")
-
-        # Convert to array if advanced indexing is used
-        if isinstance(key, tuple) and len(key) != 1 and len(key) != 3:
-            return np.asarray(self)[key]
-
-        if isinstance(key, int):
-            return self._bf[key]
-        if isinstance(key, slice):
-            idxs = range(*key.indices(self.shape[0]))
-            return np.stack([self._bf[i] for i in idxs], axis=0)
-
-        t, y, x = key
-        if isinstance(t, int):
-            return self._bf[t][y, x]
-        idxs = t if isinstance(t, range) else range(*t.indices(self.shape[0]))
-        return np.stack([self._bf[i][y, x] for i in idxs], axis=0)
-
-    def min(self):
-        if self._bf is None:
-            raise ValueError("No binary file was loaded.")
-        return float(self._bf[0].min())
-
-    def max(self):
-        if self._bf is None:
-            raise ValueError("No binary file was loaded.")
-        return float(self._bf[0].max())
-
-    def __array__(self):
-        if self._bf is None:
-            raise ValueError("No binary file was loaded.")
-        n = min(10, self.shape[0])
-        return np.stack([self._bf[i] for i in range(n)], axis=0)
-
-    def close(self):
-        if self._bf is not None:
-            self._bf.file.close()
-
-    def imshow(self, **kwargs):
-        if not HAS_SUITE2P:
-            raise ImportError("Suite2p is not installed.")
-        if self._bf is None:
-            raise ValueError("No binary file to display.")
-
-        import fastplotlib as fpl
-
-        return fpl.ImageWidget(
-            data=self,
-            histogram_widget=kwargs.get("histogram_widget", True),
-            figure_kwargs=kwargs.get("figure_kwargs", {"size": (800, 1000)}),
-            graphic_kwargs={"vmin": self.min(), "vmax": self.max()},
-            window_funcs=kwargs.get("window_funcs", None),
-        )
 
 
 class H5Array:
@@ -582,13 +486,13 @@ class MboRawArray(scans.ScanMultiROI):
 
     def read_data(self, filenames, dtype=np.int16):
         filenames = expand_paths(filenames)
-        try:
-            self.save_fsspec(filenames)
-            self.use_zarr = True
-        except Exception as e:
-            logger.error(f"Failed to save fsspec: {e}")
-            self.use_zarr = False
-            self.reference = None
+        # try:
+        #     self.save_fsspec(filenames)
+        #     self.use_zarr = True
+        # except Exception as e:
+        #     logger.error(f"Failed to save fsspec: {e}")
+        self.use_zarr = False
+        self.reference = None
         super().read_data(filenames, dtype)
         self._metadata = get_metadata(
             self.tiff_files[0].filehandle.path
