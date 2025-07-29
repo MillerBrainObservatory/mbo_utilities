@@ -1,7 +1,6 @@
 import numpy as np
 from pathlib import Path
 
-import masknmf
 
 def load_from_dir(plane_dir):
     """

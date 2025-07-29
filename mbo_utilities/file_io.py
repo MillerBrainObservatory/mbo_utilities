@@ -13,12 +13,12 @@ import dask.array as da
 from tifffile import TiffFile
 
 from . import log
-from .metadata import is_raw_scanimage
 
 try:
     from zarr import open as zarr_open
     from zarr.storage import FsspecStore
     from fsspec.implementations.reference import ReferenceFileSystem
+
     HAS_ZARR = True
 except ImportError:
     HAS_ZARR = False
@@ -28,11 +28,11 @@ except ImportError:
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-SAVE_AS_TYPES = [".tiff", ".bin", ".h5", ".zarr"]
+MBO_SUPPORTED_FTYPES = [".tiff", ".bin", ".h5"]
+MBO_PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
 logger = log.get("file_io")
 
-PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
 def load_ops(ops_input: str | Path | list[str | Path]):
     """Simple utility load a suite2p npy file"""
@@ -43,6 +43,7 @@ def load_ops(ops_input: str | Path | list[str | Path]):
     print("Warning: No valid ops file provided, returning None.")
     return {}
 
+
 def write_ops(metadata, raw_filename):
     """
     Write metadata to an ops file alongside the given filename.
@@ -51,8 +52,10 @@ def write_ops(metadata, raw_filename):
     'pixel_resolution',
     'frame_rate' keys.
     """
-    logger.info(f"Writing ops file for {raw_filename} with metadata: {metadata}")
-    assert isinstance(raw_filename, (str, Path)), "filename must be a string or Path object"
+    logger.debug(f"Writing ops file for {raw_filename} with metadata: {metadata}")
+    assert isinstance(raw_filename, (str, Path)), (
+        "filename must be a string or Path object"
+    )
     filename = Path(raw_filename).expanduser().resolve()
 
     # this convention means input can be either
@@ -85,7 +88,7 @@ def write_ops(metadata, raw_filename):
         # suite2p needs these
         "Ly": Ly,
         "Lx": Lx,
-        "fs": metadata['fs'],
+        "fs": metadata["fs"],
         "nframes": nt,
         "dx": dx,
         "dy": dy,
@@ -94,52 +97,8 @@ def write_ops(metadata, raw_filename):
         **metadata,
     }
     np.save(ops_path, ops)
-    logger.debug(f"Ops file written to {ops_path} with metadata:\n"
-                 f" {ops}")
+    logger.debug(f"Ops file written to {ops_path} with metadata:\n {ops}")
 
-def normalize_file_url(path):
-    """
-    Derive a folder tag from a filename based on “planeN”, “roiN”, or "tagN" patterns.
-
-    Parameters
-    ----------
-    path : str or pathlib.Path
-        File path or name whose stem will be parsed.
-
-    Returns
-    -------
-    str
-        If the stem starts with “plane”, “roi”, or “res” followed by an integer,
-        returns that tag plus the integer (e.g. “plane3”, “roi7”, “res2”).
-        Otherwise returns the original stem unchanged.
-
-    Examples
-    --------
-    >>> normalize_file_url("plane_01.tif")
-    'plane1'
-    >>> normalize_file_url("plane2.bin")
-    'plane2'
-    >>> normalize_file_url("roi5.raw")
-    'roi5'
-    >>> normalize_file_url("ROI_10.dat")
-    'roi10'
-    >>> normalize_file_url("res-3.h5")
-    'res3'
-    >>> normalize_file_url("assembled_data_1.tiff")
-    'assembled_data_1'
-    >>> normalize_file_url("file_12.tif")
-    'file_12'
-    """
-    name = Path(path).stem
-    for tag in PIPELINE_TAGS:
-        low = name.lower()
-        if low.startswith(tag):
-            suffix = name[len(tag):]
-            if suffix and (suffix[0] in ("_", "-")):
-                suffix = suffix[1:]
-            if suffix.isdigit():
-                return f"{tag}{int(suffix)}"
-    return name
 
 def npy_to_dask(files, name="", axis=1, astype=None):
     """
@@ -200,6 +159,7 @@ def npy_to_dask(files, name="", axis=1, astype=None):
 
     return arr
 
+
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     """
     Expand a path, list of paths, or wildcard pattern into a sorted list of actual files.
@@ -245,6 +205,7 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
     return sorted(p.resolve() for p in result if p.is_file())
 
+
 def _tiff_to_fsspec(tif_path: Path, base_dir: Path) -> dict:
     """
     Create a kerchunk reference for a single TIFF file.
@@ -268,6 +229,7 @@ def _tiff_to_fsspec(tif_path: Path, base_dir: Path) -> dict:
             refs = json.loads(f.getvalue())  # type: ignore
     return refs
 
+
 def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
     assert len(tif_files) > 1, "Need at least two TIFF files to combine."
 
@@ -277,7 +239,6 @@ def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
     total_chunks = None
     zarr_meta = {}
     for tif_path in tif_files:
-
         # Create a json reference for each TIFF file
         inner_refs = _tiff_to_fsspec(tif_path, base_dir)
         zarr_meta = json.loads(inner_refs.pop(".zarray"))
@@ -309,7 +270,7 @@ def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
 
     combined_refs[".zarray"] = json.dumps(combined_zarr_meta)
     combined_refs[".zattrs"] = json.dumps(
-        {"_ARRAY_DIMENSIONS": ["T", "C", "Y", "X"][:len(total_shape)]}
+        {"_ARRAY_DIMENSIONS": ["T", "C", "Y", "X"][: len(total_shape)]}
     )
 
     axis0_offset = 0
@@ -326,84 +287,10 @@ def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
 
     return combined_refs
 
-def read_scan(
-        pathnames,
-        dtype=np.int16,
-        roi=None,
-        fix_phase: bool = True,
-        phasecorr_method: str = "frame",
-        border: int | tuple[int, int, int, int] = 3,
-        upsample: int = 1,
-        max_offset: int = 4,
-):
-    """
-    Reads a ScanImage scan from a given file or set of file paths and returns a
-    ScanMultiROIReordered object with lazy-loaded data.
 
-    Parameters
-    ----------
-    pathnames : str, Path, or sequence of str/Path
-        A single path to, a wildcard pattern (e.g. ``*.tif``), or a list of paths
-        specifying the ScanImage TIFF files to read.
-    roi : int, optional
-        Specify ROI to export if only exporting a single ROI. 1-based.
-        Defaults to None, which exports pre-assembled (tiled) rois.
-    fix_phase : bool, optional
-        If True, applies phase correction to the scan data. Default is False.
-    phasecorr_method : str, optional
-        The method to use for phase correction. Options are 'subpix', 'two_step',
-    border : int or tuple of int, optional
-        The border size to use for phase correction. If an int, applies the same
-        border to all sides. If a tuple, specifies (top, bottom, left, right) borders.
-    upsample : int, optional
-        The for subpixel correction, upsample factor for phase correction.
-        A value of 1 clamps to whole-pixel. Default is 10.
-    max_offset : int, optional
-        The maximum allowed phase offset in pixels. If the computed offset exceeds
-        this value, it is clamped to the maximum. Default is 3.
-    dtype : numpy.dtype, optional
-        The data type to use when reading the scan data. Default is np.int16.
+def read_scan():
+    raise DeprecationWarning("read_scan is deprecated, use mbo.imread() instead.")
 
-    Returns
-    -------
-    mbo_utilities.array_types.MboRawArray
-        A scan object with metadata and lazily loaded data. Raises FileNotFoundError
-        if no files match the specified path(s).
-
-    Notes
-    -----
-    If the provided path string appears to include escaped characters (for example,
-    unintentional backslashes), a warning message is printed suggesting the use of a
-    raw string (r'...') or double backslashes.
-
-    Examples
-    --------
-    >>> import mbo_utilities as mbo
-    >>> import matplotlib.pyplot as plt
-    >>> scan = mbo.read_scan(r"D:\\demo\\raw")
-    >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # First frame of z-plane 6
-    >>> scan = mbo.read_scan(r"D:\\demo\\raw", roi=1) # First ROI
-    >>> plt.imshow(scan[0, 5, 0, 0], cmap='gray')  # indexing works the same
-    """
-    filenames = expand_paths(pathnames)
-    if len(filenames) == 0:
-        error_msg = f"Pathname(s) {pathnames} do not match any files in disk."
-        raise FileNotFoundError(error_msg)
-    if not is_raw_scanimage(filenames[0]):
-        raise ValueError(
-            f"The file {filenames[0]} does not appear to be a raw ScanImage TIFF file."
-        )
-
-    # scan = MboRawArray(
-    #     roi=roi,
-    #     fix_phase=fix_phase,
-    #     phasecorr_method=phasecorr_method,
-    #     border=border,
-    #     upsample=upsample,
-    #     max_offset=max_offset,
-    # )
-    # scan.read_data(filenames, dtype=dtype)
-    # return scan
 
 def get_files(
     base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
@@ -489,6 +376,19 @@ def get_files(
 
     return [str(file) for file in files]
 
+
+def get_plane_from_filename(path, fallback=None):
+    path = Path(path)
+    for part in path.stem.lower().split("_"):
+        if part.startswith("plane"):
+            suffix = part[5:]
+            if suffix.isdigit():
+                return int(suffix.lstrip("0") or "0")
+    if fallback is not None:
+        return fallback
+    raise ValueError(f"Could not extract plane number from filename: {path.name}")
+
+
 def _is_arraylike(obj) -> bool:
     """
     Checks if the object is array-like.
@@ -500,9 +400,11 @@ def _is_arraylike(obj) -> bool:
 
     return True
 
+
 def _get_mbo_project_root() -> Path:
     """Return the root path of the mbo_utilities repository (based on this file)."""
     return Path(__file__).resolve().parent.parent
+
 
 def get_mbo_dirs() -> dict:
     """
@@ -533,6 +435,7 @@ def get_mbo_dirs() -> dict:
         "data": data,
         "tests": tests,
     }
+
 
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k

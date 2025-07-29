@@ -2,17 +2,27 @@ import argparse
 from pathlib import Path
 from mbo_utilities import imread, imwrite, __version__
 
+
 def add_args(parser):
     parser.add_argument("input", help="Input file or directory")
     parser.add_argument("output", help="Output directory or filename")
-    parser.add_argument("--ext", default=".tiff", help="File extension for output (e.g., .tif, .npy)")
-    parser.add_argument("--planes", nargs="*", type=int, help="Planes to export (1-based index)")
+    parser.add_argument(
+        "--ext", default=".tiff", help="File extension for output (e.g., .tif, .npy)"
+    )
+    parser.add_argument(
+        "--planes", nargs="*", type=int, help="Planes to export (1-based index)"
+    )
     parser.add_argument("--roi", nargs="*", type=int, help="ROI indices to include")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output")
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Overwrite existing output"
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    parser.add_argument("--target-chunk-mb", type=int, default=20, help="Target chunk size in MB")
+    parser.add_argument(
+        "--target-chunk-mb", type=int, default=20, help="Target chunk size in MB"
+    )
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     return parser
+
 
 def main():
     parser = argparse.ArgumentParser(description="TODO!")
@@ -41,4 +51,3 @@ def main():
     )
 
     print(f"\nDone. Output saved to {output_path}\n")
-

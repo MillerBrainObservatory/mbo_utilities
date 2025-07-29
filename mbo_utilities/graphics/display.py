@@ -17,13 +17,15 @@ def mbo_tiff_display(array: MBOTiffArray, **kwargs):
     return fpl.ImageWidget(
         data=array,
         histogram_widget=True,
-        figure_kwargs={"size": (800, 1000),},  # "canvas": canvas},
+        figure_kwargs={
+            "size": (800, 1000),
+        },  # "canvas": canvas},
         graphic_kwargs={"vmin": array.min(), "vmax": array.max()},
         window_funcs={"t": (np.mean, 0)},
     )
 
-def mbo_raw_display(array: MboRawArray, **kwargs):
 
+def mbo_raw_display(array: MboRawArray, **kwargs):
     arrays = []
     names = []
     # if roi is None, use a single array.roi = None
@@ -38,24 +40,18 @@ def mbo_raw_display(array: MboRawArray, **kwargs):
         data=arrays,
         names=names,
         histogram_widget=True,
-        figure_kwargs={"size": (800, 1000),},  # "canvas": canvas},
+        figure_kwargs={
+            "size": (800, 1000),
+        },  # "canvas": canvas},
         graphic_kwargs={"vmin": array.min(), "vmax": array.max()},
         window_funcs={"t": (np.mean, 0)},
     )
 
-def demixing_display(array, **kwargs):
-    if HAS_MASKNMF:
-        return make_demixing_video(  # type: ignore  # noqa
-            array,
-            device=MBO_DEVICE,
-            **kwargs
-        )
-
 def imshow_lazy_array(array, **kwargs):
+    if hasattr(array, "imshow"):
+        return array.imshow(**kwargs)
     if isinstance(array, MBOTiffArray):
         return mbo_tiff_display(array, **kwargs)
     elif isinstance(array, MboRawArray):
         return mbo_raw_display(array, **kwargs)
-    elif isinstance(array, DemixingResultsArray):
-        return demixing_display(array, **kwargs)
     raise ValueError("No supported lazy array type found for display.")

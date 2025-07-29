@@ -10,6 +10,7 @@ from dask import array as da
 from mbo_utilities import get_mbo_dirs
 from mbo_utilities._parsing import _load_existing, _increment_label, _get_git_commit
 
+
 def run_benchmark(*arrays, uuid=None):
     """
     Run a benchmark for indexing arrays and save the results to a JSON file.
@@ -26,6 +27,7 @@ def run_benchmark(*arrays, uuid=None):
     save_path = tests_dir / "benchmark_indexing.json"
     return _benchmark_indexing(arrays, save_path)
 
+
 def _benchmark_indexing(
     arrays: dict[str, np.ndarray | da.Array | zarr.Array],
     save_path: Path,
@@ -35,9 +37,19 @@ def _benchmark_indexing(
 ):
     if index_slices is None:
         index_slices = {
-            "[:10, :, 100:200, 100:200]": (slice(0, 10), slice(None), slice(100, 200), slice(100, 200)),
+            "[:10, :, 100:200, 100:200]": (
+                slice(0, 10),
+                slice(None),
+                slice(100, 200),
+                slice(100, 200),
+            ),
             "[5, 0, :, :]": (5, 0, slice(None), slice(None)),
-            "[:200, 0, ::2, ::2]": (slice(None), slice(None), slice(None, None, 2), slice(None, None, 2)),
+            "[:200, 0, ::2, ::2]": (
+                slice(None),
+                slice(None),
+                slice(None, None, 2),
+                slice(None, None, 2),
+            ),
             "[-1, :, :, :]": (-1, slice(None), slice(None), slice(None)),
             "[:5, :2, :100, :]": (slice(0, 5), slice(0, 2), slice(0, 100), slice(None)),
             "[0, :, 50, :]": (0, slice(None), 50, slice(None)),

@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join("..")))
 sys.path.insert(0, os.path.abspath(os.path.join("..", "mbo_utilities")))
 
 project = "mbo_utilities"
+author = ""
 copyright = "2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved"
 release = "0.0.1"
 

@@ -33,6 +33,7 @@ class FileDialog:
         self._select_folder = None
         self._threading_enabled = MBO_THREADING_ENABLED
         self._widget_enabled = True
+        self.metadata_only = False
 
     @property
     def widget_enabled(self):
@@ -84,12 +85,10 @@ class FileDialog:
             imgui.dummy(hello_imgui.em_to_vec2(0, 5))
 
             # centre prompt ------------------------------------------
-            txt = (
-                "Select a file,"
-                   " multiple files,"
-                   " or a folder to preview:"
-               )
-            imgui.set_cursor_pos_x((imgui.get_window_width() - imgui.calc_text_size(txt).x) * 0.5)
+            txt = "Select a file, multiple files, or a folder to preview:"
+            imgui.set_cursor_pos_x(
+                (imgui.get_window_width() - imgui.calc_text_size(txt).x) * 0.5
+            )
             imgui.text_colored(imgui.ImVec4(1, 0.85, 0.3, 1), txt)
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.5))
 
@@ -132,6 +131,16 @@ class FileDialog:
             )
             _, self.widget_enabled = imgui.checkbox(
                 "Enable 'Data Preview' widget", self._widget_enabled
+            )
+            set_tooltip(
+                "Enable/disable the 'Data Preview' widget. "
+                "This widget allows you to visualize projections,"
+                " mean-subtraction,"
+                " and preview scan-phase correction."
+            )
+
+            _, self.metadata_only = imgui.checkbox(
+                "Metadata Preview Only", self.metadata_only
             )
             set_tooltip(
                 "Enable/disable the 'Data Preview' widget. "

@@ -5,6 +5,7 @@ from .. import log
 
 GUI_LOGGERS = log.get_package_loggers()
 
+
 class GuiLogHandler(logging.Handler):
     def __init__(self, gui_logger):
         super().__init__()
@@ -17,7 +18,7 @@ class GuiLogHandler(logging.Handler):
             logging.INFO: "info",
             logging.WARNING: "warning",
             logging.ERROR: "error",
-            logging.CRITICAL: "error"
+            logging.CRITICAL: "error",
         }.get(record.levelno, "info")
         # extract only the last segment of the logger name, e.g. "mbo.scan" → "scan"
         name = record.name.split(".")[-1]
@@ -30,9 +31,7 @@ class GuiLogger:
         self.filters = {"debug": True, "info": True, "warning": True}
         self.messages = []  # now holds tuples (time, level, logger_name, text)
         self.window_flags = imgui.WindowFlags_.none
-        self.active_loggers = {
-            name: True for name in GUI_LOGGERS
-        }
+        self.active_loggers = {name: True for name in GUI_LOGGERS}
         # self.sub_loggers = log.get_all_loggers()
 
     def draw(self):
@@ -48,7 +47,9 @@ class GuiLogger:
         # Sub‐logger toggles
         for name in list(self.active_loggers):
             imgui.push_id(f"logger_{name}")
-            changed, state = imgui.checkbox(f"Logger: {name}", self.active_loggers[name])
+            changed, state = imgui.checkbox(
+                f"Logger: {name}", self.active_loggers[name]
+            )
             if changed:
                 self.active_loggers[name] = state
                 if state:
@@ -90,7 +91,9 @@ class GuiLogger:
         # Sub‐logger toggles
         for name in list(self.active_loggers):
             imgui.push_id(f"logger_{name}")
-            changed, state = imgui.checkbox(f"Logger: {name}", self.active_loggers[name])
+            changed, state = imgui.checkbox(
+                f"Logger: {name}", self.active_loggers[name]
+            )
             if changed:
                 self.active_loggers[name] = state
                 if state:

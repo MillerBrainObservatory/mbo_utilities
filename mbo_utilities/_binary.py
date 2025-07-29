@@ -104,6 +104,7 @@ class VolumetricBinaryFile:
     def ndim(self):
         return len(self._shape)
 
+
 def tiff_to_binary(tiff_path, out_path, dtype="int16"):
     data = tifffile.memmap(tiff_path)
     out_path = Path(out_path).with_suffix(".bin")

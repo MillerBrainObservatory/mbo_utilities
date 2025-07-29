@@ -7,7 +7,15 @@ from typing import Sequence, Callable
 import numpy as np
 
 from . import log
-from .array_types import DemixingResultsArray, Suite2pArray, H5Array, MBOTiffArray, TiffArray, MboRawArray, NpyArray
+from .array_types import (
+    DemixingResultsArray,
+    Suite2pArray,
+    H5Array,
+    MBOTiffArray,
+    TiffArray,
+    MboRawArray,
+    NpyArray,
+)
 from .file_io import get_files
 from .metadata import is_raw_scanimage, has_mbo_metadata
 from .roi import supports_roi
@@ -25,7 +33,14 @@ SUPPORTED_FTYPES = (
 )
 
 _ARRAY_TYPE_KWARGS = {
-    MboRawArray: {"roi", "fix_phase", "phasecorr_method", "border", "upsample", "max_offset"},
+    MboRawArray: {
+        "roi",
+        "fix_phase",
+        "phasecorr_method",
+        "border",
+        "upsample",
+        "max_offset",
+    },
     MBOTiffArray: set(),  # accepts no kwargs
     Suite2pArray: set(),  # accepts no kwargs
     H5Array: {"dataset"},
@@ -34,23 +49,24 @@ _ARRAY_TYPE_KWARGS = {
     DemixingResultsArray: set(),
 }
 
+
 def _filter_kwargs(cls, kwargs):
     allowed = _ARRAY_TYPE_KWARGS.get(cls, set())
     return {k: v for k, v in kwargs.items() if k in allowed}
 
 
 def imwrite(
-        lazy_array,
-        outpath: str | Path,
-        planes: list | tuple = None,
-        roi: int | Sequence[int] | None = None,
-        metadata: dict = None,
-        overwrite: bool = True,
-        ext: str = ".tiff",
-        order: list | tuple = None,
-        target_chunk_mb: int = 20,
-        progress_callback: Callable = None,
-        debug: bool = False,
+    lazy_array,
+    outpath: str | Path,
+    planes: list | tuple = None,
+    roi: int | Sequence[int] | None = None,
+    metadata: dict = None,
+    overwrite: bool = True,
+    ext: str = ".tiff",
+    order: list | tuple = None,
+    target_chunk_mb: int = 20,
+    progress_callback: Callable = None,
+    debug: bool = False,
 ):
     # Logging
     if debug:
@@ -66,7 +82,6 @@ def imwrite(
     outpath = Path(outpath)
     if not outpath.parent.is_dir():
         raise ValueError(f"{outpath} is not inside a valid directory.")
-    outpath.mkdir(exist_ok=True)
 
     if roi is not None:
         if not supports_roi(lazy_array):
@@ -74,38 +89,6 @@ def imwrite(
                 f"{type(lazy_array)} does not support ROIs, but `roi` was provided."
             )
         lazy_array.roi = roi
-
-    # Determine number of planes from lazy_array attributes
-    # fallback to shape
-    num_planes = 1
-    if hasattr(lazy_array, "num_planes"):
-        num_planes = lazy_array.num_planes
-    elif hasattr(lazy_array, "num_channels"):
-        num_planes = lazy_array.num_channels
-    if hasattr(lazy_array, "metadata"):
-        if "num_planes" in lazy_array.metadata:
-            num_planes = lazy_array.metadata["num_planes"]
-        elif "num_channels" in lazy_array.metadata:
-            num_planes = lazy_array.metadata["num_channels"]
-    elif hasattr(lazy_array, 'ndim') and lazy_array.ndim >= 3:
-        num_planes = lazy_array.shape[1] if lazy_array.ndim == 4 else 1
-    else:
-        raise ValueError("Cannot determine the number of planes.")
-
-    # convert to 0 based indexing
-    if isinstance(planes, int):
-        planes = [planes - 1]
-    elif planes is None:
-        planes = list(range(num_planes))
-    else:
-        planes = [p - 1 for p in planes]
-
-    # make sure indexes are valid
-    over_idx = [p for p in planes if p < 0 or p >= num_planes]
-    if over_idx:
-        raise ValueError(
-            f"Invalid plane indices {', '.join(map(str, [p + 1 for p in over_idx]))}; must be in range 1…{lazy_array.num_channels}"
-        )
 
     if order is not None:
         if len(order) != len(planes):
@@ -135,14 +118,19 @@ def imwrite(
             ext=ext,
             progress_callback=progress_callback,
             planes=planes,
-            debug=debug
+            debug=debug,
         )
     else:
+        if isinstance(lazy_array, Suite2pArray):
+            raise TypeError("Attempting to write a Suite2pArray directly."
+                            " Is there an ops.npy file in a directory with a tiff file?"
+                            "Please make write these to separate directories.")
         raise TypeError(f"{type(lazy_array)} does not implement an `imwrite()` method.")
 
+
 def imread(
-        inputs: str | Path | Sequence[str | Path],
-        **kwargs, # for the reader
+    inputs: str | Path | Sequence[str | Path],
+    **kwargs,  # for the reader
 ):
     if isinstance(inputs, np.ndarray):
         return inputs
@@ -169,6 +157,23 @@ def imread(
         raise ValueError(f"No supported files in {inputs}")
     paths = filtered
 
+    parent = paths[0].parent if paths else None
+    ops_file = parent / "ops.npy" if parent else None
+
+    if ops_file and ops_file.exists():
+        md = np.load(str(ops_file), allow_pickle=True).item()
+        if (parent / "ops.npy").exists():
+            return Suite2pArray(md)
+        elif (parent / "reg_tif").is_dir():
+            tifs = sorted((parent / "reg_tif").glob("*.tif"))
+            if tifs:
+                return TiffArray(tifs)
+        else:
+            raise ValueError(
+                f"Unable to open suite2p data from {parent}.\n"
+                "Please ensure the directory structure is correct."
+            )
+
     exts = {p.suffix.lower() for p in paths}
     first = paths[0]
 
@@ -182,7 +187,7 @@ def imread(
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            return MboRawArray(files=paths, ** _filter_kwargs(MboRawArray, kwargs))
+            return MboRawArray(files=paths, **_filter_kwargs(MboRawArray, kwargs))
         if has_mbo_metadata(first):
             return MBOTiffArray(paths)
         return TiffArray(paths)
@@ -202,5 +207,3 @@ def imread(
         return DemixingResultsArray(first.parent)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
-
-

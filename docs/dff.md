@@ -2,14 +2,20 @@
 bibliography:
   - references.bib
 ---
+# Quantifying Cell Activity
 
-# Quantifying Cell Activity (ΔF/F₀)
+The gold-standard formula for measuring cellular activity is "Delta F over F₀", or the change in fluorescence intensity normalized by the baseline activity:
 
-$\Delta F/F_0 = \frac{F - F_0}{F_0}$
+```{math}
+:class: center large
 
-This guide covers common approaches to extracting calcium activity and how this will differ depending on which pipeline you are using.
+\Delta F/F_0 = \frac{F - F_0}{F_0}
+```
 
-The below guide assumes you've read this please read [this blog-post](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
+Here, F₀ a user-defined baseline that may be static (e.g., median over all frames)
+or dynamically estimated using a rolling window.
+
+This guide assumes you've read [this scientifica article](https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data) by Dr Peter Rupprecht at the University of Zurich.
 
 ::::{grid}
 :::{grid-item-card} Blog-Post Takeaways
@@ -24,9 +30,25 @@ The below guide assumes you've read this please read [this blog-post](https://ww
 :::
 ::::
 
-## Overview
+```{figure} ./_images/cell_activity.png
+:alt: Cell Activity (DF/F)
+:figclass: full-width
+:name: fig-dff-activity
 
-This table summarizes Calcium Activity detection methods reviewed by {cite:t}`huang`.
+ΔF/F traces for 30 cells, sorted by similarity using the [Rastermap](https://github.com/MouseLand/rastermap) algorithm.
+```
+
+## Baseline F₀ Strategies
+
+Choosing the correct baseline strategy depends on many factors:
+
+- Cell type 
+- Brain location
+- Frame-rate
+- Virus Kinetics
+- Scientific question
+
+This table summarizes Calcium Activity detection strategies used in embryoinic development reviewed by {cite:t}`huang`.
 
 | **Method**                         | **How It's Performed**                                                                 | **Pros**                                                      | **Cons**                                                             |
 |-----------------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------|------------------------------------------------------------------------|
@@ -36,38 +58,126 @@ This table summarizes Calcium Activity detection methods reviewed by {cite:t}`hu
 | **Standard Deviation (SD) Masking**| Define active frames/regions where ΔF exceeds N×SD of baseline.                        | Objective thresholding for event detection.                    | Threshold choice heavily affects results.                            |
 | **Image Subtraction (Frame-to-Frame)**| Compute ΔF = Fₙ − Fₙ₋₁ or F − background to detect sudden changes.                   | Simple, fast; used for wave detection.                         | Sensitive to noise; misses gradual changes.                          |
 
+```{figure} ./_images/dff_baseline_strategies2.png
+:alt: Comparison of dF/F baseline strategies
+:figclass: full-width
+:name: fig-dff-strategies
+
+Comparison of different ΔF/F₀ baseline correction methods across selected cells.
+```
+
+```{figure} ./_images/dff_baseline_strategies_dff.png
+:alt: Resulting DFF values from baseline strategies
+:figclass: full-width
+:name: fig-dff-dff
+
+The resulting ΔF/F₀ traces can look different depending on the chosen baseline strategy.
+```
+
+```{figure} ./_images/dff_baseline_strategies_events.png
+:alt: Resulting DFF values from baseline strategies with Events
+:figclass: full-width
+:name: fig-dff-dff-ev
+
+The resulting ΔF/F₀ traces can look different depending on the chosen baseline strategy.
+```
+
+## Standardized Noise Levels
+
+```{math}
+:class: center large
+
+\nu = \frac{\mathrm{median}_t\left( \left| \frac{\Delta F_t}{F_0} - \frac{\Delta F_{t+1}}{F_0} \right| \right)}{\sqrt{f_r}}
+```
+- Compare shot-noise levels across datasets, recordings, experiments
+- Takes advantage of the slow calcium signal, which is typically similar between adjacent frames
+- Median to exclude outlies stemming from fast onset
+- Norm by sqrt(framerate) makes metric comparable across datasets with different framerates
+- Shot-noise decreases with #samples with a square root dependency
+
+The resulting units, `% for dF/F, divided by the square root of seconds`, is strange.
+
+This metric should be used relative to other datasets.
+
+```{figure} ./_images/noise_comp.png
+:alt: High vs Low Noise Levels
+:figclass: full-width
+:name: fig-noise-high-low
+
+Top N neurons with highest and lowest standardized noise levels.
+```
+
 ## Pipelines
 
-You need to know the output units f
+There are several pipelines for users to choose from when deciding how to process calcium imaging datasets.
+Often times, the outputs of these pipelines are in units that are not well documented.
+Even worse, the *inputs* to downstream pipelines pipelines require data to have particular units.
 
-### CaImAn
+(bg_sub_example)=
+```{admonition} Example
+:class: dropdown
+
+[This discussion](https://gcamp6f.com/2021/10/04/large-scale-calcium-imaging-noise-levels/), which details how to calculate noise for a variety of datasets, used traces that had [the background signal subtracted](https://github.com/cajal/microns_phase3_nda/issues/21).
+
+This happens because CaImAn subtracts the background signal from each neuron under the hood.
+The resulting units are no longer raw signal, they are background-subtracted raw-signal.
+This process reduces the baseline F₀ to nearly zero and heavily skew ΔF/F₀ calculations.
+```
+
+### [CaImAn](https://github.com/flatironinstitute/CaImAn)
 
 See: {func}`detrend_df_f <caiman:caiman.source_extraction.cnmf.utilities.detrend_df_f>`
 
 CaImAn computes ΔF/F₀ using a **running low-percentile baseline**.
+
 By default, it uses the **8th percentile** over a **500 frame** window.
 The idea is to track the lower envelope of the signal to get F₀ without being biased by transients.
 
 **Neuropil/background:** CaImAn handles this as part of its CNMF model {cite:p}`cnmf`.
-Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are already cleaned.
+
+Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are background subtracted during this [factorization](https://en.wikipedia.org/wiki/Matrix_decomposition) (as was the issue in the above {ref}`example <bg_sub_example>`).
+
+There is a strong argument to be made that a matrix factorization `CNMF` is not complex enough to model the true background and neuropil.
+
+```{figure} ./_images/dff_baseline_strategies_caiman.png
+:alt: CaImAn default DF/F strategy
+:figclass: full-width
+:name: fig-dff-caiman
+
+[CaImAn](https://github.com/flatironinstitute/CaImAn) uses a default baseline of the `lower 8th percentile` and a moving window of `200 frames`.
+```
 
 {cite:t}`caiman`
 
-### Suite2p
+### [Suite2p](https://github.com/MouseLand/suite2p/tree/main)
 
 Suite2p does **not** output traces in ΔF/F₀ format directly.
-Instead, it gives you baseline-detrended fluorescence (i.e., $\Delta F$).
 
-The default F₀ estimate comes from a **"maximin"** filter: smooth the trace with a Gaussian (default \~10 s), take a rolling **min**, then a **max** over a 60 s window. Alternatively, you can use a **constant F₀**, either the **8th percentile** or the minimum of a smoothed trace.
+Instead, it gives you the raw trace and the neuropil, along with spike estimates if you ran [deconvolution](https://suite2p.readthedocs.io/en/latest/deconvolution.html).
+The neuropil represents fluorescence from the surrounding non-somatic tissue. 
+As an optional step, many experimentors apply a fixed subtraction:
 
-If you want ΔF/F₀, you divide the detrended trace by an F₀ value manually after the fact.
+```python
+# F is an [n_neurons x time] array of raw signal
+# Fneu is an [n_neurons x time] array of neuropil
+F_corrected = F - 0.7 * Fneu
+```
 
-Suite2p subtracts **0.7 × F<sub>neu</sub>** (surrounding fluorescence) from each ROI trace before baseline correction.
-This is a fixed fraction, applied uniformly.
+The 0.7 is an empirically chosen scalar to account for the partial contamination.
+Essentially you subtract 70% of the signal contained in the surrounding neuropil.
+
+To compute ΔF/F₀, you divide trace, be that neuropil-corrected or not, by an F₀ you calculate yourself.
+
+Internally, when running spike deconvolution, suite2p will convert your data into DF/F0 internally.
+For this, the default F₀ estimate comes from a **"maximin"** filter: smooth the trace with a Gaussian (default \~10 s), take a rolling **min**, then a **max** over a 60 s window.
+
+```{figure} ./_images/dff_oasis.png
+Raw, neuropil, ΔF/F₀ and resulting deconvolved spikes as output by [Suite2p](https://github.com/MouseLand/suite2p)
+```
 
 {cite:t}`suite2p`
 
-### EXTRACT
+### [EXTRACT](https://github.com/schnitzer-lab/EXTRACT-public?tab=readme-ov-file)
 
 EXTRACT outputs raw fluorescence signals without built-in ΔF/F₀ calculation. You compute it yourself using something like a low-percentile (e.g. 10%) as F₀. Most people use a global or sliding percentile window.
 
@@ -75,10 +185,7 @@ EXTRACT outputs raw fluorescence signals without built-in ΔF/F₀ calculation. 
 
 {cite:t}`extract2017`, {cite:t}`extract2021`
 
-
-## Comparison Table
-
-| **Pipeline** | **F₀ Method**                       | **ΔF/F₀**                 | **Neuropil Handling**                            |
+| **Pipeline** | **F₀ Method**                       | **ΔF/F₀**                 | **Neuropil**                            |
 | ------------ | ----------------------------------- | ------------------------- | ------------------------------------------------ |
 | **CaImAn**   | 8th percentile, 500-frame window    | Yes, in pipeline          | Modeled via CNMF, no manual subtraction          |
 | **Suite2p**  | Maximin (default) or 8th percentile | No, user divides post hoc | 0.7 × F<sub>neu</sub> subtracted before baseline |
@@ -106,6 +213,21 @@ Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1.
 3. GCaMP6 calibration study {cite:t}`huang`
 - ΔF/F = (F − F₀,local)/F₀,global, where F₀,local is the mean fluorescence over 100 ms before the first AP, and F₀,global is the minimum F₀,local across trials  
 - GCaMP6f
+
+(dynamics)=
+## Indicator Dynamics
+
+| **GCaMP Variant**     | **Optimal Tau (s)** | **Notes / Sources** |
+|-----------------------|---------------------|----------------------|
+| **GCaMP6f (fast)**    | ~0.5–0.7 s          | Suite2p: ~0.7 s ([docs](https://suite2p.readthedocs.io)). OASIS/CNMF: ~0.5–0.7 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~0.4 s ([docs](https://caiman.readthedocs.io)). |
+| **GCaMP6m (medium)**  | ~1.0–1.25 s         | Suite2p: ~1.0 s. OASIS: ~1.25 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~1.0 s ([docs](https://caiman.readthedocs.io)). |
+| **GCaMP6s (slow)**    | ~1.5–2.0 s          | Suite2p: 1.25–1.5 s. OASIS/Suite2p: ~2.0 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~1.5–2.0 s. |
+| **GCaMP7f (fast)**    | ~0.5 s              | Spike inference tuning ([bioRxiv](https://www.biorxiv.org)). Similar to GCaMP6f. |
+| **GCaMP7m (medium)**  | ~1.0 s (est.)       | Estimated by analogy to GCaMP6m. No default in tools. |
+| **GCaMP7s (slow)**    | ~1.0–1.5 s          | In vivo half-decay ~0.7 s ([eLife](https://elifesciences.org)). Tau ≈ 1.0 s. |
+| **GCaMP8f (fast)**    | ~0.3 s              | OASIS fine-tuning ([bioRxiv](https://www.biorxiv.org)). Fastest decay; tenfold faster than 6f/7f ([Nature](https://www.nature.com)). |
+| **GCaMP8m (medium)**  | ~0.3 s              | Slightly slower than 8f, still ~0.3 s ([bioRxiv](https://www.biorxiv.org); [Nature](https://www.nature.com)). |
+| **GCaMP8s (slow)**    | ~0.7 s              | Spike inference optimal tau ~0.7 s ([bioRxiv](https://www.biorxiv.org)). Faster than 6s ([Nature](https://www.nature.com)). |
 
 ## References
 

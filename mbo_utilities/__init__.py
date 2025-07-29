@@ -5,10 +5,11 @@ from .file_io import (
     npy_to_dask,
     expand_paths,
     get_mbo_dirs,
-    normalize_file_url,
     load_ops,
     write_ops,
+    get_plane_from_filename,
 )
+from ._parsing import _normalize_file_url
 from .plot_util import save_png, save_mp4
 
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
@@ -44,12 +45,12 @@ __all__ = [
     "subsample_array",
     "load_ops",
     "write_ops",
+    "get_plane_from_filename",
     # metadata
     "is_raw_scanimage",
     "get_metadata",
     "params_from_metadata",
     # util
-    "normalize_file_url",
     "expand_paths",
     "norm_minmax",
     "smooth_data",

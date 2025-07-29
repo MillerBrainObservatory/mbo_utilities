@@ -1,0 +1,32 @@
+,param,group1,group2
+0,hRoiManager.scanFramePeriod,0.05832543510703366,0.05859256639792423
+1,hRoiManager.scanVolumeRate,17.14517856857628,17.06701142272251
+2,hRoiManager.linePeriod,6.312276526735244e-05,6.313854137707352e-05
+3,hRoiManager.scanFrameRate,17.14517856857628,17.06701142272251
+4,hChannels.channelLUT,"[[-17, 403], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [-31, 95], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [-21, 14], [-21, 226], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [23, 2127], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100]]","[[225, 1441], [-10, 12], [-10, 12], [-10, 12], [-10, 12], [-10, 12], [290, 3156], [-10, 12], [-10, 12], [-10, 12], [-10, 12], [-10, 12], [-10, 12], [34, 820], [-4, 0], [-10, 12], [-10, 12], [-10, 12], [-10, 12], [-10, 12], [-4, 0], [-10, 12], [-10, 12], [-10, 12], [-10, 12], [-10, 12], [-10, 12], [-4, 0], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100], [0, 100]]"
+5,hChannels.channelOffset,"[-386, -120]","[-376, -122]"
+6,acqsPerLoop,1,600
+7,loopAcqInterval,10,30
+8,hDisplay.displayRollingAverageFactor,10,30
+9,acqState,grab,loop
+10,extTrigEnable,False,1
+11,hBeams.powers,7.000000000000001,45
+12,hBeams.powerFractions,0.07,0.45
+13,hScan2D.fillFractionSpatial,0.9014551171122458,0.9014551171122457
+14,hScan2D.channelOffsets,"[-386, -120]","[-376, -122]"
+15,hScan2D.virtualChannelSettings__9.laserFilterWindow,"[299, 319]","[298, 318]"
+16,hScan2D.fillFractionTemporal,0.7150000000000002,0.7150000000000001
+17,hScan2D.scannerFrequency,7921.072498682242,7919.093300143246
+18,hScan2D.virtualChannelSettings__5.laserFilterWindow,"[149, 169]","[150, 170]"
+19,hScan2D.virtualChannelSettings__14.laserFilterWindow,"[489, 509]","[490, 510]"
+20,hScan2D.trigNextInTerm,,D1.0
+21,hScan2D.virtualChannelSettings__2.laserFilterWindow,"[37, 57]","[36, 56]"
+22,hStackManager.zs,-8895.207,-6.001
+23,hStackManager.zsAllActuators,-8895.207,-6.001
+24,hStackManager.framesPerSlice,6600,inf
+25,hStackManager.zPowerReference,-8895.207000000006,-6.000749999999243
+26,hStackManager.numSlices,121,81
+27,hMotors.samplePosition,"[0, -10, -8895.207000000006]","[0, 0, -6.000749999999243]"
+28,hMotors.axesPosition,"[0, 0, 27536.77500000003]","[0, 0, 36691.53825000003]"
+29,hConfigurationSaver.usrFilename,C:\Program Files\Vidrio\ScanImage Configuration\User_Settings\2024-06-17_Pollen-Zstack.usr,C:\Program Files\Vidrio\ScanImage Configuration\User_Settings\2025-01-14_YG-Beads.usr
+30,hConfigurationSaver.cfgFilename,C:\Program Files\Vidrio\ScanImage Configuration\Configuration\2024-06-17_Pollen.cfg,C:\Program Files\Vidrio\ScanImage Configuration\Configuration\2025-01-22_CavA.cfg

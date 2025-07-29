@@ -63,7 +63,7 @@ def begin_popup_size():
     return hello_imgui.em_to_vec2(w, h)
 
 
-def ndim_to_frame(arr, t=0, z=0)->np.ndarray:
+def ndim_to_frame(arr, t=0, z=0) -> np.ndarray:
     if arr.ndim == 4:  # TZXY
         return arr[t, z]
     if arr.ndim == 3:  # TXY
