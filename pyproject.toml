@@ -23,7 +23,7 @@ dependencies = [
 	"imgui-bundle==1.6.3",
 	"jupyter_rfb>=0.5.1",
 	"fastplotlib>=0.5.0",
-	"jupyterlab>=4.5.0a0",
+	"jupyterlab",
 	"ipykernel",
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
