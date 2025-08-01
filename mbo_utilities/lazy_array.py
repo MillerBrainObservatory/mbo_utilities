@@ -161,9 +161,8 @@ def imread(
     ops_file = parent / "ops.npy" if parent else None
 
     if ops_file and ops_file.exists():
-        md = np.load(str(ops_file), allow_pickle=True).item()
         if (parent / "ops.npy").exists():
-            return Suite2pArray(md)
+            return Suite2pArray(parent / "ops.npy")
         elif (parent / "reg_tif").is_dir():
             tifs = sorted((parent / "reg_tif").glob("*.tif"))
             if tifs:
