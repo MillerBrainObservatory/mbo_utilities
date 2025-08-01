@@ -28,7 +28,7 @@ from mbo_utilities.file_io import (
     expand_paths,
 )
 from mbo_utilities.util import subsample_array
-from mbo_utilities.pipelines import HAS_SUITE2P, HAS_MASKNMF, load_from_dir
+from mbo_utilities.pipelines import HAS_MASKNMF, load_from_dir
 
 from mbo_utilities import log
 from mbo_utilities.roi import iter_rois
@@ -74,24 +74,97 @@ class DemixingResultsArray:
             graphic_kwargs={"vmin": -300, "vmax": 4000},
             window_funcs=window_funcs,
         )
+class Suite2pArray:
+    def __init__(self, path, custom_bin=None):
+        path = Path(path)
+        if path.is_dir():
+            ops_path = path/"ops.npy"
+            if not ops_path.exists():
+                raise FileNotFoundError(f"No ops.npy in {path}")
+            base_dir = path
+        elif path.suffix == ".npy":
+            ops_path = path
+            base_dir = path.parent
+        elif path.suffix == ".bin":
+            bin_path = path.resolve()
+            base_dir = bin_path.parent
+            ops_path = base_dir/"ops.npy"
+            if not ops_path.exists():
+                raise FileNotFoundError(f"No ops.npy in {base_dir}")
+        else:
+            raise TypeError(f"Path must be a dir, ops.npy, or .bin, got {path}")
+        if custom_bin:
+            bin_path = Path(custom_bin).resolve()
+            base_dir = bin_path.parent
+            ops_path = base_dir/"ops.npy"
+            if not ops_path.exists():
+                raise FileNotFoundError(f"No ops.npy in {base_dir}")
+        if "bin_path" not in locals():
+            for fname in ("data.bin","data_raw.bin"):
+                candidate = base_dir/fname
+                if candidate.exists():
+                    bin_path = candidate
+                    break
+            else:
+                raise FileNotFoundError(f"No binary file found in {base_dir}")
+
+        self.ops = np.load(ops_path, allow_pickle=True).item()
+        self.bin_path = bin_path
+
+        self.ops = np.load(ops_path, allow_pickle=True).item()
+        self.Ly = self.ops["Ly"]
+        self.Lx = self.ops["Lx"]
+        self.nframes = self.ops.get("nframes", self.ops.get("n_frames"))
+        if self.nframes is None:
+            raise ValueError("Missing 'nframes' or 'n_frames' in metadata")
+        self.shape = (self.nframes, self.Ly, self.Lx)
+        self.dtype = np.int16
+        self._file = np.memmap(str(bin_path), mode="r", dtype=self.dtype, shape=self.shape)
+
+    def __getitem__(self, key):
+        return self._file[key]
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __array__(self):
+        n = min(10, self.nframes)
+        return np.stack([self._file[i] for i in range(n)], axis=0)
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    @property
+    def min(self):
+        return float(self._file[0].min())
+
+    @property
+    def max(self):
+        return float(self._file[0].max())
+
+    def close(self):
+        self._file._mmap.close()
 
 
 @dataclass
-class Suite2pArray:
-    metadata: dict
+class Suite2pArray2:
+    metadata: dict | str | Path
 
     def __post_init__(self):
+        if isinstance(self.metadata, (str, Path)):
+            self.ops_filename = self.metadata
+            self.metadata = np.load(self.filename, allow_pickle=True).item()
+        else:
+            self.filename = self.metadata.get("reg_file") or self.metadata.get("raw_file")
+
+        self.filename = str(self.filename)
         self.Ly = self.metadata["Ly"]
         self.Lx = self.metadata["Lx"]
         self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
         if self.nframes is None:
             raise ValueError("Missing 'nframes' or 'n_frames' in metadata")
 
-        self.filename = self.metadata.get("reg_file", self.metadata.get("raw_file"))
-        if self.filename is None:
-            raise ValueError("Missing 'reg_file' or 'raw_file' in metadata")
-
-        self.filename = str(self.filename)
         self.shape = (self.nframes, self.Ly, self.Lx)
         self.dtype = np.int16
         self._file = np.memmap(
@@ -926,7 +999,8 @@ class MboRawArray(scans.ScanMultiROI):
 
                 md = self.metadata.copy()
                 md["plane"] = plane + 1  # back to 1-based indexing
-                md["roi"] = roi
+                md["mroi"] = roi
+                md["roi"] = roi  # alias
                 _write_plane(
                     self,
                     target,
