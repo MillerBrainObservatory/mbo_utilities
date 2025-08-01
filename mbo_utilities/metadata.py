@@ -11,6 +11,7 @@ import numpy as np
 import tifffile
 from tifffile import read_scanimage_metadata, matlabstr2py
 from tifffile.tifffile import bytes2str, read_json, FileHandle
+from mbo_utilities import get_files
 
 
 def _params_from_metadata_caiman(metadata):
@@ -239,7 +240,83 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
         return False
 
 
-def get_metadata(file: os.PathLike | str, z_step=None, verbose=False, strict=False):
+def get_metadata(file, z_step=None, verbose=False, strict=False):
+    """
+    Extract metadata from a TIFF file or directory of TIFF files produced by ScanImage.
+
+    This function handles single files, lists of files, or directories containing TIFF files.
+    When given a directory, it automatically finds and processes all TIFF files in natural
+    sort order. For multiple files, it calculates frames per file accounting for z-planes.
+
+    Parameters
+    ----------
+    file : os.PathLike, str, or list
+        - Single file path: processes that file
+        - Directory path: processes all TIFF files in the directory
+        - List of file paths: processes all files in the list
+    z_step : float, optional
+        The z-step size in microns. If provided, it will be included in the returned metadata.
+    verbose : bool, optional
+        If True, returns extended metadata including all ScanImage attributes. Default is False.
+    strict : bool, optional
+        If True, enforces strict validation for multi-ROI data. Default is False.
+
+    Returns
+    -------
+    dict
+        A dictionary containing extracted metadata. For multiple files, includes:
+        - 'frames_per_file': list of frame counts per file (accounting for z-planes)
+        - 'total_frames': total frames across all files
+        - 'file_paths': list of processed file paths
+        - 'tiff_pages_per_file': raw TIFF page counts per file
+
+    Raises
+    ------
+    ValueError
+        If no recognizable metadata is found or no TIFF files found in directory.
+
+    Examples
+    --------
+    >>> # Single file
+    >>> meta = get_metadata("path/to/rawscan_00001.tif")
+    >>> print(f"Frames: {meta['num_frames']}")
+
+    >>> # Directory of files
+    >>> meta = get_metadata("path/to/scan_directory/")
+    >>> print(f"Files processed: {len(meta['file_paths'])}")
+    >>> print(f"Frames per file: {meta['frames_per_file']}")
+
+    >>> # List of specific files
+    >>> files = ["scan_00001.tif", "scan_00002.tif", "scan_00003.tif"]
+    >>> meta = get_metadata(files)
+    """
+    # Convert input to Path object and handle different input types
+    if isinstance(file, (list, tuple)):
+        # make sure all values in the list are strings or paths
+        if not all(isinstance(f, (str, os.PathLike)) for f in file):
+            raise ValueError(
+                "All items in the list must be of type str or os.PathLike."
+                f"Got: {file} of type {type(file)}"
+            )
+        file_paths = [Path(f) for f in file]
+        return get_metadata_batch(file_paths, z_step=z_step, verbose=verbose)
+
+    file_path = Path(file)
+
+    if file_path.is_dir():
+        tiff_files = get_files(file_path, "tif", sort_ascending=True)
+        if not tiff_files:
+            raise ValueError(f"No TIFF files found in directory: {file_path}")
+        return get_metadata_batch(tiff_files, z_step=z_step, verbose=verbose)
+
+    elif file_path.is_file():
+        return get_metadata_single(file_path, z_step=z_step, verbose=verbose, strict=strict)
+
+    else:
+        raise ValueError(f"Path does not exist or is not accessible: {file_path}")
+
+
+def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False, strict=False):
     """
     Extract metadata from a TIFF file produced by ScanImage or processed via the save_as function.
 
@@ -287,12 +364,11 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False, strict=Fal
     >>> print(meta_verbose["all"])
     {... Includes all ScanImage FrameData ...}
     """
-    if isinstance(file, list):
-        return get_metadata_batch(file)
-
     tiff_file = tifffile.TiffFile(file)
-    # previously processed files
     if not is_raw_scanimage(file):
+        print(f"File {file} is not a raw ScanImage TIFF. Attempting to read saved metadata.")
+        if not hasattr(tiff_file, "shaped_metadata") or tiff_file.shaped_metadata is None:
+            raise ValueError(f"No metadata found in {file}.")
         return tiff_file.shaped_metadata[0]
     elif hasattr(tiff_file, "scanimage_metadata"):
         meta = tiff_file.scanimage_metadata
@@ -317,6 +393,8 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False, strict=Fal
             num_rois = len(roi_group)
 
         num_planes = len(si["SI.hChannels.channelSave"])
+        zoom_factor = si["SI.hRoiManager.scanZoomFactor"]
+        uniform_sampling = si["SI.hScan2D.uniformSampling"]
 
         if num_rois > 1:
             try:
@@ -362,19 +440,24 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False, strict=Fal
         pixel_resolution = (fov_x_um / num_pixel_xy[0], fov_y_um / num_pixel_xy[1])
         metadata = {
             "num_planes": num_planes,
+            "num_rois": num_rois,
             "fov": fov_roi_um,  # in microns
             "fov_px": tuple(num_pixel_xy),
-            "num_rois": num_rois,
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
             "ndim": series.ndim,
             "dtype": "int16",
             "size": series.size,
-            "tiff_pages": len(pages),
             "roi_width_px": num_pixel_xy[0],
             "roi_height_px": num_pixel_xy[1],
             "objective_resolution": objective_resolution,
+            "zoom_factor": zoom_factor,
+            "uniform_sampling": uniform_sampling,
         }
+
+        if z_step is not None:
+            metadata['z_step'] = z_step
+
         if verbose:
             metadata["all"] = meta
             return metadata
@@ -384,7 +467,68 @@ def get_metadata(file: os.PathLike | str, z_step=None, verbose=False, strict=Fal
         raise ValueError(f"No metadata found in {file}.")
 
 
-def get_metadata_batch(files: list[os.PathLike | str], z_step=None, verbose=False):
+def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False, strict=False):
+    """
+    Extract and aggregate metadata from a list of TIFF files.
+
+    Parameters
+    ----------
+    file_paths : list of Path
+        List of TIFF file paths.
+    z_step : float, optional
+        Z-step in microns.
+    verbose : bool, optional
+        Include full metadata from first file if True.
+    strict : bool, optional
+        Enforce strict validation.
+
+    Returns
+    -------
+    dict
+        Aggregated metadata with per-file frame information.
+    """
+    if not file_paths:
+        raise ValueError("No files provided")
+
+    tiff_pages_per_file = []
+    frames_per_file = []
+    file_path_strings = []
+    first_meta = None
+
+    print(f"Processing {len(file_paths)} files...")
+
+    for i, file_path in enumerate(file_paths):
+        try:
+            file_meta = get_metadata_single(file_path, z_step=z_step)
+            if file_meta is None:
+                print(f"Warning: No metadata found in {file_path}. Skipping.")
+                continue
+
+            if i == 0:
+                first_meta = file_meta.copy()
+            n_pages = len(tifffile.TiffFile(file_path).pages)
+            tiff_pages_per_file.append(n_pages)
+            frames_per_file.append(int(n_pages / file_meta.get('num_planes')))
+            file_path_strings.append(str(file_path))
+
+        except Exception as e:
+            print(f"Warning: Could not process {file_path}: {e}")
+            continue
+
+    total_frames = sum(frames_per_file)
+
+    first_meta.update({
+        'num_frames': total_frames,
+        'frames_per_file': frames_per_file,
+        'tiff_pages_per_file': tiff_pages_per_file,
+        'file_paths': file_path_strings,
+        'num_files': len(file_paths),
+    })
+    print(f"Total: {total_frames} frames across {len(file_paths)} files")
+
+    return first_meta
+
+def get_metadata_batch2(files: list[os.PathLike | str], z_step=None, verbose=False):
     """
     Extract and aggregate metadata from a list of TIFF files produced by ScanImage.
 
@@ -402,6 +546,9 @@ def get_metadata_batch(files: list[os.PathLike | str], z_step=None, verbose=Fals
     dict
         Aggregated metadata dictionary with total frame count and per-file page counts.
     """
+    if not files:
+        raise ValueError("No files provided")
+
     total_frames = 0
     frame_indices = []
     first_meta = None
