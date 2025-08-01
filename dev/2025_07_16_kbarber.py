@@ -7,7 +7,11 @@ from lbm_suite2p_python import load_ops, rgb_to_hsv, hsv_to_rgb
 import matplotlib.pyplot as plt
 import fastplotlib as fpl
 
-data = mbo.imread(r"D:\W2_DATA\kbarber\2025_07_17\mk355\green")
+
+
+data = mbo.imread(r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed\testing")
+
+x = 2
 mbo.imwrite(data, r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed", planes=[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], roi=0)
 
 files = list(Path(r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed").glob("*.tif"))
