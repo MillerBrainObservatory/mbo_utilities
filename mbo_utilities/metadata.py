@@ -3,16 +3,34 @@ from __future__ import annotations
 import re
 import json
 import os
-import struct
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import tifffile
-from tifffile import read_scanimage_metadata, matlabstr2py
-from tifffile.tifffile import bytes2str, read_json, FileHandle
 from mbo_utilities import get_files
 
+
+def group_si_metadata(flat: dict) -> dict:
+    grouped = {}
+    for key, value in flat.items():
+        if not key.startswith("SI."):
+            continue
+        subkeys = key.split(".")[1:]
+        if not subkeys:
+            continue
+        root = subkeys[0].split("[")[0]
+        path = subkeys[1:]
+        group = grouped.setdefault(root, {})
+
+        if not path:
+            grouped[root] = value
+            continue
+
+        current = group
+        for part in path[:-1]:
+            current = current.setdefault(part, {})
+        current[path[-1]] = value
+    return grouped
 
 def _params_from_metadata_caiman(metadata):
     """
@@ -240,6 +258,7 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
         return False
 
 
+
 def get_metadata(file, z_step=None, verbose=False, strict=False):
     """
     Extract metadata from a TIFF file or directory of TIFF files produced by ScanImage.
@@ -310,13 +329,13 @@ def get_metadata(file, z_step=None, verbose=False, strict=False):
         return get_metadata_batch(tiff_files, z_step=z_step, verbose=verbose)
 
     elif file_path.is_file():
-        return get_metadata_single(file_path, z_step=z_step, verbose=verbose, strict=strict)
+        return get_metadata_single(file_path, z_step=z_step, verbose=verbose)
 
     else:
         raise ValueError(f"Path does not exist or is not accessible: {file_path}")
 
 
-def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False, strict=False):
+def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
     """
     Extract metadata from a TIFF file produced by ScanImage or processed via the save_as function.
 
@@ -380,7 +399,6 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False, str
             print(f"No FrameData found in {file}.")
             return None
         series = tiff_file.series[0]
-        pages = tiff_file.pages
         print("Raw tiff fully read.")
 
         # Extract ROI and imaging metadata
@@ -412,14 +430,6 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False, str
                     for i in range(num_rois)
                 ]
 
-            # see if each item in sizes is the same
-            if strict:
-                assert all([sizes[0] == size for size in sizes]), (
-                    "ROIs have different sizes"
-                )
-                assert all(
-                    [num_pixel_xys[0] == num_pixel_xy for num_pixel_xy in num_pixel_xys]
-                ), "ROIs have different pixel resolutions"
             size_xy = sizes[0]
             num_pixel_xy = num_pixel_xys[0]
         else:
@@ -499,7 +509,7 @@ def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False, str
 
     for i, file_path in enumerate(file_paths):
         try:
-            file_meta = get_metadata_single(file_path, z_step=z_step)
+            file_meta = get_metadata_single(file_path, z_step=z_step, verbose=verbose)
             if file_meta is None:
                 print(f"Warning: No metadata found in {file_path}. Skipping.")
                 continue
@@ -528,51 +538,6 @@ def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False, str
 
     return first_meta
 
-def get_metadata_batch2(files: list[os.PathLike | str], z_step=None, verbose=False):
-    """
-    Extract and aggregate metadata from a list of TIFF files produced by ScanImage.
-
-    Parameters
-    ----------
-    files : list of str or PathLike
-        List of paths to TIFF files.
-    z_step : float, optional
-        Z-step in microns to include in the returned metadata.
-    verbose : bool, optional
-        If True, include full metadata from the first TIFF in 'all' key.
-
-    Returns
-    -------
-    dict
-        Aggregated metadata dictionary with total frame count and per-file page counts.
-    """
-    if not files:
-        raise ValueError("No files provided")
-
-    total_frames = 0
-    frame_indices = []
-    first_meta = None
-
-    for i, f in enumerate(files):
-        tf = tifffile.TiffFile(f)
-        num_pages = len(tf.pages)
-        frame_indices.append(num_pages)
-        total_frames += num_pages
-        if i == 0:
-            if not is_raw_scanimage(f):
-                base = tf.shaped_metadata[0]["image"]
-            elif (
-                hasattr(tf, "scanimage_metadata") and tf.scanimage_metadata is not None
-            ):
-                base = get_metadata(f, z_step=z_step, verbose=verbose)
-            else:
-                raise ValueError(f"No metadata found in {f}.")
-            first_meta = base.copy()
-
-    first_meta["num_frames"] = total_frames
-    first_meta["frame_indices"] = frame_indices
-    return first_meta
-
 
 def params_from_metadata(metadata, base_ops, pipeline="suite2p"):
     """
@@ -599,117 +564,6 @@ def params_from_metadata(metadata, base_ops, pipeline="suite2p"):
         raise ValueError(
             f"Pipeline {pipeline} not recognized. Use 'caiman' or 'suite2'"
         )
-
-
-def read_scanimage_metadata_tifffile(
-    fh: FileHandle, /
-) -> tuple[dict[str, Any], dict[str, Any], int]:
-    """FROM TIFFFILE for DEVELOPMENT
-
-    Read ScanImage BigTIFF v3 or v4 static and ROI metadata from file.
-
-    The settings can be used to read image and metadata without parsing
-    the TIFF file.
-
-    Frame data and ROI groups can alternatively be obtained from the Software
-    and Artist tags of any TIFF page.
-
-    Parameters:
-        fh: Binary file handle to read from.
-
-    Returns:
-        - Non-varying frame data, parsed with :py:func:`matlabstr2py`.
-        - ROI group data, parsed from JSON.
-        - Version of metadata (3 or 4).
-
-    Raises:
-        ValueError: File does not contain valid ScanImage metadata.
-
-    """
-    fh.seek(0)
-    try:
-        byteorder, version = struct.unpack("<2sH", fh.read(4))
-        if byteorder != b"II" or version != 43:
-            raise ValueError("not a BigTIFF file")
-        fh.seek(16)
-        magic, version, size0, size1 = struct.unpack("<IIII", fh.read(16))
-        if magic != 117637889 or version not in {3, 4}:
-            raise ValueError(f"invalid magic {magic} or version {version} number")
-    except UnicodeDecodeError as exc:
-        raise ValueError("file must be opened in binary mode") from exc
-    except Exception as exc:
-        raise ValueError("not a ScanImage BigTIFF v3 or v4 file") from exc
-
-    frame_data = matlabstr2py(bytes2str(fh.read(size0)[:-1]))
-    roi_data = read_json(fh, "<", 0, size1, 0) if size1 > 1 else {}
-    return frame_data, roi_data, version
-
-
-def matlabstr(obj):
-    """Convert Python dict to ScanImage-style MATLAB string."""
-
-    def _format(v):
-        if isinstance(v, list):
-            if all(isinstance(i, str) for i in v):
-                return "{" + " ".join(f"'{i}'" for i in v) + "}"
-            return "[" + " ".join(str(i) for i in v) + "]"
-        if isinstance(v, str):
-            return f"'{v}'"
-        if isinstance(v, bool):
-            return "true" if v else "false"
-        return str(v)
-
-    return "\n".join(f"{k} = {_format(v)}" for k, v in obj.items())
-
-
-def _parse_value(value_str):
-    if value_str.startswith("'") and value_str.endswith("'"):
-        return value_str[1:-1]
-    if value_str == "true":
-        return True
-    if value_str == "false":
-        return False
-    if value_str == "NaN":
-        return float("nan")
-    if value_str == "Inf":
-        return float("inf")
-    if re.match(r"^\d+(\.\d+)?$", value_str):
-        return float(value_str) if "." in value_str else int(value_str)
-    if re.match(r"^\[(.*)]$", value_str):
-        return [_parse_value(v.strip()) for v in value_str[1:-1].split()]
-    return value_str
-
-
-def _parse_key_value(parse_line):
-    key_str, value_str = parse_line.split(" = ", 1)
-    return key_str, _parse_value(value_str)
-
-
-def parse(metadata_str):
-    """
-    Parses the metadata string from a ScanImage Tiff file.
-
-    :param metadata_str:
-    :return metadata_kv, metadata_json:
-    """
-    lines = metadata_str.split("\n")
-    metadata_kv = {}
-    json_portion = []
-    parsing_json = False
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        if line.startswith("SI."):
-            key, value = _parse_key_value(line)
-            metadata_kv[key] = value
-        elif line.startswith("{"):
-            parsing_json = True
-        if parsing_json:
-            json_portion.append(line)
-    metadata_json = json.loads("\n".join(json_portion))
-    return metadata_kv, metadata_json
 
 
 def find_scanimage_metadata(path):

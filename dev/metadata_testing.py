@@ -32,7 +32,6 @@ def group_scanimage_metadata(flat: dict) -> dict:
         group = grouped.setdefault(root, {})
 
         if not path:
-            # Directly assign to the group if no nested path
             grouped[root] = value
             continue
 

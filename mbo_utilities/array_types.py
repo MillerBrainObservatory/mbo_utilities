@@ -11,10 +11,7 @@ import numpy as np
 import h5py
 import tifffile
 from dask import array as da
-from fsspec.implementations.reference import ReferenceFileSystem
 from numpy import ndarray
-from zarr import open as zarr_open
-from zarr.storage import FsspecStore
 import fastplotlib as fpl
 
 from mbo_utilities.metadata import get_metadata
@@ -23,7 +20,6 @@ from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
     _multi_tiff_to_fsspec,
     HAS_ZARR,
-    CHUNKS,
     _convert_range_to_slice,
     expand_paths,
 )
@@ -74,6 +70,8 @@ class DemixingResultsArray:
             graphic_kwargs={"vmin": -300, "vmax": 4000},
             window_funcs=window_funcs,
         )
+
+
 class Suite2pArray:
     def __init__(self, path, custom_bin=None):
         path = Path(path)
@@ -536,10 +534,7 @@ class MboRawArray(scans.ScanMultiROI):
                 f"Reference file {self.reference} does not exist. "
                 "Please call save_fsspec() first."
             )
-        return da.from_zarr(
-            FsspecStore(ReferenceFileSystem(str(self.reference))),
-            chunks=CHUNKS,
-        )
+        raise NotImplementedError("Attempted to convert to Dask, but not implemented.")
 
     def as_zarr(self):
         """
@@ -552,18 +547,10 @@ class MboRawArray(scans.ScanMultiROI):
             )
         if not Path(self.reference).is_file():
             return None
-        return zarr_open(
-            FsspecStore(ReferenceFileSystem(str(self.reference))),
-            mode="r",
-        )
+        return NotImplementedError("Attempted to convert to Zarr, but not implemented.")
 
     def read_data(self, filenames, dtype=np.int16):
         filenames = expand_paths(filenames)
-        # try:
-        #     self.save_fsspec(filenames)
-        #     self.use_zarr = True
-        # except Exception as e:
-        #     logger.error(f"Failed to save fsspec: {e}")
         self.use_zarr = False
         self.reference = None
         super().read_data(filenames, dtype)
@@ -696,35 +683,43 @@ class MboRawArray(scans.ScanMultiROI):
     def _read_pages(
         self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
     ):
-        C = self.num_channels
-        pages = [f * C + c for f in frames for c in chans]
+        pages = [
+            frame * self.num_channels + zplane
+            for frame in frames
+            for zplane in chans
+        ]
 
-        H = len(utils.listify_index(yslice, self._page_height))
-        W = len(utils.listify_index(xslice, self._page_width))
-
-        if getattr(self, "use_zarr", False):
-            zarray = self.as_zarr()
-            if zarray is not None:
-                buf = np.empty((len(pages), H, W), dtype=self.dtype)
-                for i, page in enumerate(pages):
-                    f, c = divmod(page, C)
-                    buf[i] = zarray[f, c, yslice, xslice]
-
-                if self.fix_phase:
-                    self.logger.debug(
-                        f"Applying phase correction with strategy: {self.phasecorr_method}"
-                    )
-                    buf, self.offset = nd_windowed(
-                        buf,
-                        method=self.phasecorr_method,
-                        upsample=self.upsample,
-                        max_offset=self.max_offset,
-                        border=self.border,
-                    )
-                return buf.reshape(len(frames), len(chans), H, W)
-
+        tiff_width_px = len(utils.listify_index(xslice, self._page_width))
+        tiff_height_px = len(utils.listify_index(yslice, self._page_height))
+        #
+        # if getattr(self, "use_zarr", False):
+        #     zarray = self.as_zarr()
+        #     if zarray is not None:
+        #         buf = np.empty((len(pages), H, W), dtype=self.dtype)
+        #         for i, page in enumerate(pages):
+        #             f, c = divmod(page, C)
+        #             buf[i] = zarray[f, c, yslice, xslice]
+        #
+        #         if self.fix_phase:
+        #             self.logger.debug(
+        #                 f"Applying phase correction with strategy: {self.phasecorr_method}"
+        #             )
+        #             buf, self.offset = nd_windowed(
+        #                 buf,
+        #                 method=self.phasecorr_method,
+        #                 upsample=self.upsample,
+        #                 max_offset=self.max_offset,
+        #                 border=self.border,
+        #             )
+        #         return buf.reshape(len(frames), len(chans), H, W)
+        #
         # TIFF path
-        buf = np.empty((len(pages), H, W), dtype=self.dtype)
+        buf = np.empty(
+            (len(pages),
+             tiff_height_px,
+             tiff_width_px),
+            dtype=self.dtype
+        )
         start = 0
         for tf in self.tiff_files:
             end = start + len(tf.pages)
@@ -752,7 +747,7 @@ class MboRawArray(scans.ScanMultiROI):
                 buf[idxs] = chunk
             start = end
 
-        return buf.reshape(len(frames), len(chans), H, W)
+        return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
 
     def __getitem__(self, key):
         if not isinstance(key, tuple):
@@ -1043,3 +1038,22 @@ class MboRawArray(scans.ScanMultiROI):
             graphic_kwargs={"vmin": -300, "vmax": 4000},
             window_funcs=window_funcs,
         )
+
+class NWBArray:
+    def __init__(self, path: Path | str):
+        try:
+            from pynwb import read_nwb
+        except ImportError:
+            raise ImportError(
+                "pynwb is not installed. Install with `pip install pynwb`."
+            )
+        self.path = Path(path)
+
+        nwbfile = read_nwb(path)
+        self.data = nwbfile.acquisition['TwoPhotonSeries'].data
+        self.shape = self.data.shape
+        self.dtype = self.data.dtype
+        self.ndim = self.data.ndim
+
+    def __getitem__(self, item):
+        return self.data[item]

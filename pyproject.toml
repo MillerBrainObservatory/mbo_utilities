@@ -28,6 +28,7 @@ dependencies = [
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
 	"glfw",
+	"suite2p_mbo",
 ]
 
 [project.scripts]
@@ -43,6 +44,7 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
 napari = ["napari"]
+pynwb = ["pynwb", "neuroconv", "roiextractors"]
 docs = [
 	"sphinx>=6.1.3",
 	"docutils>=0.19",
@@ -93,7 +95,8 @@ all = [
 	"cellpose",
 ]
 
-# [tool.uv.sources]
+[tool.uv.sources]
+neuroconv = { path = "../neuroconv" }
 # fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib", branch = "main" }
 # pygfx = { git = "https://github.com/pygfx/pygfx", branch = "main" }
 
