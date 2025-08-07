@@ -991,6 +991,11 @@ class MboRawArray(scans.ScanMultiROI):
                     fname = f"plane{plane+1:02d}_roi{roi}{ext}"
                 target = outpath.joinpath(fname)
                 target.parent.mkdir(exist_ok=True)
+                if target.exists() and not overwrite:
+                    logger.warning(
+                        f"File {target} already exists. Skipping write."
+                    )
+                    continue
 
                 md = self.metadata.copy()
                 md["plane"] = plane + 1  # back to 1-based indexing
