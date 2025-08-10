@@ -20,9 +20,10 @@ kernelspec:
 If all you want is code to get started, this will 
 ``` python
 import mbo_utilities as mbo
-scan = mbo.read_scan("path/to/data/*.tiff") # or list of full filepaths
-mbo.save_as(scan, "path/to/assembled_data", ext=".tiff") # tiff or bin
+scan = mbo.imread("path/to/data/*.tiff") # or list of full filepaths
+mbo.imwrite(scan, "path/to/assembled_data")
 ```
+
 ```{figure} ./_images/progress_bar.png
 A progress bar will track the current file progress.
 ```
@@ -68,19 +69,20 @@ If there are other `.tiff` files, such as from another session or a processed fi
 Pass a list of files, or a wildcard "/path/to/files/*" to `mbo.read_scan()`.
 
 ``` {tip}
-{func}`mbo_utilities.get_files` is useful to easily get all files of the same filetype
+{func}`mbo_utilities.get_files` is useful to easily get all files of the same filetype.
+By default, this will ensure your raw tiffs are numerically sorted in order of acquisition time.
 ```
 
 ```{code-cell} ipython3
-files = mbo.get_files("D://demo//animal_01//raw", 'tif')
+files = mbo.get_files("path//to//animal_01//raw", 'tif')
 files[:2]
 
-['/home/flynn/lbm_data/raw/mk301_03_01_2025_2roi_17p07hz_224x448px_2umpx_180mw_green_00004.tif',
+['/home/flynn/lbm_data/raw/mk301_03_01_2025_2roi_17p07hz_224x448px_2umpx_180mw_green_00001.tif',
  '/home/flynn/lbm_data/raw/mk301_03_01_2025_2roi_17p07hz_224x448px_2umpx_180mw_green_00002.tif']
 ```
 
 ```{code-cell} ipython3
-scan = mbo.read_scan(files)
+scan = mbo.imread(files)
 
 # T, Z, X, Y
 scan.shape
@@ -88,9 +90,11 @@ scan.shape
 
 ```{code-cell} ipython3
 print(f'Planes: {scan.num_channels}')
+print(f'Planes: {scan.num_planes}')  # same as num_channels for MBO recordings
 print(f'Frames: {scan.num_frames}')
 print(f'ROIs: {scan.num_rois}')
-print(f'frame-rate: {scan.fps}')
+print(f'Frame-Rate: {scan.frame_rate}')
+print(f'Spatial Resolution: {scan.frame_rate}')
 ```
 
 ## Accessing data in the scan
@@ -142,21 +146,28 @@ image_widget.close()
 
 ## Save assembled files
 
-The currently supported file extensions are `.tiff`.
+The currently supported file extensions are `.tiff`, `.bin`, and `.hdf5`.
 
 ```{code-cell} ipython3
-save_path = Path("/home/flynn/lbm_data/mk301/assembled")
-save_path.mkdir(exist_ok=True)
-
-mbo.save_as(
+mbo.imwrite(
     scan,
     save_path,
-    planes=[0, 6, 13],      # for 14 z-planes, first, middle, last 
-    overwrite=True,
-    ext = '.tiff',
-    trim_edge=[2, 2, 2, 2], # post-assembly pixels to trim [left, right, top, bottom]
+    planes=[1, 7, 14], # for 14 z-planes, first, middle, last 
+    overwrite=False,
+    ext = '.bin',
     fix_phase=True          # fix bi-directional scan phase offset
 )
+
+Initializing MBO Scan with parameters:
+roi: None, fix_phase: True, phasecorr_method: frame, border: 3, upsample: 5, max_offset: 4
+Scanning depth 0, ROI 0 
+Scanning depth 0, ROI 1 
+Raw tiff fully read.
+Scanning depth 0, ROI 0 
+Scanning depth 0, ROI 1 
+Saving plane01_stitched.tif: 100%|██████████| 108/108 [02:43<00:00,  1.51s/it]
+Saving plane07_stitched.tif: 100%|██████████| 108/108 [02:42<00:00,  1.51s/it]
+Saving plane14_stitched.tif: 100%|██████████| 108/108 [02:41<00:00,  1.50s/it]
 ```
 
 ## Vizualize data with [fastplotlib](https://www.fastplotlib.org/user_guide/guide.html#what-is-fastplotlib)
@@ -171,7 +182,7 @@ More advanced visualizations can be easily created, i.e. adding a baseline subtr
 import tifffile
 from ipywidgets import VBox
 
-img = tifffile.memmap("path/to/assembled/plane_07.tiff")
+img = mbo.imread("path/to/assembled/plane_07.tiff")
 iw_movie = fpl.ImageWidget(img, cmap="viridis")
 
 tfig = fpl.Figure()
