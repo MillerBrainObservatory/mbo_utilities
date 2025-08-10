@@ -9,28 +9,22 @@ import numpy as np
 import tifffile
 from mbo_utilities import get_files
 
+def scanimage_to_dict(d):
+    result = {}
+    for key, value in d.items():
+        if isinstance(value, dict):
+            value = scanimage_to_dict(value)
 
-def group_si_metadata(flat: dict) -> dict:
-    grouped = {}
-    for key, value in flat.items():
-        if not key.startswith("SI."):
-            continue
-        subkeys = key.split(".")[1:]
-        if not subkeys:
-            continue
-        root = subkeys[0].split("[")[0]
-        path = subkeys[1:]
-        group = grouped.setdefault(root, {})
+        if "." in key:
+            parts = key.split(".")
+            current = result
+            for part in parts[:-1]:
+                current = current.setdefault(part, {})
+            current[parts[-1]] = value
+        else:
+            result[key] = value
+    return result
 
-        if not path:
-            grouped[root] = value
-            continue
-
-        current = group
-        for part in path[:-1]:
-            current = current.setdefault(part, {})
-        current[path[-1]] = value
-    return grouped
 
 def _params_from_metadata_caiman(metadata):
     """
