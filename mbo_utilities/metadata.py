@@ -253,7 +253,7 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
 
 
 
-def get_metadata(file, z_step=None, verbose=False, strict=False):
+def get_metadata(file, z_step=None, verbose=False):
     """
     Extract metadata from a TIFF file or directory of TIFF files produced by ScanImage.
 
@@ -271,8 +271,6 @@ def get_metadata(file, z_step=None, verbose=False, strict=False):
         The z-step size in microns. If provided, it will be included in the returned metadata.
     verbose : bool, optional
         If True, returns extended metadata including all ScanImage attributes. Default is False.
-    strict : bool, optional
-        If True, enforces strict validation for multi-ROI data. Default is False.
 
     Returns
     -------
@@ -471,7 +469,7 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
         raise ValueError(f"No metadata found in {file}.")
 
 
-def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False, strict=False):
+def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False):
     """
     Extract and aggregate metadata from a list of TIFF files.
 
@@ -483,8 +481,6 @@ def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False, str
         Z-step in microns.
     verbose : bool, optional
         Include full metadata from first file if True.
-    strict : bool, optional
-        Enforce strict validation.
 
     Returns
     -------
