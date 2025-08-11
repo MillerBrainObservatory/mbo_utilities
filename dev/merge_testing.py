@@ -1,16 +1,12 @@
 from pathlib import Path
 import numpy as np
-import mbo_utilities as mbo
 import lbm_suite2p_python as lsp
-import suite2p
 from lbm_suite2p_python import load_ops, rgb_to_hsv, hsv_to_rgb
-import matplotlib.pyplot as plt
+from mbo_utilities.lazy_array import Suite2pArray
+import suite2p
 import fastplotlib as fpl
-import numpy as np
-from pathlib import Path
 import mbo_utilities as mbo
 
-file = mbo.get_metadata(r"D:\W2_DATA\santi\213107tUTC_Max15_depth400um_fov1908x2000um_res2p00x2p00umpx_fr02p605Hz_pow230p1mW_00001_00001.tif")
 
 def embed_into_canvas(img, yrange, xrange, canvas_shape):
     """
@@ -73,14 +69,14 @@ def concat_binfiles_and_merge_metadata(f1, f2, output_bin, output_ops):
 
     print(f"Saved:\n  bin: {output_bin}\n  ops: {output_ops}")
 
+
+file = mbo.get_metadata(r"D:\W2_DATA\santi\213107tUTC_Max15_depth400um_fov1908x2000um_res2p00x2p00umpx_fr02p605Hz_pow230p1mW_00001_00001.tif")
 base = Path("D:/W2_DATA/kbarber/2025_07_17/mk355/green/processed")
 outpath = base.joinpath("output")
 bin_files = list(base.rglob("data.bin"))
 ops_files = list(base.rglob("ops.npy"))
 plane_1_bins = bin_files[:2]
 plane_1_ops = ops_files[:2]
-from mbo_utilities.lazy_array import Suite2pArray
-import lbm_suite2p_python as lsp
 md1 = lsp.load_ops(ops_files[0])
 md2 = lsp.load_ops(ops_files[1])
 testing_dir = Path(r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed\testing")
@@ -93,7 +89,6 @@ data = mbo.imread(r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed\testing"
 fpl.ImageWidget(data).show()
 fpl.loop.run()
 
-x = 2
 mbo.imwrite(data, r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed", planes=[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], roi=0)
 
 files = list(Path(r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed").glob("*.tif"))
@@ -129,39 +124,3 @@ print(f"merged xrange: {ops_merged['xrange']}, yrange: {ops_merged['yrange']}")
 
 print(f"Example ROI 1 first 5 : {stat1[0]['xpix'][:5]}, {stat1[0]['ypix'][:5]}")
 print(f"Example ROI 2 first 5 : {stat2[0]['xpix'][:5]}, {stat2[0]['ypix'][:5]}")
-
-import suite3d
-import os
-os.chdir(os.path.dirname(os.path.abspath("suite3d")))
-
-from suite3d.job import Job
-tifs = mbo.get_files(r"D:\W2_DATA\kbarber\2025_07_17\mk355\green", "tif")
-
-job_params = {
-    'n_ch_tif': 14,  # number of channels recorded in the tiff file, typically 30
-    'cavity_size': 1,  # number of planes in the deeper cavity, typically 15
-    'planes': np.arange(14),
-    'voxel_size_um': (16, 2, 2),
-
-    # number of files to use for the initial pass
-    # usually, ~500 frames is a good rule of thumb
-    # we will just use 200 here for speed
-    'n_init_files': 1,
-
-    # number of pixels to fuse between the ROI strips
-    # 'fuse_shift_override': 7,
-    # will try to automatically estimate crosstalk using
-    # the shallowest crosstalk_n_planes planes. if you want to override,
-    # set override_crosstalk = float between 0 and 1
-    'subtract_crosstalk': False,
-    'fs': 17,
-    'tau': 0.8,
-    '3d_reg': True,
-    'gpu_reg': True,
-}
-
-# Create the job
-from suite3d.job import Job
-job_path = r"D://W2_DATA/kbarber/2025_07_17/mk355/green/processed/job"
-job = suite3d.Job(job_path,'test1', tifs = tifs,
-          params=job_params, create=True, overwrite=True, verbosity = 1)
