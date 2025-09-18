@@ -17,14 +17,14 @@ from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.file_io import MBO_SUPPORTED_FTYPES
 
 if __name__ == "__main__":
-    raw = Path().home().joinpath("lbm_data", "raw")
+    raw = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\green")
     data = imread(raw)
     data.roi = 2
     data.fix_phase = True
     imwrite(
         data,
-        raw.parent.joinpath("fused"),
-        ext=".tif",
+        raw.parent.joinpath("planes"),
+        ext=".h5",
         overwrite=True,
         planes=[4, 10]
     )
