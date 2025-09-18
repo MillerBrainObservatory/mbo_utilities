@@ -83,7 +83,7 @@ def imwrite(
     outpath = Path(outpath)
     if not outpath.parent.is_dir():
         raise ValueError(f"{outpath} is not inside a valid directory."
-                         f"If you want to create a new directory, please use ``.")
+                         f" Please create the directory first.")
 
     if roi is not None:
         if not supports_roi(lazy_array):
