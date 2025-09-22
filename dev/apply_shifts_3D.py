@@ -62,11 +62,20 @@ def save_projections(fpath: Path | str, str_contains: str = "", max_depth: int =
 # save_projections(stitched_dir, str_contains="_aligned", max_depth=1, kernel_size=3)
 
 #% Preview alignment
+
+from pathlib import Path
+import fastplotlib as fpl
+import tifffile
+import numpy as np
+
+stitched_dir = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\stitching_test")
+files = list(stitched_dir.glob("*.tif*"))
+
 aligned_files = list((stitched_dir / "aligned_gpu").glob("*_aligned.tif"))
 volume = np.stack([tifffile.imread(file) for file in aligned_files])
 
 pre_aligned_files = list(stitched_dir.glob("*stitched.tif*"))
 volume_pre_aligned = np.stack([tifffile.imread(file) for file in pre_aligned_files])
 
-fpl.ImageWidget([volume, volume_pre_aligned], names=["volume", "volume_pre_aligned"]).show()
+fpl.ImageWidget([volume_pre_aligned,volume], names=["No Spatial Registration", "Spatially Registered (Suite3D)"]).show()
 fpl.loop.run()
