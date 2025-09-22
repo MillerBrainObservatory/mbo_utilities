@@ -382,6 +382,7 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
             raise ValueError(f"No metadata found in {file}.")
         return tiff_file.shaped_metadata[0]
     elif hasattr(tiff_file, "scanimage_metadata"):
+        print("Raw ScanImage TIFF detected. Extracting metadata...")
         meta = tiff_file.scanimage_metadata
         if meta is None:
             return None
@@ -391,7 +392,6 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
             print(f"No FrameData found in {file}.")
             return None
         series = tiff_file.series[0]
-        print("Raw tiff fully read.")
 
         # Extract ROI and imaging metadata
         roi_group = meta["RoiGroups"]["imagingRoiGroup"]["rois"]
