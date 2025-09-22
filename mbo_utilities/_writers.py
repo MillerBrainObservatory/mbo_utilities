@@ -6,7 +6,7 @@ import numpy as np
 
 import shutil
 from pathlib import Path
-from tifffile import TiffWriter
+from tifffile import TiffWriter, imwrite
 import h5py
 
 from . import log
@@ -215,7 +215,7 @@ def _write_h5(path, data, *, overwrite=True, metadata=None):
 
 
 def _write_tiff(
-    path, data, overwrite=True, metadata=None,
+    path, data, overwrite=True, metadata={},
 ):
     filename = Path(path).with_suffix(".tif")
 
@@ -225,6 +225,9 @@ def _write_tiff(
         _write_tiff._first_write = {}
 
     if filename not in _write_tiff._writers:
+        if filename.exists() and not overwrite:
+            logger.warning(f"File {filename} already exists and overwrite=False. Skipping write.")
+            return
         if filename.exists() and overwrite:
             filename.unlink()
         _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
@@ -238,7 +241,7 @@ def _write_tiff(
             frame,
             contiguous=True,
             photometric="minisblack",
-            metadata=_make_json_serializable(metadata) if is_first else None,
+            metadata=_make_json_serializable(metadata) if is_first else {},
         )
         _write_tiff._first_write[filename] = False
 
@@ -280,3 +283,35 @@ def _write_zarr(path, data, *, overwrite=True, metadata=None):
     z[offset : offset + data.shape[0]] = data
     _write_zarr._offsets[filename] = offset + data.shape[0]
 
+
+def _try_generic_writers(
+        data: Any,
+        outpath: str | Path,
+        overwrite: bool = True,
+        metadata: dict = {},
+):
+    outpath = Path(outpath)
+    if outpath.exists() and not overwrite:
+        raise FileExistsError(f"{outpath} already exists and overwrite=False")
+
+    if outpath.suffix.lower() in {".npy", ".npz"}:
+        if metadata is None:
+            np.save(outpath, data)
+        else:
+            np.savez(outpath, data=data, metadata=metadata)
+    elif outpath.suffix.lower() in {".tif", ".tiff"}:
+        imwrite(
+            outpath,
+            data,
+            metadata=_make_json_serializable(metadata),
+            photometric="minisblack",
+            contiguous=True,
+        )
+    elif outpath.suffix.lower() in {".h5", ".hdf5"}:
+        with h5py.File(outpath, "w" if overwrite else "a") as f:
+            f.create_dataset("data", data=data)
+            if metadata:
+                for k, v in metadata.items():
+                    f.attrs[k] = v if np.isscalar(v) else str(v)
+    else:
+        raise ValueError(f"Unsupported file extension: {outpath.suffix}")

@@ -1,6 +1,6 @@
 """
-Some classes used for MultiROI scan processing.
-Adapted from the Tolias Laboratory https://github.com/atlab/scanreader.
+Some classes used for MultiROI scan processing were
+adapted from the Tolias Laboratory https://github.com/atlab/scanreader.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import tifffile
 
 from mbo_utilities import is_raw_scanimage
 from mbo_utilities.metadata import has_mbo_metadata
-
 
 def embed_into_full_frame(cropped, yrange, xrange, Ly, Lx):
     """Embed a cropped image into full (Ly, Lx) frame using Suite2p's ops['yrange'], ops['xrange']."""

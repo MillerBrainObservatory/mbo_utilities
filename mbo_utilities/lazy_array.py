@@ -7,6 +7,7 @@ from typing import Sequence, Callable
 import numpy as np
 
 from . import log
+from ._writers import _try_generic_writers
 from .array_types import (
     DemixingResultsArray,
     Suite2pArray,
@@ -75,13 +76,17 @@ def imwrite(
         logger.propagate = True  # send to terminal
     else:
         logger.setLevel(logging.WARNING)
-        logger.info("Debug mode disabled; setting log level to WARNING.")
+        # logger.info("Debug mode disabled; setting log level to WARNING.")
         logger.propagate = False  # don't send to terminal
 
     # save path
+    if not isinstance(outpath, (str, Path)):
+        raise TypeError(f"`outpath` must be a string or Path, got {type(outpath)} instead.")
+
     outpath = Path(outpath)
     if not outpath.parent.is_dir():
-        raise ValueError(f"{outpath} is not inside a valid directory.")
+        raise ValueError(f"{outpath} is not inside a valid directory."
+                         f" Please create the directory first.")
 
     if roi is not None:
         if not supports_roi(lazy_array):
@@ -98,17 +103,19 @@ def imwrite(
         planes = [planes[i] for i in order]
 
     # Handle metadata
-    file_metadata = lazy_array.metadata or {}
-    if metadata:
-        if not isinstance(metadata, dict):
+    if hasattr(lazy_array, "metadata"):
+        if lazy_array.metadata is None:
+            lazy_array.metadata = {}
+        file_metadata = dict(lazy_array.metadata)  # copy
+        file_metadata["save_path"] = str(outpath.resolve())
+    else:
+        file_metadata = {}
+    if file_metadata:
+        if not isinstance(file_metadata, dict):
             raise ValueError(
                 f"Provided metadata must be a dictionary, got {type(metadata)} instead."
             )
-        file_metadata.update(metadata)
-
-    file_metadata["save_path"] = str(outpath.resolve())
-    if hasattr(lazy_array, "metadata"):
-        lazy_array.metadata.update(file_metadata)
+        file_metadata.update(file_metadata)
 
     if hasattr(lazy_array, "_imwrite"):
         return lazy_array._imwrite(  # noqa
@@ -125,7 +132,8 @@ def imwrite(
             raise TypeError("Attempting to write a Suite2pArray directly."
                             " Is there an ops.npy file in a directory with a tiff file?"
                             "Please make write these to separate directories.")
-        raise TypeError(f"{type(lazy_array)} does not implement an `imwrite()` method.")
+        _try_generic_writers(lazy_array, outpath, overwrite=overwrite,)
+        return outpath
 
 
 def imread(
@@ -154,16 +162,16 @@ def imread(
 
     filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
     if not filtered:
-        raise ValueError(f"No supported files in {inputs}")
+        raise ValueError(f"No supported files in {inputs}. \n"
+                         f"Supported file types are: {SUPPORTED_FTYPES}")
     paths = filtered
 
     parent = paths[0].parent if paths else None
     ops_file = parent / "ops.npy" if parent else None
 
     if ops_file and ops_file.exists():
-        md = np.load(str(ops_file), allow_pickle=True).item()
         if (parent / "ops.npy").exists():
-            return Suite2pArray(md)
+            return Suite2pArray(parent / "ops.npy")
         elif (parent / "reg_tif").is_dir():
             tifs = sorted((parent / "reg_tif").glob("*.tif"))
             if tifs:

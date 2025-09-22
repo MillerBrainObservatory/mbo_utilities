@@ -8,7 +8,7 @@ description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
 dynamic = ["version"]
-requires-python = ">=3.11, <3.13"
+requires-python = ">=3.12.7, <3.12.10"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
 	"tifffile>=2025.3.30",
@@ -28,6 +28,7 @@ dependencies = [
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
 	"glfw",
+	"suite2p_mbo",
 ]
 
 [project.scripts]
@@ -100,7 +101,7 @@ all = [
 # https://github.com/charliermarsh/ruff
 [tool.ruff]
 line-length = 88
-src = ["lbm_suite2p_python"]
+src = ["mbo_utilities"]
 exclude = ["docs", "exclude", "demos", "scripts"] 
 
 [tool.ruff.lint]
@@ -111,8 +112,8 @@ ignore = [
 	"COM812", # Missing trailing comma (conflicts with ruff format)
 	"ISC001", # Import sorting (conflicts with ruff format)
 	"FIX002", # Fixable issue
-	"DOC201", # TODO(manzt) enable in follow-up PR; no doc for return type.
-	"FBT",    # TODO(manzt): enable in follow-up PR; require bool options to be keyword-only.
+	"DOC201", # TODO enable in follow-up PR; no doc for return type.
+	"FBT",    # TODO: enable in follow-up PR; require bool options to be keyword-only.
 ]
 
 [tool.ruff.lint.per-file-ignores]

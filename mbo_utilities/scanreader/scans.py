@@ -945,7 +945,6 @@ class ScanMultiROI(NewerScan, BaseScan):
             for roi_id, roi in enumerate(self.rois):
                 new_field = roi.get_field_at(scanning_depth)
                 if new_field is not None:
-                    print(f"Scanning depth {scanning_depth}, ROI {roi_id} ")
                     # if next_line_in_page + new_field.height > self._page_height:
                     #     error_msg = (
                     #         "Overestimated number of fly to lines ({}) at "

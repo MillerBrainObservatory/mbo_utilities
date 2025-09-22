@@ -7,8 +7,6 @@ import re
 from pathlib import Path
 import numpy as np
 
-from icecream import ic
-
 import dask.array as da
 from tifffile import TiffFile
 
@@ -58,7 +56,6 @@ def write_ops(metadata, raw_filename):
     )
     filename = Path(raw_filename).expanduser().resolve()
 
-    # this convention means input can be either
     if filename.is_file():
         root = filename.parent
     else:
@@ -93,6 +90,7 @@ def write_ops(metadata, raw_filename):
         "dx": dx,
         "dy": dy,
         "ops_path": str(ops_path),
+        "raw_file": str(filename),
         # and dump the rest of the metadata
         **metadata,
     }
@@ -288,9 +286,15 @@ def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
     return combined_refs
 
 
-def read_scan():
-    raise DeprecationWarning("read_scan is deprecated, use mbo.imread() instead.")
+def sort_by_si_filename(filename):
+    """
+    Sort ScanImage files by the last number in the filename (e.g., _00001, _00002, etc.).
+    """
+    numbers = re.findall(r'\d+', str(filename))
+    return int(numbers[-1]) if numbers else 0
 
+def is_excluded(path, exclude_dirs=()):
+    return any(excl in path.parts for excl in exclude_dirs)
 
 def get_files(
     base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
@@ -346,7 +350,6 @@ def get_files(
     if not base_path.is_dir():
         raise NotADirectoryError(f"'{base_path}' is not a directory.")
     if max_depth == 0:
-        ic("Max-depth of 0 is not allowed. Setting to 1.")
         max_depth = 1
 
     base_depth = len(base_path.parts)
@@ -355,26 +358,17 @@ def get_files(
     if exclude_dirs is None:
         exclude_dirs = [".venv", ".git", "__pycache__"]
 
-    def is_excluded(path):
-        return any(excl in path.parts for excl in exclude_dirs)
-
     files = [
         file
         for file in base_path.rglob(pattern)
         if len(file.parts) - base_depth <= max_depth
         and file.is_file()
-        and not is_excluded(file)
+        and not is_excluded(file, exclude_dirs)
     ]
 
     if sort_ascending:
-
-        def numerical_sort_key(path):
-            match = re.search(r"\d+", path.name)
-            return int(match.group()) if match else float("inf")
-
-        files.sort(key=numerical_sort_key)
-
-    return [str(file) for file in files]
+        files.sort(key=sort_by_si_filename)
+    return files
 
 
 def get_plane_from_filename(path, fallback=None):

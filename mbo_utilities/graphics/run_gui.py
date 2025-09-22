@@ -110,7 +110,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
             data=data_array,
             histogram_widget=True,
             figure_kwargs={"size": (800, 1000)},
-            graphic_kwargs={"vmin": data_array.min(), "vmax": data_array.max()},
+            graphic_kwargs={"vmin": data_array.min, "vmax": data_array.max},
         )
     iw.show()
     if widget:
