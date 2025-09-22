@@ -637,7 +637,7 @@ class MboRawArray(scans.ScanMultiROI):
         files: str | Path | list = None,
         roi: int | Sequence[int] | None = None,
         fix_phase: bool = True,
-        phasecorr_method: str = "frame",
+        phasecorr_method: str = "mean",
         border: int | tuple[int, int, int, int] = 3,
         upsample: int = 5,
         max_offset: int = 4,
@@ -913,16 +913,16 @@ class MboRawArray(scans.ScanMultiROI):
                 self.logger.debug(
                     f"Applying phase correction with strategy: {self.phasecorr_method}"
                 )
-                corrected, self.offset = nd_windowed(
+                buf[idxs], self.offset = nd_windowed(
                     chunk,
                     method=self.phasecorr_method,
                     upsample=self.upsample,
                     max_offset=self.max_offset,
                     border=self.border,
                 )
-                buf[idxs] = corrected
             else:
                 buf[idxs] = chunk
+                self.offset = 0.0
             start = end
 
         return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
@@ -1102,7 +1102,6 @@ class MboRawArray(scans.ScanMultiROI):
             for roi_id, roi in enumerate(self.rois):
                 new_field = roi.get_field_at(scanning_depth)
                 if new_field is not None:
-                    print(f"Scanning depth {scanning_depth}, ROI {roi_id} ")
                     # if next_line_in_page + new_field.height > self._page_height:
                     #     error_msg = (
                     #         "Overestimated number of fly to lines ({}) at "
