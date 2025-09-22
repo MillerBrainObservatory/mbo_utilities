@@ -76,10 +76,13 @@ def imwrite(
         logger.propagate = True  # send to terminal
     else:
         logger.setLevel(logging.WARNING)
-        logger.info("Debug mode disabled; setting log level to WARNING.")
+        # logger.info("Debug mode disabled; setting log level to WARNING.")
         logger.propagate = False  # don't send to terminal
 
     # save path
+    if not isinstance(outpath, (str, Path)):
+        raise TypeError(f"`outpath` must be a string or Path, got {type(outpath)} instead.")
+
     outpath = Path(outpath)
     if not outpath.parent.is_dir():
         raise ValueError(f"{outpath} is not inside a valid directory."
