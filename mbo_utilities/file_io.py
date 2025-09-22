@@ -7,8 +7,6 @@ import re
 from pathlib import Path
 import numpy as np
 
-from icecream import ic
-
 import dask.array as da
 from tifffile import TiffFile
 
@@ -58,7 +56,6 @@ def write_ops(metadata, raw_filename):
     )
     filename = Path(raw_filename).expanduser().resolve()
 
-    # this convention means input can be either
     if filename.is_file():
         root = filename.parent
     else:
@@ -93,6 +90,7 @@ def write_ops(metadata, raw_filename):
         "dx": dx,
         "dy": dy,
         "ops_path": str(ops_path),
+        "raw_file": str(filename),
         # and dump the rest of the metadata
         **metadata,
     }
@@ -286,10 +284,6 @@ def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
         axis0_offset += shape[0]
 
     return combined_refs
-
-
-def read_scan():
-    raise DeprecationWarning("read_scan is deprecated, use mbo.imread() instead.")
 
 
 def sort_by_si_filename(filename):
