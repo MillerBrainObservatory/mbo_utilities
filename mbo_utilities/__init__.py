@@ -23,12 +23,12 @@ from .util import (
 from .lazy_array import imread, imwrite
 
 
-if is_imgui_installed():
-    from .graphics import run_gui
-else:
-    raise ImportError(
-        f"This should be installed with mbo_utilities. Please report this [here](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or on slack."
-    )
+# if is_imgui_installed():
+#     from .graphics import run_gui
+# else:
+#     raise ImportError(
+#         f"This should be installed with mbo_utilities. Please report this [here](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or on slack."
+#     )
 
 __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
 
@@ -37,7 +37,7 @@ __all__ = [
     # file_io
     "imread",
     "imwrite",
-    "run_gui",
+    # "run_gui",
     "get_mbo_dirs",
     "scanreader",
     "npy_to_dask",
