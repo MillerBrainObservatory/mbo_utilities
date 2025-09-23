@@ -9,7 +9,6 @@ import numpy as np
 from . import log
 from ._writers import _try_generic_writers
 from .array_types import (
-    DemixingResultsArray,
     Suite2pArray,
     H5Array,
     MBOTiffArray,
@@ -47,7 +46,7 @@ _ARRAY_TYPE_KWARGS = {
     H5Array: {"dataset"},
     TiffArray: set(),
     NpyArray: set(),
-    DemixingResultsArray: set(),
+    # DemixingResultsArray: set(),
 }
 
 
@@ -212,6 +211,7 @@ def imread(
         return H5Array(first)
 
     if first.suffix == ".npy" and (first.parent / "pmd_demixer.npy").is_file():
-        return DemixingResultsArray(first.parent)
+        raise NotImplementedError("PMD Arrays are not yet supported.")
+        # return DemixingResultsArray(first.parent)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
