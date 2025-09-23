@@ -252,7 +252,6 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
         return False
 
 
-
 def get_metadata(file, z_step=None, verbose=False):
     """
     Extract metadata from a TIFF file or directory of TIFF files produced by ScanImage.
