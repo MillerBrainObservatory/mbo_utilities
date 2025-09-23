@@ -1,4 +1,5 @@
 import json
+import subprocess
 import time
 import uuid as _uuid
 from pathlib import Path
@@ -10,6 +11,24 @@ from dask import array as da
 from mbo_utilities import get_mbo_dirs
 from mbo_utilities._parsing import _load_existing, _increment_label, _get_git_commit
 
+def get_gpu_usage():
+    """
+    Returns (gpu_util %, mem_util %) using nvidia-smi.
+    """
+    try:
+        result = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-gpu=utilization.gpu,memory.used,memory.total",
+                "--format=csv,noheader,nounits"
+            ],
+            encoding="utf-8"
+        )
+        util, mem_used, mem_total = map(int, result.strip().split(","))
+        mem_util = int(mem_used * 100 / mem_total)
+        return util, mem_util
+    except Exception:
+        return 0, 0
 
 def run_benchmark(*arrays, uuid=None):
     """
