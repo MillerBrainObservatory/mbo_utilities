@@ -1,119 +1,83 @@
 from pathlib import Path
+import shutil
 import numpy as np
 import time
 import mbo_utilities as mbo
 import zarr
 import tifffile
-from mbo_utilities.util import align_zplanes
+from zarr.codecs import BloscCodec
+# from mbo_utilities.util import align_zplanes
 
 data_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
 files = list(data_path.glob("*.tif*"))
 
-# job_path = align_zplanes(data_path)
-# full_job_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw_suite3d_plane_alignment\s3d-v2_1-init-file_500-init-frames_gpu\summary\summary.npy")
-# summary = np.load(job_path.joinpath("summary/summary.npy"), allow_pickle=True).item()
-# tvecs = summary["tvecs"]
+compressors = BloscCodec(cname='zstd', clevel=3, shuffle=zarr.codecs.BloscShuffle.bitshuffle)
 
 x = mbo.imread(files)
 x.phasecorr_method = None
 
-out_file = data_path.parent / "data.zarr"
-arr = zarr.create_array(store="outfile", shape=x.shape, dtype=x.dtype, chunks=(42, 1000, 1000))
+spatial_dims = x.shape[2:]
+nz = x.shape[1]
 
-for i in range(x.shape[0]):
-    arr[:, i, :, :] = x[i]
-# z = zarr.create_array(store='data/example-4.zarr', shape=a.shape, dtype=a.dtype, chunks=(1000, 100))
+out_file = data_path.parent / "volume_compressed.zarr"
+if out_file.exists():
+    # recurse and delete
+    shutil.rmtree(out_file)
 
-for i in range(x.shape[0]):
+group = zarr.create_group(store=out_file)
+array = group.create_array(
+    name="volume",
+    shape=x.shape,
+    dtype=x.dtype,
+    chunks=(x.shape[0], 1, x.shape[-2], x.shape[-1]),
+    compressor=compressors
+)
 
+out_file = data_path.parent / "data_planar_compressed.zarr"
+txt_log = out_file.parent / "planar_log_compressed.txt"
+with open(txt_log, "w") as f:
+    f.write(f"Original files:\n")
+    for file in files:
+        f.write(f"{file}\n")
+    f.write(f"\nShape: {x.shape}\n")
+    f.write(f"Dtype: {x.dtype}\n")
+    f.write(f"Spatial dimensions: {spatial_dims}\n")
+    f.write(f"Number of planes: {nz}\n")
+    for i in range(x.shape[1]):
+        start = time.time()
+        data = x[:, i]
+        end = time.time()
+        f.write(f"Time to read plane {i}: {end - start:.2f}\n")
+        start = time.time()
+        array[:, i, ...] = x[:, i]
+        end = time.time()
+        f.write(f"Time to write plane {i}: {end - start:.2f}\n")
 
-benchmark_dir = data_path.parent / "benchmark"
-benchmark_dir.mkdir(exist_ok=True)
+txt_log = out_file.parent / "volume_compressed_log.txt"
+with open(txt_log, "w") as f:
+    f.write(f"Original files:\n")
+    for file in files:
+        f.write(f"{file}\n")
+    f.write(f"\nShape: {x.shape}\n")
+    f.write(f"Dtype: {x.dtype}\n")
+    f.write(f"Spatial dimensions: {spatial_dims}\n")
+    f.write(f"Number of planes: {nz}\n")
 
-# zarr
+    group = zarr.create_group(store=out_file)
 
-outpath = benchmark_dir / "zarr"
-outpath.mkdir(exist_ok=True, parents=True)
-
-start = time.time()
-mbo.imwrite(x, outpath, planes=[1, 2, 3], ext=".zarr")
-end = time.time()
-fname = "zarr_log.txt"
-
-with open(outpath / fname, "a") as f:
-    f.write(f"Time to write: {end - start:.2f}\n"
-            f"Array shape: {x.shape}\n"
-            f"Dtype: {x.dtype}\n"
-            f"Phase correction: {x.phasecorr_method}\n\n"
-            f"----------------------------------------\n")
-print(f"Time to write zarr: {end - start:.2f}")
-
-
-# tiff
-
-
-outpath = benchmark_dir / "tiff"
-start = time.time()
-mbo.imwrite(x, outpath, planes=[1, 2, 3], ext=".tif")
-end = time.time()
-fname = "zarr_log.txt"
-
-with open(outpath / fname, "a") as f:
-    f.write(f"Time to write: {end - start:.2f}\n"
-            f"Array shape: {x.shape}\n"
-            f"Dtype: {x.dtype}\n"
-            f"Phase correction: {x.phasecorr_method}\n\n"
-            f"----------------------------------------\n")
-
-print(f"Time to write tiff: {end - start:.2f}")
-
-
-# binary
-outpath = benchmark_dir / "s2p_bin"
-outpath.mkdir(exist_ok=True, parents=True)
-start = time.time()
-mbo.imwrite(x, outpath, planes=[2], ext=".bin")
-end = time.time()
-
-with open(outpath / fname, "a") as f:
-    f.write(f"Time to write: {time.time() - start:.2f}\n"
-            f"Array shape: {x.shape}\n"
-            f"Dtype: {x.dtype}\n"
-            f"Phase correction: {x.phasecorr_method}\n\n"
-            f"----------------------------------------\n")
-
-print(f"Time to write binary: {end - start:.2f}")
-
-# h5
-outpath = benchmark_dir / "h5"
-outpath.mkdir(exist_ok=True, parents=True)
-start = time.time()
-mbo.imwrite(x, outpath, planes=[2], ext=".bin")
-end = time.time()
-
-with open(outpath / fname, "a") as f:
-    f.write(f"Time to write: {end - start:.2f}\n"
-            f"Array shape: {x.shape}\n"
-            f"Dtype: {x.dtype}\n"
-            f"Phase correction: {x.phasecorr_method}\n\n"
-            f"----------------------------------------\n")
-print(f"Time to write h5: {end - start:.2f}")
-
-
-# import zarr
-# import fastplotlib as fpl
-# arr = zarr.open(outpath)["plane02_stitched.zarr"]
-# fpl.ImageWidget(arr).show(); fpl.loop.run()
-
-# start = time.time()
-# mbo.imwrite(x, outpath, planes=[2], ext=".bin")
-# end = time.time()
-# print(f"Time to write binary: {end - start:.2f}")
-#
-# start = time.time()
-# mbo.imwrite(x, outpath, planes=[2], ext=".h5")
-# end = time.time()
-# print(f"Time to write h5: {end - start:.2f}")
-
-x = 2
-# mbo.imwrite(x, temp_outfile)
+    for i in range(x.shape[1]):
+        array = group.create_array(
+            name=f"plane{i + 1}",
+            shape=(x.shape[0], x.shape[-2], x.shape[-1]),
+            dtype=x.dtype,
+            chunks=(x.shape[0], x.shape[-2], x.shape[-1]),
+            compressor=compressors
+        )
+        start = time.time()
+        data = x[:, i]
+        end = time.time()
+        f.write(f"Time to read plane {i}: {end - start:.2f}\n")
+        start = time.time()
+        array[:] = data
+        end = time.time()
+        f.write(f"Time to write plane {i}: {end - start:.2f}\n")
