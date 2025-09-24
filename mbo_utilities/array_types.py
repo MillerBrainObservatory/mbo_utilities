@@ -34,11 +34,6 @@ from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, nd_windowed
 from mbo_utilities.scanreader import scans, utils
 from mbo_utilities.scanreader.multiroi import ROI
 
-CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
-CHUNKS_3D = {0: 1, 1: -1, 2: -1}
-
-logger = log.get("array_types")
-
 try:
     from suite3d.job import Job
     HAS_SUITE3D = True
@@ -50,6 +45,56 @@ try:
     HAS_CUPY = True
 except ImportError:
     HAS_CUPY = False
+
+logger = log.get("array_types")
+
+CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
+CHUNKS_3D = {0: 1, 1: -1, 2: -1}
+
+
+def _to_tzyx(a: da.Array, axes: str) -> da.Array:
+    order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
+    perm = [axes.index(ax) for ax in order]
+    a = da.transpose(a, axes=perm)
+    have_T = "T" in order
+    pos = {ax: i for i, ax in enumerate(order)}
+    tdim = a.shape[pos["T"]] if have_T else 1
+    merge_dims = [d for d, ax in enumerate(order) if ax in ("Z", "C", "S")]
+    if merge_dims:
+        front = []
+        if have_T:
+            front.append(pos["T"])
+        rest = [d for d in range(a.ndim) if d not in front]
+        a = da.transpose(a, axes=front + rest)
+        newshape = [tdim if have_T else 1, int(np.prod([a.shape[i] for i in rest[:-2]])), a.shape[-2], a.shape[-1]]
+        a = a.reshape(newshape)
+    else:
+        if have_T:
+            if a.ndim == 3:
+                a = da.expand_dims(a, 1)
+        else:
+            a = da.expand_dims(a, 0)
+            a = da.expand_dims(a, 1)
+        if order[-2:] != ["Y", "X"]:
+            yx_pos = [order.index("Y"), order.index("X")]
+            keep = [i for i in range(len(order)) if i not in yx_pos]
+            a = da.transpose(a, axes=keep + yx_pos)
+    return a
+
+
+def _axes_or_guess(path: Path, arr_ndim: int) -> str:
+    try:
+        with tifffile.TiffFile(path) as tf:
+            return tf.series[0].axes
+    except Exception:
+        if arr_ndim == 2:
+            return "YX"
+    if arr_ndim == 3:
+        return "ZYX"
+    if arr_ndim == 4:
+        return "TZYX"
+    return "YX"
+
 
 def _safe_get_metadata(path: Path) -> dict:
     try:
@@ -317,7 +362,12 @@ class MBOTiffArray:
         if "plane" in self.metadata.keys():
             plane = self.metadata["plane"]
         else:
-            raise ValueError("Cannot determine plane from metadata.")
+            from mbo_utilities import get_plane_from_filename
+            plane = get_plane_from_filename(Path(outpath).stem, None)
+            if plane is None:
+                raise ValueError("Cannot determine plane from metadata.")
+            else:
+                self.metadata["plane"] = plane
 
         outpath = Path(outpath)
         ext = ext.lower().lstrip(".")
@@ -345,7 +395,6 @@ class MBOTiffArray:
         )
 
 
-# NOT YET IMPLEMENTED FULLY
 @dataclass
 class NpyArray:
     filenames: list[Path]
@@ -353,50 +402,6 @@ class NpyArray:
     def load(self) -> Tuple[np.ndarray, List[str]]:
         arr = np.load(str(self.filenames), mmap_mode="r")
         return arr
-
-
-def _to_tzyx(a: da.Array, axes: str) -> da.Array:
-    order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
-    perm = [axes.index(ax) for ax in order]
-    a = da.transpose(a, axes=perm)
-    have_T = "T" in order
-    pos = {ax: i for i, ax in enumerate(order)}
-    tdim = a.shape[pos["T"]] if have_T else 1
-    merge_dims = [d for d, ax in enumerate(order) if ax in ("Z", "C", "S")]
-    if merge_dims:
-        front = []
-        if have_T:
-            front.append(pos["T"])
-        rest = [d for d in range(a.ndim) if d not in front]
-        a = da.transpose(a, axes=front + rest)
-        newshape = [tdim if have_T else 1, int(np.prod([a.shape[i] for i in rest[:-2]])), a.shape[-2], a.shape[-1]]
-        a = a.reshape(newshape)
-    else:
-        if have_T:
-            if a.ndim == 3:
-                a = da.expand_dims(a, 1)
-        else:
-            a = da.expand_dims(a, 0)
-            a = da.expand_dims(a, 1)
-        if order[-2:] != ["Y", "X"]:
-            yx_pos = [order.index("Y"), order.index("X")]
-            keep = [i for i in range(len(order)) if i not in yx_pos]
-            a = da.transpose(a, axes=keep + yx_pos)
-    return a
-
-
-def _axes_or_guess(path: Path, arr_ndim: int) -> str:
-    try:
-        with tifffile.TiffFile(path) as tf:
-            return tf.series[0].axes
-    except Exception:
-        if arr_ndim == 2:
-            return "YX"
-    if arr_ndim == 3:
-        return "ZYX"
-    if arr_ndim == 4:
-        return "TZYX"
-    return "YX"
 
 
 @dataclass
@@ -1022,9 +1027,7 @@ class MboRawArray(scans.ScanMultiROI):
             previous_lines += self._num_lines_between_fields
         return fields
 
-    def preprocess(self):
-        """
-        """
+    def preprocess(self) -> Path | None:
         if not HAS_SUITE3D:
             print(
             "Suite3D is not installed. Cannot preprocess."
@@ -1038,52 +1041,41 @@ class MboRawArray(scans.ScanMultiROI):
                 "             `pip install cupy-cuda11x` # CUDA 11.x"
             )
 
-        fpath = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\green")
-        job_path = fpath.parent.joinpath("suite3d_plane_alignment")
+        parent_dir = self.filenames[0].parent
+        job_path = Path(str(parent_dir) + ".summary")
+        job_id = self.metadata.get("job_id", "preprocessed")
 
         params = {
-            'fs': 17,
-            'planes': np.arange(14),
-            'n_ch_tif': 14,
-            'tau': 0.7,
-            'lbm': True,
-            'fuse_strips': True,
-            'subtract_crosstalk': False,
-            'init_n_frames': 500,
-            'n_init_files': 1,
-            'n_proc_corr': 15,
-            'max_rigid_shift_pix': 150,
-            '3d_reg': True,
-            'gpu_reg': True,
-            'block_size': [64, 64],
+            'fs': self.metadata["frame_rate"],
+            'planes': np.arange(self.metadata["num_planes"]),
+            'n_ch_tif': self.metadata["num_planes"],
+            'tau': self.metadata.get("tau", 1.3),
+            'lbm': self.metadata.get("lbm", True),
+            'fuse_strips': self.metadata.get("fuse_planes", False),
+            'subtract_crosstalk': self.metadata.get("subtract_crosstalk", False),
+            'init_n_frames': self.metadata.get("init_n_frames", 500),
+            'n_init_files': self.metadata.get("n_init_files", 1),
+            'n_proc_corr': self.metadata.get("n_proc_corr", 15),
+            'max_rigid_shift_pix': self.metadata.get("max_rigid_shift_pix", 150),
+            '3d_reg': self.metadata.get("3d_reg", True),
+            'gpu_reg': self.metadata.get("gpu_reg", True),
+            'block_size': self.metadata.get("block_size", [64, 64]),
         }
 
-        tifs = list(fpath.glob("*.tif*"))
         job = Job(
             str(job_path),
-            'move2',
+            job_id,
             create=True,
             overwrite=True,
-            verbosity=0,
-            tifs=tifs,
+            verbosity=-1,
+            tifs=self.filenames,
             params=params
         )
-
-        with tqdm(total=100, desc='CPU %', position=2) as cpubar, \
-                tqdm(total=100, desc='RAM %', position=1) as rambar, \
-                tqdm(total=100, desc='GPU %', position=0) as gpubar:
-
-            job.run_init_pass()  # replace with job.run() for full pipeline
-
-            # Update bars one last time
-            rambar.n = psutil.virtual_memory().percent
-            cpubar.n = psutil.cpu_percent()
-            gpu_util, mem_util = get_gpu_usage()
-            gpubar.n = gpu_util
-            rambar.refresh()
-            cpubar.refresh()
-            gpubar.refresh()
-
+        job.run_init_pass()
+        out_dir = job_path / job_id
+        self.metadata["s3d-job"] = str(out_dir)
+        self.logger.info(f"Preprocessed data saved to {out_dir}")
+        return out_dir
 
     def __array__(self):
         """
