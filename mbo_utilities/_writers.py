@@ -12,20 +12,10 @@ import h5py
 from . import log
 from .file_io import write_ops
 from ._parsing import _make_json_serializable
-from .util import is_running_jupyter
 
-try:
-    from suite2p.io import BinaryFile
+from ._binary import BinaryFile
 
-    HAS_SUITE2P = True
-except ImportError:
-    HAS_SUITE2P = False
-    BinaryFile = None
-
-if is_running_jupyter():
-    from tqdm.notebook import tqdm
-else:
-    from tqdm.auto import tqdm
+from tqdm.auto import tqdm
 
 logger = log.get("writers")
 
@@ -127,11 +117,6 @@ def _get_file_writer(ext, overwrite):
             overwrite=overwrite,
         )
     elif ext == "bin":
-        if not HAS_SUITE2P:
-            raise ValueError(
-                "Suite2p needed to write binary files, please install it:\n"
-                "pip install suite2p[io]"
-            )
         return functools.partial(
             _write_bin,
             overwrite=overwrite,
@@ -173,8 +158,7 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None):
     _write_bin._offsets[key] = off + data.shape[0]
 
     if first_write:
-        raw_filename = fname  # points to data_raw.bin
-        write_ops(metadata, raw_filename)
+        write_ops(metadata, fname)
 
     logger.debug(f"Wrote {data.shape[0]} frames to {fname}.")
 

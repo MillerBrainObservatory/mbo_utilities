@@ -252,7 +252,6 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
         return False
 
 
-
 def get_metadata(file, z_step=None, verbose=False):
     """
     Extract metadata from a TIFF file or directory of TIFF files produced by ScanImage.
@@ -377,12 +376,10 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
     """
     tiff_file = tifffile.TiffFile(file)
     if not is_raw_scanimage(file):
-        print(f"File {file} is not a raw ScanImage TIFF. Attempting to read saved metadata.")
         if not hasattr(tiff_file, "shaped_metadata") or tiff_file.shaped_metadata is None:
             raise ValueError(f"No metadata found in {file}.")
         return tiff_file.shaped_metadata[0]
     elif hasattr(tiff_file, "scanimage_metadata"):
-        print("Raw ScanImage TIFF detected. Extracting metadata...")
         meta = tiff_file.scanimage_metadata
         if meta is None:
             return None

@@ -4,7 +4,7 @@ from skimage.registration import phase_cross_correlation
 
 from mbo_utilities import log
 
-TWO_DIM_PHASECORR_METHODS = {"frame"}
+TWO_DIM_PHASECORR_METHODS = {"frame", None}
 THREE_DIM_PHASECORR_METHODS = ["mean", "max", "std", "mean-sub"]
 
 MBO_WINDOW_METHODS = {

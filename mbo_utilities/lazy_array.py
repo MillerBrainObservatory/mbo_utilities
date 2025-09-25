@@ -9,7 +9,6 @@ import numpy as np
 from . import log
 from ._writers import _try_generic_writers
 from .array_types import (
-    DemixingResultsArray,
     Suite2pArray,
     H5Array,
     MBOTiffArray,
@@ -47,7 +46,7 @@ _ARRAY_TYPE_KWARGS = {
     H5Array: {"dataset"},
     TiffArray: set(),
     NpyArray: set(),
-    DemixingResultsArray: set(),
+    # DemixingResultsArray: set(),
 }
 
 
@@ -67,6 +66,7 @@ def imwrite(
     order: list | tuple = None,
     target_chunk_mb: int = 20,
     progress_callback: Callable = None,
+    preprocess: bool = True,
     debug: bool = False,
 ):
     # Logging
@@ -87,6 +87,8 @@ def imwrite(
     if not outpath.parent.is_dir():
         raise ValueError(f"{outpath} is not inside a valid directory."
                          f" Please create the directory first.")
+    outpath.mkdir(exist_ok=True)
+
 
     if roi is not None:
         if not supports_roi(lazy_array):
@@ -117,6 +119,42 @@ def imwrite(
             )
         file_metadata.update(file_metadata)
 
+    if preprocess:
+        # check metadata for s3d-job dir
+        if "s3d-job" in lazy_array.metadata and Path(lazy_array.metadata["s3d-job"]).is_dir():
+            print("Detected s3d-job in metadata, moving data to s3d output path.")
+            s3d_job_dir = Path(lazy_array.metadata["s3d-job"])
+        else: # check if the input is in a s3d-job folder
+            job_path = str(lazy_array.filenames[0].parent) + ".summary"
+            job_id = lazy_array.metadata.get("job_id", "s3d-preprocessed")
+            s3d_job_dir = Path(job_path) / job_id
+
+        if s3d_job_dir.joinpath("dirs.npy").exists():
+            print("Detected s3d-job in metadata, moving data to output path.")
+            new_job_dir = outpath.joinpath("s3d_results")
+            if new_job_dir.exists():
+                if not overwrite:
+                    raise FileExistsError(f"Output directory {new_job_dir} already exists and `overwrite` is False.")
+                else:
+                    import shutil
+                    shutil.rmtree(new_job_dir)
+                    print(f"Removed existing directory {new_job_dir}.")
+            s3d_job_dir.rename(new_job_dir)
+            s3d_job_dir.unlink(missing_ok=True)
+            print(f"Moved s3d results from {s3d_job_dir} to {new_job_dir}.")
+        else:
+            # check if outpath contains an s3d job
+            npy_files = outpath.rglob("*.npy")
+            if "dirs.npy" in [f.name for f in npy_files]:
+                print(f"Detected existing s3d-job in outpath {outpath}, skipping preprocessing.")
+            else:
+                print(f"No s3d-job detected, preprocessing data.")
+                outpath = lazy_array.preprocess()
+                if "s3d-job" in lazy_array.metadata:
+                    print(f"Preprocessing complete, moving data to {outpath}.")
+                else:
+                    lazy_array.metadata["s3d-job"] = str(outpath.resolve())
+
     if hasattr(lazy_array, "_imwrite"):
         return lazy_array._imwrite(  # noqa
             outpath,
@@ -140,6 +178,36 @@ def imread(
     inputs: str | Path | Sequence[str | Path],
     **kwargs,  # for the reader
 ):
+    """
+    Lazy load imaging data from supported file types.
+
+    Currently supported file types:
+    - .bin: Suite2p binary files (.bin + ops.npy)
+    - .tif/.tiff: TIFF files (BigTIFF, OME-TIFF and raw ScanImage TIFFs)
+    - .h5: HDF5 files
+    - .zarr: Zarr v3
+
+    Parameters
+    ----------
+    inputs : str, Path, ndarray, MboRawArray, or sequence of str/Path
+        Input source. Can be:
+        - Path to a file or directory
+        - List/tuple of file paths
+        - An existing lazy array
+    **kwargs
+        Extra keyword arguments passed to specific array readers.
+
+    Returns
+    -------
+    array_like
+        One of Suite2pArray, TiffArray, MboRawArray, MBOTiffArray, H5Array,
+        or the input ndarray.
+
+    Examples
+    -------
+    >>> from mbo_utilities import imreada
+    >>> arr = imread("/data/raw")  # directory with supported files
+    """
     if isinstance(inputs, np.ndarray):
         return inputs
     if isinstance(inputs, MboRawArray):
@@ -212,6 +280,7 @@ def imread(
         return H5Array(first)
 
     if first.suffix == ".npy" and (first.parent / "pmd_demixer.npy").is_file():
-        return DemixingResultsArray(first.parent)
+        raise NotImplementedError("PMD Arrays are not yet supported.")
+        # return DemixingResultsArray(first.parent)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")

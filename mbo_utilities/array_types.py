@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
+import psutil
+from tqdm.auto import tqdm
+
 from dataclasses import field
 from typing import Any, Tuple, List, Sequence
 from dataclasses import dataclass
@@ -13,6 +16,7 @@ import tifffile
 from dask import array as da
 import fastplotlib as fpl
 
+from mbo_utilities._benchmark import get_gpu_usage
 from mbo_utilities.metadata import get_metadata
 from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities._writers import _write_plane
@@ -23,7 +27,6 @@ from mbo_utilities.file_io import (
     expand_paths,
 )
 from mbo_utilities.util import subsample_array
-from mbo_utilities.pipelines import HAS_MASKNMF, load_from_dir
 
 from mbo_utilities import log
 from mbo_utilities.roi import iter_rois
@@ -31,10 +34,66 @@ from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, nd_windowed
 from mbo_utilities.scanreader import scans, utils
 from mbo_utilities.scanreader.multiroi import ROI
 
+try:
+    from suite3d.job import Job
+    HAS_SUITE3D = True
+except ImportError:
+    HAS_SUITE3D = False
+
+try:
+    import cupy
+    HAS_CUPY = True
+except ImportError:
+    HAS_CUPY = False
+
+logger = log.get("array_types")
+
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
-logger = log.get("array_types")
+
+def _to_tzyx(a: da.Array, axes: str) -> da.Array:
+    order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
+    perm = [axes.index(ax) for ax in order]
+    a = da.transpose(a, axes=perm)
+    have_T = "T" in order
+    pos = {ax: i for i, ax in enumerate(order)}
+    tdim = a.shape[pos["T"]] if have_T else 1
+    merge_dims = [d for d, ax in enumerate(order) if ax in ("Z", "C", "S")]
+    if merge_dims:
+        front = []
+        if have_T:
+            front.append(pos["T"])
+        rest = [d for d in range(a.ndim) if d not in front]
+        a = da.transpose(a, axes=front + rest)
+        newshape = [tdim if have_T else 1, int(np.prod([a.shape[i] for i in rest[:-2]])), a.shape[-2], a.shape[-1]]
+        a = a.reshape(newshape)
+    else:
+        if have_T:
+            if a.ndim == 3:
+                a = da.expand_dims(a, 1)
+        else:
+            a = da.expand_dims(a, 0)
+            a = da.expand_dims(a, 1)
+        if order[-2:] != ["Y", "X"]:
+            yx_pos = [order.index("Y"), order.index("X")]
+            keep = [i for i in range(len(order)) if i not in yx_pos]
+            a = da.transpose(a, axes=keep + yx_pos)
+    return a
+
+
+def _axes_or_guess(path: Path, arr_ndim: int) -> str:
+    try:
+        with tifffile.TiffFile(path) as tf:
+            return tf.series[0].axes
+    except Exception:
+        if arr_ndim == 2:
+            return "YX"
+    if arr_ndim == 3:
+        return "ZYX"
+    if arr_ndim == 4:
+        return "TZYX"
+    return "YX"
 
 
 def _safe_get_metadata(path: Path) -> dict:
@@ -42,125 +101,6 @@ def _safe_get_metadata(path: Path) -> dict:
         return get_metadata(path)
     except Exception:
         return {}
-
-@dataclass
-class DemixingResultsArray:
-    plane_dir: Path
-
-    def load(self):
-        data = load_from_dir(self.plane_dir)
-        return data["pmd_demixer"].results
-
-    def imshow(self, **kwargs):
-        """
-        Display the demixing results as an image widget.
-        """
-        if not HAS_MASKNMF:
-            raise ImportError(
-                "MaskNMF is not installed. Cannot display demixing results."
-            )
-        import fastplotlib as fpl
-
-        histogram_widget = kwargs.get("histogram_widget", True)
-        figure_kwargs = kwargs.get(
-            "figure_kwargs",
-            {
-                "size": (800, 1000),
-            },
-        )
-        window_funcs = kwargs.get("window_funcs", None)
-        return fpl.ImageWidget(
-            data=self.load(),
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,  # "canvas": canvas},
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
-            window_funcs=window_funcs,
-        )
-
-
-class Suite2pArray2:
-    def __init__(self, path, custom_bin=None):
-        path = Path(path)
-        if path.is_dir():
-            ops_path = path/"ops.npy"
-            if not ops_path.exists():
-                raise FileNotFoundError(f"No ops.npy in {path}")
-            base_dir = path
-        elif path.suffix == ".npy":
-            ops_path = path
-            base_dir = path.parent
-        elif path.suffix == ".bin":
-            bin_path = path.resolve()
-            base_dir = bin_path.parent
-            ops_path = base_dir/"ops.npy"
-            if not ops_path.exists():
-                raise FileNotFoundError(f"No ops.npy in {base_dir}")
-        else:
-            raise TypeError(f"Path must be a dir, ops.npy, or .bin, got {path}")
-        if custom_bin:
-            bin_path = Path(custom_bin).resolve()
-            base_dir = bin_path.parent
-            ops_path = base_dir/"ops.npy"
-            if not ops_path.exists():
-                raise FileNotFoundError(f"No ops.npy in {base_dir}")
-        if "bin_path" not in locals():
-            for fname in ("data.bin","data_raw.bin"):
-                candidate = base_dir/fname
-                if candidate.exists():
-                    bin_path = candidate
-                    break
-            else:
-                raise FileNotFoundError(f"No binary file found in {base_dir}")
-
-        self.ops = np.load(ops_path, allow_pickle=True).item()
-        self.bin_path = bin_path
-
-        self.ops = np.load(ops_path, allow_pickle=True).item()
-        self.Ly = self.ops["Ly"]
-        self.Lx = self.ops["Lx"]
-        self.nframes = self.ops.get("nframes", self.ops.get("n_frames"))
-        if self.nframes is None:
-            raise ValueError("Missing 'nframes' or 'n_frames' in metadata")
-        self.shape = (self.nframes, self.Ly, self.Lx)
-        self.dtype = np.int16
-        self._file = np.memmap(str(bin_path), mode="r", dtype=self.dtype, shape=self.shape)
-
-    def __getitem__(self, key):
-        return self._file[key]
-
-    def __len__(self):
-        return self.shape[0]
-
-    def __array__(self):
-        n = min(10, self.nframes)
-        return np.stack([self._file[i] for i in range(n)], axis=0)
-
-    @property
-    def ndim(self):
-        return len(self.shape)
-
-    def min_(self, axis=None):
-        """Full array min, like numpy.min(). May be slow."""
-        return float(self._file.min(axis=axis))
-
-    def max_(self, axis=None):
-        """Full array max, like numpy.max(). May be slow."""
-        return float(self._file.max(axis=axis))
-
-    @property
-    def min(self):
-        return float(self._file[0].min())
-
-    @property
-    def max(self):
-        return float(self._file[0].max())
-
-    @property
-    def metadata(self):
-        return self.ops
-
-    def close(self):
-        self._file._mmap.close()
 
 
 @dataclass
@@ -422,7 +362,12 @@ class MBOTiffArray:
         if "plane" in self.metadata.keys():
             plane = self.metadata["plane"]
         else:
-            raise ValueError("Cannot determine plane from metadata.")
+            from mbo_utilities import get_plane_from_filename
+            plane = get_plane_from_filename(Path(outpath).stem, None)
+            if plane is None:
+                raise ValueError("Cannot determine plane from metadata.")
+            else:
+                self.metadata["plane"] = plane
 
         outpath = Path(outpath)
         ext = ext.lower().lstrip(".")
@@ -450,7 +395,6 @@ class MBOTiffArray:
         )
 
 
-# NOT YET IMPLEMENTED FULLY
 @dataclass
 class NpyArray:
     filenames: list[Path]
@@ -458,50 +402,6 @@ class NpyArray:
     def load(self) -> Tuple[np.ndarray, List[str]]:
         arr = np.load(str(self.filenames), mmap_mode="r")
         return arr
-
-
-def _to_tzyx(a: da.Array, axes: str) -> da.Array:
-    order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
-    perm = [axes.index(ax) for ax in order]
-    a = da.transpose(a, axes=perm)
-    have_T = "T" in order
-    pos = {ax: i for i, ax in enumerate(order)}
-    tdim = a.shape[pos["T"]] if have_T else 1
-    merge_dims = [d for d, ax in enumerate(order) if ax in ("Z", "C", "S")]
-    if merge_dims:
-        front = []
-        if have_T:
-            front.append(pos["T"])
-        rest = [d for d in range(a.ndim) if d not in front]
-        a = da.transpose(a, axes=front + rest)
-        newshape = [tdim if have_T else 1, int(np.prod([a.shape[i] for i in rest[:-2]])), a.shape[-2], a.shape[-1]]
-        a = a.reshape(newshape)
-    else:
-        if have_T:
-            if a.ndim == 3:
-                a = da.expand_dims(a, 1)
-        else:
-            a = da.expand_dims(a, 0)
-            a = da.expand_dims(a, 1)
-        if order[-2:] != ["Y", "X"]:
-            yx_pos = [order.index("Y"), order.index("X")]
-            keep = [i for i in range(len(order)) if i not in yx_pos]
-            a = da.transpose(a, axes=keep + yx_pos)
-    return a
-
-
-def _axes_or_guess(path: Path, arr_ndim: int) -> str:
-    try:
-        with tifffile.TiffFile(path) as tf:
-            return tf.series[0].axes
-    except Exception:
-        if arr_ndim == 2:
-            return "YX"
-    if arr_ndim == 3:
-        return "ZYX"
-    if arr_ndim == 4:
-        return "TZYX"
-    return "YX"
 
 
 @dataclass
@@ -792,7 +692,7 @@ class MboRawArray(scans.ScanMultiROI):
         return self._phasecorr_method
 
     @phasecorr_method.setter
-    def phasecorr_method(self, value: str):
+    def phasecorr_method(self, value: str | None):
         """
         Set the phase correction method.
         Options are 'two_step', 'subpix', or 'crosscorr'.
@@ -802,6 +702,8 @@ class MboRawArray(scans.ScanMultiROI):
                 f"Unsupported phase correction method: {value}. "
                 f"Supported methods are: {ALL_PHASECORR_METHODS}"
             )
+        if value is None:
+            self.fix_phase = False
         self._phasecorr_method = value
 
     @property
@@ -1102,15 +1004,6 @@ class MboRawArray(scans.ScanMultiROI):
             for roi_id, roi in enumerate(self.rois):
                 new_field = roi.get_field_at(scanning_depth)
                 if new_field is not None:
-                    # if next_line_in_page + new_field.height > self._page_height:
-                    #     error_msg = (
-                    #         "Overestimated number of fly to lines ({}) at "
-                    #         "scanning depth {}".format(
-                    #             self._num_fly_to_lines, scanning_depth
-                    #         )
-                    #     )
-                    #     raise RuntimeError(error_msg)
-
                     # Set xslice and yslice (from where in the page to cut it)
                     new_field.yslices = [
                         slice(next_line_in_page, next_line_in_page + new_field.height)
@@ -1134,6 +1027,55 @@ class MboRawArray(scans.ScanMultiROI):
             previous_lines += self._num_lines_between_fields
         return fields
 
+    def preprocess(self) -> Path | None:
+        if not HAS_SUITE3D:
+            print(
+            "Suite3D is not installed. Cannot preprocess."
+            "Install with `pip install mbo_utilities[suite3d, cuda12] # CUDA 12.x or"
+            "             `pip install mbo_utilities[suite3d, cuda11] # CUDA 11.x"
+            )
+        if not HAS_CUPY:
+            print(
+                "CuPy is not installed. Cannot preprocess."
+                "Install with `pip install cupy-cuda12x` # CUDA 12.x or"
+                "             `pip install cupy-cuda11x` # CUDA 11.x"
+            )
+
+        parent_dir = self.filenames[0].parent
+        job_path = Path(str(parent_dir) + ".summary")
+        job_id = self.metadata.get("job_id", "preprocessed")
+
+        params = {
+            'fs': self.metadata["frame_rate"],
+            'planes': np.arange(self.metadata["num_planes"]),
+            'n_ch_tif': self.metadata["num_planes"],
+            'tau': self.metadata.get("tau", 1.3),
+            'lbm': self.metadata.get("lbm", True),
+            'fuse_strips': self.metadata.get("fuse_planes", False),
+            'subtract_crosstalk': self.metadata.get("subtract_crosstalk", False),
+            'init_n_frames': self.metadata.get("init_n_frames", 500),
+            'n_init_files': self.metadata.get("n_init_files", 1),
+            'n_proc_corr': self.metadata.get("n_proc_corr", 15),
+            'max_rigid_shift_pix': self.metadata.get("max_rigid_shift_pix", 150),
+            '3d_reg': self.metadata.get("3d_reg", True),
+            'gpu_reg': self.metadata.get("gpu_reg", True),
+            'block_size': self.metadata.get("block_size", [64, 64]),
+        }
+
+        job = Job(
+            str(job_path),
+            job_id,
+            create=True,
+            overwrite=True,
+            verbosity=-1,
+            tifs=self.filenames,
+            params=params
+        )
+        job.run_init_pass()
+        out_dir = job_path / job_id
+        self.metadata["s3d-job"] = str(out_dir)
+        self.logger.info(f"Preprocessed data saved to {out_dir}")
+        return out_dir
 
     def __array__(self):
         """
