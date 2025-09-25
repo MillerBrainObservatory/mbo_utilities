@@ -48,6 +48,7 @@ gui = [
 	"jupyter_rfb>=0.5.1",
 ]
 suite3d = ["mbo-suite3d==0.0.2"]
+cuda13 = ["cupy-cuda13x"]
 cuda12 = ["cupy-cuda12x"]
 cuda11 = ["cupy-cuda11x"]
 docs = [

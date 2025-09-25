@@ -33,12 +33,17 @@ To utilize the GPU, you will need CUDA and an appropriate [cupy](https://docs.cu
 
 Check which version of CUDA you have with `nvcc --version`.
 
-Then, install either 11.x or 12.x with:
-
 ```bash
-pip install cupy-cuda11x  # for CUDA 11.x
-pip install cupy-cuda12x  # for CUDA 12.x
+nvcc --version
+PS C:\Users\MBO-User\code> nvcc --version
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2025 NVIDIA Corporation
+Built on Wed_Jul_16_20:06:48_Pacific_Daylight_Time_2025
+Cuda compilation tools, release 13.0, V13.0.48
+Build cuda_13.0.r13.0/compiler.36260728_0
 ```
+
+For CUDA 13.x: `pip install mbo_utilities[cuda13]`
 
 ### RuntimeError with `cupy`
 
@@ -57,4 +62,9 @@ pip install cupy-cuda11x  # or cupy-cuda12x
 
 ## Acknowledgements
 
-Thank you to the developers of [scanreader](https://github.com/atlab/scanreader) and the broader open-source community.
+This pipeline makes use of several open-source libraries:
+
+- [Suite3D](https://github.com/alihaydaroglu/suite3d)
+- [suite2p](https://github.com/MouseLand/suite2p)
+- [rastermap](https://github.com/MouseLand/rastermap)
+- [scanreader](https://github.com/atlab/scanreader)
