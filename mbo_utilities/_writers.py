@@ -220,14 +220,14 @@ def _write_tiff(
     writer = _write_tiff._writers[filename]
     is_first = _write_tiff._first_write.get(filename, True)
 
-    for frame in data:
-        writer.write(
-            frame,
-            contiguous=True,
-            photometric="minisblack",
-            metadata=_make_json_serializable(metadata) if is_first else {},
-        )
-        _write_tiff._first_write[filename] = False
+    # for frame in data:
+    writer.write(
+        data,
+        contiguous=True,
+        photometric="minisblack",
+        metadata=_make_json_serializable(metadata) if is_first else {},
+    )
+    _write_tiff._first_write[filename] = False
 
 
 def _write_zarr(path, data, *, overwrite=True, metadata=None):
