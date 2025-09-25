@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
+import tempfile
 import copy
 import json
-import psutil
-from tqdm.auto import tqdm
+import time
 
 from dataclasses import field
 from typing import Any, Tuple, List, Sequence
@@ -16,11 +17,11 @@ import tifffile
 from dask import array as da
 import fastplotlib as fpl
 
-from mbo_utilities._benchmark import get_gpu_usage
 from mbo_utilities.metadata import get_metadata
 from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
+    get_files,
     _multi_tiff_to_fsspec,
     HAS_ZARR,
     _convert_range_to_slice,
@@ -35,7 +36,7 @@ from mbo_utilities.scanreader import scans, utils
 from mbo_utilities.scanreader.multiroi import ROI
 
 try:
-    from suite3d.job import Job
+    from suite3d.job import Job  # noqa
     HAS_SUITE3D = True
 except ImportError:
     HAS_SUITE3D = False
@@ -50,6 +51,147 @@ logger = log.get("array_types")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
+
+
+def register_zplanes(filenames, metadata, outpath = None) -> Path | None:
+    if not HAS_SUITE3D:
+        print(
+            "Suite3D is not installed. Cannot preprocess."
+            "Install with `pip install mbo_utilities[suite3d, cuda12] # CUDA 12.x or"
+            "             `pip install mbo_utilities[suite3d, cuda11] # CUDA 11.x"
+        )
+    if not HAS_CUPY:
+        print(
+            "CuPy is not installed. Cannot preprocess."
+            "Install with `pip install cupy-cuda12x` # CUDA 12.x or"
+            "             `pip install cupy-cuda11x` # CUDA 11.x"
+        )
+
+    if "frame_rate" not in metadata or "num_planes" not in metadata:
+        print("Missing required metadata for axial alignment: frame_rate / num_planes")
+        return None
+
+    if outpath is not None:
+        job_path = Path(outpath)
+    else:
+        job_path = Path(str(filenames[0].parent) + ".summary")
+
+    job_id = metadata.get("job_id", "preprocessed")
+
+    params = {
+        'fs': metadata["frame_rate"],
+        'planes': np.arange(metadata["num_planes"]),
+        'n_ch_tif': metadata["num_planes"],
+        'tau': metadata.get("tau", 1.3),
+        'lbm': metadata.get("lbm", True),
+        'fuse_strips': metadata.get("fuse_planes", False),
+        'subtract_crosstalk': metadata.get("subtract_crosstalk", False),
+        'init_n_frames': metadata.get("init_n_frames", 500),
+        'n_init_files': metadata.get("n_init_files", 1),
+        'n_proc_corr': metadata.get("n_proc_corr", 15),
+        'max_rigid_shift_pix': metadata.get("max_rigid_shift_pix", 150),
+        '3d_reg': metadata.get("3d_reg", True),
+        'gpu_reg': metadata.get("gpu_reg", True),
+        'block_size': metadata.get("block_size", [64, 64]),
+    }
+
+    job = Job(
+        str(job_path),
+        job_id,
+        create=True,
+        overwrite=True,
+        verbosity=-1,
+        tifs=filenames,
+        params=params
+    )
+    print("Running Suite3D job...")
+    start = time.time()
+    job.run_init_pass()
+    end = time.time()
+    print(f"Suite 3D init pass done in {end - start:.1f} seconds.")
+    out_dir = job_path / job_id
+    metadata["s3d-job"] = str(out_dir)
+    metadata["s3d-params"] = params
+    print(f"Preprocessed data saved to {out_dir}")
+    return out_dir
+
+
+def apply_zshifts(base_dir, inplace=False, metadata=None):
+    """
+    Apply plane shifts from summary.npy to TIFF stacks.
+
+    Parameters
+    ----------
+    base_dir : str or Path
+        Directory containing stitched plane TIFFs and summary.npy.
+    inplace : bool, default=False
+        If True, overwrite original TIFFs safely using a temporary file.
+        If False, save new files with `_aligned` suffix.
+    metadata : list of dict, optional
+        Per-plane metadata to write into output TIFFs.
+
+    Returns
+    -------
+    list of Path
+        Paths to aligned TIFF files.
+    """
+    base_dir = Path(base_dir)
+    tiffs = sorted(base_dir.rglob("plane*_stitched.tif"))
+    summary_file = list(base_dir.rglob("*summary.npy"))[0]
+
+    summary = np.load(summary_file, allow_pickle=True).item()
+    plane_shifts = summary["plane_shifts"]
+
+    with tifffile.TiffFile(tiffs[0]) as tf:
+        nframes, H, W = tf.series[0].shape
+
+    # Compute padding
+    dy_min, dx_min = plane_shifts.min(axis=0)
+    dy_max, dx_max = plane_shifts.max(axis=0)
+    pad_top, pad_left = max(0, -dy_min), max(0, -dx_min)
+    pad_bottom, pad_right = max(0, dy_max), max(0, dx_max)
+    target_shape = (nframes, H + pad_top + pad_bottom, W + pad_left + pad_right)
+
+    print("Final shape:", target_shape)
+
+    outputs = []
+    for i, (tif, (dy, dx)) in enumerate(zip(tiffs, plane_shifts)):
+        meta = metadata[i] if metadata is not None else {}
+
+        if inplace:
+            fd, tmpname = tempfile.mkstemp(suffix=".tif", dir=tif.parent)
+            os.close(fd)
+            tmpfile = Path(tmpname)
+            outpath = tif
+        else:
+            outpath = tif.with_name(tif.stem + "_aligned.tif")
+            if outpath.exists():
+                outpath.unlink()
+            tmpfile = outpath
+
+        with tifffile.TiffFile(tif) as tf:
+            with tifffile.TiffWriter(tmpfile, bigtiff=True) as tw:
+                iy, ix = int(dy), int(dx)
+                for page in tf.pages:
+                    frame = page.asarray()
+                    canvas = np.zeros(target_shape[1:], dtype=frame.dtype)
+                    yy = slice(pad_top + iy, pad_top + iy + H)
+                    xx = slice(pad_left + ix, pad_left + ix + W)
+                    canvas[yy, xx] = frame
+                    tw.write(canvas, contiguous=True, photometric="minisblack", metadata=meta)
+
+        if inplace:
+            for _ in range(6):
+                try:
+                    os.replace(str(tmpfile), str(outpath))
+                    break
+                except PermissionError:
+                    time.sleep(0.2)
+            else:
+                raise
+        print("Wrote:", outpath)
+        outputs.append(outpath)
+    return outputs
 
 
 def _to_tzyx(a: da.Array, axes: str) -> da.Array:
@@ -160,7 +302,7 @@ class Suite2pArray:
         return float(self._file[0].max())
 
     def close(self):
-        self._file._mmap.close()
+        self._file._mmap.close()  # type: ignore
 
 
 class H5Array:
@@ -237,30 +379,6 @@ class H5Array:
             debug=kwargs.get("debug", False),
         )
 
-    def _imwrite2(
-        self,
-        outpath: Path | str,
-        overwrite=False,
-        target_chunk_mb=50,
-        ext=".tiff",
-        progress_callback=None,
-        debug=None,
-        planes=None,
-    ):
-        target = outpath
-        target.mkdir(exist_ok=True)
-        md = self.metadata.copy()
-        _write_plane(
-            self,
-            target,
-            overwrite=overwrite,
-            ext=ext,
-            target_chunk_mb=target_chunk_mb,
-            metadata=md,
-            progress_callback=progress_callback,
-            debug=debug,
-        )
-
 
 @dataclass
 class MBOTiffArray:
@@ -303,12 +421,6 @@ class MBOTiffArray:
 
     def __getattr__(self, attr):
         return getattr(self.dask, attr)
-
-    # def min(self) -> float:
-    #     return float(self.dask[0].min().compute())
-    #
-    # def max(self) -> float:
-    #     return float(self.dask[0].max().compute())
 
     @property
     def ndim(self) -> int:
@@ -564,15 +676,6 @@ class MboRawArray(scans.ScanMultiROI):
             "phase_offset": False,
         }
         self.logger = logger
-        self.logger.info(
-            f"Initializing MBO Scan with parameters:\n"
-            f"roi: {roi}, "
-            f"fix_phase: {fix_phase}, "
-            f"phasecorr_method: {phasecorr_method}, "
-            f"border: {border}, "
-            f"upsample: {upsample}, "
-            f"max_offset: {max_offset}"
-        )
         if files:
             self.read_data(files)
 
@@ -635,9 +738,7 @@ class MboRawArray(scans.ScanMultiROI):
         self._metadata = get_metadata(
             self.tiff_files[0].filehandle.path
         )  # from the file
-        self.metadata = (
-            {"si": _make_json_serializable(self.tiff_files[0].scanimage_metadata)}
-        )
+        self.metadata["si"] = _make_json_serializable(self.tiff_files[0].scanimage_metadata)
         self._rois = self._create_rois()
         self.fields = self._create_fields()
         if self.join_contiguous:
@@ -645,8 +746,7 @@ class MboRawArray(scans.ScanMultiROI):
 
     @property
     def metadata(self):
-        md = self._metadata.copy()
-        md.update(
+        self._metadata.update(
             {
                 "fix_phase": self.fix_phase,
                 "phasecorr_method": self.phasecorr_method,
@@ -657,11 +757,7 @@ class MboRawArray(scans.ScanMultiROI):
                 "num_frames": self.num_frames,
             }
         )
-        return md
-
-    @metadata.setter
-    def metadata(self, value):
-        self._metadata.update(value)
+        return self._metadata
 
     @property
     def rois(self):
@@ -1074,8 +1170,10 @@ class MboRawArray(scans.ScanMultiROI):
         job.run_init_pass()
         out_dir = job_path / job_id
         self.metadata["s3d-job"] = str(out_dir)
+        self.metadata["s3d-params"] = params
         self.logger.info(f"Preprocessed data saved to {out_dir}")
         return out_dir
+
 
     def __array__(self):
         """

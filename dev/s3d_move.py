@@ -1,18 +1,34 @@
-from pathlib import Path
-import warnings
-import lbm_suite2p_python as lsp
-from mbo_utilities import get_files #, imread, get_metadata
 
-warnings.simplefilter(action='ignore')
+if __name__ == "__main__":
+    from pathlib import Path
+    import warnings
+    # import lbm_suite2p_python as lsp
+    from mbo_utilities import get_files, imread, imwrite  # , get_metadata
 
-inpath = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\suite2p\z_registered")
-outpath = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\suite2p\z_registered\mbo_v3")
-model_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\suite2p\z_registered\mbo_v3.npy")
+    # from mbo_utilities.array_types import apply_zshifts
 
-if model_path.is_file():
-    ops = {"pretrained_model": model_path}
-    aligned_files = get_files(inpath, "aligned", max_depth=3)
-    lsp.run_volume(aligned_files[:3], save_path=outpath)
+    warnings.simplefilter(action='ignore')
+    raw_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
+    out_path = raw_path.parent.joinpath("raw.aligned")
+    arr = imread(raw_path)
+    imwrite(arr, out_path, preprocess=True, planes=[1, 2])
+
+
+# base_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\suite2p\dev_test")
+# array = imread(base_path)
+# fpl.ImageWidget(array).show()
+# fpl.loop.run()
+#
+# apply_zshifts(base_path, inplace=True)
+#
+# inpath = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\suite2p\z_registered")
+# outpath = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\suite2p\z_registered\mbo_v3")
+# model_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\suite2p\z_registered\mbo_v3.npy")
+#
+# if model_path.is_file():
+#     ops = {"pretrained_model": model_path}
+#     aligned_files = get_files(inpath, "aligned", max_depth=3)
+#     lsp.run_volume(aligned_files[:3], save_path=outpath)
 
 # tiffs = get_files(Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\test"), "stitched", max_depth=2)
 # md = [get_metadata(tiffs[i]) for i in range(len(tiffs))]
@@ -61,26 +77,3 @@ if model_path.is_file():
 #     outpath = tif.with_name(tif.stem + "_aligned.tif")
 #     tifffile.imwrite(outpath, arr, metadata=md[i])
 #     print("Wrote:", outpath)
-#
-# aligned_files = get_files(outpath.parent, "aligned")
-# x = tifffile.imread(aligned_files[0])
-# arr = imread(aligned_files)
-# fpl.ImageWidget(arr).show()
-# fpl.loop.run()
-
-
-    # fpath = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
-    # arr = imread(fpath)
-    # imwrite(arr, fpath.parent.joinpath("test"))
-    # x = 2
-
-    # start = time.time()
-    # arr.preprocess()
-    # end = time.time()
-    # print(f"Preprocessing time: {end - start:.2f} seconds")
-    #
-    # outpath = Path(str(fpath) + "_extracted")
-    # start = time.time()
-    # imwrite(arr, outpath)
-    # end = time.time()
-    # print(f"Writing time: {end - start:.2f} seconds")

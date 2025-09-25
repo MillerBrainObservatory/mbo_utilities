@@ -39,6 +39,16 @@ def _close_tiff_writers():
             writer.close()
         _write_tiff._writers.clear()
 
+def compute_pad_from_shifts(plane_shifts):
+    shifts = np.asarray(plane_shifts, dtype=int)
+    dy_min, dx_min = shifts.min(axis=0)
+    dy_max, dx_max = shifts.max(axis=0)
+    pad_top = max(0, -dy_min)
+    pad_bottom = max(0, dy_max)
+    pad_left = max(0, -dx_min)
+    pad_right = max(0, dx_max)
+    return pad_top, pad_bottom, pad_left, pad_right
+
 
 def _write_plane(
     data: np.ndarray | Any,
@@ -61,6 +71,9 @@ def _write_plane(
     if plane_index:
         assert type(plane_index) is int, "plane_index must be an integer"
         metadata["plane"] = plane_index + 1
+        H0, W0 = dshape[-2], dshape[-1]
+    else:
+        H0, W0 = data.shape[-2], data.shape[-1]
 
     fname = filename
     writer = _get_file_writer(fname.suffix, overwrite=overwrite)
@@ -79,11 +92,47 @@ def _write_plane(
     else:
         pbar = None
 
+    use_shift = metadata.get("s3d-job", False)
+    if use_shift:
+        job_path = Path(metadata.get("s3d-job", ""))
+        if not job_path or not job_path.is_dir():
+            raise RuntimeError(
+                f"_write_plane expected a valid 's3d-job' path in metadata, got {job_path!r}"
+            )
+
+        summary_files = list(job_path.rglob("*summary.npy"))
+        if not summary_files:
+            raise FileNotFoundError(
+                f"No summary.npy found under {job_path}. "
+                f"Metadata: {metadata}"
+            )
+        summary_file = summary_files[0]
+
+        assert summary_file.is_file(), f"Could not find summary file in {metadata['s3d-job']}"
+        summary = np.load(summary_file, allow_pickle=True).item()
+        plane_shifts = summary["plane_shifts"]
+        assert plane_index is not None, "plane_index must be provided when using shifts"
+        pt, pb, pl, pr = compute_pad_from_shifts(plane_shifts)
+        H_out = H0 + pt + pb
+        W_out = W0 + pl + pr
+        iy, ix = map(int, plane_shifts[plane_index])
+        yy = slice(pt + iy, pt + iy + H0)
+        xx = slice(pl + ix, pl + ix + W0)
+        out_shape = (ntime, H_out, W_out)
+    else:
+        out_shape = (ntime, H0, W0)
+
     start = 0
     for i in range(nchunks):
         end = start + base + (1 if i < extra else 0)
         chunk = data[start:end, plane_index, :, :] if plane_index is not None else data[start:end, :, :]
-        writer(fname, chunk, metadata=metadata)
+        if use_shift:
+            buf = np.zeros((chunk.shape[0], out_shape[1], out_shape[2]), dtype=chunk.dtype)
+            buf[:, yy, xx] = chunk
+            writer(fname, buf, metadata=metadata)
+        else:
+            writer(fname, chunk, metadata=metadata)
+        # writer(fname, chunk, metadata=metadata)
         if pbar:
             pbar.update(1)
         if progress_callback:

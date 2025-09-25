@@ -14,7 +14,7 @@ from .array_types import (
     MBOTiffArray,
     TiffArray,
     MboRawArray,
-    NpyArray,
+    NpyArray, register_zplanes,
 )
 from .file_io import get_files
 from .metadata import is_raw_scanimage, has_mbo_metadata
@@ -68,6 +68,7 @@ def imwrite(
     progress_callback: Callable = None,
     preprocess: bool = True,
     debug: bool = False,
+    **kwargs,  # for specific array writers
 ):
     # Logging
     if debug:
@@ -88,7 +89,6 @@ def imwrite(
         raise ValueError(f"{outpath} is not inside a valid directory."
                          f" Please create the directory first.")
     outpath.mkdir(exist_ok=True)
-
 
     if roi is not None:
         if not supports_roi(lazy_array):
@@ -119,6 +119,7 @@ def imwrite(
             )
         file_metadata.update(file_metadata)
 
+    s3d_job_dir = None
     if preprocess:
         # check metadata for s3d-job dir
         if "s3d-job" in lazy_array.metadata and Path(lazy_array.metadata["s3d-job"]).is_dir():
@@ -147,14 +148,14 @@ def imwrite(
             npy_files = outpath.rglob("*.npy")
             if "dirs.npy" in [f.name for f in npy_files]:
                 print(f"Detected existing s3d-job in outpath {outpath}, skipping preprocessing.")
+                s3d_job_dir = outpath
             else:
                 print(f"No s3d-job detected, preprocessing data.")
-                outpath = lazy_array.preprocess()
-                if "s3d-job" in lazy_array.metadata:
-                    print(f"Preprocessing complete, moving data to {outpath}.")
-                else:
-                    lazy_array.metadata["s3d-job"] = str(outpath.resolve())
+                s3d_job_dir = register_zplanes(lazy_array.filenames, file_metadata, outpath)
+                print(f"Registered z-planes, results saved to {s3d_job_dir}.")
 
+    if s3d_job_dir:
+        lazy_array.metadata["s3d-job"] = s3d_job_dir
     if hasattr(lazy_array, "_imwrite"):
         return lazy_array._imwrite(  # noqa
             outpath,
@@ -205,8 +206,8 @@ def imread(
 
     Examples
     -------
-    >>> from mbo_utilities import imreada
-    >>> arr = imread("/data/raw")  # directory with supported files
+    >>> from mbo_utilities import imread
+    >>> arr = imread("/data/raw")  # directory with supported files, for full filename
     """
     if isinstance(inputs, np.ndarray):
         return inputs
