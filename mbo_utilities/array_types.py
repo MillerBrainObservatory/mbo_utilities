@@ -1292,25 +1292,35 @@ class ZarrArray:
     Lightweight reader for _write_zarr outputs.
     Presents data as (T, Z, H, W) with Z=1.
     """
-    def __init__(self, path: str | Path):
-        self.path = Path(path).with_suffix(".zarr")
-        if not self.path.exists():
-            raise FileNotFoundError(f"No zarr store at {self.path}")
-        self.z = zarr.open(self.path, mode="r")
-        self._metadata = dict(self.z.attrs)
+    def __init__(self, paths: str | Path | Sequence[str | Path]):
+        if isinstance(paths, (str, Path)):
+            paths = [paths]
+        self.paths = [Path(p).with_suffix(".zarr") for p in paths]
+        for p in self.paths:
+            if not p.exists():
+                raise FileNotFoundError(f"No zarr store at {p}")
+
+        self.zs = [zarr.open(p, mode="r") for p in self.paths]
+
+        shapes = [z.shape for z in self.zs]
+        if len(set(shapes)) != 1:
+            raise ValueError(f"Inconsistent shapes across zarr stores: {shapes}")
+
+        self._metadata = [dict(z.attrs) for z in self.zs]
 
     @property
-    def metadata(self) -> dict:
-        return self._metadata
+    def metadata(self):
+        # if one store, return dict, if many, return list of dicts
+        return self._metadata[0] if len(self._metadata) == 1 else self._metadata
 
     @property
     def shape(self) -> tuple[int, int, int, int]:
-        t, h, w = self.z.shape
-        return (t, 1, h, w)
+        t, h, w = self.zs[0].shape
+        return (t, len(self.zs), h, w)
 
     @property
     def dtype(self):
-        return self.z.dtype
+        return self.zs[0].dtype
 
     @property
     def ndim(self):
@@ -1320,25 +1330,34 @@ class ZarrArray:
     def size(self):
         return np.prod(self.shape)
 
+    def __array__(self):
+        """Materialize full array into memory: (T, Z, H, W)."""
+        arrs = [z[:] for z in self.zs]
+        stacked = np.stack(arrs, axis=1)  # (T, Z, H, W)
+        return stacked
+
     def __getitem__(self, key):
         """
-        Accepts standard 4D indexing: (t, z, h, w).
-        Since z=1, only 0 is valid in that dimension.
+        Index like a 4D array: (t, z, y, x).
+        Handles one or multiple zarr stores.
         """
+        # Normalize key to 4 components
         if not isinstance(key, tuple):
             key = (key,)
-        if len(key) < 4:
-            key = key + (slice(None),) * (4 - len(key))
+        key = key + (slice(None),) * (4 - len(key))
+        t_key, z_key, y_key, x_key = key
 
-        t_key, z_key, h_key, w_key = key
+        if len(self.zs) == 1:
+            if isinstance(z_key, int) and z_key != 0:
+                raise IndexError("Z dimension has size 1, only index 0 is valid")
+            data = self.zs[0][t_key, y_key, x_key]
+            return data[..., None, :, :] if data.ndim == 3 else data
 
-        if isinstance(z_key, int) and z_key != 0:
-            raise IndexError("Z dimension has size 1, only index 0 is valid")
-
-        data = self.z[t_key, h_key, w_key]
-        return data[..., None, :, :] if np.ndim(data) >= 2 else data
-
-    def __array__(self):
-        """Enable np.array(self) to materialize into memory."""
-        arr = self.z[:]
-        return arr[:, None, :, :]
+        # multi-zarr case
+        if isinstance(z_key, int):
+            return self.zs[z_key][t_key, y_key, x_key]
+        else:
+            # fancy indexing across multiple z
+            z_indices = range(len(self.zs))[z_key]
+            arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
+            return np.stack(arrs, axis=1)

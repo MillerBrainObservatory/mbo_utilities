@@ -1,17 +1,34 @@
+import time
 
 if __name__ == "__main__":
+    import tifffile
     from pathlib import Path
+    import numpy as np
     import warnings
     # import lbm_suite2p_python as lsp
-    from mbo_utilities import get_files, imread, imwrite  # , get_metadata
-
-    # from mbo_utilities.array_types import apply_zshifts
+    from mbo_utilities import imread, imwrite  # , get_metadata
+    # import fastplotlib as fpl
 
     warnings.simplefilter(action='ignore')
     raw_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
     out_path = raw_path.parent.joinpath("raw.aligned")
-    arr = imread(raw_path)
-    imwrite(arr, out_path, preprocess=True, planes=[1, 2])
+    start = time.time()
+    arr = imread(raw_path, roi=0)
+    end = time.time()
+    print(f"Read {arr.shape} in {end - start:.2f} sec")
+    start = time.time()
+    imwrite(arr, out_path, preprocess=True)
+    end = time.time()
+    print(f"Wrote {arr.shape} in {end - start:.2f} sec")
+    files = list(out_path.rglob("*.tif*"))
+    # make 3D stack
+    means = []
+    for f in files:
+        arr = imread(f)
+        means.append(arr.mean(axis=0))
+    array = np.stack(means, axis=0)
+    fname = out_path.joinpath("means.tiff")
+    tifffile.imwrite(fname, array)
 
 
 # base_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\suite2p\dev_test")

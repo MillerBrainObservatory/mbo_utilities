@@ -6,7 +6,16 @@ import mbo_utilities as mbo
 import zarr
 import tifffile
 from zarr.codecs import BloscCodec
+import fastplotlib as fpl
 # from mbo_utilities.util import align_zplanes
+
+arr = mbo.imread(r"D:\W2_DATA\kbarber\07_27_2025\mk355\zarr\data_planar.zarr\plane01_stitched.zarr")
+fpl.ImageWidget(arr).show()
+fpl.loop.run()
+
+arr = mbo.imread(r"D:\W2_DATA\kbarber\07_27_2025\mk355\zarr\data_planar.zarr")
+fpl.ImageWidget(arr).show()
+fpl.loop.run()
 
 data_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
 files = list(data_path.glob("*.tif*"))
@@ -19,10 +28,11 @@ x.phasecorr_method = None
 spatial_dims = x.shape[2:]
 nz = x.shape[1]
 
-out_file = data_path.parent / "volume_compressed.zarr"
-if out_file.exists():
-    # recurse and delete
-    shutil.rmtree(out_file)
+out_file = data_path.parent / "zarr"
+out_file.mkdir(exist_ok=True)
+
+# x = mbo.imwrite(x, out_file / "data_planar", preprocess=False, ext=".zarr")
+
 
 group = zarr.create_group(store=out_file)
 array = group.create_array(

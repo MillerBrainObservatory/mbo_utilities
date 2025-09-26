@@ -14,7 +14,9 @@ from .array_types import (
     MBOTiffArray,
     TiffArray,
     MboRawArray,
-    NpyArray, register_zplanes,
+    NpyArray,
+    ZarrArray,
+    register_zplanes,
 )
 from .file_io import get_files
 from .metadata import is_raw_scanimage, has_mbo_metadata
@@ -218,7 +220,13 @@ def imread(
         p = Path(inputs)
         if not p.exists():
             raise ValueError(f"Input path does not exist: {p}")
-        paths = [Path(f) for f in get_files(p)] if p.is_dir() else [p]
+
+        if p.suffix.lower() == ".zarr" and p.is_dir():
+            paths = [p]
+        elif p.is_dir():
+            paths = [Path(f) for f in get_files(p)]
+        else:
+            paths = [p]
     elif isinstance(inputs, (list, tuple)):
         if isinstance(inputs[0], np.ndarray):
             return inputs
@@ -228,6 +236,7 @@ def imread(
 
     if not paths:
         raise ValueError("No input files found.")
+
 
     filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
     if not filtered:
@@ -279,6 +288,22 @@ def imread(
 
     if first.suffix == ".h5":
         return H5Array(first)
+
+    if first.suffix == ".zarr":
+        # TODO: benchmark - save as volumetric in a single .zarr store?
+        # Case 1: nested zarrs inside
+        sub_zarrs = list(first.glob("*.zarr"))
+        if sub_zarrs:
+            return ZarrArray(sub_zarrs)
+
+        # Case 2: flat zarr store with zarr.json
+        if (first / "zarr.json").exists():
+            return ZarrArray(first)
+
+        raise ValueError(
+            f"Zarr path {first} is not a valid store. "
+            "Expected nested *.zarr dirs or a zarr.json inside."
+        )
 
     if first.suffix == ".npy" and (first.parent / "pmd_demixer.npy").is_file():
         raise NotImplementedError("PMD Arrays are not yet supported.")
