@@ -1311,7 +1311,7 @@ class ZarrArray:
     @property
     def metadata(self):
         # if one store, return dict, if many, return list of dicts
-        return self._metadata[0] if len(self._metadata) == 1 else self._metadata
+        return self._metadata[0] if len(self._metadata) >= 1 else self._metadata
 
     @property
     def shape(self) -> tuple[int, int, int, int]:
