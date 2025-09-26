@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 
 import h5py
+import zarr
 import tifffile
 from dask import array as da
 import fastplotlib as fpl
@@ -21,7 +22,6 @@ from mbo_utilities.metadata import get_metadata
 from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
-    get_files,
     _multi_tiff_to_fsspec,
     HAS_ZARR,
     _convert_range_to_slice,
@@ -332,7 +332,6 @@ class H5Array:
             n_missing = self.ndim - (len(key) - 1)
             key = key[:idx] + (slice(None),) * n_missing + key[idx + 1 :]
 
-        # Remove None axes (np.newaxis) and track their positions
         slices = []
         result_shape = []
         dim = 0
@@ -371,7 +370,6 @@ class H5Array:
     def _imwrite(self, outpath, **kwargs):
         _write_plane(
             self._d, Path(outpath),
-            ext=kwargs.get("ext", ".tiff"),
             overwrite=kwargs.get("overwrite", False),
             metadata=self.metadata,
             target_chunk_mb=kwargs.get("target_chunk_mb", 20),
@@ -1288,3 +1286,59 @@ class NWBArray:
 
     def __getitem__(self, item):
         return self.data[item]
+
+class ZarrArray:
+    """
+    Lightweight reader for _write_zarr outputs.
+    Presents data as (T, Z, H, W) with Z=1.
+    """
+    def __init__(self, path: str | Path):
+        self.path = Path(path).with_suffix(".zarr")
+        if not self.path.exists():
+            raise FileNotFoundError(f"No zarr store at {self.path}")
+        self.z = zarr.open(self.path, mode="r")
+        self._metadata = dict(self.z.attrs)
+
+    @property
+    def metadata(self) -> dict:
+        return self._metadata
+
+    @property
+    def shape(self) -> tuple[int, int, int, int]:
+        t, h, w = self.z.shape
+        return (t, 1, h, w)
+
+    @property
+    def dtype(self):
+        return self.z.dtype
+
+    @property
+    def ndim(self):
+        return 4
+
+    @property
+    def size(self):
+        return np.prod(self.shape)
+
+    def __getitem__(self, key):
+        """
+        Accepts standard 4D indexing: (t, z, h, w).
+        Since z=1, only 0 is valid in that dimension.
+        """
+        if not isinstance(key, tuple):
+            key = (key,)
+        if len(key) < 4:
+            key = key + (slice(None),) * (4 - len(key))
+
+        t_key, z_key, h_key, w_key = key
+
+        if isinstance(z_key, int) and z_key != 0:
+            raise IndexError("Z dimension has size 1, only index 0 is valid")
+
+        data = self.z[t_key, h_key, w_key]
+        return data[..., None, :, :] if np.ndim(data) >= 2 else data
+
+    def __array__(self):
+        """Enable np.array(self) to materialize into memory."""
+        arr = self.z[:]
+        return arr[:, None, :, :]

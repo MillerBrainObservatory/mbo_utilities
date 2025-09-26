@@ -237,7 +237,7 @@ def imread(
 
     parent = paths[0].parent if paths else None
     ops_file = parent / "ops.npy" if parent else None
-
+    # Suite2p ops file
     if ops_file and ops_file.exists():
         if (parent / "ops.npy").exists():
             return Suite2pArray(parent / "ops.npy")

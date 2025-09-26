@@ -68,12 +68,11 @@ def _write_plane(
     metadata = metadata or {}
     metadata["shape"] = dshape
 
-    if plane_index:
+    if plane_index is not None:
         assert type(plane_index) is int, "plane_index must be an integer"
         metadata["plane"] = plane_index + 1
-        H0, W0 = dshape[-2], dshape[-1]
-    else:
-        H0, W0 = data.shape[-2], data.shape[-1]
+
+    H0, W0 = data.shape[-2], data.shape[-1]
 
     fname = filename
     writer = _get_file_writer(fname.suffix, overwrite=overwrite)
@@ -111,10 +110,14 @@ def _write_plane(
         assert summary_file.is_file(), f"Could not find summary file in {metadata['s3d-job']}"
         summary = np.load(summary_file, allow_pickle=True).item()
         plane_shifts = summary["plane_shifts"]
+
         assert plane_index is not None, "plane_index must be provided when using shifts"
+
+        # make a canvas for all z-planes
         pt, pb, pl, pr = compute_pad_from_shifts(plane_shifts)
         H_out = H0 + pt + pb
         W_out = W0 + pl + pr
+
         iy, ix = map(int, plane_shifts[plane_index])
         yy = slice(pt + iy, pt + iy + H0)
         xx = slice(pl + ix, pl + ix + W0)
@@ -126,19 +129,32 @@ def _write_plane(
     for i in range(nchunks):
         end = start + base + (1 if i < extra else 0)
         chunk = data[start:end, plane_index, :, :] if plane_index is not None else data[start:end, :, :]
+
         if use_shift:
+            # ensure chunk matches expected orientation
+            if chunk.shape[-2:] != (H0, W0):
+                if chunk.shape[-2:] == (W0, H0):
+                    chunk = np.swapaxes(chunk, -1, -2)
+                else:
+                    raise ValueError(
+                        f"Unexpected chunk shape {chunk.shape[-2:]}, expected {(H0, W0)}"
+                    )
+
             buf = np.zeros((chunk.shape[0], out_shape[1], out_shape[2]), dtype=chunk.dtype)
             buf[:, yy, xx] = chunk
+
+            # add _zaligned to the fname
+            fname = Path(fname)
+            fname = fname.with_name(fname.stem + "_zaligned").with_suffix(fname.suffix)
             writer(fname, buf, metadata=metadata)
         else:
             writer(fname, chunk, metadata=metadata)
-        # writer(fname, chunk, metadata=metadata)
+
         if pbar:
             pbar.update(1)
         if progress_callback:
             progress_callback(pbar.n / pbar.total, current_plane=plane_index)
         start = end
-
     if pbar:
         pbar.close()
 
@@ -269,13 +285,13 @@ def _write_tiff(
     writer = _write_tiff._writers[filename]
     is_first = _write_tiff._first_write.get(filename, True)
 
-    # for frame in data:
-    writer.write(
-        data,
-        contiguous=True,
-        photometric="minisblack",
-        metadata=_make_json_serializable(metadata) if is_first else {},
-    )
+    for frame in data:
+        writer.write(
+            frame,
+            contiguous=True,
+            photometric="minisblack",
+            metadata=_make_json_serializable(metadata) if is_first else {},
+        )
     _write_tiff._first_write[filename] = False
 
 
