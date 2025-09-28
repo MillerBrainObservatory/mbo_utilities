@@ -18,7 +18,6 @@ from .array_types import (
     ZarrArray,
     register_zplanes,
 )
-from .file_io import get_files
 from .metadata import is_raw_scanimage, has_mbo_metadata
 from .roi import supports_roi
 
@@ -68,7 +67,7 @@ def imwrite(
         order: list | tuple = None,
         target_chunk_mb: int = 20,
         progress_callback: Callable = None,
-        preprocess: bool = True,
+        preprocess: bool = False,
         debug: bool = False,
         **kwargs,  # for specific array writers
 ):
@@ -128,23 +127,14 @@ def imwrite(
             print("Detected s3d-job in metadata, moving data to s3d output path.")
             s3d_job_dir = Path(lazy_array.metadata["s3d-job"])
         else: # check if the input is in a s3d-job folder
-            job_path = str(lazy_array.filenames[0].parent) + ".summary"
             job_id = lazy_array.metadata.get("job_id", "s3d-preprocessed")
-            s3d_job_dir = Path(job_path) / job_id
+            s3d_job_dir = outpath / job_id
 
-        if s3d_job_dir.joinpath("dirs.npy").exists():
-            print("Detected s3d-job in metadata, moving data to output path.")
-            new_job_dir = outpath.joinpath("s3d_results")
-            if new_job_dir.exists():
-                if not overwrite:
-                    raise FileExistsError(f"Output directory {new_job_dir} already exists and `overwrite` is False.")
-                else:
-                    import shutil
-                    shutil.rmtree(new_job_dir)
-                    print(f"Removed existing directory {new_job_dir}.")
-            s3d_job_dir.rename(new_job_dir)
-            s3d_job_dir.unlink(missing_ok=True)
-            print(f"Moved s3d results from {s3d_job_dir} to {new_job_dir}.")
+        if s3d_job_dir.joinpath("dirs.npy").is_file():
+            dirs = np.load(s3d_job_dir / "dirs.npy", allow_pickle=True).item()
+            for k, v in dirs.items():
+                if Path(v).is_dir():
+                    lazy_array.metadata[k] = v
         else:
             # check if outpath contains an s3d job
             npy_files = outpath.rglob("*.npy")

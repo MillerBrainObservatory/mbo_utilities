@@ -61,6 +61,7 @@ def _write_plane(
         debug=False,
         dshape=None,
         plane_index=None,
+        shift_vector=None,
 ):
     if dshape is None:
         dshape = data.shape
@@ -91,29 +92,25 @@ def _write_plane(
     else:
         pbar = None
 
-    use_shift = metadata.get("s3d-job", False)
+    summary = metadata.get("summary", "")
     shift_applied = False
 
-    if use_shift:
-        job_path = Path(metadata.get("s3d-job", ""))
-        if job_path and job_path.is_dir():
-            summary_files = list(job_path.rglob("*summary.npy"))
-            if summary_files:
-                summary_file = summary_files[0]
-                summary = np.load(summary_file, allow_pickle=True).item()
-                plane_shifts = summary["plane_shifts"]
+    if summary and Path(summary).is_dir() and Path(summary).joinpath("summary.npy").is_file():
+        summary = np.load(Path(summary) / "summary.npy", allow_pickle=True).item()
+        plane_shifts = summary["plane_shifts"]
 
-                assert plane_index is not None, "plane_index must be provided when using shifts"
+        assert plane_index is not None, "plane_index must be provided when using shifts"
 
-                pt, pb, pl, pr = compute_pad_from_shifts(plane_shifts)
-                H_out = H0 + pt + pb
-                W_out = W0 + pl + pr
+        pt, pb, pl, pr = compute_pad_from_shifts(plane_shifts)
+        H_out = H0 + pt + pb
+        W_out = W0 + pl + pr
 
-                iy, ix = map(int, plane_shifts[plane_index])
-                yy = slice(pt + iy, pt + iy + H0)
-                xx = slice(pl + ix, pl + ix + W0)
-                out_shape = (ntime, H_out, W_out)
-                shift_applied = True
+        iy, ix = map(int, plane_shifts[plane_index])
+        yy = slice(pt + iy, pt + iy + H0)
+        xx = slice(pl + ix, pl + ix + W0)
+        out_shape = (ntime, H_out, W_out)
+        shift_applied = True
+        metadata[f"{plane_index}_shift"] = (iy, ix)
 
     if not shift_applied:
         out_shape = (ntime, H0, W0)
@@ -124,7 +121,6 @@ def _write_plane(
         chunk = data[start:end, plane_index, :, :] if plane_index is not None else data[start:end, :, :]
 
         if shift_applied:
-            metadata["zshift"] = plane_shifts
             if chunk.shape[-2:] != (H0, W0):
                 if chunk.shape[-2:] == (W0, H0):
                     chunk = np.swapaxes(chunk, -1, -2)
