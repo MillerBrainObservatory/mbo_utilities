@@ -32,7 +32,7 @@ def _make_json_serializable(obj):
         return str(obj)
     if isinstance(obj, dict):
         return {k: _make_json_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
         return [_make_json_serializable(v) for v in obj]
     if isinstance(obj, np.ndarray):
         return obj.tolist()

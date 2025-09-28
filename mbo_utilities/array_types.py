@@ -643,14 +643,14 @@ class MboRawArray(scans.ScanMultiROI):
     """
 
     def __init__(
-        self,
-        files: str | Path | list = None,
-        roi: int | Sequence[int] | None = None,
-        fix_phase: bool = True,
-        phasecorr_method: str = "mean",
-        border: int | tuple[int, int, int, int] = 3,
-        upsample: int = 5,
-        max_offset: int = 4,
+            self,
+            files: str | Path | list = None,
+            roi: int | Sequence[int] | None = None,
+            fix_phase: bool = True,
+            phasecorr_method: str = "mean",
+            border: int | tuple[int, int, int, int] = 3,
+            upsample: int = 5,
+            max_offset: int = 4,
     ):
         super().__init__(join_contiguous=True)
         self._metadata = {}  # set when pages are read
@@ -855,7 +855,7 @@ class MboRawArray(scans.ScanMultiROI):
         return self.fields[0].output_yslices
 
     def _read_pages(
-        self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
+            self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
     ):
         pages = [
             frame * self.num_channels + zplane
@@ -1048,10 +1048,10 @@ class MboRawArray(scans.ScanMultiROI):
     @property
     def size(self):
         return (
-            self.num_frames
-            * self.num_channels
-            * self.field_heights[0]
-            * self.field_widths[0]
+                self.num_frames
+                * self.num_channels
+                * self.field_heights[0]
+                * self.field_widths[0]
         )
 
     @property
@@ -1124,9 +1124,9 @@ class MboRawArray(scans.ScanMultiROI):
     def preprocess(self) -> Path | None:
         if not HAS_SUITE3D:
             print(
-            "Suite3D is not installed. Cannot preprocess."
-            "Install with `pip install mbo_utilities[suite3d, cuda12] # CUDA 12.x or"
-            "             `pip install mbo_utilities[suite3d, cuda11] # CUDA 11.x"
+                "Suite3D is not installed. Cannot preprocess."
+                "Install with `pip install mbo_utilities[suite3d, cuda12] # CUDA 12.x or"
+                "             `pip install mbo_utilities[suite3d, cuda11] # CUDA 11.x"
             )
         if not HAS_CUPY:
             print(
@@ -1181,14 +1181,14 @@ class MboRawArray(scans.ScanMultiROI):
         return subsample_array(self, ignore_dims=[-1, -2, -3])
 
     def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite=False,
-        target_chunk_mb=50,
-        ext=".tiff",
-        progress_callback=None,
-        debug=None,
-        planes=None,
+            self,
+            outpath: Path | str,
+            overwrite=False,
+            target_chunk_mb=50,
+            ext=".tiff",
+            progress_callback=None,
+            debug=None,
+            planes=None,
     ):
         # convert to 0 based indexing
         if isinstance(planes, int):
@@ -1357,7 +1357,62 @@ class ZarrArray:
         if isinstance(z_key, int):
             return self.zs[z_key][t_key, y_key, x_key]
         else:
-            # fancy indexing across multiple z
             z_indices = range(len(self.zs))[z_key]
             arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
             return np.stack(arrs, axis=1)
+
+    def _imwrite(
+            self,
+            outpath: Path | str,
+            overwrite: bool = False,
+            target_chunk_mb: int = 50,
+            ext: str = ".tiff",
+            progress_callback=None,
+            debug: bool = False,
+            planes: list[int] | int | None = None,
+    ):
+        outpath = Path(outpath)
+
+        # Normalize planes to 0-based indexing
+        if isinstance(planes, int):
+            planes = [planes - 1]
+        elif planes is None:
+            planes = list(range(self.shape[1]))  # all z-planes
+        else:
+            planes = [p - 1 for p in planes]
+
+        for plane in planes:
+            fname = f"plane{plane+1:02d}{ext}"
+
+            if ext in [".bin", ".binary"]:
+                # Suite2p expects data_raw.bin under a folder
+                # fname_bin_stripped = Path(fname).stem
+                target = outpath / "data_raw.bin"
+            else:
+                target = outpath.joinpath(fname)
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+            if target.exists() and not overwrite:
+                logger.warning(f"File {target} already exists. Skipping write.")
+                continue
+
+            # Metadata per plane
+            if isinstance(self.metadata, list):
+                md = self.metadata[plane].copy()
+            else:
+                md = dict(self.metadata)
+            md["plane"] = plane + 1  # back to 1-based
+            md["z"] = plane
+
+            _write_plane(
+                self,
+                target,
+                overwrite=overwrite,
+                target_chunk_mb=target_chunk_mb,
+                metadata=md,
+                progress_callback=progress_callback,
+                debug=debug,
+                dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+                plane_index=plane,
+            )

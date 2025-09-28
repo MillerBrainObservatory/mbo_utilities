@@ -58,19 +58,19 @@ def _filter_kwargs(cls, kwargs):
 
 
 def imwrite(
-    lazy_array,
-    outpath: str | Path,
-    planes: list | tuple = None,
-    roi: int | Sequence[int] | None = None,
-    metadata: dict = None,
-    overwrite: bool = True,
-    ext: str = ".tiff",
-    order: list | tuple = None,
-    target_chunk_mb: int = 20,
-    progress_callback: Callable = None,
-    preprocess: bool = True,
-    debug: bool = False,
-    **kwargs,  # for specific array writers
+        lazy_array,
+        outpath: str | Path,
+        planes: list | tuple = None,
+        roi: int | Sequence[int] | None = None,
+        metadata: dict = None,
+        overwrite: bool = True,
+        ext: str = ".tiff",
+        order: list | tuple = None,
+        target_chunk_mb: int = 20,
+        progress_callback: Callable = None,
+        preprocess: bool = True,
+        debug: bool = False,
+        **kwargs,  # for specific array writers
 ):
     # Logging
     if debug:
@@ -178,8 +178,8 @@ def imwrite(
 
 
 def imread(
-    inputs: str | Path | Sequence[str | Path],
-    **kwargs,  # for the reader
+        inputs: str | Path | Sequence[str | Path],
+        **kwargs,  # for the reader
 ):
     """
     Lazy load imaging data from supported file types.
@@ -224,7 +224,13 @@ def imread(
         if p.suffix.lower() == ".zarr" and p.is_dir():
             paths = [p]
         elif p.is_dir():
-            paths = [Path(f) for f in get_files(p)]
+            # see if its a directory of .zarr dirs, which are treated differently
+            zarrs = list(p.glob("*.zarr"))
+            if zarrs:
+                paths = zarrs
+            else:
+                paths = [Path(f) for f in p.glob("*") if f.is_file()]
+            # paths = [Path(f) for f in get_files(p)]
         else:
             paths = [p]
     elif isinstance(inputs, (list, tuple)):
@@ -298,7 +304,7 @@ def imread(
 
         # Case 2: flat zarr store with zarr.json
         if (first / "zarr.json").exists():
-            return ZarrArray(first)
+            return ZarrArray(paths)
 
         raise ValueError(
             f"Zarr path {first} is not a valid store. "
@@ -310,3 +316,6 @@ def imread(
         # return DemixingResultsArray(first.parent)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
+
+if __name__ == "__main__":
+    x = imread("D:/W2_DATA/kbarber/07_27_2025/mk355/zarr/data_planar")

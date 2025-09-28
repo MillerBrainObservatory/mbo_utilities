@@ -51,16 +51,16 @@ def compute_pad_from_shifts(plane_shifts):
 
 
 def _write_plane(
-    data: np.ndarray | Any,
-    filename: Path,
-    *,
-    overwrite=False,
-    metadata=None,
-    target_chunk_mb=20,
-    progress_callback=None,
-    debug=False,
-    dshape=None,
-    plane_index=None,
+        data: np.ndarray | Any,
+        filename: Path,
+        *,
+        overwrite=False,
+        metadata=None,
+        target_chunk_mb=20,
+        progress_callback=None,
+        debug=False,
+        dshape=None,
+        plane_index=None,
 ):
     if dshape is None:
         dshape = data.shape
@@ -92,37 +92,30 @@ def _write_plane(
         pbar = None
 
     use_shift = metadata.get("s3d-job", False)
+    shift_applied = False
+
     if use_shift:
         job_path = Path(metadata.get("s3d-job", ""))
-        if not job_path or not job_path.is_dir():
-            raise RuntimeError(
-                f"_write_plane expected a valid 's3d-job' path in metadata, got {job_path!r}"
-            )
+        if job_path and job_path.is_dir():
+            summary_files = list(job_path.rglob("*summary.npy"))
+            if summary_files:
+                summary_file = summary_files[0]
+                summary = np.load(summary_file, allow_pickle=True).item()
+                plane_shifts = summary["plane_shifts"]
 
-        summary_files = list(job_path.rglob("*summary.npy"))
-        if not summary_files:
-            raise FileNotFoundError(
-                f"No summary.npy found under {job_path}. "
-                f"Metadata: {metadata}"
-            )
-        summary_file = summary_files[0]
+                assert plane_index is not None, "plane_index must be provided when using shifts"
 
-        assert summary_file.is_file(), f"Could not find summary file in {metadata['s3d-job']}"
-        summary = np.load(summary_file, allow_pickle=True).item()
-        plane_shifts = summary["plane_shifts"]
+                pt, pb, pl, pr = compute_pad_from_shifts(plane_shifts)
+                H_out = H0 + pt + pb
+                W_out = W0 + pl + pr
 
-        assert plane_index is not None, "plane_index must be provided when using shifts"
+                iy, ix = map(int, plane_shifts[plane_index])
+                yy = slice(pt + iy, pt + iy + H0)
+                xx = slice(pl + ix, pl + ix + W0)
+                out_shape = (ntime, H_out, W_out)
+                shift_applied = True
 
-        # make a canvas for all z-planes
-        pt, pb, pl, pr = compute_pad_from_shifts(plane_shifts)
-        H_out = H0 + pt + pb
-        W_out = W0 + pl + pr
-
-        iy, ix = map(int, plane_shifts[plane_index])
-        yy = slice(pt + iy, pt + iy + H0)
-        xx = slice(pl + ix, pl + ix + W0)
-        out_shape = (ntime, H_out, W_out)
-    else:
+    if not shift_applied:
         out_shape = (ntime, H0, W0)
 
     start = 0
@@ -130,8 +123,8 @@ def _write_plane(
         end = start + base + (1 if i < extra else 0)
         chunk = data[start:end, plane_index, :, :] if plane_index is not None else data[start:end, :, :]
 
-        if use_shift:
-            # ensure chunk matches expected orientation
+        if shift_applied:
+            metadata["zshift"] = plane_shifts
             if chunk.shape[-2:] != (H0, W0):
                 if chunk.shape[-2:] == (W0, H0):
                     chunk = np.swapaxes(chunk, -1, -2)
@@ -143,9 +136,6 @@ def _write_plane(
             buf = np.zeros((chunk.shape[0], out_shape[1], out_shape[2]), dtype=chunk.dtype)
             buf[:, yy, xx] = chunk
 
-            # add _zaligned to the fname
-            fname = Path(fname)
-            fname = fname.with_name(fname.stem + "_zaligned").with_suffix(fname.suffix)
             writer(fname, buf, metadata=metadata)
         else:
             writer(fname, chunk, metadata=metadata)
@@ -203,7 +193,7 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None):
         if overwrite and fname.exists():
             fname.unlink()
 
-        Ly, Lx = data.shape[1], data.shape[2]
+        Ly, Lx = data.shape[-2], data.shape[-1]
         nframes = metadata.get("nframes", None)
         if nframes is None:
             nframes = metadata.get("num_frames", None)
@@ -218,6 +208,10 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None):
 
     bf = _write_bin._writers[key]
     off = _write_bin._offsets[key]
+
+    # squeeze 4D arrays to 3D
+    if data.ndim == 4 and data.shape[1] == 1:
+        data = data.squeeze()
     bf[off : off + data.shape[0]] = data
     bf.file.flush()
     _write_bin._offsets[key] = off + data.shape[0]
@@ -264,7 +258,7 @@ def _write_h5(path, data, *, overwrite=True, metadata=None):
 
 
 def _write_tiff(
-    path, data, overwrite=True, metadata={},
+        path, data, overwrite=True, metadata={},
 ):
     filename = Path(path).with_suffix(".tif")
 
@@ -296,7 +290,7 @@ def _write_tiff(
 
 
 def _write_zarr(path, data, *, overwrite=True, metadata=None):
-    filename = Path(path).with_suffix(".zarr")
+    filename = Path(path)
 
     if not hasattr(_write_zarr, "_arrays"):
         _write_zarr._arrays = {}
@@ -317,12 +311,9 @@ def _write_zarr(path, data, *, overwrite=True, metadata=None):
             chunks=(1, h, w),
             dtype=data.dtype,
         )
-        if metadata:
-            for k, v in metadata.items():
-                try:
-                    z.attrs[k] = v
-                except TypeError:
-                    z.attrs[k] = str(v)
+        metadata = _make_json_serializable(metadata) if metadata else {}
+        for k, v in metadata.items():
+            z.attrs[k] = v
 
         _write_zarr._arrays[filename] = z
         _write_zarr._offsets[filename] = 0

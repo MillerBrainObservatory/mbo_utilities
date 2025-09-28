@@ -2,10 +2,10 @@ import numpy as np
 import copy
 
 from mbo_utilities.roi import iter_rois
-from mbo_utilities.array_types import DemixingResultsArray, MBOTiffArray, MboRawArray
+from mbo_utilities.array_types import MBOTiffArray, MboRawArray
 import fastplotlib as fpl
 
-from mbo_utilities.pipelines import MBO_DEVICE, HAS_MASKNMF
+from mbo_utilities.pipelines import HAS_MASKNMF
 
 if HAS_MASKNMF:
     from masknmf.visualization.interactive_guis import make_demixing_video
