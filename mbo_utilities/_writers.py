@@ -110,7 +110,7 @@ def _write_plane(
         xx = slice(pl + ix, pl + ix + W0)
         out_shape = (ntime, H_out, W_out)
         shift_applied = True
-        metadata[f"{plane_index}_shift"] = (iy, ix)
+        metadata[f"plane{plane_index}_shift"] = (iy, ix)
 
     if not shift_applied:
         out_shape = (ntime, H0, W0)
@@ -130,6 +130,9 @@ def _write_plane(
                     )
 
             buf = np.zeros((chunk.shape[0], out_shape[1], out_shape[2]), dtype=chunk.dtype)
+            if chunk.ndim == 4 and chunk.shape[1] == 1:
+                chunk = chunk.squeeze()
+
             buf[:, yy, xx] = chunk
 
             writer(fname, buf, metadata=metadata)

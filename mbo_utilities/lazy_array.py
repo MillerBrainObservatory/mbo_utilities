@@ -67,7 +67,7 @@ def imwrite(
         order: list | tuple = None,
         target_chunk_mb: int = 20,
         progress_callback: Callable = None,
-        preprocess: bool = False,
+        register_z: bool = False,
         debug: bool = False,
         **kwargs,  # for specific array writers
 ):
@@ -121,7 +121,7 @@ def imwrite(
         file_metadata.update(file_metadata)
 
     s3d_job_dir = None
-    if preprocess:
+    if register_z:
         # check metadata for s3d-job dir
         if "s3d-job" in lazy_array.metadata and Path(lazy_array.metadata["s3d-job"]).is_dir():
             print("Detected s3d-job in metadata, moving data to s3d output path.")
@@ -306,6 +306,3 @@ def imread(
         # return DemixingResultsArray(first.parent)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
-
-if __name__ == "__main__":
-    x = imread("D:/W2_DATA/kbarber/07_27_2025/mk355/zarr/data_planar")

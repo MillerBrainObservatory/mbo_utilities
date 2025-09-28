@@ -35,17 +35,6 @@ from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, nd_windowed
 from mbo_utilities.scanreader import scans, utils
 from mbo_utilities.scanreader.multiroi import ROI
 
-try:
-    from suite3d.job import Job  # noqa
-    HAS_SUITE3D = True
-except ImportError:
-    HAS_SUITE3D = False
-
-try:
-    import cupy
-    HAS_CUPY = True
-except ImportError:
-    HAS_CUPY = False
 
 logger = log.get("array_types")
 
@@ -54,6 +43,19 @@ CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
 
 def register_zplanes(filenames, metadata, outpath = None) -> Path | None:
+
+    # these are heavy imports, lazy import for now
+    try:
+        from suite3d.job import Job  # noqa
+        HAS_SUITE3D = True
+    except ImportError:
+        HAS_SUITE3D = False
+
+    try:
+        import cupy
+        HAS_CUPY = True
+    except ImportError:
+        HAS_CUPY = False
     if not HAS_SUITE3D:
         print(
             "Suite3D is not installed. Cannot preprocess."
@@ -109,7 +111,7 @@ def register_zplanes(filenames, metadata, outpath = None) -> Path | None:
     job.run_init_pass()
     end = time.time()
     print(f"Suite 3D init pass done in {end - start:.1f} seconds.")
-    out_dir = job_path / job_id
+    out_dir = job_path / f"s3d-{job_id}"
     metadata["s3d-job"] = str(out_dir)
     metadata["s3d-params"] = params
     print(f"Preprocessed data saved to {out_dir}")
@@ -1289,8 +1291,8 @@ class NWBArray:
 
 class ZarrArray:
     """
-    Lightweight reader for _write_zarr outputs.
-    Presents data as (T, Z, H, W) with Z=1.
+    Reader for _write_zarr outputs.
+    Presents data as (T, Z, H, W) with Z=1..nz.
     """
     def __init__(self, paths: str | Path | Sequence[str | Path]):
         if isinstance(paths, (str, Path)):
@@ -1335,6 +1337,14 @@ class ZarrArray:
         arrs = [z[:] for z in self.zs]
         stacked = np.stack(arrs, axis=1)  # (T, Z, H, W)
         return stacked
+
+    def min(self):
+        """Minimum of first zarr store."""
+        return float(self.zs[0][:].min())
+
+    def max(self):
+        """Maximum of first zarr store."""
+        return float(self.zs[0][:].max())
 
     def __getitem__(self, key):
         """
@@ -1416,3 +1426,4 @@ class ZarrArray:
                 dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
                 plane_index=plane,
             )
+
