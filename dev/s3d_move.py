@@ -17,7 +17,7 @@ if __name__ == "__main__":
     end = time.time()
     print(f"Read {arr.shape} in {end - start:.2f} sec")
     start = time.time()
-    imwrite(arr, out_path, preprocess=True)
+    imwrite(arr, out_path, register_z=True)
     end = time.time()
     print(f"Wrote {arr.shape} in {end - start:.2f} sec")
     files = list(out_path.rglob("*.tif*"))
