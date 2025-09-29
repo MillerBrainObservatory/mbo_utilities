@@ -50,12 +50,14 @@ def register_zplanes(filenames, metadata, outpath = None) -> Path | None:
         HAS_SUITE3D = True
     except ImportError:
         HAS_SUITE3D = False
+        Job = None
 
     try:
         import cupy
         HAS_CUPY = True
     except ImportError:
         HAS_CUPY = False
+        cupy = None
     if not HAS_SUITE3D:
         print(
             "Suite3D is not installed. Cannot preprocess."
@@ -246,39 +248,83 @@ def _safe_get_metadata(path: Path) -> dict:
     except Exception:
         return {}
 
+def _safe_load_s2p(path_or_ops, key):
+    try:
+        return Suite2pArray(path_or_ops[key])
+    except Exception as e:
+        print(f"Could not load {key}: {e}")
+        return None
 
 @dataclass
 class Suite2pArray:
     metadata: dict | str | Path
-    filename: str | Path = field(default=None)  # data.bin, data_raw.bin, etc
+    filename: str | Path | None = field(default=None)
 
     def __post_init__(self):
         if isinstance(self.metadata, (str, Path)):
-            ops_filename = self.metadata
-            self.metadata = np.load(ops_filename, allow_pickle=True).item()
-            self.filename = self.metadata["raw_file"]
+            path = Path(self.metadata)
 
-        if self.filename is None:
-            if "raw_file" in self.metadata:
-                self.filename = self.metadata["raw_file"]
-            elif "reg_file" in self.metadata:
-                self.filename = self.metadata["reg_file"]
+            # directory → look for ops.npy inside
+            if path.is_dir():
+                if path.name == "reg_tif":
+                    # lazy load the tiff files
+                    tif_files = sorted(path.glob("*.tif*"))
+                    if tif_files:
+                        print(f"Loading registered TIFFs from {path}…")
+                        import tifffile
+                        # lazy memmap
+                        self._file = tifffile.memmap(tif_files[0], mode="r")
+                        self.filename = tif_files[0]
+
+                ops_path = path / "ops.npy"
+                if not ops_path.exists():
+                    raise FileNotFoundError(f"No ops.npy found in {path}")
+                self.metadata = np.load(ops_path, allow_pickle=True).item()
+
+            # ops.npy directly
+            elif path.suffix == ".npy" and path.stem == "ops":
+                self.metadata = np.load(path, allow_pickle=True).item()
+
+            # binary file (data.bin, data_raw.bin, etc)
+            elif path.suffix in (".bin", ".binary"):
+                self.filename = path
+                # try to find sibling ops.npy for metadata
+                sibling_ops = path.with_name("ops.npy")
+                if sibling_ops.exists():
+                    self.metadata = np.load(sibling_ops, allow_pickle=True).item()
+                else:
+                    self.metadata = {}
             else:
-                raise ValueError(
-                    "No data file found for Suite2p results. Please provide filename explicitly e.g. data_raw.bin"
-                )
+                raise ValueError(f"Unrecognized path: {path}")
 
-        self.Ly = self.metadata["Ly"]
-        self.Lx = self.metadata["Lx"]
+        # choose which binary to open if not explicitly set
+        if self.filename is None:
+            fname = None
+            if "reg_file" in self.metadata and Path(self.metadata["reg_file"]).exists():
+                fname = self.metadata["reg_file"]
+            elif "raw_file" in self.metadata and Path(self.metadata["raw_file"]).exists():
+                fname = self.metadata["raw_file"]
+
+            if fname is None:
+                raise ValueError(
+                    "No valid binary file found. "
+                    "Pass a .bin path directly or metadata with raw_file/reg_file."
+                )
+            self.filename = fname
+
+        # confirm shape info
+        self.Ly = self.metadata.get("Ly")
+        self.Lx = self.metadata.get("Lx")
         self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
-        if self.nframes is None:
-            raise ValueError("Missing 'nframes' or 'n_frames' in metadata")
+        if None in (self.Ly, self.Lx, self.nframes):
+            raise ValueError(
+                "Missing Ly, Lx, or nframes in metadata. "
+                "If only a .bin file was provided, ensure ops.npy is available."
+            )
 
         self.shape = (self.nframes, self.Ly, self.Lx)
         self.dtype = np.int16
-        self._file = np.memmap(
-            self.filename, mode="r", dtype=self.dtype, shape=self.shape
-        )
+        self._file = np.memmap(self.filename, mode="r", dtype=self.dtype, shape=self.shape)
         self.filenames = [Path(self.filename)]
 
     def __getitem__(self, key):
@@ -305,6 +351,43 @@ class Suite2pArray:
 
     def close(self):
         self._file._mmap.close()  # type: ignore
+
+    def imshow(self, **kwargs):
+        arrays = []
+        names = []
+
+        if "raw_file" in self.metadata:
+            try:
+                raw = Suite2pArray(self.metadata["raw_file"])
+                arrays.append(raw)
+                names.append("raw")
+            except Exception as e:
+                print(f"Could not open raw_file: {e}")
+
+        if "reg_file" in self.metadata:
+            try:
+                reg = Suite2pArray(self.metadata["reg_file"])
+                arrays.append(reg)
+                names.append("registered")
+            except Exception as e:
+                print(f"Could not open reg_file: {e}")
+
+        if not arrays:
+            raise ValueError("No loadable raw_file or reg_file in ops")
+
+        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
+        histogram_widget = kwargs.get("histogram_widget", True)
+        window_funcs = kwargs.get("window_funcs", None)
+
+        return fpl.ImageWidget(
+            data=arrays,
+            names=names,
+            histogram_widget=histogram_widget,
+            figure_kwargs=figure_kwargs,
+            figure_shape=(1, len(arrays)),
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
+            window_funcs=window_funcs,
+        )
 
 
 class H5Array:
@@ -469,7 +552,7 @@ class MBOTiffArray:
             ext=".tiff",
             progress_callback=None,
             debug=None,
-            planes=None,
+            **kwargs
     ):
         if "plane" in self.metadata.keys():
             plane = self.metadata["plane"]
@@ -618,10 +701,8 @@ class TiffArray:
             outpath: Path | str,
             overwrite=False,
             target_chunk_mb=50,
-            ext=".tiff",
             progress_callback=None,
             debug=None,
-            planes=None,
     ):
         outpath = Path(outpath)
         md = dict(self.metadata) if isinstance(self.metadata, dict) else {}
@@ -957,7 +1038,7 @@ class MboRawArray(scans.ScanMultiROI):
 
     def process_rois(self, frames, chans):
         if self.roi is not None:
-            if isinstance(self.roi, list):
+            if isinstance(self.roi, list):  # noqa
                 return tuple(
                     self.process_single_roi(roi_idx - 1, frames, chans)
                     for roi_idx in self.roi
@@ -1123,7 +1204,19 @@ class MboRawArray(scans.ScanMultiROI):
             previous_lines += self._num_lines_between_fields
         return fields
 
-    def preprocess(self) -> Path | None:
+    def register_axial_planes(self) -> Path | None:
+        try:
+            from suite3d.job import Job  # noqa
+            HAS_SUITE3D = True
+        except ImportError:
+            HAS_SUITE3D = False
+            Job = None
+
+        try:
+            import cupy
+            HAS_CUPY = True
+        except ImportError:
+            HAS_CUPY = False
         if not HAS_SUITE3D:
             print(
                 "Suite3D is not installed. Cannot preprocess."

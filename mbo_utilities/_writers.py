@@ -94,8 +94,20 @@ def _write_plane(
 
     summary = metadata.get("summary", "")
     shift_applied = False
+    apply_shift = False
+    if not summary:
+        apply_shift = False
+    else:
+        summary = Path(summary)
+    if not summary.is_dir():
+        apply_shift = False
+    if not Path(summary).joinpath("summary.npy").is_file():
+        apply_shift = False
+    if fname.name == "data_raw.bin":
+        # if saving suite2p intermediate
+        apply_shift = False
 
-    if summary and Path(summary).is_dir() and Path(summary).joinpath("summary.npy").is_file():
+    if apply_shift:
         summary = np.load(Path(summary) / "summary.npy", allow_pickle=True).item()
         plane_shifts = summary["plane_shifts"]
 
@@ -120,6 +132,9 @@ def _write_plane(
         end = start + base + (1 if i < extra else 0)
         chunk = data[start:end, plane_index, :, :] if plane_index is not None else data[start:end, :, :]
 
+        if chunk.ndim == 4 and chunk.shape[1] == 1:
+            chunk = chunk.squeeze()
+
         if shift_applied:
             if chunk.shape[-2:] != (H0, W0):
                 if chunk.shape[-2:] == (W0, H0):
@@ -130,10 +145,9 @@ def _write_plane(
                     )
 
             buf = np.zeros((chunk.shape[0], out_shape[1], out_shape[2]), dtype=chunk.dtype)
-            if chunk.ndim == 4 and chunk.shape[1] == 1:
-                chunk = chunk.squeeze()
-
+            # if chunk is 4D with singleton second dim, squeeze it
             buf[:, yy, xx] = chunk
+            metadata["padded_shape"] = buf.shape
 
             writer(fname, buf, metadata=metadata)
         else:

@@ -20,7 +20,7 @@ dependencies = [
 	"matplotlib>=3.10.1",
 	"h5py",
 	"tqdm",
-	"jupyterlab",
+	"jupyterlab==4.2.6",
 	"ipykernel",
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
@@ -47,7 +47,7 @@ gui = [
 	"imgui-bundle==1.6.3",
 	"jupyter_rfb>=0.5.1",
 ]
-suite3d = ["mbo-suite3d==0.0.2"]
+suite3d = ["mbo-suite3d>=0.0.4"]
 cuda13 = ["cupy-cuda13x"]
 cuda12 = ["cupy-cuda12x"]
 cuda11 = ["cupy-cuda11x"]

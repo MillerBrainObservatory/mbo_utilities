@@ -38,7 +38,7 @@ if __name__ == "__main__":
     out_file = data_path.parent / "zarr"
     out_file.mkdir(exist_ok=True)
 
-    x = mbo.imwrite(x, out_file / "data_planar_aligned", preprocess=True, ext=".zarr")
+    x = mbo.imwrite(x, out_file / "data_roi", register_z=True, ext=".zarr", roi=0)
 
 
 # group = zarr.create_group(store=out_file)
