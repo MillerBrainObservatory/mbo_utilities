@@ -42,7 +42,7 @@ CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
 
-def register_zplanes(filenames, metadata, outpath = None) -> Path | None:
+def register_zplanes_s3d(filenames, metadata, outpath = None) -> Path | None:
 
     # these are heavy imports, lazy import for now
     try:
@@ -61,15 +61,19 @@ def register_zplanes(filenames, metadata, outpath = None) -> Path | None:
     if not HAS_SUITE3D:
         print(
             "Suite3D is not installed. Cannot preprocess."
-            "Install with `pip install mbo_utilities[suite3d, cuda12] # CUDA 12.x or"
-            "             `pip install mbo_utilities[suite3d, cuda11] # CUDA 11.x"
+            "Set register_z = False in imwrite, or install Suite3D:"
+            "`pip install mbo_utilities[suite3d, cuda12] # CUDA 12.x or"
+            "'pip install mbo_utilities[suite3d, cuda11] # CUDA 11.x"
         )
+        return None
     if not HAS_CUPY:
         print(
             "CuPy is not installed. Cannot preprocess."
-            "Install with `pip install cupy-cuda12x` # CUDA 12.x or"
-            "             `pip install cupy-cuda11x` # CUDA 11.x"
+            "Set register_z = False in imwrite, or install CuPy:"
+            "`pip install cupy-cuda12x` # CUDA 12.x or"
+            "`pip install cupy-cuda11x` # CUDA 11.x"
         )
+        return None
 
     if "frame_rate" not in metadata or "num_planes" not in metadata:
         print("Missing required metadata for axial alignment: frame_rate / num_planes")
@@ -98,6 +102,9 @@ def register_zplanes(filenames, metadata, outpath = None) -> Path | None:
         'gpu_reg': metadata.get("gpu_reg", True),
         'block_size': metadata.get("block_size", [64, 64]),
     }
+    if Job is None:
+        print("Suite3D Job class not available.")
+        return None
 
     job = Job(
         str(job_path),

@@ -16,7 +16,7 @@ from .array_types import (
     MboRawArray,
     NpyArray,
     ZarrArray,
-    register_zplanes,
+    register_zplanes_s3d,
 )
 from .metadata import is_raw_scanimage, has_mbo_metadata
 from .roi import supports_roi
@@ -69,6 +69,7 @@ def imwrite(
         progress_callback: Callable = None,
         register_z: bool = False,
         debug: bool = False,
+        shift_vectors: np.ndarray = None,
         **kwargs,  # for specific array writers
 ):
     # Logging
@@ -146,11 +147,13 @@ def imwrite(
                 s3d_job_dir = outpath
             else:
                 print(f"No s3d-job detected, preprocessing data.")
-                s3d_job_dir = register_zplanes(lazy_array.filenames, file_metadata, outpath)
+                s3d_job_dir = register_zplanes_s3d(lazy_array.filenames, file_metadata, outpath)
                 print(f"Registered z-planes, results saved to {s3d_job_dir}.")
 
     if s3d_job_dir:
         lazy_array.metadata["s3d-job"] = s3d_job_dir
+    else:
+        lazy_array.metadata["apply_shift"] = False
     if hasattr(lazy_array, "_imwrite"):
         return lazy_array._imwrite(  # noqa
             outpath,

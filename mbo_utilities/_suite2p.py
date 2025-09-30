@@ -1,14 +1,13 @@
 import time
-from pathlib import Path
-import lbm_suite2p_python as lsp
-from mbo_utilities.lazy_array import Suite2pArray
-import numpy as np
 from collections import defaultdict
+from pathlib import Path
 
-import numpy as np
+import lbm_suite2p_python as lsp
 import matplotlib.pyplot as plt
-from matplotlib.colors import hsv_to_rgb
-from skimage.segmentation import find_boundaries
+import numpy as np
+
+from mbo_utilities.lazy_array import Suite2pArray
+
 
 def safe_delete(file_path):
     if file_path.exists():
@@ -469,7 +468,7 @@ def plot_masks(plane_dir, out_prefix="rois", outpath=None):
             (3, 1, 1)
         ).transpose(1, 2, 0)  # grayscale RGB
 
-        colors = plt.cm.hsv(np.linspace(0, 1, mask_idx.sum() + 1))
+        colors = plt.cm.hsv(np.linspace(0, 1, mask_idx.sum() + 1))  # noqa
         c = 0
         for n, s in enumerate(stat):
             if mask_idx[n]:
