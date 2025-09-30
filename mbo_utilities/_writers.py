@@ -62,6 +62,7 @@ def _write_plane(
         dshape=None,
         plane_index=None,
         shift_vector=None,
+        **kwargs,
 ):
     if dshape is None:
         dshape = data.shape
@@ -92,23 +93,46 @@ def _write_plane(
     else:
         pbar = None
 
-    summary = metadata.get("summary", "")
     shift_applied = False
-    apply_shift = False
-    if not summary:
-        apply_shift = False
-    else:
-        summary = Path(summary)
-    if not summary.is_dir():
-        apply_shift = False
-    if not Path(summary).joinpath("summary.npy").is_file():
-        apply_shift = False
+
+    apply_shift = metadata.get("apply_shift", False)
+    summary = metadata.get("summary", "")
+    s3d_job_dir = metadata.get("s3d-job", "")
+
     if fname.name == "data_raw.bin":
         # if saving suite2p intermediate
         apply_shift = False
 
-    if apply_shift:
-        summary = np.load(Path(summary) / "summary.npy", allow_pickle=True).item()
+    if shift_vector is not None:
+        apply_shift = True
+        if plane_index is not None:
+            iy, ix = map(int, shift_vector)
+            pt, pb, pl, pr = compute_pad_from_shifts([shift_vector])
+            H_out = H0 + pt + pb
+            W_out = W0 + pl + pr
+            yy = slice(pt + iy, pt + iy + H0)
+            xx = slice(pl + ix, pl + ix + W0)
+            out_shape = (ntime, H_out, W_out)
+            shift_applied = True
+            metadata[f"plane{plane_index}_shift"] = (iy, ix)
+        else:
+            raise ValueError("plane_index must be provided when using shift_vector")
+
+    if apply_shift and not shift_applied:
+
+        if summary:
+            summary_path = Path(summary).joinpath("summary.npy")
+        else:
+            summary_path = Path(s3d_job_dir).joinpath("summary/summary.npy")
+
+        if summary_path.is_file():
+            summary = np.load(Path(summary_path), allow_pickle=True).item()
+        else:
+            raise FileNotFoundError(f"Summary file not found s3d-job dir: \n "
+                                    f"{s3d_job_dir} \n"
+                                    f"or summary path: {summary_path}"
+                                    )
+
         plane_shifts = summary["plane_shifts"]
 
         assert plane_index is not None, "plane_index must be provided when using shifts"
@@ -149,9 +173,9 @@ def _write_plane(
             buf[:, yy, xx] = chunk
             metadata["padded_shape"] = buf.shape
 
-            writer(fname, buf, metadata=metadata)
+            writer(fname, buf, metadata=metadata, **kwargs)
         else:
-            writer(fname, chunk, metadata=metadata)
+            writer(fname, chunk, metadata=metadata, **kwargs)
 
         if pbar:
             pbar.update(1)
@@ -193,7 +217,18 @@ def _get_file_writer(ext, overwrite):
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def _write_bin(path, data, *, overwrite: bool = False, metadata=None):
+def _write_bin(
+        path,
+        data,
+        *,
+        overwrite: bool = False,
+        metadata=None,
+        **kwargs
+):
+
+    if metadata is None:
+        metadata = {}
+
     if not hasattr(_write_bin, "_writers"):
         _write_bin._writers, _write_bin._offsets = {}, {}
 
@@ -235,7 +270,11 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None):
     logger.debug(f"Wrote {data.shape[0]} frames to {fname}.")
 
 
-def _write_h5(path, data, *, overwrite=True, metadata=None):
+def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
+
+    if metadata is None:
+        metadata = {}
+
     filename = Path(path).with_suffix(".h5")
 
     if not hasattr(_write_h5, "_initialized"):
@@ -271,8 +310,11 @@ def _write_h5(path, data, *, overwrite=True, metadata=None):
 
 
 def _write_tiff(
-        path, data, overwrite=True, metadata={},
+        path, data, overwrite=True, metadata=None, **kwargs
 ):
+    if metadata is None:
+        metadata = {}
+
     filename = Path(path).with_suffix(".tif")
 
     if not hasattr(_write_tiff, "_writers"):
@@ -302,7 +344,10 @@ def _write_tiff(
     _write_tiff._first_write[filename] = False
 
 
-def _write_zarr(path, data, *, overwrite=True, metadata=None):
+def _write_zarr(path, data, *, overwrite=True, metadata=None, **kwargs):
+
+    compressor = kwargs.get("filters", None)
+
     filename = Path(path)
 
     if not hasattr(_write_zarr, "_arrays"):
@@ -323,6 +368,7 @@ def _write_zarr(path, data, *, overwrite=True, metadata=None):
             shape=(nframes, h, w),
             chunks=(1, h, w),
             dtype=data.dtype,
+            filters=compressor,
         )
         metadata = _make_json_serializable(metadata) if metadata else {}
         for k, v in metadata.items():

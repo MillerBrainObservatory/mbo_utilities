@@ -19,14 +19,6 @@ except ImportError:
     HAS_LSP = False
     lsp = None
 
-try:
-    import masknmf
-
-    HAS_MASKNMF = True
-except ImportError:
-    HAS_MASKNMF = False
-    masknmf = None
-
 
 USER_PIPELINES = ["suite2p", "masknmf"]
 
@@ -137,7 +129,7 @@ def draw_tab_process(self):
     if self._current_pipeline == "suite2p":
         draw_section_suite2p(self)
     elif self._current_pipeline == "masknmf":
-        draw_section_masknmf(self)
+        imgui.text("MaskNMF pipeline not yet implemented.")
     imgui.spacing()
     imgui.end_group()
 
@@ -342,10 +334,6 @@ def draw_section_suite2p(self):
                             self._show_green_text = True
 
         imgui.pop_item_width()
-
-
-def draw_section_masknmf(self):
-    imgui.text("MaskNMF is not yet implemented in this version.")
 
 
 def run_process(self):

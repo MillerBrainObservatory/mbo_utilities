@@ -31,7 +31,7 @@ from mbo_utilities.util import subsample_array
 
 from mbo_utilities import log
 from mbo_utilities.roi import iter_rois
-from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, nd_windowed
+from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, bidir_phasecorr
 from mbo_utilities.scanreader import scans, utils
 from mbo_utilities.scanreader.multiroi import ROI
 
@@ -257,69 +257,54 @@ def _safe_load_s2p(path_or_ops, key):
 
 @dataclass
 class Suite2pArray:
-    metadata: dict | str | Path
-    filename: str | Path | None = field(default=None)
+    filename: str | Path
+    metadata: dict = field(init=False)
 
     def __post_init__(self):
-        if isinstance(self.metadata, (str, Path)):
-            path = Path(self.metadata)
+        path = Path(self.filename)
 
-            # directory → look for ops.npy inside
-            if path.is_dir():
-                if path.name == "reg_tif":
-                    # lazy load the tiff files
-                    tif_files = sorted(path.glob("*.tif*"))
-                    if tif_files:
-                        print(f"Loading registered TIFFs from {path}…")
-                        import tifffile
-                        # lazy memmap
-                        self._file = tifffile.memmap(tif_files[0], mode="r")
-                        self.filename = tif_files[0]
+        if not path.exists():
+            raise FileNotFoundError(f"File does not exist: {path}")
 
-                ops_path = path / "ops.npy"
-                if not ops_path.exists():
-                    raise FileNotFoundError(f"No ops.npy found in {path}")
-                self.metadata = np.load(ops_path, allow_pickle=True).item()
-
-            # ops.npy directly
-            elif path.suffix == ".npy" and path.stem == "ops":
-                self.metadata = np.load(path, allow_pickle=True).item()
-
-            # binary file (data.bin, data_raw.bin, etc)
-            elif path.suffix in (".bin", ".binary"):
-                self.filename = path
-                # try to find sibling ops.npy for metadata
-                sibling_ops = path.with_name("ops.npy")
-                if sibling_ops.exists():
-                    self.metadata = np.load(sibling_ops, allow_pickle=True).item()
-                else:
-                    self.metadata = {}
-            else:
-                raise ValueError(f"Unrecognized path: {path}")
-
-        # choose which binary to open if not explicitly set
-        if self.filename is None:
-            fname = None
+        # Case 1: ops.npy
+        if path.suffix == ".npy" and path.stem == "ops":
+            self.metadata = np.load(path, allow_pickle=True).item()
+            # pick binary from metadata
             if "reg_file" in self.metadata and Path(self.metadata["reg_file"]).exists():
-                fname = self.metadata["reg_file"]
+                self.filename = Path(self.metadata["reg_file"])
             elif "raw_file" in self.metadata and Path(self.metadata["raw_file"]).exists():
-                fname = self.metadata["raw_file"]
-
-            if fname is None:
+                self.filename = Path(self.metadata["raw_file"])
+            else:
                 raise ValueError(
-                    "No valid binary file found. "
-                    "Pass a .bin path directly or metadata with raw_file/reg_file."
+                    f"ops.npy at {path} did not contain valid reg_file/raw_file entries"
                 )
-            self.filename = fname
 
-        # confirm shape info
+        # Case 2: binary (data.bin or data_raw.bin)
+        elif path.suffix in (".bin", ".binary"):
+            ops_path = path.with_name("ops.npy")
+            if not ops_path.exists():
+                raise FileNotFoundError(f"Missing ops.npy alongside {path}")
+            self.metadata = np.load(ops_path, allow_pickle=True).item()
+            self.filename = path
+
+        # Case 3: path is a 'reg_tif' directory
+        elif path.is_dir() and path.name == 'reg_tif':
+            tiffs = sorted(path.glob("*.tif*"))
+            if not tiffs:
+                raise FileNotFoundError(f"No TIFF files found in {path}")
+            self.filename = tiffs[0]
+            print(f"Using first TIFF file in reg_tif: {self.filename}")
+
+        else:
+            raise ValueError(f"Unrecognized input file: {path}")
+
+        # shape info from metadata
         self.Ly = self.metadata.get("Ly")
         self.Lx = self.metadata.get("Lx")
         self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
         if None in (self.Ly, self.Lx, self.nframes):
             raise ValueError(
-                "Missing Ly, Lx, or nframes in metadata. "
-                "If only a .bin file was provided, ensure ops.npy is available."
+                f"ops.npy is missing Ly, Lx, or nframes keys for {self.filename}"
             )
 
         self.shape = (self.nframes, self.Ly, self.Lx)
@@ -356,14 +341,27 @@ class Suite2pArray:
         arrays = []
         names = []
 
-        if "raw_file" in self.metadata:
+        # if "raw_file" in self.metadata:
+        #     try:
+        #         raw = Suite2pArray(self.metadata["raw_file"])
+        #         arrays.append(raw)
+        #         names.append("raw")
+        #     except Exception as e:
+        #         print(f"Could not open raw_file: {e}")
+
+        # if both are available, and the same shape, show both
+        if "raw_file" in self.metadata and "reg_file" in self.metadata:
             try:
                 raw = Suite2pArray(self.metadata["raw_file"])
-                arrays.append(raw)
-                names.append("raw")
+                reg = Suite2pArray(self.metadata["reg_file"])
+                if raw.shape == reg.shape:
+                    arrays.extend([raw, reg])
+                    names.extend(["raw", "registered"])
+                else:
+                    arrays.append(reg)
+                    names.append("registered")
             except Exception as e:
-                print(f"Could not open raw_file: {e}")
-
+                print(f"Could not open raw_file or reg_file: {e}")
         if "reg_file" in self.metadata:
             try:
                 reg = Suite2pArray(self.metadata["reg_file"])
@@ -371,6 +369,14 @@ class Suite2pArray:
                 names.append("registered")
             except Exception as e:
                 print(f"Could not open reg_file: {e}")
+
+        elif "raw_file" in self.metadata:
+            try:
+                raw = Suite2pArray(self.metadata["raw_file"])
+                arrays.append(raw)
+                names.append("raw")
+            except Exception as e:
+                print(f"Could not open raw_file: {e}")
 
         if not arrays:
             raise ValueError("No loadable raw_file or reg_file in ops")
@@ -734,6 +740,7 @@ class MboRawArray(scans.ScanMultiROI):
             border: int | tuple[int, int, int, int] = 3,
             upsample: int = 5,
             max_offset: int = 4,
+            use_fft: bool = True,
     ):
         super().__init__(join_contiguous=True)
         self._metadata = {}  # set when pages are read
@@ -742,13 +749,13 @@ class MboRawArray(scans.ScanMultiROI):
         self.border: int | tuple[int, int, int, int] = border
         self.max_offset: int = max_offset
         self.upsample: int = upsample
-        self.use_zarr = False
         self.reference = ""
         self.roi = roi  # alias
         self._roi = roi
         self.pbar = None
         self.show_pbar = False
         self._offset = 0.0
+        self._use_fft = use_fft
 
         # Debugging toggles
         self.debug_flags = {
@@ -782,22 +789,6 @@ class MboRawArray(scans.ScanMultiROI):
         self.reference = combined_json_path
         return combined_json_path
 
-    def as_dask(self):
-        """
-        Convert the current scan data to a Dask array.
-        This will create a Dask array in the same directory as the reference file.
-        """
-        if not HAS_ZARR:
-            raise ImportError(
-                "Zarr is not installed. Please install it to use this method."
-            )
-        if not Path(self.reference).is_file():
-            raise FileNotFoundError(
-                f"Reference file {self.reference} does not exist. "
-                "Please call save_fsspec() first."
-            )
-        raise NotImplementedError("Attempted to convert to Dask, but not implemented.")
-
     def as_zarr(self):
         """
         Convert the current scan data to a Zarr array.
@@ -813,7 +804,6 @@ class MboRawArray(scans.ScanMultiROI):
 
     def read_data(self, filenames, dtype=np.int16):
         filenames = expand_paths(filenames)
-        self.use_zarr = False
         self.reference = None
         super().read_data(filenames, dtype)
         self._metadata = get_metadata(
@@ -859,6 +849,10 @@ class MboRawArray(scans.ScanMultiROI):
         if isinstance(value, int):
             self._offset = float(value)
         self._offset = value
+
+    @property
+    def use_fft(self):
+        return self._use_fft
 
     @property
     def phasecorr_method(self):
@@ -948,29 +942,7 @@ class MboRawArray(scans.ScanMultiROI):
 
         tiff_width_px = len(utils.listify_index(xslice, self._page_width))
         tiff_height_px = len(utils.listify_index(yslice, self._page_height))
-        #
-        # if getattr(self, "use_zarr", False):
-        #     zarray = self.as_zarr()
-        #     if zarray is not None:
-        #         buf = np.empty((len(pages), H, W), dtype=self.dtype)
-        #         for i, page in enumerate(pages):
-        #             f, c = divmod(page, C)
-        #             buf[i] = zarray[f, c, yslice, xslice]
-        #
-        #         if self.fix_phase:
-        #             self.logger.debug(
-        #                 f"Applying phase correction with strategy: {self.phasecorr_method}"
-        #             )
-        #             buf, self.offset = nd_windowed(
-        #                 buf,
-        #                 method=self.phasecorr_method,
-        #                 upsample=self.upsample,
-        #                 max_offset=self.max_offset,
-        #                 border=self.border,
-        #             )
-        #         return buf.reshape(len(frames), len(chans), H, W)
-        #
-        # TIFF path
+
         buf = np.empty(
             (len(pages),
              tiff_height_px,
@@ -992,12 +964,13 @@ class MboRawArray(scans.ScanMultiROI):
                 self.logger.debug(
                     f"Applying phase correction with strategy: {self.phasecorr_method}"
                 )
-                buf[idxs], self.offset = nd_windowed(
+                buf[idxs], self.offset = bidir_phasecorr(
                     chunk,
                     method=self.phasecorr_method,
                     upsample=self.upsample,
                     max_offset=self.max_offset,
                     border=self.border,
+                    use_fft=self.use_fft,
                 )
             else:
                 buf[idxs] = chunk
@@ -1284,6 +1257,7 @@ class MboRawArray(scans.ScanMultiROI):
             progress_callback=None,
             debug=None,
             planes=None,
+            **kwargs
     ):
         # convert to 0 based indexing
         if isinstance(planes, int):
@@ -1330,6 +1304,7 @@ class MboRawArray(scans.ScanMultiROI):
                     debug=debug,
                     dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
                     plane_index=plane,
+                    **kwargs
                 )
 
     def imshow(self, **kwargs):
@@ -1387,7 +1362,12 @@ class ZarrArray:
     Reader for _write_zarr outputs.
     Presents data as (T, Z, H, W) with Z=1..nz.
     """
-    def __init__(self, paths: str | Path | Sequence[str | Path]):
+    def __init__(
+            self,
+            paths: str | Path | Sequence[str | Path],
+            compressor: str | None = "default",
+    ):
+
         if isinstance(paths, (str, Path)):
             paths = [paths]
         self.paths = [Path(p).with_suffix(".zarr") for p in paths]
@@ -1402,6 +1382,7 @@ class ZarrArray:
             raise ValueError(f"Inconsistent shapes across zarr stores: {shapes}")
 
         self._metadata = [dict(z.attrs) for z in self.zs]
+        self.compressor = compressor
 
     @property
     def metadata(self):
@@ -1473,6 +1454,7 @@ class ZarrArray:
             progress_callback=None,
             debug: bool = False,
             planes: list[int] | int | None = None,
+            **kwargs
     ):
         outpath = Path(outpath)
 
@@ -1518,5 +1500,6 @@ class ZarrArray:
                 debug=debug,
                 dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
                 plane_index=plane,
+                **kwargs
             )
 

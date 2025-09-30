@@ -11,6 +11,7 @@ dynamic = ["version"]
 requires-python = ">=3.12.7, <3.12.10"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
+	"numpy<2.0.0",
 	"tifffile>=2025.3.30",
 	"scikit-image",
 	"zarr>=3.1.3",

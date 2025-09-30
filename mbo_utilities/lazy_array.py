@@ -122,6 +122,9 @@ def imwrite(
 
     s3d_job_dir = None
     if register_z:
+
+        lazy_array.metadata["apply_shift"] = True
+
         # check metadata for s3d-job dir
         if "s3d-job" in lazy_array.metadata and Path(lazy_array.metadata["s3d-job"]).is_dir():
             print("Detected s3d-job in metadata, moving data to s3d output path.")
@@ -157,6 +160,7 @@ def imwrite(
             progress_callback=progress_callback,
             planes=planes,
             debug=debug,
+            **kwargs,
         )
     else:
         if isinstance(lazy_array, Suite2pArray):
@@ -242,19 +246,10 @@ def imread(
 
     parent = paths[0].parent if paths else None
     ops_file = parent / "ops.npy" if parent else None
+
     # Suite2p ops file
     if ops_file and ops_file.exists():
-        if (parent / "ops.npy").exists():
-            return Suite2pArray(parent / "ops.npy")
-        elif (parent / "reg_tif").is_dir():
-            tifs = sorted((parent / "reg_tif").glob("*.tif"))
-            if tifs:
-                return TiffArray(tifs)
-        else:
-            raise ValueError(
-                f"Unable to open suite2p data from {parent}.\n"
-                "Please ensure the directory structure is correct."
-            )
+        return Suite2pArray(parent / "ops.npy")
 
     exts = {p.suffix.lower() for p in paths}
     first = paths[0]
@@ -262,25 +257,21 @@ def imread(
     if len(exts) > 1:
         if exts == {".bin", ".npy"}:
             npy_file = first.parent / "ops.npy"
-            bin_file = first.parent / "data_raw.bin"
-            md = np.load(str(npy_file), allow_pickle=True).item()
-            return Suite2pArray(bin_file, md)
+            return Suite2pArray(npy_file)
         raise ValueError(f"Multiple file types found in input: {exts!r}")
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            return MboRawArray(files=paths, **_filter_kwargs(MboRawArray, kwargs))
+            return MboRawArray(files=paths, **kwargs)
         if has_mbo_metadata(first):
-            return MBOTiffArray(paths)
+            return MBOTiffArray(paths, **kwargs)
         return TiffArray(paths)
 
     if first.suffix == ".bin":
         npy_file = first.parent / "ops.npy"
-        bin_file = first.parent / "data_raw.bin"
         if npy_file.exists():
-            md = np.load(str(npy_file), allow_pickle=True).item()
-            return Suite2pArray(bin_file, md)
-        raise NotImplementedError("BIN files with metadata are not yet supported.")
+            return Suite2pArray(npy_file)
+        raise NotImplementedError("BIN files without metadata are not yet supported.")
 
     if first.suffix == ".h5":
         return H5Array(first)
@@ -290,11 +281,11 @@ def imread(
         # Case 1: nested zarrs inside
         sub_zarrs = list(first.glob("*.zarr"))
         if sub_zarrs:
-            return ZarrArray(sub_zarrs)
+            return ZarrArray(sub_zarrs, **_filter_kwargs(ZarrArray, kwargs))
 
         # Case 2: flat zarr store with zarr.json
         if (first / "zarr.json").exists():
-            return ZarrArray(paths)
+            return ZarrArray(paths, **_filter_kwargs(ZarrArray, kwargs))
 
         raise ValueError(
             f"Zarr path {first} is not a valid store. "
