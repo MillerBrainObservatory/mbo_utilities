@@ -433,3 +433,19 @@ def get_mbo_dirs() -> dict:
 
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
+
+
+def print_tree(path, max_depth=1, prefix=""):
+    path = Path(path)
+    if not path.is_dir():
+        print(path)
+        return
+
+    entries = sorted([p for p in path.iterdir() if p.is_dir()])
+    for i, entry in enumerate(entries):
+        connector = "└── " if i == len(entries)-1 else "├── "
+        print(prefix + connector + entry.name + "/")
+
+        if max_depth > 1:
+            extension = "    " if i == len(entries)-1 else "│   "
+            print_tree(entry, max_depth=max_depth-1, prefix=prefix+extension)
