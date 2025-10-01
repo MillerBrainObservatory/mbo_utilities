@@ -161,6 +161,70 @@ def apply_scan_phase_offsets(arr, offs):
     return out
 
 
+def compute_scan_offsets(tiff_path, max_lag=8):
+    """
+    Compute scan phase offsets for each z-plane in a TIFF stack.
+
+    Matches the matlab implementation of demas et.al. 2021.
+
+    Parameters
+    ----------
+    tiff_path : str or Path
+        Path to multi-plane TIFF file.
+    max_lag : int, optional
+        Maximum lag to search in cross-correlation (default 8).
+
+    Returns
+    -------
+    offsets : np.ndarray, shape (n_planes,)
+        Detected scan offsets (in pixels) for each plane.
+    """
+    import tifffile
+    from pathlib import Path
+    from scipy.signal import correlate
+    tiff_path = Path(tiff_path)
+    data = tifffile.imread(tiff_path)  # shape = (T, Y, X, C?) depending on ScanImage export
+    if data.ndim == 2:
+        raise ValueError("Expected multi-plane data, got single frame")
+
+    # assume (frames, y, x) or (frames, y, x, planes)
+    if data.ndim == 3:
+        # no explicit plane axis, treat each frame as a plane
+        n_planes = data.shape[0]
+        vol = data
+    elif data.ndim == 4:
+        # (frames, y, x, planes)
+        n_planes = data.shape[-1]
+        vol = np.moveaxis(data, -1, 0)  # (planes, frames, y, x)
+    else:
+        raise ValueError(f"Unexpected TIFF shape {data.shape}")
+
+    offsets = []
+    for p in range(n_planes):
+        plane_data = vol[p] if vol.ndim == 3 else vol[p].max(axis=0)
+        if vol.ndim == 3:
+            img = plane_data
+        else:
+            img = plane_data
+
+        # odd/even line split
+        v1 = img[:, ::2].astype(float).ravel()
+        v2 = img[:, 1::2].astype(float).ravel()
+
+        v1 -= v1.mean()
+        v2 -= v2.mean()
+        v1[v1 < 0] = 0
+        v2[v2 < 0] = 0
+
+        corr = correlate(v1, v2, mode="full", method="auto")
+        mid = len(corr) // 2
+        search = corr[mid - max_lag: mid + max_lag + 1]
+        lags = np.arange(-max_lag, max_lag + 1)
+        offsets.append(lags[np.argmax(search)])
+
+    return np.array(offsets, dtype=int)
+
+
 if __name__ == "__main__":
     from mbo_utilities import get_files, imread
 
