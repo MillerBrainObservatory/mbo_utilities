@@ -62,7 +62,7 @@ def imwrite(
     planes: list | tuple = None,
     roi: int | Sequence[int] | None = None,
     metadata: dict = None,
-    overwrite: bool = True,
+    overwrite: bool = False,
     ext: str = ".tiff",
     order: list | tuple = None,
     target_chunk_mb: int = 20,
