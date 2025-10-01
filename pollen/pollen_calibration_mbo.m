@@ -30,7 +30,7 @@ dy = fov_um_y/ny;
 vol = load_or_read_data(filepath, filename, ny, nx, nc, nt, nz);
 
 % 1. scan offset correction
-vol = correct_scan_phase(vol, filepath);
+vol = correct_scan_phase(vol, filepath, filename);
 
 % 2. user marked pollen
 [xs, ys, Iz, III] = user_pollen_selection(vol);
@@ -45,7 +45,7 @@ analyze_z_positions(ZZ, zoi, order, filepath, dual_cavity)
 fit_exp_decay(ZZ, zoi, order, filepath, dual_cavity, pp, z_step_um)
 
 % X, Y calibration
-calibrate_xy(xs, ys, III, filepath, dual_cavity,nx,ny,dx,dy);
+calibrate_xy(xs, ys, III, filepath, filename, dual_cavity, nx, ny, dx, dy);
 end
 
 %% input data handling
@@ -69,7 +69,7 @@ end
 end
 
 %% scan offset correction
-function vol = correct_scan_phase(vol, filepath)
+function vol = correct_scan_phase(vol, filepath, filename)
 dim = 2;
 disp('Detecting scan offset...');
 
@@ -87,7 +87,9 @@ for ijk = 1:size(vol, 3)
     POI = fixScanPhase(POI, scan_corrections(ijk), dim);
     vol(:,:,ijk,:) = POI;
 end
-h5_filename = fullfile(filepath, 'pollen_calibration_data.h5');
+[~, fname, ~] = fileparts(filename);  % get name without extension
+h5_filename = fullfile(filepath, [fname '_pollen.h5']);
+
 if ~isfile(h5_filename)
     h5create(h5_filename, '/scan_corrections', size(scan_corrections));
 end
@@ -96,8 +98,8 @@ end
 
 %% user select beads
 function [xs, ys, Iz, III] = user_pollen_selection(vol)
-nc = size(vol, 3);
-nz = size(vol, 4);
+nc = size(vol, 3); % 14 z-planes
+nz = size(vol, 4); % steps 
 num = 10;
 
 xs = zeros(1, nc);
@@ -106,9 +108,9 @@ Iz = zeros(nc, nz);
 III = zeros(2*num+1, 2*num+1, nc);
 
 disp('Select pollen beads...');
-for kk = 1:nc
+for kk = 1:nc  % loop over 14 zplanes (nc)
     figure(901);
-    imagesc(max(vol(:,:,kk,:), [], 4));
+    imagesc(max(vol(:,:,kk,:), [], 4));  % max over steps/time
     axis image; colormap(gray);
     set(gca, 'xtick', [], 'ytick', []);
     title(['Select pollen bead for beamlet ' num2str(kk)]);
@@ -263,7 +265,7 @@ end
 end
 
 %% x y offsets
-function calibrate_xy(xs, ys, III, filepath, dual_cavity, nx, ny, dx, dy)
+function calibrate_xy(xs, ys, III, filepath, filename, dual_cavity, nx, ny, dx, dy)
 
 nc_total = size(III, 3);  % Total number of beamlets
 if dual_cavity
@@ -280,7 +282,9 @@ x_shifts = round(xs - mean(xs(1:nc)));  % Shift relative to mean
 y_shifts = round(ys - mean(ys(1:nc)));
 
 % Save to HDF5 file
-h5_filename = fullfile(filepath, 'pollen_calibration_data.h5');
+[~, fname, ~] = fileparts(filename);
+h5_filename = fullfile(filepath, [fname '_pollen.h5']);
+
 try
     h5create(h5_filename, '/x_shifts', size(x_shifts));
     h5create(h5_filename, '/y_shifts', size(y_shifts));
