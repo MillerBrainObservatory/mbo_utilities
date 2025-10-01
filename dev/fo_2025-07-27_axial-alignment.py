@@ -27,7 +27,7 @@ files = list(stitched_dir.glob("*.tif*"))
 # load plane shifts
 summary = np.load(
     r"D:\W2_DATA\kbarber\07_27_2025\mk355\suite3d_plane_alignment\s3d-v1\summary\summary.npy",
-    allow_pickle=True
+    allow_pickle=True,
 ).item()
 shifts = summary["plane_shifts"]  # shape (n_planes, 2) [dy, dx]
 
@@ -35,8 +35,12 @@ total_frames_all_files = sum(tifffile.imread(file).shape[0] for file in files)
 
 start = time.time()
 with tqdm(total=total_frames_all_files, desc="Shifting Frames") as pbar:
-    for i, file in (enumerate(files)):
-        out_file = stitched_dir / "aligned_gpu" / file.name.replace("_stitched.tif", "_aligned.tif")
+    for i, file in enumerate(files):
+        out_file = (
+            stitched_dir
+            / "aligned_gpu"
+            / file.name.replace("_stitched.tif", "_aligned.tif")
+        )
         img = tifffile.imread(file)
         dy, dx = shifts[i]
         aligned = np.empty_like(img)

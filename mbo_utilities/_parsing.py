@@ -7,6 +7,7 @@ import numpy as np
 
 from mbo_utilities.file_io import MBO_PIPELINE_TAGS
 
+
 def _parse_si_to_dict_nested(metadata: dict[str, Any]) -> dict[str, Any]:
     pass
 
@@ -26,6 +27,7 @@ def parse_scanimage_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         A JSON-serializable version of the metadata.
     """
     return _make_json_serializable(metadata)
+
 
 def _make_json_serializable(obj):
     if isinstance(obj, Path):

@@ -1,4 +1,5 @@
 from pathlib import Path
+
 # import numpy as np
 import mbo_utilities as mbo
 # import lbm_suite2p_python as lsp
@@ -11,13 +12,18 @@ data = mbo.imread(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw_subsampled_t")
 mbo.imwrite(data, r"D:\W2_DATA\kbarber\07_27_2025\mk355\stitching_test", roi=None)
 
 # Commented out: FO 09/17/25
-files = list(Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\out_mean\pre_reg").glob("*.tif"))
+files = list(
+    Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\out_mean\pre_reg").glob("*.tif")
+)
 ops = suite2p.default_ops()
 ops["roidetect"] = True
 ops["keep_movie_raw"] = True
 ops["tau"] = 0.7
 
-lsp.run_volume(files, ops=ops,)
+lsp.run_volume(
+    files,
+    ops=ops,
+)
 
 # def ov(ops, stat, iscell, proj=None, plot_indices=None, savepath=None,
 #        color_mode='random', red_border=False, colors=None):

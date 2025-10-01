@@ -290,11 +290,13 @@ def sort_by_si_filename(filename):
     """
     Sort ScanImage files by the last number in the filename (e.g., _00001, _00002, etc.).
     """
-    numbers = re.findall(r'\d+', str(filename))
+    numbers = re.findall(r"\d+", str(filename))
     return int(numbers[-1]) if numbers else 0
+
 
 def is_excluded(path, exclude_dirs=()):
     return any(excl in path.parts for excl in exclude_dirs)
+
 
 def get_files(
     base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
@@ -443,9 +445,9 @@ def print_tree(path, max_depth=1, prefix=""):
 
     entries = sorted([p for p in path.iterdir() if p.is_dir()])
     for i, entry in enumerate(entries):
-        connector = "└── " if i == len(entries)-1 else "├── "
+        connector = "└── " if i == len(entries) - 1 else "├── "
         print(prefix + connector + entry.name + "/")
 
         if max_depth > 1:
-            extension = "    " if i == len(entries)-1 else "│   "
-            print_tree(entry, max_depth=max_depth-1, prefix=prefix+extension)
+            extension = "    " if i == len(entries) - 1 else "│   "
+            print_tree(entry, max_depth=max_depth - 1, prefix=prefix + extension)

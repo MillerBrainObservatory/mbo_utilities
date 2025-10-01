@@ -28,7 +28,8 @@ from numcodecs import Blosc, Zstd, GZip, LZ4
 import time
 from numcodecs import Blosc
 
-def benchmark_compression(data_path, out_dir=None, clevels=(1,3)):
+
+def benchmark_compression(data_path, out_dir=None, clevels=(1, 3)):
     data_path = Path(data_path)
     if out_dir is None:
         out_dir = data_path.parent / "compression"
@@ -36,8 +37,10 @@ def benchmark_compression(data_path, out_dir=None, clevels=(1,3)):
 
     codecs = {
         "blosc_zstd": lambda c: Blosc(cname="zstd", clevel=c, shuffle=Blosc.BITSHUFFLE),
-        "blosc_lz4":  lambda c: Blosc(cname="lz4",  clevel=c, shuffle=Blosc.BITSHUFFLE),
-        "blosc_lz4hc":lambda c: Blosc(cname="lz4hc",clevel=c, shuffle=Blosc.BITSHUFFLE),
+        "blosc_lz4": lambda c: Blosc(cname="lz4", clevel=c, shuffle=Blosc.BITSHUFFLE),
+        "blosc_lz4hc": lambda c: Blosc(
+            cname="lz4hc", clevel=c, shuffle=Blosc.BITSHUFFLE
+        ),
         "blosc_zlib": lambda c: Blosc(cname="zlib", clevel=c, shuffle=Blosc.BITSHUFFLE),
     }
 
@@ -65,7 +68,7 @@ def benchmark_compression(data_path, out_dir=None, clevels=(1,3)):
             with open(out_dir / f"{label}.txt", "w") as f:
                 f.write(f"Codec: {name}\n")
                 f.write(f"Clevel: {clevel}\n")
-                f.write(f"Time: {end-start:.2f}s\n")
+                f.write(f"Time: {end - start:.2f}s\n")
 
 
 def benchmark_phasecorr(data_path, out_dir=None):
@@ -121,9 +124,7 @@ def benchmark_phasecorr(data_path, out_dir=None):
     print(f"Results written to {out_dir}")
 
 
-
 if __name__ == "__main__":
-
     import zarr
     # import fastplotlib as fpl
     # x = mbo.imread(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
@@ -134,7 +135,9 @@ if __name__ == "__main__":
 
     data_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
     files = list(data_path.glob("*.tif*"))
-    compressors = BloscCodec(cname='zstd', clevel=3, shuffle=zarr.codecs.BloscShuffle.bitshuffle)
+    compressors = BloscCodec(
+        cname="zstd", clevel=3, shuffle=zarr.codecs.BloscShuffle.bitshuffle
+    )
     x = mbo.imread(data_path, fix_phase=False, use_fft=False)
     x.phasecorr_method = "mean"
     out_file = data_path.parent / "phasecorr"
@@ -142,9 +145,15 @@ if __name__ == "__main__":
     # benchmark_phasecorr(data_path, out_dir=out_file)
     benchmark_compression(data_path, out_dir=out_file)
     start = time.time()
-    x = mbo.imwrite(x, out_file / f"{x.phasecorr_method}-{x.use_fft}", register_z=True, ext=".zarr", roi=None)
+    x = mbo.imwrite(
+        x,
+        out_file / f"{x.phasecorr_method}-{x.use_fft}",
+        register_z=True,
+        ext=".zarr",
+        roi=None,
+    )
     end = time.time()
-    with open(out_file / f"{x.phasecorr_method}-{x.use_fft}.txt", 'w') as f:
+    with open(out_file / f"{x.phasecorr_method}-{x.use_fft}.txt", "w") as f:
         f.write(f"Phase correlation method: {x.phasecorr_method}\n")
         f.write(f"Use FFT: {x.use_fft}\n")
         f.write(f"Time taken: {end - start:.2f} seconds\n")

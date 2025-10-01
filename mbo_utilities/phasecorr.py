@@ -21,6 +21,7 @@ ALL_PHASECORR_METHODS = set(TWO_DIM_PHASECORR_METHODS) | set(
 
 logger = log.get("phasecorr")
 
+
 def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False):
     """
     Estimate horizontal shift between even and odd rows of a 2D frame.
@@ -70,7 +71,10 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False):
         b_mean = b_.mean(0)
         offsets = range(-max_offset, max_offset + 1)
         scores = [
-            np.dot(a_mean[max_offset:-max_offset], np.roll(b_mean, k)[max_offset:-max_offset])
+            np.dot(
+                a_mean[max_offset:-max_offset],
+                np.roll(b_mean, k)[max_offset:-max_offset],
+            )
             for k in offsets
         ]
         dx = float(offsets[int(np.argmax(scores))])
@@ -99,7 +103,9 @@ def _apply_offset(img, offset, use_fft=False):
     return img
 
 
-def bidir_phasecorr(arr, *, method="mean", use_fft=False,upsample=4, max_offset=4, border=0):
+def bidir_phasecorr(
+    arr, *, method="mean", use_fft=False, upsample=4, max_offset=4, border=0
+):
     """
     Correct for bi-directional scanning offsets in 2D or 3D array.
 
@@ -127,7 +133,16 @@ def bidir_phasecorr(arr, *, method="mean", use_fft=False,upsample=4, max_offset=
         flat = arr.reshape(arr.shape[0], *arr.shape[-2:])
         if method == "frame":
             _offsets = np.array(
-                [_phase_corr_2d(frame=f, upsample=upsample, border=border, max_offset=max_offset, use_fft=use_fft) for f in flat]
+                [
+                    _phase_corr_2d(
+                        frame=f,
+                        upsample=upsample,
+                        border=border,
+                        max_offset=max_offset,
+                        use_fft=use_fft,
+                    )
+                    for f in flat
+                ]
             )
         else:
             if method not in MBO_WINDOW_METHODS:
@@ -137,7 +152,7 @@ def bidir_phasecorr(arr, *, method="mean", use_fft=False,upsample=4, max_offset=
                 upsample=upsample,
                 border=border,
                 max_offset=max_offset,
-                use_fft=use_fft
+                use_fft=use_fft,
             )
 
     if np.ndim(_offsets) == 0:  # scalar
@@ -182,8 +197,11 @@ def compute_scan_offsets(tiff_path, max_lag=8):
     import tifffile
     from pathlib import Path
     from scipy.signal import correlate
+
     tiff_path = Path(tiff_path)
-    data = tifffile.imread(tiff_path)  # shape = (T, Y, X, C?) depending on ScanImage export
+    data = tifffile.imread(
+        tiff_path
+    )  # shape = (T, Y, X, C?) depending on ScanImage export
     if data.ndim == 2:
         raise ValueError("Expected multi-plane data, got single frame")
 
@@ -218,7 +236,7 @@ def compute_scan_offsets(tiff_path, max_lag=8):
 
         corr = correlate(v1, v2, mode="full", method="auto")
         mid = len(corr) // 2
-        search = corr[mid - max_lag: mid + max_lag + 1]
+        search = corr[mid - max_lag : mid + max_lag + 1]
         lags = np.arange(-max_lag, max_lag + 1)
         offsets.append(lags[np.argmax(search)])
 
@@ -230,4 +248,3 @@ if __name__ == "__main__":
 
     files = get_files(r"D:\tests\data", "tif")
     fpath = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green"
-

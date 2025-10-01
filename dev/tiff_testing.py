@@ -31,11 +31,13 @@ end = time.time()
 fname = "zarr_log.txt"
 
 with open(outpath / fname, "a") as f:
-    f.write(f"Time to write: {end - start:.2f}\n"
-            f"Array shape: {x.shape}\n"
-            f"Dtype: {x.dtype}\n"
-            f"Phase correction: {x.phasecorr_method}\n\n"
-            f"----------------------------------------\n")
+    f.write(
+        f"Time to write: {end - start:.2f}\n"
+        f"Array shape: {x.shape}\n"
+        f"Dtype: {x.dtype}\n"
+        f"Phase correction: {x.phasecorr_method}\n\n"
+        f"----------------------------------------\n"
+    )
 print(f"Time to write zarr: {end - start:.2f}")
 
 
@@ -49,11 +51,13 @@ end = time.time()
 fname = "zarr_log.txt"
 
 with open(outpath / fname, "a") as f:
-    f.write(f"Time to write: {end - start:.2f}\n"
-            f"Array shape: {x.shape}\n"
-            f"Dtype: {x.dtype}\n"
-            f"Phase correction: {x.phasecorr_method}\n\n"
-            f"----------------------------------------\n")
+    f.write(
+        f"Time to write: {end - start:.2f}\n"
+        f"Array shape: {x.shape}\n"
+        f"Dtype: {x.dtype}\n"
+        f"Phase correction: {x.phasecorr_method}\n\n"
+        f"----------------------------------------\n"
+    )
 
 print(f"Time to write tiff: {end - start:.2f}")
 
@@ -66,11 +70,13 @@ mbo.imwrite(x, outpath, planes=[2], ext=".bin")
 end = time.time()
 
 with open(outpath / fname, "a") as f:
-    f.write(f"Time to write: {time.time() - start:.2f}\n"
-            f"Array shape: {x.shape}\n"
-            f"Dtype: {x.dtype}\n"
-            f"Phase correction: {x.phasecorr_method}\n\n"
-            f"----------------------------------------\n")
+    f.write(
+        f"Time to write: {time.time() - start:.2f}\n"
+        f"Array shape: {x.shape}\n"
+        f"Dtype: {x.dtype}\n"
+        f"Phase correction: {x.phasecorr_method}\n\n"
+        f"----------------------------------------\n"
+    )
 
 print(f"Time to write binary: {end - start:.2f}")
 
@@ -82,11 +88,13 @@ mbo.imwrite(x, outpath, planes=[2], ext=".bin")
 end = time.time()
 
 with open(outpath / fname, "a") as f:
-    f.write(f"Time to write: {end - start:.2f}\n"
-            f"Array shape: {x.shape}\n"
-            f"Dtype: {x.dtype}\n"
-            f"Phase correction: {x.phasecorr_method}\n\n"
-            f"----------------------------------------\n")
+    f.write(
+        f"Time to write: {end - start:.2f}\n"
+        f"Array shape: {x.shape}\n"
+        f"Dtype: {x.dtype}\n"
+        f"Phase correction: {x.phasecorr_method}\n\n"
+        f"----------------------------------------\n"
+    )
 print(f"Time to write h5: {end - start:.2f}")
 
 

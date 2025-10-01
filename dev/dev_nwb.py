@@ -6,9 +6,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from pynwb.file import Subject, NWBFile
-from neuroconv.datainterfaces.ophys.tiff.tiffdatainterface import GeneralTiffImagingInterface
+from neuroconv.datainterfaces.ophys.tiff.tiffdatainterface import (
+    GeneralTiffImagingInterface,
+)
 from neuroconv.tools import configure_and_write_nwbfile
 from mbo_utilities.array_types import NWBArray
+
 
 def reader():
     fpath = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\0727_mk355_testing.zarr")
@@ -23,7 +26,9 @@ def run_conversion():
 
     session_start_time = datetime(2025, 5, 5, 12, 30, 0, tzinfo=ZoneInfo("US/Pacific"))
 
-    full_file = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\green\mk355_7_27_2025_180mw_right_m2_go_to_2x-mROI-880x1100um_220x550px_2um-px_14p00Hz_00001_00001_00001.tif")
+    full_file = Path(
+        r"D:\W2_DATA\kbarber\07_27_2025\mk355\green\mk355_7_27_2025_180mw_right_m2_go_to_2x-mROI-880x1100um_220x550px_2um-px_14p00Hz_00001_00001_00001.tif"
+    )
     file_path = full_file.parent
     files = mbo.get_files(file_path)
 
@@ -44,7 +49,14 @@ def run_conversion():
         ],
         lab="Alipasha Vaziri",
         institution="Rockefeller University",
-        keywords=["behavior", "vision", "imaging", "mouse", "two-photon", "light-beads-microscopy"],
+        keywords=[
+            "behavior",
+            "vision",
+            "imaging",
+            "mouse",
+            "two-photon",
+            "light-beads-microscopy",
+        ],
     )
 
     subject = Subject(
@@ -64,7 +76,11 @@ def run_conversion():
 
     nwb_outpath = file_path.parent.joinpath("m355_0727_full-dataset.zarr")
     start = time.time()
-    configure_and_write_nwbfile(nwbfile, nwbfile_path=nwb_outpath, backend_configuration=backend_configuration,)
+    configure_and_write_nwbfile(
+        nwbfile,
+        nwbfile_path=nwb_outpath,
+        backend_configuration=backend_configuration,
+    )
     end = time.time()
     print(f"NWBFile writing took {end - start:.2f} seconds")
 
@@ -75,6 +91,7 @@ def run_conversion():
         overwrite=True,
         backend_configuration=backend_configuration,
     )
+
 
 if __name__ == "__main__":
     import mbo_utilities as mbo
@@ -96,23 +113,25 @@ if __name__ == "__main__":
 
     z = zarr.open(
         store=uri_rechunked,
-        storage_options = dict(anon=True),
+        storage_options=dict(anon=True),
         mode="r",
     )
     z_old = zarr.open(
         store=uri_original,
-        storage_options = dict(anon=True),
+        storage_options=dict(anon=True),
         mode="r",
     )
 
-    full_file = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\green\mk355_7_27_2025_180mw_right_m2_go_to_2x-mROI-880x1100um_220x550px_2um-px_14p00Hz_00001_00001_00001.tif")
+    full_file = Path(
+        r"D:\W2_DATA\kbarber\07_27_2025\mk355\green\mk355_7_27_2025_180mw_right_m2_go_to_2x-mROI-880x1100um_220x550px_2um-px_14p00Hz_00001_00001_00001.tif"
+    )
     data_mbo = mbo.imread(full_file)
     data_rechunked = z["acquisition"]["TwoPhotonSeries"].data
     data = z_old["acquisition"]["TwoPhotonSeries"].data
     chunks = data.chunks
 
-    chunk_size_MB = np.prod(data.chunks) * data.dtype.itemsize / 1024 ** 2
-    full_size_MB = np.prod(data.shape) * data.dtype.itemsize / 1024 ** 2
+    chunk_size_MB = np.prod(data.chunks) * data.dtype.itemsize / 1024**2
+    full_size_MB = np.prod(data.shape) * data.dtype.itemsize / 1024**2
 
     ats = z.attrs
     x = 4

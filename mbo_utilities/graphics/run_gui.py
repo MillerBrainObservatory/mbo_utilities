@@ -3,6 +3,7 @@ from typing import Any
 
 import click
 import time
+
 start = time.time()
 
 
@@ -31,7 +32,12 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 
     hello_imgui.set_assets_folder(str(get_mbo_dirs()["assets"]))
     immapp.run(runner_params=params, add_ons_params=addons)
-    return dlg.selected_path, dlg.widget_enabled, dlg.threading_enabled, dlg.metadata_only
+    return (
+        dlg.selected_path,
+        dlg.widget_enabled,
+        dlg.threading_enabled,
+        dlg.metadata_only,
+    )
 
 
 @click.command()
@@ -79,6 +85,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
     data_array = imread(data_in, roi=roi)
 
     import fastplotlib as fpl
+
     if metadata_only:
         data_array = imread(data_in, roi=roi)  # or whatever loads it
         metadata = data_array.metadata
@@ -88,6 +95,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
 
         def _render():
             from mbo_utilities.graphics._widgets import draw_metadata_inspector
+
             draw_metadata_inspector(metadata)
 
         params = hello_imgui.RunnerParams()
@@ -105,6 +113,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
 
     if hasattr(data_array, "imshow"):
         from mbo_utilities.graphics.display import imshow_lazy_array
+
         iw = imshow_lazy_array(data_array, widget=widget, threading_enabled=threading)
     else:
         iw = fpl.ImageWidget(
@@ -122,7 +131,11 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
         else:
             rois = 1 if roi is None else roi + 1
         gui = PreviewDataWidget(
-            iw=iw, fpath=data_array.filenames, threading_enabled=threading, size=350, rois=rois
+            iw=iw,
+            fpath=data_array.filenames,
+            threading_enabled=threading,
+            size=350,
+            rois=rois,
         )
         iw.figure.add_gui(gui)
     fpl.loop.run()

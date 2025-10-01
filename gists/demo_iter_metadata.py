@@ -12,17 +12,19 @@
 import os
 import tifffile
 
+
 def nest_keys(flat_dict, root_prefix="SI."):
     nested = {}
     for key, value in flat_dict.items():
         if not key.startswith(root_prefix):
             continue
-        parts = key[len(root_prefix):].split(".")
+        parts = key[len(root_prefix) :].split(".")
         current = nested
         for part in parts[:-1]:
             current = current.setdefault(part, {})
         current[parts[-1]] = value
     return nested
+
 
 def to_markdown(d, indent=0):
     md = ""
@@ -34,6 +36,7 @@ def to_markdown(d, indent=0):
         else:
             md += "  " * indent + f"- **{key}**: `{val}`\n"
     return md
+
 
 def to_markdown_all(files_dict):
     md = ""

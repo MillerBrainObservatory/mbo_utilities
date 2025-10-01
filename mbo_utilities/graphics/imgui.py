@@ -1142,11 +1142,15 @@ class PreviewDataWidget(EdgeWindow):
         if self.rois is not None:
             for roi in range(self.rois):
                 threading.Thread(
-                    target=self._compute_zstats_single_roi, args=(roi, self.fpath), daemon=True
+                    target=self._compute_zstats_single_roi,
+                    args=(roi, self.fpath),
+                    daemon=True,
                 ).start()
         else:
             threading.Thread(
-                target=self._compute_zstats_single_roi, args=(self.rois, self.fpath), daemon=True
+                target=self._compute_zstats_single_roi,
+                args=(self.rois, self.fpath),
+                daemon=True,
             ).start()
 
         # for data_ix, arr in enumerate(self.image_widget.data):

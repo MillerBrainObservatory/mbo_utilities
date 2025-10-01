@@ -5,11 +5,12 @@ if __name__ == "__main__":
     from pathlib import Path
     import numpy as np
     import warnings
+
     # import lbm_suite2p_python as lsp
     from mbo_utilities import imread, imwrite  # , get_metadata
     # import fastplotlib as fpl
 
-    warnings.simplefilter(action='ignore')
+    warnings.simplefilter(action="ignore")
     raw_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
     out_path = raw_path.parent.joinpath("raw.aligned")
     start = time.time()

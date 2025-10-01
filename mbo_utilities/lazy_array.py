@@ -57,20 +57,20 @@ def _filter_kwargs(cls, kwargs):
 
 
 def imwrite(
-        lazy_array,
-        outpath: str | Path,
-        planes: list | tuple = None,
-        roi: int | Sequence[int] | None = None,
-        metadata: dict = None,
-        overwrite: bool = True,
-        ext: str = ".tiff",
-        order: list | tuple = None,
-        target_chunk_mb: int = 20,
-        progress_callback: Callable = None,
-        register_z: bool = False,
-        debug: bool = False,
-        shift_vectors: np.ndarray = None,
-        **kwargs,  # for specific array writers
+    lazy_array,
+    outpath: str | Path,
+    planes: list | tuple = None,
+    roi: int | Sequence[int] | None = None,
+    metadata: dict = None,
+    overwrite: bool = True,
+    ext: str = ".tiff",
+    order: list | tuple = None,
+    target_chunk_mb: int = 20,
+    progress_callback: Callable = None,
+    register_z: bool = False,
+    debug: bool = False,
+    shift_vectors: np.ndarray = None,
+    **kwargs,  # for specific array writers
 ):
     # Logging
     if debug:
@@ -84,12 +84,16 @@ def imwrite(
 
     # save path
     if not isinstance(outpath, (str, Path)):
-        raise TypeError(f"`outpath` must be a string or Path, got {type(outpath)} instead.")
+        raise TypeError(
+            f"`outpath` must be a string or Path, got {type(outpath)} instead."
+        )
 
     outpath = Path(outpath)
     if not outpath.parent.is_dir():
-        raise ValueError(f"{outpath} is not inside a valid directory."
-                         f" Please create the directory first.")
+        raise ValueError(
+            f"{outpath} is not inside a valid directory."
+            f" Please create the directory first."
+        )
     outpath.mkdir(exist_ok=True)
 
     if roi is not None:
@@ -123,17 +127,19 @@ def imwrite(
 
     s3d_job_dir = None
     if register_z:
-
         lazy_array.metadata["apply_shift"] = True
 
         if shift_vectors is not None:
             lazy_array.metadata["shift_vectors"] = shift_vectors
         else:
             # check metadata for s3d-job dir
-            if "s3d-job" in lazy_array.metadata and Path(lazy_array.metadata["s3d-job"]).is_dir():
+            if (
+                "s3d-job" in lazy_array.metadata
+                and Path(lazy_array.metadata["s3d-job"]).is_dir()
+            ):
                 print("Detected s3d-job in metadata, moving data to s3d output path.")
                 s3d_job_dir = Path(lazy_array.metadata["s3d-job"])
-            else: # check if the input is in a s3d-job folder
+            else:  # check if the input is in a s3d-job folder
                 job_id = lazy_array.metadata.get("job_id", "s3d-preprocessed")
                 s3d_job_dir = outpath / job_id
 
@@ -146,11 +152,15 @@ def imwrite(
                 # check if outpath contains an s3d job
                 npy_files = outpath.rglob("*.npy")
                 if "dirs.npy" in [f.name for f in npy_files]:
-                    print(f"Detected existing s3d-job in outpath {outpath}, skipping preprocessing.")
+                    print(
+                        f"Detected existing s3d-job in outpath {outpath}, skipping preprocessing."
+                    )
                     s3d_job_dir = outpath
                 else:
                     print(f"No s3d-job detected, preprocessing data.")
-                    s3d_job_dir = register_zplanes_s3d(lazy_array.filenames, file_metadata, outpath)
+                    s3d_job_dir = register_zplanes_s3d(
+                        lazy_array.filenames, file_metadata, outpath
+                    )
                     print(f"Registered z-planes, results saved to {s3d_job_dir}.")
 
     if s3d_job_dir:
@@ -170,16 +180,22 @@ def imwrite(
         )
     else:
         if isinstance(lazy_array, Suite2pArray):
-            raise TypeError("Attempting to write a Suite2pArray directly."
-                            " Is there an ops.npy file in a directory with a tiff file?"
-                            "Please make write these to separate directories.")
-        _try_generic_writers(lazy_array, outpath, overwrite=overwrite,)
+            raise TypeError(
+                "Attempting to write a Suite2pArray directly."
+                " Is there an ops.npy file in a directory with a tiff file?"
+                "Please make write these to separate directories."
+            )
+        _try_generic_writers(
+            lazy_array,
+            outpath,
+            overwrite=overwrite,
+        )
         return outpath
 
 
 def imread(
-        inputs: str | Path | Sequence[str | Path],
-        **kwargs,  # for the reader
+    inputs: str | Path | Sequence[str | Path],
+    **kwargs,  # for the reader
 ):
     """
     Lazy load imaging data from supported file types.
@@ -243,11 +259,12 @@ def imread(
     if not paths:
         raise ValueError("No input files found.")
 
-
     filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
     if not filtered:
-        raise ValueError(f"No supported files in {inputs}. \n"
-                         f"Supported file types are: {SUPPORTED_FTYPES}")
+        raise ValueError(
+            f"No supported files in {inputs}. \n"
+            f"Supported file types are: {SUPPORTED_FTYPES}"
+        )
     paths = filtered
 
     parent = paths[0].parent if paths else None

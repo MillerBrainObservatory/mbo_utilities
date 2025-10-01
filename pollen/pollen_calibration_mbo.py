@@ -8,7 +8,7 @@ from scipy.signal import correlate
 from scipy.ndimage import uniform_filter1d
 from mbo_utilities import get_metadata, get_files
 
-warnings.simplefilter(action='ignore')
+warnings.simplefilter(action="ignore")
 
 
 def pollen_calibration_mbo(filepath, dual_cavity=False, order=None):
@@ -144,11 +144,16 @@ def user_pollen_selection(vol, num=10):
         img = vol[:, c, :, :].max(axis=0)  # (ny, nx)
 
         fig, ax = plt.subplots()
-        ax.imshow(img, cmap="gray",
-                  vmin=np.percentile(img, 1), vmax=np.percentile(img, 99),
-                  origin="upper")
-        ax.set_title(f"Select pollen bead for beamlet {c+1}")
-        ax.set_xticks([]); ax.set_yticks([])
+        ax.imshow(
+            img,
+            cmap="gray",
+            vmin=np.percentile(img, 1),
+            vmax=np.percentile(img, 99),
+            origin="upper",
+        )
+        ax.set_title(f"Select pollen bead for beamlet {c + 1}")
+        ax.set_xticks([])
+        ax.set_yticks([])
         plt.tight_layout()
 
         pts = plt.ginput(1, timeout=0)
@@ -158,30 +163,36 @@ def user_pollen_selection(vol, num=10):
 
         x, y = pts[0]
         ix, iy = int(round(x)), int(round(y))
-        xs.append(x); ys.append(y)
+        xs.append(x)
+        ys.append(y)
 
         # patch around point across z
         y0, y1 = max(0, iy - num), min(ny, iy + num + 1)
         x0, x1 = max(0, ix - num), min(nx, ix + num + 1)
 
-        patch = vol[:, c, y0:y1, x0:x1]    # (nz, roi_y, roi_x)
-        trace = patch.mean(axis=(1, 2))    # (nz,)
+        patch = vol[:, c, y0:y1, x0:x1]  # (nz, roi_y, roi_x)
+        trace = patch.mean(axis=(1, 2))  # (nz,)
         Iz.append(trace)
 
         zoi = int(np.argmax(uniform_filter1d(trace, size=10)))
-        crop = vol[zoi, c, y0:y1, x0:x1]   # 2D crop at best z
+        crop = vol[zoi, c, y0:y1, x0:x1]  # 2D crop at best z
         III.append(crop)
 
     Iz = np.vstack(Iz) if Iz else np.zeros((0, nz))
     if III:
         max_h = max(im.shape[0] for im in III)
         max_w = max(im.shape[1] for im in III)
-        pads = [np.pad(im, ((0, max_h - im.shape[0]),
-                            (0, max_w - im.shape[1])), mode="constant")
-                for im in III]
+        pads = [
+            np.pad(
+                im,
+                ((0, max_h - im.shape[0]), (0, max_w - im.shape[1])),
+                mode="constant",
+            )
+            for im in III
+        ]
         III = np.stack(pads, axis=-1)
     else:
-        III = np.zeros((2*num+1, 2*num+1, 0))
+        III = np.zeros((2 * num + 1, 2 * num + 1, 0))
 
     return np.array(xs), np.array(ys), Iz, III
 
@@ -216,7 +227,13 @@ def analyze_z_positions(ZZ, zoi, order, filepath):
     plt.close()
 
 
-def fit_exp_decay(ZZ, zoi, order, filepath,pp,):
+def fit_exp_decay(
+    ZZ,
+    zoi,
+    order,
+    filepath,
+    pp,
+):
     plt.figure()
     z = ZZ[zoi[order]]
     p = np.sqrt(pp[order])

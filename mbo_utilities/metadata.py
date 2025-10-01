@@ -9,6 +9,7 @@ import numpy as np
 import tifffile
 from mbo_utilities import get_files
 
+
 def scanimage_to_dict(d):
     result = {}
     for key, value in d.items():
@@ -376,7 +377,10 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
     """
     tiff_file = tifffile.TiffFile(file)
     if not is_raw_scanimage(file):
-        if not hasattr(tiff_file, "shaped_metadata") or tiff_file.shaped_metadata is None:
+        if (
+            not hasattr(tiff_file, "shaped_metadata")
+            or tiff_file.shaped_metadata is None
+        ):
             raise ValueError(f"No metadata found in {file}.")
         return tiff_file.shaped_metadata[0]
     elif hasattr(tiff_file, "scanimage_metadata"):
@@ -455,7 +459,7 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
         }
 
         if z_step is not None:
-            metadata['z_step'] = z_step
+            metadata["z_step"] = z_step
 
         if verbose:
             metadata["all"] = meta
@@ -505,7 +509,7 @@ def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False):
                 first_meta = file_meta.copy()
             n_pages = len(tifffile.TiffFile(file_path).pages)
             tiff_pages_per_file.append(n_pages)
-            frames_per_file.append(int(n_pages / file_meta.get('num_planes')))
+            frames_per_file.append(int(n_pages / file_meta.get("num_planes")))
             file_path_strings.append(str(file_path))
 
         except Exception as e:
@@ -514,13 +518,15 @@ def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False):
 
     total_frames = sum(frames_per_file)
 
-    first_meta.update({
-        'num_frames': total_frames,
-        'frames_per_file': frames_per_file,
-        'tiff_pages_per_file': tiff_pages_per_file,
-        'file_paths': file_path_strings,
-        'num_files': len(file_paths),
-    })
+    first_meta.update(
+        {
+            "num_frames": total_frames,
+            "frames_per_file": frames_per_file,
+            "tiff_pages_per_file": tiff_pages_per_file,
+            "file_paths": file_path_strings,
+            "num_files": len(file_paths),
+        }
+    )
     print(f"Total: {total_frames} frames across {len(file_paths)} files")
 
     return first_meta

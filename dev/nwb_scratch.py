@@ -14,14 +14,14 @@ uri_rechunked = r"s3://dandiarchive/zarr/a1f93cbf-fb83-4a02-a02b-e7b92d59fea0/"
 uri_original = r"s3://dandiarchive/zarr/2f0c6b0f-dc77-4f99-8291-40182bb7c33d/"
 
 z = zarr.open(
-store=uri_rechunked,
-storage_options=dict(anon=True),
-mode="r",
+    store=uri_rechunked,
+    storage_options=dict(anon=True),
+    mode="r",
 )
 z_old = zarr.open(
-store=uri_original,
-storage_options=dict(anon=True),
-mode="r",
+    store=uri_original,
+    storage_options=dict(anon=True),
+    mode="r",
 )
 
 full_file = Path(

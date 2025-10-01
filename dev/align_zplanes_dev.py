@@ -1,6 +1,7 @@
 from pathlib import Path
 import numpy as np
 import mbo_utilities as mbo
+
 # import lbm_suite2p_python as lsp
 # import suite2p
 # import matplotlib.pyplot as plt
@@ -28,19 +29,22 @@ x = 2
 
 # data = mbo.imread(r"D:\W2_DATA\kbarber\03_01\plane01_roi1.tif")
 
+
 def _cast(arr, dtype):
     if np.issubdtype(dtype, np.integer):
         info = np.iinfo(dtype)
         return np.clip(np.rint(arr), info.min, info.max).astype(dtype)
     return arr.astype(dtype)
 
+
 def register_planes(
-        filepaths,
-        anchor_idx=0,
-        projection="max",
-        upsample=10,
-        save=True,
-        out_suffix="registered.tif"):
+    filepaths,
+    anchor_idx=0,
+    projection="max",
+    upsample=10,
+    save=True,
+    out_suffix="registered.tif",
+):
     if not filepaths:
         raise ValueError("filepaths list is empty")
     if anchor_idx < 0 or anchor_idx >= len(filepaths):
@@ -60,7 +64,9 @@ def register_planes(
     n = len(filepaths)
     pairwise = []
     for i in tqdm(range(n - 1), desc="Pairwise shifts"):
-        shift, _, _ = phase_cross_correlation(projs[i], projs[i + 1], upsample_factor=upsample)
+        shift, _, _ = phase_cross_correlation(
+            projs[i], projs[i + 1], upsample_factor=upsample
+        )
         pairwise.append(np.asarray(shift, dtype=np.float64))
 
     cum = [None] * n
@@ -81,15 +87,22 @@ def register_planes(
                 aligned = np.fft.ifftn(fourier_shift(F, cum[i])).real
                 out[t] = _cast(aligned, stack.dtype)
             p = Path(f)
-            suf = out_suffix if out_suffix.lower().endswith(".tif") else out_suffix + ".tif"
+            suf = (
+                out_suffix
+                if out_suffix.lower().endswith(".tif")
+                else out_suffix + ".tif"
+            )
             tifffile.imwrite(str(p.with_name(p.stem + suf)), out)
 
     return shifts
 
+
 reg = True
 
 if reg:
-    files = list(Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\out_mean\pre_reg").glob("*.*")) # grab all files in directory
+    files = list(
+        Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\out_mean\pre_reg").glob("*.*")
+    )  # grab all files in directory
     dxdy = register_planes([str(f) for f in files], projection="mean")
     x = 2
 else:

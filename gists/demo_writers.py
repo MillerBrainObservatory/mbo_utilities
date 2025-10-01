@@ -14,13 +14,7 @@ raw = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\green")
 data = imread(raw)
 data.roi = 2
 data.fix_phase = True
-imwrite(
-    data,
-    raw.parent.joinpath("planes"),
-    ext=".h5",
-    overwrite=True,
-    planes=[4, 10]
-)
+imwrite(data, raw.parent.joinpath("planes"), ext=".h5", overwrite=True, planes=[4, 10])
 
 # files = [x for x in Path(path).glob("*")]
 # check = imread(files[0])

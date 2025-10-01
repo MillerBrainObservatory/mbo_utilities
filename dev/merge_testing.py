@@ -16,9 +16,10 @@ def embed_into_canvas(img, yrange, xrange, canvas_shape):
     y0, y1 = yrange
     x0, x1 = xrange
     target_shape = (y1 - y0, x1 - x0)
-    img_cropped = img[:target_shape[0], :target_shape[1]]
-    full[y0:y0 + img_cropped.shape[0], x0:x0 + img_cropped.shape[1]] = img_cropped
+    img_cropped = img[: target_shape[0], : target_shape[1]]
+    full[y0 : y0 + img_cropped.shape[0], x0 : x0 + img_cropped.shape[1]] = img_cropped
     return full
+
 
 def concat_binfiles_and_merge_metadata(f1, f2, output_bin, output_ops):
     left = Suite2pArray(f1)
@@ -27,7 +28,9 @@ def concat_binfiles_and_merge_metadata(f1, f2, output_bin, output_ops):
     md_right = load_ops(f2)
 
     assert left.Ly == right.Ly, f"Ly mismatch: {left.Ly} vs {right.Ly}"
-    assert left.nframes == right.nframes, f"nframes mismatch: {left.nframes} vs {right.nframes}"
+    assert left.nframes == right.nframes, (
+        f"nframes mismatch: {left.nframes} vs {right.nframes}"
+    )
 
     Ly = left.Ly
     Lx = left.Lx + right.Lx
@@ -46,8 +49,10 @@ def concat_binfiles_and_merge_metadata(f1, f2, output_bin, output_ops):
     right.close()
 
     canvas_Ly = max(md_left["yrange"][1], md_right["yrange"][1])
-    canvas_Lx = max(md_left["xrange"][1] + md_left["xrange"][0],
-                    md_right["xrange"][1] + md_right["xrange"][0])
+    canvas_Lx = max(
+        md_left["xrange"][1] + md_left["xrange"][0],
+        md_right["xrange"][1] + md_right["xrange"][0],
+    )
 
     merged_md = dict(md_left)
     merged_md["Ly"] = Ly
@@ -59,8 +64,12 @@ def concat_binfiles_and_merge_metadata(f1, f2, output_bin, output_ops):
     for key in ["meanImg", "meanImgE", "Vcorr"]:
         if key in md_left and key in md_right:
             canvas_shape = (canvas_Ly, canvas_Lx)
-            left_full = embed_into_canvas(md_left[key], md_left["yrange"], md_left["xrange"], canvas_shape)
-            right_full = embed_into_canvas(md_right[key], md_right["yrange"], md_right["xrange"], canvas_shape)
+            left_full = embed_into_canvas(
+                md_left[key], md_left["yrange"], md_left["xrange"], canvas_shape
+            )
+            right_full = embed_into_canvas(
+                md_right[key], md_right["yrange"], md_right["xrange"], canvas_shape
+            )
             merged_md[key] = np.hstack([left_full, right_full])
 
     output_ops = Path(output_ops)
@@ -70,7 +79,9 @@ def concat_binfiles_and_merge_metadata(f1, f2, output_bin, output_ops):
     print(f"Saved:\n  bin: {output_bin}\n  ops: {output_ops}")
 
 
-file = mbo.get_metadata(r"D:\W2_DATA\santi\213107tUTC_Max15_depth400um_fov1908x2000um_res2p00x2p00umpx_fr02p605Hz_pow230p1mW_00001_00001.tif")
+file = mbo.get_metadata(
+    r"D:\W2_DATA\santi\213107tUTC_Max15_depth400um_fov1908x2000um_res2p00x2p00umpx_fr02p605Hz_pow230p1mW_00001_00001.tif"
+)
 base = Path("D:/W2_DATA/kbarber/2025_07_17/mk355/green/processed")
 outpath = base.joinpath("output")
 bin_files = list(base.rglob("data.bin"))
@@ -89,22 +100,39 @@ data = mbo.imread(r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed\testing"
 fpl.ImageWidget(data).show()
 fpl.loop.run()
 
-mbo.imwrite(data, r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed", planes=[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], roi=0)
+mbo.imwrite(
+    data,
+    r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed",
+    planes=[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    roi=0,
+)
 
 files = list(Path(r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed").glob("*.tif"))
 
 ops = suite2p.default_ops()
 ops["roidetect"] = False
 
-lsp.run_volume(files, ops=ops, )
+lsp.run_volume(
+    files,
+    ops=ops,
+)
 
 folder1 = r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed\plane01_roi1"
 folder2 = r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed\plane01_roi2"
-output_folder = r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed\plane_01_roi1_roi2"
+output_folder = (
+    r"D:\W2_DATA\kbarber\2025_07_17\mk355\green\processed\plane_01_roi1_roi2"
+)
 
-ops_merged = lsp.load_ops("D:/W2_DATA/kbarber/2025_07_17/mk355/green/processed/plane_01_roi1_roi2/ops.npy")
-stat_merged = np.load("D:/W2_DATA/kbarber/2025_07_17/mk355/green/processed/plane_01_roi1_roi2/stat.npy", allow_pickle=True)
-iscell_merged = np.load("D:/W2_DATA/kbarber/2025_07_17/mk355/green/processed/plane_01_roi1_roi2/iscell.npy")
+ops_merged = lsp.load_ops(
+    "D:/W2_DATA/kbarber/2025_07_17/mk355/green/processed/plane_01_roi1_roi2/ops.npy"
+)
+stat_merged = np.load(
+    "D:/W2_DATA/kbarber/2025_07_17/mk355/green/processed/plane_01_roi1_roi2/stat.npy",
+    allow_pickle=True,
+)
+iscell_merged = np.load(
+    "D:/W2_DATA/kbarber/2025_07_17/mk355/green/processed/plane_01_roi1_roi2/iscell.npy"
+)
 
 ops1 = np.load(folder1 + "/ops.npy", allow_pickle=True).item()
 stat1 = np.load(folder1 + "/stat.npy", allow_pickle=True)

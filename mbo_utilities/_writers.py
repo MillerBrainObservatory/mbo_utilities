@@ -39,6 +39,7 @@ def _close_tiff_writers():
             writer.close()
         _write_tiff._writers.clear()
 
+
 def compute_pad_from_shifts(plane_shifts):
     shifts = np.asarray(plane_shifts, dtype=int)
     dy_min, dx_min = shifts.min(axis=0)
@@ -51,18 +52,18 @@ def compute_pad_from_shifts(plane_shifts):
 
 
 def _write_plane(
-        data: np.ndarray | Any,
-        filename: Path,
-        *,
-        overwrite=False,
-        metadata=None,
-        target_chunk_mb=20,
-        progress_callback=None,
-        debug=False,
-        dshape=None,
-        plane_index=None,
-        shift_vector=None,
-        **kwargs,
+    data: np.ndarray | Any,
+    filename: Path,
+    *,
+    overwrite=False,
+    metadata=None,
+    target_chunk_mb=20,
+    progress_callback=None,
+    debug=False,
+    dshape=None,
+    plane_index=None,
+    shift_vector=None,
+    **kwargs,
 ):
     if dshape is None:
         dshape = data.shape
@@ -119,7 +120,6 @@ def _write_plane(
             raise ValueError("plane_index must be provided when using shift_vector")
 
     if apply_shift and not shift_applied:
-
         if summary:
             summary_path = Path(summary).joinpath("summary.npy")
         else:
@@ -128,10 +128,11 @@ def _write_plane(
         if summary_path.is_file():
             summary = np.load(Path(summary_path), allow_pickle=True).item()
         else:
-            raise FileNotFoundError(f"Summary file not found s3d-job dir: \n "
-                                    f"{s3d_job_dir} \n"
-                                    f"or summary path: {summary_path}"
-                                    )
+            raise FileNotFoundError(
+                f"Summary file not found s3d-job dir: \n "
+                f"{s3d_job_dir} \n"
+                f"or summary path: {summary_path}"
+            )
 
         plane_shifts = summary["plane_shifts"]
 
@@ -154,7 +155,11 @@ def _write_plane(
     start = 0
     for i in range(nchunks):
         end = start + base + (1 if i < extra else 0)
-        chunk = data[start:end, plane_index, :, :] if plane_index is not None else data[start:end, :, :]
+        chunk = (
+            data[start:end, plane_index, :, :]
+            if plane_index is not None
+            else data[start:end, :, :]
+        )
 
         if chunk.ndim == 4 and chunk.shape[1] == 1:
             chunk = chunk.squeeze()
@@ -168,7 +173,9 @@ def _write_plane(
                         f"Unexpected chunk shape {chunk.shape[-2:]}, expected {(H0, W0)}"
                     )
 
-            buf = np.zeros((chunk.shape[0], out_shape[1], out_shape[2]), dtype=chunk.dtype)
+            buf = np.zeros(
+                (chunk.shape[0], out_shape[1], out_shape[2]), dtype=chunk.dtype
+            )
             # if chunk is 4D with singleton second dim, squeeze it
             buf[:, yy, xx] = chunk
             metadata["padded_shape"] = buf.shape
@@ -189,6 +196,7 @@ def _write_plane(
         _close_tiff_writers()
     elif fname.suffix in [".bin"]:
         _close_bin_writers()
+
 
 def _get_file_writer(ext, overwrite):
     if ext.startswith("."):
@@ -217,15 +225,7 @@ def _get_file_writer(ext, overwrite):
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def _write_bin(
-        path,
-        data,
-        *,
-        overwrite: bool = False,
-        metadata=None,
-        **kwargs
-):
-
+def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     if metadata is None:
         metadata = {}
 
@@ -271,7 +271,6 @@ def _write_bin(
 
 
 def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
-
     if metadata is None:
         metadata = {}
 
@@ -309,9 +308,7 @@ def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
     _write_h5._offsets[filename] = offset + data.shape[0]
 
 
-def _write_tiff(
-        path, data, overwrite=True, metadata=None, **kwargs
-):
+def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
     if metadata is None:
         metadata = {}
 
@@ -324,7 +321,9 @@ def _write_tiff(
 
     if filename not in _write_tiff._writers:
         if filename.exists() and not overwrite:
-            logger.warning(f"File {filename} already exists and overwrite=False. Skipping write.")
+            logger.warning(
+                f"File {filename} already exists and overwrite=False. Skipping write."
+            )
             return
         if filename.exists() and overwrite:
             filename.unlink()
@@ -345,7 +344,6 @@ def _write_tiff(
 
 
 def _write_zarr(path, data, *, overwrite=True, metadata=None, **kwargs):
-
     compressor = kwargs.get("filters", None)
 
     filename = Path(path)
@@ -384,10 +382,10 @@ def _write_zarr(path, data, *, overwrite=True, metadata=None, **kwargs):
 
 
 def _try_generic_writers(
-        data: Any,
-        outpath: str | Path,
-        overwrite: bool = True,
-        metadata: dict = {},
+    data: Any,
+    outpath: str | Path,
+    overwrite: bool = True,
+    metadata: dict = {},
 ):
     outpath = Path(outpath)
     if outpath.exists() and not overwrite:
