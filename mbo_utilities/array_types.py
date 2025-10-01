@@ -1,24 +1,23 @@
 from __future__ import annotations
 
-import os
-import tempfile
 import copy
 import json
+import os
+import tempfile
 import time
-
-from dataclasses import field
-from typing import Any, Tuple, List, Sequence
 from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
-import numpy as np
+from typing import Any, Tuple, List, Sequence
 
-import h5py
-import zarr
-import tifffile
-from dask import array as da
 import fastplotlib as fpl
+import h5py
+import numpy as np
+import tifffile
+import zarr
+from dask import array as da
 
-from mbo_utilities.metadata import get_metadata
+from mbo_utilities import log
 from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
@@ -27,20 +26,17 @@ from mbo_utilities.file_io import (
     _convert_range_to_slice,
     expand_paths,
 )
-from mbo_utilities.util import subsample_array
-
-from mbo_utilities import log
-from mbo_utilities.roi import iter_rois
+from mbo_utilities.metadata import get_metadata
 from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, bidir_phasecorr
+from mbo_utilities.roi import iter_rois
 from mbo_utilities.scanreader import scans, utils
 from mbo_utilities.scanreader.multiroi import ROI
-
+from mbo_utilities.util import subsample_array
 
 logger = log.get("array_types")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
-
 
 def register_zplanes_s3d(filenames, metadata, outpath = None) -> Path | None:
 
@@ -347,14 +343,6 @@ class Suite2pArray:
     def imshow(self, **kwargs):
         arrays = []
         names = []
-
-        # if "raw_file" in self.metadata:
-        #     try:
-        #         raw = Suite2pArray(self.metadata["raw_file"])
-        #         arrays.append(raw)
-        #         names.append("raw")
-        #     except Exception as e:
-        #         print(f"Could not open raw_file: {e}")
 
         # if both are available, and the same shape, show both
         if "raw_file" in self.metadata and "reg_file" in self.metadata:
