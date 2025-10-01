@@ -111,19 +111,23 @@ def imwrite(
         planes = [planes[i] for i in order]
 
     # Handle metadata
-    if hasattr(lazy_array, "metadata"):
-        if lazy_array.metadata is None:
-            lazy_array.metadata = {}
-        file_metadata = dict(lazy_array.metadata)  # copy
-        file_metadata["save_path"] = str(outpath.resolve())
+    if hasattr(lazy_array, "metadata") and lazy_array.metadata is not None:
+        file_metadata = dict(lazy_array.metadata)
     else:
         file_metadata = {}
-    if file_metadata:
-        if not isinstance(file_metadata, dict):
-            raise ValueError(
-                f"Provided metadata must be a dictionary, got {type(metadata)} instead."
-            )
-        file_metadata.update(file_metadata)
+
+    # Always ensure save_path is recorded
+    file_metadata["save_path"] = str(outpath.resolve())
+
+    # Merge in user-supplied metadata
+    if metadata is not None:
+        if not isinstance(metadata, dict):
+            raise ValueError(f"Provided metadata must be a dictionary, got {type(metadata)} instead.")
+        file_metadata.update(metadata)
+
+    # propagate merged metadata back to array
+    if hasattr(lazy_array, "metadata"):
+        lazy_array.metadata.update(file_metadata)
 
     s3d_job_dir = None
     if register_z:
