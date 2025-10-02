@@ -461,8 +461,8 @@ class PreviewDataWidget(EdgeWindow):
         self.image_widget = iw
         self.rois = rois
         self.shape = self.image_widget.data[0].shape
-        if self.image_widget.window_funcs is None:
-            self.image_widget.window_funcs = {"t": (np.mean, 0)}
+        # if self.image_widget.window_funcs is None:
+        #     self.image_widget.window_funcs = {"t": (np.mean, 0)}
 
         if len(self.shape) == 4:
             self.nz = self.shape[1]

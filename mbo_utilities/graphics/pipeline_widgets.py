@@ -368,7 +368,6 @@ def run_plane_from_data(self, arr_idx):
         return
 
     data_shape = self.image_widget.data[arr_idx].shape
-    metadata = getattr(self, "metadata", None)
     input_file = None
 
     dims = self.image_widget.current_index
@@ -377,7 +376,7 @@ def run_plane_from_data(self, arr_idx):
     else:
         current_z = 0
 
-    if arr_idx in self._rectangle_selectors.keys():
+    if arr_idx in self._rectangle_selectors.keys() and self._rectangle_selectors[arr_idx]:
         ind_xy = self._rectangle_selectors[arr_idx].get_selected_indices()
         ind_x = list(ind_xy[0])
         ind_y = list(ind_xy[1])
@@ -388,12 +387,6 @@ def run_plane_from_data(self, arr_idx):
     if self.is_mbo_scan:
         # TODO
         raise NotImplementedError()
-        # save_as(
-        #     self.image_widget.data[arr_idx],
-        #     self._saveas_outdir,
-        #     planes=[current_z + 1],
-        #     ext=".bin",
-        # )
 
     # move to property?
     if not self._saveas_outdir:
@@ -419,37 +412,20 @@ def run_plane_from_data(self, arr_idx):
         self.logger.info("Using LazyArrayLoader with ROI support. ")
         arr = loader.rois
 
-    if self.fpath.suffix.lower() in [".tif", ".tiff"]:
-        metadata = get_metadata(self.fpath)
-        metadata = _make_json_serializable(metadata)
-        input_file = out_dir / "plane_7.tif"
-        metadata["shape"] = data.shape
-        # TODO
-        raise NotImplementedError()
-        # save_as(
-        #     data,
-        #     input_file,
-        #     metadata
-        # )
-        # tifffile.imwrite(input_file, data, metadata=metadata)
-        # self.logger.info(f"Temporary file created:"
-        #             f" {input_file}")
+    filenames = loader.filenames
+    metadata = loader.metadata
 
-    elif self.fpath.suffix.lower() == ".bin":
-        metadata = np.load(self.fpath.parent / "ops.npy", allow_pickle=True).item()
-        input_file = self.fpath
+    # handle list vs single file
+    if isinstance(filenames, (list, tuple)):
+        if len(filenames) > arr_idx:
+            self.fpath = Path(filenames[arr_idx])
+        else:
+            self.fpath = Path(filenames[0])
 
-    self.logger.info(f"Metadata provided:")
-    for k, v in metadata.items():
-        self.logger.info(f"{k}: {v}")
     ops = self.s2p.to_dict()
     self.logger.info(f"User ops provided:")
     for k, v in ops.items():
         self.logger.info(f"{k}: {v}")
     ops.update(metadata)
-    if input_file:
-        lsp.run_plane(input_file, out_dir, ops=ops)
-        self.logger.info(f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
-    else:
-        self.logger.error("No valid input file found for processing.")
-        return
+    lsp.run_plane(self.fpath, out_dir, ops=ops)
+    self.logger.info(f"Plane 7 saved to {out_dir / 'plane_7.tif'}")

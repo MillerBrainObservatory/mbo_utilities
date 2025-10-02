@@ -31,6 +31,7 @@ SUPPORTED_FTYPES = (
     ".bin",
     ".h5",
     ".zarr",
+    ".json"
 )
 
 _ARRAY_TYPE_KWARGS = {
@@ -318,6 +319,10 @@ def imread(
             f"Zarr path {first} is not a valid store. "
             "Expected nested *.zarr dirs or a zarr.json inside."
         )
+
+    if first.suffix == ".json":
+        return ZarrArray(first.parent, **_filter_kwargs(ZarrArray, kwargs))
+
 
     if first.suffix == ".npy" and (first.parent / "pmd_demixer.npy").is_file():
         raise NotImplementedError("PMD Arrays are not yet supported.")

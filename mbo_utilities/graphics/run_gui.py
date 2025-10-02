@@ -113,7 +113,6 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
 
     if hasattr(data_array, "imshow"):
         from mbo_utilities.graphics.display import imshow_lazy_array
-
         iw = imshow_lazy_array(data_array, widget=widget, threading_enabled=threading)
     else:
         iw = fpl.ImageWidget(

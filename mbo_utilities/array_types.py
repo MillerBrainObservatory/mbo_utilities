@@ -38,6 +38,47 @@ logger = log.get("array_types")
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
+def _normalize_index(idx):
+    if isinstance(idx, list):
+        return np.asarray(idx)
+    return idx
+
+class LazyArrayProtocol:
+    """
+    Protocol for lazy array types.
+
+    Must implement:
+    - __getitem__(key)
+    - __len__()
+    - __array__()
+    - min()
+    - max()
+    - imshow(**kwargs)
+    - _imwrite(outpath, **kwargs)
+    """
+
+    def __getitem__(self, key: int | slice | tuple[int, ...]) -> np.ndarray:
+        raise NotImplementedError
+
+    def __len__(self) -> int:
+        raise NotImplementedError
+
+    def __array__(self) -> np.ndarray:
+        raise NotImplementedError
+
+    @property
+    def min(self) -> float:
+        raise NotImplementedError
+
+    @property
+    def max(self) -> float:
+        raise NotImplementedError
+
+    @property
+    def ndim(self) -> int:
+        raise NotImplementedError
+
+
 
 def register_zplanes_s3d(filenames, metadata, outpath=None) -> Path | None:
     # these are heavy imports, lazy import for now
@@ -612,10 +653,16 @@ class MBOTiffArray:
 class NpyArray:
     filenames: list[Path]
 
-    def load(self) -> Tuple[np.ndarray, List[str]]:
-        arr = np.load(str(self.filenames), mmap_mode="r")
-        return arr
-
+    def __post_init__(self):
+        if not self.filenames:
+            raise ValueError("No filenames provided.")
+        if len(self.filenames) > 1:
+            raise ValueError("NpyArray only supports a single .npy file.")
+        self.filenames = [Path(p) for p in self.filenames]
+        self._file = np.load(self.filenames[0], mmap_mode="r")
+        self.shape = self._file.shape
+        self.dtype = self._file.dtype
+        self.ndim = self._file.ndim
 
 @dataclass
 class TiffArray:
@@ -1354,6 +1401,10 @@ class NWBArray:
                 "pynwb is not installed. Install with `pip install pynwb`."
             )
         self.path = Path(path)
+        if not self.path.exists():
+            raise FileNotFoundError(f"No NWB file found at {self.path}")
+
+        self.filenames = [self.path]
 
         nwbfile = read_nwb(path)
         self.data = nwbfile.acquisition["TwoPhotonSeries"].data
@@ -1373,17 +1424,18 @@ class ZarrArray:
 
     def __init__(
         self,
-        paths: str | Path | Sequence[str | Path],
+        filenames: str | Path | Sequence[str | Path],
         compressor: str | None = "default",
     ):
-        if isinstance(paths, (str, Path)):
-            paths = [paths]
-        self.paths = [Path(p).with_suffix(".zarr") for p in paths]
-        for p in self.paths:
+        if isinstance(filenames, (str, Path)):
+            filenames = [filenames]
+
+        self.filenames = [Path(p).with_suffix(".zarr") for p in filenames]
+        for p in self.filenames:
             if not p.exists():
                 raise FileNotFoundError(f"No zarr store at {p}")
 
-        self.zs = [zarr.open(p, mode="r") for p in self.paths]
+        self.zs = [zarr.open(p, mode="r") for p in self.filenames]
 
         shapes = [z.shape for z in self.zs]
         if len(set(shapes)) != 1:
@@ -1394,21 +1446,18 @@ class ZarrArray:
 
     @property
     def metadata(self):
-        # if one store, return dict, if many, return list of dicts
+        # if one store, return dict, if many, return the first
+        # TODO: zarr consolidate metadata
         return self._metadata[0] if len(self._metadata) >= 1 else self._metadata
 
     @property
     def shape(self) -> tuple[int, int, int, int]:
         t, h, w = self.zs[0].shape
-        return (t, len(self.zs), h, w)
+        return t, len(self.zs), h, w
 
     @property
     def dtype(self):
         return self.zs[0].dtype
-
-    @property
-    def ndim(self):
-        return 4
 
     @property
     def size(self):
@@ -1420,38 +1469,55 @@ class ZarrArray:
         stacked = np.stack(arrs, axis=1)  # (T, Z, H, W)
         return stacked
 
+    @property
     def min(self):
         """Minimum of first zarr store."""
         return float(self.zs[0][:].min())
 
+    @property
     def max(self):
         """Maximum of first zarr store."""
         return float(self.zs[0][:].max())
 
+    @property
+    def ndim(self):
+        # this will always be 4D, since we add a Z dimension if needed
+        return 4  # (T, Z, H, W)
+
     def __getitem__(self, key):
-        """
-        Index like a 4D array: (t, z, y, x).
-        Handles one or multiple zarr stores.
-        """
-        # Normalize key to 4 components
         if not isinstance(key, tuple):
             key = (key,)
         key = key + (slice(None),) * (4 - len(key))
         t_key, z_key, y_key, x_key = key
 
+        def normalize(idx):
+            # convert contiguous lists to slices for zarr
+            if isinstance(idx, list) and len(idx) > 0:
+                if all(idx[i] + 1 == idx[i+1] for i in range(len(idx)-1)):
+                    return slice(idx[0], idx[-1] + 1)
+                else:
+                    return np.array(idx)  # will require looping later
+            return idx
+
+        y_key = normalize(y_key)
+        x_key = normalize(x_key)
+
         if len(self.zs) == 1:
             if isinstance(z_key, int) and z_key != 0:
                 raise IndexError("Z dimension has size 1, only index 0 is valid")
-            data = self.zs[0][t_key, y_key, x_key]
-            return data[..., None, :, :] if data.ndim == 3 else data
+            return self.zs[0][t_key, y_key, x_key]
 
-        # multi-zarr case
+        # multi-zarr
         if isinstance(z_key, int):
             return self.zs[z_key][t_key, y_key, x_key]
-        else:
+
+        if isinstance(z_key, slice):
             z_indices = range(len(self.zs))[z_key]
-            arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
-            return np.stack(arrs, axis=1)
+        else:
+            raise IndexError("Z indexing must be int or slice")
+
+        arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
+        return np.stack(arrs, axis=1)
 
     def _imwrite(
         self,
