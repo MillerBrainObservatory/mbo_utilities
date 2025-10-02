@@ -1,17 +1,103 @@
 import warnings
-import h5py
-import tifffile
-import numpy as np
 from pathlib import Path
+
+import click
+import h5py
 import matplotlib.pyplot as plt
-from scipy.signal import correlate
+import numpy as np
+import tifffile
 from scipy.ndimage import uniform_filter1d
-from mbo_utilities import get_metadata, get_files
+from scipy.signal import correlate
+
+from mbo_utilities import get_metadata
+
+from imgui_bundle import (
+    imgui,
+    imgui_md,
+    hello_imgui,
+    imgui_ctx,
+)
+from imgui_bundle import portable_file_dialogs as pfd
 
 warnings.simplefilter(action="ignore")
 
+class PollenDialog:
+    def __init__(self):
+        from mbo_utilities.file_io import get_mbo_dirs
+        from pathlib import Path
 
-def pollen_calibration_mbo(filepath, dual_cavity=False, order=None):
+        self.selected_path = None
+        self._open_multi = None
+        self._select_folder = None
+
+        # assets/settings from MBO utilities
+        self._assets_path = Path(get_mbo_dirs()["assets"])
+        self._settings_path = Path(get_mbo_dirs()["settings"])
+
+    def render(self):
+        with imgui_ctx.begin_child("#pollen_fd"):
+            imgui.push_id("pollen_fd")
+
+            # header --------------------------------------------------
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.5))
+
+            # Title + documentation
+            imgui_md.render_unindented("""
+            # Pollen Calibration
+
+            This tool calibrates multi-beam two-photon systems using pollen grains.  
+            Steps performed during calibration:
+
+            1. **Scan offset correction** – corrects phase shifts in Y scanning.  
+            2. **Bead selection** – user clicks pollen beads per beamlet.  
+            3. **Power vs. Z** – analyzes signal strength with depth.  
+            4. **Z position offsets** – measures axial offset between beams.  
+            5. **Exponential decay** – characterizes power falloff.  
+            6. **XY calibration** – computes lateral beamlet offsets.  
+
+            Results are saved as `.h5` (offsets) and `.png` figures in the same folder as the TIFF.
+            """)
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 2.0))
+
+            # Centered “Open File” button
+            bsz_file = hello_imgui.em_to_vec2(18, 2.4)
+            x_file = (imgui.get_window_width() - bsz_file.x) * 0.5
+            imgui.set_cursor_pos_x(x_file)
+            if imgui.button("Open File", bsz_file):
+                self._open_multi = pfd.open_file("Select pollen TIFF", options=0)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Open a TIFF file for pollen calibration.")
+
+            # handle file selection
+            if self._open_multi and self._open_multi.ready():
+                result = self._open_multi.result()
+                if result:
+                    # result is a list, pick the first file
+                    if isinstance(result, (list, tuple)):
+                        self.selected_path = result[0]
+                    else:
+                        self.selected_path = result
+                    hello_imgui.get_runner_params().app_shall_exit = True
+                self._open_multi = None
+
+            # quit button bottom-right
+            qsz = hello_imgui.em_to_vec2(10, 1.8)
+            imgui.set_cursor_pos(
+                imgui.ImVec2(
+                    imgui.get_window_width() - qsz.x - hello_imgui.em_size(1),
+                    imgui.get_window_height() - qsz.y - hello_imgui.em_size(1),
+                )
+            )
+            if imgui.button("Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
+                self.selected_path = None
+                hello_imgui.get_runner_params().app_shall_exit = True
+
+            imgui.pop_id()
+
+
+def pollen_calibration_mbo(filepath, order=None):
     filepath = Path(filepath).resolve()
     if not filepath.exists():
         raise FileNotFoundError(filepath)
@@ -19,7 +105,6 @@ def pollen_calibration_mbo(filepath, dual_cavity=False, order=None):
     metadata = get_metadata(filepath, verbose=True)
     z_step_um = metadata["all"]["FrameData"]["SI.hStackManager.stackZStepSize"]
 
-    fov_um_x, fov_um_y = metadata["fov"]
     nx = metadata["roi_width_px"]
     ny = metadata["roi_height_px"]
     nc = metadata["num_planes"]
@@ -30,9 +115,6 @@ def pollen_calibration_mbo(filepath, dual_cavity=False, order=None):
 
     if order is None:
         order = list(range(nc))
-
-    dx = fov_um_x / nx
-    dy = fov_um_y / ny
 
     vol = load_or_read_data(filepath, ny, nx, nc, nz)
 
@@ -55,19 +137,30 @@ def pollen_calibration_mbo(filepath, dual_cavity=False, order=None):
     calibrate_xy(xs, ys, III, filepath)
 
 
+def print_tifffile_note():
+    YELLOW = "\033[93m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
+
+    msg = (
+            "\n"
+            + "*" * 50 + "\n"
+            + f"* {BOLD}{YELLOW}NOTE:{RESET}".ljust(49) + "\n"
+            + f"* {YELLOW}IGNORE TIFFFILE FAILED TO RESHAPE ERRORS{RESET}".ljust(49) + "\n"
+            + "*" * 50 + "\n"
+    )
+    print(msg)
+
 def load_or_read_data(filepath, ny, nx, nc, nz):
     """Read TIFF → reshape into (nz, nc, ny, nx)."""
+    print_tifffile_note()
     arr = tifffile.imread(filepath).astype(np.float32)  # (nframes, ny, nx)
     nframes = arr.shape[0]
     if nframes != nz * nc:
         raise ValueError(f"{nframes} frames not divisible by nc={nc}")
 
-    # C-order reshape: (nz, nc, ny, nx)
     vol = arr.reshape(nz, nc, ny, nx)
-
-    # subtract mean, normalize
     vol -= vol.mean()
-
     return vol
 
 
@@ -200,16 +293,25 @@ def user_pollen_selection(vol, num=10):
 def analyze_power_vs_z(Iz, filepath, DZ, order):
     nz = Iz.shape[1]
     ZZ = np.flip(np.arange(nz) * DZ)
-    amt = int(10.0 / DZ)
+
+    amt = max(1, round(10.0 / DZ))
     smoothed = uniform_filter1d(Iz, size=amt, axis=1)
+
     zoi = smoothed.argmax(axis=1)
     pp = smoothed.max(axis=1)
 
     plt.figure()
-    plt.plot(ZZ, np.sqrt(smoothed[order, :]).T)
+    plt.plot(ZZ, np.sqrt(smoothed[order, :]).T, linewidth=1.5)
+
+    plt.plot(ZZ[zoi], np.sqrt(pp), "k.", markersize=8)
+    for i, o in enumerate(order):
+        plt.text(ZZ[zoi[o]], np.sqrt(pp[o]) + 0.02 * np.ptp(pp**0.5),
+                 str(i + 1), ha="center", fontsize=8, weight="bold")
+
     plt.xlabel("Piezo Z (µm)")
     plt.ylabel("2p signal (a.u.)")
     plt.title("Power vs. Z-depth")
+    plt.grid(True)
     plt.savefig(filepath.with_name("pollen_calibration_power_vs_z.png"))
     plt.close()
 
@@ -270,22 +372,45 @@ def calibrate_xy(xs, ys, III, filepath):
     plt.close()
 
 
+def select_pollen_file() -> str | None:
+    from imgui_bundle import immapp, hello_imgui
+
+    dlg = PollenDialog()
+
+    def _render():
+        dlg.render()
+
+    params = hello_imgui.RunnerParams()
+    params.app_window_params.window_title = "Pollen Calibration"
+    params.app_window_params.window_geometry.size = (1000, 700)
+    params.callbacks.show_gui = _render
+
+    addons = immapp.AddOnsParams()
+    addons.with_markdown = True
+    addons.with_implot = False
+    addons.with_implot3d = False
+
+    hello_imgui.set_assets_folder(str(dlg._assets_path))
+    immapp.run(runner_params=params, add_ons_params=addons)
+
+    return dlg.selected_path if dlg.selected_path else None
+
+
+@click.command()
+@click.option("--in", "input_path", type=click.Path(exists=True, file_okay=True, dir_okay=True),
+              help="Input file or directory containing pollen data")
+def main(input_path):
+    """Run pollen calibration with optional input/output paths."""
+
+    if input_path is None:
+        data_in = select_pollen_file()
+        if not data_in:
+            click.echo("No file selected, exiting.")
+            return
+        input_path = data_in
+
+    pollen_calibration_mbo(input_path)
+
+
 if __name__ == "__main__":
-    import h5py
-
-    files = get_files(r"D:\demo\pollen", str_contains="_pollen.h5", max_depth=1)
-
-    xshifts, yshifts = [], []
-    with h5py.File(files[0], "r") as hf:
-        for k in hf.keys():
-            if k == "x_shifts":
-                xshifts = hf[k][()]
-            else:
-                yshifts = hf[k][()]
-
-            print(f"  {k}: {hf[k][()]}")
-        print()
-    plane_shifts = np.array([xshifts, yshifts]).T
-    print(plane_shifts)
-    pollen_path = r"D:\demo\pollen\07_27_2025_pollen_mounted_on_rig_07_17_2025__2xzoom_30pctpower_5umsteps_81slices_100avg_00001_00001_00001_00001_00001_00001_00001.tif"
-    pollen_calibration_mbo(pollen_path, dual_cavity=False)
+    main()
