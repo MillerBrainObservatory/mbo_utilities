@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-from typing import Any, Tuple, List, Sequence
+from typing import Any, List, Sequence
 
 import fastplotlib as fpl
 import h5py
@@ -26,7 +26,7 @@ from mbo_utilities.file_io import (
     _convert_range_to_slice,
     expand_paths,
 )
-from mbo_utilities.metadata import get_metadata
+from mbo_utilities.metadata import get_metadata, clean_scanimage_metadata
 from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, bidir_phasecorr
 from mbo_utilities.roi import iter_rois
 from mbo_utilities.scanreader import scans, utils
@@ -48,13 +48,22 @@ class LazyArrayProtocol:
     Protocol for lazy array types.
 
     Must implement:
-    - __getitem__(key)
-    - __len__()
-    - __array__()
-    - min()
-    - max()
-    - imshow(**kwargs)
-    - _imwrite(outpath, **kwargs)
+    - __getitem__    (method)
+    - __len__        (method)
+    - min            (property)
+    - max            (property)
+    - ndim           (property)
+    - shape          (property)
+    - dtype          (property)
+    - metadata       (property)
+
+    Optionally implement:
+    - __array__      (method)
+    - imshow         (method)
+    - _imwrite       (method)
+    - close          (method)
+    - chunks         (property)
+    - dask           (property)
     """
 
     def __getitem__(self, key: int | slice | tuple[int, ...]) -> np.ndarray:
@@ -76,6 +85,10 @@ class LazyArrayProtocol:
 
     @property
     def ndim(self) -> int:
+        raise NotImplementedError
+
+    @property
+    def shape(self) -> tuple[int, ...]:
         raise NotImplementedError
 
 
@@ -799,10 +812,16 @@ class MboRawArray(scans.ScanMultiROI):
         border: int | tuple[int, int, int, int] = 3,
         upsample: int = 5,
         max_offset: int = 4,
-        use_fft: bool = True,
+        use_fft: bool = False,
     ):
+        """
+        Parameters
+        ----------
+        files : str, Path, or list of str/Path, optional
+
+        """
         super().__init__(join_contiguous=True)
-        self._metadata = {}  # set when pages are read
+        self._metadata = {"cleaned_scanimage_metadata": False}  # set when pages are read
         self._fix_phase = fix_phase
         self._phasecorr_method = phasecorr_method
         self.border: int | tuple[int, int, int, int] = border
@@ -871,6 +890,9 @@ class MboRawArray(scans.ScanMultiROI):
         self.metadata["si"] = _make_json_serializable(
             self.tiff_files[0].scanimage_metadata
         )
+        self._metadata = clean_scanimage_metadata(self.metadata)
+        self._metadata["cleaned_scanimage_metadata"] = True
+
         self._rois = self._create_rois()
         self.fields = self._create_fields()
         if self.join_contiguous:
@@ -914,6 +936,12 @@ class MboRawArray(scans.ScanMultiROI):
     @property
     def use_fft(self):
         return self._use_fft
+
+    @use_fft.setter
+    def use_fft(self, value: bool):
+        if not isinstance(value, bool):
+            raise ValueError("use_fft must be a boolean value.")
+        self._use_fft = value
 
     @property
     def phasecorr_method(self):
