@@ -722,6 +722,9 @@ def save_metadata_html(
     """
     Clean + render metadata to a collapsible HTML tree with search and expand/collapse all.
     Lists/tuples are shown inline (compact), truncated past `inline_max_chars` with a tooltip.
+
+    This is the most absurd code ever produced by AI.
+
     """
     cleaned = clean_scanimage_metadata(meta)  # relies on your function being defined
 
