@@ -13,11 +13,13 @@ fpath = Path(r"D:\W2_DATA\foconnell\2025-07-10_Pollen\plane7")
 files = list(fpath.glob("*.tif*"))
 
 import tifffile
+
 tf = tifffile.TiffFile(files[0])
 tf_og = tifffile.TiffFile(files_og[0])
 
 md = tf.scanimage_metadata["FrameData"]
 md_og = tf_og.scanimage_metadata["FrameData"]
+
 
 def group_scanimage_metadata(flat: dict) -> dict:
     grouped = {}
@@ -40,6 +42,7 @@ def group_scanimage_metadata(flat: dict) -> dict:
             current = current.setdefault(part, {})
         current[path[-1]] = value
     return grouped
+
 
 def diff_metadata(g1: dict, g2: dict) -> dict:
     diff = {}

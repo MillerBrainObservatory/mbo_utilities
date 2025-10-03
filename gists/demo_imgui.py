@@ -15,13 +15,16 @@ iw = fpl.ImageWidget(
     data=data,
     histogram_widget=False,
     figure_kwargs={
-       "size": (nx * 2, ny * 2),
-       "canvas": canvas,
+        "size": (nx * 2, ny * 2),
+        "canvas": canvas,
     },
     graphic_kwargs={"vmin": data.min(), "vmax": data.max()},
     window_funcs={"t": (np.mean, 1)},
 )
-edge_gui = PreviewDataWidget(iw=iw, fpath=fpath,)
+edge_gui = PreviewDataWidget(
+    iw=iw,
+    fpath=fpath,
+)
 iw.figure.add_gui(edge_gui)
 iw.show()
 

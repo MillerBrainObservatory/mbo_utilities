@@ -7,37 +7,56 @@
 # [tool.uv.sources]
 # mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "dev" }
 
+import time
 from pathlib import Path
 from mbo_utilities.lazy_array import imread, imwrite
 
-raw = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\green")
-data = imread(raw)
-data.roi = 2
-data.fix_phase = True
-imwrite(
-    data,
-    raw.parent.joinpath("planes"),
-    ext=".h5",
-    overwrite=True,
-    planes=[4, 10]
-)
+def benchmark_wrapper(func, *args, **kwargs):
+    start = time.time()
+    result = func(*args, **kwargs)
+    end = time.time()
+    with open("benchmark_log.txt", "a") as f:
+        f.write(f"Function {func.__name__} took {end - start:.2f} seconds\n"
+                f"Args: {args}, Kwargs: {kwargs}\n\n")
+    total_seconds_runtime = end - start
+    print(f"Function {func.__name__} took {total_seconds_runtime:.2f} seconds")
+    return total_seconds_runtime
 
-# files = [x for x in Path(path).glob("*")]
-# check = imread(files[0])
-# fpl.ImageWidget(check,
-#                 names=[f.name for f in files],
-#                 histogram_widget=True,
-#                 figure_kwargs={"size": (800, 1000),},
-#                 graphic_kwargs={"vmin": -300, "vmax": 3000},
-#                 window_funcs={"t": (np.mean, 0)},
-#                ).show()
-# fpl.loop.run()
+def run_with_fft(raw_data_path):
+    outpath = raw_data_path.parent.joinpath("green.processed-fft")
+    outpath.mkdir(exist_ok=True)
 
-# data = scan[:20, 11, :, :]
-# title = f"200 frames, {data.shape[0]} planes, plane {zplane}"
-# fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-# ax[0].imshow(data.mean(axis=0)[200:280, 300:380], cmap="gray", vmin=-300, vmax=2500)
-# ax[1].imshow(data.mean(axis=0), cmap="gray", vmin=-300, vmax=2500)
-# plt.title(title)
-# plt.savefig("/tmp/01/both.png")
-# print(data.shape)
+    data = imread(raw_data_path)
+
+    data.roi = None
+    data.fix_phase = True
+    data.use_fft = False
+
+    imwrite(
+        data,
+        outpath,
+        register_z=True,
+        ext=".zarr", overwrite=True, planes=None
+    )
+
+def run_without_fft(raw_data_path):
+    outpath = raw_data_path.parent.joinpath("green.processed-no-fft")
+    outpath.mkdir(exist_ok=True)
+
+    data = imread(raw_data_path)
+    data.roi = None
+    data.fix_phase = True
+    data.use_fft = True
+    imwrite(
+        data,
+        outpath,
+        register_z=True,
+        ext=".zarr", overwrite=True, planes=None
+    )
+
+
+if __name__ == "__main__":
+
+    path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\green")
+    fft_runtime = benchmark_wrapper(run_with_fft, path)
+    no_fft_runtime = benchmark_wrapper(run_without_fft, path)

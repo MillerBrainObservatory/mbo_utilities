@@ -38,13 +38,12 @@ def set_tooltip(_tooltip, _show_mark=True):
         imgui.pop_text_wrap_pos()
         imgui.end_tooltip()
 
+
 def draw_metadata_inspector(metadata: dict):
     with imgui_ctx.begin_child("Metadata Viewer"):
         imgui_md.render("# Metadata Viewer")
         imgui.separator()
-        imgui.push_style_var(
-            imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4)
-        )
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4))
         try:
             for k, v in sorted(metadata.items()):
                 _render_item(k, v)
@@ -73,7 +72,6 @@ def draw_scope():
 
 
 def _render_item(name, val, prefix=""):
-
     full_name = f"{prefix}{name}"
     if isinstance(val, Mapping):
         # filter out all-underscore keys and callables

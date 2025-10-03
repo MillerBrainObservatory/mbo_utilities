@@ -2,33 +2,17 @@ from pathlib import Path
 from typing import Any
 
 import click
+import time
 
-import fastplotlib as fpl
-from imgui_bundle import immapp, hello_imgui
+start = time.time()
 
-from mbo_utilities.graphics._widgets import draw_metadata_inspector
-from mbo_utilities.graphics.display import imshow_lazy_array
-from mbo_utilities.lazy_array import imread
-from mbo_utilities.graphics._file_dialog import FileDialog
-from mbo_utilities.file_io import get_mbo_dirs
-
-try:
-    # setup_imgui()
-    IMGUI_SETUP_COMPLETE = True
-except ImportError:
-    IMGUI_SETUP_COMPLETE = False
-    print("Failed to set up imgui. GUI functionality may not work as expected.")
-
-try:
-    from masknmf.visualization.interactive_guis import make_demixing_video
-
-    HAS_MASKNMF = True
-except ImportError:
-    HAS_MASKNMF = False
-    make_demixing_video = None
 
 
 def _select_file() -> tuple[Any, Any, Any, bool]:
+    from mbo_utilities.graphics._file_dialog import FileDialog
+    from mbo_utilities.file_io import get_mbo_dirs
+    from imgui_bundle import immapp, hello_imgui
+
     dlg = FileDialog()
 
     def _render():
@@ -49,11 +33,22 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 
     hello_imgui.set_assets_folder(str(get_mbo_dirs()["assets"]))
     immapp.run(runner_params=params, add_ons_params=addons)
-    return dlg.selected_path, dlg.widget_enabled, dlg.threading_enabled, dlg.metadata_only
+    return (
+        dlg.selected_path,
+        dlg.widget_enabled,
+        dlg.threading_enabled,
+        dlg.metadata_only,
+    )
 
 
 @click.command()
-@click.option("--roi", type=click.IntRange(0, 10), default=0)
+@click.option(
+    "--roi",
+    multiple=True,
+    type=int,
+    help="ROI index (can pass multiple, e.g. --roi 0 --roi 2). Leave empty for None.",
+    default=None,
+)
 @click.option(
     "--widget/--no-widget",
     default=True,
@@ -72,6 +67,16 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 @click.argument("data_in", required=False)
 def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=False):
     """Open a GUI to preview data of any supported type."""
+
+    from imgui_bundle import immapp, hello_imgui
+    from mbo_utilities.lazy_array import imread
+
+    if not roi:  # nothing passed
+        roi = None
+    elif len(roi) == 1:  # one value passed
+        roi = roi[0]
+    else:  # multiple values passed
+        roi = list(roi)
     if data_in is None:
         data_in, widget, threading, metadata_only = _select_file()
         if not data_in:
@@ -79,6 +84,8 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
             return
 
     data_array = imread(data_in, roi=roi)
+
+    import fastplotlib as fpl
 
     if metadata_only:
         data_array = imread(data_in, roi=roi)  # or whatever loads it
@@ -88,6 +95,8 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
             return
 
         def _render():
+            from mbo_utilities.graphics._widgets import draw_metadata_inspector
+
             draw_metadata_inspector(metadata)
 
         params = hello_imgui.RunnerParams()
@@ -104,6 +113,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
         return
 
     if hasattr(data_array, "imshow"):
+        from mbo_utilities.graphics.display import imshow_lazy_array
         iw = imshow_lazy_array(data_array, widget=widget, threading_enabled=threading)
     else:
         iw = fpl.ImageWidget(
@@ -121,7 +131,11 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
         else:
             rois = 1 if roi is None else roi + 1
         gui = PreviewDataWidget(
-            iw=iw, fpath=data_array.filenames, threading_enabled=threading, size=350, rois=rois
+            iw=iw,
+            fpath=data_array.filenames,
+            threading_enabled=threading,
+            size=350,
+            rois=rois,
         )
         iw.figure.add_gui(gui)
     fpl.loop.run()

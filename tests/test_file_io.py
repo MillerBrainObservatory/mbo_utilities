@@ -36,7 +36,9 @@ def skip_if_missing_data(func):
         if not DATA_ROOT.exists() or len(list(DATA_ROOT.glob("*.tif"))) == 0:
             pytest.skip("Required TIFF files not found.")
         return func(*args, **kwargs)
+
     return wrapper
+
 
 @skip_if_missing_data
 def test_metadata():
@@ -119,7 +121,7 @@ def test_demo_files(roi, subdir):
     )
 
     out = mbo.get_files(save_dir, "plane", max_depth=2)
-    print('------------')
+    print("------------")
     print(out)
 
 
@@ -158,9 +160,10 @@ def test_overwrite_false_skips_existing():
     mbo_imwrite(data, ASSEMBLED, ext=".tiff", overwrite=False, planes=[1])
     # Ensure the file exists
     import tifffile
+
     data = tifffile.imread(ASSEMBLED / "plane1.tif")
     assert data.shape is not None
-    print('------------')
+    print("------------")
     print(data)
     # captured = capsys.readouterr().out
     # assert "All output files exist; skipping save." in captured
@@ -176,12 +179,14 @@ def test_overwrite_true_rewrites():
     # Capture output of second call with overwrite=True
     mbo_imwrite(data, ASSEMBLED, ext=".tiff", overwrite=True, planes=[1])
     import tifffile
+
     data = tifffile.imread(ASSEMBLED / "plane1.tif")  # Ensure file exists
     assert data.shape is not None
     print(data)
     # captured = capsys.readouterr().out
     # # And it should print the elapsed‐time message twice (once per call)
     # assert captured.count("Time elapsed:") >= 2
+
 
 @skip_if_missing_data
 def test_benchmark_indexing_test(tmp_path):

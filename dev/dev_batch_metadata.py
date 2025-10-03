@@ -13,8 +13,12 @@ full_file = Path(
 )
 
 start = time.time()
-metadata = mbo.get_metadata(full_file, verbose=True,)
+metadata = mbo.get_metadata(
+    full_file,
+    verbose=True,
+)
 print(f"Metadata retrieval took {time.time() - start:.2f} seconds")
+
 
 def nest_keys(d):
     result = {}
@@ -31,6 +35,7 @@ def nest_keys(d):
         else:
             result[key] = value
     return result
+
 
 nested_metadata = nest_keys(metadata)
 

@@ -461,8 +461,8 @@ class PreviewDataWidget(EdgeWindow):
         self.image_widget = iw
         self.rois = rois
         self.shape = self.image_widget.data[0].shape
-        if self.image_widget.window_funcs is None:
-            self.image_widget.window_funcs = {"t": (np.mean, 0)}
+        # if self.image_widget.window_funcs is None:
+        #     self.image_widget.window_funcs = {"t": (np.mean, 0)}
 
         if len(self.shape) == 4:
             self.nz = self.shape[1]
@@ -1142,11 +1142,15 @@ class PreviewDataWidget(EdgeWindow):
         if self.rois is not None:
             for roi in range(self.rois):
                 threading.Thread(
-                    target=self._compute_zstats_single_roi, args=(roi, self.fpath), daemon=True
+                    target=self._compute_zstats_single_roi,
+                    args=(roi, self.fpath),
+                    daemon=True,
                 ).start()
         else:
             threading.Thread(
-                target=self._compute_zstats_single_roi, args=(self.rois, self.fpath), daemon=True
+                target=self._compute_zstats_single_roi,
+                args=(self.rois, self.fpath),
+                daemon=True,
             ).start()
 
         # for data_ix, arr in enumerate(self.image_widget.data):

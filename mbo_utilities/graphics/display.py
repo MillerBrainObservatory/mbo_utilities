@@ -2,15 +2,8 @@ import numpy as np
 import copy
 
 from mbo_utilities.roi import iter_rois
-from mbo_utilities.array_types import DemixingResultsArray, MBOTiffArray, MboRawArray
+from mbo_utilities.array_types import MBOTiffArray, MboRawArray
 import fastplotlib as fpl
-
-from mbo_utilities.pipelines import MBO_DEVICE, HAS_MASKNMF
-
-if HAS_MASKNMF:
-    from masknmf.visualization.interactive_guis import make_demixing_video
-else:
-    make_demixing_video = None
 
 
 def mbo_tiff_display(array: MBOTiffArray, **kwargs):
@@ -46,6 +39,7 @@ def mbo_raw_display(array: MboRawArray, **kwargs):
         graphic_kwargs={"vmin": array.min(), "vmax": array.max()},
         window_funcs={"t": (np.mean, 0)},
     )
+
 
 def imshow_lazy_array(array, **kwargs):
     if hasattr(array, "imshow"):
