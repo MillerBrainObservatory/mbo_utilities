@@ -211,8 +211,7 @@ def _write_plane(
 
     if "cleaned_scanimage_metadata" in metadata:
         meta_path = filename.parent.joinpath("metadata.html")
-        html = save_metadata_html(data.metadata, meta_path)
-        print(f"Saved metadata HTML to {html}")
+        save_metadata_html(data.metadata, meta_path)
 
 
 def _get_file_writer(ext, overwrite):

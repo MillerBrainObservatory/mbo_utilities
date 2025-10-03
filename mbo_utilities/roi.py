@@ -14,101 +14,6 @@ from mbo_utilities import is_raw_scanimage
 from mbo_utilities.metadata import has_mbo_metadata
 
 
-def embed_into_full_frame(cropped, yrange, xrange, Ly, Lx):
-    """Embed a cropped image into full (Ly, Lx) frame using Suite2p's ops['yrange'], ops['xrange']."""
-    full = np.zeros((Ly, Lx), dtype=cropped.dtype)
-    full[yrange[0] : yrange[1], xrange[0] : xrange[1]] = cropped
-    return full
-
-
-def merge_rois(roi_left, roi_right, save_path):
-    """
-    Merge Suite2p output from two horizontally adjacent ROIs into a unified folder.
-
-    Parameters
-    ----------
-    roi_left : str or Path
-        Path to Suite2p output folder for left ROI.
-    roi_right : str or Path
-        Path to Suite2p output folder for right ROI.
-    save_path : str or Path
-        Path where the merged Suite2p output will be saved.
-    """
-    roi_left = Path(roi_left)
-    roi_right = Path(roi_right)
-    save_path = Path(save_path)
-    save_path.mkdir(parents=True, exist_ok=True)
-
-    # Load inputs
-    ops_l = np.load(roi_left / "ops.npy", allow_pickle=True).item()
-    ops_r = np.load(roi_right / "ops.npy", allow_pickle=True).item()
-    stat_l = np.load(roi_left / "stat.npy", allow_pickle=True)
-    stat_r = np.load(roi_right / "stat.npy", allow_pickle=True)
-    iscell_l = np.load(roi_left / "iscell.npy", allow_pickle=True)
-    iscell_r = np.load(roi_right / "iscell.npy", allow_pickle=True)
-
-    assert ops_l["Ly"] == ops_r["Ly"], "Mismatched Ly"
-    Ly = ops_l["Ly"]
-    Lx_l, Lx_r = ops_l["Lx"], ops_r["Lx"]
-    Lx = Lx_l + Lx_r
-
-    # Offset right ROI positions
-    for s in stat_r:
-        s["xpix"] += Lx_l
-        s["med"][1] += Lx_l
-        if "ipix_neuropil" in s:
-            s["ipix_neuropil"] += Lx_l * Ly
-
-    stat = np.concatenate([stat_l, stat_r])
-    iscell = np.concatenate([iscell_l, iscell_r])
-
-    # Merge time traces
-    F = np.concatenate([np.load(roi_left / "F.npy"), np.load(roi_right / "F.npy")])
-    Fneu = np.concatenate(
-        [np.load(roi_left / "Fneu.npy"), np.load(roi_right / "Fneu.npy")]
-    )
-    spks = np.concatenate(
-        [np.load(roi_left / "spks.npy"), np.load(roi_right / "spks.npy")]
-    )
-
-    # Merge ops
-    ops = dict(ops_l)
-    ops.update({"Lx": Lx, "xrange": [0, Lx], "yrange": [0, Ly]})
-
-    if "meanImg" in ops_l and "meanImg" in ops_r:
-        ops["meanImg"] = np.hstack([ops_l["meanImg"], ops_r["meanImg"]])
-    if "meanImgE" in ops_l and "meanImgE" in ops_r:
-        ops["meanImgE"] = np.hstack([ops_l["meanImgE"], ops_r["meanImgE"]])
-    if "max_img" in ops_l and "max_img" in ops_r:
-        ops["max_img"] = np.hstack([ops_l["max_img"], ops_r["max_img"]])
-    if "Vcorr" in ops_l and "Vcorr" in ops_r:
-        V_l = embed_into_full_frame(
-            ops_l["Vcorr"], ops_l["yrange"], ops_l["xrange"], Ly, Lx_l
-        )
-        V_r = embed_into_full_frame(
-            ops_r["Vcorr"], ops_r["yrange"], ops_r["xrange"], Ly, Lx_r
-        )
-        ops["Vcorr"] = np.hstack([V_l, V_r])
-
-    np.save(save_path / "ops.npy", ops)
-    np.save(save_path / "stat.npy", stat)
-    np.save(save_path / "iscell.npy", iscell)
-    np.save(save_path / "F.npy", F)
-    np.save(save_path / "Fneu.npy", Fneu)
-    np.save(save_path / "spks.npy", spks)
-
-
-@property
-def roi_mode(self):
-    # TODO: make this self.roi once Scan_MBO.roi is changed
-    if self.roi is None:
-        return ROIMode.ALL
-    elif isinstance(self.roi, int):
-        return ROIMode.SINGLE
-    else:
-        return ROIMode.MULTIPLE
-
-
 def supports_roi(obj):
     return hasattr(obj, "roi") and hasattr(obj, "num_rois")
 
@@ -138,24 +43,6 @@ def iter_rois(obj):
             yield r
     else:
         yield roi
-
-
-def find_si_rois(file):
-    """
-    Find the ROIs in the current ScanImage session.
-
-    Returns
-    -------
-    list
-        List of ROI names.
-    """
-    with tifffile.TiffFile(file, mode="r") as _tf:
-        if is_raw_scanimage(file):
-            si_metadata = _tf.scanimage_metadata
-        if has_mbo_metadata(file):
-            si_metadata = _tf.shaped_metadata[0]["si"]
-        rois = si_metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
-    return rois
 
 
 class ROI:
