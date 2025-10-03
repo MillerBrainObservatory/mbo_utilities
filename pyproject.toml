@@ -35,7 +35,7 @@ dependencies = [
 
 [project.scripts]
 mbo = "mbo_utilities.graphics.run_gui:run_gui"  # alias
-run_gui = "mbo_utilities.graphics.run_gui:run_gui"
+pollen = "pollen.pollen_calibration_mbo:main"
 assemble = "mbo_utilities.assembly:main"
 
 [project.urls]
@@ -87,7 +87,7 @@ docs = [
 
 [tool.ruff]
 line-length = 88
-src = ["mbo_utilities"]
+src = ["mbo_utilities", "pollen"]
 exclude = ["docs", "exclude", "demos", "scripts"] 
 
 [tool.ruff.lint]
@@ -120,7 +120,7 @@ exclude_lines = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["mbo_utilities*"]
+include = ["mbo_utilities*", "pollen*"]
 
 [tool.setuptools.dynamic]
 version = { file = "mbo_utilities/VERSION" }

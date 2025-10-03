@@ -1,4 +1,5 @@
 import functools
+import math
 import warnings
 from typing import Any
 
@@ -12,6 +13,7 @@ import h5py
 from . import log
 from .file_io import write_ops
 from ._parsing import _make_json_serializable
+from .metadata import save_metadata_html
 
 from ._binary import BinaryFile
 
@@ -76,16 +78,26 @@ def _write_plane(
         metadata["plane"] = plane_index + 1
 
     H0, W0 = data.shape[-2], data.shape[-1]
-
     fname = filename
     writer = _get_file_writer(fname.suffix, overwrite=overwrite)
 
-    chunk_size = target_chunk_mb * 1024 * 1024
-    nbytes = np.prod(dshape) * np.dtype(data.dtype).itemsize
-    nchunks = max(1, int(np.ceil(nbytes / chunk_size)))
+    # get chunk size via bytes per timepoint
+    itemsize = np.dtype(data.dtype).itemsize
+    ntime = int(data.shape[0])  # T
 
-    # this works for txy and tzxy
-    ntime = data.shape[0]
+    bytes_per_t = int(np.prod(dshape[1:], dtype=np.int64)) * int(itemsize)
+    chunk_size = int(target_chunk_mb) * 1024 * 1024
+
+    if chunk_size <= 0:
+        chunk_size = 20 * 1024 * 1024
+
+    total_bytes = int(ntime) * int(bytes_per_t)  # keep in int64 range
+    nchunks = max(1, math.ceil(total_bytes / chunk_size))
+
+    # don't create more chunks than timepoints
+    nchunks = min(nchunks, ntime)
+
+    # distribute frames across chunks as evenly as possible
     base = ntime // nchunks
     extra = ntime % nchunks
 
@@ -196,6 +208,11 @@ def _write_plane(
         _close_tiff_writers()
     elif fname.suffix in [".bin"]:
         _close_bin_writers()
+
+    if "cleaned_scanimage_metadata" in metadata:
+        meta_path = filename.parent.joinpath("metadata.html")
+        html = save_metadata_html(data.metadata, meta_path)
+        print(f"Saved metadata HTML to {html}")
 
 
 def _get_file_writer(ext, overwrite):

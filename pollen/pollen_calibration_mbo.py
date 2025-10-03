@@ -8,6 +8,7 @@ import numpy as np
 import tifffile
 from scipy.ndimage import uniform_filter1d
 from scipy.signal import correlate
+from scipy.optimize import curve_fit
 
 from mbo_utilities import get_metadata
 
@@ -19,7 +20,22 @@ from imgui_bundle import (
 )
 from imgui_bundle import portable_file_dialogs as pfd
 
+
 warnings.simplefilter(action="ignore")
+
+
+plt.rcParams.update({
+    "font.size": 12,
+    "axes.labelweight": "bold",
+    "axes.titleweight": "bold",
+    "axes.titlesize": 14,
+    "axes.labelsize": 12,
+    "legend.fontsize": 10,
+    "xtick.labelsize": 10,
+    "ytick.labelsize": 10,
+    "lines.linewidth": 1.5,
+})
+
 
 class PollenDialog:
     def __init__(self):
@@ -151,6 +167,7 @@ def print_tifffile_note():
     )
     print(msg)
 
+
 def load_or_read_data(filepath, ny, nx, nc, nz):
     """Read TIFF → reshape into (nz, nc, ny, nx)."""
     print_tifffile_note()
@@ -233,7 +250,6 @@ def user_pollen_selection(vol, num=10):
     print("Select pollen beads...")
 
     for c in range(nc):
-        # MATLAB: imagesc(max(vol(:,:,c,:),[],4))
         img = vol[:, c, :, :].max(axis=0)  # (ny, nx)
 
         fig, ax = plt.subplots()
@@ -294,25 +310,34 @@ def analyze_power_vs_z(Iz, filepath, DZ, order):
     nz = Iz.shape[1]
     ZZ = np.flip(np.arange(nz) * DZ)
 
-    amt = max(1, round(10.0 / DZ))
-    smoothed = uniform_filter1d(Iz, size=amt, axis=1)
+    amt = max(1, int(round(10.0 / DZ)))
+    smoothed = uniform_filter1d(Iz, size=amt, axis=1, mode="nearest")
 
     zoi = smoothed.argmax(axis=1)
     pp = smoothed.max(axis=1)
 
-    plt.figure()
-    plt.plot(ZZ, np.sqrt(smoothed[order, :]).T, linewidth=1.5)
-
-    plt.plot(ZZ[zoi], np.sqrt(pp), "k.", markersize=8)
+    fig, ax = plt.subplots(figsize=(7, 5))
     for i, o in enumerate(order):
-        plt.text(ZZ[zoi[o]], np.sqrt(pp[o]) + 0.02 * np.ptp(pp**0.5),
-                 str(i + 1), ha="center", fontsize=8, weight="bold")
+        ax.plot(ZZ, np.sqrt(smoothed[o, :]), label=f"Beam {i+1}")
 
-    plt.xlabel("Piezo Z (µm)")
-    plt.ylabel("2p signal (a.u.)")
-    plt.title("Power vs. Z-depth")
-    plt.grid(True)
-    plt.savefig(filepath.with_name("pollen_calibration_power_vs_z.png"))
+    ax.plot(ZZ[zoi], np.sqrt(pp), "k.", markersize=8)
+
+    for i, o in enumerate(order):
+        ax.text(
+            ZZ[zoi[o]],
+            np.sqrt(pp[o]) + 0.02 * np.max(np.sqrt(pp)),
+            str(i + 1),
+            ha="center",
+            fontsize=10,
+            weight="bold",
+            )
+
+    ax.set_xlabel("Piezo Z (µm)", fontweight="bold")
+    ax.set_ylabel("2p signal (a.u.)", fontweight="bold")
+    ax.set_title("Power vs. Z-depth", fontweight="bold")
+    ax.grid(True)
+    plt.tight_layout()
+    plt.savefig(filepath.with_name("pollen_calibration_power_vs_z.png"), dpi=150)
     plt.close()
 
     return ZZ, zoi, pp
@@ -320,55 +345,61 @@ def analyze_power_vs_z(Iz, filepath, DZ, order):
 
 def analyze_z_positions(ZZ, zoi, order, filepath):
     Z0 = ZZ[zoi[order[0]]]
-    plt.figure()
-    plt.plot(range(len(order)), ZZ[zoi[order]] - Z0, "bo-")
-    plt.xlabel("Beam number")
-    plt.ylabel("Z position (µm)")
-    plt.grid(True)
-    plt.savefig(filepath.with_name("pollen_calibration_z_vs_N.png"))
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(range(1, len(order) + 1), ZZ[zoi[order]] - Z0, "bo-", markersize=6)
+
+    ax.set_xlabel("Beam number", fontweight="bold")
+    ax.set_ylabel("Z position (µm)", fontweight="bold")
+    ax.set_title("Z Position vs. Beam Number", fontweight="bold")
+    ax.grid(True)
+    plt.tight_layout()
+    plt.savefig(filepath.with_name("pollen_calibration_z_vs_N.png"), dpi=150)
     plt.close()
 
 
-def fit_exp_decay(
-    ZZ,
-    zoi,
-    order,
-    filepath,
-    pp,
-):
-    plt.figure()
+def fit_exp_decay(ZZ, zoi, order, filepath, pp):
+
+    def exp_func(z, a, b):
+        return a * np.exp(b * z)
+
     z = ZZ[zoi[order]]
     p = np.sqrt(pp[order])
-    plt.plot(z, p, "bo")
-    plt.xlabel("Z (µm)")
-    plt.ylabel("Power (a.u.)")
-    plt.grid(True)
-    plt.savefig(filepath.with_name("pollen_calibration_power_decay.png"))
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(z, p, "bo", markersize=6, label="Data")
+
+    try:
+        popt, _ = curve_fit(exp_func, z, p, p0=(p.max(), -0.01))
+        z_fit = np.linspace(z.min(), z.max(), 200)
+        ax.plot(z_fit, exp_func(z_fit, *popt), "r-", label=f"Fit (ls = {1/popt[1]:.1f} µm)")
+    except Exception as e:
+        print("Exp fit failed:", e)
+
+    ax.set_xlabel("Z (µm)", fontweight="bold")
+    ax.set_ylabel("Power (a.u.)", fontweight="bold")
+    ax.set_title("Exponential Power Decay", fontweight="bold")
+    ax.legend()
+    ax.grid(True)
+    plt.tight_layout()
+    plt.savefig(filepath.with_name("pollen_calibration_power_decay.png"), dpi=150)
     plt.close()
 
 
 def calibrate_xy(xs, ys, III, filepath):
     nc_total = III.shape[2]
-    # nc = nc_total // 2 if dual_cavity else nc_total
-    nc = nc_total
-    x_shifts = np.round(xs - xs[:nc].mean()).astype(int)
-    y_shifts = np.round(ys - ys[:nc].mean()).astype(int)
+    x_shifts = np.round(xs - np.mean(xs[:nc_total])).astype(int)
+    y_shifts = np.round(ys - np.mean(ys[:nc_total])).astype(int)
 
-    h5_path = filepath.with_name(filepath.stem + "_pollen.h5")
-    with h5py.File(h5_path, "a") as f:
-        if "x_shifts" in f:
-            del f["x_shifts"]
-        if "y_shifts" in f:
-            del f["y_shifts"]
-        f["x_shifts"] = x_shifts
-        f["y_shifts"] = y_shifts
-
-    plt.figure()
-    plt.plot(x_shifts, y_shifts, "bo")
-    plt.xlabel("X (µm)")
-    plt.ylabel("Y (µm)")
-    plt.axis("equal")
-    plt.savefig(filepath.with_name("pollen_calibration_xy_offsets.png"))
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.plot(x_shifts, y_shifts, "bo", markersize=6)
+    ax.set_xlabel("X (µm)", fontweight="bold")
+    ax.set_ylabel("Y (µm)", fontweight="bold")
+    ax.set_title("XY Offsets", fontweight="bold")
+    ax.axis("equal")
+    ax.grid(True)
+    plt.tight_layout()
+    plt.savefig(filepath.with_name("pollen_calibration_xy_offsets.png"), dpi=150)
     plt.close()
 
 
