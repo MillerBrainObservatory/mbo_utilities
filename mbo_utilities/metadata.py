@@ -899,4 +899,3 @@ footer { color:var(--muted); font-size:12px; padding:12px 16px; border-top:1px s
     out_html = Path(out_html)
     out_html.parent.mkdir(parents=True, exist_ok=True)
     out_html.write_text(html, encoding="utf-8")
-    print(f"Wrote metadata HTML to: {out_html}")

@@ -18,8 +18,11 @@ This package is fully installable with `pip`.
 
 `conda` can still be used for the virtual environment, but be mindful to only install packages with `conda install` when absolutely necessary.
 
+Make sure your environment is activated, be that conda, venv, or uv (recommended, just pre-pend uv to all below pip commands).
+
+To get the minimal mbo_utilities, without 3D axial correction or GUI functionality:
+
 ``` bash
-# make sure your environment is activated, be that conda, venv, uv (recommended)
 pip install mbo_utilities
 ```
 
@@ -30,6 +33,8 @@ pip install git+https://github.com/MillerBrainObservatory/mbo_utilities.git@mast
 ```
 
 To utilize the GPU, you will need CUDA and an appropriate [cupy](https://docs.cupy.dev/en/stable/install.html) installation.
+
+By default, cupy for `CUDA 12.x` is installed.
 
 Check which version of CUDA you have with `nvcc --version`.
 
@@ -43,20 +48,17 @@ Cuda compilation tools, release 13.0, V13.0.48
 Build cuda_13.0.r13.0/compiler.36260728_0
 ```
 
-For CUDA 13.x: `pip install mbo_utilities[cuda13]`
+For CUDA 11.x and 13.x, you first need to uninstall 12x:
 
-### RuntimeError with `cupy`
+`pip uninstall cupy-cuda12x`
 
-If you install the wrong version of cupy, you will see an error like:
+And replace `12` with the major CUDA version number, in this case `13`:
+
+`pip install cupy-cuda13x`
+
+Having the wrong `cupy` version will lead to the following error message:
 
 `RuntimeError: CuPy failed to load nvrtc64_120_0.dll: FileNotFoundError: Could not find module 'nvrtc64_120_0.dll' (or one of its dependencies). Try using the full path with constructor syntax.`
-
-You will need to uninstall cupy and reinstall the correct version.
-
-```bash
-pip uninstall cupy-cuda12x  # or cupy-cuda12x
-pip install cupy-cuda11x  # or cupy-cuda12x
-```
 
 ---
 

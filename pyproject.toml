@@ -52,8 +52,6 @@ gui = [
 	"jupyter_rfb>=0.5.1",
 ]
 suite3d = ["mbo-suite3d>=0.0.4"]
-cuda13 = ["cupy-cuda13x"]
-cuda11 = ["cupy-cuda11x"]
 all = [
 	"fastplotlib>=0.5.0",
 	"glfw",
@@ -88,7 +86,7 @@ docs = [
 [tool.ruff]
 line-length = 88
 src = ["mbo_utilities", "pollen"]
-exclude = ["docs", "exclude", "demos", "scripts"] 
+exclude = ["docs", "exclude", "demos", "scripts"]
 
 [tool.ruff.lint]
 pydocstyle = { convention = "numpy" }
@@ -103,7 +101,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"docs/*.py" = ["D"] 
+"docs/*.py" = ["D"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["data/*"]
