@@ -64,7 +64,7 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False):
 
     if use_fft:
         _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
-        dx = float(_shift[1])
+        dx = -float(_shift[1])
     else:
         # fast 1D correlation along x (row averages)
         a_mean = a.mean(0)

@@ -4,9 +4,6 @@ from typing import Any
 import click
 import time
 
-start = time.time()
-
-
 
 def _select_file() -> tuple[Any, Any, Any, bool]:
     from mbo_utilities.graphics._file_dialog import FileDialog

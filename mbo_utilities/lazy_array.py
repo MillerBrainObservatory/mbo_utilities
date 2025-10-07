@@ -58,21 +58,114 @@ def _filter_kwargs(cls, kwargs):
 
 
 def imwrite(
-    lazy_array,
-    outpath: str | Path,
-    planes: list | tuple = None,
-    roi: int | Sequence[int] | None = None,
-    metadata: dict = None,
-    overwrite: bool = False,
-    ext: str = ".tiff",
-    order: list | tuple = None,
-    target_chunk_mb: int = 20,
-    progress_callback: Callable = None,
-    register_z: bool = False,
-    debug: bool = False,
-    shift_vectors: np.ndarray = None,
-    **kwargs,  # for specific array writers
+        lazy_array,
+        outpath: str | Path,
+        planes: list | tuple = None,
+        roi: int | Sequence[int] | None = None,
+        metadata: dict = None,
+        overwrite: bool = False,
+        ext: str = ".tiff",
+        order: list | tuple = None,
+        target_chunk_mb: int = 20,
+        progress_callback: Callable = None,
+        register_z: bool = False,
+        debug: bool = False,
+        shift_vectors: np.ndarray = None,
+        **kwargs,
 ):
+    """
+    Write a supported lazy imaging array (Suite2p, HDF5, TIFF, etc.) to disk.
+
+    Users likely will want to use `mbo.imread` to load data as input to this function.
+
+    Parameters
+    ----------
+    lazy_array : object
+        One of the supported lazy array readers providing `.shape`, `.metadata`,
+        and `_imwrite()` methods:
+
+        - `Suite2pArray` : memory-mapped binary (`data.bin` or `data_raw.bin`)
+          paired with an `ops.npy`. Can write to TIFF or binary targets.
+        - `H5Array` : HDF5 dataset wrapper (`h5py.File[dataset]`).
+        - `MBOTiffArray` : multi-file TIFF reader using Dask/memmap backend.
+        - `TiffArray` : single or multi-TIFF reader.
+        - `MboRawArray` : raw ScanImage/ScanMultiROI acquisition object.
+        - `NpyArray` : single `.npy` memory-mapped NumPy file.
+        - `ZarrArray` : collection of z-plane `.zarr` stores.
+        - `NWBArray` : NWB file with “TwoPhotonSeries” acquisition dataset.
+
+    outpath : str or Path
+        Target directory or file path to write output into. Must exist or be creatable.
+    planes : list or tuple of int, optional
+        Specific z-planes to export (1-based indexing for consistency with Suite2p).
+        Defaults to all planes.
+    roi : int or sequence of int, optional
+        ROI index(es) to restrict output for multi-ROI data (e.g. `MboRawArray`).
+    metadata : dict, optional
+        Additional metadata to merge into the written file header.
+    overwrite : bool, default=False
+        Overwrite existing output files if True.
+    ext : str, default=".tiff"
+        Output format extension. Supports ".tiff", ".tif", ".bin", etc.
+    order : list or tuple of int, optional
+        Re-ordering of `planes` before writing, e.g. `[2, 0, 1]`.
+    target_chunk_mb : int, default=20
+        Approximate target chunk size in MB for streamed writes.
+    progress_callback : callable, optional
+        Function to receive progress updates during writing.
+    register_z : bool, default=False
+        If True, perform z-plane registration via Suite3D preprocessing
+        (`register_zplanes_s3d`) before writing.
+    debug : bool, default=False
+        Enable verbose logging.
+    shift_vectors : np.ndarray, optional
+        Pre-computed z-shift vectors to embed into metadata.
+
+    Returns
+    -------
+    Path
+        Path to the written output directory or file.
+
+    Raises
+    ------
+    TypeError
+        If the input array type is unsupported or incompatible with options.
+    ValueError
+        If `outpath` is invalid or metadata is malformed.
+    FileNotFoundError
+        If expected companion files (e.g. `ops.npy`) are missing.
+
+    Notes
+    -----
+    - Metadata from the source array is merged with `metadata` and recorded in
+      the written output (e.g. TIFF tags, Zarr attributes, or sidecar JSON).
+    - When `register_z=True`, the function attempts to detect or generate a
+      Suite3D job directory (`s3d-job`) and stores registration parameters there.
+    - The writing backend (`_write_plane`) supports efficient chunked I/O for
+      large 3-D or 4-D volumes.
+
+    Examples
+    --------
+    >>> from mbo_utilities import imread, imwrite
+    >>> mbo_data = imread("data/session1")  # load data from supported files
+
+    # Tile ScanImagee multi-ROI's and write all planes to a single multi-page TIFF.
+    >>> imwrite(mbo_data, ext="tif", outpath="output/session1/extracted", roi=None)
+
+    Write axially registered data to a new folder:
+    >>> imwrite(mbo_data, ext="tif", outpath="output/session1/extracted", register_z=True)
+
+    Write only the first two planes, overwriting existing TIFFs:
+        >>> imwrite(mbo_data, "output/session1", planes=[1, 2], overwrite=True, roi=None)
+
+    Write ALL roi's to Zarr format:
+        >>> imwrite(mbo_data, "output/rois", roi=0, ext=".zarr")
+
+    Write ROI 1 to Suite2p-compatible binary format:
+        >>> imwrite("data/session1", "output/bin_output", roi=1, ext=".bin")
+
+
+    """
     # Logging
     if debug:
         logger.setLevel(logging.INFO)
