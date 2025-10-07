@@ -18,7 +18,6 @@ from imgui_bundle import (
     imgui_ctx,
     implot,
     portable_file_dialogs as pfd,
-    ImVec2,
 )
 
 from mbo_utilities.file_io import (
@@ -185,7 +184,7 @@ def draw_saveas_popup(parent):
         parent._saveas_popup_open = False
 
     if imgui.begin_popup_modal("Save As")[0]:
-        imgui.dummy(ImVec2(0, 5))
+        imgui.dummy(imgui.ImVec2(0, 5))
 
         imgui.set_next_item_width(hello_imgui.em_size(25))
 
@@ -225,7 +224,7 @@ def draw_saveas_popup(parent):
             imgui.spacing()
             imgui.separator()
             imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose ROI(s):")
-            imgui.dummy(ImVec2(0, 5))
+            imgui.dummy(imgui.ImVec2(0, 5))
 
             if imgui.button("All##roi"):
                 parent._saveas_selected_roi = set(range(num_rois))
@@ -255,7 +254,7 @@ def draw_saveas_popup(parent):
             True,
         )
 
-        imgui.dummy(ImVec2(0, 5))
+        imgui.dummy(imgui.ImVec2(0, 5))
 
         parent._overwrite = checkbox_with_tooltip(
             "Overwrite", parent._overwrite, "Replace any existing output files."
@@ -306,7 +305,7 @@ def draw_saveas_popup(parent):
 
         # Z-plane selection
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose z-planes:")
-        imgui.dummy(ImVec2(0, 5))
+        imgui.dummy(imgui.ImVec2(0, 5))
 
         try:
             num_planes = parent.image_widget.data[0].num_channels  # noqa
@@ -709,7 +708,7 @@ class PreviewDataWidget(EdgeWindow):
         draw_tabs(self)
 
     def draw_stats_section(self):
-        if not self._zstats_done:
+        if not any(self._zstats_done):
             return
 
         stats_list = self._zstats if isinstance(self._zstats, list) else [self._zstats]
@@ -760,7 +759,9 @@ class PreviewDataWidget(EdgeWindow):
                 [np.array(s["snr"]) for s in stats_list if s and "snr" in s], axis=0
             )
 
-            z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
+            z_vals = np.ascontiguousarray(np.arange(1, n + 1, dtype=np.float64))
+            mean_vals = np.ascontiguousarray(mean_vals, dtype=np.float64)
+            std_vals = np.ascontiguousarray(std_vals, dtype=np.float64)
 
             # Table
             with imgui_ctx.begin_child(
@@ -784,91 +785,70 @@ class PreviewDataWidget(EdgeWindow):
                     imgui.end_table()
 
             with imgui_ctx.begin_child(
-                "##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
+                    "##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
             ):
                 imgui.text("Z-plane Signal: Combined")
-                if implot.begin_plot("Z-Plane Plot", ImVec2(-1, 300)):
+                if implot.begin_plot("Z-Plane Plot (Combined)", imgui.ImVec2(-1, 300)):
+                    style_seaborn_dark()
                     implot.setup_axes(
                         "Z-Plane",
                         "Mean Fluorescence",
                         implot.AxisFlags_.none.value,
                         implot.AxisFlags_.auto_fit.value,
                     )
-                    implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, self.nz)
+                    implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, len(z_vals))
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
-                    style_seaborn_dark()
-                    if len(z_vals) == 1:
-                        implot.plot_bars("Mean", z_vals, mean_vals, 0.5)
-                        implot.plot_error_bars("Std", z_vals, mean_vals, std_vals)
-                    else:
-                        implot.plot_error_bars(
-                            "Mean ± Std", z_vals, mean_vals, std_vals
-                        )
-                        implot.plot_line("Mean", z_vals, mean_vals)
+                    implot.plot_error_bars(f"Mean ± Std",
+                                           z_vals, mean_vals, std_vals)
+                    implot.plot_line(f"Mean", z_vals, mean_vals)
                     implot.end_plot()
-
         else:
             array_idx = self._selected_array
             stats = stats_list[array_idx]
-
             if not stats or "mean" not in stats:
                 return
 
-            imgui.text(f"Stats for {self._array_type} {array_idx + 1}")
             mean_vals = np.array(stats["mean"])
             std_vals = np.array(stats["std"])
             snr_vals = np.array(stats["snr"])
-            z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
+            n = min(len(mean_vals), len(std_vals), len(snr_vals))
 
-            with imgui_ctx.begin_child(
-                f"##Summary{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
-            ):
-                if imgui.begin_table(
-                    f"zstats{array_idx}",
-                    4,
-                    imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
-                ):  # type: ignore # noqa
+            mean_vals, std_vals, snr_vals = mean_vals[:n], std_vals[:n], snr_vals[:n]
+
+            z_vals = np.ascontiguousarray(np.arange(1, n + 1, dtype=np.float64))
+            mean_vals = np.ascontiguousarray(mean_vals, dtype=np.float64)
+            std_vals = np.ascontiguousarray(std_vals, dtype=np.float64)
+
+            imgui.text(f"Stats for {self._array_type} {array_idx + 1}")
+
+            with imgui_ctx.begin_child(f"##Summary{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags):
+                if imgui.begin_table(f"zstats{array_idx}", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):
                     for col in ["Z", "Mean", "Std", "SNR"]:
-                        imgui.table_setup_column(
-                            col, imgui.TableColumnFlags_.width_stretch
-                        )  # type: ignore # noqa
+                        imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
                     imgui.table_headers_row()
-                    for i in range(len(z_vals)):
+                    for j in range(n):
                         imgui.table_next_row()
-                        for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):
+                        for val in (int(z_vals[j]), mean_vals[j], std_vals[j], snr_vals[j]):
                             imgui.table_next_column()
                             imgui.text(f"{val:.2f}")
                     imgui.end_table()
 
-            with imgui_ctx.begin_child(
-                f"##Plots", size=imgui.ImVec2(0, 0), child_flags=cflags
-            ):
+            style_seaborn_dark()
+            with imgui_ctx.begin_child(f"##Plots1{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags):
                 imgui.text("Z-plane Signal: Mean ± Std")
-                if implot.begin_plot(
-                    f"Z-Plane Signal {array_idx}", size=imgui.ImVec2(-1, 300)
-                ):
-                    z_vals = np.arange(1, len(mean_vals) + 1, dtype=np.float32)
-                    implot.setup_axes(
-                        "Z-Plane",
-                        "Mean Fluorescence",
-                        implot.AxisFlags_.none.value,
-                        implot.AxisFlags_.auto_fit.value,
-                    )
-                    implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, self.nz)
+                if implot.begin_plot(f"Z-Plane Signal {array_idx}", imgui.ImVec2(-1, 300)):
+                    implot.setup_axes("Z-Plane", "Mean Fluorescence",
+                                      implot.AxisFlags_.auto_fit.value,
+                                      implot.AxisFlags_.auto_fit.value)
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
-                    style_seaborn_dark()
-                    if len(z_vals) == 1:
-                        implot.plot_bars("Mean", z_vals, mean_vals, 0.5)
-                        implot.plot_error_bars("Std", z_vals, mean_vals, std_vals)
-                    else:
-                        implot.plot_error_bars(
-                            "Mean ± Std", z_vals, mean_vals, std_vals
-                        )
-                        implot.plot_line("Mean", z_vals, mean_vals)
+                    implot.plot_error_bars(f"Mean ± Std {array_idx}",
+                                           z_vals, mean_vals, std_vals)
+                    implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals)
                     implot.end_plot()
 
+
     def draw_preview_section(self):
-        imgui.dummy(ImVec2(0, 5))
+        imgui.dummy(imgui.ImVec2(0, 5))
         cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
         with imgui_ctx.begin_child(
             "##PreviewChild",
