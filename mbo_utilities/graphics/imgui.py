@@ -1,4 +1,5 @@
 import logging
+import time
 import webbrowser
 from pathlib import Path
 from typing import Literal
@@ -460,9 +461,20 @@ class PreviewDataWidget(EdgeWindow):
         # image widget setup
         self.image_widget = iw
         self.rois = rois
+        self.num_arrays = rois
         self.shape = self.image_widget.data[0].shape
-        # if self.image_widget.window_funcs is None:
-        #     self.image_widget.window_funcs = {"t": (np.mean, 0)}
+        self.is_mbo_scan = (
+            True if isinstance(self.image_widget.data[0], MboRawArray) else False
+        )
+        if self.is_mbo_scan:
+            for arr in self.image_widget.data:
+                arr.fix_phase = False
+        start = time.time()
+        if self.image_widget.window_funcs is None:
+            self.image_widget.window_funcs = {"t": (np.mean, 0)}
+
+        end = time.time()
+        self.logger.info(f"Initial window function setup took {end - start:.2f}s.")
 
         if len(self.shape) == 4:
             self.nz = self.shape[1]
@@ -470,13 +482,6 @@ class PreviewDataWidget(EdgeWindow):
             self.nz = 1
         else:
             self.nz = 1
-
-        self.is_mbo_scan = (
-            True if isinstance(self.image_widget.data[0], MboRawArray) else False
-        )
-        if self.is_mbo_scan:
-            for arr in self.image_widget.data:
-                arr.fix_phase = False
 
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
@@ -626,10 +631,6 @@ class PreviewDataWidget(EdgeWindow):
                     "Max offset is only applicable to MBO Scan objects. "
                     "No action taken."
                 )
-
-    @property
-    def num_arrays(self):
-        return len(self.image_widget.managed_graphics)
 
     @property
     def selected_array(self):

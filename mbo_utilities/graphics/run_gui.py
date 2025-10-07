@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Any
 
 import click
-import time
 
 
 def _select_file() -> tuple[Any, Any, Any, bool]:
@@ -115,7 +114,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
     else:
         iw = fpl.ImageWidget(
             data=data_array,
-            histogram_widget=True,
+            histogram_widget=False,
             figure_kwargs={"size": (800, 1000)},
             graphic_kwargs={"vmin": data_array.min, "vmax": data_array.max},
         )
