@@ -416,7 +416,6 @@ def imread(
     if first.suffix == ".json":
         return ZarrArray(first.parent, **_filter_kwargs(ZarrArray, kwargs))
 
-
     if first.suffix == ".npy" and (first.parent / "pmd_demixer.npy").is_file():
         raise NotImplementedError("PMD Arrays are not yet supported.")
         # return DemixingResultsArray(first.parent)

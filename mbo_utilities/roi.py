@@ -17,8 +17,27 @@ from mbo_utilities.metadata import has_mbo_metadata
 def supports_roi(obj):
     return hasattr(obj, "roi") and hasattr(obj, "num_rois")
 
+def normalize_roi(value):
+    """Return ROI as None, int, or list[int] with consistent semantics."""
+    if value in (None, (), [], False):
+        return None
+    if value is True:
+        return 0  # “split ROIs” GUI flag
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return value
+
 
 def iter_rois(obj):
+    """Yield ROI indices based on MBO semantics.
+
+    - roi=None → yield None (stitched full-FOV image)
+    - roi=0 → yield each ROI index from 1..num_rois (split all)
+    - roi=int > 0 → yield that ROI only
+    - roi=list/tuple → yield each element (as given)
+    """
     if not supports_roi(obj):
         yield None
         return
@@ -26,23 +45,18 @@ def iter_rois(obj):
     roi = getattr(obj, "roi", None)
     num_rois = getattr(obj, "num_rois", 1)
 
-    if roi == 0:
-        yield from range(1, num_rois + 1)
-    elif roi is None:
+    if roi is None:
         yield None
+    elif roi == 0:
+        yield from range(1, num_rois + 1)
     elif isinstance(roi, int):
-        if roi < 1:
-            raise ValueError(f"Invalid ROI index: {roi}")
         yield roi
     elif isinstance(roi, (list, tuple)):
-        if 0 in roi:
-            roi = [r + 1 for r in roi]
         for r in roi:
-            if r < 1:
-                raise ValueError(f"Invalid ROI index in list: {r}")
-            yield r
-    else:
-        yield roi
+            if r == 0:
+                yield from range(1, num_rois + 1)
+            else:
+                yield r
 
 
 class ROI:

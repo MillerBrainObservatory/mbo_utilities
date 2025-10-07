@@ -72,6 +72,8 @@ USER_PIPELINES = ["suite2p", "masknmf"]
 
 
 def _save_as_worker(path, **imwrite_kwargs):
+    # print kwargs
+    print(f"Saving with kwargs: {imwrite_kwargs}")
     data = imread(path, roi=imwrite_kwargs.pop("roi", None))
     imwrite(data, **imwrite_kwargs)
 
@@ -366,6 +368,7 @@ def draw_saveas_popup(parent):
                     "debug": parent._debug,
                     "ext": parent._ext,
                     "target_chunk_mb": parent._saveas_chunk_mb,
+                    "use_fft": parent._use_fft,
                     "progress_callback": lambda frac,
                     current_plane: parent.gui_progress_callback(frac, current_plane),
                 }
@@ -468,12 +471,12 @@ class PreviewDataWidget(EdgeWindow):
         if self.is_mbo_scan:
             for arr in self.image_widget.data:
                 arr.fix_phase = False
-        start = time.time()
+                self._fix_phase = False
+                arr.use_fft = False
+                self._use_fft = False
+
         if self.image_widget.window_funcs is None:
             self.image_widget.window_funcs = {"t": (np.mean, 0)}
-
-        end = time.time()
-        self.logger.info(f"Initial window function setup took {end - start:.2f}s.")
 
         if len(self.shape) == 4:
             self.nz = self.shape[1]
@@ -522,7 +525,6 @@ class PreviewDataWidget(EdgeWindow):
         self._selected_planes = set()
         self._planes_str = str(getattr(self, "_planes_str", ""))
         self._overwrite = True
-        self._fix_phase = False
         self._debug = False
         self._saveas_save_phase_png = False
         self._saveas_chunk_mb = 20
@@ -595,6 +597,22 @@ class PreviewDataWidget(EdgeWindow):
             self.update_frame_apply()
 
         # force update
+        self.image_widget.current_index = self.image_widget.current_index
+
+    @property
+    def use_fft(self):
+        return self._use_fft
+
+    @use_fft.setter
+    def use_fft(self, value):
+        self._use_fft = value
+        if self.is_mbo_scan:
+            for arr in self.image_widget.data:
+                if isinstance(arr, MboRawArray):
+                    arr.use_fft = value
+        else:
+            self.update_frame_apply()
+
         self.image_widget.current_index = self.image_widget.current_index
 
     @property
@@ -759,7 +777,7 @@ class PreviewDataWidget(EdgeWindow):
                 [np.array(s["snr"]) for s in stats_list if s and "snr" in s], axis=0
             )
 
-            z_vals = np.ascontiguousarray(np.arange(1, n + 1, dtype=np.float64))
+            z_vals = np.ascontiguousarray(np.arange(1, len(mean_vals) + 1, dtype=np.float64))
             mean_vals = np.ascontiguousarray(mean_vals, dtype=np.float64)
             std_vals = np.ascontiguousarray(std_vals, dtype=np.float64)
 
@@ -928,10 +946,6 @@ class PreviewDataWidget(EdgeWindow):
 
             imgui.pop_style_var()
 
-            # Section: Scan-phase Correction
-            if not self.is_mbo_scan:
-                return
-
             imgui.spacing()
             imgui.separator()
             imgui.text_colored(
@@ -976,11 +990,8 @@ class PreviewDataWidget(EdgeWindow):
                 else:
                     display_text = f"{np.round(ofs, 2):.3f}"
 
-                # ffset ≥ self.max_offset, color red
-                if max_abs_offset >= self.max_offset:
-                    imgui.push_style_color(
-                        imgui.Col_.text, imgui.ImVec4(1.0, 0.0, 0.0, 1.0)
-                    )
+                if max_abs_offset > self.max_offset:
+                    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 0.0, 0.0, 1.0))
 
                 imgui.text(display_text)
 
@@ -1072,6 +1083,7 @@ class PreviewDataWidget(EdgeWindow):
     def _compute_zstats_single_roi(self, roi, fpath):
         arr = imread(fpath)
         arr.roi = roi
+        arr.fix_phase = False
 
         if HAS_TORCH and isinstance(arr, torch.Tensor):
             arr = arr[:]  # make sure it's dense

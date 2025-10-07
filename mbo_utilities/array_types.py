@@ -1020,17 +1020,16 @@ class MboRawArray(scans.ScanMultiROI):
     def output_yslices(self):
         return self.fields[0].output_yslices
 
-    def _read_pages(
-        self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
-    ):
+    def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs):
         pages = [
-            frame * self.num_channels + zplane for frame in frames for zplane in chans
+            frame * self.num_channels + zplane
+            for frame in frames for zplane in chans
         ]
 
         tiff_width_px = len(utils.listify_index(xslice, self._page_width))
         tiff_height_px = len(utils.listify_index(yslice, self._page_height))
-
         buf = np.empty((len(pages), tiff_height_px, tiff_width_px), dtype=self.dtype)
+
         start = 0
         for tf in self.tiff_files:
             end = start + len(tf.pages)
@@ -1042,25 +1041,82 @@ class MboRawArray(scans.ScanMultiROI):
             frame_idx = [pages[i] - start for i in idxs]
             chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
 
+            # --- main change: handle global vs per-ROI correction ---
             if self.fix_phase:
                 self.logger.debug(
-                    f"Applying phase correction with strategy: {self.phasecorr_method}"
+                    f"Applying phase correction (method={self.phasecorr_method}, use_fft={self.use_fft})"
                 )
-                buf[idxs], self.offset = bidir_phasecorr(
-                    chunk,
-                    method=self.phasecorr_method,
-                    upsample=self.upsample,
-                    max_offset=self.max_offset,
-                    border=self.border,
-                    use_fft=self.use_fft,
-                )
+                # If the ROI is None, this slice already contains all ROIs vertically concatenated.
+                # Compute a single global offset for the full chunk.
+                if self.roi is None:
+                    corrected, offset = bidir_phasecorr(
+                        chunk,
+                        method=self.phasecorr_method,
+                        upsample=self.upsample,
+                        max_offset=self.max_offset,
+                        border=self.border,
+                        use_fft=self.use_fft,
+                    )
+                    buf[idxs] = corrected
+                    self.offset = offset
+                else:
+                    buf[idxs], self.offset = bidir_phasecorr(
+                        chunk,
+                        method=self.phasecorr_method,
+                        upsample=self.upsample,
+                        max_offset=self.max_offset,
+                        border=self.border,
+                        use_fft=self.use_fft,
+                    )
             else:
                 buf[idxs] = chunk
                 self.offset = 0.0
+
             start = end
 
         return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
 
+    # def _read_pages(
+    #     self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
+    # ):
+    #     pages = [
+    #         frame * self.num_channels + zplane for frame in frames for zplane in chans
+    #     ]
+    #
+    #     tiff_width_px = len(utils.listify_index(xslice, self._page_width))
+    #     tiff_height_px = len(utils.listify_index(yslice, self._page_height))
+    #
+    #     buf = np.empty((len(pages), tiff_height_px, tiff_width_px), dtype=self.dtype)
+    #     start = 0
+    #     for tf in self.tiff_files:
+    #         end = start + len(tf.pages)
+    #         idxs = [i for i, p in enumerate(pages) if start <= p < end]
+    #         if not idxs:
+    #             start = end
+    #             continue
+    #
+    #         frame_idx = [pages[i] - start for i in idxs]
+    #         chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
+    #
+    #         if self.fix_phase:
+    #             self.logger.debug(
+    #                 f"Applying phase correction with strategy: {self.phasecorr_method}"
+    #             )
+    #             buf[idxs], self.offset = bidir_phasecorr(
+    #                 chunk,
+    #                 method=self.phasecorr_method,
+    #                 upsample=self.upsample,
+    #                 max_offset=self.max_offset,
+    #                 border=self.border,
+    #                 use_fft=self.use_fft,
+    #             )
+    #         else:
+    #             buf[idxs] = chunk
+    #             self.offset = 0.0
+    #         start = end
+    #
+    #     return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
+    #
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
@@ -1091,31 +1147,80 @@ class MboRawArray(scans.ScanMultiROI):
                 out = np.squeeze(out, axis=tuple(squeeze))
         return out
 
+    # def process_rois(self, frames, chans):
+    #     if self.roi is not None:
+    #         if isinstance(self.roi, list):  # noqa
+    #             return tuple(
+    #                 self.process_single_roi(roi_idx - 1, frames, chans)
+    #                 for roi_idx in self.roi
+    #             )
+    #         elif self.roi == 0:
+    #             return tuple(
+    #                 self.process_single_roi(roi_idx, frames, chans)
+    #                 for roi_idx in range(self.num_rois)
+    #             )
+    #         elif isinstance(self.roi, int):
+    #             return self.process_single_roi(self.roi - 1, frames, chans)
+    #     else:
+    #         H_out, W_out = self.field_heights[0], self.field_widths[0]
+    #         out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
+    #         for roi_idx in range(self.num_rois):
+    #             roi_data = self.process_single_roi(roi_idx, frames, chans)
+    #             oys, oxs = (
+    #                 self.fields[0].output_yslices[roi_idx],
+    #                 self.fields[0].output_xslices[roi_idx],
+    #             )
+    #             out[:, :, oys, oxs] = roi_data
+    #         return out
+
     def process_rois(self, frames, chans):
+        """Dispatch ROI processing. Handles single ROI, multiple ROIs, or all ROIs (None)."""
         if self.roi is not None:
-            if isinstance(self.roi, list):  # noqa
-                return tuple(
-                    self.process_single_roi(roi_idx - 1, frames, chans)
-                    for roi_idx in self.roi
-                )
+            # Single ROI or list/0 sentinel
+            if isinstance(self.roi, list):
+                return tuple(self.process_single_roi(roi_idx - 1, frames, chans)
+                             for roi_idx in self.roi)
             elif self.roi == 0:
-                return tuple(
-                    self.process_single_roi(roi_idx, frames, chans)
-                    for roi_idx in range(self.num_rois)
-                )
+                return tuple(self.process_single_roi(roi_idx, frames, chans)
+                             for roi_idx in range(self.num_rois))
             elif isinstance(self.roi, int):
                 return self.process_single_roi(self.roi - 1, frames, chans)
-        else:
-            H_out, W_out = self.field_heights[0], self.field_widths[0]
-            out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
-            for roi_idx in range(self.num_rois):
-                roi_data = self.process_single_roi(roi_idx, frames, chans)
-                oys, oxs = (
-                    self.fields[0].output_yslices[roi_idx],
-                    self.fields[0].output_xslices[roi_idx],
+
+        # --- roi=None path ---
+        # Load the full TIFF for these frames without slicing ROIs
+        pages = [frame * self.num_channels + zplane
+                 for frame in frames for zplane in chans]
+
+        h, w = self._page_height, self._page_width
+        buf = np.empty((len(pages), h, w), dtype=self.dtype)
+
+        start = 0
+        for tf in self.tiff_files:
+            end = start + len(tf.pages)
+            idxs = [i for i, p in enumerate(pages) if start <= p < end]
+            if not idxs:
+                start = end
+                continue
+
+            frame_idx = [pages[i] - start for i in idxs]
+            chunk = tf.asarray(key=frame_idx)  # no per-ROI slicing here!
+
+            if self.fix_phase:
+                self.logger.debug(f"Applying global phase correction ({self.phasecorr_method})")
+                buf[idxs], self.offset = bidir_phasecorr(
+                    chunk,
+                    method=self.phasecorr_method,
+                    upsample=self.upsample,
+                    max_offset=self.max_offset,
+                    border=self.border,
+                    use_fft=self.use_fft,
                 )
-                out[:, :, oys, oxs] = roi_data
-            return out
+            else:
+                buf[idxs] = chunk
+                self.offset = 0.0
+            start = end
+
+        return buf.reshape(len(frames), len(chans), h, w)
 
     def process_single_roi(self, roi_idx, frames, chans):
         return self._read_pages(
@@ -1396,8 +1501,10 @@ class MboRawArray(scans.ScanMultiROI):
         for roi in iter_rois(self):
             arr = copy.copy(self)
             arr.roi = roi
+            arr.fix_phase = False  # disable phase correction for initial display
+            arr.use_fft = False
             arrays.append(arr)
-            names.append(f"ROI {roi}" if roi else "Full Image")
+            names.append(f"ROI {roi}" if roi else "Stitched mROIs")
 
         figure_shape = (1, len(arrays))
 
@@ -1405,7 +1512,7 @@ class MboRawArray(scans.ScanMultiROI):
         figure_kwargs = kwargs.get(
             "figure_kwargs",
             {
-                "size": (800, 1000),
+                "size": (1000, 1200),
             },
         )
         window_funcs = kwargs.get("window_funcs", None)
@@ -1415,7 +1522,7 @@ class MboRawArray(scans.ScanMultiROI):
             histogram_widget=histogram_widget,
             figure_kwargs=figure_kwargs,  # "canvas": canvas},
             figure_shape=figure_shape,
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
+            graphic_kwargs={"vmin": arrays[0].min(), "vmax": arrays[0].max()},
             window_funcs=window_funcs,
         )
 
