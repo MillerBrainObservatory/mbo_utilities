@@ -206,9 +206,12 @@ def draw_saveas_popup(parent):
 
         # Options Section
         parent._saveas_rois = checkbox_with_tooltip(
-            "Save ROI's",
+            "Save ScanImage multi-ROI Separately",
             parent._saveas_rois,
-            "Enable to save each ROI individually. Saved to subfolders like roi1/, roi2/, etc.",
+            "Enable to save each mROI individually."
+            " mROI's are saved to subfolders: plane1_roi1, plane1_roi2, etc."
+            " These subfolders can be merged later using mbo_utilities.merge_rois()."
+            " This can be helpful as often mROI's are non-contiguous and can drift in orthogonal directions over time."
         )
         if parent._saveas_rois:
             try:
@@ -218,7 +221,7 @@ def draw_saveas_popup(parent):
 
             imgui.spacing()
             imgui.separator()
-            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose ROI(s):")
+            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose mROI(s):")
             imgui.dummy(imgui.ImVec2(0, 5))
 
             if imgui.button("All##roi"):
@@ -231,7 +234,7 @@ def draw_saveas_popup(parent):
             for i in range(num_rois):
                 imgui.push_id(f"roi_{i}")
                 selected = i in parent._saveas_selected_roi
-                _, selected = imgui.checkbox(f"ROI {i + 1}", selected)
+                _, selected = imgui.checkbox(f"mROI {i + 1}", selected)
                 if selected:
                     parent._saveas_selected_roi.add(i)
                 else:
@@ -254,7 +257,6 @@ def draw_saveas_popup(parent):
         parent._overwrite = checkbox_with_tooltip(
             "Overwrite", parent._overwrite, "Replace any existing output files."
         )
-
         fix_phase_changed, fix_phase_value = imgui.checkbox(
             "Fix Scan Phase", parent._fix_phase
         )
@@ -263,11 +265,25 @@ def draw_saveas_popup(parent):
         if imgui.is_item_hovered():
             imgui.begin_tooltip()
             imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-            imgui.text_unformatted("Apply scan-phase correction to interleaved lines.")
+            imgui.text_unformatted("Correct for bi-directional scan phase offsets.")
             imgui.pop_text_wrap_pos()
             imgui.end_tooltip()
         if fix_phase_changed:
             parent.fix_phase = fix_phase_value
+
+        use_fft, use_fft_value = imgui.checkbox(
+            "Subpixel Phase Correction", parent._use_fft
+        )
+        imgui.same_line()
+        imgui.text_disabled("(?)")
+        if imgui.is_item_hovered():
+            imgui.begin_tooltip()
+            imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+            imgui.text_unformatted("Use FFT-based subpixel registration (slower, more precise).")
+            imgui.pop_text_wrap_pos()
+            imgui.end_tooltip()
+        if use_fft:
+            parent.use_fft = use_fft_value
 
         parent._debug = checkbox_with_tooltip(
             "Debug",
@@ -278,12 +294,12 @@ def draw_saveas_popup(parent):
         imgui.spacing()
         imgui.text("Chunk Size (MB)")
         set_tooltip(
-            "Target chunk size when saving TIFF or binary. Affects I/O and memory usage."
+            "The size of the chunk, in MB, to read and write at a time. Larger chunks may be faster but use more memory.",
         )
 
         imgui.set_next_item_width(hello_imgui.em_size(20))
         _, parent._saveas_chunk_mb = imgui.drag_int(
-            "##target_chunk_mb",
+            "##chunk_size_mb_mb",
             parent._saveas_chunk_mb,
             v_speed=1,
             v_min=1,
@@ -1084,9 +1100,9 @@ class PreviewDataWidget(EdgeWindow):
             frame = gaussian_filter(frame, sigma=self.gaussian_sigma)
         if (not self.is_mbo_scan) and self._fix_phase:
             frame = apply_scan_phase_offsets(frame, self.current_offset[arr_idx])
-        if self.proj == "mean-sub" and self._zstats_means:
+        if self.proj == "mean-sub" and self._zstats_done[arr_idx]:
             z = self.image_widget.current_index.get("z", 0)
-            frame = frame - self._zstats_means[arr_idx][z]
+            frame = frame - self._zstats_mean_scalar[arr_idx][z]
         return frame
 
     def _compute_zstats_single_roi(self, roi, fpath):
