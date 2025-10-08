@@ -64,20 +64,31 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False):
 
     if use_fft:
         _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
-        dx = -float(_shift[1])
+        dx = float(_shift[1])
     else:
-        # fast 1D correlation along x (row averages)
-        a_mean = a.mean(0)
-        b_mean = b_.mean(0)
-        offsets = range(-max_offset, max_offset + 1)
-        scores = [
-            np.dot(
-                a_mean[max_offset:-max_offset],
-                np.roll(b_mean, k)[max_offset:-max_offset],
-            )
-            for k in offsets
-        ]
-        dx = float(offsets[int(np.argmax(scores))])
+        a_mean = a.mean(axis=0) - np.mean(a)
+        b_mean = b_.mean(axis=0) - np.mean(b_)
+
+        offsets = np.arange(-4, 4, 1)
+        scores = np.empty_like(offsets, dtype=float)
+
+        for i, k in enumerate(offsets):
+            # valid overlap, no wrapping
+            if k > 0:
+                aa = a_mean[:-k]
+                bb = b_mean[k:]
+            elif k < 0:
+                aa = a_mean[-k:]
+                bb = b_mean[:k]
+            else:
+                aa = a_mean
+                bb = b_mean
+            num = np.dot(aa, bb)
+            denom = np.linalg.norm(aa) * np.linalg.norm(bb)
+            scores[i] = num / denom if denom else 0.0
+
+        k_best = offsets[np.argmax(scores)]
+        dx = -float(k_best)
 
     if max_offset:
         dx = np.sign(dx) * min(abs(dx), max_offset)
@@ -96,7 +107,7 @@ def _apply_offset(img, offset, use_fft=False):
 
     if use_fft:
         f = np.fft.fftn(rows, axes=(-2, -1))
-        shift_vec = (0,) * (f.ndim - 1) + (offset,)  # e.g. (0,0,dx) for 3-D
+        shift_vec = (0,) * (f.ndim - 1) + (offset,)
         rows[:] = np.fft.ifftn(fourier_shift(f, shift_vec), axes=(-2, -1)).real
     else:
         rows[:] = np.roll(rows, shift=int(round(offset)), axis=-1)
@@ -160,7 +171,7 @@ def bidir_phasecorr(
     else:
         out = np.stack(
             [
-                _apply_offset(f.copy(), float(s))  # or _apply_offset
+                _apply_offset(f.copy(), float(s))
                 for f, s in zip(arr, _offsets)
             ]
         )
@@ -244,7 +255,21 @@ def compute_scan_offsets(tiff_path, max_lag=8):
 
 
 if __name__ == "__main__":
-    from mbo_utilities import get_files, imread
 
-    files = get_files(r"D:\tests\data", "tif")
-    fpath = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green"
+    import numpy as np
+    import tifffile
+    from pathlib import Path
+    from mbo_utilities import imread
+
+    data_path = Path(
+        r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw\mk355_7_27_2025_180mw_right_m2_go_to_2x-mROI-880x1100um_220x550px_2um-px_14p00Hz_00001_00001_00001.tif")
+    data = imread(data_path)
+    data.fix_phase = False
+
+    test = []
+    for idx in range(5):
+        frame = data[idx, 0, :, :]
+        dx_int = _phase_corr_2d(frame, use_fft=False)
+        print(f"no fft: {dx_int}")
+        dx_fft = _phase_corr_2d(frame, use_fft=True)
+        print(f"with fft: {dx_fft}")

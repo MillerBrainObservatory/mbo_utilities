@@ -463,7 +463,8 @@ class PreviewDataWidget(EdgeWindow):
         # image widget setup
         self.image_widget = iw
         self.rois = rois
-        self.num_arrays = rois
+        self.num_rois = len(self.image_widget.managed_graphics)
+        self.num_arrays = len(self.image_widget.managed_graphics)
         self.shape = self.image_widget.data[0].shape
         self.is_mbo_scan = (
             True if isinstance(self.image_widget.data[0], MboRawArray) else False
@@ -489,9 +490,7 @@ class PreviewDataWidget(EdgeWindow):
             subplot.toolbar = False
 
         self.image_widget._image_widget_sliders._loop = True  # noqa
-        if hasattr(self.image_widget, "rois") or hasattr(
-            self.image_widget.data[0], "rois"
-        ):
+        if len(self.image_widget.data) > 1:
             self._array_type = "roi"
         else:
             self._array_type = "array"
@@ -606,13 +605,9 @@ class PreviewDataWidget(EdgeWindow):
     @use_fft.setter
     def use_fft(self, value):
         self._use_fft = value
-        if self.is_mbo_scan:
-            for arr in self.image_widget.data:
-                if isinstance(arr, MboRawArray):
-                    arr.use_fft = value
-        else:
-            self.update_frame_apply()
-
+        for arr in self.image_widget.data:
+            arr.use_fft = value
+        self.update_frame_apply()
         self.image_widget.current_index = self.image_widget.current_index
 
     @property
@@ -951,27 +946,31 @@ class PreviewDataWidget(EdgeWindow):
             imgui.text_colored(
                 imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Scan-Phase Correction"
             )
+
             imgui.separator()
             imgui.begin_group()
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
-            phase_changed, phase_value = imgui.checkbox(
-                "Fix Phase",
-                self._fix_phase,
-            )
-            set_tooltip("Enable to apply scan-phase correction to interleaved lines.")
+            phase_changed, phase_value = imgui.checkbox("Fix Phase", self._fix_phase)
+            set_tooltip("Enable to apply scan-phase correction which shifts every other line/row of pixels "
+                        "to maximize correlation between these rows.")
             if phase_changed:
                 self.fix_phase = phase_value
                 self.logger.info(f"Fix Phase: {phase_value}")
+
+            imgui.set_next_item_width(hello_imgui.em_size(10))
+            fft_changed, fft_value = imgui.checkbox("Sub-Pixel (slower)", self._use_fft)
+            set_tooltip("Use FFT-based sub-pixel registration (slower but more accurate).")
+            if fft_changed:
+                self.use_fft = fft_value
+                self.logger.info(f"Use-FFT: {fft_value}")
 
             imgui.columns(2, "offsets", False)
             for i, iw in enumerate(self.image_widget.data):
                 ofs = self.current_offset[i]
                 is_sequence = isinstance(ofs, (list, np.ndarray, tuple))
 
-                # Compute the “maximum absolute offset” we'll use to decide if text should be red
                 if is_sequence:
-                    # turn it into a flat Python list of floats
                     ofs_list = [float(x) for x in ofs]
                     max_abs_offset = max(abs(x) for x in ofs_list) if ofs_list else 0.0
                 else:
@@ -990,37 +989,31 @@ class PreviewDataWidget(EdgeWindow):
                 else:
                     display_text = f"{np.round(ofs, 2):.3f}"
 
+                # Safe and balanced push/pop
                 if max_abs_offset > self.max_offset:
                     imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 0.0, 0.0, 1.0))
-
-                imgui.text(display_text)
-
-                if max_abs_offset >= self.max_offset:
+                    imgui.text(display_text)
                     imgui.pop_style_color()
+                else:
+                    imgui.text(display_text)
 
-                # show all frame offsets in a tooltip
                 if is_sequence and imgui.is_item_hovered():
                     imgui.begin_tooltip()
-                    imgui.text_colored(
-                        imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Per‐frame offsets:"
-                    )
+                    imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Per‐frame offsets:")
                     for frame_idx, val in enumerate(ofs_list):
                         imgui.text(f"  frame {frame_idx}: {val:.3f}")
                     imgui.end_tooltip()
+
                 imgui.next_column()
             imgui.columns(1)
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
-            upsample_changed, upsample_val = imgui.input_int(
-                "Upsample", self._phase_upsample, step=1, step_fast=2
-            )
+            upsample_changed, upsample_val = imgui.input_int("Upsample", self._phase_upsample, step=1, step_fast=2)
             set_tooltip(
-                "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment."
-            )
+                "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment.")
             if upsample_changed:
                 self.phase_upsample = max(1, upsample_val)
                 self.logger.info(f"New upsample: {upsample_val}")
-
             imgui.set_next_item_width(hello_imgui.em_size(10))
             border_changed, border_val = imgui.input_int(
                 "Exclude border-px", self._border, step=1, step_fast=2
@@ -1081,9 +1074,13 @@ class PreviewDataWidget(EdgeWindow):
         return frame
 
     def _compute_zstats_single_roi(self, roi, fpath):
+        roi_idx = 0 if roi is None else int(roi)
+        print(f"Computing zstats for ROI {roi_idx}...")
+        print(f" Current zstats: {self._zstats[roi_idx]}")
+
         arr = imread(fpath)
-        arr.roi = roi
         arr.fix_phase = False
+        arr.roi = None if roi is None else roi_idx
 
         if HAS_TORCH and isinstance(arr, torch.Tensor):
             arr = arr[:]  # make sure it's dense
@@ -1096,12 +1093,9 @@ class PreviewDataWidget(EdgeWindow):
 
         self._tiff_lock = threading.Lock()
         for z in range(self.nz):
-            self.logger.info(
-                f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {roi + 1} --"
-            )
             with self._tiff_lock:
                 stack = arr[:, z]
-                if hasattr(stack, "astype"):  # works for Dask and NumPy
+                if hasattr(stack, "astype"):
                     stack = stack.astype(np.float32)
                 if hasattr(stack, "compute"):
                     stack = stack.compute()
@@ -1115,39 +1109,33 @@ class PreviewDataWidget(EdgeWindow):
                 stats["snr"].append(float(np.mean(snr_img)))
                 means.append(mean_img)
 
-                self.logger.info(
-                    f"ROI {roi + 1} - Z-plane {z + 1}: "
-                    f"Mean: {stats['mean'][-1]:.2f}, "
-                    f"Std: {stats['std'][-1]:.2f}, "
-                    f"SNR: {stats['snr'][-1]:.2f}",
-                )
+                self._zstats_progress[roi_idx] = (z + 1) / self.nz
+                self._zstats_current_z[roi_idx] = z
 
-                self._zstats_progress[roi] = (z + 1) / self.nz
-                self._zstats_current_z[roi] = z
-
-        self._zstats[roi] = stats
-        self._zstats_means[roi] = np.stack(means)
-        self._zstats_done[roi] = True
+        self._zstats[roi_idx] = stats
+        self._zstats_means[roi_idx] = np.stack(means)
+        self._zstats_done[roi_idx] = True
 
     def compute_zstats(self):
+        """Compute z-plane statistics for each ROI or the full image."""
         if not self.image_widget or not self.image_widget.data:
             return
-        if self.rois is not None:
-            for roi in range(self.rois):
+
+        num_arrays = len(self.image_widget.data)
+
+        if num_arrays == 1:
+            print("Computing zstats for full image...")
+            threading.Thread(
+                target=self._compute_zstats_single_roi,
+                args=(0, self.fpath),
+                daemon=True,
+            ).start()
+        else:
+            print(f"Computing zstats for {num_arrays} ROIs...")
+            for roi in range(num_arrays):
+                print(f"  Starting zstats thread for ROI {roi}...")
                 threading.Thread(
                     target=self._compute_zstats_single_roi,
                     args=(roi, self.fpath),
                     daemon=True,
                 ).start()
-        else:
-            threading.Thread(
-                target=self._compute_zstats_single_roi,
-                args=(self.rois, self.fpath),
-                daemon=True,
-            ).start()
-
-        # for data_ix, arr in enumerate(self.image_widget.data):
-        #     self.logger.debug(f"Sending array index {data_ix} for z-stat computation..")
-        #     threading.Thread(
-        #         target=self._compute_zstats_single_roi, args=(data_ix, arr), daemon=True
-        #     ).start()

@@ -34,6 +34,7 @@ class FileDialog:
         self._threading_enabled = MBO_THREADING_ENABLED
         self._widget_enabled = True
         self.metadata_only = False
+        self.split_rois = False
 
     @property
     def widget_enabled(self):
@@ -53,10 +54,6 @@ class FileDialog:
         # print a warning because
         # this is generally done to fix a bug
         if not value:
-            print(
-                "Threading disabled,"
-                " please report issues at https://github.com/MillerBrainObservatory/mbo_utilities/issues"
-            )
             os.environ["MBO_THREADING_ENABLED"] = "0"
         if value:
             os.environ["MBO_THREADING_ENABLED"] = "1"
@@ -124,6 +121,14 @@ class FileDialog:
                 imgui.text_colored(imgui.ImVec4(1, 0.85, 0.3, 1), "Load Options")
 
                 imgui.begin_group()
+                _, self.split_rois = imgui.checkbox(
+                    "(Raw Scanimage only) Separate ScanImage mROI's", self.split_rois
+                )
+                set_tooltip(
+                    "Split mROIs."
+                    "Leave unchecked to load all mROIs into a single, fused/stitched array."
+                    "Check to treat each mROI as a separate dataset, to merge later if desired."
+                )
                 _, self.threading_enabled = imgui.checkbox(
                     "Enable Threading", self.threading_enabled
                 )

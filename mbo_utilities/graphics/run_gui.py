@@ -71,7 +71,6 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
 
     from imgui_bundle import immapp, hello_imgui
     from mbo_utilities.lazy_array import imread
-    import fastplotlib as fpl
 
     roi_cli = normalize_roi(roi)
 
