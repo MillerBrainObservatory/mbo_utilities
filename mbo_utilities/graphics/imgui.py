@@ -684,6 +684,7 @@ class PreviewDataWidget(EdgeWindow):
             self.update_frame_apply()
         else:
             self.logger.warning(f"Invalid gaussian sigma value: {value}. ")
+        self.image_widget.current_index = self.image_widget.current_index
 
     @property
     def proj(self):
@@ -720,6 +721,7 @@ class PreviewDataWidget(EdgeWindow):
         self._phase_upsample = value
         for arr in self.image_widget.data:
             arr.upsample = value
+        self.image_widget.current_index = self.image_widget.current_index
 
     def update(self):
         draw_saveas_popup(self)
@@ -1102,7 +1104,7 @@ class PreviewDataWidget(EdgeWindow):
             frame = apply_scan_phase_offsets(frame, self.current_offset[arr_idx])
         if self.proj == "mean-sub" and self._zstats_done[arr_idx]:
             z = self.image_widget.current_index.get("z", 0)
-            frame = frame - self._zstats_mean_scalar[arr_idx][z]
+            frame = frame - self._zstats_mean_scalar[arr_idx]
         return frame
 
     def _compute_zstats_single_roi(self, roi, fpath):

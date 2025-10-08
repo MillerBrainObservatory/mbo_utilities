@@ -6,21 +6,21 @@ from pathlib import Path
 import numpy as np
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
-from mbo_utilities import get_metadata, get_mbo_dirs
-from mbo_utilities._parsing import _make_json_serializable
+from mbo_utilities import get_mbo_dirs
 from mbo_utilities.graphics._widgets import set_tooltip
-from mbo_utilities.lazy_array import imread
+from mbo_utilities.lazy_array import imread, imwrite
 
 try:
-    import lbm_suite2p_python as lsp
-
+    from lbm_suite2p_python.run_lsp import run_plane
     HAS_LSP = True
-except ImportError:
+except ImportError as e:
+    print(f"Error importing lbm_suite2p_python: \n"
+          f" {e}")
     HAS_LSP = False
     lsp = None
 
 
-USER_PIPELINES = ["suite2p", "masknmf"]
+USER_PIPELINES = ["suite2p"]
 
 
 @dataclass
@@ -340,9 +340,7 @@ def run_process(self):
     """Runs the selected processing pipeline."""
     if self._current_pipeline == "suite2p":
         self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
-        try:
-            import lbm_suite2p_python as lsp
-        except ImportError:
+        if not HAS_LSP:
             self.logger.warning(
                 "error",
                 "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline.",
@@ -368,7 +366,6 @@ def run_plane_from_data(self, arr_idx):
         return
 
     data_shape = self.image_widget.data[arr_idx].shape
-    input_file = None
 
     dims = self.image_widget.current_index
     if "z" in dims:
@@ -388,7 +385,6 @@ def run_plane_from_data(self, arr_idx):
         # TODO
         raise NotImplementedError()
 
-    # move to property?
     if not self._saveas_outdir:
         current_time_fmt = time.strftime("%Y%m%d_%H%M%S")
         self._saveas_outdir = get_mbo_dirs()["data"].joinpath(
@@ -408,24 +404,26 @@ def run_plane_from_data(self, arr_idx):
 
     self.fpath = self.fpath
     loader = imread(self.fpath)
-    if hasattr(loader, "roi") or hasattr(loader, "rois"):
-        self.logger.info("Using LazyArrayLoader with ROI support. ")
-        arr = loader.rois
+    loader.fix_phase = self.fix_phase
+    loader.use_fft = self.use_fft
+    loader.phasecorr_method = self.proj
 
-    filenames = loader.filenames
-    metadata = loader.metadata
+    metadata = {
+        "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "original_filepath": str(self.fpath),
+        "crop_indices_x": (ind_x.start, ind_x.stop) if isinstance(ind_x, slice) else ind_x,
+        "crop_indices_y": (ind_y.start, ind_y.stop) if isinstance(ind_y, slice) else ind_y,
+        "array_shape": data.shape,
+        "pipeline": self._current_pipeline,
+    }
 
-    # handle list vs single file
-    if isinstance(filenames, (list, tuple)):
-        if len(filenames) > arr_idx:
-            self.fpath = Path(filenames[arr_idx])
-        else:
-            self.fpath = Path(filenames[0])
+    tiff_filename = Path(self.fpath[0]).stem
+    tiff_out = out_dir.joinpath(f"{tiff_filename}_plane{arr_idx:02d}.tif")
+    imwrite(data, tiff_out, planes=current_z)
 
     ops = self.s2p.to_dict()
     self.logger.info(f"User ops provided:")
     for k, v in ops.items():
         self.logger.info(f"{k}: {v}")
     ops.update(metadata)
-    lsp.run_plane(self.fpath, out_dir, ops=ops)
-    self.logger.info(f"Plane 7 saved to {out_dir / 'plane_7.tif'}")
+    run_plane(tiff_out, out_dir, ops=ops)
