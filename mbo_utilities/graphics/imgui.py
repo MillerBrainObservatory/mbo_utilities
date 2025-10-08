@@ -1,5 +1,6 @@
+import contextlib
 import logging
-import time
+import os
 import webbrowser
 from pathlib import Path
 from typing import Literal
@@ -7,6 +8,7 @@ import threading
 from functools import partial
 from dataclasses import dataclass, field
 
+import imgui_bundle
 import numpy as np
 from numpy import ndarray
 from scipy.ndimage import gaussian_filter
@@ -443,6 +445,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # backend.create_fonts_texture()
         io = imgui.get_io()
+
         fd_settings_dir = (
             Path(get_mbo_dirs()["imgui"])
             .joinpath("assets", "app_settings", "preview_settings.ini")
@@ -451,19 +454,32 @@ class PreviewDataWidget(EdgeWindow):
         )
         io.set_ini_filename(str(fd_settings_dir))
 
-        fonts_path = Path(get_mbo_dirs()["assets"]).joinpath("fonts")
-        self._fonts = []
-        for font_file in fonts_path.rglob("*.ttf"):
-            self._fonts.append(io.fonts.add_font_from_file_ttf(str(font_file), 16))
-        io.fonts.build()
+        io = imgui.get_io()
 
-        self.font_size = 12
+        sans_serif_font = str(
+            Path(imgui_bundle.__file__).parent.joinpath(
+                "assets", "fonts", "Roboto", "Roboto-Regular.ttf"
+            )
+        )
+
+        self._default_imgui_font = io.fonts.add_font_from_file_ttf(
+            sans_serif_font, 14, imgui.ImFontConfig()
+        )
+
+        font_config = imgui.ImFontConfig()
+        font_config.merge_mode = True
+
+        imgui.push_font(self._default_imgui_font, self._default_imgui_font.legacy_size)
+
+        self._default_imgui_font = io.fonts.add_font_from_file_ttf(
+            sans_serif_font, 14, imgui.ImFontConfig()
+        )
         self.fpath = fpath if fpath else getattr(iw, "fpath", None)
 
         # image widget setup
         self.image_widget = iw
         self.rois = rois
-        self.num_rois = len(self.image_widget.managed_graphics)
+        self.num_rois: int = len(self.image_widget.data[0].rois)
         self.num_arrays = len(self.image_widget.managed_graphics)
         self.shape = self.image_widget.data[0].shape
         self.is_mbo_scan = (
@@ -490,10 +506,20 @@ class PreviewDataWidget(EdgeWindow):
             subplot.toolbar = False
 
         self.image_widget._image_widget_sliders._loop = True  # noqa
+
         if len(self.image_widget.data) > 1:
             self._array_type = "roi"
         else:
             self._array_type = "array"
+
+        size = self.num_rois if self._array_type == "roi" else self.num_arrays
+
+        self._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(size)]
+        self._zstats_means = [None] * size
+        self._zstats_mean_scalar = [0.0] * size
+        self._zstats_done = [False] * size
+        self._zstats_progress = [0.0] * size
+        self._zstats_current_z = [0] * size
 
         # boolean flags: imgui.begin() calls that are drawn
         # when these are set to true.
@@ -527,16 +553,6 @@ class PreviewDataWidget(EdgeWindow):
         self._debug = False
         self._saveas_save_phase_png = False
         self._saveas_chunk_mb = 20
-
-        # zstats: an entry for each given array
-        # these are sent to a thread to compute
-        self._zstats = [
-            {"mean": [], "std": [], "snr": []} for _ in range(self.num_arrays)
-        ]
-        self._zstats_means = [0 for _ in range(self.num_arrays)]
-        self._zstats_done = [False] * self.num_arrays
-        self._zstats_progress = [0.0] * self.num_arrays
-        self._zstats_current_z = [0] * self.num_arrays
 
         self._saveas_popup_open = False
         self._saveas_done = False
@@ -811,9 +827,26 @@ class PreviewDataWidget(EdgeWindow):
                     )
                     implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, len(z_vals))
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
-                    implot.plot_error_bars(f"Mean ± Std",
-                                           z_vals, mean_vals, std_vals)
-                    implot.plot_line(f"Mean", z_vals, mean_vals)
+
+                    for i, roi in enumerate(self.num_rois):
+                        implot.push_style_var(implot.StyleVar_.line_weight.value, 1)
+                        implot.push_style_color(implot.Col_.line.value, (0.6, 0.6, 0.6, 0.3))
+                        implot.plot_line(f"ROI {i + 1}", z_vals, roi)
+                        implot.pop_style_color()
+                        implot.pop_style_var()
+
+                    # shaded mean ± std
+                    upper = mean_vals + std_vals
+                    lower = mean_vals - std_vals
+                    implot.push_style_color(implot.Col_.fill.value, (0.2, 0.4, 0.8, 0.25))
+                    implot.plot_shaded("Mean ± Std", z_vals, lower, upper)
+                    implot.pop_style_color()
+
+                    # bold mean line
+                    implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
+                    implot.plot_line("Mean", z_vals, mean_vals)
+                    implot.pop_style_var()
+
                     implot.end_plot()
         else:
             array_idx = self._selected_array
@@ -1074,13 +1107,8 @@ class PreviewDataWidget(EdgeWindow):
         return frame
 
     def _compute_zstats_single_roi(self, roi, fpath):
-        roi_idx = 0 if roi is None else int(roi)
-        print(f"Computing zstats for ROI {roi_idx}...")
-        print(f" Current zstats: {self._zstats[roi_idx]}")
-
         arr = imread(fpath)
-        arr.fix_phase = False
-        arr.roi = None if roi is None else roi_idx
+        arr.roi = roi
 
         if HAS_TORCH and isinstance(arr, torch.Tensor):
             arr = arr[:]  # make sure it's dense
@@ -1093,9 +1121,12 @@ class PreviewDataWidget(EdgeWindow):
 
         self._tiff_lock = threading.Lock()
         for z in range(self.nz):
+            self.logger.info(
+                f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {roi + 1} --"
+            )
             with self._tiff_lock:
                 stack = arr[:, z]
-                if hasattr(stack, "astype"):
+                if hasattr(stack, "astype"):  # works for Dask and NumPy
                     stack = stack.astype(np.float32)
                 if hasattr(stack, "compute"):
                     stack = stack.compute()
@@ -1109,33 +1140,30 @@ class PreviewDataWidget(EdgeWindow):
                 stats["snr"].append(float(np.mean(snr_img)))
                 means.append(mean_img)
 
-                self._zstats_progress[roi_idx] = (z + 1) / self.nz
-                self._zstats_current_z[roi_idx] = z
+                self.logger.info(
+                    f"ROI {roi + 1} - Z-plane {z + 1}: "
+                    f"Mean: {stats['mean'][-1]:.2f}, "
+                    f"Std: {stats['std'][-1]:.2f}, "
+                    f"SNR: {stats['snr'][-1]:.2f}",
+                )
 
-        self._zstats[roi_idx] = stats
-        self._zstats_means[roi_idx] = np.stack(means)
-        self._zstats_done[roi_idx] = True
+                self._zstats_progress[roi] = (z + 1) / self.nz
+                self._zstats_current_z[roi] = z
+
+        self._zstats[roi] = stats
+        self._zstats_means[roi] = np.stack(means)
+        self._zstats_done[roi] = True
 
     def compute_zstats(self):
-        """Compute z-plane statistics for each ROI or the full image."""
+        """Compute z-plane statistics for each ROI in parallel threads."""
         if not self.image_widget or not self.image_widget.data:
             return
 
-        num_arrays = len(self.image_widget.data)
-
-        if num_arrays == 1:
-            print("Computing zstats for full image...")
+        num_rois = len(self.image_widget.data[0].rois)
+        print(f"Computing zstats for {num_rois} ROIs.")
+        for roi in range(num_rois):
             threading.Thread(
                 target=self._compute_zstats_single_roi,
-                args=(0, self.fpath),
+                args=(roi, self.fpath),
                 daemon=True,
             ).start()
-        else:
-            print(f"Computing zstats for {num_arrays} ROIs...")
-            for roi in range(num_arrays):
-                print(f"  Starting zstats thread for ROI {roi}...")
-                threading.Thread(
-                    target=self._compute_zstats_single_roi,
-                    args=(roi, self.fpath),
-                    daemon=True,
-                ).start()

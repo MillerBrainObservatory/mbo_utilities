@@ -8,7 +8,7 @@ from mbo_utilities.array_types import MboRawArray
 from mbo_utilities.roi import iter_rois, normalize_roi
 
 
-def _select_file() -> tuple[Any, Any, Any, Any, bool]:
+def _select_file() -> tuple[Any, Any, Any, bool]:
     from mbo_utilities.graphics._file_dialog import FileDialog
     from mbo_utilities.file_io import get_mbo_dirs
     from imgui_bundle import immapp, hello_imgui
@@ -37,7 +37,6 @@ def _select_file() -> tuple[Any, Any, Any, Any, bool]:
         dlg.selected_path,
         dlg.split_rois,
         dlg.widget_enabled,
-        dlg.threading_enabled,
         dlg.metadata_only,
     )
 
@@ -47,18 +46,14 @@ def _select_file() -> tuple[Any, Any, Any, Any, bool]:
     "--roi",
     multiple=True,
     type=int,
-    help="ROI index (can pass multiple, e.g. --roi 0 --roi 2). Leave empty for None.",
+    help="ROI index (can pass multiple, e.g. --roi 0 --roi 2). Leave empty for None."
+         " If 0 is passed, all ROIs will be shown (only for Raw files).",
     default=None,
 )
 @click.option(
     "--widget/--no-widget",
     default=True,
-    help="Enable or disable PreviewDataWidget (default enabled).",
-)
-@click.option(
-    "--threading/--no-threading",
-    default=True,
-    help="Enable or disable threading (only effects widgets).",
+    help="Enable or disable PreviewDataWidget for Raw ScanImge tiffs.",
 )
 @click.option(
     "--metadata-only/--full-preview",
@@ -66,7 +61,7 @@ def _select_file() -> tuple[Any, Any, Any, Any, bool]:
     help="If enabled, only show extracted metadata.",
 )
 @click.argument("data_in", required=False)
-def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=False):
+def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
     """Open a GUI to preview data of any supported type."""
 
     from imgui_bundle import immapp, hello_imgui
@@ -75,7 +70,7 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
     roi_cli = normalize_roi(roi)
 
     if data_in is None:
-        data_in, roi_gui, widget, threading, metadata_only = _select_file()
+        data_in, roi_gui, widget, metadata_only = _select_file()
         if not data_in:
             click.echo("No file selected, exiting.")
             return
@@ -142,7 +137,6 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
         gui = PreviewDataWidget(
             iw=iw,
             fpath=data_array.filenames,
-            threading_enabled=threading,
             size=350,
             rois=roi_final,
         )
