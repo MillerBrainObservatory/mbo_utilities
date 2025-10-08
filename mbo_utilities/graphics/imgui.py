@@ -512,7 +512,7 @@ class PreviewDataWidget(EdgeWindow):
         else:
             self._array_type = "array"
 
-        size = self.num_rois if self._array_type == "roi" else self.num_arrays
+        size = self.num_rois  # always per-ROI
 
         self._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(size)]
         self._zstats_means = [None] * size
@@ -1107,61 +1107,38 @@ class PreviewDataWidget(EdgeWindow):
         return frame
 
     def _compute_zstats_single_roi(self, roi, fpath):
-        arr = imread(fpath)
+        arr = imread(fpath);
         arr.roi = roi
+        if HAS_TORCH and isinstance(arr, torch.Tensor): arr = arr[:]
+        if arr.ndim == 3: arr = arr[:, np.newaxis, :, :]
 
-        if HAS_TORCH and isinstance(arr, torch.Tensor):
-            arr = arr[:]  # make sure it's dense
-
-        if arr.ndim == 3:
-            arr = arr[:, np.newaxis, :, :]
-
-        stats = {"mean": [], "std": [], "snr": []}
-        means = []
-
+        stats, means = {"mean": [], "std": [], "snr": []}, []
         self._tiff_lock = threading.Lock()
         for z in range(self.nz):
-            self.logger.info(
-                f"--- Processing Z-plane {z + 1}/{self.nz} for ROI {roi + 1} --"
-            )
             with self._tiff_lock:
                 stack = arr[:, z]
-                if hasattr(stack, "astype"):  # works for Dask and NumPy
-                    stack = stack.astype(np.float32)
-                if hasattr(stack, "compute"):
-                    stack = stack.compute()
-
+                if hasattr(stack, "astype"): stack = stack.astype(np.float32)
+                if hasattr(stack, "compute"): stack = stack.compute()
                 mean_img = np.mean(stack, axis=0)
                 std_img = np.std(stack, axis=0)
                 snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
-
                 stats["mean"].append(float(np.mean(mean_img)))
                 stats["std"].append(float(np.mean(std_img)))
                 stats["snr"].append(float(np.mean(snr_img)))
                 means.append(mean_img)
-
-                self.logger.info(
-                    f"ROI {roi + 1} - Z-plane {z + 1}: "
-                    f"Mean: {stats['mean'][-1]:.2f}, "
-                    f"Std: {stats['std'][-1]:.2f}, "
-                    f"SNR: {stats['snr'][-1]:.2f}",
-                )
-
                 self._zstats_progress[roi] = (z + 1) / self.nz
+                print(f"Z-stats progress for ROI {roi}: {self._zstats_progress[roi]*100:.2f}%")
                 self._zstats_current_z[roi] = z
 
         self._zstats[roi] = stats
         self._zstats_means[roi] = np.stack(means)
+        self._zstats_mean_scalar[roi] = float(np.mean(self._zstats_means[roi]))
         self._zstats_done[roi] = True
 
     def compute_zstats(self):
-        """Compute z-plane statistics for each ROI in parallel threads."""
         if not self.image_widget or not self.image_widget.data:
             return
-
-        num_rois = len(self.image_widget.data[0].rois)
-        print(f"Computing zstats for {num_rois} ROIs.")
-        for roi in range(num_rois):
+        for roi in range(self.num_rois):
             threading.Thread(
                 target=self._compute_zstats_single_roi,
                 args=(roi, self.fpath),
