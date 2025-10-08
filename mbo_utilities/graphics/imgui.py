@@ -1,12 +1,12 @@
-import contextlib
 import logging
-import os
 import webbrowser
 from pathlib import Path
 from typing import Literal
 import threading
 from functools import partial
 from dataclasses import dataclass, field
+
+from tqdm.auto import tqdm
 
 import imgui_bundle
 import numpy as np
@@ -70,7 +70,7 @@ import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
 
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
-USER_PIPELINES = ["suite2p", "masknmf"]
+USER_PIPELINES = ["suite2p"]
 
 
 def _save_as_worker(path, **imwrite_kwargs):
@@ -91,12 +91,6 @@ class SaveStatus:
 
 def draw_menu(parent):
     # (accessible from the "Tools" menu)
-    if parent.show_style_window:
-        _, parent.show_style_window = imgui.begin(
-            "Style Editor", parent.show_style_window
-        )
-        imgui.show_style_editor()
-        imgui.end()
     if parent.show_scope_window:
         size = begin_popup_size()
         imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)  # type: ignore # noqa
@@ -140,9 +134,6 @@ def draw_menu(parent):
                 imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
                 imgui.separator()
                 imgui.spacing()
-                _, parent.show_style_window = imgui.menu_item(
-                    "Style Editor", "", parent.show_style_window, True
-                )
                 _, parent.show_debug_panel = imgui.menu_item(
                     "Debug Panel",
                     "",
@@ -281,12 +272,7 @@ def draw_saveas_popup(parent):
         parent._debug = checkbox_with_tooltip(
             "Debug",
             parent._debug,
-            "Run with debugging, settings -> debug to view the outputs.",
-        )
-        parent._saveas_save_phase_png = checkbox_with_tooltip(
-            "Save Phase Images",
-            parent._saveas_save_phase_png,
-            "Saves pre-post scan-phase images as PNGs to the save-directory.",
+            "Print additional information to the terminal during process.",
         )
 
         imgui.spacing()
@@ -523,7 +509,6 @@ class PreviewDataWidget(EdgeWindow):
 
         # boolean flags: imgui.begin() calls that are drawn
         # when these are set to true.
-        self.show_style_window = False
         self.show_metrics_window = False
         self.show_debug_panel = False
         self.show_scope_window = False
@@ -551,7 +536,6 @@ class PreviewDataWidget(EdgeWindow):
         self._planes_str = str(getattr(self, "_planes_str", ""))
         self._overwrite = True
         self._debug = False
-        self._saveas_save_phase_png = False
         self._saveas_chunk_mb = 20
 
         self._saveas_popup_open = False
@@ -642,6 +626,7 @@ class PreviewDataWidget(EdgeWindow):
                     "Max offset is only applicable to MBO Scan objects. "
                     "No action taken."
                 )
+        self.image_widget.current_index = self.image_widget.current_index
 
     @property
     def max_offset(self):
@@ -651,14 +636,9 @@ class PreviewDataWidget(EdgeWindow):
     def max_offset(self, value):
         self._max_offset = value
         for arr in self.image_widget.data:
-            if isinstance(arr, MboRawArray):
-                arr.max_offset = value
-                self.logger.info(f"Max offset set to {value}.")
-            else:
-                self.logger.warning(
-                    "Max offset is only applicable to MBO Scan objects. "
-                    "No action taken."
-                )
+            arr.max_offset = value
+            self.logger.info(f"Max offset set to {value}.")
+        self.image_widget.current_index = self.image_widget.current_index
 
     @property
     def selected_array(self):
@@ -703,6 +683,7 @@ class PreviewDataWidget(EdgeWindow):
                 self.logger.info(f"Setting projection to np.{value}.")
                 self.image_widget.window_funcs["t"].func = getattr(np, value)
             self._proj = value
+        self.image_widget.current_index = self.image_widget.current_index
 
     @property
     def window_size(self):
@@ -721,15 +702,8 @@ class PreviewDataWidget(EdgeWindow):
     @phase_upsample.setter
     def phase_upsample(self, value):
         self._phase_upsample = value
-        if self.is_mbo_scan:
-            for arr in self.image_widget.data:
-                if isinstance(arr, MboRawArray):
-                    arr.upsample = value
-        else:
-            self.logger.warning(
-                "Phase upsample is only applicable to MBO Scan objects. "
-                "No action taken."
-            )
+        for arr in self.image_widget.data:
+            arr.upsample = value
 
     def update(self):
         draw_saveas_popup(self)
@@ -813,41 +787,51 @@ class PreviewDataWidget(EdgeWindow):
                             imgui.text(f"{val:.2f}")
                     imgui.end_table()
 
-            with imgui_ctx.begin_child(
-                    "##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
-            ):
+            with imgui_ctx.begin_child("##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags):
                 imgui.text("Z-plane Signal: Combined")
+                set_tooltip(
+                    f"Gray = per-ROI z-profiles (mean over frames)."
+                    f" Blue shade = across-ROI mean ± std; blue line = mean."
+                    f" Hover gray lines for values.",
+                    True
+                )
+
+                # build per-ROI series
+                roi_series = [np.asarray(self._zstats[r]["mean"], float) for r in range(self.num_rois)]
+                L = min(len(s) for s in roi_series)
+                z = np.asarray(z_vals[:L], float)
+                roi_series = [s[:L] for s in roi_series]
+                stack = np.vstack(roi_series)
+                mean_vals = stack.mean(axis=0)
+                std_vals = stack.std(axis=0)
+                lower = mean_vals - std_vals
+                upper = mean_vals + std_vals
+
                 if implot.begin_plot("Z-Plane Plot (Combined)", imgui.ImVec2(-1, 300)):
                     style_seaborn_dark()
-                    implot.setup_axes(
-                        "Z-Plane",
-                        "Mean Fluorescence",
-                        implot.AxisFlags_.none.value,
-                        implot.AxisFlags_.auto_fit.value,
-                    )
-                    implot.setup_axis_limits(implot.ImAxis_.x1.value, 1, len(z_vals))
+                    implot.setup_axes("Z-Plane", "Mean Fluorescence",
+                                      implot.AxisFlags_.none.value, implot.AxisFlags_.auto_fit.value)
+                    implot.setup_axis_limits(implot.ImAxis_.x1.value, float(z[0]), float(z[-1]))
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
 
-                    for i, roi in enumerate(self.num_rois):
+                    for i, ys in enumerate(roi_series):
+                        label = f"ROI {i + 1}##roi{i}"
                         implot.push_style_var(implot.StyleVar_.line_weight.value, 1)
-                        implot.push_style_color(implot.Col_.line.value, (0.6, 0.6, 0.6, 0.3))
-                        implot.plot_line(f"ROI {i + 1}", z_vals, roi)
+                        implot.push_style_color(implot.Col_.line.value, (0.6, 0.6, 0.6, 0.35))
+                        implot.plot_line(label, z, ys)
                         implot.pop_style_color()
                         implot.pop_style_var()
 
-                    # shaded mean ± std
-                    upper = mean_vals + std_vals
-                    lower = mean_vals - std_vals
                     implot.push_style_color(implot.Col_.fill.value, (0.2, 0.4, 0.8, 0.25))
-                    implot.plot_shaded("Mean ± Std", z_vals, lower, upper)
+                    implot.plot_shaded("Mean ± Std##band", z, lower, upper)
                     implot.pop_style_color()
 
-                    # bold mean line
                     implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
-                    implot.plot_line("Mean", z_vals, mean_vals)
+                    implot.plot_line("Mean##line", z, mean_vals)
                     implot.pop_style_var()
 
                     implot.end_plot()
+
         else:
             array_idx = self._selected_array
             stats = stats_list[array_idx]
@@ -1089,7 +1073,6 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_done = fraction >= 1.0
 
     def update_frame_apply(self):
-        """Update the frame_apply function of the image widget."""
         self.image_widget.frame_apply = {
             i: partial(self._combined_frame_apply, arr_idx=i)
             for i in range(len(self.image_widget.managed_graphics))
@@ -1107,7 +1090,7 @@ class PreviewDataWidget(EdgeWindow):
         return frame
 
     def _compute_zstats_single_roi(self, roi, fpath):
-        arr = imread(fpath);
+        arr = imread(fpath)
         arr.roi = roi
         if HAS_TORCH and isinstance(arr, torch.Tensor): arr = arr[:]
         if arr.ndim == 3: arr = arr[:, np.newaxis, :, :]
@@ -1116,9 +1099,8 @@ class PreviewDataWidget(EdgeWindow):
         self._tiff_lock = threading.Lock()
         for z in range(self.nz):
             with self._tiff_lock:
-                stack = arr[:, z]
+                stack = arr[::10, z]
                 if hasattr(stack, "astype"): stack = stack.astype(np.float32)
-                if hasattr(stack, "compute"): stack = stack.compute()
                 mean_img = np.mean(stack, axis=0)
                 std_img = np.std(stack, axis=0)
                 snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
@@ -1127,7 +1109,6 @@ class PreviewDataWidget(EdgeWindow):
                 stats["snr"].append(float(np.mean(snr_img)))
                 means.append(mean_img)
                 self._zstats_progress[roi] = (z + 1) / self.nz
-                print(f"Z-stats progress for ROI {roi}: {self._zstats_progress[roi]*100:.2f}%")
                 self._zstats_current_z[roi] = z
 
         self._zstats[roi] = stats

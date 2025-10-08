@@ -44,20 +44,6 @@ class FileDialog:
     def widget_enabled(self, value):
         self._widget_enabled = value
 
-    @property
-    def threading_enabled(self):
-        return self._threading_enabled
-
-    @threading_enabled.setter
-    def threading_enabled(self, value):
-        self._threading_enabled = value
-        # print a warning because
-        # this is generally done to fix a bug
-        if not value:
-            os.environ["MBO_THREADING_ENABLED"] = "0"
-        if value:
-            os.environ["MBO_THREADING_ENABLED"] = "1"
-
     def render(self):
         pad = hello_imgui.em_to_vec2(3, 1)
         with imgui_ctx.begin_child("#outer", size=imgui.ImVec2(-pad.x * 2, 0)):
@@ -122,22 +108,21 @@ class FileDialog:
 
                 imgui.begin_group()
                 _, self.split_rois = imgui.checkbox(
-                    "(Raw Scanimage only) Separate ScanImage mROI's", self.split_rois
+                    "(Raw Scanimage tiffs only) Separate ScanImage mROI's", self.split_rois
                 )
                 set_tooltip(
-                    "Split mROIs."
-                    "Leave unchecked to load all mROIs into a single, fused/stitched array."
-                    "Check to treat each mROI as a separate dataset, to merge later if desired."
+                    "View each mROI as a separate image in the data viewer. "
+                    "Does not affect data on disk, just for visualization. "
                 )
-                _, self.threading_enabled = imgui.checkbox(
-                    "Enable Threading", self.threading_enabled
-                )
-                set_tooltip(
-                    "Enable/disable threading for the data preview widget. "
-                    "Useful to turn this off if you experience issues with the widget or for debugging."
-                    "For issues, please report here: "
-                    "https://github.com/MillerBrainObservatory/mbo_utilities/issues/new"
-                )
+                # _, self.threading_enabled = imgui.checkbox(
+                #     "Enable Threading", self.threading_enabled
+                # )
+                # set_tooltip(
+                #     "Enable/disable threading for the data preview widget. "
+                #     "Useful to turn this off if you experience issues with the widget or for debugging."
+                #     "For issues, please report here: "
+                #     "https://github.com/MillerBrainObservatory/mbo_utilities/issues/new"
+                # )
                 _, self.widget_enabled = imgui.checkbox(
                     "Enable 'Data Preview' widget", self._widget_enabled
                 )
@@ -152,10 +137,8 @@ class FileDialog:
                     "Metadata Preview Only", self.metadata_only
                 )
                 set_tooltip(
-                    "Enable/disable the 'Data Preview' widget. "
-                    "This widget allows you to visualize projections,"
-                    " mean-subtraction,"
-                    " and preview scan-phase correction."
+                    "Open metadata for the selected files, if available."
+                    " This is experimental and may not work on all filetypes."
                 )
                 imgui.end_group()
 

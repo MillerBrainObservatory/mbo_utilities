@@ -112,8 +112,7 @@ def draw_saveas_progress(self):
 
 
 def draw_zstats_progress(self):
-    # if self.num_rois > 1:
-    for i in range(self.num_arrays):
+    for i in range(self.num_rois):
         roi_key = f"zstats_roi{i + 1}"
         roi_state = _progress_state[roi_key]
 
@@ -138,19 +137,3 @@ def draw_zstats_progress(self):
             done_text=f"Z-stats complete (ROI {i + 1})",
             done=done,
         )
-    # else:
-    #     key = "zstats"
-    #     state = _progress_state[key]
-    #
-    #     if state["done_cleared"]:
-    #         return
-    #
-    #     draw_progress(
-    #         key=key,
-    #         current_index=self._zstats_current_z,
-    #         total_count=self.nz,
-    #         percent_complete=self._zstats_progress,
-    #         running_text="Computing stats for plane(s)",
-    #         done_text="Z-stats complete",
-    #         done=self._zstats_done,
-    #     )

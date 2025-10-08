@@ -384,7 +384,7 @@ def run_plane_from_data(self, arr_idx):
     else:
         ind_x, ind_y = slice(None), slice(None)
 
-    if self.is_mbo_scan:
+    if not self.is_mbo_scan:
         # TODO
         raise NotImplementedError()
 
