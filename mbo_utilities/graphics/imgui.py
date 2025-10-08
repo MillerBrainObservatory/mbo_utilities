@@ -581,21 +581,9 @@ class PreviewDataWidget(EdgeWindow):
     def current_offset(self) -> list[float]:
         if not self.fix_phase:
             return [0.0 for _ in self.image_widget.data]
-        if not self.is_mbo_scan:
-            self.logger.critical(
-                "Scan-phase correction is only implemented for MBO scans. "
-                "Returning zero offsets."
-            )
-            return [0.0 for _ in self.image_widget.data]
         if all(hasattr(array, "offset") for array in self.image_widget.data):
-            self.logger.debug(
-                f"All arrays have offset attribute. Setting from array.offset"
-            )
             return [array.offset for array in self.image_widget.data]
-        else:
-            raise NotImplementedError(
-                "Scan-phase correction is only implemented for MBO scans."
-            )
+        return [0.0]
 
     @property
     def fix_phase(self):
@@ -610,8 +598,6 @@ class PreviewDataWidget(EdgeWindow):
                     arr.fix_phase = value
         else:
             self.update_frame_apply()
-
-        # force update
         self.image_widget.current_index = self.image_widget.current_index
 
     @property
@@ -1103,22 +1089,22 @@ class PreviewDataWidget(EdgeWindow):
         if (not self.is_mbo_scan) and self._fix_phase:
             frame = apply_scan_phase_offsets(frame, self.current_offset[arr_idx])
         if self.proj == "mean-sub" and self._zstats_done[arr_idx]:
-            z = self.image_widget.current_index.get("z", 0)
-            frame = frame - self._zstats_mean_scalar[arr_idx]
+            if self.proj == "mean-sub" and self._zstats_done[arr_idx]:
+                # select the mean for the current z index (assumes slider updates current_index)
+                z_idx = self.image_widget.current_index.get("z", 0)
+                frame = frame - self._zstats_mean_scalar[arr_idx][z_idx]
+            # frame = frame - self._zstats_mean_scalar[arr_idx]
         return frame
 
     def _compute_zstats_single_roi(self, roi, fpath):
         arr = imread(fpath)
         arr.roi = roi
-        if HAS_TORCH and isinstance(arr, torch.Tensor): arr = arr[:]
-        if arr.ndim == 3: arr = arr[:, np.newaxis, :, :]
 
         stats, means = {"mean": [], "std": [], "snr": []}, []
         self._tiff_lock = threading.Lock()
         for z in range(self.nz):
             with self._tiff_lock:
-                stack = arr[::10, z]
-                if hasattr(stack, "astype"): stack = stack.astype(np.float32)
+                stack = arr[::10, z].astype(np.float32) # Z, Y, X
                 mean_img = np.mean(stack, axis=0)
                 std_img = np.std(stack, axis=0)
                 snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
@@ -1126,18 +1112,20 @@ class PreviewDataWidget(EdgeWindow):
                 stats["std"].append(float(np.mean(std_img)))
                 stats["snr"].append(float(np.mean(snr_img)))
                 means.append(mean_img)
-                self._zstats_progress[roi] = (z + 1) / self.nz
-                self._zstats_current_z[roi] = z
+                self._zstats_progress[roi - 1] = (z + 1) / self.nz
+                self._zstats_current_z[roi - 1] = z
 
-        self._zstats[roi] = stats
-        self._zstats_means[roi] = np.stack(means)
-        self._zstats_mean_scalar[roi] = float(np.mean(self._zstats_means[roi]))
-        self._zstats_done[roi] = True
+        self._zstats[roi - 1] = stats
+        means_stack = np.stack(means)
+
+        self._zstats_means[roi - 1] = means_stack
+        self._zstats_mean_scalar[roi - 1] = means_stack.mean(axis=(1, 2))
+        self._zstats_done[roi - 1] = True
 
     def compute_zstats(self):
         if not self.image_widget or not self.image_widget.data:
             return
-        for roi in range(self.num_rois):
+        for roi in range(1, self.num_rois + 1):
             threading.Thread(
                 target=self._compute_zstats_single_roi,
                 args=(roi, self.fpath),

@@ -7,7 +7,7 @@ from typing import Sequence, Callable
 import numpy as np
 
 from . import log
-from ._writers import _try_generic_writers
+from ._writers import _try_generic_writers, _write_plane
 from .array_types import (
     Suite2pArray,
     H5Array,
@@ -190,6 +190,33 @@ def imwrite(
         )
     outpath.mkdir(exist_ok=True)
 
+    # TODO: integrade with numpy lazyarray
+    if isinstance(lazy_array, np.ndarray):
+        if not str(ext).lower().startswith(".tif"):
+            raise TypeError("Raw numpy arrays can only be written as TIFFs in imwrite()")
+
+        outpath = Path(outpath)
+        base_dir = outpath if outpath.is_dir() else outpath.parent
+        base_dir.mkdir(exist_ok=True)
+
+        plane_idx = kwargs.get("plane_index", 0)
+        roi_idx = kwargs.get("roi", None)
+        subname = f"plane{plane_idx:02d}_roi{roi_idx:02d}" if roi_idx is not None else f"plane{plane_idx:02d}"
+
+        save_dir = base_dir / subname
+        save_dir.mkdir(exist_ok=True)
+
+        filename = save_dir / f"{subname}.tif"
+        _write_plane(
+            data=lazy_array,
+            filename=filename,
+            overwrite=overwrite,
+            metadata=metadata,
+            debug=debug,
+            plane_index=plane_idx if lazy_array.ndim == 4 else None,
+        )
+        return filename
+
     if roi is not None:
         if not supports_roi(lazy_array):
             raise ValueError(
@@ -209,9 +236,6 @@ def imwrite(
         file_metadata = dict(lazy_array.metadata)
     else:
         file_metadata = {}
-
-    # Always ensure save_path is recorded
-    file_metadata["save_path"] = str(outpath.resolve())
 
     # Merge in user-supplied metadata
     if metadata is not None:
