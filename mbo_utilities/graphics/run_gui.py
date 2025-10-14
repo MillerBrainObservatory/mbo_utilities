@@ -82,6 +82,8 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
     data_array = imread(data_in, roi=roi_final)
     import fastplotlib as fpl
 
+    import fastplotlib as fpl
+
     if metadata_only:
         metadata = data_array.metadata
         if not metadata:
