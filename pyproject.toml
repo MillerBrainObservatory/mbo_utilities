@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.0.1"
+version = "2.0.2"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -36,7 +36,7 @@ dependencies = [
 	"torch",
 	"torchvision",
 	"mbo-suite3d>=0.0.4",
-	"lbm_suite2p_python>=2.0.1",
+	"lbm-suite2p-python>=2.0.1",
 	"mbo-fpl",
 	"glfw",
 	"wgpu[imgui]",
