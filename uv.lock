@@ -1655,7 +1655,7 @@ dependencies = [
 [[package]]
 name = "mbo-suite3d"
 version = "0.0.4"
-source = { git = "https://github.com/MillerBrainObservatory/suite3d.git?branch=main#80b6decc141281672f03bfe8cf0dbd82e39a0d83" }
+source = { git = "https://github.com/MillerBrainObservatory/suite3d.git?branch=main#3ac30eef83c453ba10b77615416d33e08c4306c3" }
 dependencies = [
     { name = "click" },
     { name = "dask" },

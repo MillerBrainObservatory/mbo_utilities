@@ -30,17 +30,24 @@ def draw_progress(
     now = time.time()
     state = _progress_state[key]
 
+    # if already cleared, never draw again
+    if state["done_cleared"]:
+        return
+
     if done and not state["done_shown_once"]:
         state["hide_time"] = now + 3
         state["is_showing_done"] = True
         state["done_shown_once"] = True
         state["done_cleared"] = False
 
-    elif not done:
+    if not done and not state["is_showing_done"]:
         state["hide_time"] = None
-        state["is_showing_done"] = False
         state["done_shown_once"] = False
-        state["done_cleared"] = False
+    # elif not done:
+    #     state["hide_time"] = None
+    #     state["is_showing_done"] = False
+    #     state["done_shown_once"] = False
+    #     state["done_cleared"] = False
 
     if state["is_showing_done"] and state["hide_time"] and now >= state["hide_time"]:
         state["hide_time"] = None
@@ -112,7 +119,8 @@ def draw_saveas_progress(self):
 
 
 def draw_zstats_progress(self):
-    for i in range(self.num_rois):
+    # if self.num_rois > 1:
+    for i in range(self.num_arrays):
         roi_key = f"zstats_roi{i + 1}"
         roi_state = _progress_state[roi_key]
 
@@ -140,6 +148,12 @@ def draw_zstats_progress(self):
 
 def draw_register_z_progress(self):
     key = "register_z"
+    state = _progress_state[key]
+
+    # fully skip if cleared
+    if state["done_cleared"]:
+        return
+
     done = self._register_z_done
     progress = self._register_z_progress
     msg = self._register_z_current_msg
@@ -161,5 +175,5 @@ def draw_register_z_progress(self):
             total_count=100,
             percent_complete=progress,
             running_text="Z-Registration",
-            custom_text=f"{msg} [{int(progress * 100)}%]",
+            custom_text=f"Z-Registration: {msg} [{int(progress * 100)}%]",
         )

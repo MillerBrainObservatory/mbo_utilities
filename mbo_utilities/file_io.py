@@ -558,6 +558,29 @@ def get_mbo_dirs() -> dict:
     }
 
 
+def get_last_savedir_path() -> Path:
+    """Return path to settings file tracking last saved folder."""
+    return Path.home().joinpath("mbo", "settings", "last_savedir.json")
+
+def load_last_savedir(default=None) -> Path:
+    """Load last saved directory path if it exists."""
+    f = get_last_savedir_path()
+    if f.is_file():
+        try:
+            path = Path(json.loads(f.read_text()).get("last_savedir", ""))
+            if path.exists():
+                return path
+        except Exception:
+            pass
+    return Path(default or Path().cwd())
+
+def save_last_savedir(path: Path):
+    """Persist the most recent save directory path."""
+    f = get_last_savedir_path()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"last_savedir": str(path)}))
+
+
 def _convert_range_to_slice(k):
     return slice(k.start, k.stop, k.step) if isinstance(k, range) else k
 

@@ -4,9 +4,6 @@ from pathlib import Path
 from typing import Literal
 import threading
 from functools import partial
-from dataclasses import dataclass, field
-
-from tqdm.auto import tqdm
 
 import imgui_bundle
 import numpy as np
@@ -25,6 +22,9 @@ from imgui_bundle import (
 from mbo_utilities.file_io import (
     MBO_SUPPORTED_FTYPES,
     get_mbo_dirs,
+    save_last_savedir,
+    get_last_savedir_path,
+    load_last_savedir
 )
 from mbo_utilities.array_types import MboRawArray
 from mbo_utilities.graphics._imgui import (
@@ -180,10 +180,11 @@ def draw_saveas_popup(parent):
         )
         imgui.same_line()
         if imgui.button("Browse"):
-            home = Path().home()
-            res = pfd.select_folder(str(home))
+            res = pfd.select_folder(str(parent._saveas_outdir))
             if res:
-                parent._saveas_outdir = res.result()
+                selected = Path(res.result())
+                parent._saveas_outdir = selected
+                save_last_savedir(selected)
 
         imgui.set_next_item_width(hello_imgui.em_size(25))
         _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_SUPPORTED_FTYPES)
@@ -339,7 +340,8 @@ def draw_saveas_popup(parent):
 
         if imgui.button("Save", imgui.ImVec2(100, 0)):
             if not parent._saveas_outdir:
-                parent._saveas_outdir = get_mbo_dirs()["data"].joinpath("data")
+                last_dir = load_last_savedir(default=Path().home())
+                parent._saveas_outdir = last_dir
             try:
                 save_planes = [p + 1 for p in parent._selected_planes]
                 parent._saveas_total = len(save_planes)
