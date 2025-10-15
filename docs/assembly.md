@@ -148,7 +148,7 @@ image_widget.close()
 
 The currently supported file extensions are `.tiff`, `.bin`, and `.hdf5`.
 
-```{code-cell} ipython3
+```{code-cell} text
 mbo.imwrite(
     scan,
     save_path,
