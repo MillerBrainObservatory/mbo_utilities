@@ -18,8 +18,8 @@ jobs:
           python-version: "3.12.9"
           enable-cache: true
 
-      - name: Sync --all-extras
-        run: GIT_LFS_SKIP_SMUDGE=1 uv sync
+      - name: Sync Dependencies
+        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --no-sources
 
       - name: Run tests
         run: uv run pytest tests
