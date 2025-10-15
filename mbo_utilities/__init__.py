@@ -1,4 +1,12 @@
+from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
+
+try:
+    __version__ = version("mbo_utilities")
+except PackageNotFoundError:
+    # fallback for editable installs
+    __version__ = "0.0.0"
+
 
 from .file_io import (
     get_files,
