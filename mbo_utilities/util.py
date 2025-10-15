@@ -1,64 +1,7 @@
-import sys
-import time
 from typing import Sequence
 
-from pathlib import Path
 import numpy as np
 from numpy.typing import ArrayLike
-from mbo_utilities.file_io import get_files
-
-
-def align_zplanes(raw_path: str | Path):
-    try:
-        repo_root = Path(__file__).resolve().parents[2] / "suite3d"
-        sys.path.insert(0, str(repo_root))
-        import suite3d
-        from suite3d import job
-    except ImportError:
-        raise ImportError(
-            "The suite3d package is required for this function. Please install it via pip"
-        )
-    from mbo_utilities.metadata import get_metadata
-
-    raw_path = Path(raw_path)
-    files = get_files(raw_path, str_contains=".tif")
-    job_path = raw_path.parent / f"{raw_path.name}_suite3d_plane_alignment"
-    metadata = get_metadata(raw_path)
-
-    params = {
-        # volume rate
-        "fs": metadata["frame_rate"],
-        "planes": np.arange(metadata["num_planes"]),
-        "n_ch_tif": metadata["num_planes"],
-        "lbm": True,
-        "subtract_crosstalk": False,
-        "n_proc_corr": metadata.get("n_proc_corr", 15),
-        "max_rigid_shift_pix": metadata.get("max_rigid_shift_pix", 150),
-        "3d_reg": metadata.get("3d_reg", True),
-        "gpu_reg": metadata.get("gpu_reg", True),
-        "block_size": metadata.get("block_size", [64, 64]),
-        "n_init_files": metadata.get("n_init_files", 1),
-        "init_n_frames": metadata.get("init_n_frames", 500),
-        "tau": metadata.get("tau", 0.7),
-        "fuse_strips": metadata.get("fuse_strips", True),
-    }
-
-    tifs = files
-    job = job.Job(
-        str(job_path),
-        "v2_1-init-file_500-init-frames_gpu",
-        create=True,
-        overwrite=True,
-        verbosity=0,
-        tifs=tifs,
-        params=params,
-    )
-
-    start = time.time()
-    job.run_init_pass()
-    end = time.time()
-    print(f"Initialization pass took {end - start:.2f} seconds")
-    return job_path
 
 
 def smooth_data(data, window_size=5):
