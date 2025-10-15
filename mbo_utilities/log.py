@@ -1,25 +1,40 @@
 import os, logging
 
-# this ic import convenciton is from their readme
 try:
     from icecream import ic
-except ImportError:  # Graceful fallback if IceCream isn't installed.
-    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
-    install = None
+except ImportError:
+    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)
 
 _debug = bool(int(os.getenv("MBO_DEBUG", "0")))
 _level = logging.DEBUG if _debug else logging.INFO
 
-_h = logging.StreamHandler()
 _root = logging.getLogger("mbo")
 _root.setLevel(_level)
-_root.addHandler(_h)
 _root.propagate = False
+
+_h = logging.StreamHandler()
+_root.addHandler(_h)
+
+_extra_handlers: list[logging.Handler] = []
+
+
+def attach(handler: logging.Handler):
+    """Attach a global handler (e.g. GUI log viewer)."""
+    _extra_handlers.append(handler)
+    for name, logger in logging.Logger.manager.loggerDict.items():
+        if isinstance(logger, logging.Logger) and name.startswith("mbo."):
+            logger.addHandler(handler)
 
 
 def get(subname: str | None = None) -> logging.Logger:
     name = "mbo" if subname is None else f"mbo.{subname}"
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    logger.setLevel(_level)
+    logger.propagate = False
+    for h in _extra_handlers:
+        if h not in logger.handlers:
+            logger.addHandler(h)
+    return logger
 
 
 def enable(*subs):
@@ -32,28 +47,9 @@ def disable(*subs):
         get(s).disabled = True
 
 
-for sub in os.getenv("MBO_ENABLE", "").split(","):
-    if sub:
-        enable(sub)
-for sub in os.getenv("MBO_DISABLE", "").split(","):
-    if sub:
-        disable(sub)
-
-
-def get_package_loggers() -> list[str]:
-    """Get all loggers that are part of the 'mbo' package."""
+def get_package_loggers():
     return [
-        name
-        for name in logging.Logger.manager.loggerDict
+        name for name in logging.Logger.manager.loggerDict
         if name.startswith("mbo.")
-        and isinstance(logging.Logger.manager.loggerDict[name], logging.Logger)
-    ]
-
-
-def get_all_loggers() -> list[str]:
-    """Get all loggers that are currently enabled."""
-    return [
-        name
-        for name, logger in logging.Logger.manager.loggerDict.items()
-        if isinstance(logger, logging.Logger) and not logger.disabled
+           and isinstance(logging.Logger.manager.loggerDict[name], logging.Logger)
     ]
