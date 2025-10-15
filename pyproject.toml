@@ -87,8 +87,8 @@ docs = [
 	"pygfx",
 ]
 
-[tool.uv.sources]
-mbo-fpl = { path = "../mbo_fastplotlib" }
+# [tool.uv.sources]
+# mbo-fpl = { path = "../mbo_fastplotlib" }
 
 [tool.ruff]
 line-length = 88
