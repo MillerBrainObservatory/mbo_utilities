@@ -84,7 +84,7 @@ docs = [
 
 [tool.uv.sources]
 mbo-fpl = { path = "../mbo_fastplotlib"}
-mbo-suite3d = { path = "../mbo-suite3d"}
+mbo-suite3d = { path = "../suite3d"}
 
 [tool.ruff]
 line-length = 88
