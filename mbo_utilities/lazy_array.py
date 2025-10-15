@@ -374,7 +374,6 @@ def imread(
                 paths = zarrs
             else:
                 paths = [Path(f) for f in p.glob("*") if f.is_file()]
-            # paths = [Path(f) for f in get_files(p)]
         else:
             paths = [p]
     elif isinstance(inputs, (list, tuple)):
