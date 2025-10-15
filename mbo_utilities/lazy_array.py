@@ -282,8 +282,12 @@ def imwrite(
                     s3d_job_dir = outpath
                 else:
                     print(f"No s3d-job detected, preprocessing data.")
+                    # s3d_params = kwargs.get("s3d_params", {})
                     s3d_job_dir = register_zplanes_s3d(
-                        lazy_array.filenames, file_metadata, outpath
+                        filenames=lazy_array.filenames,
+                        metadata=file_metadata,
+                        outpath=outpath,
+                        progress_callback=progress_callback
                     )
                     print(f"Registered z-planes, results saved to {s3d_job_dir}.")
 

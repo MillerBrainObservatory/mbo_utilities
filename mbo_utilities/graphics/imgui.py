@@ -40,6 +40,7 @@ from mbo_utilities.graphics._widgets import (
 from mbo_utilities.graphics.progress_bar import (
     draw_zstats_progress,
     draw_saveas_progress,
+    draw_register_z_progress,
 )
 from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
 from mbo_utilities.lazy_array import imread, imwrite
@@ -76,16 +77,6 @@ USER_PIPELINES = ["suite2p"]
 def _save_as_worker(path, **imwrite_kwargs):
     data = imread(path, roi=imwrite_kwargs.pop("roi", None))
     imwrite(data, **imwrite_kwargs)
-
-
-@dataclass
-class SaveStatus:
-    # progressbar
-    progress: float = 0.0
-    plane: int | None = None
-    message: str = ""
-    logs: dict = field(default_factory=dict)
-
 
 def draw_menu(parent):
     # (accessible from the "Tools" menu)
@@ -543,6 +534,10 @@ class PreviewDataWidget(EdgeWindow):
         self._auto_update = False
         self._proj = "mean"
         self._register_z = False
+        self._register_z_progress = 0.0
+        self._register_z_done = False
+        self._register_z_current_msg = ""
+        self._register_z_total = 1  # dummy
 
         self._selected_pipelines = None
         self._selected_array = 0
@@ -578,6 +573,23 @@ class PreviewDataWidget(EdgeWindow):
         else:
             title = f"Filepath: {Path(self.fpath).stem}"
         self.image_widget.figure.canvas.set_title(str(title))
+
+    def gui_progress_callback(self, frac, meta=None):
+        """
+        Handles both saving progress (z-plane) and Suite3D registration progress.
+        The `meta` parameter may be a plane index (int) or message (str).
+        """
+        if isinstance(meta, (int, np.integer)):
+            # This is standard save progress
+            self._saveas_progress = frac
+            self._saveas_current_index = meta
+            self._saveas_done = frac >= 1.0
+
+        elif isinstance(meta, str):
+            # This is Suite3D progress message
+            self._register_z_progress = frac
+            self._register_z_current_msg = meta
+            self._register_z_done = frac >= 1.0
 
     @property
     def register_z(self):
@@ -1071,7 +1083,9 @@ class PreviewDataWidget(EdgeWindow):
             imgui.separator()
 
         imgui.separator()
+
         draw_zstats_progress(self)
+        draw_register_z_progress(self)
         draw_saveas_progress(self)
 
     def get_raw_frame(self) -> tuple[ndarray, ...]:
@@ -1079,12 +1093,6 @@ class PreviewDataWidget(EdgeWindow):
         t = idx.get("t", 0)
         z = idx.get("z", 0)
         return tuple(ndim_to_frame(arr, t, z) for arr in self.image_widget.data)
-
-    def gui_progress_callback(self, fraction, current_plane):
-        """Callback for save_as progress updates."""
-        self._saveas_current_index = current_plane
-        self._saveas_progress = fraction
-        self._saveas_done = fraction >= 1.0
 
     def update_frame_apply(self):
         self.image_widget.frame_apply = {
@@ -1103,7 +1111,6 @@ class PreviewDataWidget(EdgeWindow):
                 # select the mean for the current z index (assumes slider updates current_index)
                 z_idx = self.image_widget.current_index.get("z", 0)
                 frame = frame - self._zstats_mean_scalar[arr_idx][z_idx]
-            # frame = frame - self._zstats_mean_scalar[arr_idx]
         return frame
 
     def _compute_zstats_single_roi(self, roi, fpath):

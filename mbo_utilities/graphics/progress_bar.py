@@ -137,3 +137,29 @@ def draw_zstats_progress(self):
             done_text=f"Z-stats complete (ROI {i + 1})",
             done=done,
         )
+
+def draw_register_z_progress(self):
+    key = "register_z"
+    done = self._register_z_done
+    progress = self._register_z_progress
+    msg = self._register_z_current_msg
+
+    if done:
+        draw_progress(
+            key=key,
+            current_index=int(progress * 100),
+            total_count=100,
+            percent_complete=progress,
+            running_text="Z-Registration",
+            done_text="Z-Registration Complete!",
+            done=True,
+        )
+    elif 0.0 < progress < 1.0:
+        draw_progress(
+            key=key,
+            current_index=int(progress * 100),
+            total_count=100,
+            percent_complete=progress,
+            running_text="Z-Registration",
+            custom_text=f"{msg} [{int(progress * 100)}%]",
+        )

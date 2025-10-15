@@ -90,7 +90,12 @@ class LazyArrayProtocol:
 
 
 
-def register_zplanes_s3d(filenames, metadata, outpath=None, progress_callback=None) -> Path | None:
+def register_zplanes_s3d(
+        filenames,
+        metadata,
+        outpath=None,
+        progress_callback=None
+) -> Path | None:
     # these are heavy imports, lazy import for now
     try:
         from suite3d.job import Job  # noqa
@@ -165,11 +170,9 @@ def register_zplanes_s3d(filenames, metadata, outpath=None, progress_callback=No
         params=params,
         progress_callback=progress_callback,
     )
+    job._report(0.01, "Launching Suite3D job...")
     print("Running Suite3D job...")
-    start = time.time()
     job.run_init_pass()
-    end = time.time()
-    print(f"Suite 3D init pass done in {end - start:.1f} seconds.")
     out_dir = job_path / f"s3d-{job_id}"
     metadata["s3d-job"] = str(out_dir)
     metadata["s3d-params"] = params
