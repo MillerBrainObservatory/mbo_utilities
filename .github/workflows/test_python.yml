@@ -18,6 +18,10 @@ jobs:
           python-version: "3.12.9"
           enable-cache: true
 
+      - name: Remove local sources for CI
+        run: |
+          sed -i '/^\[tool\.uv\.sources\]/,$d' pyproject.toml
+
       - name: Sync Dependencies
         run: GIT_LFS_SKIP_SMUDGE=1 uv sync --no-sources
 
