@@ -1,31 +1,15 @@
+import time
+from pathlib import Path
+
 import numpy as np
-from mbo_utilities.file_io import get_files, read_scan
-from mbo_utilities.graphics.imgui import PreviewDataWidget
-from imgui_bundle import imgui, portable_file_dialogs as pfd, hello_imgui, immapp
-from wgpu.utils.imgui import ImguiRenderer, Stats
-import fastplotlib as fpl
-from rendercanvas.auto import RenderCanvas
+from mbo_utilities.lazy_array import imread
+from mbo_utilities.file_io import merge_zarr_rois, group_plane_rois
+# from mbo_utilities.graphics.imgui import PreviewDataWidget
+# import fastplotlib as fpl
 
-canvas = RenderCanvas()
+fpath = Path(r"D:\demo\regz")
+start = time.time()
+merge_zarr_rois(fpath, output_dir=fpath.parent / f"{fpath.stem}_merged")
+print(f"Time to complete: {time.time() - start:.2f} seconds")
 
-fpath = "/home/flynn/lbm_data/raw"
-data = read_scan(fpath)
-nx, ny = data.shape[-2:]
-iw = fpl.ImageWidget(
-    data=data,
-    histogram_widget=False,
-    figure_kwargs={
-        "size": (nx * 2, ny * 2),
-        "canvas": canvas,
-    },
-    graphic_kwargs={"vmin": data.min(), "vmax": data.max()},
-    window_funcs={"t": (np.mean, 1)},
-)
-edge_gui = PreviewDataWidget(
-    iw=iw,
-    fpath=fpath,
-)
-iw.figure.add_gui(edge_gui)
-iw.show()
-
-fpl.loop.run()
+x = 5

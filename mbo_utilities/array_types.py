@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import time
+from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any, List, Sequence
 import fastplotlib as fpl
 import h5py
 import numpy as np
+import psutil
 import tifffile
 import zarr
 from dask import array as da
@@ -24,7 +26,7 @@ from mbo_utilities.file_io import (
     _multi_tiff_to_fsspec,
     HAS_ZARR,
     _convert_range_to_slice,
-    expand_paths,
+    expand_paths, files_to_dask,
 )
 from mbo_utilities.metadata import get_metadata, clean_scanimage_metadata
 from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, bidir_phasecorr
@@ -37,11 +39,6 @@ logger = log.get("array_types")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
-
-def _normalize_index(idx):
-    if isinstance(idx, list):
-        return np.asarray(idx)
-    return idx
 
 class LazyArrayProtocol:
     """
@@ -93,7 +90,7 @@ class LazyArrayProtocol:
 
 
 
-def register_zplanes_s3d(filenames, metadata, outpath=None) -> Path | None:
+def register_zplanes_s3d(filenames, metadata, outpath=None, progress_callback=None) -> Path | None:
     # these are heavy imports, lazy import for now
     try:
         from suite3d.job import Job  # noqa
@@ -166,6 +163,7 @@ def register_zplanes_s3d(filenames, metadata, outpath=None) -> Path | None:
         verbosity=-1,
         tifs=filenames,
         params=params,
+        progress_callback=progress_callback,
     )
     print("Running Suite3D job...")
     start = time.time()
@@ -313,14 +311,6 @@ def _safe_get_metadata(path: Path) -> dict:
         return get_metadata(path)
     except Exception:
         return {}
-
-
-def _safe_load_s2p(path_or_ops, key):
-    try:
-        return Suite2pArray(path_or_ops[key])
-    except Exception as e:
-        print(f"Could not load {key}: {e}")
-        return None
 
 
 @dataclass
@@ -538,7 +528,6 @@ class H5Array:
 class MBOTiffArray:
     filenames: list[Path]
     _chunks: tuple[int, ...] | dict | None = None
-    roi: Any = None
     _dask_array: da.Array = field(default=None, init=False, repr=False)
 
     @property
@@ -549,25 +538,10 @@ class MBOTiffArray:
     def chunks(self, value):
         self._chunks = value
 
-    def _build_dask_array(self) -> da.Array:
-        if len(self.filenames) == 1:
-            arr = tifffile.memmap(self.filenames[0], mode="r")
-            return da.from_array(arr, chunks=self.chunks)
-
-        planes = []
-        for p in self.filenames:
-            mm = tifffile.memmap(p, mode="r")
-            if mm.ndim == 3:
-                mm = mm[None, ...]
-            planes.append(da.from_array(mm, chunks=self.chunks))
-
-        dstack = da.concatenate(planes, axis=0)  # (Z, T, Y, X)
-        return dstack.transpose(1, 0, 2, 3)  # (T, Z, Y, X)
-
     @property
     def dask(self) -> da.Array:
         if self._dask_array is None:
-            self._dask_array = self._build_dask_array()
+            self._dask_array = files_to_dask(self.filenames)
         return self._dask_array
 
     def __getitem__(self, key: int | slice | tuple[int, ...]) -> np.ndarray:
@@ -594,26 +568,45 @@ class MBOTiffArray:
             return {}
         return get_metadata(self.filenames[0])
 
+
     def imshow(self, **kwargs) -> fpl.ImageWidget:
+
+        from lbm_suite2p_python import derive_tag_from_filename
+        tags = [derive_tag_from_filename(f) for f in self.filenames]
+
         if len(self.filenames) == 1:
-            data = tifffile.memmap(self.filenames[0], mode="r")
+            with tifffile.TiffFile(self.filenames[0]) as tif:
+                # read only first or middle frame (avoid full load)
+                n_pages = len(tif.pages)
+                frame_idx = kwargs.get("frame", n_pages // 2)
+                data = tif.pages[frame_idx].asarray()
+            tag = tags[0]
         else:
+            # sample one frame from the dask array lazily
+            start = time.time()
             data = self.dask
+            end = time.time()
+            print(f"Dask array access took {end - start:.2f} seconds")
+            tag = "_".join(tags)
+
         histogram_widget = kwargs.get("histogram_widget", True)
-        figure_kwargs = kwargs.get(
-            "figure_kwargs",
-            {
-                "size": (800, 1000),
-            },
-        )
+        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
         window_funcs = kwargs.get("window_funcs", None)
-        return fpl.ImageWidget(
+
+        start_widget = time.time()
+
+        widget = fpl.ImageWidget(
             data=data,
             histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,  # "canvas": canvas},
+            figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": -300, "vmax": 4000},
             window_funcs=window_funcs,
         )
+        end_widget = time.time()
+        print(f"ImageWidget creation took {end_widget - start_widget:.2f} seconds")
+
+        widget.figure.title = f"{tag} (frame {kwargs.get('frame', 'auto')})"
+        return widget
 
     def _imwrite(
         self,
@@ -1477,11 +1470,13 @@ class ZarrArray:
         self,
         filenames: str | Path | Sequence[str | Path],
         compressor: str | None = "default",
+        rois: list[int] | int | None = None,
     ):
         if isinstance(filenames, (str, Path)):
             filenames = [filenames]
 
         self.filenames = [Path(p).with_suffix(".zarr") for p in filenames]
+        self.rois = rois
         for p in self.filenames:
             if not p.exists():
                 raise FileNotFoundError(f"No zarr store at {p}")

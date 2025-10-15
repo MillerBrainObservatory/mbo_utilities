@@ -74,8 +74,6 @@ USER_PIPELINES = ["suite2p"]
 
 
 def _save_as_worker(path, **imwrite_kwargs):
-    # print kwargs
-    print(f"Saving with kwargs: {imwrite_kwargs}")
     data = imread(path, roi=imwrite_kwargs.pop("roi", None))
     imwrite(data, **imwrite_kwargs)
 
@@ -257,6 +255,9 @@ def draw_saveas_popup(parent):
         parent._overwrite = checkbox_with_tooltip(
             "Overwrite", parent._overwrite, "Replace any existing output files."
         )
+        parent._register_z = checkbox_with_tooltip(
+            "Register Z-Planes Axially", parent._register_z, "Register adjacent z-planes to each other using Suite3D."
+        )
         fix_phase_changed, fix_phase_value = imgui.checkbox(
             "Fix Scan Phase", parent._fix_phase
         )
@@ -373,8 +374,8 @@ def draw_saveas_popup(parent):
                     "ext": parent._ext,
                     "target_chunk_mb": parent._saveas_chunk_mb,
                     "use_fft": parent._use_fft,
-                    "progress_callback": lambda frac,
-                    current_plane: parent.gui_progress_callback(frac, current_plane),
+                    "register_z": parent._register_z,
+                    "progress_callback": lambda frac, current_plane: parent.gui_progress_callback(frac, current_plane),
                 }
                 parent.logger.info(f"Saving planes {save_planes}")
                 parent.logger.info(
@@ -541,6 +542,7 @@ class PreviewDataWidget(EdgeWindow):
         self._border = 3
         self._auto_update = False
         self._proj = "mean"
+        self._register_z = False
 
         self._selected_pipelines = None
         self._selected_array = 0
@@ -576,6 +578,14 @@ class PreviewDataWidget(EdgeWindow):
         else:
             title = f"Filepath: {Path(self.fpath).stem}"
         self.image_widget.figure.canvas.set_title(str(title))
+
+    @property
+    def register_z(self):
+        return self._register_z
+
+    @register_z.setter
+    def register_z(self, value):
+        self._register_z = value
 
     @property
     def current_offset(self) -> list[float]:

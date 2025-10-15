@@ -83,8 +83,9 @@ docs = [
 ]
 
 [tool.uv.sources]
-mbo-fpl = { path = "../mbo_fastplotlib"}
-mbo-suite3d = { path = "../suite3d"}
+lbm_suite2p_python = { git = "https://github.com/MillerBrainObservatory/LBM-Suite2p-Python.git", branch = "master"}
+mbo-fpl = { git = "https://github.com/MillerBrainObservatory/mbo_fastplotlib.git", branch = "main"}
+mbo-suite3d = { git = "https://github.com/MillerBrainObservatory/suite3d.git", branch = "main"}
 
 [tool.ruff]
 line-length = 88
@@ -119,7 +120,5 @@ exclude_lines = [
 	"raise NotImplementedError()"
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["mbo_utilities*", "pollen*"]
-
+[tool.setuptools]
+packages = { find = { where = ["."], include = ["mbo_utilities*", "pollen*"] } }

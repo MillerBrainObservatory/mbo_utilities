@@ -1,5 +1,4 @@
 from importlib.metadata import version, PackageNotFoundError
-from pathlib import Path
 
 try:
     __version__ = version("mbo_utilities")
@@ -10,14 +9,13 @@ except PackageNotFoundError:
 
 from .file_io import (
     get_files,
-    npy_to_dask,
+    files_to_dask,
     expand_paths,
     get_mbo_dirs,
     load_ops,
     write_ops,
     get_plane_from_filename,
 )
-from ._parsing import _normalize_file_url
 from .plot_util import save_png, save_mp4
 
 from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
@@ -31,14 +29,6 @@ from .util import (
 from .lazy_array import imread, imwrite
 
 
-# if is_imgui_installed():
-#     from .graphics import run_gui
-# else:
-#     raise ImportError(
-#         f"This should be installed with mbo_utilities. Please report this [here](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or on slack."
-#     )
-
-
 __all__ = [
     # file_io
     "imread",
@@ -46,7 +36,7 @@ __all__ = [
     # "run_gui",
     "get_mbo_dirs",
     "scanreader",
-    "npy_to_dask",
+    "files_to_dask",
     "get_files",
     "subsample_array",
     "load_ops",

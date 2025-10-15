@@ -18,6 +18,7 @@ from .array_types import (
     ZarrArray,
     register_zplanes_s3d,
 )
+from .file_io import derive_tag_from_filename
 from .metadata import is_raw_scanimage, has_mbo_metadata
 from .roi import supports_roi
 
@@ -43,7 +44,8 @@ _ARRAY_TYPE_KWARGS = {
         "upsample",
         "max_offset",
     },
-    MBOTiffArray: set(),  # accepts no kwargs
+    ZarrArray: {"filenames", "compressor", "rois"},
+    MBOTiffArray: {"filenames", "_chunks"},
     Suite2pArray: set(),  # accepts no kwargs
     H5Array: {"dataset"},
     TiffArray: set(),
@@ -422,6 +424,8 @@ def imread(
         return H5Array(first)
 
     if first.suffix == ".zarr":
+        tag = derive_tag_from_filename(first)
+
         # TODO: benchmark - save as volumetric in a single .zarr store?
         # Case 1: nested zarrs inside
         sub_zarrs = list(first.glob("*.zarr"))
