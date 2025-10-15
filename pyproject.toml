@@ -56,11 +56,6 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
 all = [
-	# "mbo-fpl",
-	# "glfw",
-	# "wgpu[imgui]",
-	# "jupyter_rfb>=0.5.1",
-	# "mbo-suite3d>=0.0.4",
 ]
 docs = [
 	"sphinx>=6.1.3",
@@ -87,8 +82,9 @@ docs = [
 	"pygfx",
 ]
 
-# [tool.uv.sources]
-# mbo-fpl = { path = "../mbo_fastplotlib" }
+[tool.uv.sources]
+mbo-fpl = { path = "../mbo_fastplotlib"}
+mbo-suite3d = { path = "../mbo-suite3d"}
 
 [tool.ruff]
 line-length = 88
