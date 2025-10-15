@@ -61,62 +61,6 @@ def align_zplanes(raw_path: str | Path):
     return job_path
 
 
-def align_images_zstack(images, mode="trim"):
-    """
-    Align a list of 2D images to a common shape for creating a Z-stack. Helpful for e.g. suite2p max-images that are cropped
-    to different x/y sizes.
-
-    This function takes a list of 2D NumPy arrays and adjusts their sizes so that they all share
-    the same dimensions. Two alignment modes are provided:
-      - "trim": Crop each image to the smallest height and width among the images.
-      - "pad": Pad each image with zeros to the size of the largest height and width among the images.
-
-    Parameters
-    ----------
-    images : list of numpy.ndarray
-        A list of 2D images to be aligned.
-    mode : str, optional
-        The method used for alignment. Must be either "trim" (default) or "pad".
-
-    Returns
-    -------
-    numpy.ndarray
-        A 3D NumPy array (Z-stack) of shape (N, H, W), where N is the number of images and H and W are
-        the common height and width determined by the alignment mode.
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> img1 = np.random.rand(400, 500)
-    >>> img2 = np.random.rand(450, 480)
-    >>> zstack = align_images_zstack([img1, img2], mode="trim")
-    >>> zstack.shape
-    (2, 400, 480)
-    """
-    shapes = np.array([img.shape for img in images])
-
-    if mode == "trim":
-        target_shape = np.min(shapes, axis=0)
-        aligned_images = [img[: target_shape[0], : target_shape[1]] for img in images]
-
-    elif mode == "pad":
-        target_shape = np.max(shapes, axis=0)
-        aligned_images = [
-            np.pad(
-                img,
-                (
-                    (0, target_shape[0] - img.shape[0]),
-                    (0, target_shape[1] - img.shape[1]),
-                ),
-                mode="constant",
-            )
-            for img in images
-        ]
-    else:
-        raise ValueError("Invalid mode. Choose 'trim' or 'pad'.")
-    return np.stack(aligned_images, axis=0)
-
-
 def smooth_data(data, window_size=5):
     """
     Smooth 1D data using a moving average filter.
