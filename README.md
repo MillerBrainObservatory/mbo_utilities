@@ -56,9 +56,25 @@ And replace `12` with the major CUDA version number, in this case `13`:
 
 `pip install cupy-cuda13x`
 
-Having the wrong `cupy` version will lead to the following error message:
+## Troubleshooting
 
-`RuntimeError: CuPy failed to load nvrtc64_120_0.dll: FileNotFoundError: Could not find module 'nvrtc64_120_0.dll' (or one of its dependencies). Try using the full path with constructor syntax.`
+### Wrong PyTorch or CuPy version
+
+``` bash
+OSError: [WinError 1114] A dynamic link library (DLL) initialization routine failed.
+Error loading "path\to\.venv\Lib\site-packages\torch\lib\c10.dll" or one of its dependencies.
+```
+
+This error means you have the wrong version of pytorch install for your CUDA version.
+
+You can run `uv pip uninstall torch` and `uv pip install torch --torch-backend=auto`.
+If not using `uv`, follow instructions here: https://pytorch.org/get-started/locally/.
+
+``` bash
+RuntimeError: CuPy failed to load nvrtc64_120_0.dll: FileNotFoundError: Could not find module 'nvrtc64_120_0.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+```
+
+Having the wrong `cupy` version will lead to the following error message.
 
 ---
 
@@ -66,7 +82,7 @@ Having the wrong `cupy` version will lead to the following error message:
 
 This pipeline makes use of several open-source libraries:
 
-- [Suite3D](https://github.com/alihaydaroglu/suite3d)
 - [suite2p](https://github.com/MouseLand/suite2p)
 - [rastermap](https://github.com/MouseLand/rastermap)
+- [Suite3D](https://github.com/alihaydaroglu/suite3d)
 - [scanreader](https://github.com/atlab/scanreader)
