@@ -1,14 +1,15 @@
+import pathlib
+from pathlib import Path
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
+
 from mbo_utilities import get_mbo_dirs
 from mbo_utilities.graphics._widgets import set_tooltip
-from mbo_utilities.lazy_array import imread, imwrite
 
 try:
     from lbm_suite2p_python.run_lsp import run_plane
@@ -286,7 +287,7 @@ def draw_section_suite2p(self):
         imgui.input_text("Save folder", self._saveas_outdir, 256)
         imgui.same_line()
         if imgui.button("Browse"):
-            home = Path().home()
+            home = pathlib.Path().home()
             res = pfd.select_folder(str(home))
             if res:
                 self._saveas_outdir = res.result()
@@ -337,113 +338,168 @@ def draw_section_suite2p(self):
                             self._show_green_text = True
 
         imgui.pop_item_width()
+        imgui.spacing()
+        if imgui.button("Load Suite2p Masks"):
+            try:
+                import numpy as np
+                from pathlib import Path
+
+                res = pfd.select_folder(self._saveas_outdir or str(Path().home()))
+                if res:
+                    self.s2p_dir = res.result()
+
+                s2p_dir = Path(self._saveas_outdir)
+                ops = np.load(next(s2p_dir.rglob("ops.npy")), allow_pickle=True).item()
+                stat = np.load(next(s2p_dir.rglob("stat.npy")), allow_pickle=True)
+                iscell = np.load(next(s2p_dir.rglob("iscell.npy")), allow_pickle=True)[:, 0].astype(bool)
+
+                Ly, Lx = ops["Ly"], ops["Lx"]
+                mask_rgb = np.zeros((Ly, Lx, 3), dtype=np.float32)
+
+                # build ROI overlay (green for accepted cells)
+                for s, ok in zip(stat, iscell):
+                    if not ok:
+                        continue
+                    ypix, xpix, lam = s["ypix"], s["xpix"], s["lam"]
+                    lam = lam / lam.max()
+                    mask_rgb[ypix, xpix, 1] = np.maximum(mask_rgb[ypix, xpix, 1], lam)  # G channel
+
+                self._mask_color_strength = 0.5
+                self._mask_rgb = mask_rgb
+                self._mean_img = ops["meanImg"].astype(np.float32)
+                self._show_mask_slider = True
+
+                combined = self._mean_img[..., None].repeat(3, axis=2)
+                combined = combined / combined.max()
+                combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
+                self.image_widget.managed_graphics[1].data = combined
+                self.logger.info(f"Loaded and displayed {iscell.sum()} Suite2p masks.")
+
+            except Exception as e:
+                self.logger.error(f"Mask load failed: {e}")
+
+        if getattr(self, "_show_mask_slider", False):
+            imgui.separator_text("Mask Overlay")
+            changed, self._mask_color_strength = imgui.slider_float(
+                "Color Strength", self._mask_color_strength, 0.0, 2.0
+            )
+            if changed:
+                combined = self._mean_img[..., None].repeat(3, axis=2)
+                combined = combined / combined.max()
+                combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
+                self.image_widget.managed_graphics[1].data = combined
+
 
 
 def run_process(self):
     """Runs the selected processing pipeline."""
-    if self._current_pipeline == "suite2p":
-        self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
-        if not HAS_LSP:
-            self.logger.warning(
-                "error",
-                "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline.",
-            )
-            self._install_error = True
-            return
+    if self._current_pipeline != "suite2p":
+        if self._current_pipeline == "masknmf":
+            self.logger.info("Running MaskNMF pipeline (not yet implemented).")
+        else:
+            self.logger.error(f"Unknown pipeline selected: {self._current_pipeline}")
+        return
+
+    self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
+    if not HAS_LSP:
+        self.logger.warning("lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline."
+                            "`uv pip install lbm_suite2p_python`",)
+        self._install_error = True
+        return
+
     if not self._install_error:
         for i, arr in enumerate(self.image_widget.data):
             kwargs = {"self": self, "arr_idx": i}
-            threading.Thread(target=run_plane_from_data, kwargs=kwargs).start()
-    elif self._current_pipeline == "masknmf":
-        self.logger.info("Running MaskNMF pipeline (not yet implemented).")
-    else:
-        self.logger.error(f"Unknown pipeline selected: {self._current_pipeline}")
+            threading.Thread(target=run_plane_from_data, kwargs=kwargs, daemon=True).start()
 
 
 def run_plane_from_data(self, arr_idx):
     if not HAS_LSP:
-        self.logger.error(
-            "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline."
-        )
+        self.logger.error("lbm_suite2p_python is not installed.")
         self._install_error = True
         return
 
     arr = self.image_widget.data[arr_idx]
     data_shape = arr.shape
     dims = self.image_widget.current_index
-    current_z = dims["z"] if "z" in dims else 0
+    current_z = dims.get("z", 0)
 
-    # region selection
     if arr_idx in self._rectangle_selectors and self._rectangle_selectors[arr_idx]:
         ind_x, ind_y = self._rectangle_selectors[arr_idx].get_selected_indices()
     else:
         ind_x, ind_y = slice(None), slice(None)
 
-    if not self.is_mbo_scan:
-        raise NotImplementedError("Only MBO Scan types supported for now.")
+    base_out = Path(self._saveas_outdir) if getattr(self, "_saveas_outdir", None) else None
+    if not base_out:
+        from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
+        # find last saved dir
+        last_savedir = get_last_savedir_path()
+        if last_savedir:
+            base_out = Path(last_savedir)
+        else:
+            base_out = get_mbo_dirs()["data"]
+    if not base_out.exists():
+        base_out.mkdir(exist_ok=True)
 
-    # output path
-    if not self._saveas_outdir:
-        current_time_fmt = time.strftime("%Y%m%d_%H%M%S")
-        self._saveas_outdir = get_mbo_dirs()["data"].joinpath(
-            f"{current_time_fmt}_{self._current_pipeline}_output"
-        )
-    out_dir = Path(self._saveas_outdir)
-    out_dir.mkdir(exist_ok=True)
+    if len(self.image_widget.managed_graphics) > 1:
+        plane_dir = base_out / f"plane{current_z+1:02d}_roi{arr_idx+1:02d}"
+        roi = arr_idx + 1
+        plane = current_z + 1
+    else:
+        plane_dir = base_out / f"plane{current_z+1:02d}"
+        roi = None
+        plane = current_z + 1
 
-    # extract data for this ROI/zplane
+    ops_path = plane_dir / "ops.npy"
+
     if len(data_shape) == 4:
         data = arr[:, current_z, ind_x, ind_y]
     elif len(data_shape) == 3:
         data = arr[:, ind_x, ind_y]
     else:
         data = arr[ind_x, ind_y]
-    self.logger.info(f"Selected data shape: {data.shape}")
+    self.logger.info(f"Selected data shape {data.shape} (z={current_z}, roi={arr_idx})")
 
-    lazy_mdata = self.image_widget.data[0].metadata.copy()
-    metadata = {
+    lazy_mdata = getattr(arr, "metadata", {}).copy()
+    md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "original_filepath": str(self.fpath),
-        "crop_indices_x": (ind_x.start, ind_x.stop) if isinstance(ind_x, slice) else ind_x,
-        "crop_indices_y": (ind_y.start, ind_y.stop) if isinstance(ind_y, slice) else ind_y,
-        "array_shape": data.shape,
-        "pipeline": self._current_pipeline,
-        "num_frames": data.shape[0] if len(data.shape) >= 1 else 1,
-        "pixel_resolution": lazy_mdata["pixel_resolution"],
-        "Lx": data.shape[1],
-        "Ly": data.shape[2],
+        "original_file": str(self.fpath),
+        "roi_index": arr_idx,
+        "z_index": current_z,
+        "num_frames": data.shape[0],
+        "Ly": data.shape[-2],
+        "Lx": data.shape[-1],
+        "fs": lazy_mdata.get("frame_rate", 15.0),
+        "dx": lazy_mdata.get("pixel_size_xy", 1.0),
+        "dz": lazy_mdata.get("z_step", 1.0),
+        "ops_path": str(ops_path),
+        "save_path": str(plane_dir),
+        "raw_file": str((plane_dir / "data_raw.bin").resolve()),
+        "reg_file": str((plane_dir / "data.bin").resolve()),
     }
-
-    lazy_mdata.update(metadata)
+    lazy_mdata.update(md)
 
     ops = self.s2p.to_dict()
     ops.update(lazy_mdata)
 
+    from mbo_utilities.lazy_array import imwrite
     imwrite(
         data,
-        out_dir,
-        ext=".tiff",
-        metadata=metadata,
+        plane_dir,
+        ext=".bin",
         overwrite=True,
-        debug=False,
-        plane_index=current_z + 1,
-        roi=arr_idx,
+        register_z=True,
+        metadata=ops,
+        s2p_bin=True,
+        plane_index=plane,
+        roi=roi
     )
-    tfiles = [x for x in Path(out_dir).rglob("*.tif*") if "plane" in x.name]
-    tf = Path(tfiles[0])
-    # make folder with the name of the tiff (without extension)
-    out_dir = out_dir.joinpath(tf.stem)
-    out_dir.mkdir(exist_ok=True)
 
-    print(f"Anatomical: {ops['anatomical_only']}")
-    # now run suite2p
-    run_plane(
-        input_path=tf,
-        save_path=out_dir,
-        ops=ops,
-        keep_reg=True,
-        keep_raw=False,
-        force_reg=True,
-        force_detect=True,
-        save_json=True,
-    )
+    self.logger.info(f"Wrote data_raw.bin and ops.npy to {plane_dir}")
+
+    from lbm_suite2p_python import run_plane_bin
+    complete = run_plane_bin(ops)
+    if complete:
+        self.logger.info(f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}")
+    else:
+        self.logger.error(f"---- Suite2p processing failed for plane {current_z}, roi {arr_idx}. See log above.")

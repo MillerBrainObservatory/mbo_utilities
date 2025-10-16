@@ -352,7 +352,7 @@ def draw_saveas_popup(parent):
                         or len(parent._saveas_selected_roi) == set()
                     ):
                         parent._saveas_selected_roi = set(
-                            range(1, parent.num_arrays + 1)
+                            range(1, parent.num_rois + 1)
                         )
                     rois = sorted(parent._saveas_selected_roi)
                 else:
@@ -419,6 +419,7 @@ class PreviewDataWidget(EdgeWindow):
 
         self.logger = log.get("gui")
         self.s2p = Suite2pSettings()
+        self._s2p_dir = ""
         self.logger.info("Logger initialized.")
 
         flags = (
@@ -474,8 +475,11 @@ class PreviewDataWidget(EdgeWindow):
 
         # image widget setup
         self.image_widget = iw
-        self.rois = rois
-        self.num_rois: int = len(self.image_widget.data[0].rois)
+        if hasattr(self.image_widget.data[0], "rois"):
+            self.num_arrays: int = len(self.image_widget.data[0].rois)
+        else:
+            self.num_arrays: int = rois
+
         self.num_arrays = len(self.image_widget.managed_graphics)
         self.shape = self.image_widget.data[0].shape
         self.is_mbo_scan = (
@@ -484,9 +488,10 @@ class PreviewDataWidget(EdgeWindow):
         if self.is_mbo_scan:
             for arr in self.image_widget.data:
                 arr.fix_phase = False
-                self._fix_phase = False
                 arr.use_fft = False
-                self._use_fft = False
+
+        self._fix_phase = False
+        self._use_fft = False
 
         if self.image_widget.window_funcs is None:
             self.image_widget.window_funcs = {"t": (np.mean, 0)}
@@ -508,7 +513,7 @@ class PreviewDataWidget(EdgeWindow):
         else:
             self._array_type = "array"
 
-        size = self.num_rois  # always per-ROI
+        size = self.num_arrays  # always per-ROI
 
         self._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(size)]
         self._zstats_means = [None] * size
@@ -592,6 +597,16 @@ class PreviewDataWidget(EdgeWindow):
             self._register_z_progress = frac
             self._register_z_current_msg = meta
             self._register_z_done = frac >= 1.0
+
+
+    @property
+    def s2p_dir(self):
+        return self._s2p_dir
+
+    @s2p_dir.setter
+    def s2p_dir(self, value):
+        self.logger.info(f"Setting Suite2p directory to {value}")
+        self._s2p_dir = value
 
     @property
     def register_z(self):
@@ -718,9 +733,9 @@ class PreviewDataWidget(EdgeWindow):
 
     @window_size.setter
     def window_size(self, value):
+        self.logger.info(f"Window size set to {value}.")
         self.image_widget.window_funcs["t"].window_size = value
         self._window_size = value
-        self.logger.info(f"Window size set to {value}.")
 
     @property
     def phase_upsample(self):
@@ -825,7 +840,7 @@ class PreviewDataWidget(EdgeWindow):
                 )
 
                 # build per-ROI series
-                roi_series = [np.asarray(self._zstats[r]["mean"], float) for r in range(self.num_rois)]
+                roi_series = [np.asarray(self._zstats[r]["mean"], float) for r in range(self.num_arrays)]
                 L = min(len(s) for s in roi_series)
                 z = np.asarray(z_vals[:L], float)
                 roi_series = [s[:L] for s in roi_series]
@@ -1144,7 +1159,7 @@ class PreviewDataWidget(EdgeWindow):
     def compute_zstats(self):
         if not self.image_widget or not self.image_widget.data:
             return
-        for roi in range(1, self.num_rois + 1):
+        for roi in range(1, self.num_arrays + 1):
             threading.Thread(
                 target=self._compute_zstats_single_roi,
                 args=(roi, self.fpath),
