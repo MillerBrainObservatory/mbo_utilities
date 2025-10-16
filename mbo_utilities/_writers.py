@@ -117,6 +117,7 @@ def _write_plane(
         apply_shift = False
 
     if shift_vector is not None:
+        logger.debug(f"Using provided shift_vector of type {type(shift_vector)} length {len(shift_vector)}")
         apply_shift = True
         if plane_index is not None:
             iy, ix = map(int, shift_vector)
@@ -211,7 +212,7 @@ def _write_plane(
 
     if "cleaned_scanimage_metadata" in metadata:
         meta_path = filename.parent.joinpath("metadata.html")
-        save_metadata_html(data.metadata, meta_path)
+        save_metadata_html(metadata, meta_path)
 
 
 def _get_file_writer(ext, overwrite):

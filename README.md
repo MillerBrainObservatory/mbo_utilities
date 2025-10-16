@@ -18,8 +18,11 @@ This package is fully installable with `pip`.
 
 `conda` can still be used for the virtual environment, but be mindful to only install packages with `conda install` when absolutely necessary.
 
+Make sure your environment is activated, be that conda, venv, or uv (recommended, just pre-pend uv to all below pip commands).
+
+To get the minimal mbo_utilities, without 3D axial correction or GUI functionality:
+
 ``` bash
-# make sure your environment is activated, be that conda, venv, uv (recommended)
 pip install mbo_utilities
 ```
 
@@ -30,6 +33,8 @@ pip install git+https://github.com/MillerBrainObservatory/mbo_utilities.git@mast
 ```
 
 To utilize the GPU, you will need CUDA and an appropriate [cupy](https://docs.cupy.dev/en/stable/install.html) installation.
+
+By default, cupy for `CUDA 12.x` is installed.
 
 Check which version of CUDA you have with `nvcc --version`.
 
@@ -43,20 +48,33 @@ Cuda compilation tools, release 13.0, V13.0.48
 Build cuda_13.0.r13.0/compiler.36260728_0
 ```
 
-For CUDA 13.x: `pip install mbo_utilities[cuda13]`
+For CUDA 11.x and 13.x, you first need to uninstall 12x:
 
-### RuntimeError with `cupy`
+`pip uninstall cupy-cuda12x`
 
-If you install the wrong version of cupy, you will see an error like:
+And replace `12` with the major CUDA version number, in this case `13`:
 
-`RuntimeError: CuPy failed to load nvrtc64_120_0.dll: FileNotFoundError: Could not find module 'nvrtc64_120_0.dll' (or one of its dependencies). Try using the full path with constructor syntax.`
+`pip install cupy-cuda13x`
 
-You will need to uninstall cupy and reinstall the correct version.
+## Troubleshooting
 
-```bash
-pip uninstall cupy-cuda12x  # or cupy-cuda12x
-pip install cupy-cuda11x  # or cupy-cuda12x
+### Wrong PyTorch or CuPy version
+
+``` bash
+OSError: [WinError 1114] A dynamic link library (DLL) initialization routine failed.
+Error loading "path\to\.venv\Lib\site-packages\torch\lib\c10.dll" or one of its dependencies.
 ```
+
+This error means you have the wrong version of pytorch install for your CUDA version.
+
+You can run `uv pip uninstall torch` and `uv pip install torch --torch-backend=auto`.
+If not using `uv`, follow instructions here: https://pytorch.org/get-started/locally/.
+
+``` bash
+RuntimeError: CuPy failed to load nvrtc64_120_0.dll: FileNotFoundError: Could not find module 'nvrtc64_120_0.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+```
+
+Having the wrong `cupy` version will lead to the following error message.
 
 ---
 
@@ -64,7 +82,7 @@ pip install cupy-cuda11x  # or cupy-cuda12x
 
 This pipeline makes use of several open-source libraries:
 
-- [Suite3D](https://github.com/alihaydaroglu/suite3d)
 - [suite2p](https://github.com/MouseLand/suite2p)
 - [rastermap](https://github.com/MouseLand/rastermap)
+- [Suite3D](https://github.com/alihaydaroglu/suite3d)
 - [scanreader](https://github.com/atlab/scanreader)

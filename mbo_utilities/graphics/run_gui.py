@@ -1,11 +1,11 @@
+import copy
 from pathlib import Path
 from typing import Any
-
 import click
-import time
+import numpy as np
 
-start = time.time()
-
+from mbo_utilities.array_types import MboRawArray
+from mbo_utilities.roi import iter_rois, normalize_roi
 
 
 def _select_file() -> tuple[Any, Any, Any, bool]:
@@ -35,8 +35,8 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
     immapp.run(runner_params=params, add_ons_params=addons)
     return (
         dlg.selected_path,
+        dlg.split_rois,
         dlg.widget_enabled,
-        dlg.threading_enabled,
         dlg.metadata_only,
     )
 
@@ -46,18 +46,14 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
     "--roi",
     multiple=True,
     type=int,
-    help="ROI index (can pass multiple, e.g. --roi 0 --roi 2). Leave empty for None.",
+    help="ROI index (can pass multiple, e.g. --roi 0 --roi 2). Leave empty for None."
+         " If 0 is passed, all ROIs will be shown (only for Raw files).",
     default=None,
 )
 @click.option(
     "--widget/--no-widget",
     default=True,
-    help="Enable or disable PreviewDataWidget (default enabled).",
-)
-@click.option(
-    "--threading/--no-threading",
-    default=True,
-    help="Enable or disable threading (only effects widgets).",
+    help="Enable or disable PreviewDataWidget for Raw ScanImge tiffs.",
 )
 @click.option(
     "--metadata-only/--full-preview",
@@ -65,30 +61,24 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
     help="If enabled, only show extracted metadata.",
 )
 @click.argument("data_in", required=False)
-def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=False):
+def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
     """Open a GUI to preview data of any supported type."""
+    roi_cli = normalize_roi(roi)
 
-    from imgui_bundle import immapp, hello_imgui
-    from mbo_utilities.lazy_array import imread
-
-    if not roi:  # nothing passed
-        roi = None
-    elif len(roi) == 1:  # one value passed
-        roi = roi[0]
-    else:  # multiple values passed
-        roi = list(roi)
     if data_in is None:
-        data_in, widget, threading, metadata_only = _select_file()
+        data_in, roi_gui, widget, metadata_only = _select_file()
         if not data_in:
             click.echo("No file selected, exiting.")
             return
+    else:
+        roi_gui = None
 
-    data_array = imread(data_in, roi=roi)
+    roi_final = normalize_roi(roi_cli if roi_cli is not None else roi_gui)
 
-    import fastplotlib as fpl
+    from mbo_utilities.lazy_array import imread
+    data_array = imread(data_in, roi=roi_final)
 
     if metadata_only:
-        data_array = imread(data_in, roi=roi)  # or whatever loads it
         metadata = data_array.metadata
         if not metadata:
             click.echo("No metadata found.")
@@ -96,9 +86,9 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
 
         def _render():
             from mbo_utilities.graphics._widgets import draw_metadata_inspector
-
             draw_metadata_inspector(metadata)
 
+        from imgui_bundle import immapp, hello_imgui
         params = hello_imgui.RunnerParams()
         params.app_window_params.window_title = "MBO Metadata Viewer"
         params.app_window_params.window_geometry.size = (1600, 1000)
@@ -112,30 +102,41 @@ def run_gui(data_in=None, widget=None, roi=None, threading=True, metadata_only=F
         immapp.run(runner_params=params, add_ons_params=addons)
         return
 
-    if hasattr(data_array, "imshow"):
-        from mbo_utilities.graphics.display import imshow_lazy_array
-        iw = imshow_lazy_array(data_array, widget=widget, threading_enabled=threading)
+    import fastplotlib as fpl
+    if isinstance(data_array, MboRawArray):
+        arrays = []
+        names = []
+        for r in iter_rois(data_array):
+            arr = copy.copy(data_array)
+            arr.roi = r
+            arrays.append(arr)
+            names.append(f"ROI {r}" if r else "Full Image")
+
+        iw = fpl.ImageWidget(
+            data=arrays,
+            names=names,
+            histogram_widget=True,
+            figure_kwargs={"size": (800, 1000)},
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
+            window_funcs={"t": (np.mean, 0)},
+        )
     else:
         iw = fpl.ImageWidget(
             data=data_array,
-            histogram_widget=True,
+            histogram_widget=False,
             figure_kwargs={"size": (800, 1000)},
-            graphic_kwargs={"vmin": data_array.min, "vmax": data_array.max},
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
         )
+
     iw.show()
     if widget:
         from mbo_utilities.graphics.imgui import PreviewDataWidget
 
-        if hasattr(data_array, "num_rois"):
-            rois = data_array.num_rois
-        else:
-            rois = 1 if roi is None else roi + 1
         gui = PreviewDataWidget(
             iw=iw,
             fpath=data_array.filenames,
-            threading_enabled=threading,
             size=350,
-            rois=rois,
+            rois=roi_final,
         )
         iw.figure.add_gui(gui)
     fpl.loop.run()

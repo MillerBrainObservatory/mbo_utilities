@@ -29,7 +29,7 @@ A progress bar will track the current file progress.
 ```
 ``````
 
-## Overview 
+## Overview
 
 This section covers the steps to convert raw scanimage-tiff files into assembled, planar timeseries.
 
@@ -38,7 +38,7 @@ This section covers the steps to convert raw scanimage-tiff files into assembled
 
 Overview of pre-processing steps that convert the raw scanimage tiffs into planar timeseries.
 Starting with a raw, multi-page ScanImage Tiff, frames are {ref}`deinterleaved <ex_deinterleave>`, optionally pre-processed to eliminate scan-phase artifacts,
-and fused to create an assembled timeseries.
+and fused to create an assembled timeseries. 
 ```
 
 ----
@@ -64,7 +64,7 @@ If there are other `.tiff` files, such as from another session or a processed fi
 
 +++
 
-## Initialize a scanreader object
+## Ini
 
 Pass a list of files, or a wildcard "/path/to/files/*" to `mbo.read_scan()`.
 
@@ -148,7 +148,7 @@ image_widget.close()
 
 The currently supported file extensions are `.tiff`, `.bin`, and `.hdf5`.
 
-```{code-cell} ipython3
+```{code-cell} text
 mbo.imwrite(
     scan,
     save_path,

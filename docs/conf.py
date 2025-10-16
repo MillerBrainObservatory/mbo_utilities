@@ -65,6 +65,8 @@ images_config = {"cache_path": "./_images/"}
 templates_path = ["_templates"]
 html_static_path = ["_static"]
 
+suppress_warnings = ["misc.highlighting_failure"]
+
 # A shorter title for the navigation bar.  Default is the same as html_title.
 html_title = "mbo_utilities"
 

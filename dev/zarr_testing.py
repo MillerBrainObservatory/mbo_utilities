@@ -1,30 +1,5 @@
 from pathlib import Path
-import shutil
-import numpy as np
-import time
 import mbo_utilities as mbo
-import zarr
-import tifffile
-from zarr.codecs import BloscCodec
-import fastplotlib as fpl
-# from mbo_utilities.util import align_zplanes
-
-# arr = mbo.imread(r"D:\W2_DATA\kbarber\07_27_2025\mk355\zarr\data_planar.zarr\plane01_stitched.zarr")
-# fpl.ImageWidget(arr).show()
-# fpl.loop.run()
-#
-# arr = mbo.imread(r"D:\W2_DATA\kbarber\07_27_2025\mk355\zarr\data_planar.zarr")
-# fpl.ImageWidget(arr).show()
-# fpl.loop.run()
-
-import time
-from pathlib import Path
-import zarr
-from numcodecs import Blosc as BloscCodec
-import mbo_utilities as mbo
-from numcodecs import Blosc, Zstd, GZip, LZ4
-
-
 import time
 from numcodecs import Blosc
 
@@ -71,89 +46,60 @@ def benchmark_compression(data_path, out_dir=None, clevels=(1, 3)):
                 f.write(f"Time: {end - start:.2f}s\n")
 
 
-def benchmark_phasecorr(data_path, out_dir=None):
+def bench_phasecorr(data_path, out_dir=None, method="mean"):
     """
-    Run a grid search over phase correlation methods and FFT vs. correlation backends.
-
-    Parameters
-    ----------
-    data_path : Path or str
-        Path to a directory of .tif files.
-    out_dir : Path or str, optional
-        Where to save outputs. Defaults to data_path/../phasecorr.
+    Benchmark real I/O + phase correction performance for FFT vs non-FFT backends.
+    Logs total time and per-1000-frame throughput.
     """
     data_path = Path(data_path)
-    files = list(data_path.glob("*.tif*"))
-    if not files:
-        raise FileNotFoundError(f"No TIFF files found under {data_path}")
-
     if out_dir is None:
-        out_dir = data_path.parent / "phasecorr"
+        out_dir = data_path.parent / "phasecorr_bench"
     out_dir.mkdir(exist_ok=True)
 
-    methods = ["frame", "mean", "max", "std", "mean-sub"]
     backends = [False, True]  # use_fft flag
 
-    for method in methods:
-        for use_fft in backends:
-            print(f"Running method={method}, use_fft={use_fft}")
-            # load
-            x = mbo.imread(data_path, use_fft=use_fft)
-            x.phasecorr_method = method
+    for use_fft in backends:
+        print(f"--- method={method}, use_fft={use_fft} ---")
 
-            # save
-            label = f"{method}-fft{int(use_fft)}"
-            out_file = out_dir / label
-            start = time.time()
-            x = mbo.imwrite(
-                x,
-                out_file,
-                register_z=True,
-                ext=".zarr",
-                roi=None,
-                compressor=compressors,
-            )
-            end = time.time()
+        # Load and configure reader
+        start = time.time()
+        x = mbo.imread(data_path, fix_phase=True, use_fft=use_fft)
+        load_time = time.time() - start
 
-            # log timing
-            with open(out_dir / f"{label}.txt", "w") as f:
-                f.write(f"Phase correlation method: {method}\n")
-                f.write(f"Use FFT: {use_fft}\n")
-                f.write(f"Time taken: {end - start:.2f} seconds\n")
+        n_frames = getattr(x, "num_frames", len(x))
+        start = time.time()
 
-    print(f"Results written to {out_dir}")
+        # Write back with phase correction
+        label = f"{method}_fft{int(use_fft)}"
+        out_file = out_dir / label
+        mbo.imwrite(
+            x,
+            out_file,
+            register_z=True,
+            ext=".zarr",
+            roi=None,
+        )
+        write_time = time.time() - start
+        total_time = load_time + write_time
+        per_1000 = total_time / (n_frames / 1000)
+
+        # Log
+        log_file = out_dir / f"{label}.txt"
+        with open(log_file, "w") as f:
+            f.write(f"Method: {method}\n")
+            f.write(f"Use FFT: {use_fft}\n")
+            f.write(f"Frames: {n_frames}\n")
+            f.write(f"Load time: {load_time:.2f}s\n")
+            f.write(f"Write time: {write_time:.2f}s\n")
+            f.write(f"Total time: {total_time:.2f}s\n")
+            f.write(f"Seconds per 1000 frames: {per_1000:.2f}s\n")
+
+        print(f"{label} finished in {total_time:.2f}s ({per_1000:.2f}s/1k frames)")
+
+    print(f"\nLogs written to {out_dir}")
 
 
 if __name__ == "__main__":
-    import zarr
-    # import fastplotlib as fpl
-    # x = mbo.imread(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
-    # fpl.ImageWidget(x).show()
-    # fpl.loop.run()
-    #
-    # z = zarr.open(r"D:\W2_DATA\kbarber\07_27_2025\mk355\zarr\data_planar\plane01_stitched.zarr", mode='r')
-
     data_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
-    files = list(data_path.glob("*.tif*"))
-    compressors = BloscCodec(
-        cname="zstd", clevel=3, shuffle=zarr.codecs.BloscShuffle.bitshuffle
-    )
-    x = mbo.imread(data_path, fix_phase=False, use_fft=False)
-    x.phasecorr_method = "mean"
-    out_file = data_path.parent / "phasecorr"
-    out_file.mkdir(exist_ok=True)
-    # benchmark_phasecorr(data_path, out_dir=out_file)
-    benchmark_compression(data_path, out_dir=out_file)
-    start = time.time()
-    x = mbo.imwrite(
-        x,
-        out_file / f"{x.phasecorr_method}-{x.use_fft}",
-        register_z=True,
-        ext=".zarr",
-        roi=None,
-    )
-    end = time.time()
-    with open(out_file / f"{x.phasecorr_method}-{x.use_fft}.txt", "w") as f:
-        f.write(f"Phase correlation method: {x.phasecorr_method}\n")
-        f.write(f"Use FFT: {x.use_fft}\n")
-        f.write(f"Time taken: {end - start:.2f} seconds\n")
+    out_dir = data_path.parent / "phasecorr_bench"
+    bench_phasecorr(data_path, out_dir)

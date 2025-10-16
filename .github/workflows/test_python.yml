@@ -15,11 +15,15 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12.7"
+          python-version: "3.12.9"
           enable-cache: true
 
-      - name: Sync --all-extras
-        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --all-extras
+      - name: Remove local sources for CI
+        run: |
+          sed -i '/^\[tool\.uv\.sources\]/,$d' pyproject.toml
+
+      - name: Sync Dependencies
+        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --no-sources
 
       - name: Run tests
         run: uv run pytest tests
