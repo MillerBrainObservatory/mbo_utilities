@@ -63,10 +63,6 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 @click.argument("data_in", required=False)
 def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
     """Open a GUI to preview data of any supported type."""
-
-    from imgui_bundle import immapp, hello_imgui
-    from mbo_utilities.lazy_array import imread
-
     roi_cli = normalize_roi(roi)
 
     if data_in is None:
@@ -79,10 +75,8 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
 
     roi_final = normalize_roi(roi_cli if roi_cli is not None else roi_gui)
 
+    from mbo_utilities.lazy_array import imread
     data_array = imread(data_in, roi=roi_final)
-    import fastplotlib as fpl
-
-    import fastplotlib as fpl
 
     if metadata_only:
         metadata = data_array.metadata
@@ -94,6 +88,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
             from mbo_utilities.graphics._widgets import draw_metadata_inspector
             draw_metadata_inspector(metadata)
 
+        from imgui_bundle import immapp, hello_imgui
         params = hello_imgui.RunnerParams()
         params.app_window_params.window_title = "MBO Metadata Viewer"
         params.app_window_params.window_geometry.size = (1600, 1000)
@@ -107,6 +102,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
         immapp.run(runner_params=params, add_ons_params=addons)
         return
 
+    import fastplotlib as fpl
     if isinstance(data_array, MboRawArray):
         arrays = []
         names = []
@@ -121,7 +117,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
             names=names,
             histogram_widget=True,
             figure_kwargs={"size": (800, 1000)},
-            graphic_kwargs={"vmin": data_array.min(), "vmax": data_array.max()},
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
             window_funcs={"t": (np.mean, 0)},
         )
     else:
@@ -129,7 +125,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
             data=data_array,
             histogram_widget=False,
             figure_kwargs={"size": (800, 1000)},
-            graphic_kwargs={"vmin": data_array.min, "vmax": data_array.max},
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
         )
 
     iw.show()

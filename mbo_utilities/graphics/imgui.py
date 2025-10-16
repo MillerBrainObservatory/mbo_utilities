@@ -92,11 +92,12 @@ def draw_menu(parent):
     if parent.show_debug_panel:
         size = begin_popup_size()
         imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)  # type: ignore # noqa
-        _, parent.show_debug_panel = imgui.begin(
+        opened, _ = imgui.begin(
             "MBO Debug Panel",
             parent.show_debug_panel,
         )
-        parent.debug_panel.draw()
+        if opened:
+            parent.debug_panel.draw()
         imgui.end()
     with imgui_ctx.begin_child(
         "menu",
@@ -411,12 +412,11 @@ class PreviewDataWidget(EdgeWindow):
         """
         self.debug_panel = GuiLogger()
         gui_handler = GuiLogHandler(self.debug_panel)
-        for name in GUI_LOGGERS:
-            lg = log.get(name)
-            lg.addHandler(gui_handler)
-            lg.setLevel(logging.WARNING)
-            lg.disabled = False
-            lg.propagate = True
+        gui_handler.setFormatter(logging.Formatter("%(message)s"))
+        gui_handler.setLevel(logging.DEBUG)
+        log.attach(gui_handler)
+        log.set_global_level(logging.DEBUG)
+
         self.logger = log.get("gui")
         self.s2p = Suite2pSettings()
         self.logger.info("Logger initialized.")

@@ -5,7 +5,6 @@ import json
 import os
 import tempfile
 import time
-from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -14,7 +13,6 @@ from typing import Any, List, Sequence
 import fastplotlib as fpl
 import h5py
 import numpy as np
-import psutil
 import tifffile
 import zarr
 from dask import array as da
@@ -113,7 +111,7 @@ def register_zplanes_s3d(
         HAS_CUPY = False
         cupy = None
     if not HAS_SUITE3D:
-        print(
+        logger.warning(
             "Suite3D is not installed. Cannot preprocess."
             "Set register_z = False in imwrite, or install Suite3D:"
             "`pip install mbo_utilities[suite3d, cuda12] # CUDA 12.x or"
@@ -121,7 +119,7 @@ def register_zplanes_s3d(
         )
         return None
     if not HAS_CUPY:
-        print(
+        logger.warning(
             "CuPy is not installed. Cannot preprocess."
             "Set register_z = False in imwrite, or install CuPy:"
             "`pip install cupy-cuda12x` # CUDA 12.x or"
@@ -130,7 +128,7 @@ def register_zplanes_s3d(
         return None
 
     if "frame_rate" not in metadata or "num_planes" not in metadata:
-        print("Missing required metadata for axial alignment: frame_rate / num_planes")
+        logger.warning("Missing required metadata for axial alignment: frame_rate / num_planes")
         return None
 
     if outpath is not None:
@@ -157,7 +155,7 @@ def register_zplanes_s3d(
         "block_size": metadata.get("block_size", [64, 64]),
     }
     if Job is None:
-        print("Suite3D Job class not available.")
+        logger.warning("Suite3D Job class not available.")
         return None
 
     job = Job(
@@ -171,12 +169,12 @@ def register_zplanes_s3d(
         progress_callback=progress_callback,
     )
     job._report(0.01, "Launching Suite3D job...")
-    print("Running Suite3D job...")
+    logger.debug("Running Suite3D job...")
     job.run_init_pass()
     out_dir = job_path / f"s3d-{job_id}"
     metadata["s3d-job"] = str(out_dir)
     metadata["s3d-params"] = params
-    print(f"Preprocessed data saved to {out_dir}")
+    logger.info(f"Preprocessed data saved to {out_dir}")
     return out_dir
 
 
@@ -216,7 +214,7 @@ def apply_zshifts(base_dir, inplace=False, metadata=None):
     pad_bottom, pad_right = max(0, dy_max), max(0, dx_max)
     target_shape = (nframes, H + pad_top + pad_bottom, W + pad_left + pad_right)
 
-    print("Final shape:", target_shape)
+    logger.debug("Final shape:", target_shape)
 
     outputs = []
     for i, (tif, (dy, dx)) in enumerate(zip(tiffs, plane_shifts)):
@@ -255,7 +253,6 @@ def apply_zshifts(base_dir, inplace=False, metadata=None):
                     time.sleep(0.2)
             else:
                 raise
-        print("Wrote:", outpath)
         outputs.append(outpath)
     return outputs
 
@@ -356,7 +353,7 @@ class Suite2pArray:
             if not tiffs:
                 raise FileNotFoundError(f"No TIFF files found in {path}")
             self.filename = tiffs[0]
-            print(f"Using first TIFF file in reg_tif: {self.filename}")
+            logger.debug(f"Using first TIFF file in reg_tif: {self.filename}")
 
         else:
             raise ValueError(f"Unrecognized input file: {path}")
@@ -418,14 +415,14 @@ class Suite2pArray:
                     arrays.append(reg)
                     names.append("registered")
             except Exception as e:
-                print(f"Could not open raw_file or reg_file: {e}")
+                logger.warning(f"Could not open raw_file or reg_file: {e}")
         if "reg_file" in self.metadata:
             try:
                 reg = Suite2pArray(self.metadata["reg_file"])
                 arrays.append(reg)
                 names.append("registered")
             except Exception as e:
-                print(f"Could not open reg_file: {e}")
+                logger.warning(f"Could not open reg_file: {e}")
 
         elif "raw_file" in self.metadata:
             try:
@@ -433,7 +430,7 @@ class Suite2pArray:
                 arrays.append(raw)
                 names.append("raw")
             except Exception as e:
-                print(f"Could not open raw_file: {e}")
+                logger.warning(f"Could not open raw_file: {e}")
 
         if not arrays:
             raise ValueError("No loadable raw_file or reg_file in ops")
@@ -589,7 +586,7 @@ class MBOTiffArray:
             start = time.time()
             data = self.dask
             end = time.time()
-            print(f"Dask array access took {end - start:.2f} seconds")
+            logger.debug(f"Dask array access took {end - start:.2f} seconds")
             tag = "_".join(tags)
 
         histogram_widget = kwargs.get("histogram_widget", True)
@@ -606,7 +603,7 @@ class MBOTiffArray:
             window_funcs=window_funcs,
         )
         end_widget = time.time()
-        print(f"ImageWidget creation took {end_widget - start_widget:.2f} seconds")
+        logger.debug(f"ImageWidget creation took {end_widget - start_widget:.2f} seconds")
 
         widget.figure.title = f"{tag} (frame {kwargs.get('frame', 'auto')})"
         return widget
@@ -853,13 +850,13 @@ class MboRawArray(scans.ScanMultiROI):
             )
             combined_json_path.unlink()
 
-        print(f"Generating combined kerchunk reference for {len(filenames)} files…")
+        logger.debug(f"Generating combined kerchunk reference for {len(filenames)} files…")
         combined_refs = _multi_tiff_to_fsspec(tif_files=filenames, base_dir=base_dir)
 
         with open(combined_json_path, "w") as _f:
             json.dump(combined_refs, _f)
 
-        print(f"Combined kerchunk reference written to {combined_json_path}")
+        logger.info(f"Combined kerchunk reference written to {combined_json_path}")
         self.reference = combined_json_path
         return combined_json_path
 
@@ -1080,35 +1077,8 @@ class MboRawArray(scans.ScanMultiROI):
                 out = np.squeeze(out, axis=tuple(squeeze))
         return out
 
-    # def process_rois(self, frames, chans):
-    #     if self.roi is not None:
-    #         if isinstance(self.roi, list):  # noqa
-    #             return tuple(
-    #                 self.process_single_roi(roi_idx - 1, frames, chans)
-    #                 for roi_idx in self.roi
-    #             )
-    #         elif self.roi == 0:
-    #             return tuple(
-    #                 self.process_single_roi(roi_idx, frames, chans)
-    #                 for roi_idx in range(self.num_rois)
-    #             )
-    #         elif isinstance(self.roi, int):
-    #             return self.process_single_roi(self.roi - 1, frames, chans)
-    #     else:
-    #         H_out, W_out = self.field_heights[0], self.field_widths[0]
-    #         out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
-    #         for roi_idx in range(self.num_rois):
-    #             roi_data = self.process_single_roi(roi_idx, frames, chans)
-    #             oys, oxs = (
-    #                 self.fields[0].output_yslices[roi_idx],
-    #                 self.fields[0].output_xslices[roi_idx],
-    #             )
-    #             out[:, :, oys, oxs] = roi_data
-    #         return out
-
     def process_rois(self, frames, chans):
         """Dispatch ROI processing. Handles single ROI, multiple ROIs, or all ROIs (None)."""
-        # --- explicit ROI(s) ---
         if self.roi is not None:
             if isinstance(self.roi, list):
                 return tuple(self.process_single_roi(r - 1, frames, chans) for r in self.roi)
@@ -1117,7 +1087,6 @@ class MboRawArray(scans.ScanMultiROI):
             elif isinstance(self.roi, int):
                 return self.process_single_roi(self.roi - 1, frames, chans)
 
-        # --- roi=None: full-FOV concatenation across ROIs ---
         H_out, W_out = self.field_heights[0], self.field_widths[0]
         out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
 
@@ -1275,71 +1244,6 @@ class MboRawArray(scans.ScanMultiROI):
                     fields.append(new_field)
             previous_lines += self._num_lines_between_fields
         return fields
-
-    def register_axial_planes(self) -> Path | None:
-        try:
-            from suite3d.job import Job  # noqa
-
-            HAS_SUITE3D = True
-        except ImportError:
-            HAS_SUITE3D = False
-            Job = None
-
-        try:
-            import cupy
-
-            HAS_CUPY = True
-        except ImportError:
-            HAS_CUPY = False
-        if not HAS_SUITE3D:
-            print(
-                "Suite3D is not installed. Cannot preprocess."
-                "Install with `pip install mbo_utilities[suite3d, cuda12] # CUDA 12.x or"
-                "             `pip install mbo_utilities[suite3d, cuda11] # CUDA 11.x"
-            )
-        if not HAS_CUPY:
-            print(
-                "CuPy is not installed. Cannot preprocess."
-                "Install with `pip install cupy-cuda12x` # CUDA 12.x or"
-                "             `pip install cupy-cuda11x` # CUDA 11.x"
-            )
-
-        parent_dir = self.filenames[0].parent
-        job_path = Path(str(parent_dir) + ".summary")
-        job_id = self.metadata.get("job_id", "preprocessed")
-
-        params = {
-            "fs": self.metadata["frame_rate"],
-            "planes": np.arange(self.metadata["num_planes"]),
-            "n_ch_tif": self.metadata["num_planes"],
-            "tau": self.metadata.get("tau", 1.3),
-            "lbm": self.metadata.get("lbm", True),
-            "fuse_strips": self.metadata.get("fuse_planes", False),
-            "subtract_crosstalk": self.metadata.get("subtract_crosstalk", False),
-            "init_n_frames": self.metadata.get("init_n_frames", 500),
-            "n_init_files": self.metadata.get("n_init_files", 1),
-            "n_proc_corr": self.metadata.get("n_proc_corr", 15),
-            "max_rigid_shift_pix": self.metadata.get("max_rigid_shift_pix", 150),
-            "3d_reg": self.metadata.get("3d_reg", True),
-            "gpu_reg": self.metadata.get("gpu_reg", True),
-            "block_size": self.metadata.get("block_size", [64, 64]),
-        }
-
-        job = Job(
-            str(job_path),
-            job_id,
-            create=True,
-            overwrite=True,
-            verbosity=-1,
-            tifs=self.filenames,
-            params=params,
-        )
-        job.run_init_pass()
-        out_dir = job_path / job_id
-        self.metadata["s3d-job"] = str(out_dir)
-        self.metadata["s3d-params"] = params
-        self.logger.info(f"Preprocessed data saved to {out_dir}")
-        return out_dir
 
     def __array__(self):
         """

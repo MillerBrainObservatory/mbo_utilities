@@ -18,7 +18,6 @@ from .array_types import (
     ZarrArray,
     register_zplanes_s3d,
 )
-from .file_io import derive_tag_from_filename
 from .metadata import is_raw_scanimage, has_mbo_metadata
 from .roi import supports_roi
 
@@ -261,7 +260,7 @@ def imwrite(
                 "s3d-job" in lazy_array.metadata
                 and Path(lazy_array.metadata["s3d-job"]).is_dir()
             ):
-                print("Detected s3d-job in metadata, moving data to s3d output path.")
+                logger.debug("Detected s3d-job in metadata, moving data to s3d output path.")
                 s3d_job_dir = Path(lazy_array.metadata["s3d-job"])
             else:  # check if the input is in a s3d-job folder
                 job_id = lazy_array.metadata.get("job_id", "s3d-preprocessed")
@@ -276,12 +275,12 @@ def imwrite(
                 # check if outpath contains an s3d job
                 npy_files = outpath.rglob("*.npy")
                 if "dirs.npy" in [f.name for f in npy_files]:
-                    print(
+                    logger.info(
                         f"Detected existing s3d-job in outpath {outpath}, skipping preprocessing."
                     )
                     s3d_job_dir = outpath
                 else:
-                    print(f"No s3d-job detected, preprocessing data.")
+                    logger.info(f"No s3d-job detected, preprocessing data.")
                     # s3d_params = kwargs.get("s3d_params", {})
                     s3d_job_dir = register_zplanes_s3d(
                         filenames=lazy_array.filenames,
@@ -289,11 +288,13 @@ def imwrite(
                         outpath=outpath,
                         progress_callback=progress_callback
                     )
-                    print(f"Registered z-planes, results saved to {s3d_job_dir}.")
+                    logger.info(f"Registered z-planes, results saved to {s3d_job_dir}.")
 
     if s3d_job_dir:
+        logger.info(f"Storing s3d-job path {s3d_job_dir} in metadata.")
         lazy_array.metadata["s3d-job"] = s3d_job_dir
     else:
+        logger.info("No s3d-job directory used or created.")
         lazy_array.metadata["apply_shift"] = False
     if hasattr(lazy_array, "_imwrite"):
         return lazy_array._imwrite(  # noqa
@@ -313,6 +314,7 @@ def imwrite(
                 " Is there an ops.npy file in a directory with a tiff file?"
                 "Please make write these to separate directories."
             )
+        logger.info(f"Falling back to generic writers for {type(lazy_array)}.")
         _try_generic_writers(
             lazy_array,
             outpath,
@@ -368,12 +370,14 @@ def imread(
         if p.suffix.lower() == ".zarr" and p.is_dir():
             paths = [p]
         elif p.is_dir():
-            # see if its a directory of .zarr dirs, which are treated differently
+            logger.debug(f"Input is a directory, searching for supported files in {p}")
             zarrs = list(p.glob("*.zarr"))
             if zarrs:
+                logger.debug(f"Found {len(zarrs)} zarr stores in {p}, loading as ZarrArray.")
                 paths = zarrs
             else:
                 paths = [Path(f) for f in p.glob("*") if f.is_file()]
+                logger.debug(f"Found {len(paths)} files in {p}")
         else:
             paths = [p]
     elif isinstance(inputs, (list, tuple)):
@@ -399,6 +403,7 @@ def imread(
 
     # Suite2p ops file
     if ops_file and ops_file.exists():
+        logger.debug(f"Ops.npy detected - reading {ops_file} from {ops_file}.")
         return Suite2pArray(parent / "ops.npy")
 
     exts = {p.suffix.lower() for p in paths}
@@ -407,36 +412,41 @@ def imread(
     if len(exts) > 1:
         if exts == {".bin", ".npy"}:
             npy_file = first.parent / "ops.npy"
+            logger.debug(f"Reading {npy_file} from {npy_file}.")
             return Suite2pArray(npy_file)
         raise ValueError(f"Multiple file types found in input: {exts!r}")
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
+            logger.debug(f"Detected raw ScanImage TIFFs, loading as MboRawArray.")
             return MboRawArray(files=paths, **kwargs)
         if has_mbo_metadata(first):
+            logger.debug(f"Detected MBO TIFFs, loading as MBOTiffArray.")
             return MBOTiffArray(paths, **kwargs)
+        logger.debug(f"Loading TIFF files as TiffArray.")
         return TiffArray(paths)
 
     if first.suffix == ".bin":
         npy_file = first.parent / "ops.npy"
         if npy_file.exists():
+            logger.debug(f"Reading Suite2p binary from {npy_file}.")
             return Suite2pArray(npy_file)
         raise NotImplementedError("BIN files without metadata are not yet supported.")
 
     if first.suffix == ".h5":
+        logger.debug(f"Reading HDF5 files from {first}.")
         return H5Array(first)
 
     if first.suffix == ".zarr":
-        tag = derive_tag_from_filename(first)
-
-        # TODO: benchmark - save as volumetric in a single .zarr store?
         # Case 1: nested zarrs inside
         sub_zarrs = list(first.glob("*.zarr"))
         if sub_zarrs:
+            logger.debug(f"Detected nested zarr stores, loading as ZarrArray.")
             return ZarrArray(sub_zarrs, **_filter_kwargs(ZarrArray, kwargs))
 
         # Case 2: flat zarr store with zarr.json
         if (first / "zarr.json").exists():
+            logger.debug(f"Detected zarr.json, loading as ZarrArray.")
             return ZarrArray(paths, **_filter_kwargs(ZarrArray, kwargs))
 
         raise ValueError(
@@ -445,6 +455,7 @@ def imread(
         )
 
     if first.suffix == ".json":
+        logger.debug(f"Reading JSON files from {first}.")
         return ZarrArray(first.parent, **_filter_kwargs(ZarrArray, kwargs))
 
     if first.suffix == ".npy" and (first.parent / "pmd_demixer.npy").is_file():
