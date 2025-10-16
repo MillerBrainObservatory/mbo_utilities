@@ -471,12 +471,13 @@ def merge_zarr_rois(
         if output_dir
         else input_dir.parent / (input_dir.name + "_merged")
     )
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(exist_ok=True)
+    logger.debug(f"Saving merged zarrs to {output_dir}")
 
     roi1_dirs = sorted(input_dir.glob("*plane*_roi1*"))
     roi2_dirs = sorted(input_dir.glob("*plane*_roi2*"))
     if not roi1_dirs or not roi2_dirs:
-        print("No roi1 or roi2 in input dir")
+        logger.critical("No roi1 or roi2 in input dir")
         return None
     assert len(roi1_dirs) == len(roi2_dirs), "Mismatched ROI dirs"
 
@@ -485,18 +486,18 @@ def merge_zarr_rois(
         out_path = output_dir / f"{zplane}.zarr"
         if out_path.exists():
             if overwrite:
+                logger.info(f"Overwriting {out_path}")
                 import shutil
 
                 shutil.rmtree(out_path)
             else:
-                print(f"Skipping {zplane}, {out_path} exists")
+                logger.info(f"Skipping {zplane}, {out_path} exists")
                 continue
 
         # load ops
         z1 = da.from_zarr(roi1)
         z2 = da.from_zarr(roi2)
 
-        # sanity check
         assert z1.shape[0] == z2.shape[0], "Frame count mismatch"
         assert z1.shape[1] == z2.shape[1], "Height mismatch"
 
@@ -505,7 +506,7 @@ def merge_zarr_rois(
         z_merged.to_zarr(out_path, overwrite=overwrite)
 
     if z_merged is not None:
-        print(f"{z_merged}")
+        logger.info(f"Merged shape: {z_merged.shape}")
 
     return None
 
