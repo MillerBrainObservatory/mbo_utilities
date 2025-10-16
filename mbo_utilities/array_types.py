@@ -22,9 +22,8 @@ from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
     _multi_tiff_to_fsspec,
-    HAS_ZARR,
     _convert_range_to_slice,
-    expand_paths,
+    expand_paths, files_to_dask, derive_tag_from_filename,
 )
 from mbo_utilities.metadata import get_metadata, clean_scanimage_metadata
 from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, bidir_phasecorr
@@ -37,11 +36,6 @@ logger = log.get("array_types")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
-
-def _normalize_index(idx):
-    if isinstance(idx, list):
-        return np.asarray(idx)
-    return idx
 
 class LazyArrayProtocol:
     """
@@ -93,7 +87,12 @@ class LazyArrayProtocol:
 
 
 
-def register_zplanes_s3d(filenames, metadata, outpath=None) -> Path | None:
+def register_zplanes_s3d(
+        filenames,
+        metadata,
+        outpath=None,
+        progress_callback=None
+) -> Path | None:
     # these are heavy imports, lazy import for now
     try:
         from suite3d.job import Job  # noqa
@@ -111,7 +110,7 @@ def register_zplanes_s3d(filenames, metadata, outpath=None) -> Path | None:
         HAS_CUPY = False
         cupy = None
     if not HAS_SUITE3D:
-        print(
+        logger.warning(
             "Suite3D is not installed. Cannot preprocess."
             "Set register_z = False in imwrite, or install Suite3D:"
             "`pip install mbo_utilities[suite3d, cuda12] # CUDA 12.x or"
@@ -119,7 +118,7 @@ def register_zplanes_s3d(filenames, metadata, outpath=None) -> Path | None:
         )
         return None
     if not HAS_CUPY:
-        print(
+        logger.warning(
             "CuPy is not installed. Cannot preprocess."
             "Set register_z = False in imwrite, or install CuPy:"
             "`pip install cupy-cuda12x` # CUDA 12.x or"
@@ -128,7 +127,7 @@ def register_zplanes_s3d(filenames, metadata, outpath=None) -> Path | None:
         return None
 
     if "frame_rate" not in metadata or "num_planes" not in metadata:
-        print("Missing required metadata for axial alignment: frame_rate / num_planes")
+        logger.warning("Missing required metadata for axial alignment: frame_rate / num_planes")
         return None
 
     if outpath is not None:
@@ -155,7 +154,7 @@ def register_zplanes_s3d(filenames, metadata, outpath=None) -> Path | None:
         "block_size": metadata.get("block_size", [64, 64]),
     }
     if Job is None:
-        print("Suite3D Job class not available.")
+        logger.warning("Suite3D Job class not available.")
         return None
 
     job = Job(
@@ -166,16 +165,15 @@ def register_zplanes_s3d(filenames, metadata, outpath=None) -> Path | None:
         verbosity=-1,
         tifs=filenames,
         params=params,
+        progress_callback=progress_callback,
     )
-    print("Running Suite3D job...")
-    start = time.time()
+    job._report(0.01, "Launching Suite3D job...")
+    logger.debug("Running Suite3D job...")
     job.run_init_pass()
-    end = time.time()
-    print(f"Suite 3D init pass done in {end - start:.1f} seconds.")
     out_dir = job_path / f"s3d-{job_id}"
     metadata["s3d-job"] = str(out_dir)
     metadata["s3d-params"] = params
-    print(f"Preprocessed data saved to {out_dir}")
+    logger.info(f"Preprocessed data saved to {out_dir}")
     return out_dir
 
 
@@ -215,7 +213,7 @@ def apply_zshifts(base_dir, inplace=False, metadata=None):
     pad_bottom, pad_right = max(0, dy_max), max(0, dx_max)
     target_shape = (nframes, H + pad_top + pad_bottom, W + pad_left + pad_right)
 
-    print("Final shape:", target_shape)
+    logger.debug("Final shape:", target_shape)
 
     outputs = []
     for i, (tif, (dy, dx)) in enumerate(zip(tiffs, plane_shifts)):
@@ -254,7 +252,6 @@ def apply_zshifts(base_dir, inplace=False, metadata=None):
                     time.sleep(0.2)
             else:
                 raise
-        print("Wrote:", outpath)
         outputs.append(outpath)
     return outputs
 
@@ -315,14 +312,6 @@ def _safe_get_metadata(path: Path) -> dict:
         return {}
 
 
-def _safe_load_s2p(path_or_ops, key):
-    try:
-        return Suite2pArray(path_or_ops[key])
-    except Exception as e:
-        print(f"Could not load {key}: {e}")
-        return None
-
-
 @dataclass
 class Suite2pArray:
     filename: str | Path
@@ -363,7 +352,7 @@ class Suite2pArray:
             if not tiffs:
                 raise FileNotFoundError(f"No TIFF files found in {path}")
             self.filename = tiffs[0]
-            print(f"Using first TIFF file in reg_tif: {self.filename}")
+            logger.debug(f"Using first TIFF file in reg_tif: {self.filename}")
 
         else:
             raise ValueError(f"Unrecognized input file: {path}")
@@ -425,14 +414,14 @@ class Suite2pArray:
                     arrays.append(reg)
                     names.append("registered")
             except Exception as e:
-                print(f"Could not open raw_file or reg_file: {e}")
+                logger.warning(f"Could not open raw_file or reg_file: {e}")
         if "reg_file" in self.metadata:
             try:
                 reg = Suite2pArray(self.metadata["reg_file"])
                 arrays.append(reg)
                 names.append("registered")
             except Exception as e:
-                print(f"Could not open reg_file: {e}")
+                logger.warning(f"Could not open reg_file: {e}")
 
         elif "raw_file" in self.metadata:
             try:
@@ -440,7 +429,7 @@ class Suite2pArray:
                 arrays.append(raw)
                 names.append("raw")
             except Exception as e:
-                print(f"Could not open raw_file: {e}")
+                logger.warning(f"Could not open raw_file: {e}")
 
         if not arrays:
             raise ValueError("No loadable raw_file or reg_file in ops")
@@ -538,82 +527,66 @@ class H5Array:
 class MBOTiffArray:
     filenames: list[Path]
     _chunks: tuple[int, ...] | dict | None = None
-    roi: Any = None
-    _dask_array: da.Array = field(default=None, init=False, repr=False)
+    roi: int | None = None
+    _metadata: dict | None = field(default=None, init=False)
+    _dask_array: da.Array | None = field(default=None, init=False, repr=False)
+
+    def __post_init__(self):
+        if not self.filenames:
+            raise ValueError("No filenames provided.")
+
+        # allow string paths
+        self.filenames = [Path(f) for f in self.filenames]
+
+        # collect metadata from first TIFF
+        self._metadata = get_metadata(self.filenames)
+
+        self.tags = [derive_tag_from_filename(f) for f in self.filenames]
 
     @property
-    def chunks(self) -> tuple[int, ...] | dict:
+    def metadata(self) -> dict:
+        return self._metadata or {}
+
+    @property
+    def chunks(self):
         return self._chunks or CHUNKS_4D
-
-    @chunks.setter
-    def chunks(self, value):
-        self._chunks = value
-
-    def _build_dask_array(self) -> da.Array:
-        if len(self.filenames) == 1:
-            arr = tifffile.memmap(self.filenames[0], mode="r")
-            return da.from_array(arr, chunks=self.chunks)
-
-        planes = []
-        for p in self.filenames:
-            mm = tifffile.memmap(p, mode="r")
-            if mm.ndim == 3:
-                mm = mm[None, ...]
-            planes.append(da.from_array(mm, chunks=self.chunks))
-
-        dstack = da.concatenate(planes, axis=0)  # (Z, T, Y, X)
-        return dstack.transpose(1, 0, 2, 3)  # (T, Z, Y, X)
 
     @property
     def dask(self) -> da.Array:
-        if self._dask_array is None:
-            self._dask_array = self._build_dask_array()
-        return self._dask_array
+        if self._dask_array is not None:
+            return self._dask_array
 
-    def __getitem__(self, key: int | slice | tuple[int, ...]) -> np.ndarray:
+        if len(self.filenames) == 1:
+            arr = tifffile.imread(self.filenames[0], aszarr=True)
+            darr = da.from_zarr(arr)
+            if darr.ndim == 2:
+                darr = darr[None, None, :, :]
+            elif darr.ndim == 3:
+                darr = darr[:, None, :, :]
+        else:
+            darr = files_to_dask(self.filenames)
+            if darr.ndim == 3:
+                darr = darr[None, :, :, :]
+        self._dask_array = darr
+        return darr
+
+    @property
+    def shape(self):
+        return tuple(self.dask.shape)
+
+    @property
+    def ndim(self):
+        return self.dask.ndim
+
+    def __getitem__(self, key):
+        key = tuple(
+            slice(k.start, k.stop) if isinstance(k, range) else k
+            for k in (key if isinstance(key, tuple) else (key,))
+        )
         return self.dask[key]
 
     def __getattr__(self, attr):
         return getattr(self.dask, attr)
-
-    @property
-    def ndim(self) -> int:
-        return self.dask.ndim
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        return tuple(self.dask.shape)
-
-    @property
-    def metadata(self) -> dict:
-        """
-        Return metadata from the first TIFF file.
-        Assumes all files have the same metadata structure.
-        """
-        if not self.filenames:
-            return {}
-        return get_metadata(self.filenames[0])
-
-    def imshow(self, **kwargs) -> fpl.ImageWidget:
-        if len(self.filenames) == 1:
-            data = tifffile.memmap(self.filenames[0], mode="r")
-        else:
-            data = self.dask
-        histogram_widget = kwargs.get("histogram_widget", True)
-        figure_kwargs = kwargs.get(
-            "figure_kwargs",
-            {
-                "size": (800, 1000),
-            },
-        )
-        window_funcs = kwargs.get("window_funcs", None)
-        return fpl.ImageWidget(
-            data=data,
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,  # "canvas": canvas},
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
-            window_funcs=window_funcs,
-        )
 
     def _imwrite(
         self,
@@ -625,40 +598,30 @@ class MBOTiffArray:
         debug=None,
         **kwargs,
     ):
-        if "plane" in self.metadata.keys():
-            plane = self.metadata["plane"]
-        else:
-            from mbo_utilities import get_plane_from_filename
+        from mbo_utilities.lazy_array import _write_plane
+        from mbo_utilities.file_io import get_plane_from_filename
 
-            plane = get_plane_from_filename(Path(outpath).stem, None)
-            if plane is None:
-                raise ValueError("Cannot determine plane from metadata.")
-            else:
-                self.metadata["plane"] = plane
+        md = self.metadata.copy()
+        plane = md.get("plane") or get_plane_from_filename(Path(outpath).stem, None)
+        if plane is None:
+            raise ValueError("Cannot determine plane from metadata.")
 
         outpath = Path(outpath)
         ext = ext.lower().lstrip(".")
-
-        if ext in {"bin"}:
-            fname = "data_raw.bin"
-        else:
-            fname = f"plane{plane:03d}.{ext}"
-
-        if outpath.is_dir():
-            target = outpath.joinpath(fname)
-        else:
-            target = outpath.parent.joinpath(fname)
+        fname = f"plane{plane:03d}.{ext}" if ext != "bin" else "data_raw.bin"
+        target = outpath.joinpath(fname) if outpath.is_dir() else outpath.parent.joinpath(fname)
 
         _write_plane(
             self,
             target,
             overwrite=overwrite,
             target_chunk_mb=target_chunk_mb,
-            metadata=self.metadata,
+            metadata=md,
             progress_callback=progress_callback,
             debug=debug,
             dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
-            plane_index=None,  # convert to 0-based index
+            plane_index=None,
+            **kwargs,
         )
 
 
@@ -857,28 +820,15 @@ class MboRawArray(scans.ScanMultiROI):
             )
             combined_json_path.unlink()
 
-        print(f"Generating combined kerchunk reference for {len(filenames)} files…")
+        logger.debug(f"Generating combined kerchunk reference for {len(filenames)} files…")
         combined_refs = _multi_tiff_to_fsspec(tif_files=filenames, base_dir=base_dir)
 
         with open(combined_json_path, "w") as _f:
             json.dump(combined_refs, _f)
 
-        print(f"Combined kerchunk reference written to {combined_json_path}")
+        logger.info(f"Combined kerchunk reference written to {combined_json_path}")
         self.reference = combined_json_path
         return combined_json_path
-
-    def as_zarr(self):
-        """
-        Convert the current scan data to a Zarr array.
-        This will create a Zarr store in the same directory as the reference file.
-        """
-        if not HAS_ZARR:
-            raise ImportError(
-                "Zarr is not installed. Please install it to use this method."
-            )
-        if not Path(self.reference).is_file():
-            return None
-        return NotImplementedError("Attempted to convert to Zarr, but not implemented.")
 
     def read_data(self, filenames, dtype=np.int16):
         filenames = expand_paths(filenames)
@@ -909,6 +859,7 @@ class MboRawArray(scans.ScanMultiROI):
                 "upsample": self.upsample,
                 "max_offset": self.max_offset,
                 "num_frames": self.num_frames,
+                "use_fft": self.use_fft,
             }
         )
         return self._metadata
@@ -947,7 +898,6 @@ class MboRawArray(scans.ScanMultiROI):
     def phasecorr_method(self):
         """
         Get the current phase correction method.
-        Options are 'subpix' or 'mean'.
         """
         return self._phasecorr_method
 
@@ -955,7 +905,6 @@ class MboRawArray(scans.ScanMultiROI):
     def phasecorr_method(self, value: str | None):
         """
         Set the phase correction method.
-        Options are 'two_step', 'subpix', or 'crosscorr'.
         """
         if value not in ALL_PHASECORR_METHODS:
             raise ValueError(
@@ -1020,17 +969,12 @@ class MboRawArray(scans.ScanMultiROI):
     def output_yslices(self):
         return self.fields[0].output_yslices
 
-    def _read_pages(
-        self, frames, chans, yslice=slice(None), xslice=slice(None), **kwargs
-    ):
-        pages = [
-            frame * self.num_channels + zplane for frame in frames for zplane in chans
-        ]
-
+    def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **_):
+        pages = [f * self.num_channels + z for f in frames for z in chans]
         tiff_width_px = len(utils.listify_index(xslice, self._page_width))
         tiff_height_px = len(utils.listify_index(yslice, self._page_height))
-
         buf = np.empty((len(pages), tiff_height_px, tiff_width_px), dtype=self.dtype)
+
         start = 0
         for tf in self.tiff_files:
             end = start + len(tf.pages)
@@ -1043,10 +987,7 @@ class MboRawArray(scans.ScanMultiROI):
             chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
 
             if self.fix_phase:
-                self.logger.debug(
-                    f"Applying phase correction with strategy: {self.phasecorr_method}"
-                )
-                buf[idxs], self.offset = bidir_phasecorr(
+                corrected, offset = bidir_phasecorr(
                     chunk,
                     method=self.phasecorr_method,
                     upsample=self.upsample,
@@ -1054,6 +995,8 @@ class MboRawArray(scans.ScanMultiROI):
                     border=self.border,
                     use_fft=self.use_fft,
                 )
+                buf[idxs] = corrected
+                self.offset = offset
             else:
                 buf[idxs] = chunk
                 self.offset = 0.0
@@ -1092,30 +1035,30 @@ class MboRawArray(scans.ScanMultiROI):
         return out
 
     def process_rois(self, frames, chans):
+        """Dispatch ROI processing. Handles single ROI, multiple ROIs, or all ROIs (None)."""
         if self.roi is not None:
-            if isinstance(self.roi, list):  # noqa
-                return tuple(
-                    self.process_single_roi(roi_idx - 1, frames, chans)
-                    for roi_idx in self.roi
-                )
+            if isinstance(self.roi, list):
+                return tuple(self.process_single_roi(r - 1, frames, chans) for r in self.roi)
             elif self.roi == 0:
-                return tuple(
-                    self.process_single_roi(roi_idx, frames, chans)
-                    for roi_idx in range(self.num_rois)
-                )
+                return tuple(self.process_single_roi(r, frames, chans) for r in range(self.num_rois))
             elif isinstance(self.roi, int):
                 return self.process_single_roi(self.roi - 1, frames, chans)
-        else:
-            H_out, W_out = self.field_heights[0], self.field_widths[0]
-            out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
-            for roi_idx in range(self.num_rois):
-                roi_data = self.process_single_roi(roi_idx, frames, chans)
-                oys, oxs = (
-                    self.fields[0].output_yslices[roi_idx],
-                    self.fields[0].output_xslices[roi_idx],
-                )
-                out[:, :, oys, oxs] = roi_data
-            return out
+
+        H_out, W_out = self.field_heights[0], self.field_widths[0]
+        out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
+
+        for roi_idx in range(self.num_rois):
+            roi_data = self._read_pages(
+                frames,
+                chans,
+                yslice=self.fields[0].yslices[roi_idx],
+                xslice=self.fields[0].xslices[roi_idx],
+            )
+            oys = self.fields[0].output_yslices[roi_idx]
+            oxs = self.fields[0].output_xslices[roi_idx]
+            out[:, :, oys, oxs] = roi_data
+
+        return out
 
     def process_single_roi(self, roi_idx, frames, chans):
         return self._read_pages(
@@ -1259,71 +1202,6 @@ class MboRawArray(scans.ScanMultiROI):
             previous_lines += self._num_lines_between_fields
         return fields
 
-    def register_axial_planes(self) -> Path | None:
-        try:
-            from suite3d.job import Job  # noqa
-
-            HAS_SUITE3D = True
-        except ImportError:
-            HAS_SUITE3D = False
-            Job = None
-
-        try:
-            import cupy
-
-            HAS_CUPY = True
-        except ImportError:
-            HAS_CUPY = False
-        if not HAS_SUITE3D:
-            print(
-                "Suite3D is not installed. Cannot preprocess."
-                "Install with `pip install mbo_utilities[suite3d, cuda12] # CUDA 12.x or"
-                "             `pip install mbo_utilities[suite3d, cuda11] # CUDA 11.x"
-            )
-        if not HAS_CUPY:
-            print(
-                "CuPy is not installed. Cannot preprocess."
-                "Install with `pip install cupy-cuda12x` # CUDA 12.x or"
-                "             `pip install cupy-cuda11x` # CUDA 11.x"
-            )
-
-        parent_dir = self.filenames[0].parent
-        job_path = Path(str(parent_dir) + ".summary")
-        job_id = self.metadata.get("job_id", "preprocessed")
-
-        params = {
-            "fs": self.metadata["frame_rate"],
-            "planes": np.arange(self.metadata["num_planes"]),
-            "n_ch_tif": self.metadata["num_planes"],
-            "tau": self.metadata.get("tau", 1.3),
-            "lbm": self.metadata.get("lbm", True),
-            "fuse_strips": self.metadata.get("fuse_planes", False),
-            "subtract_crosstalk": self.metadata.get("subtract_crosstalk", False),
-            "init_n_frames": self.metadata.get("init_n_frames", 500),
-            "n_init_files": self.metadata.get("n_init_files", 1),
-            "n_proc_corr": self.metadata.get("n_proc_corr", 15),
-            "max_rigid_shift_pix": self.metadata.get("max_rigid_shift_pix", 150),
-            "3d_reg": self.metadata.get("3d_reg", True),
-            "gpu_reg": self.metadata.get("gpu_reg", True),
-            "block_size": self.metadata.get("block_size", [64, 64]),
-        }
-
-        job = Job(
-            str(job_path),
-            job_id,
-            create=True,
-            overwrite=True,
-            verbosity=-1,
-            tifs=self.filenames,
-            params=params,
-        )
-        job.run_init_pass()
-        out_dir = job_path / job_id
-        self.metadata["s3d-job"] = str(out_dir)
-        self.metadata["s3d-params"] = params
-        self.logger.info(f"Preprocessed data saved to {out_dir}")
-        return out_dir
-
     def __array__(self):
         """
         Convert the scan data to a NumPy array.
@@ -1351,6 +1229,8 @@ class MboRawArray(scans.ScanMultiROI):
             planes = [p - 1 for p in planes]
         for roi in iter_rois(self):
             for plane in planes:
+                if not isinstance(plane, int):
+                    raise ValueError(f"Plane must be an integer, got {type(plane)}")
                 self.roi = roi
                 if roi is None:
                     fname = f"plane{plane + 1:02d}_stitched{ext}"
@@ -1396,8 +1276,10 @@ class MboRawArray(scans.ScanMultiROI):
         for roi in iter_rois(self):
             arr = copy.copy(self)
             arr.roi = roi
+            arr.fix_phase = False  # disable phase correction for initial display
+            arr.use_fft = False
             arrays.append(arr)
-            names.append(f"ROI {roi}" if roi else "Full Image")
+            names.append(f"ROI {roi}" if roi else "Stitched mROIs")
 
         figure_shape = (1, len(arrays))
 
@@ -1405,7 +1287,7 @@ class MboRawArray(scans.ScanMultiROI):
         figure_kwargs = kwargs.get(
             "figure_kwargs",
             {
-                "size": (800, 1000),
+                "size": (1000, 1200),
             },
         )
         window_funcs = kwargs.get("window_funcs", None)
@@ -1415,9 +1297,70 @@ class MboRawArray(scans.ScanMultiROI):
             histogram_widget=histogram_widget,
             figure_kwargs=figure_kwargs,  # "canvas": canvas},
             figure_shape=figure_shape,
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
+            graphic_kwargs={"vmin": arrays[0].min(), "vmax": arrays[0].max()},
             window_funcs=window_funcs,
         )
+
+
+class NumpyArray:
+    def __init__(
+            self,
+            array: np.ndarray | str | Path,
+            metadata: dict | None = None
+    ):
+        if isinstance(array, (str, Path)):
+            self.path = Path(array)
+            if not self.path.exists():
+                raise FileNotFoundError(f"Numpy file not found: {self.path}")
+            self.data = np.load(self.path, mmap_mode="r")
+            self._tempfile = None
+        elif isinstance(array, np.ndarray):
+            logger.info(f"Creating temporary .npy file for array.")
+            tmp = tempfile.NamedTemporaryFile(suffix=".npy", delete=False)
+            np.save(tmp, array)
+            tmp.close()
+            self.path = Path(tmp.name)
+            self.data = np.load(self.path, mmap_mode="r")
+            self._tempfile = tmp
+            logger.debug(f"Temporary file created at {self.path}")
+        else:
+            raise TypeError(f"Expected np.ndarray or path, got {type(array)}")
+
+        self.shape = self.data.shape
+        self.dtype = self.data.dtype
+        self.ndim = self.data.ndim
+        self._metadata = metadata or {}
+
+    def __getitem__(self, item):
+        return self.data[item]
+
+    def __array__(self):
+        return np.asarray(self.data)
+
+    @property
+    def filenames(self) -> list[Path]:
+        return [self.path]
+
+    @property
+    def metadata(self):
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError("metadata must be a dict")
+        self._metadata = value
+
+    def close(self):
+        if self._tempfile:
+            try:
+                Path(self._tempfile.name).unlink(missing_ok=True)
+            except Exception:
+                pass
+            self._tempfile = None
+
+    def __del__(self):
+        self.close()
 
 
 class NWBArray:
@@ -1454,11 +1397,13 @@ class ZarrArray:
         self,
         filenames: str | Path | Sequence[str | Path],
         compressor: str | None = "default",
+        rois: list[int] | int | None = None,
     ):
         if isinstance(filenames, (str, Path)):
             filenames = [filenames]
 
         self.filenames = [Path(p).with_suffix(".zarr") for p in filenames]
+        self.rois = rois
         for p in self.filenames:
             if not p.exists():
                 raise FileNotFoundError(f"No zarr store at {p}")

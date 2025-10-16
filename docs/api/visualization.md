@@ -5,9 +5,8 @@
 
 Functions to help visualize datasets.
 
-.. currentmodule:: mbo_utilities
+.. currentmodule:: mbo_utilities.graphics
 
-.. autofunction:: save_mp4
 .. autofunction:: run_gui
 
 ```

@@ -30,17 +30,24 @@ def draw_progress(
     now = time.time()
     state = _progress_state[key]
 
+    # if already cleared, never draw again
+    if state["done_cleared"]:
+        return
+
     if done and not state["done_shown_once"]:
         state["hide_time"] = now + 3
         state["is_showing_done"] = True
         state["done_shown_once"] = True
         state["done_cleared"] = False
 
-    elif not done:
+    if not done and not state["is_showing_done"]:
         state["hide_time"] = None
-        state["is_showing_done"] = False
         state["done_shown_once"] = False
-        state["done_cleared"] = False
+    # elif not done:
+    #     state["hide_time"] = None
+    #     state["is_showing_done"] = False
+    #     state["done_shown_once"] = False
+    #     state["done_cleared"] = False
 
     if state["is_showing_done"] and state["hide_time"] and now >= state["hide_time"]:
         state["hide_time"] = None
@@ -138,19 +145,35 @@ def draw_zstats_progress(self):
             done_text=f"Z-stats complete (ROI {i + 1})",
             done=done,
         )
-    # else:
-    #     key = "zstats"
-    #     state = _progress_state[key]
-    #
-    #     if state["done_cleared"]:
-    #         return
-    #
-    #     draw_progress(
-    #         key=key,
-    #         current_index=self._zstats_current_z,
-    #         total_count=self.nz,
-    #         percent_complete=self._zstats_progress,
-    #         running_text="Computing stats for plane(s)",
-    #         done_text="Z-stats complete",
-    #         done=self._zstats_done,
-    #     )
+
+def draw_register_z_progress(self):
+    key = "register_z"
+    state = _progress_state[key]
+
+    # fully skip if cleared
+    if state["done_cleared"]:
+        return
+
+    done = self._register_z_done
+    progress = self._register_z_progress
+    msg = self._register_z_current_msg
+
+    if done:
+        draw_progress(
+            key=key,
+            current_index=int(progress * 100),
+            total_count=100,
+            percent_complete=progress,
+            running_text="Z-Registration",
+            done_text="Z-Registration Complete!",
+            done=True,
+        )
+    elif 0.0 < progress < 1.0:
+        draw_progress(
+            key=key,
+            current_index=int(progress * 100),
+            total_count=100,
+            percent_complete=progress,
+            running_text="Z-Registration",
+            custom_text=f"Z-Registration: {msg} [{int(progress * 100)}%]",
+        )

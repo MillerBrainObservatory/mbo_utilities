@@ -1,14 +1,15 @@
 import json
+import time
+from collections import defaultdict
 from collections.abc import Sequence
 from io import StringIO
-from itertools import product
 import re
 
 from pathlib import Path
 import numpy as np
 
 import dask.array as da
-from tifffile import TiffFile
+from tifffile import TiffFile, tifffile
 
 from . import log
 
@@ -26,8 +27,9 @@ except ImportError:
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-MBO_SUPPORTED_FTYPES = [".tiff", ".bin", ".h5"]
-MBO_PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
+MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5"]
+PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
+
 
 logger = log.get("file_io")
 
@@ -98,64 +100,71 @@ def write_ops(metadata, raw_filename):
     logger.debug(f"Ops file written to {ops_path} with metadata:\n {ops}")
 
 
-def npy_to_dask(files, name="", axis=1, astype=None):
+def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
     """
-    Creates a Dask array that lazily stacks multiple .npy files along a specified axis without fully loading them into memory.
+    Lazily build a Dask array or list of arrays depending on filename tags.
 
-    Taken from suite3d for convenience
-    https://github.com/alihaydaroglu/suite3d/blob/py310/suite3d/utils.py
-    To avoid the unnessessary import. Very nice function, thanks Ali!
-
-    Parameters
-    ----------
-    files : list of str or Path
-        A list of file paths pointing to .npy files containing array data. Each file must have the same shape except
-        possibly along the concatenation axis.
-    name : str, optional
-        A string to be appended to a base name ("from-npy-stack-") to label the resulting Dask array. Default is an empty string.
-    axis : int, optional
-        The axis along which to stack/concatenate the arrays from the provided files. Default is 1.
-    astype : numpy.dtype, optional
-        If provided, the resulting Dask array will be cast to this data type. Otherwise, the data type is inferred
-        from the first file.
-
-    Returns
-    -------
-    dask.array.Array
-
-    Examples
-    --------
-    >>> # https://www.fastplotlib.org/
-    >>> import fastplotlib as fpl
-    >>> import mbo_utilities as mbo
-    >>> files = mbo.get_files("path/to/images/", 'fused', 3) # suite3D output
-    >>> arr = npy_to_dask(files, name="stack", axis=1)
-    >>> print(arr.shape)
-    (nz, nt, ny, nx )
-    >>> # Optionally, cast the array to float32
-    >>> arr = npy_to_dask(files, axis=1, astype=np.float32)
-    >>> fpl.ImageWidget(arr.transpose(1, 0, 2, 3)).show()
+    - "plane", "z", or "chan" → stacked along Z (TZYX)
+    - "roi" → list of 3D (T,Y,X) arrays, one per ROI
+    - otherwise → concatenate all files in time (T)
     """
-    sample_mov = np.load(files[0], mmap_mode="r")
-    file_ts = [np.load(f, mmap_mode="r").shape[axis] for f in files]
-    nz, nt_sample, ny, nx = sample_mov.shape
+    files = [Path(f) for f in files]
+    if not files:
+        raise ValueError("No input files provided.")
 
-    dtype = sample_mov.dtype
-    chunks = [(nz,), (nt_sample,), (ny,), (nx,)]
-    chunks[axis] = tuple(file_ts)
-    chunks = tuple(chunks)
-    name = "from-npy-stack-%s" % name
+    has_plane = any(re.search(r"(plane|z|chan)[_-]?\d+", f.stem, re.I) for f in files)
+    has_roi   = any(re.search(r"roi[_-]?\d+", f.stem, re.I) for f in files)
 
-    keys = list(product([name], *[range(len(c)) for c in chunks]))
-    values = [(np.load, files[i], "r") for i in range(len(chunks[axis]))]
+    # lazy-load utility inline
+    def load_lazy(f):
+        if f.suffix == ".npy":
+            arr = np.load(f, mmap_mode="r")
+        elif f.suffix in (".tif", ".tiff"):
+            arr = tifffile.memmap(f, mode="r")
+        else:
+            raise ValueError(f"Unsupported file type: {f}")
+        chunks = (min(chunk_t, arr.shape[0]),) + arr.shape[1:]
+        return da.from_array(arr, chunks=chunks)
 
-    dsk = dict(zip(keys, values, strict=False))
+    if has_roi:
+        roi_groups = defaultdict(list)
+        for f in files:
+            m = re.search(r"roi[_-]?(\d+)", f.stem, re.I)
+            roi_idx = int(m.group(1)) if m else 0
+            roi_groups[roi_idx].append(f)
 
-    arr = da.Array(dsk, name, chunks, dtype)
-    if astype is not None:
-        arr = arr.astype(astype)
+        roi_arrays = []
+        for roi_idx, group in sorted(roi_groups.items()):
+            arrays = [load_lazy(f) for f in sorted(group)]
+            darr = da.concatenate(arrays, axis=0)  # concat in time
+            if astype:
+                darr = darr.astype(astype)
+            roi_arrays.append(darr)
+        return roi_arrays
 
-    return arr
+    # Plane or Z grouping case
+    if has_plane:
+        plane_groups = defaultdict(list)
+        for f in files:
+            m = re.search(r"(plane|z|chan)[_-]?(\d+)", f.stem, re.I)
+            plane_idx = int(m.group(2)) if m else 0
+            plane_groups[plane_idx].append(f)
+
+        plane_stacks = []
+        for z, group in sorted(plane_groups.items()):
+            arrays = [load_lazy(f) for f in sorted(group)]
+            plane = da.concatenate(arrays, axis=0)
+            plane_stacks.append(plane)
+
+        full = da.stack(plane_stacks, axis=1)  # (T,Z,Y,X)
+        return full.astype(astype) if astype else full
+
+    # Default: concatenate along time
+    arrays = [load_lazy(f) for f in sorted(files)]
+    full = da.concatenate(arrays, axis=0)  # (T,Y,X)
+    return full.astype(astype) if astype else full
+
+
 
 
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
@@ -385,6 +394,187 @@ def get_plane_from_filename(path, fallback=None):
     raise ValueError(f"Could not extract plane number from filename: {path.name}")
 
 
+def derive_tag_from_filename(path):
+    """
+    Derive a folder tag from a filename based on “planeN”, “roiN”, or "tagN" patterns.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        File path or name whose stem will be parsed.
+
+    Returns
+    -------
+    str
+        If the stem starts with “plane”, “roi”, or “res” followed by an integer,
+        returns that tag plus the integer (e.g. “plane3”, “roi7”, “res2”).
+        Otherwise returns the original stem unchanged.
+
+    Examples
+    --------
+    >>> derive_tag_from_filename("plane_01.tif")
+    'plane1'
+    >>> derive_tag_from_filename("plane2.bin")
+    'plane2'
+    >>> derive_tag_from_filename("roi5.raw")
+    'roi5'
+    >>> derive_tag_from_filename("ROI_10.dat")
+    'roi10'
+    >>> derive_tag_from_filename("res-3.h5")
+    'res3'
+    >>> derive_tag_from_filename("assembled_data_1.tiff")
+    'assembled_data_1'
+    >>> derive_tag_from_filename("file_12.tif")
+    'file_12'
+    """
+    name = Path(path).stem
+    for tag in PIPELINE_TAGS:
+        low = name.lower()
+        if low.startswith(tag):
+            suffix = name[len(tag) :]
+            if suffix and (suffix[0] in ("_", "-")):
+                suffix = suffix[1:]
+            if suffix.isdigit():
+                return f"{tag}{int(suffix)}"
+    return name
+
+
+def group_plane_rois(input_dir):
+    input_dir = Path(input_dir)
+    grouped = defaultdict(list)
+
+    for d in input_dir.iterdir():
+        if (
+                d.is_dir()
+                and not d.name.endswith(".zarr")     # exclude zarr dirs
+                and d.stem.startswith("plane")
+                and "_roi" in d.stem
+        ):
+            parts = d.stem.split("_")
+            if len(parts) == 2 and parts[1].startswith("roi"):
+                plane = parts[0]  # e.g. "plane01"
+                grouped[plane].append(d)
+
+    return grouped
+
+
+def merge_zarr_rois(
+        input_dir,
+        output_dir=None,
+        overwrite=True
+):
+    """
+    Concatenate roi1 + roi2 .zarr stores for each plane into a single planeXX.zarr.
+
+    Parameters
+    ----------
+    input_dir : Path or str
+        Directory containing planeXX_roi1, planeXX_roi2 subfolders with ops.npy + data.zarr.
+    output_dir : Path or str, optional
+        Where to write merged planeXX.zarr. Defaults to `input_dir`.
+    overwrite : bool
+        If True, existing outputs are replaced.
+    """
+
+    z_merged = None
+    input_dir = Path(input_dir)
+    output_dir = (
+        Path(output_dir)
+        if output_dir
+        else input_dir.parent / (input_dir.name + "_merged")
+    )
+    output_dir.mkdir(exist_ok=True)
+    logger.debug(f"Saving merged zarrs to {output_dir}")
+
+    roi1_dirs = sorted(input_dir.glob("*plane*_roi1*"))
+    roi2_dirs = sorted(input_dir.glob("*plane*_roi2*"))
+    if not roi1_dirs or not roi2_dirs:
+        logger.critical("No roi1 or roi2 in input dir")
+        return None
+    assert len(roi1_dirs) == len(roi2_dirs), "Mismatched ROI dirs"
+
+    for roi1, roi2 in zip(roi1_dirs, roi2_dirs):
+        zplane = roi1.stem.split("_")[0]  # "plane01"
+        out_path = output_dir / f"{zplane}.zarr"
+        if out_path.exists():
+            if overwrite:
+                logger.info(f"Overwriting {out_path}")
+                import shutil
+
+                shutil.rmtree(out_path)
+            else:
+                logger.info(f"Skipping {zplane}, {out_path} exists")
+                continue
+
+        # load ops
+        z1 = da.from_zarr(roi1)
+        z2 = da.from_zarr(roi2)
+
+        assert z1.shape[0] == z2.shape[0], "Frame count mismatch"
+        assert z1.shape[1] == z2.shape[1], "Height mismatch"
+
+        # concatenate along width (axis=2)
+        z_merged = da.concatenate([z1, z2], axis=2)
+        z_merged.to_zarr(out_path, overwrite=overwrite)
+
+    if z_merged is not None:
+        logger.info(f"Merged shape: {z_merged.shape}")
+
+    return None
+
+
+def load_zarr_grouped(input_dir, ):
+    """
+    Discover and lazily concatenate ROI .zarr stores per plane.
+
+    Returns
+    -------
+    dict[str, dask.array.Array]
+        Mapping plane tag -> concatenated dask array
+    """
+    """
+    Lazily load multiple planeN_roiN.zarr stores into a single 4D array (T, Z, Y, X).
+
+    Each plane's ROIs are concatenated horizontally (along X),
+    and all planes are stacked along the Z dimension.
+
+    Returns
+    -------
+    dask.array.Array
+        Lazy 4D array with shape (T, Z, Y, X_total)
+    """
+    input_dir = Path(input_dir)
+    grouped = defaultdict(list)
+
+    # collect plane-roi groups
+    for d in sorted(input_dir.glob("plane*_roi*.zarr")):
+        if not d.is_dir():
+            continue
+        parts = d.stem.split("_")
+        if len(parts) == 2 and parts[1].startswith("roi"):
+            grouped[parts[0]].append(d)
+
+    if not grouped:
+        raise ValueError(f"No plane*_roi*.zarr directories in {input_dir}")
+
+    planes = []
+    for plane, roi_dirs in sorted(grouped.items(), key=lambda kv: kv[0]):
+        roi_dirs = sorted(roi_dirs, key=lambda p: p.stem.lower())
+        arrays = [da.from_zarr(p, chunks=None) for p in roi_dirs]
+
+        base_shape = arrays[0].shape
+        for a in arrays[1:]:
+            if a.shape[:2] != base_shape[:2]:
+                raise ValueError(f"Shape mismatch in {plane}: {a.shape} vs {base_shape}")
+
+        merged_plane = da.concatenate(arrays, axis=2)  # concat horizontally
+        planes.append(merged_plane)
+        logger.info(f"{plane}: concatenated {len(arrays)} ROIs → {merged_plane.shape}")
+
+    arr_4d = da.stack(planes, axis=1)  # stack planes along Z
+    logger.info(f"Final 4D array shape: {arr_4d.shape} (T, Z, Y, X)")
+    return arr_4d
+
 def _is_arraylike(obj) -> bool:
     """
     Checks if the object is array-like.
@@ -431,6 +621,29 @@ def get_mbo_dirs() -> dict:
         "data": data,
         "tests": tests,
     }
+
+
+def get_last_savedir_path() -> Path:
+    """Return path to settings file tracking last saved folder."""
+    return Path.home().joinpath("mbo", "settings", "last_savedir.json")
+
+def load_last_savedir(default=None) -> Path:
+    """Load last saved directory path if it exists."""
+    f = get_last_savedir_path()
+    if f.is_file():
+        try:
+            path = Path(json.loads(f.read_text()).get("last_savedir", ""))
+            if path.exists():
+                return path
+        except Exception:
+            pass
+    return Path(default or Path().cwd())
+
+def save_last_savedir(path: Path):
+    """Persist the most recent save directory path."""
+    f = get_last_savedir_path()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"last_savedir": str(path)}))
 
 
 def _convert_range_to_slice(k):

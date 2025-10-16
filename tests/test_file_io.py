@@ -196,12 +196,10 @@ def test_benchmark_indexing_test(tmp_path):
 
     # Convert to dask and zarr
     dask_array = data.as_dask()
-    zarr_array = data.as_zarr()
 
     arrays = {
         "numpy": data,
         "dask": dask_array,
-        "zarr": zarr_array,
     }
 
     save_path = tmp_path / "benchmark_results.json"

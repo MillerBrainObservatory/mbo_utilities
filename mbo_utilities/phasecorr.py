@@ -65,22 +65,36 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False):
     if use_fft:
         _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
         dx = float(_shift[1])
+        logger.debug(f"FFT-based phase correlation shift: {dx:.2f}")
     else:
-        # fast 1D correlation along x (row averages)
-        a_mean = a.mean(0)
-        b_mean = b_.mean(0)
-        offsets = range(-max_offset, max_offset + 1)
-        scores = [
-            np.dot(
-                a_mean[max_offset:-max_offset],
-                np.roll(b_mean, k)[max_offset:-max_offset],
-            )
-            for k in offsets
-        ]
-        dx = float(offsets[int(np.argmax(scores))])
+        a_mean = a.mean(axis=0) - np.mean(a)
+        b_mean = b_.mean(axis=0) - np.mean(b_)
+
+        offsets = np.arange(-4, 4, 1)
+        scores = np.empty_like(offsets, dtype=float)
+
+        for i, k in enumerate(offsets):
+            # valid overlap, no wrapping
+            if k > 0:
+                aa = a_mean[:-k]
+                bb = b_mean[k:]
+            elif k < 0:
+                aa = a_mean[-k:]
+                bb = b_mean[:k]
+            else:
+                aa = a_mean
+                bb = b_mean
+            num = np.dot(aa, bb)
+            denom = np.linalg.norm(aa) * np.linalg.norm(bb)
+            scores[i] = num / denom if denom else 0.0
+
+        k_best = offsets[np.argmax(scores)]
+        dx = -float(k_best)
+        logger.debug(f"Integer phase correlation shift: {dx:.2f}")
 
     if max_offset:
         dx = np.sign(dx) * min(abs(dx), max_offset)
+        logger.debug(f"Clipped shift to max_offset={max_offset}: {dx:.2f}")
     return dx
 
 
@@ -96,7 +110,7 @@ def _apply_offset(img, offset, use_fft=False):
 
     if use_fft:
         f = np.fft.fftn(rows, axes=(-2, -1))
-        shift_vec = (0,) * (f.ndim - 1) + (offset,)  # e.g. (0,0,dx) for 3-D
+        shift_vec = (0,) * (f.ndim - 1) + (offset,)
         rows[:] = np.fft.ifftn(fourier_shift(f, shift_vec), axes=(-2, -1)).real
     else:
         rows[:] = np.roll(rows, shift=int(round(offset)), axis=-1)
@@ -126,12 +140,12 @@ def bidir_phasecorr(
     border : int or tuple, optional
         Number of pixels to crop from edges (t, b, l, r).
     """
-
     if arr.ndim == 2:
         _offsets = _phase_corr_2d(arr, upsample, border, max_offset)
     else:
         flat = arr.reshape(arr.shape[0], *arr.shape[-2:])
         if method == "frame":
+            logger.debug("Using individual frames for phase correlation")
             _offsets = np.array(
                 [
                     _phase_corr_2d(
@@ -147,6 +161,7 @@ def bidir_phasecorr(
         else:
             if method not in MBO_WINDOW_METHODS:
                 raise ValueError(f"unknown method {method}")
+            logger.debug(f"Using '{method}' window for phase correlation")
             _offsets = _phase_corr_2d(
                 frame=MBO_WINDOW_METHODS[method](flat),
                 upsample=upsample,
@@ -160,7 +175,7 @@ def bidir_phasecorr(
     else:
         out = np.stack(
             [
-                _apply_offset(f.copy(), float(s))  # or _apply_offset
+                _apply_offset(f.copy(), float(s))
                 for f, s in zip(arr, _offsets)
             ]
         )
@@ -176,75 +191,20 @@ def apply_scan_phase_offsets(arr, offs):
     return out
 
 
-def compute_scan_offsets(tiff_path, max_lag=8):
-    """
-    Compute scan phase offsets for each z-plane in a TIFF stack.
+if __name__ == "__main__":
 
-    Matches the matlab implementation of demas et.al. 2021.
-
-    Parameters
-    ----------
-    tiff_path : str or Path
-        Path to multi-plane TIFF file.
-    max_lag : int, optional
-        Maximum lag to search in cross-correlation (default 8).
-
-    Returns
-    -------
-    offsets : np.ndarray, shape (n_planes,)
-        Detected scan offsets (in pixels) for each plane.
-    """
+    import numpy as np
     import tifffile
     from pathlib import Path
-    from scipy.signal import correlate
+    from mbo_utilities import imread
 
-    tiff_path = Path(tiff_path)
-    data = tifffile.imread(
-        tiff_path
-    )  # shape = (T, Y, X, C?) depending on ScanImage export
-    if data.ndim == 2:
-        raise ValueError("Expected multi-plane data, got single frame")
+    data_path = Path(
+        r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw\mk355_7_27_2025_180mw_right_m2_go_to_2x-mROI-880x1100um_220x550px_2um-px_14p00Hz_00001_00001_00001.tif")
+    data = imread(data_path)
+    data.fix_phase = False
 
-    # assume (frames, y, x) or (frames, y, x, planes)
-    if data.ndim == 3:
-        # no explicit plane axis, treat each frame as a plane
-        n_planes = data.shape[0]
-        vol = data
-    elif data.ndim == 4:
-        # (frames, y, x, planes)
-        n_planes = data.shape[-1]
-        vol = np.moveaxis(data, -1, 0)  # (planes, frames, y, x)
-    else:
-        raise ValueError(f"Unexpected TIFF shape {data.shape}")
-
-    offsets = []
-    for p in range(n_planes):
-        plane_data = vol[p] if vol.ndim == 3 else vol[p].max(axis=0)
-        if vol.ndim == 3:
-            img = plane_data
-        else:
-            img = plane_data
-
-        # odd/even line split
-        v1 = img[:, ::2].astype(float).ravel()
-        v2 = img[:, 1::2].astype(float).ravel()
-
-        v1 -= v1.mean()
-        v2 -= v2.mean()
-        v1[v1 < 0] = 0
-        v2[v2 < 0] = 0
-
-        corr = correlate(v1, v2, mode="full", method="auto")
-        mid = len(corr) // 2
-        search = corr[mid - max_lag : mid + max_lag + 1]
-        lags = np.arange(-max_lag, max_lag + 1)
-        offsets.append(lags[np.argmax(search)])
-
-    return np.array(offsets, dtype=int)
-
-
-if __name__ == "__main__":
-    from mbo_utilities import get_files, imread
-
-    files = get_files(r"D:\tests\data", "tif")
-    fpath = r"D:\W2_DATA\kbarber\2025_03_01\mk301\green"
+    test = []
+    for idx in range(5):
+        frame = data[idx, 0, :, :]
+        dx_int = _phase_corr_2d(frame, use_fft=False)
+        dx_fft = _phase_corr_2d(frame, use_fft=True)
