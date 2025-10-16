@@ -7,7 +7,9 @@ from pathlib import Path
 
 import numpy as np
 import tifffile
-from mbo_utilities import get_files
+from mbo_utilities import get_files, log
+
+logger = log.get("metadata")
 
 
 def _params_from_metadata_caiman(metadata):
@@ -128,37 +130,6 @@ def _default_params_caiman():
     }
 
 
-def _params_from_metadata_suite2p(metadata, ops):
-    """
-    Tau is 0.7 for GCaMP6f, 1.0 for GCaMP6m, 1.25-1.5 for GCaMP6s
-    """
-    if metadata is None:
-        print("No metadata found. Using default parameters.")
-        return ops
-
-    # typical neuron ~16 microns
-    ops["fs"] = metadata["frame_rate"]
-    ops["nplanes"] = 1
-    ops["nchannels"] = 1
-    ops["do_bidiphase"] = 0
-    ops["do_regmetrics"] = True
-
-    # suite2p iterates each plane and takes ops['dxy'][i] where i is the plane index
-    ops["dx"] = [metadata["pixel_resolution"][0]]
-    ops["dy"] = [metadata["pixel_resolution"][1]]
-
-    return ops
-
-
-def report_missing_metadata(file: os.PathLike | str):
-    tiff_file = tifffile.TiffFile(file)
-    if not tiff_file.software == "SI":
-        print(f"Missing SI software tag.")
-    if not tiff_file.description[:6] == "state.":
-        print(f"Missing 'state' software tag.")
-    if not "scanimage.SI" in tiff_file.description[-256:]:
-        print(f"Missing 'scanimage.SI' in description tag.")
-
 
 def has_mbo_metadata(file: os.PathLike | str) -> bool:
     """
@@ -226,10 +197,11 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
             and tiff_file.shaped_metadata is not None
             and isinstance(tiff_file.shaped_metadata, (list, tuple))
         ):
+            logger.info(f"File {file} has shaped_metadata; not a raw ScanImage TIFF.")
             return False
         else:
             if tiff_file.scanimage_metadata is None:
-                print(f"No ScanImage metadata found in {file}.")
+                logger.info(f"No ScanImage metadata found in {file}.")
                 return False
             return True
     except Exception:
@@ -366,10 +338,32 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
         ):
             raise ValueError(f"No metadata found in {file}.")
         return tiff_file.shaped_metadata[0]
+
     elif hasattr(tiff_file, "scanimage_metadata"):
         meta = tiff_file.scanimage_metadata
-        if meta is None:
-            return None
+        # if no ScanImage metadata at all → fallback immediately
+        if not meta:
+            logger.info(f"{file} has no scanimage_metadata, trying ops.npy fallback.")
+            for parent in Path(file).parents:
+                ops_path = parent / "ops.npy"
+                if ops_path.exists():
+                    try:
+                        ops = np.load(ops_path, allow_pickle=True).item()
+                        return {
+                            "num_planes": int(ops.get("nplanes", 1) or 1),
+                            "fov_px": (int(ops.get("Lx", 0) or 0), int(ops.get("Ly", 0) or 0)),
+                            "frame_rate": float(ops.get("fs", 0) or 0),
+                            "zoom_factor": ops.get("zoom"),
+                            "pixel_resolution": (
+                                float(ops.get("umPerPixX", 1) or 1),
+                                float(ops.get("umPerPixY", 1) or 1),
+                            ),
+                            "dtype": "int16",
+                            "source": "ops_fallback",
+                        }
+                    except Exception as e:
+                        logger.warning(f"Failed ops.npy fallback for {file}: {e}")
+            raise ValueError(f"No metadata found in {file}.")
 
         si = meta.get("FrameData", {})
         if not si:
@@ -450,6 +444,52 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
         else:
             return metadata
     else:
+        logger.info(f"No ScanImage metadata found in {file}, trying ops.npy fallback.")
+        # fallback: no ScanImage metadata, try nearby ops.npy
+        ops_path = Path(file).with_name("ops.npy")
+        if not ops_path.exists():
+            # climb until you find suite2p or root
+            for parent in Path(file).parents:
+                ops_path = parent / "ops.npy"
+                if ops_path.exists():
+                    try:
+                        ops = np.load(ops_path, allow_pickle=True).item()
+                        num_planes = int(ops.get("nplanes") or 1)
+                        # single-plane suite2p folder → force to 1
+                        if "plane0" in str(ops_path.parent).lower():
+                            num_planes = 1
+                        return {
+                            "num_planes": num_planes,
+                            "fov_px": (
+                                int(ops.get("Lx") or 0),
+                                int(ops.get("Ly") or 0),
+                            ),
+                            "frame_rate": float(ops.get("fs") or 0),
+                            "zoom_factor": ops.get("zoom"),
+                            "pixel_resolution": (
+                                float(ops.get("umPerPixX") or 1.0),
+                                float(ops.get("umPerPixY") or 1.0),
+                            ),
+                            "dtype": "int16",
+                            "source": "ops_fallback",
+                        }
+                    except Exception as e:
+                        logger.warning(f"Failed ops.npy fallback for {file}: {e}")
+        if ops_path.exists():
+            logger.info(f"Found ops.npy at {ops_path}, attempting to load.")
+            try:
+                ops = np.load(ops_path, allow_pickle=True).item()
+                return {
+                    "num_planes": ops.get("nplanes", 1),
+                    "fov_px": (ops.get("Lx"), ops.get("Ly")),
+                    "frame_rate": ops.get("fs"),
+                    "zoom_factor": ops.get("zoom", None),
+                    "pixel_resolution": (ops.get("umPerPixX"), ops.get("umPerPixY")),
+                    "dtype": "int16",
+                    "source": "ops_fallback",
+                }
+            except Exception as e:
+                logger.warning(f"Failed ops.npy fallback for {file}: {e}")
         raise ValueError(f"No metadata found in {file}.")
 
 
@@ -484,15 +524,21 @@ def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False):
     for i, file_path in enumerate(file_paths):
         try:
             file_meta = get_metadata_single(file_path, z_step=z_step, verbose=verbose)
+
             if file_meta is None:
                 print(f"Warning: No metadata found in {file_path}. Skipping.")
                 continue
 
             if i == 0:
                 first_meta = file_meta.copy()
+
+            n_planes = file_meta.get("num_planes", 1)
+            if not isinstance(n_planes, (int, float)) or n_planes in (0, None):
+                n_planes = 1
+
             n_pages = len(tifffile.TiffFile(file_path).pages)
+            frames_per_file.append(int(n_pages / n_planes))
             tiff_pages_per_file.append(n_pages)
-            frames_per_file.append(int(n_pages / file_meta.get("num_planes")))
             file_path_strings.append(str(file_path))
 
         except Exception as e:
@@ -513,33 +559,6 @@ def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False):
     print(f"Total: {total_frames} frames across {len(file_paths)} files")
 
     return first_meta
-
-
-def params_from_metadata(metadata, base_ops, pipeline="suite2p"):
-    """
-    Use metadata to get sensible default pipeline parameters.
-
-    If ops are not provided, uses suite2p.default_ops(). Sets framerate, pixel resolution, and do_metrics=True.
-
-    Parameters
-    ----------
-    metadata : dict
-        Result of mbo.get_metadata()
-    base_ops : dict
-        Ops dict to use as a base.
-    pipeline : str, optional
-        The pipeline to use. Default is "suite2p".
-    """
-    if pipeline.lower() == "caiman":
-        print("Warning: CaImAn is not stable, proceed at your own risk.")
-        return _params_from_metadata_caiman(metadata)
-    elif pipeline.lower() == "suite2p":
-        print("Setting pipeline to suite2p")
-        return _params_from_metadata_suite2p(metadata, base_ops)
-    else:
-        raise ValueError(
-            f"Pipeline {pipeline} not recognized. Use 'caiman' or 'suite2'"
-        )
 
 
 def find_scanimage_metadata(path):

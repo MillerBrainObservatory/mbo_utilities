@@ -102,57 +102,69 @@ def write_ops(metadata, raw_filename):
 
 def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
     """
-    Lazily builds a 4D Dask array from planeXX_roiYY.npy files without full load.
+    Lazily build a Dask array or list of arrays depending on filename tags.
 
-    Parameters
-    ----------
-    files : list of str or Path
-        .npy files with names like plane01_roi1.npy, plane02_roi2.npy, etc.
-    astype : numpy.dtype, optional
-        Cast final array dtype.
-    chunk_t : int
-        Chunk size along time axis.
-
-    Returns
-    -------
-    dask.array.Array
-        Shape (T, Z, Y, X)
+    - "plane", "z", or "chan" → stacked along Z (TZYX)
+    - "roi" → list of 3D (T,Y,X) arrays, one per ROI
+    - otherwise → concatenate all files in time (T)
     """
-
     files = [Path(f) for f in files]
-    planes = defaultdict(list)
-    plane_re = re.compile(r"plane(\d+)", re.I)
-    roi_re = re.compile(r"roi(\d+)", re.I)
+    if not files:
+        raise ValueError("No input files provided.")
 
-    for f in files:
-        m = plane_re.search(f.name)
-        if m:
-            planes[int(m.group(1))].append(f)
+    has_plane = any(re.search(r"(plane|z|chan)[_-]?\d+", f.stem, re.I) for f in files)
+    has_roi   = any(re.search(r"roi[_-]?\d+", f.stem, re.I) for f in files)
 
-    plane_stacks = []
-    for z, pfiles in sorted(planes.items()):
+    # lazy-load utility inline
+    def load_lazy(f):
+        if f.suffix == ".npy":
+            arr = np.load(f, mmap_mode="r")
+        elif f.suffix in (".tif", ".tiff"):
+            arr = tifffile.memmap(f, mode="r")
+        else:
+            raise ValueError(f"Unsupported file type: {f}")
+        chunks = (min(chunk_t, arr.shape[0]),) + arr.shape[1:]
+        return da.from_array(arr, chunks=chunks)
+
+    if has_roi:
+        roi_groups = defaultdict(list)
+        for f in files:
+            m = re.search(r"roi[_-]?(\d+)", f.stem, re.I)
+            roi_idx = int(m.group(1)) if m else 0
+            roi_groups[roi_idx].append(f)
+
         roi_arrays = []
-        for f in sorted(pfiles, key=lambda x: int(roi_re.search(x.name).group(1)) if roi_re.search(x.name) else 0):
-            if f.suffix == ".npy":
-                arr = np.load(f, mmap_mode="r")
-            elif f.suffix in (".tif", ".tiff"):
-                arr = tifffile.memmap(f)   # OS-backed, no full load
-            else:
-                raise ValueError(f"Unsupported {f}")
-            chunks = (min(chunk_t, arr.shape[0]),) + arr.shape[1:]
-            start_fromarr = time.time()
-            darr = da.from_array(arr, chunks=chunks)
-            end = time.time()
-            print(f"Loaded {f.name} to dask in {end - start_fromarr:.2f}s")
+        for roi_idx, group in sorted(roi_groups.items()):
+            arrays = [load_lazy(f) for f in sorted(group)]
+            darr = da.concatenate(arrays, axis=0)  # concat in time
+            if astype:
+                darr = darr.astype(astype)
             roi_arrays.append(darr)
+        return roi_arrays
 
-        plane = da.concatenate(roi_arrays, axis=-1)
-        plane_stacks.append(plane)
+    # Plane or Z grouping case
+    if has_plane:
+        plane_groups = defaultdict(list)
+        for f in files:
+            m = re.search(r"(plane|z|chan)[_-]?(\d+)", f.stem, re.I)
+            plane_idx = int(m.group(2)) if m else 0
+            plane_groups[plane_idx].append(f)
 
-    full = da.stack(plane_stacks, axis=1)  # (T,Z,Y,X)
-    if astype:
-        full = full.astype(astype)
-    return full
+        plane_stacks = []
+        for z, group in sorted(plane_groups.items()):
+            arrays = [load_lazy(f) for f in sorted(group)]
+            plane = da.concatenate(arrays, axis=0)
+            plane_stacks.append(plane)
+
+        full = da.stack(plane_stacks, axis=1)  # (T,Z,Y,X)
+        return full.astype(astype) if astype else full
+
+    # Default: concatenate along time
+    arrays = [load_lazy(f) for f in sorted(files)]
+    full = da.concatenate(arrays, axis=0)  # (T,Y,X)
+    return full.astype(astype) if astype else full
+
+
 
 
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
@@ -510,6 +522,58 @@ def merge_zarr_rois(
 
     return None
 
+
+def load_zarr_grouped(input_dir, ):
+    """
+    Discover and lazily concatenate ROI .zarr stores per plane.
+
+    Returns
+    -------
+    dict[str, dask.array.Array]
+        Mapping plane tag -> concatenated dask array
+    """
+    """
+    Lazily load multiple planeN_roiN.zarr stores into a single 4D array (T, Z, Y, X).
+
+    Each plane's ROIs are concatenated horizontally (along X),
+    and all planes are stacked along the Z dimension.
+
+    Returns
+    -------
+    dask.array.Array
+        Lazy 4D array with shape (T, Z, Y, X_total)
+    """
+    input_dir = Path(input_dir)
+    grouped = defaultdict(list)
+
+    # collect plane-roi groups
+    for d in sorted(input_dir.glob("plane*_roi*.zarr")):
+        if not d.is_dir():
+            continue
+        parts = d.stem.split("_")
+        if len(parts) == 2 and parts[1].startswith("roi"):
+            grouped[parts[0]].append(d)
+
+    if not grouped:
+        raise ValueError(f"No plane*_roi*.zarr directories in {input_dir}")
+
+    planes = []
+    for plane, roi_dirs in sorted(grouped.items(), key=lambda kv: kv[0]):
+        roi_dirs = sorted(roi_dirs, key=lambda p: p.stem.lower())
+        arrays = [da.from_zarr(p, chunks=None) for p in roi_dirs]
+
+        base_shape = arrays[0].shape
+        for a in arrays[1:]:
+            if a.shape[:2] != base_shape[:2]:
+                raise ValueError(f"Shape mismatch in {plane}: {a.shape} vs {base_shape}")
+
+        merged_plane = da.concatenate(arrays, axis=2)  # concat horizontally
+        planes.append(merged_plane)
+        logger.info(f"{plane}: concatenated {len(arrays)} ROIs → {merged_plane.shape}")
+
+    arr_4d = da.stack(planes, axis=1)  # stack planes along Z
+    logger.info(f"Final 4D array shape: {arr_4d.shape} (T, Z, Y, X)")
+    return arr_4d
 
 def _is_arraylike(obj) -> bool:
     """

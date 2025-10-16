@@ -18,7 +18,7 @@ from .file_io import (
 )
 from .plot_util import save_png, save_mp4
 
-from .metadata import is_raw_scanimage, get_metadata, params_from_metadata
+from .metadata import is_raw_scanimage, get_metadata
 from .util import (
     norm_minmax,
     smooth_data,
@@ -45,7 +45,6 @@ __all__ = [
     # metadata
     "is_raw_scanimage",
     "get_metadata",
-    "params_from_metadata",
     # util
     "expand_paths",
     "norm_minmax",

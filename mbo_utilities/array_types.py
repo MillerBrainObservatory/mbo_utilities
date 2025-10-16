@@ -22,9 +22,8 @@ from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
     _multi_tiff_to_fsspec,
-    HAS_ZARR,
     _convert_range_to_slice,
-    expand_paths, files_to_dask,
+    expand_paths, files_to_dask, derive_tag_from_filename,
 )
 from mbo_utilities.metadata import get_metadata, clean_scanimage_metadata
 from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, bidir_phasecorr
@@ -528,85 +527,66 @@ class H5Array:
 class MBOTiffArray:
     filenames: list[Path]
     _chunks: tuple[int, ...] | dict | None = None
-    _dask_array: da.Array = field(default=None, init=False, repr=False)
+    roi: int | None = None
+    _metadata: dict | None = field(default=None, init=False)
+    _dask_array: da.Array | None = field(default=None, init=False, repr=False)
+
+    def __post_init__(self):
+        if not self.filenames:
+            raise ValueError("No filenames provided.")
+
+        # allow string paths
+        self.filenames = [Path(f) for f in self.filenames]
+
+        # collect metadata from first TIFF
+        self._metadata = get_metadata(self.filenames)
+
+        self.tags = [derive_tag_from_filename(f) for f in self.filenames]
 
     @property
-    def chunks(self) -> tuple[int, ...] | dict:
-        return self._chunks or CHUNKS_4D
+    def metadata(self) -> dict:
+        return self._metadata or {}
 
-    @chunks.setter
-    def chunks(self, value):
-        self._chunks = value
+    @property
+    def chunks(self):
+        return self._chunks or CHUNKS_4D
 
     @property
     def dask(self) -> da.Array:
-        if self._dask_array is None:
-            self._dask_array = files_to_dask(self.filenames)
-        return self._dask_array
+        if self._dask_array is not None:
+            return self._dask_array
 
-    def __getitem__(self, key: int | slice | tuple[int, ...]) -> np.ndarray:
+        if len(self.filenames) == 1:
+            arr = tifffile.imread(self.filenames[0], aszarr=True)
+            darr = da.from_zarr(arr)
+            if darr.ndim == 2:
+                darr = darr[None, None, :, :]
+            elif darr.ndim == 3:
+                darr = darr[:, None, :, :]
+        else:
+            darr = files_to_dask(self.filenames)
+            if darr.ndim == 3:
+                darr = darr[None, :, :, :]
+        self._dask_array = darr
+        return darr
+
+    @property
+    def shape(self):
+        return tuple(self.dask.shape)
+
+    @property
+    def ndim(self):
+        return self.dask.ndim
+
+    def __getitem__(self, key):
+        key = tuple(
+            slice(k.start, k.stop) if isinstance(k, range) else k
+            for k in (key if isinstance(key, tuple) else (key,))
+        )
         return self.dask[key]
 
     def __getattr__(self, attr):
         return getattr(self.dask, attr)
-
-    @property
-    def ndim(self) -> int:
-        return self.dask.ndim
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        return tuple(self.dask.shape)
-
-    @property
-    def metadata(self) -> dict:
-        """
-        Return metadata from the first TIFF file.
-        Assumes all files have the same metadata structure.
-        """
-        if not self.filenames:
-            return {}
-        return get_metadata(self.filenames[0])
-
-
-    def imshow(self, **kwargs) -> fpl.ImageWidget:
-
-        from lbm_suite2p_python import derive_tag_from_filename
-        tags = [derive_tag_from_filename(f) for f in self.filenames]
-
-        if len(self.filenames) == 1:
-            with tifffile.TiffFile(self.filenames[0]) as tif:
-                # read only first or middle frame (avoid full load)
-                n_pages = len(tif.pages)
-                frame_idx = kwargs.get("frame", n_pages // 2)
-                data = tif.pages[frame_idx].asarray()
-            tag = tags[0]
-        else:
-            # sample one frame from the dask array lazily
-            start = time.time()
-            data = self.dask
-            end = time.time()
-            logger.debug(f"Dask array access took {end - start:.2f} seconds")
-            tag = "_".join(tags)
-
-        histogram_widget = kwargs.get("histogram_widget", True)
-        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
-        window_funcs = kwargs.get("window_funcs", None)
-
-        start_widget = time.time()
-
-        widget = fpl.ImageWidget(
-            data=data,
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
-            window_funcs=window_funcs,
-        )
-        end_widget = time.time()
-        logger.debug(f"ImageWidget creation took {end_widget - start_widget:.2f} seconds")
-
-        widget.figure.title = f"{tag} (frame {kwargs.get('frame', 'auto')})"
-        return widget
 
     def _imwrite(
         self,
@@ -618,40 +598,30 @@ class MBOTiffArray:
         debug=None,
         **kwargs,
     ):
-        if "plane" in self.metadata.keys():
-            plane = self.metadata["plane"]
-        else:
-            from mbo_utilities import get_plane_from_filename
+        from mbo_utilities.lazy_array import _write_plane
+        from mbo_utilities.file_io import get_plane_from_filename
 
-            plane = get_plane_from_filename(Path(outpath).stem, None)
-            if plane is None:
-                raise ValueError("Cannot determine plane from metadata.")
-            else:
-                self.metadata["plane"] = plane
+        md = self.metadata.copy()
+        plane = md.get("plane") or get_plane_from_filename(Path(outpath).stem, None)
+        if plane is None:
+            raise ValueError("Cannot determine plane from metadata.")
 
         outpath = Path(outpath)
         ext = ext.lower().lstrip(".")
-
-        if ext in {"bin"}:
-            fname = "data_raw.bin"
-        else:
-            fname = f"plane{plane:03d}.{ext}"
-
-        if outpath.is_dir():
-            target = outpath.joinpath(fname)
-        else:
-            target = outpath.parent.joinpath(fname)
+        fname = f"plane{plane:03d}.{ext}" if ext != "bin" else "data_raw.bin"
+        target = outpath.joinpath(fname) if outpath.is_dir() else outpath.parent.joinpath(fname)
 
         _write_plane(
             self,
             target,
             overwrite=overwrite,
             target_chunk_mb=target_chunk_mb,
-            metadata=self.metadata,
+            metadata=md,
             progress_callback=progress_callback,
             debug=debug,
             dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
-            plane_index=None,  # convert to 0-based index
+            plane_index=None,
+            **kwargs,
         )
 
 
@@ -859,19 +829,6 @@ class MboRawArray(scans.ScanMultiROI):
         logger.info(f"Combined kerchunk reference written to {combined_json_path}")
         self.reference = combined_json_path
         return combined_json_path
-
-    def as_zarr(self):
-        """
-        Convert the current scan data to a Zarr array.
-        This will create a Zarr store in the same directory as the reference file.
-        """
-        if not HAS_ZARR:
-            raise ImportError(
-                "Zarr is not installed. Please install it to use this method."
-            )
-        if not Path(self.reference).is_file():
-            return None
-        return NotImplementedError("Attempted to convert to Zarr, but not implemented.")
 
     def read_data(self, filenames, dtype=np.int16):
         filenames = expand_paths(filenames)
@@ -1272,6 +1229,8 @@ class MboRawArray(scans.ScanMultiROI):
             planes = [p - 1 for p in planes]
         for roi in iter_rois(self):
             for plane in planes:
+                if not isinstance(plane, int):
+                    raise ValueError(f"Plane must be an integer, got {type(plane)}")
                 self.roi = roi
                 if roi is None:
                     fname = f"plane{plane + 1:02d}_stitched{ext}"
@@ -1341,6 +1300,67 @@ class MboRawArray(scans.ScanMultiROI):
             graphic_kwargs={"vmin": arrays[0].min(), "vmax": arrays[0].max()},
             window_funcs=window_funcs,
         )
+
+
+class NumpyArray:
+    def __init__(
+            self,
+            array: np.ndarray | str | Path,
+            metadata: dict | None = None
+    ):
+        if isinstance(array, (str, Path)):
+            self.path = Path(array)
+            if not self.path.exists():
+                raise FileNotFoundError(f"Numpy file not found: {self.path}")
+            self.data = np.load(self.path, mmap_mode="r")
+            self._tempfile = None
+        elif isinstance(array, np.ndarray):
+            logger.info(f"Creating temporary .npy file for array.")
+            tmp = tempfile.NamedTemporaryFile(suffix=".npy", delete=False)
+            np.save(tmp, array)
+            tmp.close()
+            self.path = Path(tmp.name)
+            self.data = np.load(self.path, mmap_mode="r")
+            self._tempfile = tmp
+            logger.debug(f"Temporary file created at {self.path}")
+        else:
+            raise TypeError(f"Expected np.ndarray or path, got {type(array)}")
+
+        self.shape = self.data.shape
+        self.dtype = self.data.dtype
+        self.ndim = self.data.ndim
+        self._metadata = metadata or {}
+
+    def __getitem__(self, item):
+        return self.data[item]
+
+    def __array__(self):
+        return np.asarray(self.data)
+
+    @property
+    def filenames(self) -> list[Path]:
+        return [self.path]
+
+    @property
+    def metadata(self):
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError("metadata must be a dict")
+        self._metadata = value
+
+    def close(self):
+        if self._tempfile:
+            try:
+                Path(self._tempfile.name).unlink(missing_ok=True)
+            except Exception:
+                pass
+            self._tempfile = None
+
+    def __del__(self):
+        self.close()
 
 
 class NWBArray:

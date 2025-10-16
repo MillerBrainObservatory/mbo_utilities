@@ -18,6 +18,7 @@ from .array_types import (
     ZarrArray,
     register_zplanes_s3d,
 )
+from .file_io import derive_tag_from_filename, get_plane_from_filename
 from .metadata import is_raw_scanimage, has_mbo_metadata
 from .roi import supports_roi
 
@@ -193,30 +194,55 @@ def imwrite(
 
     # TODO: integrade with numpy lazyarray
     if isinstance(lazy_array, np.ndarray):
-        if not str(ext).lower().startswith(".tif"):
-            raise TypeError("Raw numpy arrays can only be written as TIFFs in imwrite()")
+        if kwargs.get("s2p_bin", None) is not None:
+            plane_index = kwargs.get("plane_index", 0)
+            if roi is not None:
+                tag = f"plane{plane_index:02d}_roi{roi:02d}"
+            else:
+                tag = f"plane{plane_index:02d}"
+            plane_save_path = Path(outpath).joinpath(tag)
+            plane_save_path.mkdir(exist_ok=True)
 
-        outpath = Path(outpath)
-        base_dir = outpath if outpath.is_dir() else outpath.parent
-        base_dir.mkdir(exist_ok=True)
+            # attach metadata as property to numpy array
+            lazy_array = np.asarray(lazy_array).view()
+            lazy_array.metadata = metadata
+            _write_plane(
+                data=lazy_array,
+                filename = plane_save_path / "data_raw.bin",
+                overwrite=overwrite,
+                metadata=metadata,
+                debug=debug,
+                plane_index=plane_index,
+                target_chunk_mb=target_chunk_mb,
+                ext=".bin",
+                shift_vectors=shift_vectors,
+                register_z=register_z,
+                progress_callback=progress_callback,
+                **kwargs
+            )
 
-        plane_idx = kwargs.get("plane_index", 0)
-        roi_idx = kwargs.get("roi", None)
-        subname = f"plane{plane_idx:02d}_roi{roi_idx:02d}" if roi_idx is not None else f"plane{plane_idx:02d}"
+        else:
+            outpath = Path(outpath)
+            base_dir = outpath if outpath.is_dir() else outpath.parent
+            base_dir.mkdir(exist_ok=True)
 
-        save_dir = base_dir / subname
-        save_dir.mkdir(exist_ok=True)
+            plane_idx = kwargs.get("plane_index", 0)
+            roi_idx = kwargs.get("roi", None)
+            subname = f"plane{plane_idx:02d}_roi{roi_idx:02d}" if roi_idx is not None else f"plane{plane_idx:02d}"
 
-        filename = save_dir / f"{subname}.tif"
-        _write_plane(
-            data=lazy_array,
-            filename=filename,
-            overwrite=overwrite,
-            metadata=metadata,
-            debug=debug,
-            plane_index=plane_idx if lazy_array.ndim == 4 else None,
-        )
-        return filename
+            save_dir = base_dir / subname
+            save_dir.mkdir(exist_ok=True)
+
+            filename = save_dir / f"{subname}.tif"
+            _write_plane(
+                data=lazy_array,
+                filename=filename,
+                overwrite=overwrite,
+                metadata=metadata,
+                debug=debug,
+                plane_index=plane_idx if lazy_array.ndim == 4 else None,
+            )
+            return filename
 
     if roi is not None:
         if not supports_roi(lazy_array):
@@ -441,12 +467,13 @@ def imread(
         # Case 1: nested zarrs inside
         sub_zarrs = list(first.glob("*.zarr"))
         if sub_zarrs:
-            logger.debug(f"Detected nested zarr stores, loading as ZarrArray.")
+            logger.info(f"Detected nested zarr stores, loading as ZarrArray.")
             return ZarrArray(sub_zarrs, **_filter_kwargs(ZarrArray, kwargs))
 
+        tag = derive_tag_from_filename
         # Case 2: flat zarr store with zarr.json
         if (first / "zarr.json").exists():
-            logger.debug(f"Detected zarr.json, loading as ZarrArray.")
+            logger.info(f"Detected zarr.json, loading as ZarrArray.")
             return ZarrArray(paths, **_filter_kwargs(ZarrArray, kwargs))
 
         raise ValueError(
