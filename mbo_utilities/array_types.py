@@ -95,6 +95,8 @@ def register_zplanes_s3d(
 ) -> Path | None:
     # these are heavy imports, lazy import for now
     try:
+        # https://github.com/MillerBrainObservatory/mbo_utilities/issues/35
+        os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
         from suite3d.job import Job  # noqa
 
         HAS_SUITE3D = True

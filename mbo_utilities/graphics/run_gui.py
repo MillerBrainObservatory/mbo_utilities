@@ -40,7 +40,6 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
         dlg.metadata_only,
     )
 
-
 @click.command()
 @click.option(
     "--roi",

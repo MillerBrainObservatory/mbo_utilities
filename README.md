@@ -40,7 +40,8 @@ Using `UV` to install from github allows us to specify dependencies that are not
 If *not* using `uv`, simply replace `uv pip` with `pip`, and install the latest pygfx (this is likely to change in the future).
 
 ``` bash
-pip install mbo_utilities
+# into an environment with python 3.12.7-3.12.9 (tested)
+pip install mbo_utilities 
 pip install git+https://github.com/pygfx/pygfx.git@main
 ```
 
