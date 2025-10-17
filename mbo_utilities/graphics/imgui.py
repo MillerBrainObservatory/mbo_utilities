@@ -405,22 +405,11 @@ class PreviewDataWidget(EdgeWindow):
         scrollable: bool = False,
         auto_resize: bool = True,
         window_flags: int | None = None,
-        rois: int = 1,
+        **kwargs
     ):
         """
         Fastplotlib attachment, callable with fastplotlib.ImageWidget.add_gui(PreviewDataWidget)
         """
-        self.debug_panel = GuiLogger()
-        gui_handler = GuiLogHandler(self.debug_panel)
-        gui_handler.setFormatter(logging.Formatter("%(message)s"))
-        gui_handler.setLevel(logging.DEBUG)
-        log.attach(gui_handler)
-        log.set_global_level(logging.DEBUG)
-
-        self.logger = log.get("gui")
-        self.s2p = Suite2pSettings()
-        self._s2p_dir = ""
-        self.logger.info("Logger initialized.")
 
         flags = (
             (imgui.WindowFlags_.no_title_bar if not show_title else 0)
@@ -432,16 +421,33 @@ class PreviewDataWidget(EdgeWindow):
         )
         super().__init__(
             figure=iw.figure,
-            size=350 if size is None else size,
+            size=250 if size is None else size,
             location=location,
             title=title,
             window_flags=flags,
         )
+
+        # logger / debugger
+        self.debug_panel = GuiLogger()
+        gui_handler = GuiLogHandler(self.debug_panel)
+        gui_handler.setFormatter(logging.Formatter("%(message)s"))
+        gui_handler.setLevel(logging.DEBUG)
+        log.attach(gui_handler)
+        log.set_global_level(logging.DEBUG)
+        self.logger = log.get("gui")
+
+        self.logger.info("Logger initialized.")
+
+        self.s2p = Suite2pSettings()
+        self._s2p_dir = ""
+        self.kwargs = kwargs
+
         if implot.get_current_context() is None:
             implot.create_context()
 
-        # backend.create_fonts_texture()
         io = imgui.get_io()
+        font_config = imgui.ImFontConfig()
+        font_config.merge_mode = True
 
         fd_settings_dir = (
             Path(get_mbo_dirs()["imgui"])
@@ -451,8 +457,6 @@ class PreviewDataWidget(EdgeWindow):
         )
         io.set_ini_filename(str(fd_settings_dir))
 
-        io = imgui.get_io()
-
         sans_serif_font = str(
             Path(imgui_bundle.__file__).parent.joinpath(
                 "assets", "fonts", "Roboto", "Roboto-Regular.ttf"
@@ -460,31 +464,29 @@ class PreviewDataWidget(EdgeWindow):
         )
 
         self._default_imgui_font = io.fonts.add_font_from_file_ttf(
-            sans_serif_font, 14, imgui.ImFontConfig()
+            sans_serif_font,
+            14,
+            imgui.ImFontConfig()
         )
-
-        font_config = imgui.ImFontConfig()
-        font_config.merge_mode = True
 
         imgui.push_font(self._default_imgui_font, self._default_imgui_font.legacy_size)
 
-        self._default_imgui_font = io.fonts.add_font_from_file_ttf(
-            sans_serif_font, 14, imgui.ImFontConfig()
-        )
         self.fpath = fpath if fpath else getattr(iw, "fpath", None)
 
         # image widget setup
         self.image_widget = iw
-        if hasattr(self.image_widget.data[0], "rois"):
-            self.num_arrays: int = len(self.image_widget.data[0].rois)
-        else:
-            self.num_arrays: int = rois
 
         self.num_arrays = len(self.image_widget.managed_graphics)
         self.shape = self.image_widget.data[0].shape
-        self.is_mbo_scan = (
-            True if isinstance(self.image_widget.data[0], MboRawArray) else False
-        )
+        self.is_mbo_scan = (True if isinstance(self.image_widget.data[0], MboRawArray) else False)
+
+        if hasattr(self.image_widget.data[0], "rois"):
+            self.num_rois = len(self.image_widget.data[0].rois)
+            self._array_type = "roi"
+        else:
+            self.num_rois = 1
+            self._array_type = "array"
+
         if self.is_mbo_scan:
             for arr in self.image_widget.data:
                 arr.fix_phase = False
@@ -505,33 +507,32 @@ class PreviewDataWidget(EdgeWindow):
 
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
-
         self.image_widget._image_widget_sliders._loop = True  # noqa
 
-        if len(self.image_widget.data) > 1:
-            self._array_type = "roi"
-        else:
-            self._array_type = "array"
+        self._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(self.num_rois)]
+        self._zstats_means = [None] * self.num_rois
+        self._zstats_mean_scalar = [0.0] * self.num_rois
+        self._zstats_done = [False] * self.num_rois
+        self._zstats_progress = [0.0] * self.num_rois
+        self._zstats_current_z = [0] * self.num_rois
 
-        size = self.num_arrays  # always per-ROI
-
-        self._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(size)]
-        self._zstats_means = [None] * size
-        self._zstats_mean_scalar = [0.0] * size
-        self._zstats_done = [False] * size
-        self._zstats_progress = [0.0] * size
-        self._zstats_current_z = [0] * size
-
-        # boolean flags: imgui.begin() calls that are drawn
-        # when these are set to true.
-        self.show_metrics_window = False
+        # Settings menu flags
         self.show_debug_panel = False
         self.show_scope_window = False
 
-        # properties: each have a @property getter and setter
-        # that controls what to do with the value.
-        # different filetypes sometimes require different handling
-        # though it may be easier to group these instead into a function or a class.
+        # ------------------------properties
+        for arr in self.image_widget.data:
+            if hasattr(arr, "border"):
+                arr.border = 3
+            if hasattr(arr, "max_offset"):
+                arr.max_offset = 3
+            if hasattr(arr, "upsample"):
+                arr.upsample = 20
+            if hasattr(arr, "fix_phase"):
+                arr.fix_phase = False
+            if hasattr(arr, "use_fft"):
+                arr.use_fft = False
+
         self._max_offset = 3
         self._gaussian_sigma = 0
         self._current_offset = [0.0] * self.num_arrays
@@ -540,23 +541,25 @@ class PreviewDataWidget(EdgeWindow):
         self._border = 3
         self._auto_update = False
         self._proj = "mean"
+
         self._register_z = False
         self._register_z_progress = 0.0
         self._register_z_done = False
         self._register_z_current_msg = ""
-        self._register_z_total = 1  # dummy
 
         self._selected_pipelines = None
         self._selected_array = 0
+        self._selected_planes = set()
+        self._planes_str = str(getattr(self, "_planes_str", ""))
 
         # properties for saving to another filetype
         self._ext = str(getattr(self, "_ext", ".tiff"))
         self._ext_idx = MBO_SUPPORTED_FTYPES.index(".tiff")
-        self._selected_planes = set()
-        self._planes_str = str(getattr(self, "_planes_str", ""))
+
         self._overwrite = True
         self._debug = False
-        self._saveas_chunk_mb = 20
+
+        self._saveas_chunk_mb = 100
 
         self._saveas_popup_open = False
         self._saveas_done = False
@@ -593,7 +596,7 @@ class PreviewDataWidget(EdgeWindow):
             self._saveas_done = frac >= 1.0
 
         elif isinstance(meta, str):
-            # This is Suite3D progress message
+            # Suite3D progress message
             self._register_z_progress = frac
             self._register_z_current_msg = meta
             self._register_z_done = frac >= 1.0
@@ -757,7 +760,7 @@ class PreviewDataWidget(EdgeWindow):
         if not any(self._zstats_done):
             return
 
-        stats_list = self._zstats if isinstance(self._zstats, list) else [self._zstats]
+        stats_list = self._zstats
 
         imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats")
         cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # type: ignore # noqa
@@ -840,7 +843,11 @@ class PreviewDataWidget(EdgeWindow):
                 )
 
                 # build per-ROI series
-                roi_series = [np.asarray(self._zstats[r]["mean"], float) for r in range(self.num_arrays)]
+                roi_series = [
+                    np.asarray(self._zstats[r]["mean"], float)
+                    for r in range(self.num_rois)
+                ]
+
                 L = min(len(s) for s in roi_series)
                 z = np.asarray(z_vals[:L], float)
                 roi_series = [s[:L] for s in roi_series]
@@ -852,9 +859,18 @@ class PreviewDataWidget(EdgeWindow):
 
                 if implot.begin_plot("Z-Plane Plot (Combined)", imgui.ImVec2(-1, 300)):
                     style_seaborn_dark()
-                    implot.setup_axes("Z-Plane", "Mean Fluorescence",
-                                      implot.AxisFlags_.none.value, implot.AxisFlags_.auto_fit.value)
-                    implot.setup_axis_limits(implot.ImAxis_.x1.value, float(z[0]), float(z[-1]))
+                    implot.setup_axes(
+                        "Z-Plane",
+                        "Mean Fluorescence",
+                        implot.AxisFlags_.none.value,
+                        implot.AxisFlags_.auto_fit.value
+                    )
+
+                    implot.setup_axis_limits(
+                        implot.ImAxis_.x1.value,
+                        float(z[0]),
+                        float(z[-1])
+                    )
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
 
                     for i, ys in enumerate(roi_series):

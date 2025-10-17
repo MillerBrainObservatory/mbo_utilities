@@ -29,6 +29,10 @@ See our documentation on virtual environments [here](https://millerbrainobservat
 To get the latest version from github:
 
 ```bash
+# make a new environment in a location of your choosing
+# preferably on your C: drive. e.g. C:\Users\YourName\project
+
+uv venv --python 3.12.9 
 uv pip install git+https://github.com/MillerBrainObservatory/mbo_utilities.git@master
 ```
 

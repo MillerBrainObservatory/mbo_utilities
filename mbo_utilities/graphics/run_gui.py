@@ -103,7 +103,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
         return
 
     import fastplotlib as fpl
-    if isinstance(data_array, MboRawArray):
+    if hasattr(data_array, "rois"):
         arrays = []
         names = []
         for r in iter_rois(data_array):
@@ -126,6 +126,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
             histogram_widget=False,
             figure_kwargs={"size": (800, 1000)},
             graphic_kwargs={"vmin": -300, "vmax": 4000},
+            window_funcs={"t": (np.mean, 0)},
         )
 
     iw.show()
@@ -135,8 +136,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
         gui = PreviewDataWidget(
             iw=iw,
             fpath=data_array.filenames,
-            size=350,
-            rois=roi_final,
+            size=300,
         )
         iw.figure.add_gui(gui)
     fpl.loop.run()
