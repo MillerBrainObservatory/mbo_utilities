@@ -120,7 +120,7 @@ def draw_saveas_progress(self):
 
 def draw_zstats_progress(self):
     # if self.num_rois > 1:
-    for i in range(self.num_arrays):
+    for i in range(self.num_rois):
         roi_key = f"zstats_roi{i + 1}"
         roi_state = _progress_state[roi_key]
 

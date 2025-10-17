@@ -487,6 +487,7 @@ class PreviewDataWidget(EdgeWindow):
             self.num_rois = 1
             self._array_type = "array"
 
+        print(f"Num rois: {self.num_rois}")
         if self.is_mbo_scan:
             for arr in self.image_widget.data:
                 arr.fix_phase = False
@@ -515,6 +516,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_done = [False] * self.num_rois
         self._zstats_progress = [0.0] * self.num_rois
         self._zstats_current_z = [0] * self.num_rois
+        print(f"zstats: {self._zstats}")
 
         # Settings menu flags
         self.show_debug_panel = False
@@ -1172,12 +1174,46 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_mean_scalar[roi - 1] = means_stack.mean(axis=(1, 2))
         self._zstats_done[roi - 1] = True
 
+    def _compute_zstats_single_array(self, idx, arr):
+        stats, means = {"mean": [], "std": [], "snr": []}, []
+        self._tiff_lock = threading.Lock()
+        for z in range(self.nz):
+            with self._tiff_lock:
+                stack = arr[::10, z].astype(np.float32)
+                mean_img = np.mean(stack, axis=0)
+                std_img = np.std(stack, axis=0)
+                snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
+                stats["mean"].append(float(np.mean(mean_img)))
+                stats["std"].append(float(np.mean(std_img)))
+                stats["snr"].append(float(np.mean(snr_img)))
+                means.append(mean_img)
+                self._zstats_progress[idx - 1] = (z + 1) / self.nz
+                self._zstats_current_z[idx - 1] = z
+
+        self._zstats[idx - 1] = stats
+        means_stack = np.stack(means)
+        self._zstats_means[idx - 1] = means_stack
+        self._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
+        self._zstats_done[idx - 1] = True
+
+
     def compute_zstats(self):
         if not self.image_widget or not self.image_widget.data:
             return
-        for roi in range(1, self.num_arrays + 1):
-            threading.Thread(
-                target=self._compute_zstats_single_roi,
-                args=(roi, self.fpath),
-                daemon=True,
-            ).start()
+
+        # if arrays have .roi attribute (multi-ROI mode)
+        if hasattr(self.image_widget.data[0], "roi") or self.num_rois > 1:
+            for roi in range(1, self.num_rois + 1):
+                threading.Thread(
+                    target=self._compute_zstats_single_roi,
+                    args=(roi, self.fpath),
+                    daemon=True,
+                ).start()
+        else:
+            # treat each array as a virtual ROI
+            for idx, arr in enumerate(self.image_widget.data, start=1):
+                threading.Thread(
+                    target=self._compute_zstats_single_array,
+                    args=(idx, arr),
+                    daemon=True,
+                ).start()
