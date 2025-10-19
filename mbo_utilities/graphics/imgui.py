@@ -482,7 +482,10 @@ class PreviewDataWidget(EdgeWindow):
 
         if hasattr(self.image_widget.data[0], "rois"):
             self.num_rois = len(self.image_widget.data[0].rois)
-            self._array_type = "roi"
+            if self.num_arrays > 1:
+                self._array_type = "roi"
+            else:
+                self._array_type = "array"
         else:
             self.num_rois = 1
             self._array_type = "array"
@@ -967,7 +970,7 @@ class PreviewDataWidget(EdgeWindow):
                 self.proj if self._proj != "mean-sub" else disabled_label
             )
 
-            imgui.set_next_item_width(hello_imgui.em_size(15))
+            imgui.set_next_item_width(hello_imgui.em_size(6))
             proj_changed, selected_display_idx = imgui.combo(
                 "Projection", current_display_idx, options
             )
@@ -989,7 +992,7 @@ class PreviewDataWidget(EdgeWindow):
                         )
 
             # Window size for projections
-            imgui.set_next_item_width(hello_imgui.em_size(15))
+            imgui.set_next_item_width(hello_imgui.em_size(6))
             winsize_changed, new_winsize = imgui.input_int(
                 "Window Size", self.window_size, step=1, step_fast=2
             )
@@ -1002,7 +1005,7 @@ class PreviewDataWidget(EdgeWindow):
                 self.logger.info(f"New Window Size: {new_winsize}")
 
             # Gaussian Filter
-            imgui.set_next_item_width(hello_imgui.em_size(15))
+            imgui.set_next_item_width(hello_imgui.em_size(6))
             gaussian_changed, new_gaussian_sigma = imgui.slider_float(
                 label="sigma",
                 v=self.gaussian_sigma,
@@ -1067,7 +1070,6 @@ class PreviewDataWidget(EdgeWindow):
                 else:
                     display_text = f"{np.round(ofs, 2):.3f}"
 
-                # Safe and balanced push/pop
                 if max_abs_offset > self.max_offset:
                     imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 0.0, 0.0, 1.0))
                     imgui.text(display_text)
@@ -1085,14 +1087,14 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.next_column()
             imgui.columns(1)
 
-            imgui.set_next_item_width(hello_imgui.em_size(10))
+            imgui.set_next_item_width(hello_imgui.em_size(5))
             upsample_changed, upsample_val = imgui.input_int("Upsample", self._phase_upsample, step=1, step_fast=2)
             set_tooltip(
                 "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment.")
             if upsample_changed:
                 self.phase_upsample = max(1, upsample_val)
                 self.logger.info(f"New upsample: {upsample_val}")
-            imgui.set_next_item_width(hello_imgui.em_size(10))
+            imgui.set_next_item_width(hello_imgui.em_size(5))
             border_changed, border_val = imgui.input_int(
                 "Exclude border-px", self._border, step=1, step_fast=2
             )
@@ -1103,7 +1105,7 @@ class PreviewDataWidget(EdgeWindow):
                 self.border = max(0, border_val)
                 self.logger.info(f"New border: {border_val}")
 
-            imgui.set_next_item_width(hello_imgui.em_size(10))
+            imgui.set_next_item_width(hello_imgui.em_size(5))
             max_offset_changed, max_offset = imgui.input_int(
                 "max-offset", self._max_offset, step=1, step_fast=2
             )
