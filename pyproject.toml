@@ -82,10 +82,21 @@ docs = [
 	"pygfx",
 ]
 
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
 [tool.uv.sources]
 lbm_suite2p_python = { git = "https://github.com/MillerBrainObservatory/LBM-Suite2p-Python.git", branch = "master"}
 mbo-fpl = { git = "https://github.com/MillerBrainObservatory/mbo_fastplotlib.git", branch = "main"}
 mbo-suite3d = { git = "https://github.com/MillerBrainObservatory/suite3d.git", branch = "main"}
+torch = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
 
 [tool.ruff]
 line-length = 88
