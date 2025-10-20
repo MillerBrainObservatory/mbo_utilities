@@ -318,63 +318,54 @@ def _safe_get_metadata(path: Path) -> dict:
 class Suite2pArray:
     filename: str | Path
     metadata: dict = field(init=False)
+    active_file: Path = field(init=False)
+    raw_file: Path = field(default=None)
+    reg_file: Path = field(default=None)
 
     def __post_init__(self):
         path = Path(self.filename)
-
         if not path.exists():
-            raise FileNotFoundError(f"File does not exist: {path}")
+            raise FileNotFoundError(path)
 
-        # Case 1: ops.npy
         if path.suffix == ".npy" and path.stem == "ops":
-            self.metadata = np.load(path, allow_pickle=True).item()
-            # pick binary from metadata
-            if "reg_file" in self.metadata and Path(self.metadata["reg_file"]).exists():
-                self.filename = Path(self.metadata["reg_file"])
-            elif (
-                "raw_file" in self.metadata and Path(self.metadata["raw_file"]).exists()
-            ):
-                self.filename = Path(self.metadata["raw_file"])
-            else:
-                raise ValueError(
-                    f"ops.npy at {path} did not contain valid reg_file/raw_file entries"
-                )
-
-        # Case 2: binary (data.bin or data_raw.bin)
-        elif path.suffix in (".bin", ".binary"):
+            ops_path = path
+        elif path.suffix == ".bin":
             ops_path = path.with_name("ops.npy")
             if not ops_path.exists():
-                raise FileNotFoundError(f"Missing ops.npy alongside {path}")
-            self.metadata = np.load(ops_path, allow_pickle=True).item()
-            self.filename = path
-
-        # Case 3: path is a 'reg_tif' directory
-        elif path.is_dir() and path.name == "reg_tif":
-            tiffs = sorted(path.glob("*.tif*"))
-            if not tiffs:
-                raise FileNotFoundError(f"No TIFF files found in {path}")
-            self.filename = tiffs[0]
-            logger.debug(f"Using first TIFF file in reg_tif: {self.filename}")
-
+                raise FileNotFoundError(f"Missing ops.npy near {path}")
         else:
-            raise ValueError(f"Unrecognized input file: {path}")
+            raise ValueError(f"Unsupported input: {path}")
 
-        # shape info from metadata
-        self.Ly = self.metadata.get("Ly")
-        self.Lx = self.metadata.get("Lx")
+        self.metadata = np.load(ops_path, allow_pickle=True).item()
+
+        # resolve both possible bins
+        self.raw_file = Path(self.metadata.get("raw_file", path.with_name("data_raw.bin")))
+        self.reg_file = Path(self.metadata.get("reg_file", path.with_name("data.bin")))
+
+        # choose which one to use
+        if path.suffix == ".bin":
+            self.active_file = path
+        else:
+            self.active_file = self.reg_file if self.reg_file.exists() else self.raw_file
+
+        # confirm
+        if not self.active_file.exists():
+            raise FileNotFoundError(f"Active binary not found: {self.active_file}")
+
+        self.Ly = self.metadata["Ly"]
+        self.Lx = self.metadata["Lx"]
         self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
-        if None in (self.Ly, self.Lx, self.nframes):
-            raise ValueError(
-                f"ops.npy is missing Ly, Lx, or nframes keys for {self.filename}"
-            )
-
         self.shape = (self.nframes, self.Ly, self.Lx)
         self.dtype = np.int16
-        self._file = np.memmap(
-            self.filename, mode="r", dtype=self.dtype, shape=self.shape
-        )
-        self.filenames = [Path(self.filename)]
+        self._file = np.memmap(self.active_file, mode="r", dtype=self.dtype, shape=self.shape)
+        self.filenames = [self.active_file]
 
+    def switch_channel(self, use_raw=False):
+        new_file = self.raw_file if use_raw else self.reg_file
+        if not new_file.exists():
+            raise FileNotFoundError(new_file)
+        self._file = np.memmap(new_file, mode="r", dtype=self.dtype, shape=self.shape)
+        self.active_file = new_file
     def __getitem__(self, key):
         return self._file[key]
 
@@ -1244,7 +1235,10 @@ class MboRawArray(scans.ScanMultiROI):
                     # we want the filename to be data_raw.bin
                     # so put the fname as the folder name
                     fname_bin_stripped = Path(fname).stem  # remove extension
-                    target = outpath / fname_bin_stripped / "data_raw.bin"
+                    if "structural" in kwargs and kwargs["structural"]:
+                        target = outpath / fname_bin_stripped / "data_chan2.bin"
+                    else:
+                        target = outpath / fname_bin_stripped / "data_raw.bin"
                 else:
                     target = outpath.joinpath(fname)
 

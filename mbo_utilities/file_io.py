@@ -1,5 +1,4 @@
 import json
-import time
 from collections import defaultdict
 from collections.abc import Sequence
 from io import StringIO
@@ -44,32 +43,26 @@ def load_ops(ops_input: str | Path | list[str | Path]):
     return {}
 
 
-def write_ops(metadata, raw_filename):
+def write_ops(metadata, raw_filename, **kwargs):
     """
     Write metadata to an ops file alongside the given filename.
     metadata must contain
-    'shape'
-    'pixel_resolution',
-    'frame_rate' keys.
+    'shape', 'pixel_resolution', 'frame_rate' keys.
     """
     logger.debug(f"Writing ops file for {raw_filename} with metadata: {metadata}")
-    assert isinstance(raw_filename, (str, Path)), (
-        "filename must be a string or Path object"
-    )
+    assert isinstance(raw_filename, (str, Path))
     filename = Path(raw_filename).expanduser().resolve()
 
-    if filename.is_file():
-        root = filename.parent
-    else:
-        root = filename
+    structural = kwargs.get("structural", False)
+    chan = 2 if structural or "data_chan2.bin" in str(filename) else 1
+    logger.debug(f"Detected channel {chan}")
 
-    ops_path = root.joinpath("ops.npy")
-    logger.debug(f"Writing ops file to {ops_path}.")
+    root = filename.parent if filename.is_file() else filename
+    ops_path = root / "ops.npy"
+    logger.info(f"Writing ops file to {ops_path}")
 
     shape = metadata["shape"]
-    nt = shape[0]
-    Lx = shape[-2]
-    Ly = shape[-1]
+    nt, Lx, Ly = shape[0], shape[-2], shape[-1]
 
     if "pixel_resolution" not in metadata:
         logger.warning("No pixel resolution found in metadata, using default [2, 2].")
@@ -79,25 +72,49 @@ def write_ops(metadata, raw_filename):
         elif "framerate" in metadata:
             metadata["fs"] = metadata["framerate"]
         else:
-            logger.debug("No frame rate found in metadata; defaulting fs=10")
+            logger.warning("No frame rate found; defaulting fs=10")
             metadata["fs"] = 10
 
     dx, dy = metadata.get("pixel_resolution", [2, 2])
-    ops = {
-        # suite2p needs these
+
+    # Load or initialize ops
+    if ops_path.exists():
+        ops = np.load(ops_path, allow_pickle=True).item()
+    else:
+        from .metadata import default_ops
+        ops = default_ops()
+
+    # Update shared core fields
+    ops.update({
         "Ly": Ly,
         "Lx": Lx,
         "fs": metadata["fs"],
-        "nframes": nt,
         "dx": dx,
         "dy": dy,
         "ops_path": str(ops_path),
-        "raw_file": str(filename),
-        # and dump the rest of the metadata
-        **metadata,
-    }
+    })
+
+    # Channel-specific entries
+    if chan == 1:
+        ops["nframes_chan1"] = nt
+        ops["raw_file"] = str(filename)
+    else:
+        ops["nframes_chan2"] = nt
+        ops["chan2_file"] = str(filename)
+
+    ops["align_by_chan"] = chan
+    # Compatibility: prefer functional channel for top-level nframes
+    if "nframes_chan1" in ops:
+        ops["nframes"] = ops["nframes_chan1"]
+    elif "nframes_chan2" in ops:
+        ops["nframes"] = ops["nframes_chan2"]
+
+    # Merge extra metadata without overwriting
+    for k, v in metadata.items():
+        ops.setdefault(k, v)
+
     np.save(ops_path, ops)
-    logger.debug(f"Ops file written to {ops_path} with metadata:\n {ops}")
+    logger.debug(f"Ops file written to {ops_path} with metadata:\n{ops}")
 
 
 def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
@@ -163,8 +180,6 @@ def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
     arrays = [load_lazy(f) for f in sorted(files)]
     full = da.concatenate(arrays, axis=0)  # (T,Y,X)
     return full.astype(astype) if astype else full
-
-
 
 
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:

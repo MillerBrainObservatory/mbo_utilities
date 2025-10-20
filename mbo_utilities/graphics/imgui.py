@@ -1152,7 +1152,8 @@ class PreviewDataWidget(EdgeWindow):
 
     def _compute_zstats_single_roi(self, roi, fpath):
         arr = imread(fpath)
-        arr.roi = roi
+        if hasattr(arr, "roi"):
+            arr.roi = roi
 
         stats, means = {"mean": [], "std": [], "snr": []}, []
         self._tiff_lock = threading.Lock()
@@ -1179,15 +1180,20 @@ class PreviewDataWidget(EdgeWindow):
     def _compute_zstats_single_array(self, idx, arr):
         stats, means = {"mean": [], "std": [], "snr": []}, []
         self._tiff_lock = threading.Lock()
-        for z in range(self.nz):
-            with self._tiff_lock:
-                stack = arr[::10, z].astype(np.float32)
+
+        for z in ([0] if arr.ndim == 3 else range(self.nz)):
+            with (self._tiff_lock):
+
+                stack = arr[::10].astype(np.float32) if arr.ndim == 3 else arr[::10, z].astype(np.float32)
+
                 mean_img = np.mean(stack, axis=0)
                 std_img = np.std(stack, axis=0)
                 snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
+
                 stats["mean"].append(float(np.mean(mean_img)))
                 stats["std"].append(float(np.mean(std_img)))
                 stats["snr"].append(float(np.mean(snr_img)))
+
                 means.append(mean_img)
                 self._zstats_progress[idx - 1] = (z + 1) / self.nz
                 self._zstats_current_z[idx - 1] = z

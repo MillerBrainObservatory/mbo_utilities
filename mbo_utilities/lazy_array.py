@@ -192,6 +192,7 @@ def imwrite(
         )
     outpath.mkdir(exist_ok=True)
 
+
     # TODO: integrade with numpy lazyarray
     if isinstance(lazy_array, np.ndarray):
         if kwargs.get("s2p_bin", None) is not None:
@@ -270,9 +271,15 @@ def imwrite(
             raise ValueError(f"Provided metadata must be a dictionary, got {type(metadata)} instead.")
         file_metadata.update(metadata)
 
+    if "num_frames" in kwargs:
+        logger.info(f"Setting num_frames via argument to {kwargs['num_frames']}")
+        file_metadata["num_frames"] = kwargs["num_frames"]
+        file_metadata["nframes"] = kwargs["num_frames"]
+
     # propagate merged metadata back to array
     if hasattr(lazy_array, "metadata"):
         lazy_array.metadata.update(file_metadata)
+
 
     s3d_job_dir = None
     if register_z:
@@ -322,6 +329,9 @@ def imwrite(
     else:
         logger.info("No s3d-job directory used or created.")
         lazy_array.metadata["apply_shift"] = False
+
+    if "target_nframes" in lazy_array.metadata:
+        target_nframes = lazy_array.metadata["target_nframes"]
     if hasattr(lazy_array, "_imwrite"):
         return lazy_array._imwrite(  # noqa
             outpath,

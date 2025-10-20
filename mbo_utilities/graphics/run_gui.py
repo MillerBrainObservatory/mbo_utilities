@@ -3,8 +3,6 @@ from pathlib import Path
 from typing import Any
 import click
 import numpy as np
-
-from mbo_utilities.array_types import MboRawArray
 from mbo_utilities.roi import iter_rois, normalize_roi
 
 
@@ -122,7 +120,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
     else:
         iw = fpl.ImageWidget(
             data=data_array,
-            histogram_widget=False,
+            histogram_widget=True,
             figure_kwargs={"size": (800, 1000)},
             graphic_kwargs={"vmin": -300, "vmax": 4000},
             window_funcs={"t": (np.mean, 0)},
