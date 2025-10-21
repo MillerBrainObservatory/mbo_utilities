@@ -1,43 +1,52 @@
+import os, shutil
 from pathlib import Path
-import os
-from imgui_bundle import (
-    imgui,
-    imgui_md,
-    hello_imgui,
-    imgui_ctx,
-)
-from imgui_bundle import portable_file_dialogs as pfd
-
-from mbo_utilities import get_mbo_dirs, log
+import imgui_bundle
+import mbo_utilities as mbo
 from mbo_utilities.graphics._widgets import set_tooltip
+from imgui_bundle import hello_imgui, imgui, imgui_md, imgui_ctx, portable_file_dialogs as pfd
+import imgui_bundle
 
-MBO_THREADING_ENABLED = bool(
-    int(os.getenv("MBO_THREADING_ENABLED", "1"))
-)
+from pathlib import Path
+import shutil, imgui_bundle, mbo_utilities as mbo
+from imgui_bundle import hello_imgui
 
-MBO_ASSETS_PATH = get_mbo_dirs()["assets"]
-MBO_LOGO_PATH = Path(MBO_ASSETS_PATH).joinpath("static", "logo_utilities.png")
+def reset_imgui_assets():
+    assets = Path(mbo.get_mbo_dirs()["base"]) / "imgui" / "assets"
+    fonts_dst = assets / "fonts"
+    fonts_dst.mkdir(parents=True, exist_ok=True)
+    (assets / "static").mkdir(parents=True, exist_ok=True)
 
-logger = log.get(__name__)
-logger.debug("MBO_LOGO_PATH: %s", MBO_LOGO_PATH)
-logger.debug(f"MBO_LOGO EXISTS: {MBO_LOGO_PATH.exists()}")
+    fonts_src = Path(imgui_bundle.__file__).parent / "assets" / "fonts"
+    for p in fonts_src.rglob("*"):
+        if p.is_file():
+            d = fonts_dst / p.relative_to(fonts_src)
+            if not d.exists():
+                d.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(p, d)
 
-logger.debug("MBO_ASSETS_PATH: %s", MBO_ASSETS_PATH)
+    roboto_dir = fonts_dst / "Roboto"
+    roboto_dir.mkdir(parents=True, exist_ok=True)
+    required = [
+        roboto_dir / "Roboto-Regular.ttf",
+        roboto_dir / "Roboto-Bold.ttf",
+        roboto_dir / "Roboto-RegularItalic.ttf",
+        fonts_dst / "fontawesome-webfont.ttf",
+    ]
+    fallback = next((t for t in roboto_dir.glob("*.ttf")), None)
+    for need in required:
+        if not need.exists() and fallback and fallback.exists():
+            need.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(fallback, need)
 
-HAS_LOGO = MBO_LOGO_PATH.exists() and MBO_LOGO_PATH.is_file()
+    hello_imgui.set_assets_folder(str(assets))
 
-if not HAS_LOGO:
-    print("Warning: MBO logo not found at", MBO_LOGO_PATH)
-
+reset_imgui_assets()
 
 class FileDialog:
     def __init__(self):
-        self._assets_path = MBO_ASSETS_PATH
-        self._logo_path = MBO_LOGO_PATH
         self.selected_path = None
         self._open_multi = None
         self._select_folder = None
-        self._threading_enabled = MBO_THREADING_ENABLED
         self._widget_enabled = True
         self.metadata_only = False
         self.split_rois = False
@@ -163,3 +172,6 @@ class FileDialog:
 
         imgui.pop_style_color(2)
         imgui.pop_style_var()
+
+if __name__ == "__main__":
+    pass
