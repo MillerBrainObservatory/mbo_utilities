@@ -525,7 +525,10 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
         if not si:
             print(f"No FrameData found in {file}.")
             return None
-        series = tiff_file.series[0]
+        # series = tiff_file.series[0]
+        pages = tiff_file.pages
+        first_page = pages[0]
+        shape = first_page.shape
 
         # Extract ROI and imaging metadata
         roi_group = meta["RoiGroups"]["imagingRoiGroup"]["rois"]
@@ -581,9 +584,9 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
             "fov_px": tuple(num_pixel_xy),
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
-            "ndim": series.ndim,
+            "ndim": len(shape),
             "dtype": "int16",
-            "size": series.size,
+            "size": np.prod(shape),
             "roi_width_px": num_pixel_xy[0],
             "roi_height_px": num_pixel_xy[1],
             "objective_resolution": objective_resolution,

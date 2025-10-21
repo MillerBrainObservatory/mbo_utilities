@@ -1,14 +1,13 @@
 import time
-
 from pathlib import Path
+import numpy as np
 from mbo_utilities import get_files, imread, imwrite
+
 
 def run_plane_bin(ops) -> bool:
     from mbo_utilities._binary import BinaryFile
     from suite2p.run_s2p import pipeline
     from contextlib import nullcontext
-    import numpy as np
-    from pathlib import Path
 
     ops = lsp.load_ops(ops)
     Ly, Lx = ops["Ly"], ops["Lx"]
@@ -50,7 +49,7 @@ def run_plane_bin(ops) -> bool:
             f_reg=f_reg,
             f_raw=f_raw,
             f_reg_chan2=f_reg_chan2,
-            f_raw_chan2=f_reg_chan2,  # critical fix
+            f_raw_chan2=f_reg_chan2,
             run_registration=ops.get("do_registration", True),
             ops=ops,
             stat=None,
@@ -64,23 +63,31 @@ if __name__ == "__main__":
     import lbm_suite2p_python as lsp
 
     base_path = Path(r"D:\demo\multichannel")
-    structural = get_files(base_path / "structural")
-    functional = get_files(base_path / "functional")
+
+    structural_tiffs = get_files(base_path / "structural")
+    functional_tiffs = get_files(base_path / "functional")
+
+    func_only_outdir = base_path / "functional_only_registration"
+    struct_only_outdir = base_path / "structural_only_registration"
 
     start = time.time()
-    s_data = imread(structural)
-    f_data = imread(functional)
+    s_data = imread(structural_tiffs)
+    f_data = imread(functional_tiffs)
     end = time.time()
     print(f"{end - start} seconds")
 
-    outpath = structural[0].parent.joinpath("registered")
+    outpath = structural_tiffs[0].parent.joinpath("registered")
     structural_nframes = s_data.shape[0]
     functional_nframes = f_data.shape[0]
     min_nframes = min(structural_nframes, functional_nframes)
-    imwrite(s_data, outpath, structural=True, ext=".bin", overwrite=True, planes=[1], num_frames=min_nframes)
-    imwrite(f_data, outpath, ext=".bin", overwrite=True, planes=[1], num_frames=min_nframes)
+
+    # imwrite(s_data, outpath, structural=True, ext=".bin", overwrite=True, planes=[1], num_frames=min_nframes)
+    # imwrite(f_data, outpath, ext=".bin", overwrite=True, planes=[1], num_frames=min_nframes)
+
     ops_files = get_files(outpath, "ops.npy", 3)
+
     _ops = lsp.load_ops(ops_files[0])
     _ops["anatomical_only"] = 3
     _ops["cellprob_threshold"] = -6
+
     run_plane_bin(_ops)

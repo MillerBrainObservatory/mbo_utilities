@@ -150,6 +150,7 @@ def draw_tabs(parent):
                 imgui.pop_style_var()
                 imgui.pop_style_var()
                 imgui.end_tab_item()
+            imgui.begin_disabled(not all(parent._zstats_done))
             if imgui.begin_tab_item("Summary Stats")[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
@@ -157,6 +158,7 @@ def draw_tabs(parent):
                 imgui.pop_style_var()
                 imgui.pop_style_var()
                 imgui.end_tab_item()
+            imgui.end_disabled()
             if imgui.begin_tab_item("Process")[0]:
                 draw_tab_process(parent)
                 imgui.end_tab_item()
@@ -940,48 +942,40 @@ class PreviewDataWidget(EdgeWindow):
                     implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals)
                     implot.end_plot()
 
-
     def draw_preview_section(self):
         imgui.dummy(imgui.ImVec2(0, 5))
-        cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # noqa
-        with imgui_ctx.begin_child(
-            "##PreviewChild",
-            imgui.ImVec2(0, 0),
-            cflags,
-        ):
-            # Section: Window Functions
+        cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
+        with imgui_ctx.begin_child("##PreviewChild", imgui.ImVec2(0, 0), cflags):
+
             imgui.spacing()
             imgui.separator()
             imgui.spacing()
-
             imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Window Functions")
             imgui.spacing()
 
-            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(2, 2))  # noqa
-
+            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(2, 2))
             imgui.begin_group()
+
             options = ["mean", "max", "std"]
-            disabled_label = (
-                "mean-sub (pending)" if not self._zstats_done else "mean-sub"
-            )
+            disabled_label = ("mean-sub (pending)" if not all(self._zstats_done) else "mean-sub")
             options.append(disabled_label)
 
-            current_display_idx = options.index(
-                self.proj if self._proj != "mean-sub" else disabled_label
-            )
+            current_display_idx = options.index(self.proj if self._proj != "mean-sub" else disabled_label)
 
             imgui.set_next_item_width(hello_imgui.em_size(6))
-            proj_changed, selected_display_idx = imgui.combo(
-                "Projection", current_display_idx, options
-            )
+            proj_changed, selected_display_idx = imgui.combo("Projection", current_display_idx, options)
             set_tooltip(
-                "Choose projection method over the sliding window: “mean” (average), “max” (peak), “std” (variance), or “mean-sub” (background-subtracted mean, recommended for motion preview)."
+                "Choose projection method over the sliding window:\n\n"
+                " “mean” (average)\n"
+                " “max” (peak)\n"
+                " “std” (variance)\n"
+                " “mean-sub” (mean-subtracted)."
             )
 
             if proj_changed:
                 selected_label = options[selected_display_idx]
                 if selected_label == "mean-sub (pending)":
-                    pass  # ignore user click while disabled
+                    pass
                 else:
                     self.proj = selected_label
                     if self.proj == "mean-sub":
@@ -1144,10 +1138,8 @@ class PreviewDataWidget(EdgeWindow):
         if (not self.is_mbo_scan) and self._fix_phase:
             frame = apply_scan_phase_offsets(frame, self.current_offset[arr_idx])
         if self.proj == "mean-sub" and self._zstats_done[arr_idx]:
-            if self.proj == "mean-sub" and self._zstats_done[arr_idx]:
-                # select the mean for the current z index (assumes slider updates current_index)
-                z_idx = self.image_widget.current_index.get("z", 0)
-                frame = frame - self._zstats_mean_scalar[arr_idx][z_idx]
+            z_idx = self.image_widget.current_index.get("z", 0)
+            frame = frame - self._zstats_mean_scalar[arr_idx][z_idx]
         return frame
 
     def _compute_zstats_single_roi(self, roi, fpath):

@@ -179,85 +179,6 @@ def register_zplanes_s3d(
     return out_dir
 
 
-def apply_zshifts(base_dir, inplace=False, metadata=None):
-    """
-    Apply plane shifts from summary.npy to TIFF stacks.
-
-    Parameters
-    ----------
-    base_dir : str or Path
-        Directory containing stitched plane TIFFs and summary.npy.
-    inplace : bool, default=False
-        If True, overwrite original TIFFs safely using a temporary file.
-        If False, save new files with `_aligned` suffix.
-    metadata : list of dict, optional
-        Per-plane metadata to write into output TIFFs.
-
-    Returns
-    -------
-    list of Path
-        Paths to aligned TIFF files.
-    """
-    base_dir = Path(base_dir)
-    tiffs = sorted(base_dir.rglob("plane*_stitched.tif"))
-    summary_file = list(base_dir.rglob("*summary.npy"))[0]
-
-    summary = np.load(summary_file, allow_pickle=True).item()
-    plane_shifts = summary["plane_shifts"]
-
-    with tifffile.TiffFile(tiffs[0]) as tf:
-        nframes, H, W = tf.series[0].shape
-
-    # Compute padding
-    dy_min, dx_min = plane_shifts.min(axis=0)
-    dy_max, dx_max = plane_shifts.max(axis=0)
-    pad_top, pad_left = max(0, -dy_min), max(0, -dx_min)
-    pad_bottom, pad_right = max(0, dy_max), max(0, dx_max)
-    target_shape = (nframes, H + pad_top + pad_bottom, W + pad_left + pad_right)
-
-    logger.debug("Final shape:", target_shape)
-
-    outputs = []
-    for i, (tif, (dy, dx)) in enumerate(zip(tiffs, plane_shifts)):
-        meta = metadata[i] if metadata is not None else {}
-
-        if inplace:
-            fd, tmpname = tempfile.mkstemp(suffix=".tif", dir=tif.parent)
-            os.close(fd)
-            tmpfile = Path(tmpname)
-            outpath = tif
-        else:
-            outpath = tif.with_name(tif.stem + "_aligned.tif")
-            if outpath.exists():
-                outpath.unlink()
-            tmpfile = outpath
-
-        with tifffile.TiffFile(tif) as tf:
-            with tifffile.TiffWriter(tmpfile, bigtiff=True) as tw:
-                iy, ix = int(dy), int(dx)
-                for page in tf.pages:
-                    frame = page.asarray()
-                    canvas = np.zeros(target_shape[1:], dtype=frame.dtype)
-                    yy = slice(pad_top + iy, pad_top + iy + H)
-                    xx = slice(pad_left + ix, pad_left + ix + W)
-                    canvas[yy, xx] = frame
-                    tw.write(
-                        canvas, contiguous=True, photometric="minisblack", metadata=meta
-                    )
-
-        if inplace:
-            for _ in range(6):
-                try:
-                    os.replace(str(tmpfile), str(outpath))
-                    break
-                except PermissionError:
-                    time.sleep(0.2)
-            else:
-                raise
-        outputs.append(outpath)
-    return outputs
-
-
 def _to_tzyx(a: da.Array, axes: str) -> da.Array:
     order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
     perm = [axes.index(ax) for ax in order]
@@ -293,18 +214,15 @@ def _to_tzyx(a: da.Array, axes: str) -> da.Array:
     return a
 
 
-def _axes_or_guess(path: Path, arr_ndim: int) -> str:
-    try:
-        with tifffile.TiffFile(path) as tf:
-            return tf.series[0].axes
-    except Exception:
-        if arr_ndim == 2:
-            return "YX"
-    if arr_ndim == 3:
+def _axes_or_guess(arr_ndim: int) -> str:
+    if arr_ndim == 2:
+        return "YX"
+    elif arr_ndim == 3:
         return "ZYX"
-    if arr_ndim == 4:
+    elif arr_ndim == 4:
         return "TZYX"
-    return "YX"
+    else:
+        return 1
 
 
 def _safe_get_metadata(path: Path) -> dict:
@@ -664,11 +582,11 @@ class TiffArray:
             try:
                 mm = tifffile.memmap(path, mode="r")
                 a = da.from_array(mm, chunks=self.chunks)
-                axes = _axes_or_guess(path, mm.ndim)
+                axes = _axes_or_guess(mm.ndim)
             except Exception:
                 arr = tifffile.imread(path)
                 a = da.from_array(arr, chunks=self.chunks)
-                axes = _axes_or_guess(path, arr.ndim)
+                axes = _axes_or_guess(arr.ndim)
         a = _to_tzyx(a, axes)
         if a.ndim == 3:
             a = da.expand_dims(a, 0)
@@ -825,6 +743,8 @@ class MboRawArray(scans.ScanMultiROI):
 
     def read_data(self, filenames, dtype=np.int16):
         filenames = expand_paths(filenames)
+
+        filenames = expand_paths(filenames)
         self.reference = None
         super().read_data(filenames, dtype)
         self._metadata = get_metadata(
@@ -835,7 +755,7 @@ class MboRawArray(scans.ScanMultiROI):
         )
         self._metadata = clean_scanimage_metadata(self.metadata)
         self._metadata["cleaned_scanimage_metadata"] = True
-
+        #
         self._rois = self._create_rois()
         self.fields = self._create_fields()
         if self.join_contiguous:

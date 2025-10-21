@@ -280,7 +280,6 @@ def imwrite(
     if hasattr(lazy_array, "metadata"):
         lazy_array.metadata.update(file_metadata)
 
-
     s3d_job_dir = None
     if register_z:
         lazy_array.metadata["apply_shift"] = True
@@ -330,8 +329,6 @@ def imwrite(
         logger.info("No s3d-job directory used or created.")
         lazy_array.metadata["apply_shift"] = False
 
-    if "target_nframes" in lazy_array.metadata:
-        target_nframes = lazy_array.metadata["target_nframes"]
     if hasattr(lazy_array, "_imwrite"):
         return lazy_array._imwrite(  # noqa
             outpath,
