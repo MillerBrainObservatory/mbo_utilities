@@ -3,8 +3,6 @@ from pathlib import Path
 from typing import Any
 import click
 import numpy as np
-
-from mbo_utilities.array_types import MboRawArray
 from mbo_utilities.roi import iter_rois, normalize_roi
 
 
@@ -39,7 +37,6 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
         dlg.widget_enabled,
         dlg.metadata_only,
     )
-
 
 @click.command()
 @click.option(
@@ -103,7 +100,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
         return
 
     import fastplotlib as fpl
-    if isinstance(data_array, MboRawArray):
+    if hasattr(data_array, "rois"):
         arrays = []
         names = []
         for r in iter_rois(data_array):
@@ -123,9 +120,10 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
     else:
         iw = fpl.ImageWidget(
             data=data_array,
-            histogram_widget=False,
+            histogram_widget=True,
             figure_kwargs={"size": (800, 1000)},
             graphic_kwargs={"vmin": -300, "vmax": 4000},
+            window_funcs={"t": (np.mean, 0)},
         )
 
     iw.show()
@@ -135,8 +133,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
         gui = PreviewDataWidget(
             iw=iw,
             fpath=data_array.filenames,
-            size=350,
-            rois=roi_final,
+            size=300,
         )
         iw.figure.add_gui(gui)
     fpl.loop.run()

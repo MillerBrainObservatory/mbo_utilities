@@ -77,13 +77,20 @@ def _write_plane(
         assert type(plane_index) is int, "plane_index must be an integer"
         metadata["plane"] = plane_index + 1
 
+    nframes_target = kwargs.get("num_frames", metadata.get("num_frames"))
+    if nframes_target is not None:
+        metadata["num_frames"] = int(nframes_target)
+        metadata["nframes"] = int(nframes_target)
+    else:
+        nframes_target = data.shape[0]
+
     H0, W0 = data.shape[-2], data.shape[-1]
     fname = filename
     writer = _get_file_writer(fname.suffix, overwrite=overwrite)
 
     # get chunk size via bytes per timepoint
     itemsize = np.dtype(data.dtype).itemsize
-    ntime = int(data.shape[0])  # T
+    ntime = int(nframes_target)  # T
 
     bytes_per_t = int(np.prod(dshape[1:], dtype=np.int64)) * int(itemsize)
     chunk_size = int(target_chunk_mb) * 1024 * 1024
@@ -282,7 +289,7 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     _write_bin._offsets[key] = off + data.shape[0]
 
     if first_write:
-        write_ops(metadata, fname)
+        write_ops(metadata, fname, **kwargs)
 
     logger.debug(f"Wrote {data.shape[0]} frames to {fname}.")
 

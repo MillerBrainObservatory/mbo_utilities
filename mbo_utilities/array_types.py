@@ -95,6 +95,8 @@ def register_zplanes_s3d(
 ) -> Path | None:
     # these are heavy imports, lazy import for now
     try:
+        # https://github.com/MillerBrainObservatory/mbo_utilities/issues/35
+        os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
         from suite3d.job import Job  # noqa
 
         HAS_SUITE3D = True
@@ -177,85 +179,6 @@ def register_zplanes_s3d(
     return out_dir
 
 
-def apply_zshifts(base_dir, inplace=False, metadata=None):
-    """
-    Apply plane shifts from summary.npy to TIFF stacks.
-
-    Parameters
-    ----------
-    base_dir : str or Path
-        Directory containing stitched plane TIFFs and summary.npy.
-    inplace : bool, default=False
-        If True, overwrite original TIFFs safely using a temporary file.
-        If False, save new files with `_aligned` suffix.
-    metadata : list of dict, optional
-        Per-plane metadata to write into output TIFFs.
-
-    Returns
-    -------
-    list of Path
-        Paths to aligned TIFF files.
-    """
-    base_dir = Path(base_dir)
-    tiffs = sorted(base_dir.rglob("plane*_stitched.tif"))
-    summary_file = list(base_dir.rglob("*summary.npy"))[0]
-
-    summary = np.load(summary_file, allow_pickle=True).item()
-    plane_shifts = summary["plane_shifts"]
-
-    with tifffile.TiffFile(tiffs[0]) as tf:
-        nframes, H, W = tf.series[0].shape
-
-    # Compute padding
-    dy_min, dx_min = plane_shifts.min(axis=0)
-    dy_max, dx_max = plane_shifts.max(axis=0)
-    pad_top, pad_left = max(0, -dy_min), max(0, -dx_min)
-    pad_bottom, pad_right = max(0, dy_max), max(0, dx_max)
-    target_shape = (nframes, H + pad_top + pad_bottom, W + pad_left + pad_right)
-
-    logger.debug("Final shape:", target_shape)
-
-    outputs = []
-    for i, (tif, (dy, dx)) in enumerate(zip(tiffs, plane_shifts)):
-        meta = metadata[i] if metadata is not None else {}
-
-        if inplace:
-            fd, tmpname = tempfile.mkstemp(suffix=".tif", dir=tif.parent)
-            os.close(fd)
-            tmpfile = Path(tmpname)
-            outpath = tif
-        else:
-            outpath = tif.with_name(tif.stem + "_aligned.tif")
-            if outpath.exists():
-                outpath.unlink()
-            tmpfile = outpath
-
-        with tifffile.TiffFile(tif) as tf:
-            with tifffile.TiffWriter(tmpfile, bigtiff=True) as tw:
-                iy, ix = int(dy), int(dx)
-                for page in tf.pages:
-                    frame = page.asarray()
-                    canvas = np.zeros(target_shape[1:], dtype=frame.dtype)
-                    yy = slice(pad_top + iy, pad_top + iy + H)
-                    xx = slice(pad_left + ix, pad_left + ix + W)
-                    canvas[yy, xx] = frame
-                    tw.write(
-                        canvas, contiguous=True, photometric="minisblack", metadata=meta
-                    )
-
-        if inplace:
-            for _ in range(6):
-                try:
-                    os.replace(str(tmpfile), str(outpath))
-                    break
-                except PermissionError:
-                    time.sleep(0.2)
-            else:
-                raise
-        outputs.append(outpath)
-    return outputs
-
-
 def _to_tzyx(a: da.Array, axes: str) -> da.Array:
     order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
     perm = [axes.index(ax) for ax in order]
@@ -291,18 +214,15 @@ def _to_tzyx(a: da.Array, axes: str) -> da.Array:
     return a
 
 
-def _axes_or_guess(path: Path, arr_ndim: int) -> str:
-    try:
-        with tifffile.TiffFile(path) as tf:
-            return tf.series[0].axes
-    except Exception:
-        if arr_ndim == 2:
-            return "YX"
-    if arr_ndim == 3:
+def _axes_or_guess(arr_ndim: int) -> str:
+    if arr_ndim == 2:
+        return "YX"
+    elif arr_ndim == 3:
         return "ZYX"
-    if arr_ndim == 4:
+    elif arr_ndim == 4:
         return "TZYX"
-    return "YX"
+    else:
+        return 1
 
 
 def _safe_get_metadata(path: Path) -> dict:
@@ -316,63 +236,54 @@ def _safe_get_metadata(path: Path) -> dict:
 class Suite2pArray:
     filename: str | Path
     metadata: dict = field(init=False)
+    active_file: Path = field(init=False)
+    raw_file: Path = field(default=None)
+    reg_file: Path = field(default=None)
 
     def __post_init__(self):
         path = Path(self.filename)
-
         if not path.exists():
-            raise FileNotFoundError(f"File does not exist: {path}")
+            raise FileNotFoundError(path)
 
-        # Case 1: ops.npy
         if path.suffix == ".npy" and path.stem == "ops":
-            self.metadata = np.load(path, allow_pickle=True).item()
-            # pick binary from metadata
-            if "reg_file" in self.metadata and Path(self.metadata["reg_file"]).exists():
-                self.filename = Path(self.metadata["reg_file"])
-            elif (
-                "raw_file" in self.metadata and Path(self.metadata["raw_file"]).exists()
-            ):
-                self.filename = Path(self.metadata["raw_file"])
-            else:
-                raise ValueError(
-                    f"ops.npy at {path} did not contain valid reg_file/raw_file entries"
-                )
-
-        # Case 2: binary (data.bin or data_raw.bin)
-        elif path.suffix in (".bin", ".binary"):
+            ops_path = path
+        elif path.suffix == ".bin":
             ops_path = path.with_name("ops.npy")
             if not ops_path.exists():
-                raise FileNotFoundError(f"Missing ops.npy alongside {path}")
-            self.metadata = np.load(ops_path, allow_pickle=True).item()
-            self.filename = path
-
-        # Case 3: path is a 'reg_tif' directory
-        elif path.is_dir() and path.name == "reg_tif":
-            tiffs = sorted(path.glob("*.tif*"))
-            if not tiffs:
-                raise FileNotFoundError(f"No TIFF files found in {path}")
-            self.filename = tiffs[0]
-            logger.debug(f"Using first TIFF file in reg_tif: {self.filename}")
-
+                raise FileNotFoundError(f"Missing ops.npy near {path}")
         else:
-            raise ValueError(f"Unrecognized input file: {path}")
+            raise ValueError(f"Unsupported input: {path}")
 
-        # shape info from metadata
-        self.Ly = self.metadata.get("Ly")
-        self.Lx = self.metadata.get("Lx")
+        self.metadata = np.load(ops_path, allow_pickle=True).item()
+
+        # resolve both possible bins
+        self.raw_file = Path(self.metadata.get("raw_file", path.with_name("data_raw.bin")))
+        self.reg_file = Path(self.metadata.get("reg_file", path.with_name("data.bin")))
+
+        # choose which one to use
+        if path.suffix == ".bin":
+            self.active_file = path
+        else:
+            self.active_file = self.reg_file if self.reg_file.exists() else self.raw_file
+
+        # confirm
+        if not self.active_file.exists():
+            raise FileNotFoundError(f"Active binary not found: {self.active_file}")
+
+        self.Ly = self.metadata["Ly"]
+        self.Lx = self.metadata["Lx"]
         self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
-        if None in (self.Ly, self.Lx, self.nframes):
-            raise ValueError(
-                f"ops.npy is missing Ly, Lx, or nframes keys for {self.filename}"
-            )
-
         self.shape = (self.nframes, self.Ly, self.Lx)
         self.dtype = np.int16
-        self._file = np.memmap(
-            self.filename, mode="r", dtype=self.dtype, shape=self.shape
-        )
-        self.filenames = [Path(self.filename)]
+        self._file = np.memmap(self.active_file, mode="r", dtype=self.dtype, shape=self.shape)
+        self.filenames = [self.active_file]
 
+    def switch_channel(self, use_raw=False):
+        new_file = self.raw_file if use_raw else self.reg_file
+        if not new_file.exists():
+            raise FileNotFoundError(new_file)
+        self._file = np.memmap(new_file, mode="r", dtype=self.dtype, shape=self.shape)
+        self.active_file = new_file
     def __getitem__(self, key):
         return self._file[key]
 
@@ -671,11 +582,11 @@ class TiffArray:
             try:
                 mm = tifffile.memmap(path, mode="r")
                 a = da.from_array(mm, chunks=self.chunks)
-                axes = _axes_or_guess(path, mm.ndim)
+                axes = _axes_or_guess(mm.ndim)
             except Exception:
                 arr = tifffile.imread(path)
                 a = da.from_array(arr, chunks=self.chunks)
-                axes = _axes_or_guess(path, arr.ndim)
+                axes = _axes_or_guess(arr.ndim)
         a = _to_tzyx(a, axes)
         if a.ndim == 3:
             a = da.expand_dims(a, 0)
@@ -832,6 +743,8 @@ class MboRawArray(scans.ScanMultiROI):
 
     def read_data(self, filenames, dtype=np.int16):
         filenames = expand_paths(filenames)
+
+        filenames = expand_paths(filenames)
         self.reference = None
         super().read_data(filenames, dtype)
         self._metadata = get_metadata(
@@ -842,7 +755,7 @@ class MboRawArray(scans.ScanMultiROI):
         )
         self._metadata = clean_scanimage_metadata(self.metadata)
         self._metadata["cleaned_scanimage_metadata"] = True
-
+        #
         self._rois = self._create_rois()
         self.fields = self._create_fields()
         if self.join_contiguous:
@@ -1242,7 +1155,10 @@ class MboRawArray(scans.ScanMultiROI):
                     # we want the filename to be data_raw.bin
                     # so put the fname as the folder name
                     fname_bin_stripped = Path(fname).stem  # remove extension
-                    target = outpath / fname_bin_stripped / "data_raw.bin"
+                    if "structural" in kwargs and kwargs["structural"]:
+                        target = outpath / fname_bin_stripped / "data_chan2.bin"
+                    else:
+                        target = outpath / fname_bin_stripped / "data_raw.bin"
                 else:
                     target = outpath.joinpath(fname)
 
