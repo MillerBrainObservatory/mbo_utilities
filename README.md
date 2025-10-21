@@ -26,12 +26,19 @@ Make sure your environment is activated, be that conda, venv, or uv.
 
 See our documentation on virtual environments [here](https://millerbrainobservatory.github.io/mbo_utilities/venvs.html).
 
-To get the latest version from github:
+To get the latest stable version:
 
 ```bash
 # make a new environment in a location of your choosing
 # preferably on your C: drive. e.g. C:\Users\YourName\project
 
+uv venv --python 3.12.9 
+uv pip install mbo_utilities
+```
+
+To get the latest version from github:
+
+```bash
 uv venv --python 3.12.9 
 uv pip install git+https://github.com/MillerBrainObservatory/mbo_utilities.git@master
 ```
@@ -41,7 +48,7 @@ If *not* using `uv`, simply replace `uv pip` with `pip`, and install the latest 
 
 ``` bash
 # into an environment with python 3.12.7-3.12.9 (tested)
-pip install mbo_utilities 
+pip install mbo_utilities
 pip install git+https://github.com/pygfx/pygfx.git@main
 ```
 
@@ -63,11 +70,11 @@ Build cuda_13.0.r13.0/compiler.36260728_0
 
 For CUDA 11.x and 13.x, you first need to uninstall 12x:
 
-`pip uninstall cupy-cuda12x`
+`uv pip uninstall cupy-cuda12x`
 
 And replace `12` with the major CUDA version number, in this case `13`:
 
-`pip install cupy-cuda13x`
+`uv pip install cupy-cuda13x`
 
 ## Troubleshooting
 
