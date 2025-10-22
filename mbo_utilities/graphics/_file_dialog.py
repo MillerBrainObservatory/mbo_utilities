@@ -3,14 +3,15 @@ from pathlib import Path
 import imgui_bundle
 import mbo_utilities as mbo
 from mbo_utilities.graphics._widgets import set_tooltip
-from imgui_bundle import hello_imgui, imgui, imgui_md, imgui_ctx, portable_file_dialogs as pfd
-import imgui_bundle
+from imgui_bundle import (
+    imgui,
+    imgui_md,
+    hello_imgui,
+    imgui_ctx,
+    portable_file_dialogs as pfd,
+)
 
-from pathlib import Path
-import shutil, imgui_bundle, mbo_utilities as mbo
-from imgui_bundle import hello_imgui
-
-def reset_imgui_assets():
+def setup_imgui():
     assets = Path(mbo.get_mbo_dirs()["base"]) / "imgui" / "assets"
     fonts_dst = assets / "fonts"
     fonts_dst.mkdir(parents=True, exist_ok=True)
@@ -40,7 +41,7 @@ def reset_imgui_assets():
 
     hello_imgui.set_assets_folder(str(assets))
 
-reset_imgui_assets()
+setup_imgui()
 
 class FileDialog:
     def __init__(self):

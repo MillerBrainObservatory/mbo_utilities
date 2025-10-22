@@ -45,7 +45,7 @@ from mbo_utilities.graphics.progress_bar import (
 from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
 from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.phasecorr import apply_scan_phase_offsets
-from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler, GUI_LOGGERS
+from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler
 from mbo_utilities import log
 
 try:

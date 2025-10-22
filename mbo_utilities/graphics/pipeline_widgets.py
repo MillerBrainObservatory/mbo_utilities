@@ -8,11 +8,11 @@ import numpy as np
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
 
-from mbo_utilities import get_mbo_dirs
 from mbo_utilities.graphics._widgets import set_tooltip
 
 try:
-    from lbm_suite2p_python.run_lsp import run_plane
+    from lbm_suite2p_python.run_lsp import run_plane, run_plane_bin
+
     HAS_LSP = True
 except ImportError as e:
     print(f"Error importing lbm_suite2p_python: \n"
@@ -414,92 +414,49 @@ def run_process(self):
 
 
 def run_plane_from_data(self, arr_idx):
-    if not HAS_LSP:
-        self.logger.error("lbm_suite2p_python is not installed.")
-        self._install_error = True
-        return
-
+    from mbo_utilities._writers import _write_bin, write_ops
+    from mbo_utilities.file_io import get_last_savedir_path
     arr = self.image_widget.data[arr_idx]
-    data_shape = arr.shape
     dims = self.image_widget.current_index
     current_z = dims.get("z", 0)
 
+    # optional ROI selection
     if arr_idx in self._rectangle_selectors and self._rectangle_selectors[arr_idx]:
         ind_x, ind_y = self._rectangle_selectors[arr_idx].get_selected_indices()
     else:
         ind_x, ind_y = slice(None), slice(None)
 
-    base_out = Path(self._saveas_outdir) if getattr(self, "_saveas_outdir", None) else None
-    if not base_out:
-        from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
-        # find last saved dir
-        last_savedir = get_last_savedir_path()
-        if last_savedir:
-            base_out = Path(last_savedir)
-        else:
-            base_out = get_mbo_dirs()["data"]
-    if not base_out.exists():
-        base_out.mkdir(exist_ok=True)
-
-    if len(self.image_widget.managed_graphics) > 1:
-        plane_dir = base_out / f"plane{current_z+1:02d}_roi{arr_idx+1:02d}"
-        roi = arr_idx + 1
-        plane = current_z + 1
-    else:
-        plane_dir = base_out / f"plane{current_z+1:02d}"
-        roi = None
-        plane = current_z + 1
-
+    # output base
+    base_out = Path(self._saveas_outdir or get_last_savedir_path())
+    base_out.mkdir(exist_ok=True)
+    plane_dir = base_out / f"plane{current_z+1:02d}_roi{arr_idx+1:02d}"
+    plane_dir.mkdir(parents=True, exist_ok=True)
+    raw_file = plane_dir / "data_raw.bin"
     ops_path = plane_dir / "ops.npy"
 
-    if len(data_shape) == 4:
-        data = arr[:, current_z, ind_x, ind_y]
-    elif len(data_shape) == 3:
-        data = arr[:, ind_x, ind_y]
-    else:
-        data = arr[ind_x, ind_y]
-    self.logger.info(f"Selected data shape {data.shape} (z={current_z}, roi={arr_idx})")
+    # slice the selected z and optional ROI region
+    data = arr[:, current_z, ind_x, ind_y].astype(np.int16)
 
-    lazy_mdata = getattr(arr, "metadata", {}).copy()
     md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "original_file": str(self.fpath),
         "roi_index": arr_idx,
         "z_index": current_z,
         "num_frames": data.shape[0],
+        "shape": data.shape,
         "Ly": data.shape[-2],
         "Lx": data.shape[-1],
-        "fs": lazy_mdata.get("frame_rate", 15.0),
-        "dx": lazy_mdata.get("pixel_size_xy", 1.0),
-        "dz": lazy_mdata.get("z_step", 1.0),
+        "fs": arr.metadata.get("frame_rate", 15.0),
+        "dx": arr.metadata.get("pixel_size_xy", 1.0),
+        "dz": arr.metadata.get("z_step", 1.0),
         "ops_path": str(ops_path),
         "save_path": str(plane_dir),
         "raw_file": str((plane_dir / "data_raw.bin").resolve()),
         "reg_file": str((plane_dir / "data.bin").resolve()),
     }
-    lazy_mdata.update(md)
 
-    ops = self.s2p.to_dict()
-    ops.update(lazy_mdata)
+    _write_bin(raw_file, data, overwrite=True, metadata=md)
+    write_ops(md, raw_file)
 
-    from mbo_utilities.lazy_array import imwrite
-    imwrite(
-        data,
-        plane_dir,
-        ext=".bin",
-        overwrite=True,
-        register_z=True,
-        metadata=ops,
-        s2p_bin=True,
-        plane_index=plane,
-        roi=roi
-    )
-
-    self.logger.info(f"Wrote data_raw.bin and ops.npy to {plane_dir}")
-
-    from lbm_suite2p_python import run_plane_bin
-    complete = run_plane_bin(ops)
-    if complete:
-        self.logger.info(f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}")
-    else:
-        self.logger.error(f"---- Suite2p processing failed for plane {current_z}, roi {arr_idx}. See log above.")
+    complete = run_plane_bin(ops_path)
+    self.logger.info(f"Suite2p plane {current_z} {'done' if complete else 'failed'} → {plane_dir}")
