@@ -437,6 +437,13 @@ def run_plane_from_data(self, arr_idx):
     # slice the selected z and optional ROI region
     data = arr[:, current_z, ind_x, ind_y].astype(np.int16)
 
+    user_ops = {}
+    if hasattr(self, "s2p"):
+        try:
+            user_ops = vars(self.s2p).copy() if hasattr(self.s2p, "__dict__") else dict(self.s2p)
+        except Exception as e:
+            self.logger.warning(f"Could not merge Suite2p params: {e}")
+
     md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "original_file": str(self.fpath),
@@ -456,8 +463,22 @@ def run_plane_from_data(self, arr_idx):
         "reg_file": str((plane_dir / "data.bin").resolve()),
     }
 
-    _write_bin(raw_file, data, overwrite=True, metadata=md)
-    write_ops(md, raw_file)
+    user_ops.update(md)
 
-    out_ops = run_plane(raw_file, save_path=plane_dir, ops=ops_path, keep_raw=True, keep_reg=True)
-    self.logger.info(f"Suite2p processing complete for plane {current_z}, ROI {arr_idx}. Results saved to {plane_dir}.")
+    _write_bin(raw_file, data, overwrite=True, metadata=user_ops)
+
+    # save user ops
+    ops_dict = np.load(ops_path, allow_pickle=True).item()
+    ops_dict.update(user_ops)
+    np.save(ops_path, ops_dict)
+    # write_ops(user_ops, raw_file)
+
+    try:
+        _ = run_plane(raw_file, save_path=plane_dir, ops=ops_path, keep_raw=True, keep_reg=True)
+    except ValueError as e:
+        self.logger.warning(
+            f"No cells found for plane {current_z}, ROI {arr_idx}: \n"
+            f"{e}"
+        )
+        return
+    self.logger.info(f"Suite2p processing complete for plane {current_z}, ROI {arr_idx}.")

@@ -111,9 +111,7 @@ def write_ops(metadata, raw_filename, **kwargs):
         ops["nframes"] = ops["nframes_chan2"]
 
     # Merge extra metadata without overwriting
-    for k, v in metadata.items():
-        ops.setdefault(k, v)
-
+    ops = {**ops, **metadata}
     np.save(ops_path, ops)
     logger.debug(f"Ops file written to {ops_path} with metadata:\n{ops}")
 

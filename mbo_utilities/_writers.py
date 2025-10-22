@@ -261,6 +261,12 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
 
     key = str(fname)
     first_write = False
+
+    # drop cached writer if file was deleted externally
+    if key in _write_bin._writers and not Path(key).exists():
+        _write_bin._writers.pop(key, None)
+        _write_bin._offsets.pop(key, None)
+
     if key not in _write_bin._writers:
         if overwrite and fname.exists():
             fname.unlink()
