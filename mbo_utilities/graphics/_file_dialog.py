@@ -41,7 +41,7 @@ def setup_imgui():
 
     hello_imgui.set_assets_folder(str(assets))
 
-setup_imgui()
+# setup_imgui()
 
 class FileDialog:
     def __init__(self):

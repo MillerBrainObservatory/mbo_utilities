@@ -415,7 +415,8 @@ def run_process(self):
 
 def run_plane_from_data(self, arr_idx):
     from mbo_utilities._writers import _write_bin, write_ops
-    from mbo_utilities.file_io import get_last_savedir_path
+    from mbo_utilities.file_io import get_last_savedir_path, save_last_savedir
+
     arr = self.image_widget.data[arr_idx]
     dims = self.image_widget.current_index
     current_z = dims.get("z", 0)
@@ -466,12 +467,12 @@ def run_plane_from_data(self, arr_idx):
     user_ops.update(md)
 
     _write_bin(raw_file, data, overwrite=True, metadata=user_ops)
+    save_last_savedir(plane_dir)  # cache this location
 
-    # save user ops
+    # re-save user ops
     ops_dict = np.load(ops_path, allow_pickle=True).item()
     ops_dict.update(user_ops)
     np.save(ops_path, ops_dict)
-    # write_ops(user_ops, raw_file)
 
     try:
         _ = run_plane(raw_file, save_path=plane_dir, ops=ops_path, keep_raw=True, keep_reg=True)
