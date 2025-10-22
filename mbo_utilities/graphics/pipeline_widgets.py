@@ -442,6 +442,7 @@ def run_plane_from_data(self, arr_idx):
         "original_file": str(self.fpath),
         "roi_index": arr_idx,
         "z_index": current_z,
+        "plane": current_z + 1,
         "num_frames": data.shape[0],
         "shape": data.shape,
         "Ly": data.shape[-2],
@@ -458,5 +459,5 @@ def run_plane_from_data(self, arr_idx):
     _write_bin(raw_file, data, overwrite=True, metadata=md)
     write_ops(md, raw_file)
 
-    complete = run_plane_bin(ops_path)
-    self.logger.info(f"Suite2p plane {current_z} {'done' if complete else 'failed'} → {plane_dir}")
+    out_ops = run_plane(raw_file, save_path=plane_dir, ops=ops_path, keep_raw=True, keep_reg=True)
+    self.logger.info(f"Suite2p processing complete for plane {current_z}, ROI {arr_idx}. Results saved to {plane_dir}.")
