@@ -11,12 +11,12 @@ Functions to help with loading and saving data.
 .. autofunction:: imwrite
 .. autofunction:: imread
 .. autofunction:: get_files
-.. autofunction:: npy_to_dask
+.. autofunction:: files_to_dask
+.. autofunction:: get_metadata
 .. autofunction:: expand_paths
 .. autofunction:: get_mbo_dirs
 .. autofunction:: load_ops
 .. autofunction:: write_ops
-.. autofunction:: get_metadata
 
 
 ```
