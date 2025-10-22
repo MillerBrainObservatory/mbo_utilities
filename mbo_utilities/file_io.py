@@ -103,6 +103,7 @@ def write_ops(metadata, raw_filename, **kwargs):
         ops["chan2_file"] = str(filename)
 
     ops["align_by_chan"] = chan
+
     # Compatibility: prefer functional channel for top-level nframes
     if "nframes_chan1" in ops:
         ops["nframes"] = ops["nframes_chan1"]
