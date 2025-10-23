@@ -18,7 +18,7 @@ from .array_types import (
     ZarrArray,
     register_zplanes_s3d,
 )
-from .file_io import derive_tag_from_filename, get_plane_from_filename
+from .file_io import derive_tag_from_filename
 from .metadata import is_raw_scanimage, has_mbo_metadata
 from .roi import supports_roi
 
@@ -62,17 +62,18 @@ def _filter_kwargs(cls, kwargs):
 def imwrite(
         lazy_array,
         outpath: str | Path,
-        planes: list | tuple = None,
-        roi: int | Sequence[int] | None = None,
-        metadata: dict = None,
-        overwrite: bool = False,
         ext: str = ".tiff",
+        planes: list | tuple | None = None,
+        num_frames: int | None = None,
+        register_z: bool = False,
+        roi: int | Sequence[int] | None = None,
+        metadata: dict | None = None,
+        overwrite: bool = False,
         order: list | tuple = None,
         target_chunk_mb: int = 20,
-        progress_callback: Callable = None,
-        register_z: bool = False,
+        progress_callback: Callable | None = None,
         debug: bool = False,
-        shift_vectors: np.ndarray = None,
+        shift_vectors: np.ndarray | None = None,
         **kwargs,
 ):
     """
@@ -101,6 +102,8 @@ def imwrite(
     planes : list or tuple of int, optional
         Specific z-planes to export (1-based indexing for consistency with Suite2p).
         Defaults to all planes.
+    num_frames : list or tuple of int, optional
+        The number of frames to export. Defaults to all frames.
     roi : int or sequence of int, optional
         ROI index(es) to restrict output for multi-ROI data (e.g. `MboRawArray`).
     metadata : dict, optional
@@ -165,17 +168,13 @@ def imwrite(
 
     Write ROI 1 to Suite2p-compatible binary format:
         >>> imwrite("data/session1", "output/bin_output", roi=1, ext=".bin")
-
-
     """
-    # Logging
     if debug:
         logger.setLevel(logging.INFO)
         logger.info("Debug mode enabled; setting log level to INFO.")
         logger.propagate = True  # send to terminal
     else:
         logger.setLevel(logging.WARNING)
-        # logger.info("Debug mode disabled; setting log level to WARNING.")
         logger.propagate = False  # don't send to terminal
 
     # save path
@@ -206,26 +205,21 @@ def imwrite(
             )
         planes = [planes[i] for i in order]
 
-    # Handle metadata
-    if hasattr(lazy_array, "metadata") and lazy_array.metadata is not None:
-        file_metadata = dict(lazy_array.metadata)
-    else:
-        file_metadata = {}
+    existing_meta = getattr(lazy_array, "metadata", None)
+    file_metadata = dict(existing_meta or {})
 
-    # Merge in user-supplied metadata
-    if metadata is not None:
+    if metadata:
         if not isinstance(metadata, dict):
-            raise ValueError(f"Provided metadata must be a dictionary, got {type(metadata)} instead.")
+            raise ValueError(f"metadata must be a dict, got {type(metadata)}")
         file_metadata.update(metadata)
 
-    if "num_frames" in kwargs:
-        logger.info(f"Setting num_frames via argument to {kwargs['num_frames']}")
-        file_metadata["num_frames"] = kwargs["num_frames"]
-        file_metadata["nframes"] = kwargs["num_frames"]
+    if num_frames is not None:
+        file_metadata["num_frames"] = int(num_frames)
+        file_metadata["nframes"] = int(num_frames)
 
-    # propagate merged metadata back to array
+    # Only assign back if object supports metadata
     if hasattr(lazy_array, "metadata"):
-        lazy_array.metadata.update(file_metadata)
+        lazy_array.metadata = file_metadata
 
     s3d_job_dir = None
     if register_z:

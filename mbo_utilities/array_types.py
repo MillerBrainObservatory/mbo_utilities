@@ -777,6 +777,10 @@ class MboRawArray(scans.ScanMultiROI):
         )
         return self._metadata
 
+    @metadata.setter
+    def metadata(self, value):
+        self._metadata.update(value)
+
     @property
     def rois(self):
         """ROI's hold information about the size, position and shape of the ROIs."""
