@@ -176,18 +176,18 @@ def draw_saveas_popup(parent):
         imgui.set_next_item_width(hello_imgui.em_size(25))
 
         # Directory + Ext
-        _, parent._saveas_outdir = imgui.input_text(
-            "Save Dir",
-            str(Path(parent._saveas_outdir).expanduser().resolve()),
-            256,
-        )
+        current_dir_str = str(Path(parent._saveas_outdir).expanduser().resolve()) if parent._saveas_outdir else ""
+        changed, new_str = imgui.input_text("Save Dir", current_dir_str)
+        if changed:
+            parent._saveas_outdir = new_str
+
         imgui.same_line()
         if imgui.button("Browse"):
-            res = pfd.select_folder(str(parent._saveas_outdir))
+            res = pfd.select_folder(parent._saveas_outdir or str(Path.home()))
             if res:
-                selected = Path(res.result())
-                parent._saveas_outdir = selected
-                save_last_savedir(selected)
+                selected_str = str(res.result())
+                parent._saveas_outdir = selected_str
+                save_last_savedir(Path(selected_str))
 
         imgui.set_next_item_width(hello_imgui.em_size(25))
         _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_SUPPORTED_FTYPES)
@@ -359,6 +359,10 @@ def draw_saveas_popup(parent):
                     rois = sorted(parent._saveas_selected_roi)
                 else:
                     rois = None
+
+                outdir = Path(parent._saveas_outdir).expanduser()
+                if not outdir.exists():
+                    outdir.mkdir(parents=True, exist_ok=True)
 
                 save_kwargs = {
                     "path": parent.fpath,
