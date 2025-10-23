@@ -36,31 +36,28 @@ uv venv --python 3.12.9
 uv pip install mbo_utilities
 ```
 
-To get the latest version from github:
+For use with the GUI, install [LBM-Suite2p-Python](https://github.com/MillerBrainObservatory/LBM-Suite2p-Python/tree/master):
+
+```bash
+uv pip install lbm_suite2p_python
+```
+
+To get the latest mbo_utilities from github:
 
 ```bash
 uv venv --python 3.12.9 
 uv pip install git+https://github.com/MillerBrainObservatory/mbo_utilities.git@master
 ```
 
-Using `UV` to install from github allows us to specify dependencies that are not yet released to `pypi`.
-If *not* using `uv`, simply replace `uv pip` with `pip`, and install the latest pygfx (this is likely to change in the future).
+By default, cupy for `CUDA 12.x` is installed and Pytorch for `CUDA 12.9`.
 
-``` bash
-# into an environment with python 3.12.7-3.12.9 (tested)
-pip install mbo_utilities
-pip install git+https://github.com/pygfx/pygfx.git@main
-```
+To fully utilize the GPU, you will verify CUDA version and an appropriate [cupy](https://docs.cupy.dev/en/stable/install.html) installation.
 
-To utilize the GPU, you will need CUDA and an appropriate [cupy](https://docs.cupy.dev/en/stable/install.html) installation.
-
-By default, cupy for `CUDA 12.x` is installed.
-
-Check which version of CUDA you have with `nvcc --version`.
+Check which version of CUDA you have with `nvcc --version` (here, 13.0):
 
 ```bash
 nvcc --version
-PS C:\Users\MBO-User\code> nvcc --version
+PS C:\Users\User\code> nvcc --version
 nvcc: NVIDIA (R) Cuda compiler driver
 Copyright (c) 2005-2025 NVIDIA Corporation
 Built on Wed_Jul_16_20:06:48_Pacific_Daylight_Time_2025
@@ -68,7 +65,7 @@ Cuda compilation tools, release 13.0, V13.0.48
 Build cuda_13.0.r13.0/compiler.36260728_0
 ```
 
-For CUDA 11.x and 13.x, you first need to uninstall 12x:
+You first need to uninstall 12x:
 
 `uv pip uninstall cupy-cuda12x`
 
@@ -76,9 +73,10 @@ And replace `12` with the major CUDA version number, in this case `13`:
 
 `uv pip install cupy-cuda13x`
 
-## Troubleshooting
-
-### Wrong PyTorch or CuPy version
+For pytorch, you can run `uv pip uninstall torch` and `uv pip install torch --torch-backend=auto`.
+This sometimes installs the wrong Torch-enabled cuda version.
+If this happens, you should uninstall and reinstall following instruction
+from the [pytorch getting-started page]( https://pytorch.org/get-started/locally/.)
 
 The below error means you have the wrong version of pytorch install for your CUDA version.
 
@@ -87,24 +85,16 @@ OSError: [WinError 1114] A dynamic link library (DLL) initialization routine fai
 Error loading "path\to\.venv\Lib\site-packages\torch\lib\c10.dll" or one of its dependencies.
 ```
 
-You can run `uv pip uninstall torch` and `uv pip install torch --torch-backend=auto`.
-
-If not using `uv`, follow instructions here: https://pytorch.org/get-started/locally/.
-
 Having the wrong `cupy` version will lead to the following error message.
 
 ``` bash
 RuntimeError: CuPy failed to load nvrtc64_120_0.dll: FileNotFoundError: Could not find module 'nvrtc64_120_0.dll' (or one of its dependencies). Try using the full path with constructor syntax.
 ```
 
-Uninstall cupy and reinstall the correct version for your CUDA version. Find your CUDA version with `nvcc --version` and replace `12` with your major CUDA version number:
+Follow instructions above for getting the correct CUDA/Pytorch packages.
 
-```bash
-uv pip uninstall cupy-cuda12x
-uv pip install cupy-cuda13x
-```
+## Graphical User Interface
 
----
 
 ## Acknowledgements
 
