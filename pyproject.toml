@@ -34,6 +34,7 @@ dependencies = [
 	"torchvision",
 	"glfw",
 	"wgpu[imgui]",
+	"pygfx>=0.14.0",
 	"jupyter_rfb>=0.5.1",
 	"suite2p_mbo>=1.0.6",
 	"mbo-suite3d>=0.0.4",
@@ -79,7 +80,7 @@ docs = [
 	"scikit-image",
 	"suite2p_mbo",
 	"cellpose",
-	"pygfx",
+	"pygfx>=0.14.0",
 ]
 
 [[tool.uv.index]]
