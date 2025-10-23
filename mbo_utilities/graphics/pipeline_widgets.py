@@ -42,6 +42,7 @@ class Suite2pSettings:
     norm_frames: bool = True
     force_refimg: bool = False
     pad_fft: bool = False
+    chan2_file: str = ""
 
     tau: float = 1.0
 
@@ -198,6 +199,14 @@ def draw_section_suite2p(self):
         set_tooltip("Use stored reference image instead of recomputing.")
         _, self.s2p.pad_fft = imgui.checkbox("Pad FFT", self.s2p.pad_fft)
         set_tooltip("Pad image for FFT registration to reduce edge artifacts.")
+        _, self.s2p.chan2_file = imgui.input_text("Channel 2 File", self.s2p.chan2_file, 256)
+        set_tooltip("Path to channel 2 binary file for cross-channel registration.")
+        imgui.same_line()
+        if imgui.button("Browse##chan2"):
+            home = pathlib.Path().home()
+            res = pfd.open_file(str(home), single_select=True)
+            if res and res.result():
+                self.s2p.chan2_file = res.result()[0]
 
         imgui.spacing()
         imgui.separator_text("ROI Detection Settings")
