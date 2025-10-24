@@ -425,6 +425,7 @@ def run_process(self):
 def run_plane_from_data(self, arr_idx):
     from mbo_utilities._writers import _write_bin, write_ops
     from mbo_utilities.file_io import get_last_savedir_path, save_last_savedir
+    from mbo_utilities.lazy_array import imread
 
     arr = self.image_widget.data[arr_idx]
     dims = self.image_widget.current_index
@@ -454,6 +455,26 @@ def run_plane_from_data(self, arr_idx):
         except Exception as e:
             self.logger.warning(f"Could not merge Suite2p params: {e}")
 
+    # Handle chan2_file if provided
+    chan2_data = None
+    chan2_raw_file = None
+    if user_ops.get("chan2_file"):
+        try:
+            self.logger.info(f"Loading channel 2 from: {user_ops['chan2_file']}")
+            chan2_arr = imread(user_ops["chan2_file"])
+            # Slice same z and ROI from chan2 data
+            chan2_data = chan2_arr[:, current_z, ind_x, ind_y].astype(np.int16)
+            # Get minimum frames between functional and structural
+            min_frames = min(data.shape[0], chan2_data.shape[0])
+            # Trim both to same number of frames
+            data = data[:min_frames]
+            chan2_data = chan2_data[:min_frames]
+            chan2_raw_file = plane_dir / "data_chan2.bin"
+            self.logger.info(f"Channel 2 loaded and trimmed to {min_frames} frames")
+        except Exception as e:
+            self.logger.warning(f"Could not load channel 2 data: {e}")
+            chan2_data = None
+
     md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "original_file": str(self.fpath),
@@ -475,7 +496,20 @@ def run_plane_from_data(self, arr_idx):
 
     user_ops.update(md)
 
+    # Write functional channel (channel 1) binary
     _write_bin(raw_file, data, overwrite=True, metadata=user_ops)
+
+    # Write structural channel (channel 2) binary if provided
+    if chan2_data is not None and chan2_raw_file is not None:
+        chan2_metadata = user_ops.copy()
+        chan2_metadata["num_frames"] = chan2_data.shape[0]
+        chan2_metadata["shape"] = chan2_data.shape
+        # Update the metadata to point to the chan2 file
+        chan2_metadata["chan2_file"] = str(chan2_raw_file.resolve())
+        _write_bin(chan2_raw_file, chan2_data, overwrite=True, metadata=chan2_metadata, structural=True)
+        # Update ops to reference the chan2 file path
+        user_ops["chan2_file"] = str(chan2_raw_file.resolve())
+
     save_last_savedir(plane_dir)  # cache this location
 
     # re-save user ops
