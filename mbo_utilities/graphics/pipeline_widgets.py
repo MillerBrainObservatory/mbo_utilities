@@ -204,7 +204,7 @@ def draw_section_suite2p(self):
         imgui.same_line()
         if imgui.button("Browse##chan2"):
             home = pathlib.Path().home()
-            res = pfd.open_file(str(home), single_select=True)
+            res = pfd.open_file("Select channel 2 file", str(home))
             if res and res.result():
                 self.s2p.chan2_file = res.result()[0]
 
