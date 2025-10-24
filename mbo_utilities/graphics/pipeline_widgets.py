@@ -423,7 +423,7 @@ def run_process(self):
 
 
 def run_plane_from_data(self, arr_idx):
-    from mbo_utilities._writers import _write_bin, write_ops
+    from mbo_utilities._writers import _write_bin
     from mbo_utilities.file_io import get_last_savedir_path, save_last_savedir
     from mbo_utilities.lazy_array import imread
 
@@ -455,9 +455,11 @@ def run_plane_from_data(self, arr_idx):
         except Exception as e:
             self.logger.warning(f"Could not merge Suite2p params: {e}")
 
-    # Handle chan2_file if provided
+    # Handle chan2_file if provided - CRITICAL: both bins must have same frame count
     chan2_data = None
     chan2_raw_file = None
+    min_frames = data.shape[0]  # default to functional data frames
+
     if user_ops.get("chan2_file"):
         try:
             self.logger.info(f"Loading channel 2 from: {user_ops['chan2_file']}")
@@ -474,6 +476,7 @@ def run_plane_from_data(self, arr_idx):
         except Exception as e:
             self.logger.warning(f"Could not load channel 2 data: {e}")
             chan2_data = None
+            min_frames = data.shape[0]
 
     md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -481,8 +484,9 @@ def run_plane_from_data(self, arr_idx):
         "roi_index": arr_idx,
         "z_index": current_z,
         "plane": current_z + 1,
-        "num_frames": data.shape[0],
-        "shape": data.shape,
+        "num_frames": min_frames,  # Use minimum frame count
+        "nframes": min_frames,     # Suite2p also uses nframes
+        "shape": (min_frames, data.shape[-2], data.shape[-1]),
         "Ly": data.shape[-2],
         "Lx": data.shape[-1],
         "fs": arr.metadata.get("frame_rate", 15.0),
@@ -496,23 +500,26 @@ def run_plane_from_data(self, arr_idx):
 
     user_ops.update(md)
 
-    # Write functional channel (channel 1) binary
+    # Write functional channel (channel 1) binary with num_frames constraint
     _write_bin(raw_file, data, overwrite=True, metadata=user_ops)
 
     # Write structural channel (channel 2) binary if provided
+    # Both bins MUST have the same num_frames for suite2p
     if chan2_data is not None and chan2_raw_file is not None:
         chan2_metadata = user_ops.copy()
-        chan2_metadata["num_frames"] = chan2_data.shape[0]
-        chan2_metadata["shape"] = chan2_data.shape
+        # CRITICAL: Keep the same num_frames for both bins
+        chan2_metadata["num_frames"] = min_frames
+        chan2_metadata["nframes"] = min_frames
+        chan2_metadata["shape"] = (min_frames, chan2_data.shape[-2], chan2_data.shape[-1])
         # Update the metadata to point to the chan2 file
         chan2_metadata["chan2_file"] = str(chan2_raw_file.resolve())
-        _write_bin(chan2_raw_file, chan2_data, overwrite=True, metadata=chan2_metadata, structural=True)
+        _write_bin(chan2_raw_file, chan2_data, overwrite=True, metadata=chan2_metadata)
         # Update ops to reference the chan2 file path
         user_ops["chan2_file"] = str(chan2_raw_file.resolve())
 
     save_last_savedir(plane_dir)  # cache this location
 
-    # re-save user ops
+    # re-save user ops with correct num_frames
     ops_dict = np.load(ops_path, allow_pickle=True).item()
     ops_dict.update(user_ops)
     np.save(ops_path, ops_dict)
