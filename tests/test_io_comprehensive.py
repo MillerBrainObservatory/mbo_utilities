@@ -14,16 +14,19 @@ import pytest
 import numpy as np
 import h5py
 
-import mbo_utilities as mbo
-from mbo_utilities import imread, imwrite, get_files, get_mbo_dirs
-
 
 # ============================================================================
 # Test Configuration
 # ============================================================================
 
-DEFAULT_DATA_ROOT = get_mbo_dirs().get("tests")
-DATA_ROOT = Path(os.getenv("MBO_TEST_DATA", DEFAULT_DATA_ROOT or "/tmp/mbo_test_data"))
+# Lazy imports to avoid loading heavy dependencies during test collection
+# Don't call _get_mbo_dirs() at module level - wait until test execution
+try:
+    DEFAULT_DATA_ROOT = Path(os.getenv("MBO_TEST_DATA", "/tmp/mbo_test_data"))
+except Exception:
+    DEFAULT_DATA_ROOT = Path("/tmp/mbo_test_data")
+
+DATA_ROOT = DEFAULT_DATA_ROOT
 
 # Test data specifications
 SYNTHETIC_SHAPE = (50, 64, 128)  # (T, H, W) - small for CI
@@ -96,6 +99,8 @@ def synthetic_tiff(tmp_path, synthetic_data):
 @pytest.fixture
 def real_data_files():
     """Get real data files if available."""
+    from mbo_utilities import get_files
+
     if not DATA_ROOT.exists():
         pytest.skip(f"Real data directory not found: {DATA_ROOT}")
 
@@ -114,6 +119,8 @@ def real_data_files():
 @pytest.mark.io
 def test_imread_synthetic_tiff(synthetic_tiff):
     """Test imread with synthetic TIFF file."""
+    from mbo_utilities import imread
+
     with Timer("imread synthetic TIFF"):
         arr = imread(synthetic_tiff)
 
@@ -135,6 +142,8 @@ def test_imread_synthetic_tiff(synthetic_tiff):
 ])
 def test_imwrite_formats_synthetic(tmp_path, synthetic_tiff, ext, format_name):
     """Test writing synthetic data to different formats with timing."""
+    from mbo_utilities import imread, imwrite
+
     print(f"\n🔧 Testing {format_name} format")
 
     # Read data first (imwrite expects lazy array objects)
@@ -172,6 +181,8 @@ def test_imwrite_formats_synthetic(tmp_path, synthetic_tiff, ext, format_name):
 @pytest.mark.io
 def test_roundtrip_tiff(tmp_path, synthetic_tiff):
     """Test read-write roundtrip with TIFF format."""
+    from mbo_utilities import imread, imwrite
+
     print("\n🔄 Testing TIFF roundtrip")
 
     # Read original
@@ -204,6 +215,8 @@ def test_roundtrip_tiff(tmp_path, synthetic_tiff):
 @pytest.mark.io
 def test_roundtrip_zarr(tmp_path, synthetic_tiff):
     """Test read-write roundtrip with Zarr format."""
+    from mbo_utilities import imread, imwrite
+
     print("\n🔄 Testing Zarr roundtrip")
 
     # Read original
@@ -236,6 +249,8 @@ def test_roundtrip_zarr(tmp_path, synthetic_tiff):
 @pytest.mark.io
 def test_roundtrip_h5(tmp_path, synthetic_tiff):
     """Test read-write roundtrip with HDF5 format."""
+    from mbo_utilities import imread, imwrite
+
     print("\n🔄 Testing HDF5 roundtrip")
 
     # Read original
@@ -267,6 +282,8 @@ def test_roundtrip_h5(tmp_path, synthetic_tiff):
 @pytest.mark.ci
 def test_metadata_preservation(tmp_path, synthetic_tiff):
     """Test that metadata is preserved through read/write cycles."""
+    from mbo_utilities import imread, imwrite
+
     print("\n📋 Testing metadata preservation")
 
     # Read with metadata
@@ -301,6 +318,8 @@ def test_metadata_preservation(tmp_path, synthetic_tiff):
 @skip_if_missing_data
 def test_imread_real_data(real_data_files):
     """Test imread with real data files."""
+    from mbo_utilities import imread
+
     print(f"\n📂 Testing with {len(real_data_files)} real data file(s)")
 
     with Timer("imread real data"):
@@ -325,6 +344,8 @@ def test_imread_real_data(real_data_files):
 @skip_if_missing_data
 def test_imwrite_formats_real_data(tmp_path, real_data_files, ext, format_name):
     """Test writing real data to all formats with timing."""
+    from mbo_utilities import imread, imwrite
+
     print(f"\n🔧 Testing {format_name} format with real data")
 
     # Read real data
