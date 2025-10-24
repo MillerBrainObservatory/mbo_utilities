@@ -4,10 +4,10 @@ from typing import Any
 import click
 import numpy as np
 from mbo_utilities.roi import iter_rois, normalize_roi
+from mbo_utilities.graphics._file_dialog import FileDialog, setup_imgui
 
 
 def _select_file() -> tuple[Any, Any, Any, bool]:
-    from mbo_utilities.graphics._file_dialog import FileDialog
     from mbo_utilities.file_io import get_mbo_dirs
     from imgui_bundle import immapp, hello_imgui
 
@@ -60,6 +60,7 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 @click.argument("data_in", required=False)
 def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
     """Open a GUI to preview data of any supported type."""
+    setup_imgui()  # ensure assets (fonts + icons) are available
     roi_cli = normalize_roi(roi)
 
     if data_in is None:
@@ -88,7 +89,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
         from imgui_bundle import immapp, hello_imgui
         params = hello_imgui.RunnerParams()
         params.app_window_params.window_title = "MBO Metadata Viewer"
-        params.app_window_params.window_geometry.size = (1600, 1000)
+        params.app_window_params.window_geometry.size = (800, 800)
         params.callbacks.show_gui = _render
 
         addons = immapp.AddOnsParams()

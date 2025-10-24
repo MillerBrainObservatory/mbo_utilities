@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.0.4"
+version = "2.0.5"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -34,10 +34,11 @@ dependencies = [
 	"torchvision",
 	"glfw",
 	"wgpu[imgui]",
+	"pygfx>=0.14.0",
 	"jupyter_rfb>=0.5.1",
 	"suite2p_mbo>=1.0.6",
 	"mbo-suite3d>=0.0.4",
-	"lbm-suite2p-python>=2.0.1",
+	"lbm-suite2p-python>=2.0.4",
 	"mbo-fpl",
 	"llvmlite>=0.43.0",
 	"mkl_fft>=2.0.0",
@@ -79,7 +80,7 @@ docs = [
 	"scikit-image",
 	"suite2p_mbo",
 	"cellpose",
-	"pygfx",
+	"pygfx>=0.14.0",
 ]
 
 [[tool.uv.index]]

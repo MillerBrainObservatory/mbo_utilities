@@ -2,12 +2,21 @@
 
 This guide covers managing python environments with [UV](https://docs.astral.sh/uv/) and [conda](https://docs.conda.io/projects/conda/en/stable/user-guide/getting-started.html).
 
-```{admonition} TLDR
+:::{admonition} TLDR
 :class: dropdown
-If you know `conda`, use `conda`.
 
-Otherwise, install and learn about `uv` and substitute `pip install <PACKAGE>` with `uv pip install <PACKAGE>` for a drop-in `pip` replacement.
+Install and learn about `uv` and substitute `pip install <PACKAGE>` with `uv pip install <PACKAGE>` for a drop-in `pip` replacement.
+
+Keep all code in a single directory. This is where your environemnt lives. 
+
+```bash
+
+uv venv --python 3.12.9
+uv pip install <package>
+
 ```
+
+:::
 
 ```{list-table} UV vs Conda: Common Environment Commands
 :header-rows: 1
@@ -285,31 +294,3 @@ For jupyterlab:
 
 ```{figure} ./_images/venv_jlab.png
 ```
-
-<!-- ### Two common examples -->
-<!---->
-<!-- 1. **Mixing `conda` and `pip`** -->
-<!---->
-<!--   `jupyter` is one of several libraries that will not work when mixing `conda` and `pip`. -->
-<!---->
-<!---->
-<!-- **Wrong Python is being used** -->
-<!---->
-<!-- There are a tens of options for how to install Python on any of the operating systems. -->
-<!---->
-<!-- One of the most detrimental mistakes is adding Python to your system -->
-<!---->
-<!-- [PATH](https://superuser.com/questions/284342/what-are-path-and-other-environment-variables-and-how-can-i-set-or-use-them). -->
-<!---->
-<!-- `conda` warns you not to do this, [Windows Python Installer](https://docs.python.org/3/_images/win_installer.png) does too. -->
-<!---->
-<!-- Though for some reason users so often end up with system versions of python, often from the package managers. -->
-<!---->
-<!-- The problem here is that you will be using this system python and you won't know it. -->
-<!---->
-<!-- You will run a `jupyter lab` command, which will open properly but your environments are nowhere to be found. -->
-<!---->
-<!-- This can often be incredibly difficult and time-consuming to debug. -->
-<!---->
-<!-- This happens to experienced developers the same as anyone else. -->
-<!---->

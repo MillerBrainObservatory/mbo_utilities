@@ -261,6 +261,12 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
 
     key = str(fname)
     first_write = False
+
+    # drop cached writer if file was deleted externally
+    if key in _write_bin._writers and not Path(key).exists():
+        _write_bin._writers.pop(key, None)
+        _write_bin._offsets.pop(key, None)
+
     if key not in _write_bin._writers:
         if overwrite and fname.exists():
             fname.unlink()
@@ -366,9 +372,73 @@ def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
         )
     _write_tiff._first_write[filename] = False
 
+def _write_zarr(
+    path,
+    data,
+    *,
+    overwrite=True,
+    metadata=None,
+    level=1,
+    **kwargs,
+):
+    sharded = kwargs.get("sharded", False)
 
-def _write_zarr(path, data, *, overwrite=True, metadata=None, **kwargs):
-    compressor = kwargs.get("filters", None)
+    filename = Path(path)
+    if not hasattr(_write_zarr, "_arrays"):
+        _write_zarr._arrays = {}
+        _write_zarr._offsets = {}
+
+    if overwrite and filename in _write_zarr._arrays:
+        del _write_zarr._arrays[filename]
+        del _write_zarr._offsets[filename]
+
+    if filename not in _write_zarr._arrays:
+        if filename.exists() and overwrite:
+            shutil.rmtree(filename)
+
+        import zarr
+        from zarr.codecs import BytesCodec, GzipCodec, ShardingCodec, Crc32cCodec
+
+        nframes = int(metadata["num_frames"])
+        h, w = data.shape[-2:]
+
+        if sharded:
+            outer = (min(nframes, 100), h, w)  # 100-frame shards
+            inner = (1, h, w)
+            codec = ShardingCodec(
+                chunk_shape=inner,
+                codecs=[BytesCodec(), GzipCodec(level=level)],
+                index_codecs=[BytesCodec(), Crc32cCodec()],
+            )
+            codecs = [codec]
+            chunks = outer
+        else:
+            codecs = None
+            chunks = (1, h, w)
+
+        z = zarr.create(
+            store=str(filename),
+            shape=(nframes, h, w),
+            chunks=chunks,
+            dtype=data.dtype,
+            codecs=codecs,
+            overwrite=True,
+        )
+
+        for k, v in (metadata or {}).items():
+            z.attrs[k] = v
+
+        _write_zarr._arrays[filename] = z
+        _write_zarr._offsets[filename] = 0
+
+    z = _write_zarr._arrays[filename]
+    offset = _write_zarr._offsets[filename]
+    z[offset : offset + data.shape[0]] = data
+    _write_zarr._offsets[filename] = offset + data.shape[0]
+
+
+def _write_zarr_v2(path, data, *, overwrite=True, metadata=None, **kwargs):
+    compressor = None
 
     filename = Path(path)
 
