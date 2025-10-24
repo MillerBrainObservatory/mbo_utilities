@@ -348,55 +348,55 @@ def draw_section_suite2p(self):
 
         imgui.pop_item_width()
         imgui.spacing()
-        if imgui.button("Load Suite2p Masks"):
-            try:
-                import numpy as np
-                from pathlib import Path
+        # if imgui.button("Load Suite2p Masks"):
+        #     try:
+        #         import numpy as np
+        #         from pathlib import Path
+        #
+        #         res = pfd.select_folder(self._saveas_outdir or str(Path().home()))
+        #         if res:
+        #             self.s2p_dir = res.result()
+        #
+        #         s2p_dir = Path(self._saveas_outdir)
+        #         ops = np.load(next(s2p_dir.rglob("ops.npy")), allow_pickle=True).item()
+        #         stat = np.load(next(s2p_dir.rglob("stat.npy")), allow_pickle=True)
+        #         iscell = np.load(next(s2p_dir.rglob("iscell.npy")), allow_pickle=True)[:, 0].astype(bool)
+        #
+        #         Ly, Lx = ops["Ly"], ops["Lx"]
+        #         mask_rgb = np.zeros((Ly, Lx, 3), dtype=np.float32)
+        #
+        #         # build ROI overlay (green for accepted cells)
+        #         for s, ok in zip(stat, iscell):
+        #             if not ok:
+        #                 continue
+        #             ypix, xpix, lam = s["ypix"], s["xpix"], s["lam"]
+        #             lam = lam / lam.max()
+        #             mask_rgb[ypix, xpix, 1] = np.maximum(mask_rgb[ypix, xpix, 1], lam)  # G channel
+        #
+        #         self._mask_color_strength = 0.5
+        #         self._mask_rgb = mask_rgb
+        #         self._mean_img = ops["meanImg"].astype(np.float32)
+        #         self._show_mask_slider = True
+        #
+        #         combined = self._mean_img[..., None].repeat(3, axis=2)
+        #         combined = combined / combined.max()
+        #         combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
+        #         self.image_widget.managed_graphics[1].data = combined
+        #         self.logger.info(f"Loaded and displayed {iscell.sum()} Suite2p masks.")
+        #
+        #     except Exception as e:
+        #         self.logger.error(f"Mask load failed: {e}")
 
-                res = pfd.select_folder(self._saveas_outdir or str(Path().home()))
-                if res:
-                    self.s2p_dir = res.result()
-
-                s2p_dir = Path(self._saveas_outdir)
-                ops = np.load(next(s2p_dir.rglob("ops.npy")), allow_pickle=True).item()
-                stat = np.load(next(s2p_dir.rglob("stat.npy")), allow_pickle=True)
-                iscell = np.load(next(s2p_dir.rglob("iscell.npy")), allow_pickle=True)[:, 0].astype(bool)
-
-                Ly, Lx = ops["Ly"], ops["Lx"]
-                mask_rgb = np.zeros((Ly, Lx, 3), dtype=np.float32)
-
-                # build ROI overlay (green for accepted cells)
-                for s, ok in zip(stat, iscell):
-                    if not ok:
-                        continue
-                    ypix, xpix, lam = s["ypix"], s["xpix"], s["lam"]
-                    lam = lam / lam.max()
-                    mask_rgb[ypix, xpix, 1] = np.maximum(mask_rgb[ypix, xpix, 1], lam)  # G channel
-
-                self._mask_color_strength = 0.5
-                self._mask_rgb = mask_rgb
-                self._mean_img = ops["meanImg"].astype(np.float32)
-                self._show_mask_slider = True
-
-                combined = self._mean_img[..., None].repeat(3, axis=2)
-                combined = combined / combined.max()
-                combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
-                self.image_widget.managed_graphics[1].data = combined
-                self.logger.info(f"Loaded and displayed {iscell.sum()} Suite2p masks.")
-
-            except Exception as e:
-                self.logger.error(f"Mask load failed: {e}")
-
-        if getattr(self, "_show_mask_slider", False):
-            imgui.separator_text("Mask Overlay")
-            changed, self._mask_color_strength = imgui.slider_float(
-                "Color Strength", self._mask_color_strength, 0.0, 2.0
-            )
-            if changed:
-                combined = self._mean_img[..., None].repeat(3, axis=2)
-                combined = combined / combined.max()
-                combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
-                self.image_widget.managed_graphics[1].data = combined
+        # if getattr(self, "_show_mask_slider", False):
+        #     imgui.separator_text("Mask Overlay")
+        #     changed, self._mask_color_strength = imgui.slider_float(
+        #         "Color Strength", self._mask_color_strength, 0.0, 2.0
+        #     )
+        #     if changed:
+        #         combined = self._mean_img[..., None].repeat(3, axis=2)
+        #         combined = combined / combined.max()
+        #         combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
+        #         self.image_widget.managed_graphics[1].data = combined
 
 
 
