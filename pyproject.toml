@@ -58,6 +58,10 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 [project.optional-dependencies]
 all = [
 ]
+dev = [
+	"pytest>=8.0.0",
+	"pytest-cov",
+]
 docs = [
 	"sphinx>=6.1.3",
 	"docutils>=0.19",
