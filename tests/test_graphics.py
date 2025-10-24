@@ -1,6 +1,8 @@
 import sys
+import pytest
 
 
+@pytest.mark.ci
 def test_imgui_context_creation():
     if sys.platform == "win32":
         return

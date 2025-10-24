@@ -217,33 +217,40 @@ def imwrite(
         file_metadata["num_frames"] = int(num_frames)
         file_metadata["nframes"] = int(num_frames)
 
-    # Only assign back if object supports metadata
+    # Assign metadata back to the array
     if hasattr(lazy_array, "metadata"):
         lazy_array.metadata = file_metadata
 
     s3d_job_dir = None
     if register_z:
-        lazy_array.metadata["apply_shift"] = True
+        file_metadata["apply_shift"] = True
+        if hasattr(lazy_array, "metadata"):
+            lazy_array.metadata["apply_shift"] = True
 
         if shift_vectors is not None:
-            lazy_array.metadata["shift_vectors"] = shift_vectors
+            file_metadata["shift_vectors"] = shift_vectors
+            if hasattr(lazy_array, "metadata"):
+                lazy_array.metadata["shift_vectors"] = shift_vectors
         else:
             # check metadata for s3d-job dir
+            meta_dict = getattr(lazy_array, "metadata", file_metadata)
             if (
-                "s3d-job" in lazy_array.metadata
-                and Path(lazy_array.metadata["s3d-job"]).is_dir()
+                "s3d-job" in meta_dict
+                and Path(meta_dict["s3d-job"]).is_dir()
             ):
                 logger.debug("Detected s3d-job in metadata, moving data to s3d output path.")
-                s3d_job_dir = Path(lazy_array.metadata["s3d-job"])
+                s3d_job_dir = Path(meta_dict["s3d-job"])
             else:  # check if the input is in a s3d-job folder
-                job_id = lazy_array.metadata.get("job_id", "s3d-preprocessed")
+                job_id = meta_dict.get("job_id", "s3d-preprocessed")
                 s3d_job_dir = outpath / job_id
 
             if s3d_job_dir.joinpath("dirs.npy").is_file():
                 dirs = np.load(s3d_job_dir / "dirs.npy", allow_pickle=True).item()
                 for k, v in dirs.items():
                     if Path(v).is_dir():
-                        lazy_array.metadata[k] = v
+                        file_metadata[k] = v
+                        if hasattr(lazy_array, "metadata"):
+                            lazy_array.metadata[k] = v
             else:
                 # check if outpath contains an s3d job
                 npy_files = outpath.rglob("*.npy")
@@ -265,10 +272,14 @@ def imwrite(
 
     if s3d_job_dir:
         logger.info(f"Storing s3d-job path {s3d_job_dir} in metadata.")
-        lazy_array.metadata["s3d-job"] = s3d_job_dir
+        file_metadata["s3d-job"] = s3d_job_dir
+        if hasattr(lazy_array, "metadata"):
+            lazy_array.metadata["s3d-job"] = s3d_job_dir
     else:
         logger.info("No s3d-job directory used or created.")
-        lazy_array.metadata["apply_shift"] = False
+        file_metadata["apply_shift"] = False
+        if hasattr(lazy_array, "metadata"):
+            lazy_array.metadata["apply_shift"] = False
 
     if hasattr(lazy_array, "_imwrite"):
         return lazy_array._imwrite(  # noqa
