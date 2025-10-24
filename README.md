@@ -104,8 +104,8 @@ uv run mbo
 See the [GUI User Guide](./mbo_gui_user_guide.pdf) attached here.
 
 <p align="center">
-  <img src="docs/_images_GUI_Slide1.png" alt="GUI Slide 1" width="45%">
-  <img src="docs/_images_GUI_Slide2.png" alt="GUI Slide 2" width="45%">
+  <img src="docs/_images/GUI_Slide1.png" alt="GUI Slide 1" width="45%">
+  <img src="docs/_images/GUI_Slide2.png" alt="GUI Slide 2" width="45%">
 </p>
 
 
