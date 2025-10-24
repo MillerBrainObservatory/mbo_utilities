@@ -42,6 +42,7 @@ class Suite2pSettings:
     norm_frames: bool = True
     force_refimg: bool = False
     pad_fft: bool = False
+    chan2_file: str = ""
 
     tau: float = 1.0
 
@@ -198,6 +199,14 @@ def draw_section_suite2p(self):
         set_tooltip("Use stored reference image instead of recomputing.")
         _, self.s2p.pad_fft = imgui.checkbox("Pad FFT", self.s2p.pad_fft)
         set_tooltip("Pad image for FFT registration to reduce edge artifacts.")
+        _, self.s2p.chan2_file = imgui.input_text("Channel 2 File", self.s2p.chan2_file, 256)
+        set_tooltip("Path to channel 2 binary file for cross-channel registration.")
+        imgui.same_line()
+        if imgui.button("Browse##chan2"):
+            home = pathlib.Path().home()
+            res = pfd.open_file("Select channel 2 file", str(home))
+            if res and res.result():
+                self.s2p.chan2_file = res.result()[0]
 
         imgui.spacing()
         imgui.separator_text("ROI Detection Settings")
@@ -339,55 +348,55 @@ def draw_section_suite2p(self):
 
         imgui.pop_item_width()
         imgui.spacing()
-        if imgui.button("Load Suite2p Masks"):
-            try:
-                import numpy as np
-                from pathlib import Path
+        # if imgui.button("Load Suite2p Masks"):
+        #     try:
+        #         import numpy as np
+        #         from pathlib import Path
+        #
+        #         res = pfd.select_folder(self._saveas_outdir or str(Path().home()))
+        #         if res:
+        #             self.s2p_dir = res.result()
+        #
+        #         s2p_dir = Path(self._saveas_outdir)
+        #         ops = np.load(next(s2p_dir.rglob("ops.npy")), allow_pickle=True).item()
+        #         stat = np.load(next(s2p_dir.rglob("stat.npy")), allow_pickle=True)
+        #         iscell = np.load(next(s2p_dir.rglob("iscell.npy")), allow_pickle=True)[:, 0].astype(bool)
+        #
+        #         Ly, Lx = ops["Ly"], ops["Lx"]
+        #         mask_rgb = np.zeros((Ly, Lx, 3), dtype=np.float32)
+        #
+        #         # build ROI overlay (green for accepted cells)
+        #         for s, ok in zip(stat, iscell):
+        #             if not ok:
+        #                 continue
+        #             ypix, xpix, lam = s["ypix"], s["xpix"], s["lam"]
+        #             lam = lam / lam.max()
+        #             mask_rgb[ypix, xpix, 1] = np.maximum(mask_rgb[ypix, xpix, 1], lam)  # G channel
+        #
+        #         self._mask_color_strength = 0.5
+        #         self._mask_rgb = mask_rgb
+        #         self._mean_img = ops["meanImg"].astype(np.float32)
+        #         self._show_mask_slider = True
+        #
+        #         combined = self._mean_img[..., None].repeat(3, axis=2)
+        #         combined = combined / combined.max()
+        #         combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
+        #         self.image_widget.managed_graphics[1].data = combined
+        #         self.logger.info(f"Loaded and displayed {iscell.sum()} Suite2p masks.")
+        #
+        #     except Exception as e:
+        #         self.logger.error(f"Mask load failed: {e}")
 
-                res = pfd.select_folder(self._saveas_outdir or str(Path().home()))
-                if res:
-                    self.s2p_dir = res.result()
-
-                s2p_dir = Path(self._saveas_outdir)
-                ops = np.load(next(s2p_dir.rglob("ops.npy")), allow_pickle=True).item()
-                stat = np.load(next(s2p_dir.rglob("stat.npy")), allow_pickle=True)
-                iscell = np.load(next(s2p_dir.rglob("iscell.npy")), allow_pickle=True)[:, 0].astype(bool)
-
-                Ly, Lx = ops["Ly"], ops["Lx"]
-                mask_rgb = np.zeros((Ly, Lx, 3), dtype=np.float32)
-
-                # build ROI overlay (green for accepted cells)
-                for s, ok in zip(stat, iscell):
-                    if not ok:
-                        continue
-                    ypix, xpix, lam = s["ypix"], s["xpix"], s["lam"]
-                    lam = lam / lam.max()
-                    mask_rgb[ypix, xpix, 1] = np.maximum(mask_rgb[ypix, xpix, 1], lam)  # G channel
-
-                self._mask_color_strength = 0.5
-                self._mask_rgb = mask_rgb
-                self._mean_img = ops["meanImg"].astype(np.float32)
-                self._show_mask_slider = True
-
-                combined = self._mean_img[..., None].repeat(3, axis=2)
-                combined = combined / combined.max()
-                combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
-                self.image_widget.managed_graphics[1].data = combined
-                self.logger.info(f"Loaded and displayed {iscell.sum()} Suite2p masks.")
-
-            except Exception as e:
-                self.logger.error(f"Mask load failed: {e}")
-
-        if getattr(self, "_show_mask_slider", False):
-            imgui.separator_text("Mask Overlay")
-            changed, self._mask_color_strength = imgui.slider_float(
-                "Color Strength", self._mask_color_strength, 0.0, 2.0
-            )
-            if changed:
-                combined = self._mean_img[..., None].repeat(3, axis=2)
-                combined = combined / combined.max()
-                combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
-                self.image_widget.managed_graphics[1].data = combined
+        # if getattr(self, "_show_mask_slider", False):
+        #     imgui.separator_text("Mask Overlay")
+        #     changed, self._mask_color_strength = imgui.slider_float(
+        #         "Color Strength", self._mask_color_strength, 0.0, 2.0
+        #     )
+        #     if changed:
+        #         combined = self._mean_img[..., None].repeat(3, axis=2)
+        #         combined = combined / combined.max()
+        #         combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
+        #         self.image_widget.managed_graphics[1].data = combined
 
 
 
@@ -414,8 +423,9 @@ def run_process(self):
 
 
 def run_plane_from_data(self, arr_idx):
-    from mbo_utilities._writers import _write_bin, write_ops
+    from mbo_utilities._writers import _write_bin
     from mbo_utilities.file_io import get_last_savedir_path, save_last_savedir
+    from mbo_utilities.lazy_array import imread
 
     arr = self.image_widget.data[arr_idx]
     dims = self.image_widget.current_index
@@ -445,14 +455,38 @@ def run_plane_from_data(self, arr_idx):
         except Exception as e:
             self.logger.warning(f"Could not merge Suite2p params: {e}")
 
+    # Handle chan2_file if provided - CRITICAL: both bins must have same frame count
+    chan2_data = None
+    chan2_raw_file = None
+    min_frames = data.shape[0]  # default to functional data frames
+
+    if user_ops.get("chan2_file"):
+        try:
+            self.logger.info(f"Loading channel 2 from: {user_ops['chan2_file']}")
+            chan2_arr = imread(user_ops["chan2_file"])
+            # Slice same z and ROI from chan2 data
+            chan2_data = chan2_arr[:, current_z, ind_x, ind_y].astype(np.int16)
+            # Get minimum frames between functional and structural
+            min_frames = min(data.shape[0], chan2_data.shape[0])
+            # Trim both to same number of frames
+            data = data[:min_frames]
+            chan2_data = chan2_data[:min_frames]
+            chan2_raw_file = plane_dir / "data_chan2.bin"
+            self.logger.info(f"Channel 2 loaded and trimmed to {min_frames} frames")
+        except Exception as e:
+            self.logger.warning(f"Could not load channel 2 data: {e}")
+            chan2_data = None
+            min_frames = data.shape[0]
+
     md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "original_file": str(self.fpath),
         "roi_index": arr_idx,
         "z_index": current_z,
         "plane": current_z + 1,
-        "num_frames": data.shape[0],
-        "shape": data.shape,
+        "num_frames": min_frames,  # Use minimum frame count
+        "nframes": min_frames,     # Suite2p also uses nframes
+        "shape": (min_frames, data.shape[-2], data.shape[-1]),
         "Ly": data.shape[-2],
         "Lx": data.shape[-1],
         "fs": arr.metadata.get("frame_rate", 15.0),
@@ -466,10 +500,26 @@ def run_plane_from_data(self, arr_idx):
 
     user_ops.update(md)
 
+    # Write functional channel (channel 1) binary with num_frames constraint
     _write_bin(raw_file, data, overwrite=True, metadata=user_ops)
+
+    # Write structural channel (channel 2) binary if provided
+    # Both bins MUST have the same num_frames for suite2p
+    if chan2_data is not None and chan2_raw_file is not None:
+        chan2_metadata = user_ops.copy()
+        # CRITICAL: Keep the same num_frames for both bins
+        chan2_metadata["num_frames"] = min_frames
+        chan2_metadata["nframes"] = min_frames
+        chan2_metadata["shape"] = (min_frames, chan2_data.shape[-2], chan2_data.shape[-1])
+        # Update the metadata to point to the chan2 file
+        chan2_metadata["chan2_file"] = str(chan2_raw_file.resolve())
+        _write_bin(chan2_raw_file, chan2_data, overwrite=True, metadata=chan2_metadata)
+        # Update ops to reference the chan2 file path
+        user_ops["chan2_file"] = str(chan2_raw_file.resolve())
+
     save_last_savedir(plane_dir)  # cache this location
 
-    # re-save user ops
+    # re-save user ops with correct num_frames
     ops_dict = np.load(ops_path, allow_pickle=True).item()
     ops_dict.update(user_ops)
     np.save(ops_path, ops_dict)

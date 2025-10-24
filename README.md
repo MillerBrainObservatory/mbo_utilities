@@ -95,6 +95,19 @@ Follow instructions above for getting the correct CUDA/Pytorch packages.
 
 ## Graphical User Interface
 
+To start the gui:
+
+```bash
+uv run mbo
+```
+
+See the [GUI User Guide](./mbo_gui_user_guide.pdf) attached here.
+
+<p align="center">
+  <img src="docs/_images/GUI_Slide1.png" alt="GUI Slide 1" width="45%">
+  <img src="docs/_images/GUI_Slide2.png" alt="GUI Slide 2" width="45%">
+</p>
+
 
 ## Acknowledgements
 
