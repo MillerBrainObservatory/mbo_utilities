@@ -368,6 +368,7 @@ class H5Array:
         self.shape = self._d.shape
         self.dtype = self._d.dtype
         self.ndim = self._d.ndim
+        self._metadata = None
 
     @property
     def num_planes(self) -> int:
@@ -420,7 +421,15 @@ class H5Array:
 
     @property
     def metadata(self) -> dict:
+        if self._metadata is not None:
+            return self._metadata
         return dict(self._f.attrs)
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
 
     def _imwrite(self, outpath, **kwargs):
         _write_plane(
@@ -457,6 +466,12 @@ class MBOTiffArray:
     @property
     def metadata(self) -> dict:
         return self._metadata or {}
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
 
     @property
     def chunks(self):
@@ -513,9 +528,15 @@ class MBOTiffArray:
         from mbo_utilities.file_io import get_plane_from_filename
 
         md = self.metadata.copy()
-        plane = md.get("plane") or get_plane_from_filename(Path(outpath).stem, None)
+        plane = md.get("plane")
         if plane is None:
-            raise ValueError("Cannot determine plane from metadata.")
+            # Try to get from filename
+            try:
+                plane = get_plane_from_filename(Path(outpath).stem, None)
+            except (ValueError, AttributeError):
+                # Default to 0 if we can't determine plane number
+                plane = 0
+                logger.debug(f"Could not determine plane number, defaulting to {plane}")
 
         outpath = Path(outpath)
         ext = ext.lower().lstrip(".")
@@ -534,11 +555,13 @@ class MBOTiffArray:
             plane_index=None,
             **kwargs,
         )
+        return outpath
 
 
 @dataclass
 class NpyArray:
     filenames: list[Path]
+    _metadata: dict = field(default_factory=dict, init=False)
 
     def __post_init__(self):
         if not self.filenames:
@@ -550,6 +573,30 @@ class NpyArray:
         self.shape = self._file.shape
         self.dtype = self._file.dtype
         self.ndim = self._file.ndim
+
+    @property
+    def metadata(self) -> dict:
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
+
+    @property
+    def min(self) -> float:
+        return float(self._file.min())
+
+    @property
+    def max(self) -> float:
+        return float(self._file.max())
+
+    def __getitem__(self, key):
+        return self._file[key]
+
+    def __len__(self):
+        return self.shape[0]
 
 @dataclass
 class TiffArray:
@@ -619,6 +666,12 @@ class TiffArray:
     @property
     def metadata(self) -> dict:
         return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
 
     def __getitem__(self, key):
         return self.dask[key]
@@ -1271,6 +1324,17 @@ class NumpyArray:
             raise TypeError("metadata must be a dict")
         self._metadata = value
 
+    @property
+    def min(self) -> float:
+        return float(self.data.min())
+
+    @property
+    def max(self) -> float:
+        return float(self.data.max())
+
+    def __len__(self):
+        return self.shape[0]
+
     def close(self):
         if self._tempfile:
             try:
@@ -1302,9 +1366,31 @@ class NWBArray:
         self.shape = self.data.shape
         self.dtype = self.data.dtype
         self.ndim = self.data.ndim
+        self._metadata = {}
+
+    @property
+    def metadata(self) -> dict:
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
+
+    @property
+    def min(self) -> float:
+        return float(self.data[0].min())
+
+    @property
+    def max(self) -> float:
+        return float(self.data[0].max())
 
     def __getitem__(self, item):
         return self.data[item]
+
+    def __len__(self):
+        return self.shape[0]
 
 
 class ZarrArray:
@@ -1342,6 +1428,16 @@ class ZarrArray:
         # if one store, return dict, if many, return the first
         # TODO: zarr consolidate metadata
         return self._metadata[0] if len(self._metadata) >= 1 else self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        # Update the first metadata entry (or all of them)
+        if len(self._metadata) >= 1:
+            self._metadata[0] = value
+        else:
+            self._metadata = [value]
 
     @property
     def shape(self) -> tuple[int, int, int, int]:
