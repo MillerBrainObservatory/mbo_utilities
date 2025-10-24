@@ -21,5 +21,8 @@ jobs:
       - name: Sync Dependencies
         run: GIT_LFS_SKIP_SMUDGE=1 uv sync --no-sources
 
-      # - name: Run tests
-      #   run: GIT_LFS_SKIP_SMUDGE=1 uv run pytest tests
+      - name: Install pytest
+        run: uv pip install pytest
+
+      - name: Run CI tests
+        run: GIT_LFS_SKIP_SMUDGE=1 uv run pytest -m ci tests/
