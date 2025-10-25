@@ -28,8 +28,7 @@ from mbo_utilities.file_io import (
 from mbo_utilities.metadata import get_metadata, clean_scanimage_metadata
 from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, bidir_phasecorr
 from mbo_utilities.roi import iter_rois
-from mbo_utilities.scanreader import scans, utils
-from mbo_utilities.scanreader.multiroi import ROI
+from mbo_utilities.scanreader import utils
 from mbo_utilities.util import subsample_array
 
 logger = log.get("array_types")
@@ -724,10 +723,27 @@ class TiffArray:
         )
 
 
-class MboRawArray(scans.ScanMultiROI):
+class MboRawArray:
     """
-    A subclass of ScanMultiROI that ignores the num_fields dimension
-    and reorders the output to [time, z, x, y].
+    Lazy reader for raw ScanImage multi-ROI TIFF files without unnecessary class hierarchy.
+
+    Handles:
+    - Multi-ROI raw ScanImage acquisitions
+    - ROI stitching (roi=None) or splitting (roi=0)
+    - Bidirectional scan phase correction
+    - Lazy indexing: __getitem__ only reads requested data
+
+    Internal ROI representation:
+    - roi_fields: list of dicts with keys:
+      - height, width: ROI dimensions in pixels
+      - yslice, xslice: where to cut from TIFF pages
+      - output_yslice, output_xslice: where to paste in stitched output
+
+    ROI Semantics:
+    - roi=None: Return stitched full FOV (all ROIs merged)
+    - roi=0: Return tuple of all individual ROIs
+    - roi=int>0: Return specific ROI (1-based indexing)
+    - roi=list[int]: Return tuple of specified ROIs
     """
 
     def __init__(
@@ -742,46 +758,321 @@ class MboRawArray(scans.ScanMultiROI):
         use_fft: bool = False,
     ):
         """
+        Initialize a lazy reader for raw ScanImage multi-ROI TIFFs.
+
         Parameters
         ----------
         files : str, Path, or list of str/Path, optional
-
+            TIFF file(s) to load
+        roi : int, list[int], or None, optional
+            ROI selection: None=stitch, 0=split, int>0=single, list=multiple
+        fix_phase : bool, default True
+            Apply bidirectional scan phase correction
+        phasecorr_method : str, default "mean"
+            Phase correction method ("mean", "max", "std", "mean-sub")
+        border : int or (top, bottom, left, right), default 3
+            Border width for phase correction
+        upsample : int, default 5
+            Upsampling factor for phase correlation
+        max_offset : int, default 4
+            Maximum allowed phase offset in pixels
+        use_fft : bool, default False
+            Use FFT for phase correlation instead of direct
         """
-        super().__init__(join_contiguous=True)
-        self._metadata = {"cleaned_scanimage_metadata": False}  # set when pages are read
+        self._metadata = {"cleaned_scanimage_metadata": False}
         self._fix_phase = fix_phase
         self._phasecorr_method = phasecorr_method
         self.border: int | tuple[int, int, int, int] = border
         self.max_offset: int = max_offset
         self.upsample: int = upsample
         self.reference = ""
-        self.roi = roi  # alias
         self._roi = roi
-        self.pbar = None
-        self.show_pbar = False
         self._offset = 0.0
         self._use_fft = use_fft
 
-        # Debugging toggles
-        self.debug_flags = {
-            "frame_idx": True,
-            "roi_array_shape": False,
-            "phase_offset": False,
-        }
-        self.logger = logger
+        # Lazy-loaded TIFF files
+        self._tiff_files = None
+        self.filenames = None
+        self._dtype = np.int16
+
+        # Parsed ROI structure (list of dicts with slice info)
+        self.roi_fields = []
+
+        # Header and metadata from first file
+        self.header = ""
+
         if files:
             self.read_data(files)
 
-    def save_fsspec(self, filenames):
-        base_dir = Path(filenames[0]).parent
+    @property
+    def tiff_files(self):
+        """Lazy-load TiffFile objects."""
+        if self._tiff_files is None:
+            self._tiff_files = [
+                tifffile.TiffFile(str(f), mode="r") for f in self.filenames
+            ]
+        return self._tiff_files
 
+    @property
+    def num_channels(self) -> int:
+        """Number of channels (aka planes in LBM terminology)."""
+        import re
+        match = re.search(r"hChannels\.channelSave = (?P<channels>.*)", self.header)
+        if match:
+            from mbo_utilities.scanreader.utils import matlabstr2py
+            channels = matlabstr2py(match.group("channels"))
+            return len(channels) if isinstance(channels, list) else 1
+        return 1
+
+    @property
+    def num_frames(self) -> int:
+        """Total time frames across all files."""
+        return sum(len(tf.pages) // self.num_channels for tf in self.tiff_files)
+
+    @property
+    def _page_height(self) -> int:
+        """Height of TIFF pages in pixels."""
+        return self.tiff_files[0].pages[0].shape[0]
+
+    @property
+    def _page_width(self) -> int:
+        """Width of TIFF pages in pixels."""
+        return self.tiff_files[0].pages[0].shape[1]
+
+    @property
+    def num_rois(self) -> int:
+        """Number of ROIs in this scan."""
+        return len(self.roi_fields)
+
+    @property
+    def roi(self):
+        """Get the current ROI index."""
+        return self._roi
+
+    @roi.setter
+    def roi(self, value):
+        """Set the current ROI index."""
+        self._roi = value
+
+    @property
+    def fix_phase(self) -> bool:
+        """Whether to apply phase correction."""
+        return self._fix_phase
+
+    @fix_phase.setter
+    def fix_phase(self, value: bool):
+        if not isinstance(value, bool):
+            raise ValueError("fix_phase must be a boolean value.")
+        self._fix_phase = value
+
+    @property
+    def phasecorr_method(self) -> str:
+        """Current phase correction method."""
+        return self._phasecorr_method
+
+    @phasecorr_method.setter
+    def phasecorr_method(self, value: str | None):
+        if value not in ALL_PHASECORR_METHODS:
+            raise ValueError(
+                f"Unsupported phase correction method: {value}. "
+                f"Supported methods are: {ALL_PHASECORR_METHODS}"
+            )
+        if value is None:
+            self.fix_phase = False
+        self._phasecorr_method = value
+
+    @property
+    def use_fft(self) -> bool:
+        """Whether to use FFT for phase correlation."""
+        return self._use_fft
+
+    @use_fft.setter
+    def use_fft(self, value: bool):
+        if not isinstance(value, bool):
+            raise ValueError("use_fft must be a boolean value.")
+        self._use_fft = value
+
+    @property
+    def offset(self) -> float | np.ndarray:
+        """Phase offset result from last correction."""
+        return self._offset
+
+    @offset.setter
+    def offset(self, value: float | np.ndarray):
+        """Set phase offset."""
+        if isinstance(value, int):
+            self._offset = float(value)
+        else:
+            self._offset = value
+
+    @property
+    def metadata(self) -> dict:
+        """Full metadata including phase correction settings."""
+        self._metadata.update({
+            "fix_phase": self.fix_phase,
+            "phasecorr_method": self.phasecorr_method,
+            "offset": self.offset,
+            "border": self.border,
+            "upsample": self.upsample,
+            "max_offset": self.max_offset,
+            "num_frames": self.num_frames,
+            "use_fft": self.use_fft,
+        })
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata.update(value)
+
+    @property
+    def shape(self) -> tuple[int, int, int, int]:
+        """Shape (time, channels, height, width) relative to current ROI."""
+        if self.roi is not None:
+            if not isinstance(self.roi, (list, tuple)):
+                if self.roi > 0:
+                    # Single ROI: use its width only
+                    roi_field = self.roi_fields[self.roi - 1]
+                    width = roi_field["xslice"].stop - roi_field["xslice"].start
+                    return (
+                        self.num_frames,
+                        self.num_channels,
+                        roi_field["height"],
+                        width,
+                    )
+        # roi=None or list: return full FOV shape
+        fov_height = self._get_fov_height()
+        fov_width = self._get_fov_width()
+        return (self.num_frames, self.num_channels, fov_height, fov_width)
+
+    @property
+    def shape_full(self) -> tuple[int, int, int, int]:
+        """Full FOV shape regardless of ROI setting."""
+        return (
+            self.num_frames,
+            self.num_channels,
+            self._get_fov_height(),
+            self._get_fov_width(),
+        )
+
+    @property
+    def ndim(self) -> int:
+        """Number of dimensions (always 4)."""
+        return 4
+
+    @property
+    def size(self) -> int:
+        """Total number of elements."""
+        return int(np.prod(self.shape))
+
+    @property
+    def dtype(self) -> np.dtype:
+        """Data type of the arrays."""
+        return self._dtype
+
+    @dtype.setter
+    def dtype(self, value):
+        self._dtype = value
+
+    @property
+    def num_planes(self) -> int:
+        """Alias for num_channels (LBM terminology)."""
+        return self.num_channels
+
+    def _get_fov_height(self) -> int:
+        """Full field-of-view height (sum of all ROI heights with gaps)."""
+        if not self.roi_fields:
+            return self._page_height
+        total = 0
+        for roi_field in self.roi_fields:
+            total = max(total, roi_field["output_yslice"].stop)
+        return total
+
+    def _get_fov_width(self) -> int:
+        """Full field-of-view width (maximum ROI width, assuming contiguous stitch)."""
+        if not self.roi_fields:
+            return self._page_width
+        return max(rf["width"] for rf in self.roi_fields)
+
+    def read_data(self, filenames, dtype=np.int16):
+        """Load TIFF files and parse ROI metadata."""
+        self.filenames = expand_paths(filenames)
+        self.dtype = dtype
+        self.reference = None
+
+        # Read header and ScanImage metadata from first TIFF
+        first_tiff = self.tiff_files[0]
+        self.header = first_tiff.scanimage_metadata.get("Header", "") if hasattr(
+            first_tiff, "scanimage_metadata"
+        ) else ""
+
+        # Extract and clean metadata
+        first_path = Path(self.filenames[0])
+        self._metadata = get_metadata(first_path)
+        self._metadata["si"] = _make_json_serializable(
+            first_tiff.scanimage_metadata
+        )
+        self._metadata = clean_scanimage_metadata(self._metadata)
+        self._metadata["cleaned_scanimage_metadata"] = True
+
+        # Parse ROI fields from ScanImage metadata
+        self._parse_roi_fields()
+
+    def _parse_roi_fields(self):
+        """Extract ROI geometry from ScanImage metadata into simple dicts."""
+        try:
+            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"][
+                "imagingRoiGroup"
+            ]["rois"]
+        except KeyError:
+            raise RuntimeError(
+                "This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata."
+            )
+
+        # Ensure roi_infos is a list
+        if not isinstance(roi_infos, list):
+            roi_infos = [roi_infos]
+
+        # Filter out malformed ROIs
+        roi_infos = [r for r in roi_infos if isinstance(r.get("zs"), (int, float, list))]
+
+        # Build ROI field structures
+        self.roi_fields = []
+        next_y_pos = 0  # Accumulate y position for stitching
+
+        for roi_idx, roi_info in enumerate(roi_infos):
+            scanfields = roi_info.get("scanfields", [])
+            if not isinstance(scanfields, list):
+                scanfields = [scanfields]
+
+            if not scanfields:
+                continue
+
+            # Since MBO forces z=[0], we only use the first scanfield
+            sf = scanfields[0]
+            height, width = sf["pixelResolutionXY"]
+            # Note: pixelResolutionXY is [height, width], not [x, y]
+
+            roi_field = {
+                "height": int(height),
+                "width": int(width),
+                "yslice": slice(next_y_pos, next_y_pos + int(height)),
+                "xslice": slice(0, int(width)),
+                "output_yslice": slice(next_y_pos, next_y_pos + int(height)),
+                "output_xslice": slice(0, int(width)),
+                "roi_idx": roi_idx,
+            }
+            self.roi_fields.append(roi_field)
+            next_y_pos += int(height)
+
+    def save_fsspec(self, filenames):
+        """Generate kerchunk references for cloud-friendly access."""
+        base_dir = Path(filenames[0]).parent
         combined_json_path = base_dir / "combined_refs.json"
 
         if combined_json_path.is_file():
-            # delete it, its cheap to create
-            logger.debug(
-                f"Removing existing combined reference file: {combined_json_path}"
-            )
+            logger.debug(f"Removing existing combined reference file: {combined_json_path}")
             combined_json_path.unlink()
 
         logger.debug(f"Generating combined kerchunk reference for {len(filenames)} files…")
@@ -794,157 +1085,42 @@ class MboRawArray(scans.ScanMultiROI):
         self.reference = combined_json_path
         return combined_json_path
 
-    def read_data(self, filenames, dtype=np.int16):
-        filenames = expand_paths(filenames)
+    def _read_pages(
+        self,
+        frames: list[int],
+        chans: list[int],
+        yslice: slice = slice(None),
+        xslice: slice = slice(None),
+    ) -> np.ndarray:
+        """Read TIFF pages with optional phase correction.
 
-        filenames = expand_paths(filenames)
-        self.reference = None
-        super().read_data(filenames, dtype)
-        self._metadata = get_metadata(
-            self.tiff_files[0].filehandle.path
-        )  # from the file
-        self.metadata["si"] = _make_json_serializable(
-            self.tiff_files[0].scanimage_metadata
-        )
-        self._metadata = clean_scanimage_metadata(self.metadata)
-        self._metadata["cleaned_scanimage_metadata"] = True
-        #
-        self._rois = self._create_rois()
-        self.fields = self._create_fields()
-        if self.join_contiguous:
-            self._join_contiguous_fields()
+        Parameters
+        ----------
+        frames : list[int]
+            Frame indices to read
+        chans : list[int]
+            Channel indices to read
+        yslice : slice
+            Y-axis slice into each TIFF page
+        xslice : slice
+            X-axis slice into each TIFF page
 
-    @property
-    def metadata(self):
-        self._metadata.update(
-            {
-                "fix_phase": self.fix_phase,
-                "phasecorr_method": self.phasecorr_method,
-                "offset": self.offset,
-                "border": self.border,
-                "upsample": self.upsample,
-                "max_offset": self.max_offset,
-                "num_frames": self.num_frames,
-                "use_fft": self.use_fft,
-            }
-        )
-        return self._metadata
-
-    @metadata.setter
-    def metadata(self, value):
-        self._metadata.update(value)
-
-    @property
-    def rois(self):
-        """ROI's hold information about the size, position and shape of the ROIs."""
-        return self._rois
-
-    @property
-    def offset(self):
-        return self._offset
-
-    @offset.setter
-    def offset(self, value: float | np.ndarray):
+        Returns
+        -------
+        np.ndarray
+            Array of shape (len(frames), len(chans), height, width)
         """
-        Set the phase offset for phase correction.
-        If value is a scalar, it applies the same offset to all frames.
-        If value is an array, it must match the number of frames.
-        """
-        if isinstance(value, int):
-            self._offset = float(value)
-        self._offset = value
-
-    @property
-    def use_fft(self):
-        return self._use_fft
-
-    @use_fft.setter
-    def use_fft(self, value: bool):
-        if not isinstance(value, bool):
-            raise ValueError("use_fft must be a boolean value.")
-        self._use_fft = value
-
-    @property
-    def phasecorr_method(self):
-        """
-        Get the current phase correction method.
-        """
-        return self._phasecorr_method
-
-    @phasecorr_method.setter
-    def phasecorr_method(self, value: str | None):
-        """
-        Set the phase correction method.
-        """
-        if value not in ALL_PHASECORR_METHODS:
-            raise ValueError(
-                f"Unsupported phase correction method: {value}. "
-                f"Supported methods are: {ALL_PHASECORR_METHODS}"
-            )
-        if value is None:
-            self.fix_phase = False
-        self._phasecorr_method = value
-
-    @property
-    def fix_phase(self):
-        """
-        Get whether phase correction is applied.
-        If True, phase correction is applied to the data.
-        """
-        return self._fix_phase
-
-    @fix_phase.setter
-    def fix_phase(self, value: bool):
-        """
-        Set whether to apply phase correction.
-        If True, phase correction is applied to the data.
-        """
-        if not isinstance(value, bool):
-            raise ValueError("do_phasecorr must be a boolean value.")
-        self._fix_phase = value
-
-    @property
-    def roi(self):
-        """
-        Get the current ROI index.
-        If roi is None, returns -1 to indicate no specific ROI.
-        """
-        return self._roi
-
-    @roi.setter
-    def roi(self, value):
-        """
-        Set the current ROI index.
-        If value is None, sets roi to -1 to indicate no specific ROI.
-        """
-        self._roi = value
-
-    @property
-    def num_rois(self) -> int:
-        return len(self.rois)
-
-    @property
-    def xslices(self):
-        return self.fields[0].xslices
-
-    @property
-    def yslices(self):
-        return self.fields[0].yslices
-
-    @property
-    def output_xslices(self):
-        return self.fields[0].output_xslices
-
-    @property
-    def output_yslices(self):
-        return self.fields[0].output_yslices
-
-    def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **_):
+        # Map (frame, channel) to TIFF page index
         pages = [f * self.num_channels + z for f in frames for z in chans]
+
+        # Compute output dimensions
         tiff_width_px = len(utils.listify_index(xslice, self._page_width))
         tiff_height_px = len(utils.listify_index(yslice, self._page_height))
-        buf = np.empty((len(pages), tiff_height_px, tiff_width_px), dtype=self.dtype)
+        buf = np.empty(
+            (len(pages), tiff_height_px, tiff_width_px), dtype=self.dtype
+        )
 
+        # Read pages from TIFF files
         start = 0
         for tf in self.tiff_files:
             end = start + len(tf.pages)
@@ -953,9 +1129,11 @@ class MboRawArray(scans.ScanMultiROI):
                 start = end
                 continue
 
+            # Read chunk from this TIFF file
             frame_idx = [pages[i] - start for i in idxs]
             chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
 
+            # Apply phase correction if enabled
             if self.fix_phase:
                 corrected, offset = bidir_phasecorr(
                     chunk,
@@ -970,264 +1148,237 @@ class MboRawArray(scans.ScanMultiROI):
             else:
                 buf[idxs] = chunk
                 self.offset = 0.0
+
             start = end
 
         return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
 
-    def __getitem__(self, key):
+    def process_rois(self, frames: list[int], chans: list[int]) -> np.ndarray | tuple:
+        """Dispatch ROI processing based on self.roi setting.
+
+        ROI Semantics:
+        - roi=None: Return stitched full FOV
+        - roi=0: Return tuple of all individual ROIs
+        - roi=int>0: Return single ROI (1-based)
+        - roi=list[int]: Return tuple of specified ROIs
+
+        Returns
+        -------
+        np.ndarray or tuple[np.ndarray, ...]
+            Data array(s) for requested ROI(s)
+        """
+        if self.roi is not None:
+            if isinstance(self.roi, list):
+                # Multiple specific ROIs
+                return tuple(
+                    self.process_single_roi(r - 1, frames, chans) for r in self.roi
+                )
+            elif self.roi == 0:
+                # Split all ROIs
+                return tuple(
+                    self.process_single_roi(r, frames, chans)
+                    for r in range(self.num_rois)
+                )
+            elif isinstance(self.roi, int):
+                # Single specific ROI
+                return self.process_single_roi(self.roi - 1, frames, chans)
+
+        # Default: stitch all ROIs
+        fov_height = self._get_fov_height()
+        fov_width = self._get_fov_width()
+        out = np.zeros(
+            (len(frames), len(chans), fov_height, fov_width), dtype=self.dtype
+        )
+
+        for roi_idx, roi_field in enumerate(self.roi_fields):
+            roi_data = self._read_pages(
+                frames,
+                chans,
+                yslice=roi_field["yslice"],
+                xslice=roi_field["xslice"],
+            )
+            out_y = roi_field["output_yslice"]
+            out_x = roi_field["output_xslice"]
+            out[:, :, out_y, out_x] = roi_data
+
+        return out
+
+    def process_single_roi(
+        self, roi_idx: int, frames: list[int], chans: list[int]
+    ) -> np.ndarray:
+        """Extract data for a single ROI.
+
+        Parameters
+        ----------
+        roi_idx : int
+            ROI index (0-based)
+        frames : list[int]
+            Frame indices
+        chans : list[int]
+            Channel indices
+
+        Returns
+        -------
+        np.ndarray
+            Data of shape (len(frames), len(chans), roi_height, roi_width)
+        """
+        roi_field = self.roi_fields[roi_idx]
+        return self._read_pages(
+            frames,
+            chans,
+            yslice=roi_field["yslice"],
+            xslice=roi_field["xslice"],
+        )
+
+    def __getitem__(self, key: int | slice | tuple) -> np.ndarray | tuple:
+        """Lazy indexing with NumPy-like semantics.
+
+        Supports:
+        - arr[t] -> single frame
+        - arr[t:t+n] -> time slice
+        - arr[t, z] -> frame and channel
+        - arr[t, z, y, x] -> full indexing
+
+        Returns
+        -------
+        np.ndarray or tuple[np.ndarray, ...]
+            Data array(s)
+        """
         if not isinstance(key, tuple):
             key = (key,)
+
+        # Pad key with slice(None) for missing dimensions
         t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (
             slice(None),
         ) * (4 - len(key))
+
+        # Convert to frame/channel indices
         frames = utils.listify_index(t_key, self.num_frames)
         chans = utils.listify_index(z_key, self.num_channels)
+
         if not frames or not chans:
             return np.empty(0)
 
         logger.debug(
-            f"Phase-corrected: {self.fix_phase}/{self.phasecorr_method},"
-            f" channels: {chans},"
-            f" roi: {self.roi}",
+            f"Phase-corrected: {self.fix_phase}/{self.phasecorr_method}, "
+            f"channels: {chans}, roi: {self.roi}",
         )
+
+        # Get data with ROI handling
         out = self.process_rois(frames, chans)
 
+        # Squeeze dimensions that were indexed with int
         squeeze = []
         if isinstance(t_key, int):
             squeeze.append(0)
         if isinstance(z_key, int):
             squeeze.append(1)
+
         if squeeze:
             if isinstance(out, tuple):
                 out = tuple(np.squeeze(x, axis=tuple(squeeze)) for x in out)
             else:
                 out = np.squeeze(out, axis=tuple(squeeze))
-        return out
-
-    def process_rois(self, frames, chans):
-        """Dispatch ROI processing. Handles single ROI, multiple ROIs, or all ROIs (None)."""
-        if self.roi is not None:
-            if isinstance(self.roi, list):
-                return tuple(self.process_single_roi(r - 1, frames, chans) for r in self.roi)
-            elif self.roi == 0:
-                return tuple(self.process_single_roi(r, frames, chans) for r in range(self.num_rois))
-            elif isinstance(self.roi, int):
-                return self.process_single_roi(self.roi - 1, frames, chans)
-
-        H_out, W_out = self.field_heights[0], self.field_widths[0]
-        out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
-
-        for roi_idx in range(self.num_rois):
-            roi_data = self._read_pages(
-                frames,
-                chans,
-                yslice=self.fields[0].yslices[roi_idx],
-                xslice=self.fields[0].xslices[roi_idx],
-            )
-            oys = self.fields[0].output_yslices[roi_idx]
-            oxs = self.fields[0].output_xslices[roi_idx]
-            out[:, :, oys, oxs] = roi_data
 
         return out
 
-    def process_single_roi(self, roi_idx, frames, chans):
-        return self._read_pages(
-            frames,
-            chans,
-            yslice=self.fields[0].yslices[roi_idx],
-            xslice=self.fields[0].xslices[roi_idx],
-        )
+    def __len__(self) -> int:
+        """Number of time frames."""
+        return self.num_frames
 
-    @property
-    def total_frames(self):
-        return sum(len(tf.pages) // self.num_channels for tf in self.tiff_files)
-
-    @property
-    def num_planes(self):
-        """LBM alias for num_channels."""
-        return self.num_channels
-
-    def min(self):
-        """
-        Returns the minimum value of the first tiff page.
-        """
-        page = self.tiff_files[0].pages[0]
-        return np.min(page.asarray())
-
-    def max(self):
-        """
-        Returns the maximum value of the first tiff page.
-        """
-        page = self.tiff_files[0].pages[0]
-        return np.max(page.asarray())
-
-    @property
-    def shape(self):
-        """Shape is relative to the current ROI."""
-        if self.roi is not None:
-            if not isinstance(self.roi, (list, tuple)):
-                if self.roi > 0:
-                    s = self.fields[0].output_xslices[self.roi - 1]
-                    width = s.stop - s.start
-                    return (
-                        self.total_frames,
-                        self.num_channels,
-                        self.field_heights[0],
-                        width,
-                    )
-        # roi = None, or a list/tuple indicates the shape should be relative to the full FOV
-        return (
-            self.total_frames,
-            self.num_channels,
-            self.field_heights[0],
-            self.field_widths[0],
-        )
-
-    @property
-    def shape_full(self):
-        return (
-            self.total_frames,
-            self.num_channels,
-            self.field_heights[0],
-            self.field_widths[0],
-        )
-
-    @property
-    def ndim(self):
-        return 4
-
-    @property
-    def size(self):
-        return (
-            self.num_frames
-            * self.num_channels
-            * self.field_heights[0]
-            * self.field_widths[0]
-        )
-
-    @property
-    def scanning_depths(self):
-        """
-        We override this because LBM should always be at a single scanning depth.
-        """
-        return [0]
-
-    def _create_rois(self):
-        """
-        Create scan rois from the configuration file. Override the base method to force
-        ROI's that have multiple 'zs' to a single depth.
-        """
-        try:
-            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"][
-                "imagingRoiGroup"
-            ]["rois"]
-        except KeyError:
-            raise RuntimeError(
-                "This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata."
-            )
-        roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
-
-        # discard empty/malformed ROIs
-        roi_infos = list(
-            filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos)
-        )
-
-        # LBM uses a single depth that is not stored in metadata,
-        # so force this to be 0.
-        for roi_info in roi_infos:
-            roi_info["zs"] = [0]
-
-        rois = [ROI(roi_info) for roi_info in roi_infos]
-        return rois
-
-    def _create_fields(self):
-        """Go over each slice depth and each roi generating the scanned fields."""
-        fields = []
-        previous_lines = 0
-        for slice_id, scanning_depth in enumerate(self.scanning_depths):
-            next_line_in_page = 0  # each slice is one tiff page
-            for roi_id, roi in enumerate(self.rois):
-                new_field = roi.get_field_at(scanning_depth)
-                if new_field is not None:
-                    # Set xslice and yslice (from where in the page to cut it)
-                    new_field.yslices = [
-                        slice(next_line_in_page, next_line_in_page + new_field.height)
-                    ]
-                    new_field.xslices = [slice(0, new_field.width)]
-
-                    # Set output xslice and yslice (where to paste it in output)
-                    new_field.output_yslices = [slice(0, new_field.height)]
-                    new_field.output_xslices = [slice(0, new_field.width)]
-
-                    # Set slice and roi id
-                    new_field.slice_id = slice_id
-                    new_field.roi_ids = [roi_id]
-
-                    offsets = self._compute_offsets(
-                        new_field.height, previous_lines + next_line_in_page
-                    )
-                    new_field.offsets = [offsets]
-                    next_line_in_page += new_field.height + self._num_fly_to_lines
-                    fields.append(new_field)
-            previous_lines += self._num_lines_between_fields
-        return fields
-
-    def __array__(self):
-        """
-        Convert the scan data to a NumPy array.
-        Calculate the size of the scan and subsample to keep under memory limits.
-        """
+    def __array__(self) -> np.ndarray:
+        """Materialize to NumPy array with intelligent subsampling."""
         return subsample_array(self, ignore_dims=[-1, -2, -3])
+
+    def min(self) -> float:
+        """Minimum value in first TIFF page."""
+        page = self.tiff_files[0].pages[0]
+        return float(np.min(page.asarray()))
+
+    def max(self) -> float:
+        """Maximum value in first TIFF page."""
+        page = self.tiff_files[0].pages[0]
+        return float(np.max(page.asarray()))
+
+    def close(self):
+        """Close all open TIFF files."""
+        if self._tiff_files is not None:
+            for tf in self._tiff_files:
+                tf.close()
+            self._tiff_files = None
 
     def _imwrite(
         self,
         outpath: Path | str,
-        overwrite=False,
-        target_chunk_mb=50,
-        ext=".tiff",
+        overwrite: bool = False,
+        target_chunk_mb: int = 50,
+        ext: str = ".tiff",
         progress_callback=None,
         debug=None,
         planes=None,
         **kwargs,
     ):
-        # convert to 0 based indexing
+        """Write array data to file(s).
+
+        Parameters
+        ----------
+        outpath : Path or str
+            Output directory or file path
+        overwrite : bool
+            Whether to overwrite existing files
+        target_chunk_mb : int
+            Target chunk size in MB for efficient I/O
+        ext : str
+            File extension (".tiff", ".zarr", ".bin", ".h5", ".nwb")
+        progress_callback : callable, optional
+            Callback for progress updates
+        planes : int or list[int], optional
+            Plane indices to write (default: all)
+        """
+        # Convert plane indices to 0-based
         if isinstance(planes, int):
             planes = [planes - 1]
         elif planes is None:
             planes = list(range(self.num_planes))
         else:
             planes = [p - 1 for p in planes]
+
+        outpath = Path(outpath)
         for roi in iter_rois(self):
             for plane in planes:
                 if not isinstance(plane, int):
                     raise ValueError(f"Plane must be an integer, got {type(plane)}")
+
                 self.roi = roi
+
+                # Generate filename
                 if roi is None:
                     fname = f"plane{plane + 1:02d}_stitched{ext}"
                 else:
                     fname = f"plane{plane + 1:02d}_roi{roi}{ext}"
 
+                # Determine output path
                 if ext in [".bin", ".binary"]:
-                    # saving to bin for suite2p
-                    # we want the filename to be data_raw.bin
-                    # so put the fname as the folder name
-                    fname_bin_stripped = Path(fname).stem  # remove extension
+                    fname_base = Path(fname).stem
                     if "structural" in kwargs and kwargs["structural"]:
-                        target = outpath / fname_bin_stripped / "data_chan2.bin"
+                        target = outpath / fname_base / "data_chan2.bin"
                     else:
-                        target = outpath / fname_bin_stripped / "data_raw.bin"
+                        target = outpath / fname_base / "data_raw.bin"
                 else:
-                    target = outpath.joinpath(fname)
+                    target = outpath / fname if outpath.is_dir() else outpath
 
-                target.parent.mkdir(exist_ok=True)
+                target.parent.mkdir(exist_ok=True, parents=True)
+
                 if target.exists() and not overwrite:
                     logger.warning(f"File {target} already exists. Skipping write.")
                     continue
 
+                # Write the data
                 md = self.metadata.copy()
-                md["plane"] = plane + 1  # back to 1-based indexing
+                md["plane"] = plane + 1  # Back to 1-based indexing
                 md["mroi"] = roi
-                md["roi"] = roi  # alias
+                md["roi"] = roi
+
                 _write_plane(
                     self,
                     target,
@@ -1242,14 +1393,22 @@ class MboRawArray(scans.ScanMultiROI):
                 )
 
     def imshow(self, **kwargs):
+        """Create interactive visualization with fastplotlib.
+
+        Creates ImageWidget with one pane per ROI (or all stitched if roi=None).
+
+        Returns
+        -------
+        fastplotlib.ImageWidget
+            Interactive image viewer
+        """
         arrays = []
         names = []
-        # if roi is None, use a single array.roi = None
-        # if roi is 0, get a list of all ROIs by deeepcopying the array and setting each roi
+
         for roi in iter_rois(self):
             arr = copy.copy(self)
             arr.roi = roi
-            arr.fix_phase = False  # disable phase correction for initial display
+            arr.fix_phase = False  # Disable phase correction for display
             arr.use_fft = False
             arrays.append(arr)
             names.append(f"ROI {roi}" if roi else "Stitched mROIs")
@@ -1259,16 +1418,15 @@ class MboRawArray(scans.ScanMultiROI):
         histogram_widget = kwargs.get("histogram_widget", True)
         figure_kwargs = kwargs.get(
             "figure_kwargs",
-            {
-                "size": (1000, 1200),
-            },
+            {"size": (1000, 1200)},
         )
         window_funcs = kwargs.get("window_funcs", None)
+
         return fpl.ImageWidget(
             data=arrays,
             names=names,
             histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,  # "canvas": canvas},
+            figure_kwargs=figure_kwargs,
             figure_shape=figure_shape,
             graphic_kwargs={"vmin": arrays[0].min(), "vmax": arrays[0].max()},
             window_funcs=window_funcs,
