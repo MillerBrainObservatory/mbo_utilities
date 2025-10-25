@@ -139,9 +139,7 @@ def draw_tab_process(self):
     imgui.dummy(imgui.ImVec2(0, 5))
     imgui.separator()
 
-    imgui.text_colored(
-        imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Select a processing pipeline:"
-    )
+    imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Select a processing pipeline:")
 
     current_display_idx = USER_PIPELINES.index(self._current_pipeline)
     changed, selected_idx = imgui.combo("Pipeline", current_display_idx, USER_PIPELINES)
