@@ -841,6 +841,11 @@ class MboRawArray(scans.ScanMultiROI):
             return [Path(tf.filehandle.path) for tf in self.tiff_files]
         return []
 
+    @filenames.setter
+    def filenames(self, value):
+        """Setter for filenames (no-op, filenames are derived from tiff_files)."""
+        pass
+
     @property
     def rois(self):
         """ROI's hold information about the size, position and shape of the ROIs."""
