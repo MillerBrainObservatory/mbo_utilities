@@ -835,18 +835,6 @@ class MboRawArray(scans.ScanMultiROI):
         self._metadata.update(value)
 
     @property
-    def filenames(self) -> list[Path]:
-        """Return list of loaded TIFF file paths."""
-        if hasattr(self, 'tiff_files') and self.tiff_files:
-            return [Path(tf.filehandle.path) for tf in self.tiff_files]
-        return []
-
-    @filenames.setter
-    def filenames(self, value):
-        """Setter for filenames (no-op, filenames are derived from tiff_files)."""
-        pass
-
-    @property
     def rois(self):
         """ROI's hold information about the size, position and shape of the ROIs."""
         return self._rois
