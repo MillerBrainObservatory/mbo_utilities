@@ -1,6 +1,7 @@
 # MBO Utilities
 
-General Python and shell utilities developed for the Miller Brain Observatory (MBO) workflows.
+**MBO Utilities** is a Python package for microscopy image processing and analysis, developed for the Miller Brain Observatory (MBO).
+It provides lazy-loading for ScanImage tiff, zarr, hdf5 and .bin files, with a GUI for visualizing volumetric datasets, scan-phase correction, and quickly processing with Suite2p.
 
 This package is still in a *late-beta* stage of development. As such, you may encounter bugs or unexpected behavior.
 
@@ -93,7 +94,48 @@ RuntimeError: CuPy failed to load nvrtc64_120_0.dll: FileNotFoundError: Could no
 
 Follow instructions above for getting the correct CUDA/Pytorch packages.
 
-## Graphical User Interface
+## Usage
+
+### Reading Different File Types
+
+```python
+from mbo_utilities import imread
+
+# Multi-ROI ScanImage
+arr = imread("scanimage_mROI.tif")  # Returns stitched MboRawArray with phase correction
+arr = imread("scanimage_mROI.tif", roi=None)  # Stitches multiROI's into a single FOV
+arr = imread("scanimage_mROI.tif", roi=0)  # A list of [roi1, roi2 ... roiN]
+
+# Single TIFF file
+arr = imread("suite2p/reg_0001.tif")  # Any standard tiffs
+
+# Suite2p binaries
+arr = imread("raw_data.bin")  # Raw suite2p binary
+arr = imread("data.bin")  # Registrered suite2p binary
+
+# Multi-file volumetric outputs e.g. plane01.tiff, plane02.tiff
+arr = imread("/path/to/raw/data")  # Auto-detects and loads all compatible files
+```
+
+### Writing
+
+```python
+from mbo_utilities import imwrite
+
+# Read any format
+data = imread("input.tif")
+
+# Write to Zarr (lazy, compressed)
+imwrite(data, "output.zarr")
+
+# Write to HDF5
+imwrite(data, "output.h5")
+
+# Write to binary + metadata
+imwrite(data, "output.bin")
+```
+
+### Graphical User Interface
 
 To start the gui:
 
