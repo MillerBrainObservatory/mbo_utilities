@@ -120,19 +120,18 @@ arr = imread("/path/to/raw/data")  # Auto-detects and loads all compatible files
 ### Writing
 
 ```python
-from mbo_utilities import imwrite
+from mbo_utilities import imread, imwrite
 
 # Read any format
-data = imread("input.tif")
+data = imread("path/to/directory")
 
-# Write to Zarr (lazy, compressed)
-imwrite(data, "output.zarr")
+# Write all zplanes to Zarr
+imwrite(data, "path/to/directory", ext=".zarr", planes=None)
 
-# Write to HDF5
-imwrite(data, "output.h5")
-
-# Write to binary + metadata
-imwrite(data, "output.bin")
+# roi=None: Sittch/fuse scanimage multi-ROIs
+# roi=0: Save all multi-ROI's separately
+# roi=[1,2,3...N]: Save listed mROI's only
+imwrite(data, "path/to/directory", ext=".tiff", roi=0)
 ```
 
 ### Graphical User Interface
