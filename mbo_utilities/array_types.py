@@ -1272,7 +1272,12 @@ class MboRawArray:
             )
             out_y = roi_field["output_yslice"]
             out_x = roi_field["output_xslice"]
-            out[:, :, out_y, out_x] = roi_data
+            # roi_data is (n_frames, n_chans, roi_height, roi_width)
+            # Extract start/stop indices from slices
+            y_start, y_stop = out_y.start, out_y.stop
+            x_start, x_stop = out_x.start, out_x.stop
+            # Place it at the correct position in the output FOV
+            out[:, :, y_start:y_stop, x_start:x_stop] = roi_data
 
         return out
 
