@@ -1165,85 +1165,27 @@ class MboRawArray:
 
         return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
 
-    def process_rois(self, frames: list[int], chans: list[int]) -> np.ndarray | tuple:
-        """Dispatch ROI processing based on self.roi setting.
-
-        ROI Semantics:
-        - roi=None: Return stitched full FOV
-        - roi=0: Return tuple of all individual ROIs
-        - roi=int>0: Return single ROI (1-based)
-        - roi=list[int]: Return tuple of specified ROIs
+    def _get_roi_indices(self) -> list[int]:
+        """Get list of ROI indices to read based on self.roi setting.
 
         Returns
         -------
-        np.ndarray or tuple[np.ndarray, ...]
-            Data array(s) for requested ROI(s)
+        list[int]
+            0-based ROI indices to read
         """
-        if self.roi is not None:
-            if isinstance(self.roi, list):
-                # Multiple specific ROIs
-                return tuple(
-                    self.process_single_roi(r - 1, frames, chans) for r in self.roi
-                )
-            elif self.roi == 0:
-                # Split all ROIs
-                return tuple(
-                    self.process_single_roi(r, frames, chans)
-                    for r in range(self.num_rois)
-                )
-            elif isinstance(self.roi, int):
-                # Single specific ROI
-                return self.process_single_roi(self.roi - 1, frames, chans)
-
-        # Default: stitch all ROIs
-        fov_height = self._get_fov_height()
-        fov_width = self._get_fov_width()
-        out = np.zeros(
-            (len(frames), len(chans), fov_height, fov_width), dtype=self.dtype
-        )
-
-        for roi_idx, roi_field in enumerate(self.roi_fields):
-            roi_data = self._read_pages(
-                frames,
-                chans,
-                yslice=roi_field["yslice"],
-                xslice=roi_field["xslice"],
-            )
-            out_y = roi_field["output_yslice"]
-            out_x = roi_field["output_xslice"]
-            out[:, :, out_y, out_x] = roi_data
-
-        return out
-
-    def process_single_roi(
-        self, roi_idx: int, frames: list[int], chans: list[int]
-    ) -> np.ndarray:
-        """Extract data for a single ROI.
-
-        Parameters
-        ----------
-        roi_idx : int
-            ROI index (0-based)
-        frames : list[int]
-            Frame indices
-        chans : list[int]
-            Channel indices
-
-        Returns
-        -------
-        np.ndarray
-            Data of shape (len(frames), len(chans), roi_height, roi_width)
-        """
-        roi_field = self.roi_fields[roi_idx]
-        return self._read_pages(
-            frames,
-            chans,
-            yslice=roi_field["yslice"],
-            xslice=roi_field["xslice"],
-        )
+        if self.roi is None:
+            return None  # Signal to stitch all
+        elif self.roi == 0:
+            return list(range(self.num_rois))  # All ROIs individually
+        elif isinstance(self.roi, int):
+            return [self.roi - 1]  # Single ROI (convert to 0-based)
+        elif isinstance(self.roi, list):
+            return [r - 1 for r in self.roi]  # Multiple ROIs (convert to 0-based)
+        else:
+            raise ValueError(f"Invalid roi value: {self.roi}")
 
     def __getitem__(self, key: int | slice | tuple) -> np.ndarray | tuple:
-        """Lazy indexing with NumPy-like semantics.
+        """Lazy indexing with ROI handling.
 
         Supports:
         - arr[t] -> single frame
@@ -1254,7 +1196,7 @@ class MboRawArray:
         Returns
         -------
         np.ndarray or tuple[np.ndarray, ...]
-            Data array(s)
+            Data array(s) - tuple if roi=0 or roi=list
         """
         if not isinstance(key, tuple):
             key = (key,)
@@ -1276,8 +1218,19 @@ class MboRawArray:
             f"channels: {chans}, roi: {self.roi}",
         )
 
-        # Get data with ROI handling
-        out = self.process_rois(frames, chans)
+        # Get ROI indices to read
+        roi_indices = self._get_roi_indices()
+
+        if roi_indices is None:
+            # Stitch all ROIs
+            out = self._read_and_stitch(frames, chans)
+        else:
+            # Return tuple of individual ROIs or single ROI
+            roi_arrays = [
+                self._read_single_roi(roi_idx, frames, chans)
+                for roi_idx in roi_indices
+            ]
+            out = tuple(roi_arrays) if len(roi_arrays) > 1 else roi_arrays[0]
 
         # Squeeze dimensions that were indexed with int
         squeeze = []
@@ -1291,6 +1244,35 @@ class MboRawArray:
                 out = tuple(np.squeeze(x, axis=tuple(squeeze)) for x in out)
             else:
                 out = np.squeeze(out, axis=tuple(squeeze))
+
+        return out
+
+    def _read_single_roi(self, roi_idx: int, frames: list[int], chans: list[int]) -> np.ndarray:
+        """Read a single ROI."""
+        roi_field = self.roi_fields[roi_idx]
+        return self._read_pages(
+            frames, chans,
+            yslice=roi_field["yslice"],
+            xslice=roi_field["xslice"],
+        )
+
+    def _read_and_stitch(self, frames: list[int], chans: list[int]) -> np.ndarray:
+        """Read all ROIs and stitch them into a single FOV."""
+        fov_height = self._get_fov_height()
+        fov_width = self._get_fov_width()
+        out = np.zeros(
+            (len(frames), len(chans), fov_height, fov_width), dtype=self.dtype
+        )
+
+        for roi_field in self.roi_fields:
+            roi_data = self._read_pages(
+                frames, chans,
+                yslice=roi_field["yslice"],
+                xslice=roi_field["xslice"],
+            )
+            out_y = roi_field["output_yslice"]
+            out_x = roi_field["output_xslice"]
+            out[:, :, out_y, out_x] = roi_data
 
         return out
 
