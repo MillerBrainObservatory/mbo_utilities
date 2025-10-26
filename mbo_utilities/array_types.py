@@ -1258,11 +1258,10 @@ class MboRawArray:
 
     def _read_and_stitch(self, frames: list[int], chans: list[int]) -> np.ndarray:
         """Read all ROIs and stitch them into a single FOV."""
-        fov_height = self._get_fov_height()
-        fov_width = self._get_fov_width()
-        out = np.zeros(
-            (len(frames), len(chans), fov_height, fov_width), dtype=self.dtype
-        )
+        # First, read all ROI data
+        roi_data_list = []
+        max_height = 0
+        total_width = 0
 
         for roi_field in self.roi_fields:
             roi_data = self._read_pages(
@@ -1270,14 +1269,26 @@ class MboRawArray:
                 yslice=roi_field["yslice"],
                 xslice=roi_field["xslice"],
             )
-            out_y = roi_field["output_yslice"]
-            out_x = roi_field["output_xslice"]
-            # roi_data is (n_frames, n_chans, roi_height, roi_width)
-            # Extract start/stop indices from slices
-            y_start, y_stop = out_y.start, out_y.stop
-            x_start, x_stop = out_x.start, out_x.stop
-            # Place it at the correct position in the output FOV
-            out[:, :, y_start:y_stop, x_start:x_stop] = roi_data
+            roi_data_list.append(roi_data)
+            # Get dimensions: roi_data is (n_frames, n_chans, roi_height, roi_width)
+            roi_height = roi_data.shape[2]
+            roi_width = roi_data.shape[3]
+            max_height = max(max_height, roi_height)
+            total_width += roi_width
+
+        # Create output array with correct dimensions
+        # ROIs are placed side-by-side horizontally
+        out = np.zeros(
+            (len(frames), len(chans), max_height, total_width), dtype=self.dtype
+        )
+
+        # Place each ROI in the output
+        x_offset = 0
+        for roi_data in roi_data_list:
+            roi_height = roi_data.shape[2]
+            roi_width = roi_data.shape[3]
+            out[:, :, :roi_height, x_offset:x_offset+roi_width] = roi_data
+            x_offset += roi_width
 
         return out
 
