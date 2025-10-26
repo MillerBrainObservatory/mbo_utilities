@@ -347,6 +347,9 @@ def imread(
     if isinstance(inputs, MboRawArray):
         return inputs
 
+    # Track whether input was explicitly a single file vs auto-discovered
+    user_provided_single_file = False
+
     if isinstance(inputs, (str, Path)):
         p = Path(inputs)
         if not p.exists():
@@ -364,11 +367,14 @@ def imread(
                 paths = [Path(f) for f in p.glob("*") if f.is_file()]
                 logger.debug(f"Found {len(paths)} files in {p}")
         else:
+            # Single file was explicitly provided
             paths = [p]
+            user_provided_single_file = True
     elif isinstance(inputs, (list, tuple)):
         if isinstance(inputs[0], np.ndarray):
             return inputs
         paths = [Path(p) for p in inputs if isinstance(p, (str, Path))]
+        user_provided_single_file = len(paths) == 1
     else:
         raise TypeError(f"Unsupported input type: {type(inputs)}")
 
@@ -386,8 +392,8 @@ def imread(
     parent = paths[0].parent if paths else None
     ops_file = parent / "ops.npy" if parent else None
 
-    # Suite2p ops file
-    if ops_file and ops_file.exists():
+    # Suite2p ops file - only auto-detect if directory was provided, not single file
+    if ops_file and ops_file.exists() and not user_provided_single_file:
         logger.debug(f"Ops.npy detected - reading {ops_file} from {ops_file}.")
         return Suite2pArray(parent / "ops.npy")
 
@@ -414,8 +420,8 @@ def imread(
     if first.suffix == ".bin":
         npy_file = first.parent / "ops.npy"
         if npy_file.exists():
-            logger.debug(f"Reading Suite2p binary from {npy_file}.")
-            return Suite2pArray(npy_file)
+            logger.debug(f"Reading Suite2p binary from {first}.")
+            return Suite2pArray(first)
         raise NotImplementedError("BIN files without metadata are not yet supported.")
 
     if first.suffix == ".h5":

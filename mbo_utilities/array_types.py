@@ -362,8 +362,8 @@ class Suite2pArray:
 
 class H5Array:
     def __init__(self, filenames: Path | str, dataset: str = "mov"):
-        self.filenames = Path(filenames)
-        self._f = h5py.File(self.filenames, "r")
+        self.filenames = [Path(filenames)]
+        self._f = h5py.File(self.filenames[0], "r")
         self._d = self._f[dataset]
         self.shape = self._d.shape
         self.dtype = self._d.dtype
@@ -833,6 +833,13 @@ class MboRawArray(scans.ScanMultiROI):
     @metadata.setter
     def metadata(self, value):
         self._metadata.update(value)
+
+    @property
+    def filenames(self) -> list[Path]:
+        """Return list of loaded TIFF file paths."""
+        if hasattr(self, 'tiff_files') and self.tiff_files:
+            return [Path(tf.filehandle.path) for tf in self.tiff_files]
+        return []
 
     @property
     def rois(self):
