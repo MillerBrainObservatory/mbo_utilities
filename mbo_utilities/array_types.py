@@ -990,10 +990,11 @@ class MboRawArray:
         return total
 
     def _get_fov_width(self) -> int:
-        """Full field-of-view width (maximum ROI width, assuming contiguous stitch)."""
+        """Full field-of-view width (maximum x position of all ROIs)."""
         if not self.roi_fields:
             return self._page_width
-        return max(rf["width"] for rf in self.roi_fields)
+        # Get the rightmost x position of any ROI
+        return max(rf["output_xslice"].stop for rf in self.roi_fields)
 
     def read_data(self, filenames, dtype=np.int16):
         """Load TIFF files and parse ROI metadata."""
@@ -1038,9 +1039,8 @@ class MboRawArray:
         roi_infos = [r for r in roi_infos if isinstance(r.get("zs"), (int, float, list))]
 
         # Build ROI field structures
-        self.roi_fields = []
-        next_y_pos = 0  # Accumulate y position for stitching
-
+        # First pass: extract all ROI dimensions
+        roi_dims = []
         for roi_idx, roi_info in enumerate(roi_infos):
             scanfields = roi_info.get("scanfields", [])
             if not isinstance(scanfields, list):
@@ -1052,19 +1052,31 @@ class MboRawArray:
             # Since MBO forces z=[0], we only use the first scanfield
             sf = scanfields[0]
             height, width = sf["pixelResolutionXY"]
-            # Note: pixelResolutionXY is [height, width], not [x, y]
+            roi_dims.append((roi_idx, int(height), int(width)))
 
+        # Second pass: build field dicts with correct stitching positions
+        self.roi_fields = []
+        next_y_output_pos = 0  # Output Y position (accumulates for stacking)
+        next_x_output_pos = 0  # Output X position (accumulates for horizontal placement)
+        next_y_tiff_pos = 0    # TIFF page Y position (accumulates where ROIs are stored in TIFF)
+
+        for roi_idx, height, width in roi_dims:
             roi_field = {
-                "height": int(height),
-                "width": int(width),
-                "yslice": slice(next_y_pos, next_y_pos + int(height)),
-                "xslice": slice(0, int(width)),
-                "output_yslice": slice(next_y_pos, next_y_pos + int(height)),
-                "output_xslice": slice(0, int(width)),
+                "height": height,
+                "width": width,
+                # Where in TIFF page to read this ROI
+                "yslice": slice(next_y_tiff_pos, next_y_tiff_pos + height),
+                "xslice": slice(0, width),
+                # Where to place this ROI in the output stitched image
+                "output_yslice": slice(next_y_output_pos, next_y_output_pos + height),
+                "output_xslice": slice(next_x_output_pos, next_x_output_pos + width),
                 "roi_idx": roi_idx,
             }
             self.roi_fields.append(roi_field)
-            next_y_pos += int(height)
+            # ROIs are stacked vertically in TIFF pages
+            next_y_tiff_pos += height
+            # ROIs are placed horizontally in output
+            next_x_output_pos += width
 
     def save_fsspec(self, filenames):
         """Generate kerchunk references for cloud-friendly access."""
