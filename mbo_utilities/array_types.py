@@ -724,7 +724,7 @@ class TiffArray:
         )
 
 
-class MboRawArray(scans.ScanMultiROI):
+class MboRawArray:
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
