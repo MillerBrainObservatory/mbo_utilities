@@ -348,3 +348,36 @@ def _print_params(params, indent=5):
             _print_params(v, indent + 4)
         else:
             print(" " * indent + f"{k}: {v}")
+
+
+def listify_index(index, dim_size):
+    """Generates the list representation of an index for the given dim_size.
+
+    Args:
+        index: A single index (integer, slice or list/tuple/array of integers).
+        dim_size: Size of the dimension corresponding to the index.
+
+    Returns:
+        A list of positive integers. List of indices.
+
+    Raises:
+        TypeError: If index is not either integer, slice, or array.
+    """
+    if np.issubdtype(type(index), np.signedinteger):
+        index_as_list = [index] if index >= 0 else [dim_size + index]
+    elif isinstance(index, (list, tuple, np.ndarray)):
+        index_as_list = [x if x >= 0 else (dim_size + x) for x in index]
+    elif isinstance(index, slice):
+        start, stop, step = index.indices(
+            dim_size
+        )  # transforms Nones and negative ints to valid slice
+        index_as_list = list(range(start, stop, step))
+    else:
+        error_msg = (
+            "index {} is not integer, slice or array/list/tuple of integers".format(
+                index
+            )
+        )
+        raise TypeError(error_msg)
+
+    return index_as_list
