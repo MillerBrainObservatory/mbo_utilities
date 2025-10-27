@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import copy
+from itertools import combinations
 import json
 import os
 import tempfile
-import time
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
 from typing import Any, List, Sequence
 
-import fastplotlib as fpl
 import h5py
 import numpy as np
 import tifffile
 import zarr
 from dask import array as da
+from tifffile import TiffFile
 
 from mbo_utilities import log
 from mbo_utilities._parsing import _make_json_serializable
@@ -27,10 +27,8 @@ from mbo_utilities.file_io import (
 )
 from mbo_utilities.metadata import get_metadata, clean_scanimage_metadata
 from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, bidir_phasecorr
-from mbo_utilities.roi import iter_rois
-from mbo_utilities.scanreader import scans, utils
-from mbo_utilities.scanreader.multiroi import ROI
-from mbo_utilities.util import subsample_array
+from mbo_utilities.roi import iter_rois, ROI
+from mbo_utilities.util import subsample_array, listify_index
 
 logger = log.get("array_types")
 
@@ -222,7 +220,7 @@ def _axes_or_guess(arr_ndim: int) -> str:
     elif arr_ndim == 4:
         return "TZYX"
     else:
-        return 1
+        return "Unknown"
 
 
 def _safe_get_metadata(path: Path) -> dict:
@@ -349,6 +347,7 @@ class Suite2pArray:
         histogram_widget = kwargs.get("histogram_widget", True)
         window_funcs = kwargs.get("window_funcs", None)
 
+        import fastplotlib as fpl
         return fpl.ImageWidget(
             data=arrays,
             names=names,
@@ -509,7 +508,7 @@ class MBOTiffArray:
         debug=None,
         **kwargs,
     ):
-        from mbo_utilities.lazy_array import _write_plane
+        from mbo_utilities._writers import _write_plane
         from mbo_utilities.file_io import get_plane_from_filename
 
         md = self.metadata.copy()
@@ -636,7 +635,8 @@ class TiffArray:
     def max(self) -> float:
         return float(self.dask[0].max().compute())
 
-    def imshow(self, **kwargs) -> fpl.ImageWidget:
+    def imshow(self, **kwargs):
+        import fastplotlib as fpl
         histogram_widget = kwargs.get("histogram_widget", True)
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
         window_funcs = kwargs.get("window_funcs", None)
@@ -671,7 +671,7 @@ class TiffArray:
         )
 
 
-class MboRawArray(scans.ScanMultiROI):
+class MboRawArray:
     """
     A subclass of ScanMultiROI that ignores the num_fields dimension
     and reorders the output to [time, z, x, y].
@@ -694,7 +694,13 @@ class MboRawArray(scans.ScanMultiROI):
         files : str, Path, or list of str/Path, optional
 
         """
-        super().__init__(join_contiguous=True)
+        self._page_width = None
+        self._page_height = None
+        self.num_channels = None
+        self._tiff_files = None
+        self.fields = None
+        self.filenames = None
+        self.header = None
         self._metadata = {"cleaned_scanimage_metadata": False}  # set when pages are read
         self._fix_phase = fix_phase
         self._phasecorr_method = phasecorr_method
@@ -704,6 +710,8 @@ class MboRawArray(scans.ScanMultiROI):
         self.reference = ""
         self.roi = roi  # alias
         self._roi = roi
+        self._rois = None
+        self.num_rois = None
         self.pbar = None
         self.show_pbar = False
         self._offset = 0.0
@@ -716,8 +724,26 @@ class MboRawArray(scans.ScanMultiROI):
             "phase_offset": False,
         }
         self.logger = logger
-        if files:
-            self.read_data(files)
+        self.read_data(files)
+
+    @property
+    def tiff_files(self):
+        if self._tiff_files is None:
+            self._tiff_files = [
+                TiffFile(
+                    filename,
+                    mode="r",
+                )
+                for filename in self.filenames
+            ]
+        return self._tiff_files
+
+    @tiff_files.deleter
+    def tiff_files(self):
+        if self._tiff_files is not None:
+            for tiff_file in self._tiff_files:
+                tiff_file.close()
+            self._tiff_files = None
 
     def save_fsspec(self, filenames):
         base_dir = Path(filenames[0]).parent
@@ -735,18 +761,18 @@ class MboRawArray(scans.ScanMultiROI):
         combined_refs = _multi_tiff_to_fsspec(tif_files=filenames, base_dir=base_dir)
 
         with open(combined_json_path, "w") as _f:
-            json.dump(combined_refs, _f)
+            json.dump(combined_refs, _f)  # type: ignore
 
         logger.info(f"Combined kerchunk reference written to {combined_json_path}")
         self.reference = combined_json_path
         return combined_json_path
 
-    def read_data(self, filenames, dtype=np.int16):
-        filenames = expand_paths(filenames)
-
-        filenames = expand_paths(filenames)
-        self.reference = None
-        super().read_data(filenames, dtype)
+    def read_data(self, filenames):
+        self.filenames = expand_paths(filenames)
+        self.header = "{}\n{}".format(
+            self.tiff_files[0].pages[0].description,
+            self.tiff_files[0].pages[0].software,
+        )  # set header (ScanImage metadata)
         self._metadata = get_metadata(
             self.tiff_files[0].filehandle.path
         )  # from the file
@@ -755,11 +781,13 @@ class MboRawArray(scans.ScanMultiROI):
         )
         self._metadata = clean_scanimage_metadata(self.metadata)
         self._metadata["cleaned_scanimage_metadata"] = True
+
+        self.num_channels = self._metadata["num_planes"]
+        self.num_rois = self._metadata["num_rois"]
         #
         self._rois = self._create_rois()
         self.fields = self._create_fields()
-        if self.join_contiguous:
-            self._join_contiguous_fields()
+        self._join_contiguous_fields()
 
     @property
     def metadata(self):
@@ -867,10 +895,6 @@ class MboRawArray(scans.ScanMultiROI):
         self._roi = value
 
     @property
-    def num_rois(self) -> int:
-        return len(self.rois)
-
-    @property
     def xslices(self):
         return self.fields[0].xslices
 
@@ -888,8 +912,8 @@ class MboRawArray(scans.ScanMultiROI):
 
     def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **_):
         pages = [f * self.num_channels + z for f in frames for z in chans]
-        tiff_width_px = len(utils.listify_index(xslice, self._page_width))
-        tiff_height_px = len(utils.listify_index(yslice, self._page_height))
+        tiff_width_px = len(listify_index(xslice, self._page_width))
+        tiff_height_px = len(listify_index(yslice, self._page_height))
         buf = np.empty((len(pages), tiff_height_px, tiff_width_px), dtype=self.dtype)
 
         start = 0
@@ -927,8 +951,8 @@ class MboRawArray(scans.ScanMultiROI):
         t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (
             slice(None),
         ) * (4 - len(key))
-        frames = utils.listify_index(t_key, self.num_frames)
-        chans = utils.listify_index(z_key, self.num_channels)
+        frames = listify_index(t_key, self.num_frames)
+        chans = listify_index(z_key, self.num_channels)
         if not frames or not chans:
             return np.empty(0)
 
@@ -985,11 +1009,9 @@ class MboRawArray(scans.ScanMultiROI):
             xslice=self.fields[0].xslices[roi_idx],
         )
 
-    @property
     def total_frames(self):
         return sum(len(tf.pages) // self.num_channels for tf in self.tiff_files)
 
-    @property
     def num_planes(self):
         """LBM alias for num_channels."""
         return self.num_channels
@@ -1119,6 +1141,40 @@ class MboRawArray(scans.ScanMultiROI):
             previous_lines += self._num_lines_between_fields
         return fields
 
+    def _join_contiguous_fields(self):
+        """In each scanning depth, join fields that are contiguous.
+
+        Fields are considered contiguous if they appear next to each other and have the
+        same size in their touching axis. Process is iterative: it tries to join each
+        field with the remaining ones (checked in order); at the first union it will break
+        and restart the process at the first field. When two fields are joined, it deletes
+        the one appearing last and modifies info such as field height, field width and
+        slices in the one appearing first.
+
+        Any rectangular area in the scan formed by the union of two or more fields which
+        have been joined will be treated as a single field after this operation.
+        """
+        for scanning_depth in self.scanning_depths:
+            two_fields_were_joined = True
+            while two_fields_were_joined:  # repeat until no fields were joined
+                two_fields_were_joined = False
+
+                fields = filter(
+                    lambda field: field.depth == scanning_depth, self.fields
+                )
+                for field1, field2 in combinations(fields, 2):
+                    if field1.is_contiguous_to(field2):
+                        # Change info in field 1 to reflect the union
+                        field1.join_with(field2)
+
+                        # Delete field 2 in self.fields
+                        self.fields.remove(field2)
+
+                        # Restart join contiguous search (at while)
+                        two_fields_were_joined = True
+                        break
+
+
     def __array__(self):
         """
         Convert the scan data to a NumPy array.
@@ -1141,7 +1197,7 @@ class MboRawArray(scans.ScanMultiROI):
         if isinstance(planes, int):
             planes = [planes - 1]
         elif planes is None:
-            planes = list(range(self.num_planes))
+            planes = list(range(self.num_channels))
         else:
             planes = [p - 1 for p in planes]
         for roi in iter_rois(self):
@@ -1211,6 +1267,7 @@ class MboRawArray(scans.ScanMultiROI):
             },
         )
         window_funcs = kwargs.get("window_funcs", None)
+        import fastplotlib as fpl
         return fpl.ImageWidget(
             data=arrays,
             names=names,
