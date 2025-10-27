@@ -486,7 +486,7 @@ class PreviewDataWidget(EdgeWindow):
         self.shape = self.image_widget.data[0].shape
         self.is_mbo_scan = (True if isinstance(self.image_widget.data[0], MboRawArray) else False)
 
-        if hasattr(self.image_widget.data[0], "rois"):
+        if hasattr(self.image_widget.data[0], "rois") and self.image_widget.data[0].rois is not None:
             self.num_rois = len(self.image_widget.data[0].rois)
             if self.num_arrays > 1:
                 self._array_type = "roi"
