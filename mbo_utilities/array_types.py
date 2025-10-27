@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import copy
-from itertools import combinations
-import json
 import os
 import tempfile
 from dataclasses import dataclass
@@ -13,27 +11,24 @@ from typing import Any, List, Sequence
 import h5py
 import numpy as np
 import tifffile
-import zarr
 from dask import array as da
 from tifffile import TiffFile
 
 from mbo_utilities import log
-from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
-    _multi_tiff_to_fsspec,
     _convert_range_to_slice,
     expand_paths, files_to_dask, derive_tag_from_filename,
 )
-from mbo_utilities.metadata import get_metadata, clean_scanimage_metadata
+from mbo_utilities.metadata import get_metadata
 from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, bidir_phasecorr
-from mbo_utilities.roi import iter_rois, ROI
 from mbo_utilities.util import subsample_array, listify_index
 
 logger = log.get("array_types")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
+
 
 class LazyArrayProtocol:
     """
@@ -82,7 +77,6 @@ class LazyArrayProtocol:
     @property
     def shape(self) -> tuple[int, ...]:
         raise NotImplementedError
-
 
 
 def register_zplanes_s3d(
@@ -175,59 +169,6 @@ def register_zplanes_s3d(
     metadata["s3d-params"] = params
     logger.info(f"Preprocessed data saved to {out_dir}")
     return out_dir
-
-
-def _to_tzyx(a: da.Array, axes: str) -> da.Array:
-    order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
-    perm = [axes.index(ax) for ax in order]
-    a = da.transpose(a, axes=perm)
-    have_T = "T" in order
-    pos = {ax: i for i, ax in enumerate(order)}
-    tdim = a.shape[pos["T"]] if have_T else 1
-    merge_dims = [d for d, ax in enumerate(order) if ax in ("Z", "C", "S")]
-    if merge_dims:
-        front = []
-        if have_T:
-            front.append(pos["T"])
-        rest = [d for d in range(a.ndim) if d not in front]
-        a = da.transpose(a, axes=front + rest)
-        newshape = [
-            tdim if have_T else 1,
-            int(np.prod([a.shape[i] for i in rest[:-2]])),
-            a.shape[-2],
-            a.shape[-1],
-        ]
-        a = a.reshape(newshape)
-    else:
-        if have_T:
-            if a.ndim == 3:
-                a = da.expand_dims(a, 1)
-        else:
-            a = da.expand_dims(a, 0)
-            a = da.expand_dims(a, 1)
-        if order[-2:] != ["Y", "X"]:
-            yx_pos = [order.index("Y"), order.index("X")]
-            keep = [i for i in range(len(order)) if i not in yx_pos]
-            a = da.transpose(a, axes=keep + yx_pos)
-    return a
-
-
-def _axes_or_guess(arr_ndim: int) -> str:
-    if arr_ndim == 2:
-        return "YX"
-    elif arr_ndim == 3:
-        return "ZYX"
-    elif arr_ndim == 4:
-        return "TZYX"
-    else:
-        return "Unknown"
-
-
-def _safe_get_metadata(path: Path) -> dict:
-    try:
-        return get_metadata(path)
-    except Exception:
-        return {}
 
 
 @dataclass
@@ -672,122 +613,121 @@ class TiffArray:
 
 
 class MboRawArray:
-    """
-    A subclass of ScanMultiROI that ignores the num_fields dimension
-    and reorders the output to [time, z, x, y].
-    """
-
     def __init__(
-        self,
-        files: str | Path | list = None,
-        roi: int | Sequence[int] | None = None,
-        fix_phase: bool = True,
-        phasecorr_method: str = "mean",
-        border: int | tuple[int, int, int, int] = 3,
-        upsample: int = 5,
-        max_offset: int = 4,
-        use_fft: bool = False,
+            self,
+            files: str | Path | list,
+            roi: int | Sequence[int] | None = None,
+            fix_phase: bool = True,
+            phasecorr_method: str = "mean",
+            border: int | tuple[int, int, int, int] = 3,
+            upsample: int = 5,
+            max_offset: int = 4,
+            use_fft: bool = False,
     ):
-        """
-        Parameters
-        ----------
-        files : str, Path, or list of str/Path, optional
+        self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
+        self.tiff_files = [TiffFile(f) for f in self.filenames]
 
-        """
-        self._page_width = None
-        self._page_height = None
-        self.num_channels = None
-        self._tiff_files = None
-        self.fields = None
-        self.filenames = None
-        self.header = None
-        self._metadata = {"cleaned_scanimage_metadata": False}  # set when pages are read
+        self.roi = self._roi = roi
         self._fix_phase = fix_phase
+        self._use_fft = use_fft
         self._phasecorr_method = phasecorr_method
-        self.border: int | tuple[int, int, int, int] = border
-        self.max_offset: int = max_offset
-        self.upsample: int = upsample
-        self.reference = ""
-        self.roi = roi  # alias
-        self._roi = roi
-        self._rois = None
-        self.num_rois = None
+        self.border = border
+        self.max_offset = max_offset
+        self.upsample = upsample
+        self._offset = 0.0
         self.pbar = None
         self.show_pbar = False
-        self._offset = 0.0
-        self._use_fft = use_fft
+        self.logger = logger
 
-        # Debugging toggles
+        # Debug flags
         self.debug_flags = {
             "frame_idx": True,
             "roi_array_shape": False,
             "phase_offset": False,
         }
-        self.logger = logger
-        self.read_data(files)
 
-    @property
-    def tiff_files(self):
-        if self._tiff_files is None:
-            self._tiff_files = [
-                TiffFile(
-                    filename,
-                    mode="r",
-                )
-                for filename in self.filenames
-            ]
-        return self._tiff_files
-
-    @tiff_files.deleter
-    def tiff_files(self):
-        if self._tiff_files is not None:
-            for tiff_file in self._tiff_files:
-                tiff_file.close()
-            self._tiff_files = None
-
-    def save_fsspec(self, filenames):
-        base_dir = Path(filenames[0]).parent
-
-        combined_json_path = base_dir / "combined_refs.json"
-
-        if combined_json_path.is_file():
-            # delete it, its cheap to create
-            logger.debug(
-                f"Removing existing combined reference file: {combined_json_path}"
-            )
-            combined_json_path.unlink()
-
-        logger.debug(f"Generating combined kerchunk reference for {len(filenames)} files…")
-        combined_refs = _multi_tiff_to_fsspec(tif_files=filenames, base_dir=base_dir)
-
-        with open(combined_json_path, "w") as _f:
-            json.dump(combined_refs, _f)  # type: ignore
-
-        logger.info(f"Combined kerchunk reference written to {combined_json_path}")
-        self.reference = combined_json_path
-        return combined_json_path
-
-    def read_data(self, filenames):
-        self.filenames = expand_paths(filenames)
-        self.header = "{}\n{}".format(
-            self.tiff_files[0].pages[0].description,
-            self.tiff_files[0].pages[0].software,
-        )  # set header (ScanImage metadata)
-        self._metadata = get_metadata(
-            self.tiff_files[0].filehandle.path
-        )  # from the file
-        self.metadata["si"] = _make_json_serializable(
-            self.tiff_files[0].scanimage_metadata
-        )
-        self._metadata = clean_scanimage_metadata(self.metadata)
-        self._metadata["cleaned_scanimage_metadata"] = True
+        # Initialize data attributes (set in read_data)
+        self._metadata = get_metadata(self.filenames)
 
         self.num_channels = self._metadata["num_planes"]
         self.num_rois = self._metadata["num_rois"]
-        #
-        self._rois = self._create_rois()
-        self.fields = self._create_fields()
-        self._join_contiguous_fields()
+        self.num_frames = self._metadata["num_frames"]
+        self.dtype = self._metadata["dtype"]
+        self._ndim = self._metadata["ndim"]
+
+        # self._rois = self._create_rois()
+        self._rois = self._extract_roi_info()
+        # self.fields = self._create_fields()
+        # self._join_contiguous_fields()
+        # end = time.time()
+        # print(f"Raw initialization took {end - start} seconds")
+
+    def _extract_roi_info(self):
+        """
+        Extract ROI positions and dimensions from metadata.
+        Uses actual TIFF page dimensions, excluding flyback lines.
+        """
+        # Get ROI info from metadata
+        roi_groups = self._metadata["roi_groups"]
+        if isinstance(roi_groups, dict):
+            roi_groups = [roi_groups]
+
+        # Use actual TIFF dimensions
+        actual_page_width = self._page_width
+        actual_page_height = self._page_height
+        num_fly_to_lines = self._metadata.get("num_fly_to_lines", 0)
+
+        # Get heights from metadata
+        heights_from_metadata = []
+        for roi_data in roi_groups:
+            scanfields = roi_data["scanfields"]
+            if isinstance(scanfields, list):
+                scanfields = scanfields[0]
+            heights_from_metadata.append(scanfields["pixelResolutionXY"][1])
+
+        # Calculate actual heights: distribute available height (excluding flyback) proportionally
+        total_metadata_height = sum(heights_from_metadata)
+        total_available_height = actual_page_height - (len(roi_groups) - 1) * num_fly_to_lines
+
+        # Calculate actual heights for each ROI (proportionally)
+        actual_heights = []
+        remaining_height = total_available_height
+        for i, metadata_height in enumerate(heights_from_metadata):
+            if i == len(heights_from_metadata) - 1:
+                # Last ROI gets remaining height to avoid rounding errors
+                height = remaining_height
+            else:
+                height = int(round(metadata_height * total_available_height / total_metadata_height))
+                remaining_height -= height
+            actual_heights.append(height)
+
+        # Build ROI info
+        rois = []
+        y_offset = 0
+
+        for i, (roi_data, height) in enumerate(zip(roi_groups, actual_heights)):
+            roi_info = {
+                'y_start': y_offset,
+                'y_end': y_offset + height,  # Exclude flyback lines
+                'width': actual_page_width,
+                'height': height,
+                'x': 0,
+                'slice': slice(y_offset, y_offset + height),  # Only the ROI data
+            }
+            rois.append(roi_info)
+
+            # Move to next ROI position (skip flyback lines)
+            y_offset += height + num_fly_to_lines
+
+        # Debug info
+        logger.debug(f"ROI structure: {[(r['y_start'], r['y_end'], r['height']) for r in rois]}")
+        logger.debug(f"Total calculated height: {y_offset - num_fly_to_lines}, actual page: {actual_page_height}")
+
+        return rois
+
+    @property
+    def ndim(self):
+        return self._ndim
 
     @property
     def metadata(self):
@@ -895,20 +835,25 @@ class MboRawArray:
         self._roi = value
 
     @property
-    def xslices(self):
-        return self.fields[0].xslices
-
-    @property
-    def yslices(self):
-        return self.fields[0].yslices
-
-    @property
     def output_xslices(self):
-        return self.fields[0].output_xslices
+        x_offset = 0
+        slices = []
+        for roi in self._rois:
+            slices.append(slice(x_offset, x_offset + roi['width']))
+            x_offset += roi['width']
+        return slices
 
     @property
     def output_yslices(self):
-        return self.fields[0].output_yslices
+        return [slice(0, roi['height']) for roi in self._rois]
+
+    @property
+    def yslices(self):
+        return [roi['slice'] for roi in self._rois]
+
+    @property
+    def xslices(self):
+        return [slice(0, roi['width']) for roi in self._rois]
 
     def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **_):
         pages = [f * self.num_channels + z for f in frames for z in chans]
@@ -925,7 +870,10 @@ class MboRawArray:
                 continue
 
             frame_idx = [pages[i] - start for i in idxs]
-            chunk = tf.asarray(key=frame_idx)[..., yslice, xslice]
+            chunk = tf.asarray(key=frame_idx)
+            if chunk.ndim == 2:  # Single page was squeezed to 2D
+                chunk = chunk[np.newaxis, ...]  # Add back the first dimension
+            chunk = chunk[..., yslice, xslice]
 
             if self.fix_phase:
                 corrected, offset = bidir_phasecorr(
@@ -985,32 +933,33 @@ class MboRawArray:
             elif isinstance(self.roi, int):
                 return self.process_single_roi(self.roi - 1, frames, chans)
 
-        H_out, W_out = self.field_heights[0], self.field_widths[0]
-        out = np.zeros((len(frames), len(chans), H_out, W_out), dtype=self.dtype)
+        # roi=None: Horizontally concatenate ROIs
+        total_width = sum(roi['width'] for roi in self._rois)
+        max_height = max(roi['height'] for roi in self._rois)
+        out = np.zeros((len(frames), len(chans), max_height, total_width), dtype=self.dtype)
 
         for roi_idx in range(self.num_rois):
             roi_data = self._read_pages(
                 frames,
                 chans,
-                yslice=self.fields[0].yslices[roi_idx],
-                xslice=self.fields[0].xslices[roi_idx],
+                yslice=self._rois[roi_idx]['slice'],  # Where to extract from TIFF
+                xslice=slice(None),
             )
-            oys = self.fields[0].output_yslices[roi_idx]
-            oxs = self.fields[0].output_xslices[roi_idx]
+            # Where to place in output (horizontal concatenation)
+            oys = self.output_yslices[roi_idx]
+            oxs = self.output_xslices[roi_idx]
             out[:, :, oys, oxs] = roi_data
 
         return out
 
     def process_single_roi(self, roi_idx, frames, chans):
+        roi = self._rois[roi_idx]
         return self._read_pages(
             frames,
             chans,
-            yslice=self.fields[0].yslices[roi_idx],
-            xslice=self.fields[0].xslices[roi_idx],
+            yslice=roi['slice'],
+            xslice=slice(None),  # or slice(0, roi['width'])
         )
-
-    def total_frames(self):
-        return sum(len(tf.pages) // self.num_channels for tf in self.tiff_files)
 
     def num_planes(self):
         """LBM alias for num_channels."""
@@ -1036,144 +985,41 @@ class MboRawArray:
         if self.roi is not None:
             if not isinstance(self.roi, (list, tuple)):
                 if self.roi > 0:
-                    s = self.fields[0].output_xslices[self.roi - 1]
-                    width = s.stop - s.start
+                    roi = self._rois[self.roi - 1]
                     return (
-                        self.total_frames,
+                        self.num_frames,
                         self.num_channels,
-                        self.field_heights[0],
-                        width,
+                        roi['height'],
+                        roi['width'],
                     )
-        # roi = None, or a list/tuple indicates the shape should be relative to the full FOV
+        # roi = None: return horizontally concatenated shape
+        total_width = sum(roi['width'] for roi in self._rois)
+        max_height = max(roi['height'] for roi in self._rois)
         return (
-            self.total_frames,
+            self.num_frames,
             self.num_channels,
-            self.field_heights[0],
-            self.field_widths[0],
+            max_height,
+            total_width,
         )
 
-    @property
-    def shape_full(self):
-        return (
-            self.total_frames,
-            self.num_channels,
-            self.field_heights[0],
-            self.field_widths[0],
-        )
-
-    @property
-    def ndim(self):
-        return 4
-
-    @property
     def size(self):
+        """Total number of elements."""
+        total_width = sum(roi['width'] for roi in self._rois)
+        max_height = max(roi['height'] for roi in self._rois)
         return (
-            self.num_frames
-            * self.num_channels
-            * self.field_heights[0]
-            * self.field_widths[0]
+                self.num_frames
+                * self.num_channels
+                * max_height
+                * total_width
         )
 
     @property
-    def scanning_depths(self):
-        """
-        We override this because LBM should always be at a single scanning depth.
-        """
-        return [0]
+    def _page_height(self):
+        return self._metadata["page_height"]
 
-    def _create_rois(self):
-        """
-        Create scan rois from the configuration file. Override the base method to force
-        ROI's that have multiple 'zs' to a single depth.
-        """
-        try:
-            roi_infos = self.tiff_files[0].scanimage_metadata["RoiGroups"][
-                "imagingRoiGroup"
-            ]["rois"]
-        except KeyError:
-            raise RuntimeError(
-                "This file is not a raw-scanimage tiff or is missing tiff.scanimage_metadata."
-            )
-        roi_infos = roi_infos if isinstance(roi_infos, list) else [roi_infos]
-
-        # discard empty/malformed ROIs
-        roi_infos = list(
-            filter(lambda r: isinstance(r["zs"], (int, float, list)), roi_infos)
-        )
-
-        # LBM uses a single depth that is not stored in metadata,
-        # so force this to be 0.
-        for roi_info in roi_infos:
-            roi_info["zs"] = [0]
-
-        rois = [ROI(roi_info) for roi_info in roi_infos]
-        return rois
-
-    def _create_fields(self):
-        """Go over each slice depth and each roi generating the scanned fields."""
-        fields = []
-        previous_lines = 0
-        for slice_id, scanning_depth in enumerate(self.scanning_depths):
-            next_line_in_page = 0  # each slice is one tiff page
-            for roi_id, roi in enumerate(self.rois):
-                new_field = roi.get_field_at(scanning_depth)
-                if new_field is not None:
-                    # Set xslice and yslice (from where in the page to cut it)
-                    new_field.yslices = [
-                        slice(next_line_in_page, next_line_in_page + new_field.height)
-                    ]
-                    new_field.xslices = [slice(0, new_field.width)]
-
-                    # Set output xslice and yslice (where to paste it in output)
-                    new_field.output_yslices = [slice(0, new_field.height)]
-                    new_field.output_xslices = [slice(0, new_field.width)]
-
-                    # Set slice and roi id
-                    new_field.slice_id = slice_id
-                    new_field.roi_ids = [roi_id]
-
-                    offsets = self._compute_offsets(
-                        new_field.height, previous_lines + next_line_in_page
-                    )
-                    new_field.offsets = [offsets]
-                    next_line_in_page += new_field.height + self._num_fly_to_lines
-                    fields.append(new_field)
-            previous_lines += self._num_lines_between_fields
-        return fields
-
-    def _join_contiguous_fields(self):
-        """In each scanning depth, join fields that are contiguous.
-
-        Fields are considered contiguous if they appear next to each other and have the
-        same size in their touching axis. Process is iterative: it tries to join each
-        field with the remaining ones (checked in order); at the first union it will break
-        and restart the process at the first field. When two fields are joined, it deletes
-        the one appearing last and modifies info such as field height, field width and
-        slices in the one appearing first.
-
-        Any rectangular area in the scan formed by the union of two or more fields which
-        have been joined will be treated as a single field after this operation.
-        """
-        for scanning_depth in self.scanning_depths:
-            two_fields_were_joined = True
-            while two_fields_were_joined:  # repeat until no fields were joined
-                two_fields_were_joined = False
-
-                fields = filter(
-                    lambda field: field.depth == scanning_depth, self.fields
-                )
-                for field1, field2 in combinations(fields, 2):
-                    if field1.is_contiguous_to(field2):
-                        # Change info in field 1 to reflect the union
-                        field1.join_with(field2)
-
-                        # Delete field 2 in self.fields
-                        self.fields.remove(field2)
-
-                        # Restart join contiguous search (at while)
-                        two_fields_were_joined = True
-                        break
-
+    @property
+    def _page_width(self):
+        return self._metadata["page_width"]
 
     def __array__(self):
         """
@@ -1198,8 +1044,10 @@ class MboRawArray:
             planes = [planes - 1]
         elif planes is None:
             planes = list(range(self.num_channels))
-        else:
+        elif isinstance(planes, (list, tuple)):
             planes = [p - 1 for p in planes]
+        else:
+            raise RuntimeError(f"Invalid values for requested z-plane type: {type(planes)}")
         for roi in iter_rois(self):
             for plane in planes:
                 if not isinstance(plane, int):
@@ -1294,7 +1142,7 @@ class NumpyArray:
         elif isinstance(array, np.ndarray):
             logger.info(f"Creating temporary .npy file for array.")
             tmp = tempfile.NamedTemporaryFile(suffix=".npy", delete=False)
-            np.save(tmp, array)
+            np.save(tmp, array)  # type: ignore
             tmp.close()
             self.path = Path(tmp.name)
             self.data = np.load(self.path, mmap_mode="r")
@@ -1376,6 +1224,14 @@ class ZarrArray:
         compressor: str | None = "default",
         rois: list[int] | int | None = None,
     ):
+        try:
+            import zarr
+            # v3.0 +
+        except ImportError:
+            logger.error("zarr is not installed. Install with `uv pip install zarr>=3.1.3`.")
+            zarr = None
+            return
+
         if isinstance(filenames, (str, Path)):
             filenames = [filenames]
 
@@ -1526,3 +1382,97 @@ class ZarrArray:
                 plane_index=plane,
                 **kwargs,
             )
+
+
+def supports_roi(obj):
+    return hasattr(obj, "roi") and hasattr(obj, "num_rois")
+
+def normalize_roi(value):
+    """Return ROI as None, int, or list[int] with consistent semantics."""
+    if value in (None, (), [], False):
+        return None
+    if value is True:
+        return 0  # “split ROIs” GUI flag
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return value
+
+def iter_rois(obj):
+    """Yield ROI indices based on MBO semantics.
+
+    - roi=None → yield None (stitched full-FOV image)
+    - roi=0 → yield each ROI index from 1..num_rois (split all)
+    - roi=int > 0 → yield that ROI only
+    - roi=list/tuple → yield each element (as given)
+    """
+    if not supports_roi(obj):
+        yield None
+        return
+
+    roi = getattr(obj, "roi", None)
+    num_rois = getattr(obj, "num_rois", 1)
+
+    if roi is None:
+        yield None
+    elif roi == 0:
+        yield from range(1, num_rois + 1)
+    elif isinstance(roi, int):
+        yield roi
+    elif isinstance(roi, (list, tuple)):
+        for r in roi:
+            if r == 0:
+                yield from range(1, num_rois + 1)
+            else:
+                yield r
+
+def _to_tzyx(a: da.Array, axes: str) -> da.Array:
+    order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
+    perm = [axes.index(ax) for ax in order]
+    a = da.transpose(a, axes=perm)
+    have_T = "T" in order
+    pos = {ax: i for i, ax in enumerate(order)}
+    tdim = a.shape[pos["T"]] if have_T else 1
+    merge_dims = [d for d, ax in enumerate(order) if ax in ("Z", "C", "S")]
+    if merge_dims:
+        front = []
+        if have_T:
+            front.append(pos["T"])
+        rest = [d for d in range(a.ndim) if d not in front]
+        a = da.transpose(a, axes=front + rest)
+        newshape = [
+            tdim if have_T else 1,
+            int(np.prod([a.shape[i] for i in rest[:-2]])),
+            a.shape[-2],
+            a.shape[-1],
+        ]
+        a = a.reshape(newshape)
+    else:
+        if have_T:
+            if a.ndim == 3:
+                a = da.expand_dims(a, 1)
+        else:
+            a = da.expand_dims(a, 0)
+            a = da.expand_dims(a, 1)
+        if order[-2:] != ["Y", "X"]:
+            yx_pos = [order.index("Y"), order.index("X")]
+            keep = [i for i in range(len(order)) if i not in yx_pos]
+            a = da.transpose(a, axes=keep + yx_pos)
+    return a
+
+def _axes_or_guess(arr_ndim: int) -> str:
+    if arr_ndim == 2:
+        return "YX"
+    elif arr_ndim == 3:
+        return "ZYX"
+    elif arr_ndim == 4:
+        return "TZYX"
+    else:
+        return "Unknown"
+
+def _safe_get_metadata(path: Path) -> dict:
+    try:
+        return get_metadata(path)
+    except Exception:
+        return {}

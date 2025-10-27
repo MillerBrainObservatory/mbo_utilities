@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 import click
 import numpy as np
-from mbo_utilities.roi import iter_rois, normalize_roi
+from mbo_utilities.array_types import iter_rois, normalize_roi
 from mbo_utilities.graphics._file_dialog import FileDialog, setup_imgui
 
 
@@ -106,6 +106,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
         names = []
         for r in iter_rois(data_array):
             arr = copy.copy(data_array)
+            arr.fix_phase = False
             arr.roi = r
             arrays.append(arr)
             names.append(f"ROI {r}" if r else "Full Image")

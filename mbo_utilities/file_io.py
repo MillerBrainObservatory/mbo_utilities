@@ -250,6 +250,26 @@ def _tiff_to_fsspec(tif_path: Path, base_dir: Path) -> dict:
             refs = json.loads(f.getvalue())  # type: ignore
     return refs
 
+def save_fsspec(filenames):
+    base_dir = Path(filenames[0]).parent
+
+    combined_json_path = base_dir / "combined_refs.json"
+
+    if combined_json_path.is_file():
+        # delete it, its cheap to create
+        logger.debug(
+            f"Removing existing combined reference file: {combined_json_path}"
+        )
+        combined_json_path.unlink()
+
+    logger.debug(f"Generating combined kerchunk reference for {len(filenames)} files…")
+    combined_refs = _multi_tiff_to_fsspec(tif_files=filenames, base_dir=base_dir)
+
+    with open(combined_json_path, "w") as _f:
+        json.dump(combined_refs, _f)  # type: ignore
+
+    logger.info(f"Combined kerchunk reference written to {combined_json_path}")
+    return combined_json_path
 
 def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
     assert len(tif_files) > 1, "Need at least two TIFF files to combine."

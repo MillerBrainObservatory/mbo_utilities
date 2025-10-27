@@ -20,7 +20,6 @@ from .array_types import (
 )
 from .file_io import derive_tag_from_filename
 from .metadata import is_raw_scanimage, has_mbo_metadata
-from .roi import supports_roi
 
 logger = log.get("lazy_array")
 

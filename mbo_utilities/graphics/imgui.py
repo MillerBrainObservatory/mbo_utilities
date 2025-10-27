@@ -1,3 +1,4 @@
+print("Starting imgui imports")
 import logging
 import webbrowser
 from pathlib import Path
@@ -69,6 +70,8 @@ except ImportError:
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
+
+print("Finished imgui imports")
 
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
 USER_PIPELINES = ["suite2p"]

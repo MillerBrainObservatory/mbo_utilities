@@ -6,23 +6,6 @@ from typing import Any
 import numpy as np
 
 
-def parse_scanimage_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    """
-    Parse metadata from a ScanImage dictionary to a more JSON-friendly format.
-
-    Parameters
-    ----------
-    metadata : dict[str, Any]
-        The original metadata dictionary from ScanImage.
-
-    Returns
-    -------
-    dict[str, Any]
-        A JSON-serializable version of the metadata.
-    """
-    return _make_json_serializable(metadata)
-
-
 def _make_json_serializable(obj):
     if isinstance(obj, Path):
         return str(obj)

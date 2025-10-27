@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import json
 import os
 from pathlib import Path
@@ -9,7 +8,9 @@ from tqdm.auto import tqdm
 
 import numpy as np
 import tifffile
-from mbo_utilities import get_files, log
+from mbo_utilities import log
+from mbo_utilities.file_io import get_files
+from mbo_utilities._parsing import _make_json_serializable
 
 logger = log.get("metadata")
 
@@ -147,7 +148,7 @@ def get_metadata(file, z_step=None, verbose=False):
                 f"Got: {file} of type {type(file)}"
             )
         file_paths = [Path(f) for f in file]
-        return get_metadata_batch(file_paths, z_step=z_step, verbose=verbose)
+        return get_metadata_batch(file_paths)
 
     file_path = Path(file)
 
@@ -164,7 +165,7 @@ def get_metadata(file, z_step=None, verbose=False):
         raise ValueError(f"Path does not exist or is not accessible: {file_path}")
 
 
-def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
+def get_metadata_single(file: os.PathLike | str):
     """
     Extract metadata from a TIFF file produced by ScanImage or processed via the save_as function.
 
@@ -251,14 +252,13 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
         if not si:
             print(f"No FrameData found in {file}.")
             return None
-        # series = tiff_file.series[0]
+
         pages = tiff_file.pages
         first_page = pages[0]
         shape = first_page.shape
 
         # Extract ROI and imaging metadata
         roi_group = meta["RoiGroups"]["imagingRoiGroup"]["rois"]
-
         if isinstance(roi_group, dict):
             num_rois = 1
             roi_group = [roi_group]
@@ -268,63 +268,50 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
         num_planes = len(si["SI.hChannels.channelSave"])
         zoom_factor = si["SI.hRoiManager.scanZoomFactor"]
         uniform_sampling = si["SI.hScan2D.uniformSampling"]
-
-        if num_rois > 1:
-            try:
-                sizes = [
-                    roi_group[i]["scanfields"][i]["sizeXY"] for i in range(num_rois)
-                ]
-                num_pixel_xys = [
-                    roi_group[i]["scanfields"][i]["pixelResolutionXY"]
-                    for i in range(num_rois)
-                ]
-            except KeyError:
-                sizes = [roi_group[i]["scanfields"]["sizeXY"] for i in range(num_rois)]
-                num_pixel_xys = [
-                    roi_group[i]["scanfields"]["pixelResolutionXY"]
-                    for i in range(num_rois)
-                ]
-
-            size_xy = sizes[0]
-            num_pixel_xy = num_pixel_xys[0]
-        else:
-            size_xy = [roi_group[0]["scanfields"]["sizeXY"]][0]
-            num_pixel_xy = [roi_group[0]["scanfields"]["pixelResolutionXY"]][0]
-
-        # TIFF header-derived metadata
         objective_resolution = si["SI.objectiveResolution"]
         frame_rate = si["SI.hRoiManager.scanFrameRate"]
 
-        # Field-of-view calculations
-        # TODO: We may want an FOV measure that takes into account contiguous ROIs
-        # As of now, this is for a single ROI
-        fov_x_um = round(objective_resolution * size_xy[0])  # in microns
-        fov_y_um = round(objective_resolution * size_xy[1])  # in microns
-        fov_roi_um = (fov_x_um, fov_y_um)  # in microns
+        fly_to_time = float(si["SI.hScan2D.flytoTimePerScanfield"])
+        line_period = float(si["SI.hRoiManager.linePeriod"])
+        num_fly_to_lines = int(round(fly_to_time / line_period))
 
+        sizes = []
+        num_pixel_xys = []
+        for roi in roi_group:
+            scanfields = roi["scanfields"]
+            if isinstance(scanfields, list):
+                scanfields = scanfields[0]
+            sizes.append(scanfields["sizeXY"])
+            num_pixel_xys.append(scanfields["pixelResolutionXY"])
+
+        size_xy = sizes[0]
+        num_pixel_xy = num_pixel_xys[0]
+
+        fov_x_um = round(objective_resolution * size_xy[0])
+        fov_y_um = round(objective_resolution * size_xy[1])
         pixel_resolution = (fov_x_um / num_pixel_xy[0], fov_y_um / num_pixel_xy[1])
+
         metadata = {
             "num_planes": num_planes,
             "num_rois": num_rois,
-            "fov": fov_roi_um,  # in microns
+            "fov": (fov_x_um, fov_y_um),
             "fov_px": tuple(num_pixel_xy),
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
             "ndim": len(shape),
             "dtype": "int16",
             "size": np.prod(shape),
-            "roi_width_px": num_pixel_xy[0],
-            "roi_height_px": num_pixel_xy[1],
+            "page_height": shape[0],
+            "page_width": shape[1],
             "objective_resolution": objective_resolution,
             "zoom_factor": zoom_factor,
             "uniform_sampling": uniform_sampling,
-            "si": si
+            "num_fly_to_lines": num_fly_to_lines,
+            "roi_heights": [px[1] for px in num_pixel_xys],
+            "roi_groups": _make_json_serializable(roi_group),
+            "si": _make_json_serializable(si)
         }
-
-        if z_step is not None:
-            metadata["z_step"] = z_step
-
-        return metadata
+        return clean_scanimage_metadata(metadata)
 
     else:
         logger.info(f"No ScanImage metadata found in {file}, trying ops.npy fallback.")
@@ -376,7 +363,7 @@ def get_metadata_single(file: os.PathLike | str, z_step=None, verbose=False):
         raise ValueError(f"No metadata found in {file}.")
 
 
-def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False):
+def get_metadata_batch(file_paths: list | tuple):
     """
     Extract and aggregate metadata from a list of TIFF files.
 
@@ -384,10 +371,6 @@ def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False):
     ----------
     file_paths : list of Path
         List of TIFF file paths.
-    z_step : float, optional
-        Z-step in microns.
-    verbose : bool, optional
-        Include full metadata from first file if True.
 
     Returns
     -------
@@ -397,32 +380,23 @@ def get_metadata_batch(file_paths: list | tuple, z_step=None, verbose=False):
     if not file_paths:
         raise ValueError("No files provided")
 
-    frames_per_file = []
-    file_path_strings = []
-    first_meta = None
-
+    # Get metadata from first file only
     metadata = get_metadata_single(file_paths[0])
     n_planes = metadata["num_planes"]
-    for idx, file_path in tqdm(enumerate(file_paths), total=len(file_paths)):
 
-        n_pages = query_tiff_pages(file_path)
+    # Count frames for all files
+    frames_per_file = [
+        query_tiff_pages(fp) // n_planes
+        for fp in tqdm(file_paths, desc="Counting frames")
+    ]
 
-        frames_per_file.append(int(n_pages / n_planes))
-        file_path_strings.append(str(file_path))
-
-    total_frames = sum(frames_per_file)
-
-    metadata.update(
-        {
-            "num_frames": total_frames,
-            "frames_per_file": frames_per_file,
-            "file_paths": file_path_strings,
-            "num_files": len(file_paths),
-        }
-    )
-    print(f"Total: {total_frames} frames across {len(file_paths)} files")
-
-    return first_meta
+    # Return metadata with batch info (dict.update() returns None, so use | operator)
+    return metadata | {
+        "num_frames": sum(frames_per_file),
+        "frames_per_file": frames_per_file,
+        "file_paths": [str(fp) for fp in file_paths],
+        "num_files": len(file_paths),
+    }
 
 
 def query_tiff_pages(file_path):
@@ -514,13 +488,11 @@ def query_tiff_pages(file_path):
 
 def clean_scanimage_metadata(meta: dict) -> dict:
     """
-    Build a JSON-serializable, nicely nested dict from a ScanImage-style metadata dict.
+    Build a JSON-serializable, nicely nested dict from ScanImage metadata.
 
-    - Keeps ALL top-level (non-'si') keys after cleaning (remove empties, NaNs/inf, empty arrays/strings).
-    - Includes the full `si` subtree (cleaned), preserving e.g. 'RoiGroups'.
-    - Additionally nests any flat 'SI.*' keys found anywhere under the 'si' subtree:
-        * If they are inside meta['si']['FrameData'], they become si['FrameData']['SI'][...nested...]
-        * If 'SI.*' keys appear elsewhere in the tree, they are nested under a top-level 'SI' root.
+    - All non-'si' top-level keys are kept after cleaning
+    - All 'SI.*' keys (from anywhere) are nested under 'si' with 'SI.' prefix stripped
+    - So SI.hChannels.channelSave -> metadata['si']['hChannels']['channelSave']
     """
 
     def _clean(x):
@@ -576,30 +548,34 @@ def clean_scanimage_metadata(meta: dict) -> dict:
                 d.pop(k, None)
         return d
 
-    def _collect_SI_pairs(node, path=()):
+    def _collect_SI_keys(node):
+        """Collect all 'SI.*' keys anywhere in the tree."""
         out = []
         if isinstance(node, dict):
             for k, v in node.items():
                 if isinstance(k, str) and k.startswith("SI."):
-                    out.append((".".join((k,)), v, path))  # store key, value, and where we found it
-                out.extend(_collect_SI_pairs(v, path + (k,)))
+                    out.append((k, v))
+                # Recurse into nested dicts/lists
+                out.extend(_collect_SI_keys(v))
         elif isinstance(node, (list, tuple)):
-            for i, v in enumerate(node):
-                out.extend(_collect_SI_pairs(v, path + (f"[{i}]",)))
+            for v in node:
+                out.extend(_collect_SI_keys(v))
         return out
 
-    def _nest_into(root_dict, dotted_key, value, keep_root_SI=True):
+    def _nest_into_si(root_dict, dotted_key, value):
+        """Nest 'SI.hChannels.channelSave' into root_dict as ['hChannels']['channelSave']"""
+        # Strip 'SI.' prefix
+        if dotted_key.startswith("SI."):
+            dotted_key = dotted_key[3:]
+
         parts = dotted_key.split(".")
-        # parts[0] should be "SI"
-        start = 0 if keep_root_SI else 1
         cur = root_dict
-        for p in parts[start:-1]:
-            p = p.split("[")[0]
+        for p in parts[:-1]:
             cur = cur.setdefault(p, {})
-        leaf = parts[-1].split("[")[0]
+        leaf = parts[-1]
         cur[leaf] = _clean(value)
 
-    # 1) Start with cleaned copy of ALL top-level non-'si' keys.
+    # 1) Copy all top-level keys EXCEPT 'si'
     result = {}
     for k, v in meta.items():
         if k == "si":
@@ -608,39 +584,22 @@ def clean_scanimage_metadata(meta: dict) -> dict:
         if cv is not None:
             result[k] = cv
 
-    # 2) Bring in the 'si' subtree (cleaned) as-is (so 'RoiGroups' is preserved).
-    si_clean = None
+    # 2) Initialize 'si' dict
+    result["si"] = {}
+
+    # 3) Add non-SI.* keys from meta['si'] (like RoiGroups, etc.)
     if isinstance(meta.get("si"), dict):
-        si_clean = _clean(meta["si"])
-        if si_clean is not None:
-            result["si"] = si_clean
-        else:
-            result["si"] = {}
+        for k, v in meta["si"].items():
+            if not (isinstance(k, str) and k.startswith("SI.")):
+                cv = _clean(v)
+                if cv is not None:
+                    result["si"][k] = cv
 
-    # 3) Find *all* 'SI.*' keys anywhere, and nest them.
-    #    If they are under meta['si']['FrameData'], put them into result['si']['FrameData']['SI'][...]
-    #    Otherwise, collect them under a top-level 'SI' in the result.
-    si_pairs = _collect_SI_pairs(meta)
-    if si_pairs:
-        # Ensure containers exist where needed
-        if "si" not in result or not isinstance(result["si"], dict):
-            result["si"] = {}
-        si_framedata = result["si"].setdefault("FrameData", {})
-        si_framedata_SI = si_framedata.setdefault("SI", {})
-        top_SI = result.setdefault("SI", {})
+    # 4) Collect ALL 'SI.*' keys from entire meta tree and nest under result['si']
+    si_pairs = _collect_SI_keys(meta)
+    for dotted_key, val in si_pairs:
+        _nest_into_si(result["si"], dotted_key, val)
 
-        for dotted_key, val, where in si_pairs:
-            # Check if this came from under ['si']['FrameData']
-            if len(where) >= 2 and where[0] == "si" and where[1] == "FrameData":
-                _nest_into(si_framedata_SI, dotted_key, val, keep_root_SI=False)
-            else:
-                _nest_into(top_SI, dotted_key, val, keep_root_SI=True)
-
-        # If the top-level 'SI' ended up empty after cleaning/pruning, drop it.
-        if not _prune(top_SI):
-            result.pop("SI", None)
-
-    # 4) Final prune pass
     return _prune(result)
 
 
