@@ -7,7 +7,7 @@ from typing import Sequence, Callable
 import numpy as np
 
 from . import log
-from ._writers import _try_generic_writers, _write_plane
+from ._writers import _try_generic_writers
 from .array_types import (
     Suite2pArray,
     H5Array,
