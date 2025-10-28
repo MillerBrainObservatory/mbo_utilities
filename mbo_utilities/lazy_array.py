@@ -7,7 +7,7 @@ from typing import Sequence, Callable
 import numpy as np
 
 from . import log
-from ._writers import _try_generic_writers, _write_plane
+from ._writers import _try_generic_writers
 from .array_types import (
     Suite2pArray,
     H5Array,
@@ -17,23 +17,16 @@ from .array_types import (
     NpyArray,
     ZarrArray,
     register_zplanes_s3d,
+    validate_s3d_registration,
+    supports_roi,
 )
 from .file_io import derive_tag_from_filename
 from .metadata import is_raw_scanimage, has_mbo_metadata
-from .roi import supports_roi
 
 logger = log.get("lazy_array")
 
 
-SUPPORTED_FTYPES = (
-    ".npy",
-    ".tif",
-    ".tiff",
-    ".bin",
-    ".h5",
-    ".zarr",
-    ".json"
-)
+SUPPORTED_FTYPES = (".npy", ".tif", ".tiff", ".bin", ".h5", ".zarr", ".json")
 
 _ARRAY_TYPE_KWARGS = {
     MboRawArray: {
@@ -60,26 +53,28 @@ def _filter_kwargs(cls, kwargs):
 
 
 def imwrite(
-        lazy_array,
-        outpath: str | Path,
-        ext: str = ".tiff",
-        planes: list | tuple | None = None,
-        num_frames: int | None = None,
-        register_z: bool = False,
-        roi: int | Sequence[int] | None = None,
-        metadata: dict | None = None,
-        overwrite: bool = False,
-        order: list | tuple = None,
-        target_chunk_mb: int = 20,
-        progress_callback: Callable | None = None,
-        debug: bool = False,
-        shift_vectors: np.ndarray | None = None,
-        **kwargs,
+    lazy_array,
+    outpath: str | Path,
+    ext: str = ".tiff",
+    planes: list | tuple | None = None,
+    num_frames: int | None = None,
+    register_z: bool = False,
+    roi: int | Sequence[int] | None = None,
+    metadata: dict | None = None,
+    overwrite: bool = False,
+    order: list | tuple = None,
+    target_chunk_mb: int = 20,
+    progress_callback: Callable | None = None,
+    debug: bool = False,
+    shift_vectors: np.ndarray | None = None,
+    **kwargs,
 ):
     """
     Write a supported lazy imaging array (Suite2p, HDF5, TIFF, etc.) to disk.
 
-    Users likely will want to use `mbo.imread` to load data as input to this function.
+    This function handles writing multi-dimensional imaging data to various formats,
+    with support for ROI selection, z-plane registration, chunked streaming, and
+    format conversion. Use with `imread()` to load and convert imaging data.
 
     Parameters
     ----------
@@ -87,87 +82,206 @@ def imwrite(
         One of the supported lazy array readers providing `.shape`, `.metadata`,
         and `_imwrite()` methods:
 
-        - `Suite2pArray` : memory-mapped binary (`data.bin` or `data_raw.bin`)
-          paired with an `ops.npy`. Can write to TIFF or binary targets.
-        - `H5Array` : HDF5 dataset wrapper (`h5py.File[dataset]`).
-        - `MBOTiffArray` : multi-file TIFF reader using Dask/memmap backend.
-        - `TiffArray` : single or multi-TIFF reader.
-        - `MboRawArray` : raw ScanImage/ScanMultiROI acquisition object.
-        - `NpyArray` : single `.npy` memory-mapped NumPy file.
-        - `ZarrArray` : collection of z-plane `.zarr` stores.
-        - `NWBArray` : NWB file with “TwoPhotonSeries” acquisition dataset.
+        - `MboRawArray` : Raw ScanImage/ScanMultiROI TIFF files with phase correction
+        - `Suite2pArray` : Memory-mapped binary (`data.bin` or `data_raw.bin`) + `ops.npy`
+        - `MBOTiffArray` : Multi-file TIFF reader using Dask backend
+        - `TiffArray` : Single or multi-TIFF reader
+        - `H5Array` : HDF5 dataset wrapper (`h5py.File[dataset]`)
+        - `ZarrArray` : Collection of z-plane `.zarr` stores
+        - `NpyArray` : Single `.npy` memory-mapped NumPy file
+        - `NWBArray` : NWB file with "TwoPhotonSeries" acquisition dataset
 
     outpath : str or Path
-        Target directory or file path to write output into. Must exist or be creatable.
-    planes : list or tuple of int, optional
-        Specific z-planes to export (1-based indexing for consistency with Suite2p).
-        Defaults to all planes.
-    num_frames : list or tuple of int, optional
-        The number of frames to export. Defaults to all frames.
-    roi : int or sequence of int, optional
-        ROI index(es) to restrict output for multi-ROI data (e.g. `MboRawArray`).
-    metadata : dict, optional
-        Additional metadata to merge into the written file header.
-    overwrite : bool, default=False
-        Overwrite existing output files if True.
+        Target directory to write output files. Will be created if it doesn't exist.
+        Files are named automatically based on plane/ROI (e.g., `plane01_roi1.tiff`).
+
     ext : str, default=".tiff"
-        Output format extension. Supports ".tiff", ".tif", ".bin", etc.
-    order : list or tuple of int, optional
-        Re-ordering of `planes` before writing, e.g. `[2, 0, 1]`.
-    target_chunk_mb : int, default=20
-        Approximate target chunk size in MB for streamed writes.
-    progress_callback : callable, optional
-        Function to receive progress updates during writing.
+        Output format extension. Supported formats:
+        - `.tiff`, `.tif` : Multi-page TIFF (BigTIFF for >4GB)
+        - `.bin` : Suite2p-compatible binary format with ops.npy metadata
+        - `.zarr` : Zarr v3 array store
+        - `.h5`, `.hdf5` : HDF5 format
+
+    planes : list | tuple | int | None, optional
+        Z-planes to export (1-based indexing). Options:
+        - None (default) : Export all planes
+        - int : Single plane, e.g. `planes=7` exports only plane 7
+        - list/tuple : Specific planes, e.g. `planes=[1, 7, 14]`
+
+    roi : int | Sequence[int] | None, optional
+        ROI selection for multi-ROI data (e.g., MboRawArray from ScanImage). Options:
+        - None (default) : Stitch/fuse all ROIs horizontally into single FOV
+        - 0 : Split all ROIs into separate files (one file per ROI per plane)
+        - int > 0 : Export specific ROI, e.g. `roi=1` exports only ROI 1
+        - list/tuple : Export specific ROIs, e.g. `roi=[1, 3]` exports ROIs 1 and 3
+
+    num_frames : int, optional
+        Number of frames to export. If None (default), exports all frames.
+        Useful for testing or exporting subsets: `num_frames=1000`
+
     register_z : bool, default=False
-        If True, perform z-plane registration via Suite3D preprocessing
-        (`register_zplanes_s3d`) before writing.
-    debug : bool, default=False
-        Enable verbose logging.
+        Perform z-plane registration using Suite3D before writing. When True:
+        - Computes rigid shifts between z-planes
+        - Validates registration results (checks `summary.npy` for valid `plane_shifts`)
+        - Applies shifts during write to align planes
+        - Requires Suite3D and CuPy installed: `pip install mbo_utilities[suite3d,cuda12]`
+        - Creates/reuses s3d job directory in outpath
+
     shift_vectors : np.ndarray, optional
-        Pre-computed z-shift vectors to embed into metadata.
+        Pre-computed z-shift vectors with shape (n_planes, 2) for [dy, dx] shifts.
+        Use this to apply previously computed registration without re-running Suite3D.
+        Example: `shift_vectors=np.array([[0, 0], [2, -1], [1, 3]])`
+
+    metadata : dict, optional
+        Additional metadata to merge into output file headers/attributes.
+        Merged with existing metadata from the source array.
+
+    overwrite : bool, default=False
+        Whether to overwrite existing output files. If False, skips existing files
+        with a warning.
+
+    order : list | tuple, optional
+        Reorder planes before writing. Must have same length as `planes`.
+        Example: `planes=[1,2,3], order=[2,0,1]` writes planes in order [3,1,2]
+
+    target_chunk_mb : int, default=20
+        Target chunk size in MB for streaming writes. Larger chunks may be faster
+        but use more memory. Adjust based on available RAM.
+
+    progress_callback : Callable, optional
+        Callback function for progress updates: `callback(progress, current_plane)`.
+        Receives progress as float 0-1 and current plane index.
+
+    debug : bool, default=False
+        Enable verbose logging to terminal for troubleshooting.
+
+    **kwargs
+        Additional format-specific options passed to writer backends.
 
     Returns
     -------
     Path
-        Path to the written output directory or file.
+        Path to the output directory containing written files.
 
     Raises
     ------
     TypeError
-        If the input array type is unsupported or incompatible with options.
+        If lazy_array type is unsupported or incompatible with specified options.
     ValueError
-        If `outpath` is invalid or metadata is malformed.
+        If outpath parent doesn't exist, metadata is malformed, or parameters are invalid.
     FileNotFoundError
-        If expected companion files (e.g. `ops.npy`) are missing.
+        If expected companion files (e.g., `ops.npy`, `summary.npy`) are missing.
+    KeyError
+        If registration is requested but `plane_shifts` is missing from summary.
 
     Notes
     -----
-    - Metadata from the source array is merged with `metadata` and recorded in
-      the written output (e.g. TIFF tags, Zarr attributes, or sidecar JSON).
-    - When `register_z=True`, the function attempts to detect or generate a
-      Suite3D job directory (`s3d-job`) and stores registration parameters there.
-    - The writing backend (`_write_plane`) supports efficient chunked I/O for
-      large 3-D or 4-D volumes.
+    **File Naming Convention:**
+    - Single ROI or stitched: `plane{Z:02d}_stitched.{ext}`
+    - Multiple ROIs: `plane{Z:02d}_roi{R}.{ext}`
+    - Binary format: `plane{Z:02d}_roi{R}/data_raw.bin` + `ops.npy`
+
+    **Registration (register_z=True):**
+    - Validates existing registration by checking `summary/summary.npy` for valid
+      `plane_shifts` array with shape (n_planes, 2)
+    - Only reruns Suite3D if validation fails or no existing job found
+    - Registration shifts are applied during write to align planes spatially
+    - Output files are padded to accommodate all shifts
+
+    **Memory Management:**
+    - Data is streamed in chunks (controlled by `target_chunk_mb`)
+    - Only one chunk is held in memory at a time
+    - Large files (>4GB) automatically use BigTIFF format
+
+    **Phase Correction (MboRawArray only):**
+    - Set `lazy_array.fix_phase = True` before calling imwrite
+    - Corrects bidirectional scanning artifacts
+    - Methods: 'mean', 'median', 'max' (set via `lazy_array.phasecorr_method`)
 
     Examples
     --------
+    **Basic Usage - Stitch ROIs and save all planes as TIFF:**
+
     >>> from mbo_utilities import imread, imwrite
-    >>> mbo_data = imread("data/session1")  # load data from supported files
+    >>> data = imread("path/to/raw/*.tiff")
+    >>> imwrite(data, "output/session1", roi=None)  # Stitches all ROIs
 
-    # Tile ScanImagee multi-ROI's and write all planes to a single multi-page TIFF.
-    >>> imwrite(mbo_data, ext="tif", outpath="output/session1/extracted", roi=None)
+    **Save specific planes only (first, middle, last for 14-plane volume):**
 
-    Write axially registered data to a new folder:
-    >>> imwrite(mbo_data, ext="tif", outpath="output/session1/extracted", register_z=True)
+    >>> imwrite(data, "output/session1", planes=[1, 7, 14])
+    # Creates: plane01_stitched.tiff, plane07_stitched.tiff, plane14_stitched.tiff
 
-    Write only the first two planes, overwriting existing TIFFs:
-        >>> imwrite(mbo_data, "output/session1", planes=[1, 2], overwrite=True, roi=None)
+    **Split all ROIs into separate files:**
 
-    Write ALL roi's to Zarr format:
-        >>> imwrite(mbo_data, "output/rois", roi=0, ext=".zarr")
+    >>> imwrite(data, "output/session1", roi=0)
+    # Creates: plane01_roi1.tiff, plane01_roi2.tiff, ..., plane14_roi1.tiff, ...
 
-    Write ROI 1 to Suite2p-compatible binary format:
-        >>> imwrite("data/session1", "output/bin_output", roi=1, ext=".bin")
+    **Save specific ROIs only:**
+
+    >>> imwrite(data, "output/session1", roi=[1, 3])  # Only ROIs 1 and 3
+    >>> imwrite(data, "output/session1", roi=2)       # Only ROI 2
+
+    **Z-plane registration with Suite3D:**
+
+    >>> data = imread("path/to/raw/*.tiff")
+    >>> imwrite(data, "output/registered", register_z=True, roi=None)
+    # Computes and applies rigid shifts to align z-planes spatially
+
+    **Use pre-computed registration shifts:**
+
+    >>> shifts = np.load("previous_job/summary/summary.npy", allow_pickle=True).item()
+    >>> shift_vectors = shifts['plane_shifts']  # shape: (n_planes, 2)
+    >>> imwrite(data, "output/registered", shift_vectors=shift_vectors)
+
+    **Convert to Suite2p binary format:**
+
+    >>> data = imread("path/to/raw/*.tiff")
+    >>> imwrite(data, "output/suite2p", ext=".bin", roi=0)
+    # Creates: plane01_roi1/data_raw.bin, plane01_roi1/ops.npy, ...
+
+    **Export subset of frames for testing:**
+
+    >>> imwrite(data, "output/test", num_frames=1000, planes=[1, 7, 14])
+    # Exports only first 1000 frames of planes 1, 7, and 14
+
+    **Save to Zarr format with compression:**
+
+    >>> imwrite(data, "output/zarr_store", ext=".zarr", roi=0)
+    # Creates: output/zarr_store/plane01_roi1.zarr, ...
+
+    **Enable phase correction (for raw ScanImage data):**
+
+    >>> data = imread("path/to/raw/*.tiff")
+    >>> data.fix_phase = True
+    >>> data.phasecorr_method = "mean"  # or "median", "max"
+    >>> data.use_fft = True  # Use FFT-based correction (faster)
+    >>> imwrite(data, "output/corrected", roi=None)
+
+    **Overwrite existing files:**
+
+    >>> imwrite(data, "output/session1", planes=[1, 2, 3], overwrite=True)
+
+    **Custom metadata:**
+
+    >>> custom_meta = {"experimenter": "MBO-User", "Date": "2025-01-15"}
+    >>> imwrite(data, "output/session1", metadata=custom_meta)
+
+    **Reorder planes:**
+
+    >>> imwrite(data, "output/session1", planes=[3, 2, 1], order=[2, 1, 0])
+    # Writes plane 3 first, then plane 2, then plane 1
+
+    **Progress callback reports per-zplane completion % for UIs:**
+
+    >>> def progress_handler(progress, plane):
+    ...     print(f"Plane {plane}: {progress*100:.1f}% complete")
+    >>> imwrite(data, "output/session1", progress_callback=progress_handler)
+
+    See Also
+    --------
+    imread : Load imaging data from various formats
+    register_zplanes_s3d : Compute z-plane registration using Suite3D
+    validate_s3d_registration : Validate Suite3D registration results
     """
     if debug:
         logger.setLevel(logging.INFO)
@@ -224,50 +338,77 @@ def imwrite(
     s3d_job_dir = None
     if register_z:
         lazy_array.metadata["apply_shift"] = True
+        num_planes = file_metadata.get("num_planes")
 
         if shift_vectors is not None:
             lazy_array.metadata["shift_vectors"] = shift_vectors
+            logger.info("Using provided shift_vectors for registration.")
         else:
-            # check metadata for s3d-job dir
-            if (
-                "s3d-job" in lazy_array.metadata
-                and Path(lazy_array.metadata["s3d-job"]).is_dir()
-            ):
-                logger.debug("Detected s3d-job in metadata, moving data to s3d output path.")
-                s3d_job_dir = Path(lazy_array.metadata["s3d-job"])
-            else:  # check if the input is in a s3d-job folder
-                job_id = lazy_array.metadata.get("job_id", "s3d-preprocessed")
-                s3d_job_dir = outpath / job_id
+            # Check if we already have a valid s3d-job directory
+            existing_s3d_dir = None
 
-            if s3d_job_dir.joinpath("dirs.npy").is_file():
-                dirs = np.load(s3d_job_dir / "dirs.npy", allow_pickle=True).item()
-                for k, v in dirs.items():
-                    if Path(v).is_dir():
-                        lazy_array.metadata[k] = v
-            else:
-                # check if outpath contains an s3d job
-                npy_files = outpath.rglob("*.npy")
-                if "dirs.npy" in [f.name for f in npy_files]:
-                    logger.info(
-                        f"Detected existing s3d-job in outpath {outpath}, skipping preprocessing."
-                    )
-                    s3d_job_dir = outpath
+            # Option 1: Check metadata for existing s3d-job
+            if "s3d-job" in lazy_array.metadata:
+                candidate = Path(lazy_array.metadata["s3d-job"])
+                if validate_s3d_registration(candidate, num_planes):
+                    logger.info(f"Found valid s3d-job in metadata: {candidate}")
+                    existing_s3d_dir = candidate
                 else:
-                    logger.info(f"No s3d-job detected, preprocessing data.")
-                    # s3d_params = kwargs.get("s3d_params", {})
-                    s3d_job_dir = register_zplanes_s3d(
-                        filenames=lazy_array.filenames,
-                        metadata=file_metadata,
-                        outpath=outpath,
-                        progress_callback=progress_callback
+                    logger.warning(
+                        f"s3d-job in metadata exists but registration is invalid: {candidate}"
                     )
-                    logger.info(f"Registered z-planes, results saved to {s3d_job_dir}.")
 
-    if s3d_job_dir:
-        logger.info(f"Storing s3d-job path {s3d_job_dir} in metadata.")
-        lazy_array.metadata["s3d-job"] = s3d_job_dir
+            # Option 2: Check if outpath contains existing valid registration
+            if not existing_s3d_dir:
+                job_id = file_metadata.get("job_id", "s3d-preprocessed")
+                candidate = outpath / job_id
+                if validate_s3d_registration(candidate, num_planes):
+                    logger.info(f"Found valid existing s3d-job: {candidate}")
+                    existing_s3d_dir = candidate
+
+            if existing_s3d_dir:
+                s3d_job_dir = existing_s3d_dir
+                # Load directory metadata if available
+                if s3d_job_dir.joinpath("dirs.npy").is_file():
+                    dirs = np.load(s3d_job_dir / "dirs.npy", allow_pickle=True).item()
+                    for k, v in dirs.items():
+                        if Path(v).is_dir():
+                            lazy_array.metadata[k] = v
+            else:
+                # Need to run registration
+                logger.info("No valid s3d-job found, running Suite3D registration.")
+                s3d_job_dir = register_zplanes_s3d(
+                    filenames=lazy_array.filenames,
+                    metadata=file_metadata,
+                    outpath=outpath,
+                    progress_callback=progress_callback,
+                )
+
+                if s3d_job_dir:
+                    # Validate the registration actually succeeded
+                    if validate_s3d_registration(s3d_job_dir, num_planes):
+                        logger.info(f"Z-plane registration succeeded: {s3d_job_dir}")
+                    else:
+                        logger.error(
+                            f"Suite3D job completed but registration validation failed. "
+                            f"Check {s3d_job_dir}/summary/summary.npy for plane_shifts. "
+                            f"Proceeding without registration."
+                        )
+                        s3d_job_dir = None
+                        lazy_array.metadata["apply_shift"] = False
+                else:
+                    logger.warning(
+                        "Z-plane registration failed. Proceeding without registration. "
+                        "Check that Suite3D and CuPy are installed correctly."
+                    )
+                    lazy_array.metadata["apply_shift"] = False
+
+        # Store s3d-job directory in metadata if available
+        if s3d_job_dir:
+            logger.info(f"Storing s3d-job path {s3d_job_dir} in metadata.")
+            lazy_array.metadata["s3d-job"] = str(s3d_job_dir)
     else:
-        logger.info("No s3d-job directory used or created.")
+        # Registration not requested
         lazy_array.metadata["apply_shift"] = False
 
     if hasattr(lazy_array, "_imwrite"):
@@ -347,7 +488,9 @@ def imread(
             logger.debug(f"Input is a directory, searching for supported files in {p}")
             zarrs = list(p.glob("*.zarr"))
             if zarrs:
-                logger.debug(f"Found {len(zarrs)} zarr stores in {p}, loading as ZarrArray.")
+                logger.debug(
+                    f"Found {len(zarrs)} zarr stores in {p}, loading as ZarrArray."
+                )
                 paths = zarrs
             else:
                 paths = [Path(f) for f in p.glob("*") if f.is_file()]
@@ -433,8 +576,15 @@ def imread(
         logger.debug(f"Reading JSON files from {first}.")
         return ZarrArray(first.parent, **_filter_kwargs(ZarrArray, kwargs))
 
-    if first.suffix == ".npy" and (first.parent / "pmd_demixer.npy").is_file():
-        raise NotImplementedError("PMD Arrays are not yet supported.")
-        # return DemixingResultsArray(first.parent)
+    if first.suffix == ".npy":
+        # Check for PMD demixer arrays
+        if (first.parent / "pmd_demixer.npy").is_file():
+            raise NotImplementedError("PMD Arrays are not yet supported.")
+            # return DemixingResultsArray(first.parent)
+
+        # Regular .npy file - load as NumpyArray
+        from mbo_utilities.array_types import NumpyArray
+        logger.debug(f"Loading .npy file as NumpyArray: {first}")
+        return NumpyArray(first)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")

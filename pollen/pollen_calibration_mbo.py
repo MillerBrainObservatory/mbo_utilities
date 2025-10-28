@@ -24,17 +24,19 @@ from imgui_bundle import portable_file_dialogs as pfd
 warnings.simplefilter(action="ignore")
 
 
-plt.rcParams.update({
-    "font.size": 12,
-    "axes.labelweight": "bold",
-    "axes.titleweight": "bold",
-    "axes.titlesize": 14,
-    "axes.labelsize": 12,
-    "legend.fontsize": 10,
-    "xtick.labelsize": 10,
-    "ytick.labelsize": 10,
-    "lines.linewidth": 1.5,
-})
+plt.rcParams.update(
+    {
+        "font.size": 12,
+        "axes.labelweight": "bold",
+        "axes.titleweight": "bold",
+        "axes.titlesize": 14,
+        "axes.labelsize": 12,
+        "legend.fontsize": 10,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "lines.linewidth": 1.5,
+    }
+)
 
 
 class PollenDialog:
@@ -159,11 +161,15 @@ def print_tifffile_note():
     RESET = "\033[0m"
 
     msg = (
-            "\n"
-            + "*" * 50 + "\n"
-            + f"* {BOLD}{YELLOW}NOTE:{RESET}".ljust(49) + "\n"
-            + f"* {YELLOW}IGNORE TIFFFILE FAILED TO RESHAPE ERRORS{RESET}".ljust(49) + "\n"
-            + "*" * 50 + "\n"
+        "\n"
+        + "*" * 50
+        + "\n"
+        + f"* {BOLD}{YELLOW}NOTE:{RESET}".ljust(49)
+        + "\n"
+        + f"* {YELLOW}IGNORE TIFFFILE FAILED TO RESHAPE ERRORS{RESET}".ljust(49)
+        + "\n"
+        + "*" * 50
+        + "\n"
     )
     print(msg)
 
@@ -318,7 +324,7 @@ def analyze_power_vs_z(Iz, filepath, DZ, order):
 
     fig, ax = plt.subplots(figsize=(7, 5))
     for i, o in enumerate(order):
-        ax.plot(ZZ, np.sqrt(smoothed[o, :]), label=f"Beam {i+1}")
+        ax.plot(ZZ, np.sqrt(smoothed[o, :]), label=f"Beam {i + 1}")
 
     ax.plot(ZZ[zoi], np.sqrt(pp), "k.", markersize=8)
 
@@ -330,7 +336,7 @@ def analyze_power_vs_z(Iz, filepath, DZ, order):
             ha="center",
             fontsize=10,
             weight="bold",
-            )
+        )
 
     ax.set_xlabel("Piezo Z (µm)", fontweight="bold")
     ax.set_ylabel("2p signal (a.u.)", fontweight="bold")
@@ -359,7 +365,6 @@ def analyze_z_positions(ZZ, zoi, order, filepath):
 
 
 def fit_exp_decay(ZZ, zoi, order, filepath, pp):
-
     def exp_func(z, a, b):
         return a * np.exp(b * z)
 
@@ -372,7 +377,12 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp):
     try:
         popt, _ = curve_fit(exp_func, z, p, p0=(p.max(), -0.01))
         z_fit = np.linspace(z.min(), z.max(), 200)
-        ax.plot(z_fit, exp_func(z_fit, *popt), "r-", label=f"Fit (ls = {1/popt[1]:.1f} µm)")
+        ax.plot(
+            z_fit,
+            exp_func(z_fit, *popt),
+            "r-",
+            label=f"Fit (ls = {1 / popt[1]:.1f} µm)",
+        )
     except Exception as e:
         print("Exp fit failed:", e)
 
@@ -428,8 +438,12 @@ def select_pollen_file() -> str | None:
 
 
 @click.command()
-@click.option("--in", "input_path", type=click.Path(exists=True, file_okay=True, dir_okay=True),
-              help="Input file or directory containing pollen data")
+@click.option(
+    "--in",
+    "input_path",
+    type=click.Path(exists=True, file_okay=True, dir_okay=True),
+    help="Input file or directory containing pollen data",
+)
 def main(input_path):
     """Run pollen calibration with optional input/output paths."""
 

@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from mbo_utilities.lazy_array import imread, imwrite
 
+
 def benchmark_wrapper(func, *args, **kwargs):
     start = time.time()
     func(*args, **kwargs)
@@ -44,20 +45,14 @@ def run_with_fft(raw_data_path, outpath):
         planes=None,  # all zplanes
     )
 
-def run_without_fft(raw_data_path, outpath):
 
+def run_without_fft(raw_data_path, outpath):
     data = imread(raw_data_path)
     data.roi = 0
     data.fix_phase = True
     data.use_fft = False
-    imwrite(
-        data,
-        outpath,
-        register_z=True,
-        ext=".zarr",
-        overwrite=True,
-        planes=None
-    )
+    imwrite(data, outpath, register_z=True, ext=".zarr", overwrite=True, planes=None)
+
 
 if __name__ == "__main__":
     path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\green")

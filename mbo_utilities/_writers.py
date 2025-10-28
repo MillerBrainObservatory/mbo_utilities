@@ -124,7 +124,9 @@ def _write_plane(
         apply_shift = False
 
     if shift_vector is not None:
-        logger.debug(f"Using provided shift_vector of type {type(shift_vector)} length {len(shift_vector)}")
+        logger.debug(
+            f"Using provided shift_vector of type {type(shift_vector)} length {len(shift_vector)}"
+        )
         apply_shift = True
         if plane_index is not None:
             iy, ix = map(int, shift_vector)
@@ -145,18 +147,56 @@ def _write_plane(
         else:
             summary_path = Path(s3d_job_dir).joinpath("summary/summary.npy")
 
-        if summary_path.is_file():
-            summary = np.load(Path(summary_path), allow_pickle=True).item()
-        else:
+        if not summary_path.is_file():
             raise FileNotFoundError(
-                f"Summary file not found s3d-job dir: \n "
-                f"{s3d_job_dir} \n"
-                f"or summary path: {summary_path}"
+                f"Summary file not found in s3d-job directory.\n"
+                f"Expected: {summary_path}\n"
+                f"s3d_job_dir: {s3d_job_dir}\n"
+                f"This usually means Suite3D registration failed or is incomplete."
+            )
+
+        try:
+            summary = np.load(Path(summary_path), allow_pickle=True).item()
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load summary file: {summary_path}\nError: {e}"
+            )
+
+        if not isinstance(summary, dict):
+            raise ValueError(
+                f"Summary file is not a dict: {type(summary)}\nPath: {summary_path}"
+            )
+
+        if "plane_shifts" not in summary:
+            raise KeyError(
+                f"Summary file is missing 'plane_shifts' key.\n"
+                f"Available keys: {list(summary.keys())}\n"
+                f"Path: {summary_path}"
             )
 
         plane_shifts = summary["plane_shifts"]
 
+        if not isinstance(plane_shifts, (list, np.ndarray)):
+            raise TypeError(
+                f"plane_shifts has invalid type: {type(plane_shifts)}\n"
+                f"Expected list or ndarray"
+            )
+
+        plane_shifts = np.asarray(plane_shifts)
+
+        if plane_shifts.ndim != 2 or plane_shifts.shape[1] != 2:
+            raise ValueError(
+                f"plane_shifts has invalid shape: {plane_shifts.shape}\n"
+                f"Expected (n_planes, 2)"
+            )
+
         assert plane_index is not None, "plane_index must be provided when using shifts"
+
+        if plane_index >= len(plane_shifts):
+            raise IndexError(
+                f"plane_index {plane_index} is out of range for plane_shifts "
+                f"with length {len(plane_shifts)}"
+            )
 
         pt, pb, pl, pr = compute_pad_from_shifts(plane_shifts)
         H_out = H0 + pt + pb
@@ -168,6 +208,7 @@ def _write_plane(
         out_shape = (ntime, H_out, W_out)
         shift_applied = True
         metadata[f"plane{plane_index}_shift"] = (iy, ix)
+        logger.debug(f"Applying shift for plane {plane_index}: y={iy}, x={ix}")
 
     if not shift_applied:
         out_shape = (ntime, H0, W0)
@@ -371,6 +412,7 @@ def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
             metadata=_make_json_serializable(metadata) if is_first else {},
         )
     _write_tiff._first_write[filename] = False
+
 
 def _write_zarr(
     path,

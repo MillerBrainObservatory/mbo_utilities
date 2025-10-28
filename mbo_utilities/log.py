@@ -7,6 +7,7 @@ except ImportError:
 
 _level_override: int | None = None
 
+
 def set_global_level(level: int):
     global _level_override
     _level_override = level
@@ -14,6 +15,7 @@ def set_global_level(level: int):
     for name, lg in logging.Logger.manager.loggerDict.items():
         if isinstance(lg, logging.Logger) and name.startswith("mbo"):
             lg.setLevel(level)
+
 
 def get(subname: str | None = None) -> logging.Logger:
     name = "mbo" if subname is None else f"mbo.{subname}"
@@ -26,6 +28,7 @@ def get(subname: str | None = None) -> logging.Logger:
         if h not in lg.handlers:
             lg.addHandler(h)
     return lg
+
 
 _debug = bool(int(os.getenv("MBO_DEBUG", "0")))
 _level = logging.DEBUG if _debug else logging.INFO
@@ -60,7 +63,8 @@ def disable(*subs):
 
 def get_package_loggers():
     return [
-        name for name in logging.Logger.manager.loggerDict
+        name
+        for name in logging.Logger.manager.loggerDict
         if name.startswith("mbo.")
-           and isinstance(logging.Logger.manager.loggerDict[name], logging.Logger)
+        and isinstance(logging.Logger.manager.loggerDict[name], logging.Logger)
     ]

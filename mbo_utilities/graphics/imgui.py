@@ -1,3 +1,4 @@
+print("Starting imgui imports")
 import logging
 import webbrowser
 from pathlib import Path
@@ -24,7 +25,7 @@ from mbo_utilities.file_io import (
     get_mbo_dirs,
     save_last_savedir,
     get_last_savedir_path,
-    load_last_savedir
+    load_last_savedir,
 )
 from mbo_utilities.array_types import MboRawArray
 from mbo_utilities.graphics._imgui import (
@@ -70,6 +71,8 @@ except ImportError:
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
 
+print("Finished imgui imports")
+
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
 USER_PIPELINES = ["suite2p"]
 
@@ -77,6 +80,7 @@ USER_PIPELINES = ["suite2p"]
 def _save_as_worker(path, **imwrite_kwargs):
     data = imread(path, roi=imwrite_kwargs.pop("roi", None))
     imwrite(data, **imwrite_kwargs)
+
 
 def draw_menu(parent):
     # (accessible from the "Tools" menu)
@@ -176,7 +180,11 @@ def draw_saveas_popup(parent):
         imgui.set_next_item_width(hello_imgui.em_size(25))
 
         # Directory + Ext
-        current_dir_str = str(Path(parent._saveas_outdir).expanduser().resolve()) if parent._saveas_outdir else ""
+        current_dir_str = (
+            str(Path(parent._saveas_outdir).expanduser().resolve())
+            if parent._saveas_outdir
+            else ""
+        )
         changed, new_str = imgui.input_text("Save Dir", current_dir_str)
         if changed:
             parent._saveas_outdir = new_str
@@ -204,7 +212,7 @@ def draw_saveas_popup(parent):
             "Enable to save each mROI individually."
             " mROI's are saved to subfolders: plane1_roi1, plane1_roi2, etc."
             " These subfolders can be merged later using mbo_utilities.merge_rois()."
-            " This can be helpful as often mROI's are non-contiguous and can drift in orthogonal directions over time."
+            " This can be helpful as often mROI's are non-contiguous and can drift in orthogonal directions over time.",
         )
         if parent._saveas_rois:
             try:
@@ -251,7 +259,9 @@ def draw_saveas_popup(parent):
             "Overwrite", parent._overwrite, "Replace any existing output files."
         )
         parent._register_z = checkbox_with_tooltip(
-            "Register Z-Planes Axially", parent._register_z, "Register adjacent z-planes to each other using Suite3D."
+            "Register Z-Planes Axially",
+            parent._register_z,
+            "Register adjacent z-planes to each other using Suite3D.",
         )
         fix_phase_changed, fix_phase_value = imgui.checkbox(
             "Fix Scan Phase", parent._fix_phase
@@ -275,7 +285,9 @@ def draw_saveas_popup(parent):
         if imgui.is_item_hovered():
             imgui.begin_tooltip()
             imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-            imgui.text_unformatted("Use FFT-based subpixel registration (slower, more precise).")
+            imgui.text_unformatted(
+                "Use FFT-based subpixel registration (slower, more precise)."
+            )
             imgui.pop_text_wrap_pos()
             imgui.end_tooltip()
         if use_fft:
@@ -353,9 +365,7 @@ def draw_saveas_popup(parent):
                         not parent._saveas_selected_roi
                         or len(parent._saveas_selected_roi) == set()
                     ):
-                        parent._saveas_selected_roi = set(
-                            range(1, parent.num_rois + 1)
-                        )
+                        parent._saveas_selected_roi = set(range(1, parent.num_rois + 1))
                     rois = sorted(parent._saveas_selected_roi)
                 else:
                     rois = None
@@ -375,7 +385,8 @@ def draw_saveas_popup(parent):
                     "target_chunk_mb": parent._saveas_chunk_mb,
                     "use_fft": parent._use_fft,
                     "register_z": parent._register_z,
-                    "progress_callback": lambda frac, current_plane: parent.gui_progress_callback(frac, current_plane),
+                    "progress_callback": lambda frac,
+                    current_plane: parent.gui_progress_callback(frac, current_plane),
                 }
                 parent.logger.info(f"Saving planes {save_planes}")
                 parent.logger.info(
@@ -411,7 +422,7 @@ class PreviewDataWidget(EdgeWindow):
         scrollable: bool = False,
         auto_resize: bool = True,
         window_flags: int | None = None,
-        **kwargs
+        **kwargs,
     ):
         """
         Fastplotlib attachment, callable with fastplotlib.ImageWidget.add_gui(PreviewDataWidget)
@@ -470,9 +481,7 @@ class PreviewDataWidget(EdgeWindow):
         )
 
         self._default_imgui_font = io.fonts.add_font_from_file_ttf(
-            sans_serif_font,
-            14,
-            imgui.ImFontConfig()
+            sans_serif_font, 14, imgui.ImFontConfig()
         )
 
         imgui.push_font(self._default_imgui_font, self._default_imgui_font.legacy_size)
@@ -484,9 +493,14 @@ class PreviewDataWidget(EdgeWindow):
 
         self.num_arrays = len(self.image_widget.managed_graphics)
         self.shape = self.image_widget.data[0].shape
-        self.is_mbo_scan = (True if isinstance(self.image_widget.data[0], MboRawArray) else False)
+        self.is_mbo_scan = (
+            True if isinstance(self.image_widget.data[0], MboRawArray) else False
+        )
 
-        if hasattr(self.image_widget.data[0], "rois"):
+        if (
+            hasattr(self.image_widget.data[0], "rois")
+            and self.image_widget.data[0].rois is not None
+        ):
             self.num_rois = len(self.image_widget.data[0].rois)
             if self.num_arrays > 1:
                 self._array_type = "roi"
@@ -519,7 +533,9 @@ class PreviewDataWidget(EdgeWindow):
             subplot.toolbar = False
         self.image_widget._image_widget_sliders._loop = True  # noqa
 
-        self._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(self.num_rois)]
+        self._zstats = [
+            {"mean": [], "std": [], "snr": []} for _ in range(self.num_rois)
+        ]
         self._zstats_means = [None] * self.num_rois
         self._zstats_mean_scalar = [0.0] * self.num_rois
         self._zstats_done = [False] * self.num_rois
@@ -611,7 +627,6 @@ class PreviewDataWidget(EdgeWindow):
             self._register_z_progress = frac
             self._register_z_current_msg = meta
             self._register_z_done = frac >= 1.0
-
 
     @property
     def s2p_dir(self):
@@ -819,7 +834,9 @@ class PreviewDataWidget(EdgeWindow):
                 [np.array(s["snr"]) for s in stats_list if s and "snr" in s], axis=0
             )
 
-            z_vals = np.ascontiguousarray(np.arange(1, len(mean_vals) + 1, dtype=np.float64))
+            z_vals = np.ascontiguousarray(
+                np.arange(1, len(mean_vals) + 1, dtype=np.float64)
+            )
             mean_vals = np.ascontiguousarray(mean_vals, dtype=np.float64)
             std_vals = np.ascontiguousarray(std_vals, dtype=np.float64)
 
@@ -844,13 +861,15 @@ class PreviewDataWidget(EdgeWindow):
                             imgui.text(f"{val:.2f}")
                     imgui.end_table()
 
-            with imgui_ctx.begin_child("##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags):
+            with imgui_ctx.begin_child(
+                "##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
+            ):
                 imgui.text("Z-plane Signal: Combined")
                 set_tooltip(
                     f"Gray = per-ROI z-profiles (mean over frames)."
                     f" Blue shade = across-ROI mean ± std; blue line = mean."
                     f" Hover gray lines for values.",
-                    True
+                    True,
                 )
 
                 # build per-ROI series
@@ -874,25 +893,27 @@ class PreviewDataWidget(EdgeWindow):
                         "Z-Plane",
                         "Mean Fluorescence",
                         implot.AxisFlags_.none.value,
-                        implot.AxisFlags_.auto_fit.value
+                        implot.AxisFlags_.auto_fit.value,
                     )
 
                     implot.setup_axis_limits(
-                        implot.ImAxis_.x1.value,
-                        float(z[0]),
-                        float(z[-1])
+                        implot.ImAxis_.x1.value, float(z[0]), float(z[-1])
                     )
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
 
                     for i, ys in enumerate(roi_series):
                         label = f"ROI {i + 1}##roi{i}"
                         implot.push_style_var(implot.StyleVar_.line_weight.value, 1)
-                        implot.push_style_color(implot.Col_.line.value, (0.6, 0.6, 0.6, 0.35))
+                        implot.push_style_color(
+                            implot.Col_.line.value, (0.6, 0.6, 0.6, 0.35)
+                        )
                         implot.plot_line(label, z, ys)
                         implot.pop_style_color()
                         implot.pop_style_var()
 
-                    implot.push_style_color(implot.Col_.fill.value, (0.2, 0.4, 0.8, 0.25))
+                    implot.push_style_color(
+                        implot.Col_.fill.value, (0.2, 0.4, 0.8, 0.25)
+                    )
                     implot.plot_shaded("Mean ± Std##band", z, lower, upper)
                     implot.pop_style_color()
 
@@ -921,28 +942,49 @@ class PreviewDataWidget(EdgeWindow):
 
             imgui.text(f"Stats for {self._array_type} {array_idx + 1}")
 
-            with imgui_ctx.begin_child(f"##Summary{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags):
-                if imgui.begin_table(f"zstats{array_idx}", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):
+            with imgui_ctx.begin_child(
+                f"##Summary{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
+            ):
+                if imgui.begin_table(
+                    f"zstats{array_idx}",
+                    4,
+                    imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
+                ):
                     for col in ["Z", "Mean", "Std", "SNR"]:
-                        imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
+                        imgui.table_setup_column(
+                            col, imgui.TableColumnFlags_.width_stretch
+                        )
                     imgui.table_headers_row()
                     for j in range(n):
                         imgui.table_next_row()
-                        for val in (int(z_vals[j]), mean_vals[j], std_vals[j], snr_vals[j]):
+                        for val in (
+                            int(z_vals[j]),
+                            mean_vals[j],
+                            std_vals[j],
+                            snr_vals[j],
+                        ):
                             imgui.table_next_column()
                             imgui.text(f"{val:.2f}")
                     imgui.end_table()
 
             style_seaborn_dark()
-            with imgui_ctx.begin_child(f"##Plots1{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags):
+            with imgui_ctx.begin_child(
+                f"##Plots1{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
+            ):
                 imgui.text("Z-plane Signal: Mean ± Std")
-                if implot.begin_plot(f"Z-Plane Signal {array_idx}", imgui.ImVec2(-1, 300)):
-                    implot.setup_axes("Z-Plane", "Mean Fluorescence",
-                                      implot.AxisFlags_.auto_fit.value,
-                                      implot.AxisFlags_.auto_fit.value)
+                if implot.begin_plot(
+                    f"Z-Plane Signal {array_idx}", imgui.ImVec2(-1, 300)
+                ):
+                    implot.setup_axes(
+                        "Z-Plane",
+                        "Mean Fluorescence",
+                        implot.AxisFlags_.auto_fit.value,
+                        implot.AxisFlags_.auto_fit.value,
+                    )
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
-                    implot.plot_error_bars(f"Mean ± Std {array_idx}",
-                                           z_vals, mean_vals, std_vals)
+                    implot.plot_error_bars(
+                        f"Mean ± Std {array_idx}", z_vals, mean_vals, std_vals
+                    )
                     implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals)
                     implot.end_plot()
 
@@ -950,7 +992,6 @@ class PreviewDataWidget(EdgeWindow):
         imgui.dummy(imgui.ImVec2(0, 5))
         cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
         with imgui_ctx.begin_child("##PreviewChild", imgui.ImVec2(0, 0), cflags):
-
             imgui.spacing()
             imgui.separator()
             imgui.spacing()
@@ -961,13 +1002,19 @@ class PreviewDataWidget(EdgeWindow):
             imgui.begin_group()
 
             options = ["mean", "max", "std"]
-            disabled_label = ("mean-sub (pending)" if not all(self._zstats_done) else "mean-sub")
+            disabled_label = (
+                "mean-sub (pending)" if not all(self._zstats_done) else "mean-sub"
+            )
             options.append(disabled_label)
 
-            current_display_idx = options.index(self.proj if self._proj != "mean-sub" else disabled_label)
+            current_display_idx = options.index(
+                self.proj if self._proj != "mean-sub" else disabled_label
+            )
 
             imgui.set_next_item_width(hello_imgui.em_size(6))
-            proj_changed, selected_display_idx = imgui.combo("Projection", current_display_idx, options)
+            proj_changed, selected_display_idx = imgui.combo(
+                "Projection", current_display_idx, options
+            )
             set_tooltip(
                 "Choose projection method over the sliding window:\n\n"
                 " “mean” (average)\n"
@@ -1031,15 +1078,19 @@ class PreviewDataWidget(EdgeWindow):
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
             phase_changed, phase_value = imgui.checkbox("Fix Phase", self._fix_phase)
-            set_tooltip("Enable to apply scan-phase correction which shifts every other line/row of pixels "
-                        "to maximize correlation between these rows.")
+            set_tooltip(
+                "Enable to apply scan-phase correction which shifts every other line/row of pixels "
+                "to maximize correlation between these rows."
+            )
             if phase_changed:
                 self.fix_phase = phase_value
                 self.logger.info(f"Fix Phase: {phase_value}")
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
             fft_changed, fft_value = imgui.checkbox("Sub-Pixel (slower)", self._use_fft)
-            set_tooltip("Use FFT-based sub-pixel registration (slower but more accurate).")
+            set_tooltip(
+                "Use FFT-based sub-pixel registration (slower but more accurate)."
+            )
             if fft_changed:
                 self.use_fft = fft_value
                 self.logger.info(f"Use-FFT: {fft_value}")
@@ -1069,7 +1120,9 @@ class PreviewDataWidget(EdgeWindow):
                     display_text = f"{np.round(ofs, 2):.3f}"
 
                 if max_abs_offset > self.max_offset:
-                    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 0.0, 0.0, 1.0))
+                    imgui.push_style_color(
+                        imgui.Col_.text, imgui.ImVec4(1.0, 0.0, 0.0, 1.0)
+                    )
                     imgui.text(display_text)
                     imgui.pop_style_color()
                 else:
@@ -1077,7 +1130,9 @@ class PreviewDataWidget(EdgeWindow):
 
                 if is_sequence and imgui.is_item_hovered():
                     imgui.begin_tooltip()
-                    imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Per‐frame offsets:")
+                    imgui.text_colored(
+                        imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Per‐frame offsets:"
+                    )
                     for frame_idx, val in enumerate(ofs_list):
                         imgui.text(f"  frame {frame_idx}: {val:.3f}")
                     imgui.end_tooltip()
@@ -1086,9 +1141,12 @@ class PreviewDataWidget(EdgeWindow):
             imgui.columns(1)
 
             imgui.set_next_item_width(hello_imgui.em_size(5))
-            upsample_changed, upsample_val = imgui.input_int("Upsample", self._phase_upsample, step=1, step_fast=2)
+            upsample_changed, upsample_val = imgui.input_int(
+                "Upsample", self._phase_upsample, step=1, step_fast=2
+            )
             set_tooltip(
-                "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment.")
+                "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment."
+            )
             if upsample_changed:
                 self.phase_upsample = max(1, upsample_val)
                 self.logger.info(f"New upsample: {upsample_val}")
@@ -1155,7 +1213,7 @@ class PreviewDataWidget(EdgeWindow):
         self._tiff_lock = threading.Lock()
         for z in range(self.nz):
             with self._tiff_lock:
-                stack = arr[::10, z].astype(np.float32) # Z, Y, X
+                stack = arr[::10, z].astype(np.float32)  # Z, Y, X
                 mean_img = np.mean(stack, axis=0)
                 std_img = np.std(stack, axis=0)
                 snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
@@ -1177,10 +1235,13 @@ class PreviewDataWidget(EdgeWindow):
         stats, means = {"mean": [], "std": [], "snr": []}, []
         self._tiff_lock = threading.Lock()
 
-        for z in ([0] if arr.ndim == 3 else range(self.nz)):
-            with (self._tiff_lock):
-
-                stack = arr[::10].astype(np.float32) if arr.ndim == 3 else arr[::10, z].astype(np.float32)
+        for z in [0] if arr.ndim == 3 else range(self.nz):
+            with self._tiff_lock:
+                stack = (
+                    arr[::10].astype(np.float32)
+                    if arr.ndim == 3
+                    else arr[::10, z].astype(np.float32)
+                )
 
                 mean_img = np.mean(stack, axis=0)
                 std_img = np.std(stack, axis=0)
@@ -1199,7 +1260,6 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_means[idx - 1] = means_stack
         self._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
         self._zstats_done[idx - 1] = True
-
 
     def compute_zstats(self):
         if not self.image_widget or not self.image_widget.data:

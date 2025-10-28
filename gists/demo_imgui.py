@@ -14,7 +14,9 @@ def run_plane_bin(ops) -> bool:
 
     # input functional channel (unregistered)
     raw_file = ops.get("raw_file")
-    nframes_chan1 = ops.get("nframes_chan1") or ops.get("nframes") or ops.get("n_frames")
+    nframes_chan1 = (
+        ops.get("nframes_chan1") or ops.get("nframes") or ops.get("n_frames")
+    )
     if raw_file is None or nframes_chan1 is None:
         raise KeyError("Missing raw_file or nframes_chan1")
 
@@ -35,15 +37,22 @@ def run_plane_bin(ops) -> bool:
     if "diameter" in ops:
         if ops["diameter"] is not None and np.isnan(ops["diameter"]):
             ops["diameter"] = 8
-        if (ops["diameter"] is None or ops["diameter"] == 0) and ops.get("anatomical_only", 0) > 0:
+        if (ops["diameter"] is None or ops["diameter"] == 0) and ops.get(
+            "anatomical_only", 0
+        ) > 0:
             ops["diameter"] = 8
             print("Warning: diameter was not set, defaulting to 8.")
 
     with (
-        BinaryFile(Ly=Ly, Lx=Lx, filename=str(reg_file), n_frames=nframes_chan1) as f_reg,
+        BinaryFile(
+            Ly=Ly, Lx=Lx, filename=str(reg_file), n_frames=nframes_chan1
+        ) as f_reg,
         BinaryFile(Ly=Ly, Lx=Lx, filename=raw_file, n_frames=nframes_chan1) as f_raw,
-        (BinaryFile(Ly=Ly, Lx=Lx, filename=chan2_file, n_frames=nframes_chan2)
-         if chan2_file and nframes_chan2 else nullcontext()) as f_reg_chan2
+        (
+            BinaryFile(Ly=Ly, Lx=Lx, filename=chan2_file, n_frames=nframes_chan2)
+            if chan2_file and nframes_chan2
+            else nullcontext()
+        ) as f_reg_chan2,
     ):
         ops = pipeline(
             f_reg=f_reg,

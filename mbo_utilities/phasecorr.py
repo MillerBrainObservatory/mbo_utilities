@@ -174,10 +174,7 @@ def bidir_phasecorr(
         out = _apply_offset(arr.copy(), float(_offsets), use_fft)
     else:
         out = np.stack(
-            [
-                _apply_offset(f.copy(), float(s))
-                for f, s in zip(arr, _offsets)
-            ]
+            [_apply_offset(f.copy(), float(s)) for f, s in zip(arr, _offsets)]
         )
     return out, _offsets
 
@@ -192,14 +189,14 @@ def apply_scan_phase_offsets(arr, offs):
 
 
 if __name__ == "__main__":
-
     import numpy as np
     import tifffile
     from pathlib import Path
     from mbo_utilities import imread
 
     data_path = Path(
-        r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw\mk355_7_27_2025_180mw_right_m2_go_to_2x-mROI-880x1100um_220x550px_2um-px_14p00Hz_00001_00001_00001.tif")
+        r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw\mk355_7_27_2025_180mw_right_m2_go_to_2x-mROI-880x1100um_220x550px_2um-px_14p00Hz_00001_00001_00001.tif"
+    )
     data = imread(data_path)
     data.fix_phase = False
 

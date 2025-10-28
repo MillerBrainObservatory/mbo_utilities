@@ -11,6 +11,7 @@ from imgui_bundle import (
     portable_file_dialogs as pfd,
 )
 
+
 def setup_imgui():
     assets = Path(mbo.get_mbo_dirs()["base"]) / "imgui" / "assets"
     fonts_dst = assets / "fonts"
@@ -41,7 +42,9 @@ def setup_imgui():
 
     hello_imgui.set_assets_folder(str(assets))
 
+
 # setup_imgui()
+
 
 class FileDialog:
     def __init__(self):
@@ -62,7 +65,9 @@ class FileDialog:
 
     def render(self):
         pad = hello_imgui.em_to_vec2(3, 1)
-        imgui.push_style_var(imgui.StyleVar_.window_padding, hello_imgui.em_to_vec2(2, 2))
+        imgui.push_style_var(
+            imgui.StyleVar_.window_padding, hello_imgui.em_to_vec2(2, 2)
+        )
         imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(0.9, 0.9, 0.9, 1.0))
         imgui.push_style_color(imgui.Col_.separator, imgui.ImVec4(0.7, 0.7, 0.7, 0.25))
 
@@ -91,7 +96,9 @@ class FileDialog:
 
                 # prompt --------------------------------------------------
                 txt = "Select a file, multiple files, or a folder to preview:"
-                imgui.set_cursor_pos_x((imgui.get_window_width() - imgui.calc_text_size(txt).x) * 0.5)
+                imgui.set_cursor_pos_x(
+                    (imgui.get_window_width() - imgui.calc_text_size(txt).x) * 0.5
+                )
                 imgui.text_colored(imgui.ImVec4(1.0, 0.85, 0.3, 1.0), txt)
                 imgui.dummy(hello_imgui.em_to_vec2(0, 1))
 
@@ -100,7 +107,9 @@ class FileDialog:
                 x_file = (imgui.get_window_width() - bsz_file.x) * 0.5
                 imgui.set_cursor_pos_x(x_file)
                 if imgui.button("Open File(s)", bsz_file):
-                    self._open_multi = pfd.open_file("Select files", options=pfd.opt.multiselect)
+                    self._open_multi = pfd.open_file(
+                        "Select files", options=pfd.opt.multiselect
+                    )
                 if imgui.is_item_hovered():
                     imgui.set_tooltip("Open one or multiple supported files.")
 
@@ -123,7 +132,8 @@ class FileDialog:
 
                 imgui.begin_group()
                 _, self.split_rois = imgui.checkbox(
-                    "(Raw ScanImage tiffs only) Separate ScanImage mROIs", self.split_rois
+                    "(Raw ScanImage tiffs only) Separate ScanImage mROIs",
+                    self.split_rois,
                 )
                 set_tooltip(
                     "Display each ScanImage mROI separately in the preview widget. "
@@ -140,9 +150,7 @@ class FileDialog:
                 _, self.metadata_only = imgui.checkbox(
                     "Metadata Preview Only", self.metadata_only
                 )
-                set_tooltip(
-                    "Load only metadata for selected files (experimental)."
-                )
+                set_tooltip("Load only metadata for selected files (experimental).")
                 imgui.end_group()
 
                 # file/folder completion ---------------------------------
@@ -173,6 +181,7 @@ class FileDialog:
 
         imgui.pop_style_color(2)
         imgui.pop_style_var()
+
 
 if __name__ == "__main__":
     pass
