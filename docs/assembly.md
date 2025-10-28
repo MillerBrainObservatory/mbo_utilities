@@ -146,28 +146,125 @@ image_widget.close()
 
 ## Save assembled files
 
-The currently supported file extensions are `.tiff`, `.bin`, and `.hdf5`.
+The currently supported file extensions are `.tiff`, `.bin`, `.zarr`, and `.h5`.
 
-```{code-cell} text
+### Basic Usage: Stitch ROIs and Save All Planes
+
+```{code-cell} ipython3
+# Stitch all ROIs together (default behavior)
+scan.roi = None
+mbo.imwrite(scan, save_path, ext='.tiff')
+# Creates: plane01_stitched.tiff, plane02_stitched.tiff, ..., plane14_stitched.tiff
+```
+
+### Save Specific Planes
+
+```{code-cell} ipython3
+# Save only first, middle, and last planes (for 14-plane volume)
 mbo.imwrite(
     scan,
     save_path,
-    planes=[1, 7, 14], # for 14 z-planes, first, middle, last 
+    planes=[1, 7, 14],
     overwrite=False,
-    ext = '.bin',
-    fix_phase=True          # fix bi-directional scan phase offset
+    ext='.tiff'
 )
+# Creates: plane01_stitched.tiff, plane07_stitched.tiff, plane14_stitched.tiff
+```
 
-Initializing MBO Scan with parameters:
-roi: None, fix_phase: True, phasecorr_method: frame, border: 3, upsample: 5, max_offset: 4
-Scanning depth 0, ROI 0 
-Scanning depth 0, ROI 1 
-Raw tiff fully read.
-Scanning depth 0, ROI 0 
-Scanning depth 0, ROI 1 
-Saving plane01_stitched.tif: 100%|██████████| 108/108 [02:43<00:00,  1.51s/it]
-Saving plane07_stitched.tif: 100%|██████████| 108/108 [02:42<00:00,  1.51s/it]
-Saving plane14_stitched.tif: 100%|██████████| 108/108 [02:41<00:00,  1.50s/it]
+### ROI Handling Options
+
+```{code-cell} ipython3
+# Option 1: Stitch all ROIs together (default)
+scan.roi = None
+mbo.imwrite(scan, save_path / "stitched")
+# Creates: plane01_stitched.tiff, plane02_stitched.tiff, ...
+
+# Option 2: Save all ROIs as separate files
+scan.roi = 0
+mbo.imwrite(scan, save_path / "split_rois")
+# Creates: plane01_roi1.tiff, plane01_roi2.tiff, ..., plane14_roi1.tiff, plane14_roi2.tiff
+
+# Option 3: Save specific ROI only
+scan.roi = 1
+mbo.imwrite(scan, save_path / "roi1_only")
+# Creates: plane01_roi1.tiff, plane02_roi1.tiff, ..., plane14_roi1.tiff
+
+# Option 4: Save multiple specific ROIs
+scan.roi = [1, 3]
+mbo.imwrite(scan, save_path / "roi1_and_roi3")
+# Creates: plane01_roi1.tiff, plane01_roi3.tiff, ..., plane14_roi1.tiff, plane14_roi3.tiff
+```
+
+### Enable Phase Correction
+
+Fix bidirectional scan phase artifacts before saving:
+
+```{code-cell} ipython3
+scan.fix_phase = True
+scan.phasecorr_method = "mean"  # Options: "mean", "median", "max"
+scan.use_fft = True  # Use FFT-based correction (faster)
+mbo.imwrite(scan, save_path / "phase_corrected")
+```
+
+### Z-Plane Registration
+
+Align z-planes spatially using Suite3D registration:
+
+```{code-cell} ipython3
+# Automatic registration with Suite3D (requires Suite3D + CuPy installed)
+mbo.imwrite(
+    scan,
+    save_path / "registered",
+    register_z=True,
+    roi=None
+)
+# Computes rigid shifts and applies them during write
+# Validates registration results before proceeding
+```
+
+### Export Subset of Frames
+
+Useful for testing or creating demos:
+
+```{code-cell} ipython3
+# Export only first 1000 frames
+mbo.imwrite(scan, save_path / "test_data", num_frames=1000, planes=[1, 7, 14])
+```
+
+### Convert to Suite2p Binary Format
+
+```{code-cell} ipython3
+# Save as Suite2p-compatible binary files
+mbo.imwrite(scan, save_path / "suite2p", ext='.bin', roi=0)
+# Creates: plane01_roi1/data_raw.bin + ops.npy, plane01_roi2/data_raw.bin + ops.npy, ...
+```
+
+### Save to Zarr Format
+
+```{code-cell} ipython3
+# Save as Zarr v3 stores (efficient for large datasets)
+mbo.imwrite(scan, save_path / "zarr_data", ext='.zarr', roi=0)
+# Creates: plane01_roi1.zarr, plane01_roi2.zarr, ...
+```
+
+### Use Pre-Computed Registration Shifts
+
+```{code-cell} ipython3
+# Load previously computed shifts
+import numpy as np
+summary = np.load("previous_job/summary/summary.npy", allow_pickle=True).item()
+shift_vectors = summary['plane_shifts']  # shape: (n_planes, 2)
+
+# Apply shifts without re-running registration
+mbo.imwrite(scan, save_path / "registered", shift_vectors=shift_vectors)
+```
+
+### Example Output
+
+```text
+Saving plane01_stitched.tiff: 100%|██████████| 108/108 [02:43<00:00,  1.51s/it]
+Saving plane07_stitched.tiff: 100%|██████████| 108/108 [02:42<00:00,  1.51s/it]
+Saving plane14_stitched.tiff: 100%|██████████| 108/108 [02:41<00:00,  1.50s/it]
 ```
 
 ## Vizualize data with [fastplotlib](https://www.fastplotlib.org/user_guide/guide.html#what-is-fastplotlib)
