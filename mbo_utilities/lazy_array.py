@@ -576,8 +576,15 @@ def imread(
         logger.debug(f"Reading JSON files from {first}.")
         return ZarrArray(first.parent, **_filter_kwargs(ZarrArray, kwargs))
 
-    if first.suffix == ".npy" and (first.parent / "pmd_demixer.npy").is_file():
-        raise NotImplementedError("PMD Arrays are not yet supported.")
-        # return DemixingResultsArray(first.parent)
+    if first.suffix == ".npy":
+        # Check for PMD demixer arrays
+        if (first.parent / "pmd_demixer.npy").is_file():
+            raise NotImplementedError("PMD Arrays are not yet supported.")
+            # return DemixingResultsArray(first.parent)
+
+        # Regular .npy file - load as NumpyArray
+        from mbo_utilities.array_types import NumpyArray
+        logger.debug(f"Loading .npy file as NumpyArray: {first}")
+        return NumpyArray(first)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")

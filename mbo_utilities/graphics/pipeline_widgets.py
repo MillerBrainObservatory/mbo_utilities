@@ -500,13 +500,28 @@ def run_plane_from_data(self, arr_idx):
     # output base
     base_out = Path(self._saveas_outdir or get_last_savedir_path())
     base_out.mkdir(exist_ok=True)
-    plane_dir = base_out / f"plane{current_z + 1:02d}_roi{arr_idx + 1:02d}"
+
+    # Determine plane directory name based on ROI configuration
+    # Match naming convention from array_types.py:1155-1158
+    roi = getattr(arr, "roi", None)
+    if roi is None:
+        # Stitched data
+        plane_dirname = f"plane{current_z + 1:02d}_stitched"
+    else:
+        # Separate ROI data
+        plane_dirname = f"plane{current_z + 1:02d}_roi{roi}"
+
+    plane_dir = base_out / plane_dirname
     plane_dir.mkdir(parents=True, exist_ok=True)
     raw_file = plane_dir / "data_raw.bin"
     ops_path = plane_dir / "ops.npy"
 
     # slice the selected z and optional ROI region
-    data = arr[:, current_z, ind_x, ind_y].astype(np.int16)
+    data = arr[:, current_z, ind_x, ind_y]
+
+    # Force computation for lazy arrays (dask, etc.)
+    # np.asarray handles both dask arrays and memmap arrays correctly
+    data = np.asarray(data, dtype=np.int16)
 
     user_ops = {}
     if hasattr(self, "s2p"):
@@ -529,7 +544,9 @@ def run_plane_from_data(self, arr_idx):
             self.logger.info(f"Loading channel 2 from: {user_ops['chan2_file']}")
             chan2_arr = imread(user_ops["chan2_file"])
             # Slice same z and ROI from chan2 data
-            chan2_data = chan2_arr[:, current_z, ind_x, ind_y].astype(np.int16)
+            chan2_data = chan2_arr[:, current_z, ind_x, ind_y]
+            # Force computation for lazy arrays (dask, etc.)
+            chan2_data = np.asarray(chan2_data, dtype=np.int16)
             # Get minimum frames between functional and structural
             min_frames = min(data.shape[0], chan2_data.shape[0])
             # Trim both to same number of frames
@@ -545,7 +562,9 @@ def run_plane_from_data(self, arr_idx):
     md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "original_file": str(self.fpath),
-        "roi_index": arr_idx,
+        "roi_index": arr_idx,  # Array index in ImageWidget
+        "mroi": roi,  # Actual ROI number or None for stitched
+        "roi": roi,  # Alias for mroi (matches array_types.py convention)
         "z_index": current_z,
         "plane": current_z + 1,
         "num_frames": min_frames,  # Use minimum frame count
