@@ -14,37 +14,28 @@ kernelspec:
 (assembly)=
 # Image Assembly
 
-`````{admonition} TLDR
-:class: dropdown
+Converting raw scanimage-tiff files into fused z-planes.
 
-If all you want is code to get started, this will 
-``` python
+## Quickstart
+
+All you need is a path to your .tiffs and a place to save them.
+
+```python
 import mbo_utilities as mbo
-scan = mbo.imread("path/to/data/*.tiff") # or list of full filepaths
-mbo.imwrite(scan, "path/to/assembled_data")
+
+scan = mbo.imread(r"path/to/tiffs*")  # glob or list of filepaths
+
+# Save options:
+scan.roi = 1        # save just mROI 1
+scan.roi = [1, 2]   # save mROI 1 and 2
+scan.roi = 0        # save all mROIs separately
+scan.roi = None     # stitch/fuse all mROIs
+
+mbo.imwrite(scan, "/path/to/save", planes=[1, 7, 14])
+# Creates: plane_01.tiff, plane_07.tiff, plane_14.tiff
 ```
-
-```{figure} ./_images/progress_bar.png
-A progress bar will track the current file progress.
-```
-``````
-
-## Overview
-
-This section covers the steps to convert raw scanimage-tiff files into assembled, planar timeseries.
-
-```{figure}  ./_images/assembly_1.png
-:align: center
-
-Overview of pre-processing steps that convert the raw scanimage tiffs into planar timeseries.
-Starting with a raw, multi-page ScanImage Tiff, frames are {ref}`deinterleaved <ex_deinterleave>`, optionally pre-processed to eliminate scan-phase artifacts,
-and fused to create an assembled timeseries. 
-```
-
-----
 
 ```{code-cell} ipython3
-# imports
 from pathlib import Path
 import numpy as np
 
@@ -54,94 +45,47 @@ import mbo_utilities as mbo
 
 ## Input data: Path to your raw .tiff file(s)
 
-```{admonition} One session per folder
-:class: dropdown
+Make sure your `data_path` contains only `.tiff` files for this imaging session. If there are other `.tiff` files, such as from another session or a processed file for this session, those files will be included in the scan and lead to errors.
 
-Make sure your `data_path` contains only `.tiff` files for this imaging session.
-If there are other `.tiff` files, such as from another session or a processed file for this session, those files will be included in the scan and lead to errors.
+## Initialize a scanreader object
 
-```
+Pass a list of files, or a wildcard string (e.g. "/path/to/files/*" matches all files in that directory) to `mbo.imread()`.
 
-+++
-
-## Ini
-
-Pass a list of files, or a wildcard "/path/to/files/*" to `mbo.read_scan()`.
-
-``` {tip}
-{func}`mbo_utilities.get_files` is useful to easily get all files of the same filetype.
-By default, this will ensure your raw tiffs are numerically sorted in order of acquisition time.
-```
+**Tip:** `mbo.get_files()` is useful to easily get all files of the same filetype.
 
 ```{code-cell} ipython3
-files = mbo.get_files("path//to//animal_01//raw", 'tif')
-files[:2]
-
-['/home/flynn/lbm_data/raw/mk301_03_01_2025_2roi_17p07hz_224x448px_2umpx_180mw_green_00001.tif',
- '/home/flynn/lbm_data/raw/mk301_03_01_2025_2roi_17p07hz_224x448px_2umpx_180mw_green_00002.tif']
+files = mbo.get_files("/path/to/data/raw", 'tif')
+len(files)
 ```
 
 ```{code-cell} ipython3
 scan = mbo.imread(files)
-
-# T, Z, X, Y
-scan.shape
 ```
 
 ```{code-cell} ipython3
 print(f'Planes: {scan.num_channels}')
-print(f'Planes: {scan.num_planes}')  # same as num_channels for MBO recordings
 print(f'Frames: {scan.num_frames}')
 print(f'ROIs: {scan.num_rois}')
-print(f'Frame-Rate: {scan.frame_rate}')
-print(f'Spatial Resolution: {scan.frame_rate}')
+print(f'Shape (T, Z, Y, X): {scan.shape}')
 ```
 
 ## Accessing data in the scan
 
-The scan can be indexed like a numpy array, data will be loaded lazily as only the data you access here is loaded in memory.
+Numpy-like indexing:
 
-```{code-cell} ipython3
-# load the first 6 frames (0 to 5), the first z-plane, and all X/Y pixels
-array = scan[:5, 0, :, :]
-print(f'[T, X, Y]: {array.shape}')
-
-# load a z stack, with a single frame for each Z
-array = scan[0, :, :, :]
-print(f'[Z, X, Y]: {array.shape}')
-```
-
-```{admonition} A note on performance
-:class: dropdown
-
-When you initialize a scan with `read_scan`, [tifffile](https://github.com/cgohlke/tifffile/blob/master/tifffile/tifffile.py) is going to iterate through every page in your tiff to "count" how many pages there are.
-. Only a single page of data is held in memory, and using that information we can lazily load the scan (this is what the scanreader does).
-
-For a single 35 Gb file, this process takes ~10 seconds.
-For 216 files totaling 231 GB, ~ 2 minutes.
-
-This only occurs once, and is cached by your operating system. So the next time you read the same scan, a 35GB file will be nearly instant, and a series of 216 files ~8 seconds.
-
+```python
+frame = scan[0, 0, :, :]   # first frame, plane 1
+zplane7 = scan[:, 6, :, :] # all frames from z-plane 7
 ```
 
 ```{code-cell} ipython3
-import matplotlib.pyplot as plt
-%matplotlib inline
-
-plt.imshow(np.mean(scan[:100, 6, :, :], axis=0))
-plt.title('Mean Image for first 100 frames')
-plt.show()
-```
-
-This will display a widget allowing you to scroll in time and in z.
-
-```{code-cell} ipython3
-image_widget = mbo.run_gui(scan)
-image_widget.show()
+# Visualize the data
+iw = scan.imshow()
+iw.show()
 ```
 
 ```{code-cell} ipython3
-image_widget.close()
+iw.close()
 ```
 
 ## Save assembled files
@@ -151,6 +95,9 @@ The currently supported file extensions are `.tiff`, `.bin`, `.zarr`, and `.h5`.
 ### Basic Usage: Stitch ROIs and Save All Planes
 
 ```{code-cell} ipython3
+save_path = Path("/path/to/save")
+save_path.mkdir(exist_ok=True)
+
 # Stitch all ROIs together (default behavior)
 scan.roi = None
 mbo.imwrite(scan, save_path, ext='.tiff')
@@ -279,7 +226,7 @@ More advanced visualizations can be easily created, i.e. adding a baseline subtr
 import tifffile
 from ipywidgets import VBox
 
-img = mbo.imread("path/to/assembled/plane_07.tiff")
+img = mbo.imread("path/to/assembled/plane07_stitched.tiff")
 iw_movie = fpl.ImageWidget(img, cmap="viridis")
 
 tfig = fpl.Figure()
@@ -289,14 +236,9 @@ raw_trace = tfig[0, 0].add_line(np.zeros(img.shape[0]))
 @iw_movie.managed_graphics[0].add_event_handler("click")
 def pixel_clicked(ev):
     col, row = ev.pick_info["index"]
-    raw_trace.data[:, 1] =  iw_movie.data[0][:, row, col]
+    raw_trace.data[:, 1] = iw_movie.data[0][:, row, col]
     tfig[0, 0].auto_scale(maintain_aspect=False)
 
 VBox([iw_movie.show(), tfig.show()])
-```
-
-## Under the hood
-
-```{figure}  ./_images/ex_diagram.png
 ```
 
