@@ -257,6 +257,7 @@ class Suite2pArray:
             raise ValueError(f"Unsupported input: {path}")
 
         self.metadata = np.load(ops_path, allow_pickle=True).item()
+        self.num_rois = self.metadata.get("num_rois", 1)
 
         # resolve both possible bins
         self.raw_file = Path(self.metadata.get("raw_file", path.with_name("data_raw.bin")))
@@ -286,6 +287,7 @@ class Suite2pArray:
             raise FileNotFoundError(new_file)
         self._file = np.memmap(new_file, mode="r", dtype=self.dtype, shape=self.shape)
         self.active_file = new_file
+
     def __getitem__(self, key):
         return self._file[key]
 
@@ -454,6 +456,7 @@ class MBOTiffArray:
 
         # collect metadata from first TIFF
         self._metadata = get_metadata(self.filenames)
+        self.num_rois = self.metadata.get("num_rois", 1)
 
         self.tags = [derive_tag_from_filename(f) for f in self.filenames]
 
@@ -566,6 +569,7 @@ class TiffArray:
             self.filenames = expand_paths(self.filenames)
         self.filenames = [Path(p) for p in self.filenames]
         self._metadata = _safe_get_metadata(self.filenames[0])
+        self.num_rois = self._metadata.get("num_rois", 1)
 
     @property
     def chunks(self):
