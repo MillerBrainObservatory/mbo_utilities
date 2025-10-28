@@ -38,13 +38,14 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
         dlg.metadata_only,
     )
 
+
 @click.command()
 @click.option(
     "--roi",
     multiple=True,
     type=int,
     help="ROI index (can pass multiple, e.g. --roi 0 --roi 2). Leave empty for None."
-         " If 0 is passed, all ROIs will be shown (only for Raw files).",
+    " If 0 is passed, all ROIs will be shown (only for Raw files).",
     default=None,
 )
 @click.option(
@@ -74,6 +75,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
     roi_final = normalize_roi(roi_cli if roi_cli is not None else roi_gui)
 
     from mbo_utilities.lazy_array import imread
+
     data_array = imread(data_in, roi=roi_final)
 
     if metadata_only:
@@ -84,9 +86,11 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
 
         def _render():
             from mbo_utilities.graphics._widgets import draw_metadata_inspector
+
             draw_metadata_inspector(metadata)
 
         from imgui_bundle import immapp, hello_imgui
+
         params = hello_imgui.RunnerParams()
         params.app_window_params.window_title = "MBO Metadata Viewer"
         params.app_window_params.window_geometry.size = (800, 800)
@@ -101,6 +105,7 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
         return
 
     import fastplotlib as fpl
+
     if hasattr(data_array, "rois"):
         arrays = []
         names = []

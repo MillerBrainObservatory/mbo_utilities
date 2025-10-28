@@ -4,6 +4,7 @@ from pathlib import Path
 # from lbm_suite2p_python import load_ops
 
 from mbo_utilities import get_files, imread, imwrite
+
 # import lbm_suite2p_python as lsp
 # from lbm_suite2p_python.run_lsp import run_plane_bin, _should_register
 from mbo_utilities.file_io import MBO_SUPPORTED_FTYPES
@@ -18,7 +19,6 @@ data.use_fft = True
 times = {}
 
 if __name__ == "__main__":
-
     for ext in MBO_SUPPORTED_FTYPES:
         start = time.time()
         imwrite(
@@ -31,7 +31,6 @@ if __name__ == "__main__":
         )
         end = time.time()
         times[ext] = f"{end - start:.2f}"
-
 
     times = {}
     data.roi = None

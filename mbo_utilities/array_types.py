@@ -18,7 +18,9 @@ from mbo_utilities import log
 from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
     _convert_range_to_slice,
-    expand_paths, files_to_dask, derive_tag_from_filename,
+    expand_paths,
+    files_to_dask,
+    derive_tag_from_filename,
 )
 from mbo_utilities.metadata import get_metadata
 from mbo_utilities.phasecorr import ALL_PHASECORR_METHODS, bidir_phasecorr
@@ -125,7 +127,9 @@ def validate_s3d_registration(s3d_job_dir: Path, num_planes: int = None) -> bool
         plane_shifts = np.asarray(plane_shifts)
 
         if plane_shifts.ndim != 2 or plane_shifts.shape[1] != 2:
-            logger.warning(f"plane_shifts has invalid shape: {plane_shifts.shape}, expected (n_planes, 2)")
+            logger.warning(
+                f"plane_shifts has invalid shape: {plane_shifts.shape}, expected (n_planes, 2)"
+            )
             return False
 
         if num_planes is not None and len(plane_shifts) != num_planes:
@@ -134,7 +138,9 @@ def validate_s3d_registration(s3d_job_dir: Path, num_planes: int = None) -> bool
             )
             return False
 
-        logger.debug(f"Valid Suite3D registration found with {len(plane_shifts)} plane shifts")
+        logger.debug(
+            f"Valid Suite3D registration found with {len(plane_shifts)} plane shifts"
+        )
         return True
 
     except Exception as e:
@@ -143,10 +149,7 @@ def validate_s3d_registration(s3d_job_dir: Path, num_planes: int = None) -> bool
 
 
 def register_zplanes_s3d(
-        filenames,
-        metadata,
-        outpath=None,
-        progress_callback=None
+    filenames, metadata, outpath=None, progress_callback=None
 ) -> Path | None:
     # these are heavy imports, lazy import for now
     try:
@@ -184,7 +187,9 @@ def register_zplanes_s3d(
         return None
 
     if "frame_rate" not in metadata or "num_planes" not in metadata:
-        logger.warning("Missing required metadata for axial alignment: frame_rate / num_planes")
+        logger.warning(
+            "Missing required metadata for axial alignment: frame_rate / num_planes"
+        )
         return None
 
     if outpath is not None:
@@ -260,14 +265,18 @@ class Suite2pArray:
         self.num_rois = self.metadata.get("num_rois", 1)
 
         # resolve both possible bins
-        self.raw_file = Path(self.metadata.get("raw_file", path.with_name("data_raw.bin")))
+        self.raw_file = Path(
+            self.metadata.get("raw_file", path.with_name("data_raw.bin"))
+        )
         self.reg_file = Path(self.metadata.get("reg_file", path.with_name("data.bin")))
 
         # choose which one to use
         if path.suffix == ".bin":
             self.active_file = path
         else:
-            self.active_file = self.reg_file if self.reg_file.exists() else self.raw_file
+            self.active_file = (
+                self.reg_file if self.reg_file.exists() else self.raw_file
+            )
 
         # confirm
         if not self.active_file.exists():
@@ -278,7 +287,9 @@ class Suite2pArray:
         self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
         self.shape = (self.nframes, self.Ly, self.Lx)
         self.dtype = np.int16
-        self._file = np.memmap(self.active_file, mode="r", dtype=self.dtype, shape=self.shape)
+        self._file = np.memmap(
+            self.active_file, mode="r", dtype=self.dtype, shape=self.shape
+        )
         self.filenames = [self.active_file]
 
     def switch_channel(self, use_raw=False):
@@ -354,6 +365,7 @@ class Suite2pArray:
         window_funcs = kwargs.get("window_funcs", None)
 
         import fastplotlib as fpl
+
         return fpl.ImageWidget(
             data=arrays,
             names=names,
@@ -526,7 +538,11 @@ class MBOTiffArray:
         outpath = Path(outpath)
         ext = ext.lower().lstrip(".")
         fname = f"plane{plane:03d}.{ext}" if ext != "bin" else "data_raw.bin"
-        target = outpath.joinpath(fname) if outpath.is_dir() else outpath.parent.joinpath(fname)
+        target = (
+            outpath.joinpath(fname)
+            if outpath.is_dir()
+            else outpath.parent.joinpath(fname)
+        )
 
         _write_plane(
             self,
@@ -556,6 +572,7 @@ class NpyArray:
         self.shape = self._file.shape
         self.dtype = self._file.dtype
         self.ndim = self._file.ndim
+
 
 @dataclass
 class TiffArray:
@@ -645,6 +662,7 @@ class TiffArray:
 
     def imshow(self, **kwargs):
         import fastplotlib as fpl
+
         histogram_widget = kwargs.get("histogram_widget", True)
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
         window_funcs = kwargs.get("window_funcs", None)
@@ -681,15 +699,15 @@ class TiffArray:
 
 class MboRawArray:
     def __init__(
-            self,
-            files: str | Path | list,
-            roi: int | Sequence[int] | None = None,
-            fix_phase: bool = True,
-            phasecorr_method: str = "mean",
-            border: int | tuple[int, int, int, int] = 3,
-            upsample: int = 5,
-            max_offset: int = 4,
-            use_fft: bool = False,
+        self,
+        files: str | Path | list,
+        roi: int | Sequence[int] | None = None,
+        fix_phase: bool = True,
+        phasecorr_method: str = "mean",
+        border: int | tuple[int, int, int, int] = 3,
+        upsample: int = 5,
+        max_offset: int = 4,
+        use_fft: bool = False,
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
@@ -754,7 +772,9 @@ class MboRawArray:
 
         # Calculate actual heights: distribute available height (excluding flyback) proportionally
         total_metadata_height = sum(heights_from_metadata)
-        total_available_height = actual_page_height - (len(roi_groups) - 1) * num_fly_to_lines
+        total_available_height = (
+            actual_page_height - (len(roi_groups) - 1) * num_fly_to_lines
+        )
 
         # Calculate actual heights for each ROI (proportionally)
         actual_heights = []
@@ -764,7 +784,11 @@ class MboRawArray:
                 # Last ROI gets remaining height to avoid rounding errors
                 height = remaining_height
             else:
-                height = int(round(metadata_height * total_available_height / total_metadata_height))
+                height = int(
+                    round(
+                        metadata_height * total_available_height / total_metadata_height
+                    )
+                )
                 remaining_height -= height
             actual_heights.append(height)
 
@@ -774,12 +798,12 @@ class MboRawArray:
 
         for i, (roi_data, height) in enumerate(zip(roi_groups, actual_heights)):
             roi_info = {
-                'y_start': y_offset,
-                'y_end': y_offset + height,  # Exclude flyback lines
-                'width': actual_page_width,
-                'height': height,
-                'x': 0,
-                'slice': slice(y_offset, y_offset + height),  # Only the ROI data
+                "y_start": y_offset,
+                "y_end": y_offset + height,  # Exclude flyback lines
+                "width": actual_page_width,
+                "height": height,
+                "x": 0,
+                "slice": slice(y_offset, y_offset + height),  # Only the ROI data
             }
             rois.append(roi_info)
 
@@ -787,8 +811,12 @@ class MboRawArray:
             y_offset += height + num_fly_to_lines
 
         # Debug info
-        logger.debug(f"ROI structure: {[(r['y_start'], r['y_end'], r['height']) for r in rois]}")
-        logger.debug(f"Total calculated height: {y_offset - num_fly_to_lines}, actual page: {actual_page_height}")
+        logger.debug(
+            f"ROI structure: {[(r['y_start'], r['y_end'], r['height']) for r in rois]}"
+        )
+        logger.debug(
+            f"Total calculated height: {y_offset - num_fly_to_lines}, actual page: {actual_page_height}"
+        )
 
         return rois
 
@@ -906,21 +934,21 @@ class MboRawArray:
         x_offset = 0
         slices = []
         for roi in self._rois:
-            slices.append(slice(x_offset, x_offset + roi['width']))
-            x_offset += roi['width']
+            slices.append(slice(x_offset, x_offset + roi["width"]))
+            x_offset += roi["width"]
         return slices
 
     @property
     def output_yslices(self):
-        return [slice(0, roi['height']) for roi in self._rois]
+        return [slice(0, roi["height"]) for roi in self._rois]
 
     @property
     def yslices(self):
-        return [roi['slice'] for roi in self._rois]
+        return [roi["slice"] for roi in self._rois]
 
     @property
     def xslices(self):
-        return [slice(0, roi['width']) for roi in self._rois]
+        return [slice(0, roi["width"]) for roi in self._rois]
 
     def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **_):
         pages = [f * self.num_channels + z for f in frames for z in chans]
@@ -994,22 +1022,29 @@ class MboRawArray:
         """Dispatch ROI processing. Handles single ROI, multiple ROIs, or all ROIs (None)."""
         if self.roi is not None:
             if isinstance(self.roi, list):
-                return tuple(self.process_single_roi(r - 1, frames, chans) for r in self.roi)
+                return tuple(
+                    self.process_single_roi(r - 1, frames, chans) for r in self.roi
+                )
             elif self.roi == 0:
-                return tuple(self.process_single_roi(r, frames, chans) for r in range(self.num_rois))
+                return tuple(
+                    self.process_single_roi(r, frames, chans)
+                    for r in range(self.num_rois)
+                )
             elif isinstance(self.roi, int):
                 return self.process_single_roi(self.roi - 1, frames, chans)
 
         # roi=None: Horizontally concatenate ROIs
-        total_width = sum(roi['width'] for roi in self._rois)
-        max_height = max(roi['height'] for roi in self._rois)
-        out = np.zeros((len(frames), len(chans), max_height, total_width), dtype=self.dtype)
+        total_width = sum(roi["width"] for roi in self._rois)
+        max_height = max(roi["height"] for roi in self._rois)
+        out = np.zeros(
+            (len(frames), len(chans), max_height, total_width), dtype=self.dtype
+        )
 
         for roi_idx in range(self.num_rois):
             roi_data = self._read_pages(
                 frames,
                 chans,
-                yslice=self._rois[roi_idx]['slice'],  # Where to extract from TIFF
+                yslice=self._rois[roi_idx]["slice"],  # Where to extract from TIFF
                 xslice=slice(None),
             )
             # Where to place in output (horizontal concatenation)
@@ -1024,7 +1059,7 @@ class MboRawArray:
         return self._read_pages(
             frames,
             chans,
-            yslice=roi['slice'],
+            yslice=roi["slice"],
             xslice=slice(None),  # or slice(0, roi['width'])
         )
 
@@ -1056,12 +1091,12 @@ class MboRawArray:
                     return (
                         self.num_frames,
                         self.num_channels,
-                        roi['height'],
-                        roi['width'],
+                        roi["height"],
+                        roi["width"],
                     )
         # roi = None: return horizontally concatenated shape
-        total_width = sum(roi['width'] for roi in self._rois)
-        max_height = max(roi['height'] for roi in self._rois)
+        total_width = sum(roi["width"] for roi in self._rois)
+        max_height = max(roi["height"] for roi in self._rois)
         return (
             self.num_frames,
             self.num_channels,
@@ -1071,14 +1106,9 @@ class MboRawArray:
 
     def size(self):
         """Total number of elements."""
-        total_width = sum(roi['width'] for roi in self._rois)
-        max_height = max(roi['height'] for roi in self._rois)
-        return (
-                self.num_frames
-                * self.num_channels
-                * max_height
-                * total_width
-        )
+        total_width = sum(roi["width"] for roi in self._rois)
+        max_height = max(roi["height"] for roi in self._rois)
+        return self.num_frames * self.num_channels * max_height * total_width
 
     @property
     def _page_height(self):
@@ -1114,7 +1144,9 @@ class MboRawArray:
         elif isinstance(planes, (list, tuple)):
             planes = [p - 1 for p in planes]
         else:
-            raise RuntimeError(f"Invalid values for requested z-plane type: {type(planes)}")
+            raise RuntimeError(
+                f"Invalid values for requested z-plane type: {type(planes)}"
+            )
         for roi in iter_rois(self):
             for plane in planes:
                 if not isinstance(plane, int):
@@ -1183,6 +1215,7 @@ class MboRawArray:
         )
         window_funcs = kwargs.get("window_funcs", None)
         import fastplotlib as fpl
+
         return fpl.ImageWidget(
             data=arrays,
             names=names,
@@ -1195,11 +1228,7 @@ class MboRawArray:
 
 
 class NumpyArray:
-    def __init__(
-            self,
-            array: np.ndarray | str | Path,
-            metadata: dict | None = None
-    ):
+    def __init__(self, array: np.ndarray | str | Path, metadata: dict | None = None):
         if isinstance(array, (str, Path)):
             self.path = Path(array)
             if not self.path.exists():
@@ -1295,7 +1324,9 @@ class ZarrArray:
             import zarr
             # v3.0 +
         except ImportError:
-            logger.error("zarr is not installed. Install with `uv pip install zarr>=3.1.3`.")
+            logger.error(
+                "zarr is not installed. Install with `uv pip install zarr>=3.1.3`."
+            )
             zarr = None
             return
 
@@ -1366,7 +1397,7 @@ class ZarrArray:
         def normalize(idx):
             # convert contiguous lists to slices for zarr
             if isinstance(idx, list) and len(idx) > 0:
-                if all(idx[i] + 1 == idx[i+1] for i in range(len(idx)-1)):
+                if all(idx[i] + 1 == idx[i + 1] for i in range(len(idx) - 1)):
                     return slice(idx[0], idx[-1] + 1)
                 else:
                     return np.array(idx)  # will require looping later
@@ -1454,6 +1485,7 @@ class ZarrArray:
 def supports_roi(obj):
     return hasattr(obj, "roi") and hasattr(obj, "num_rois")
 
+
 def normalize_roi(value):
     """Return ROI as None, int, or list[int] with consistent semantics."""
     if value in (None, (), [], False):
@@ -1465,6 +1497,7 @@ def normalize_roi(value):
     if isinstance(value, (list, tuple)):
         return list(value)
     return value
+
 
 def iter_rois(obj):
     """Yield ROI indices based on MBO semantics.
@@ -1493,6 +1526,7 @@ def iter_rois(obj):
                 yield from range(1, num_rois + 1)
             else:
                 yield r
+
 
 def _to_tzyx(a: da.Array, axes: str) -> da.Array:
     order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
@@ -1528,6 +1562,7 @@ def _to_tzyx(a: da.Array, axes: str) -> da.Array:
             a = da.transpose(a, axes=keep + yx_pos)
     return a
 
+
 def _axes_or_guess(arr_ndim: int) -> str:
     if arr_ndim == 2:
         return "YX"
@@ -1537,6 +1572,7 @@ def _axes_or_guess(arr_ndim: int) -> str:
         return "TZYX"
     else:
         return "Unknown"
+
 
 def _safe_get_metadata(path: Path) -> dict:
     try:

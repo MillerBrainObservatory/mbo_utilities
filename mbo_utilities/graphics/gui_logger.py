@@ -4,22 +4,32 @@ from imgui_bundle import imgui
 from .. import log
 
 GUI_LOGGERS = log.get_package_loggers()
-LEVELS = ["DEBUG","INFO","WARNING","ERROR","CRITICAL"]
+LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 LEVEL_VAL = {n: getattr(logging, n) for n in LEVELS}
 
+
 class _GuiNameFilter(logging.Filter):
-    def __init__(self, gui_logger): super().__init__(); self.gui_logger = gui_logger
-    def filter(self, record): return 1 if self.gui_logger.active_loggers.get(record.name, True) else 0
+    def __init__(self, gui_logger):
+        super().__init__()
+        self.gui_logger = gui_logger
+
+    def filter(self, record):
+        return 1 if self.gui_logger.active_loggers.get(record.name, True) else 0
+
 
 class GuiLogHandler(logging.Handler):
     def __init__(self, gui_logger):
         super().__init__()
         self.gui_logger = gui_logger
         self.addFilter(_GuiNameFilter(gui_logger))  # key line
+
     def emit(self, record):
         t = time.strftime("%H:%M:%S")
-        lvl = {10:"debug",20:"info",30:"warning",40:"error",50:"error"}.get(record.levelno,"info")
+        lvl = {10: "debug", 20: "info", 30: "warning", 40: "error", 50: "error"}.get(
+            record.levelno, "info"
+        )
         self.gui_logger.messages.append((t, lvl, record.name, self.format(record)))
+
 
 class GuiLogger:
     def __init__(self):

@@ -3,8 +3,10 @@ import shutil
 import time
 from pathlib import Path
 
+
 def dir_size_bytes(p: Path) -> int:
     return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+
 
 def copy_dir(src: Path, dst: Path) -> dict:
     if dst.exists():
@@ -13,9 +15,10 @@ def copy_dir(src: Path, dst: Path) -> dict:
     shutil.copytree(src, dst)
     elapsed = time.time() - start
     size_bytes = dir_size_bytes(src)
-    mb = size_bytes / (1024 ** 2)
+    mb = size_bytes / (1024**2)
     mbps = mb / elapsed if elapsed > 0 else 0
     return {"name": src.name, "size_mb": mb, "elapsed": elapsed, "mbps": mbps}
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -59,8 +62,11 @@ def main():
     total_time = sum(m["elapsed"] for m in results)
     avg_mbps = total_mb / total_time if total_time > 0 else 0
     for m in results:
-        print(f"  {m['name']:<15} {m['size_mb']:8.1f} MB  {m['elapsed']:8.2f}s  {m['mbps']:6.1f} MB/s")
+        print(
+            f"  {m['name']:<15} {m['size_mb']:8.1f} MB  {m['elapsed']:8.2f}s  {m['mbps']:6.1f} MB/s"
+        )
     print(f"\nTotal: {total_mb:.1f} MB in {total_time:.2f}s (avg {avg_mbps:.1f} MB/s)")
+
 
 if __name__ == "__main__":
     main()

@@ -124,7 +124,9 @@ def _write_plane(
         apply_shift = False
 
     if shift_vector is not None:
-        logger.debug(f"Using provided shift_vector of type {type(shift_vector)} length {len(shift_vector)}")
+        logger.debug(
+            f"Using provided shift_vector of type {type(shift_vector)} length {len(shift_vector)}"
+        )
         apply_shift = True
         if plane_index is not None:
             iy, ix = map(int, shift_vector)
@@ -157,14 +159,12 @@ def _write_plane(
             summary = np.load(Path(summary_path), allow_pickle=True).item()
         except Exception as e:
             raise RuntimeError(
-                f"Failed to load summary file: {summary_path}\n"
-                f"Error: {e}"
+                f"Failed to load summary file: {summary_path}\nError: {e}"
             )
 
         if not isinstance(summary, dict):
             raise ValueError(
-                f"Summary file is not a dict: {type(summary)}\n"
-                f"Path: {summary_path}"
+                f"Summary file is not a dict: {type(summary)}\nPath: {summary_path}"
             )
 
         if "plane_shifts" not in summary:
@@ -412,6 +412,7 @@ def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
             metadata=_make_json_serializable(metadata) if is_first else {},
         )
     _write_tiff._first_write[filename] = False
+
 
 def _write_zarr(
     path,

@@ -146,6 +146,7 @@ def draw_zstats_progress(self):
             done=done,
         )
 
+
 def draw_register_z_progress(self):
     key = "register_z"
     state = _progress_state[key]

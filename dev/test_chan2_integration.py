@@ -2,6 +2,7 @@
 Test script to validate chan2 integration in run_plane_from_data.
 This tests the logic of loading and writing both functional and structural channels.
 """
+
 import numpy as np
 from pathlib import Path
 import tempfile
@@ -26,8 +27,12 @@ def test_chan2_binary_writing():
         n_frames_structural = 95
         height, width = 256, 256
 
-        func_data = np.random.randint(0, 1000, (n_frames_functional, height, width), dtype=np.int16)
-        struct_data = np.random.randint(0, 1000, (n_frames_structural, height, width), dtype=np.int16)
+        func_data = np.random.randint(
+            0, 1000, (n_frames_functional, height, width), dtype=np.int16
+        )
+        struct_data = np.random.randint(
+            0, 1000, (n_frames_structural, height, width), dtype=np.int16
+        )
 
         # Trim both to minimum frames (simulating the GUI behavior)
         min_frames = min(n_frames_functional, n_frames_structural)
@@ -61,7 +66,13 @@ def test_chan2_binary_writing():
         chan2_metadata["num_frames"] = struct_data.shape[0]
         chan2_metadata["shape"] = struct_data.shape
         chan2_metadata["chan2_file"] = str(chan2_file.resolve())
-        _write_bin(chan2_file, struct_data, overwrite=True, metadata=chan2_metadata, structural=True)
+        _write_bin(
+            chan2_file,
+            struct_data,
+            overwrite=True,
+            metadata=chan2_metadata,
+            structural=True,
+        )
         print(f"✓ Wrote structural channel: {chan2_file}")
 
         # Check that ops.npy was created
@@ -72,18 +83,30 @@ def test_chan2_binary_writing():
         ops = np.load(ops_path, allow_pickle=True).item()
         print("\nOps dictionary contents:")
         print(f"  nframes_chan1: {ops.get('nframes_chan1')} (expected: {min_frames})")
-        print(f"  nframes_chan2: {ops.get('nframes_chan2')} (expected: {struct_data.shape[0]})")
+        print(
+            f"  nframes_chan2: {ops.get('nframes_chan2')} (expected: {struct_data.shape[0]})"
+        )
         print(f"  raw_file: {ops.get('raw_file')}")
         print(f"  chan2_file: {ops.get('chan2_file')}")
         print(f"  align_by_chan: {ops.get('align_by_chan')} (expected: 1)")
         print(f"  reg_tif_chan2: {ops.get('reg_tif_chan2')} (expected: True)")
 
         # Validate key fields
-        assert ops.get("nframes_chan1") == min_frames, f"Expected nframes_chan1={min_frames}, got {ops.get('nframes_chan1')}"
-        assert ops.get("nframes_chan2") == struct_data.shape[0], f"Expected nframes_chan2={struct_data.shape[0]}, got {ops.get('nframes_chan2')}"
-        assert ops.get("align_by_chan") == 1, f"Expected align_by_chan=1, got {ops.get('align_by_chan')}"
-        assert ops.get("reg_tif_chan2") == True, f"Expected reg_tif_chan2=True, got {ops.get('reg_tif_chan2')}"
-        assert str(chan2_file.resolve()) in ops.get("chan2_file", ""), "chan2_file not properly set in ops"
+        assert ops.get("nframes_chan1") == min_frames, (
+            f"Expected nframes_chan1={min_frames}, got {ops.get('nframes_chan1')}"
+        )
+        assert ops.get("nframes_chan2") == struct_data.shape[0], (
+            f"Expected nframes_chan2={struct_data.shape[0]}, got {ops.get('nframes_chan2')}"
+        )
+        assert ops.get("align_by_chan") == 1, (
+            f"Expected align_by_chan=1, got {ops.get('align_by_chan')}"
+        )
+        assert ops.get("reg_tif_chan2") == True, (
+            f"Expected reg_tif_chan2=True, got {ops.get('reg_tif_chan2')}"
+        )
+        assert str(chan2_file.resolve()) in ops.get("chan2_file", ""), (
+            "chan2_file not properly set in ops"
+        )
 
         print("\n✓ All validations passed!")
         return True
@@ -97,5 +120,6 @@ if __name__ == "__main__":
         print(f"\n✗✗✗ Test FAILED ✗✗✗")
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

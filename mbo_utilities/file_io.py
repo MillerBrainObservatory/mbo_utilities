@@ -82,17 +82,20 @@ def write_ops(metadata, raw_filename, **kwargs):
         ops = np.load(ops_path, allow_pickle=True).item()
     else:
         from .metadata import default_ops
+
         ops = default_ops()
 
     # Update shared core fields
-    ops.update({
-        "Ly": Ly,
-        "Lx": Lx,
-        "fs": metadata["fs"],
-        "dx": dx,
-        "dy": dy,
-        "ops_path": str(ops_path),
-    })
+    ops.update(
+        {
+            "Ly": Ly,
+            "Lx": Lx,
+            "fs": metadata["fs"],
+            "dx": dx,
+            "dy": dy,
+            "ops_path": str(ops_path),
+        }
+    )
 
     # Channel-specific entries
     if chan == 1:
@@ -129,7 +132,7 @@ def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
         raise ValueError("No input files provided.")
 
     has_plane = any(re.search(r"(plane|z|chan)[_-]?\d+", f.stem, re.I) for f in files)
-    has_roi   = any(re.search(r"roi[_-]?\d+", f.stem, re.I) for f in files)
+    has_roi = any(re.search(r"roi[_-]?\d+", f.stem, re.I) for f in files)
 
     # lazy-load utility inline
     def load_lazy(f):
@@ -250,6 +253,7 @@ def _tiff_to_fsspec(tif_path: Path, base_dir: Path) -> dict:
             refs = json.loads(f.getvalue())  # type: ignore
     return refs
 
+
 def save_fsspec(filenames):
     base_dir = Path(filenames[0]).parent
 
@@ -257,9 +261,7 @@ def save_fsspec(filenames):
 
     if combined_json_path.is_file():
         # delete it, its cheap to create
-        logger.debug(
-            f"Removing existing combined reference file: {combined_json_path}"
-        )
+        logger.debug(f"Removing existing combined reference file: {combined_json_path}")
         combined_json_path.unlink()
 
     logger.debug(f"Generating combined kerchunk reference for {len(filenames)} files…")
@@ -270,6 +272,7 @@ def save_fsspec(filenames):
 
     logger.info(f"Combined kerchunk reference written to {combined_json_path}")
     return combined_json_path
+
 
 def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
     assert len(tif_files) > 1, "Need at least two TIFF files to combine."
@@ -479,10 +482,10 @@ def group_plane_rois(input_dir):
 
     for d in input_dir.iterdir():
         if (
-                d.is_dir()
-                and not d.name.endswith(".zarr")     # exclude zarr dirs
-                and d.stem.startswith("plane")
-                and "_roi" in d.stem
+            d.is_dir()
+            and not d.name.endswith(".zarr")  # exclude zarr dirs
+            and d.stem.startswith("plane")
+            and "_roi" in d.stem
         ):
             parts = d.stem.split("_")
             if len(parts) == 2 and parts[1].startswith("roi"):
@@ -492,11 +495,7 @@ def group_plane_rois(input_dir):
     return grouped
 
 
-def merge_zarr_rois(
-        input_dir,
-        output_dir=None,
-        overwrite=True
-):
+def merge_zarr_rois(input_dir, output_dir=None, overwrite=True):
     """
     Concatenate roi1 + roi2 .zarr stores for each plane into a single planeXX.zarr.
 
@@ -557,7 +556,9 @@ def merge_zarr_rois(
     return None
 
 
-def load_zarr_grouped(input_dir, ):
+def load_zarr_grouped(
+    input_dir,
+):
     """
     Discover and lazily concatenate ROI .zarr stores per plane.
 
@@ -599,7 +600,9 @@ def load_zarr_grouped(input_dir, ):
         base_shape = arrays[0].shape
         for a in arrays[1:]:
             if a.shape[:2] != base_shape[:2]:
-                raise ValueError(f"Shape mismatch in {plane}: {a.shape} vs {base_shape}")
+                raise ValueError(
+                    f"Shape mismatch in {plane}: {a.shape} vs {base_shape}"
+                )
 
         merged_plane = da.concatenate(arrays, axis=2)  # concat horizontally
         planes.append(merged_plane)
@@ -608,6 +611,7 @@ def load_zarr_grouped(input_dir, ):
     arr_4d = da.stack(planes, axis=1)  # stack planes along Z
     logger.info(f"Final 4D array shape: {arr_4d.shape} (T, Z, Y, X)")
     return arr_4d
+
 
 def _is_arraylike(obj) -> bool:
     """
@@ -661,6 +665,7 @@ def get_last_savedir_path() -> Path:
     """Return path to settings file tracking last saved folder."""
     return Path.home().joinpath("mbo", "settings", "last_savedir.json")
 
+
 def load_last_savedir(default=None) -> Path:
     """Load last saved directory path if it exists."""
     f = get_last_savedir_path()
@@ -672,6 +677,7 @@ def load_last_savedir(default=None) -> Path:
         except Exception:
             pass
     return Path(default or Path().cwd())
+
 
 def save_last_savedir(path: Path):
     """Persist the most recent save directory path."""

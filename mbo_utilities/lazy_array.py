@@ -26,15 +26,7 @@ from .metadata import is_raw_scanimage, has_mbo_metadata
 logger = log.get("lazy_array")
 
 
-SUPPORTED_FTYPES = (
-    ".npy",
-    ".tif",
-    ".tiff",
-    ".bin",
-    ".h5",
-    ".zarr",
-    ".json"
-)
+SUPPORTED_FTYPES = (".npy", ".tif", ".tiff", ".bin", ".h5", ".zarr", ".json")
 
 _ARRAY_TYPE_KWARGS = {
     MboRawArray: {
@@ -61,21 +53,21 @@ def _filter_kwargs(cls, kwargs):
 
 
 def imwrite(
-        lazy_array,
-        outpath: str | Path,
-        ext: str = ".tiff",
-        planes: list | tuple | None = None,
-        num_frames: int | None = None,
-        register_z: bool = False,
-        roi: int | Sequence[int] | None = None,
-        metadata: dict | None = None,
-        overwrite: bool = False,
-        order: list | tuple = None,
-        target_chunk_mb: int = 20,
-        progress_callback: Callable | None = None,
-        debug: bool = False,
-        shift_vectors: np.ndarray | None = None,
-        **kwargs,
+    lazy_array,
+    outpath: str | Path,
+    ext: str = ".tiff",
+    planes: list | tuple | None = None,
+    num_frames: int | None = None,
+    register_z: bool = False,
+    roi: int | Sequence[int] | None = None,
+    metadata: dict | None = None,
+    overwrite: bool = False,
+    order: list | tuple = None,
+    target_chunk_mb: int = 20,
+    progress_callback: Callable | None = None,
+    debug: bool = False,
+    shift_vectors: np.ndarray | None = None,
+    **kwargs,
 ):
     """
     Write a supported lazy imaging array (Suite2p, HDF5, TIFF, etc.) to disk.
@@ -362,7 +354,9 @@ def imwrite(
                     logger.info(f"Found valid s3d-job in metadata: {candidate}")
                     existing_s3d_dir = candidate
                 else:
-                    logger.warning(f"s3d-job in metadata exists but registration is invalid: {candidate}")
+                    logger.warning(
+                        f"s3d-job in metadata exists but registration is invalid: {candidate}"
+                    )
 
             # Option 2: Check if outpath contains existing valid registration
             if not existing_s3d_dir:
@@ -387,7 +381,7 @@ def imwrite(
                     filenames=lazy_array.filenames,
                     metadata=file_metadata,
                     outpath=outpath,
-                    progress_callback=progress_callback
+                    progress_callback=progress_callback,
                 )
 
                 if s3d_job_dir:
@@ -494,7 +488,9 @@ def imread(
             logger.debug(f"Input is a directory, searching for supported files in {p}")
             zarrs = list(p.glob("*.zarr"))
             if zarrs:
-                logger.debug(f"Found {len(zarrs)} zarr stores in {p}, loading as ZarrArray.")
+                logger.debug(
+                    f"Found {len(zarrs)} zarr stores in {p}, loading as ZarrArray."
+                )
                 paths = zarrs
             else:
                 paths = [Path(f) for f in p.glob("*") if f.is_file()]

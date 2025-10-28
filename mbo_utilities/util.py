@@ -3,6 +3,7 @@ from typing import Sequence
 import numpy as np
 from numpy.typing import ArrayLike
 
+
 def check():
     import importlib, pandas as pd
 
@@ -11,11 +12,24 @@ def check():
     try:
         torch = importlib.import_module("torch")
         t_ver = getattr(torch, "__version__", "") or ""
-        rows.append({"component": "torch-cpu", "ok": True, "version": t_ver, "details": "import ok"})
+        rows.append(
+            {
+                "component": "torch-cpu",
+                "ok": True,
+                "version": t_ver,
+                "details": "import ok",
+            }
+        )
         try:
             cuda_ver = getattr(getattr(torch, "version", None), "cuda", "") or ""
-            cuda_avail = bool(getattr(getattr(torch, "cuda", None), "is_available", lambda: False)())
-            dev_count = getattr(getattr(torch, "cuda", None), "device_count", lambda: 0)() if cuda_avail else 0
+            cuda_avail = bool(
+                getattr(getattr(torch, "cuda", None), "is_available", lambda: False)()
+            )
+            dev_count = (
+                getattr(getattr(torch, "cuda", None), "device_count", lambda: 0)()
+                if cuda_avail
+                else 0
+            )
             dev_name = ""
             if cuda_avail and dev_count > 0:
                 try:
@@ -31,15 +45,38 @@ def check():
                 }
             )
         except Exception as e:
-            rows.append({"component": "torch-gpu", "ok": False, "version": "", "details": f"check error: {e}"})
+            rows.append(
+                {
+                    "component": "torch-gpu",
+                    "ok": False,
+                    "version": "",
+                    "details": f"check error: {e}",
+                }
+            )
     except Exception as e:
-        rows.append({"component": "torch-cpu", "ok": False, "version": "", "details": str(e)})
-        rows.append({"component": "torch-gpu", "ok": False, "version": "", "details": "torch not available"})
+        rows.append(
+            {"component": "torch-cpu", "ok": False, "version": "", "details": str(e)}
+        )
+        rows.append(
+            {
+                "component": "torch-gpu",
+                "ok": False,
+                "version": "",
+                "details": "torch not available",
+            }
+        )
 
     try:
         cupy = importlib.import_module("cupy")
         cu_ver = getattr(cupy, "__version__", "") or ""
-        rows.append({"component": "cupy-cpu", "ok": True, "version": cu_ver, "details": "import ok"})
+        rows.append(
+            {
+                "component": "cupy-cpu",
+                "ok": True,
+                "version": cu_ver,
+                "details": "import ok",
+            }
+        )
         try:
             get_dc = getattr(getattr(cupy, "cuda", None), "runtime", None)
             get_dc = getattr(get_dc, "getDeviceCount", None)
@@ -53,10 +90,26 @@ def check():
                 }
             )
         except Exception as e:
-            rows.append({"component": "cupy-gpu", "ok": False, "version": cu_ver, "details": f"device check error: {e}"})
+            rows.append(
+                {
+                    "component": "cupy-gpu",
+                    "ok": False,
+                    "version": cu_ver,
+                    "details": f"device check error: {e}",
+                }
+            )
     except Exception as e:
-        rows.append({"component": "cupy-cpu", "ok": False, "version": "", "details": str(e)})
-        rows.append({"component": "cupy-gpu", "ok": False, "version": "", "details": "cupy not available"})
+        rows.append(
+            {"component": "cupy-cpu", "ok": False, "version": "", "details": str(e)}
+        )
+        rows.append(
+            {
+                "component": "cupy-gpu",
+                "ok": False,
+                "version": "",
+                "details": "cupy not available",
+            }
+        )
 
     df = pd.DataFrame(rows, columns=["component", "ok", "version", "details"])
     df = df.sort_values("component").reset_index(drop=True)
