@@ -79,6 +79,69 @@ class LazyArrayProtocol:
         raise NotImplementedError
 
 
+def validate_s3d_registration(s3d_job_dir: Path, num_planes: int = None) -> bool:
+    """
+    Validate that Suite3D registration completed successfully.
+
+    Parameters
+    ----------
+    s3d_job_dir : Path
+        Path to the Suite3D job directory (e.g., 's3d-preprocessed')
+    num_planes : int, optional
+        Expected number of planes. If provided, validates that plane_shifts has correct length.
+
+    Returns
+    -------
+    bool
+        True if valid registration results exist, False otherwise.
+    """
+    if not s3d_job_dir or not Path(s3d_job_dir).is_dir():
+        return False
+
+    s3d_job_dir = Path(s3d_job_dir)
+    summary_path = s3d_job_dir / "summary" / "summary.npy"
+
+    if not summary_path.is_file():
+        logger.warning(f"Suite3D summary file not found: {summary_path}.")
+        return False
+
+    try:
+        summary = np.load(summary_path, allow_pickle=True).item()
+
+        if not isinstance(summary, dict):
+            logger.warning(f"Suite3D summary is not a dict: {type(summary)}")
+            return False
+
+        if "plane_shifts" not in summary:
+            logger.warning("Suite3D summary missing 'plane_shifts' key")
+            return False
+
+        plane_shifts = summary["plane_shifts"]
+
+        if not isinstance(plane_shifts, (list, np.ndarray)):
+            logger.warning(f"plane_shifts has invalid type: {type(plane_shifts)}")
+            return False
+
+        plane_shifts = np.asarray(plane_shifts)
+
+        if plane_shifts.ndim != 2 or plane_shifts.shape[1] != 2:
+            logger.warning(f"plane_shifts has invalid shape: {plane_shifts.shape}, expected (n_planes, 2)")
+            return False
+
+        if num_planes is not None and len(plane_shifts) != num_planes:
+            logger.warning(
+                f"plane_shifts length {len(plane_shifts)} doesn't match expected {num_planes} planes"
+            )
+            return False
+
+        logger.debug(f"Valid Suite3D registration found with {len(plane_shifts)} plane shifts")
+        return True
+
+    except Exception as e:
+        logger.warning(f"Failed to validate Suite3D registration: {e}")
+        return False
+
+
 def register_zplanes_s3d(
         filenames,
         metadata,

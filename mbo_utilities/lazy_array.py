@@ -17,6 +17,8 @@ from .array_types import (
     NpyArray,
     ZarrArray,
     register_zplanes_s3d,
+    validate_s3d_registration,
+    supports_roi,
 )
 from .file_io import derive_tag_from_filename
 from .metadata import is_raw_scanimage, has_mbo_metadata
@@ -223,50 +225,75 @@ def imwrite(
     s3d_job_dir = None
     if register_z:
         lazy_array.metadata["apply_shift"] = True
+        num_planes = file_metadata.get("num_planes")
 
         if shift_vectors is not None:
             lazy_array.metadata["shift_vectors"] = shift_vectors
+            logger.info("Using provided shift_vectors for registration.")
         else:
-            # check metadata for s3d-job dir
-            if (
-                "s3d-job" in lazy_array.metadata
-                and Path(lazy_array.metadata["s3d-job"]).is_dir()
-            ):
-                logger.debug("Detected s3d-job in metadata, moving data to s3d output path.")
-                s3d_job_dir = Path(lazy_array.metadata["s3d-job"])
-            else:  # check if the input is in a s3d-job folder
-                job_id = lazy_array.metadata.get("job_id", "s3d-preprocessed")
-                s3d_job_dir = outpath / job_id
+            # Check if we already have a valid s3d-job directory
+            existing_s3d_dir = None
 
-            if s3d_job_dir.joinpath("dirs.npy").is_file():
-                dirs = np.load(s3d_job_dir / "dirs.npy", allow_pickle=True).item()
-                for k, v in dirs.items():
-                    if Path(v).is_dir():
-                        lazy_array.metadata[k] = v
-            else:
-                # check if outpath contains an s3d job
-                npy_files = outpath.rglob("*.npy")
-                if "dirs.npy" in [f.name for f in npy_files]:
-                    logger.info(
-                        f"Detected existing s3d-job in outpath {outpath}, skipping preprocessing."
-                    )
-                    s3d_job_dir = outpath
+            # Option 1: Check metadata for existing s3d-job
+            if "s3d-job" in lazy_array.metadata:
+                candidate = Path(lazy_array.metadata["s3d-job"])
+                if validate_s3d_registration(candidate, num_planes):
+                    logger.info(f"Found valid s3d-job in metadata: {candidate}")
+                    existing_s3d_dir = candidate
                 else:
-                    logger.info(f"No s3d-job detected, preprocessing data.")
-                    # s3d_params = kwargs.get("s3d_params", {})
-                    s3d_job_dir = register_zplanes_s3d(
-                        filenames=lazy_array.filenames,
-                        metadata=file_metadata,
-                        outpath=outpath,
-                        progress_callback=progress_callback
-                    )
-                    logger.info(f"Registered z-planes, results saved to {s3d_job_dir}.")
+                    logger.warning(f"s3d-job in metadata exists but registration is invalid: {candidate}")
 
-    if s3d_job_dir:
-        logger.info(f"Storing s3d-job path {s3d_job_dir} in metadata.")
-        lazy_array.metadata["s3d-job"] = s3d_job_dir
+            # Option 2: Check if outpath contains existing valid registration
+            if not existing_s3d_dir:
+                job_id = file_metadata.get("job_id", "s3d-preprocessed")
+                candidate = outpath / job_id
+                if validate_s3d_registration(candidate, num_planes):
+                    logger.info(f"Found valid existing s3d-job: {candidate}")
+                    existing_s3d_dir = candidate
+
+            if existing_s3d_dir:
+                s3d_job_dir = existing_s3d_dir
+                # Load directory metadata if available
+                if s3d_job_dir.joinpath("dirs.npy").is_file():
+                    dirs = np.load(s3d_job_dir / "dirs.npy", allow_pickle=True).item()
+                    for k, v in dirs.items():
+                        if Path(v).is_dir():
+                            lazy_array.metadata[k] = v
+            else:
+                # Need to run registration
+                logger.info("No valid s3d-job found, running Suite3D registration.")
+                s3d_job_dir = register_zplanes_s3d(
+                    filenames=lazy_array.filenames,
+                    metadata=file_metadata,
+                    outpath=outpath,
+                    progress_callback=progress_callback
+                )
+
+                if s3d_job_dir:
+                    # Validate the registration actually succeeded
+                    if validate_s3d_registration(s3d_job_dir, num_planes):
+                        logger.info(f"Z-plane registration succeeded: {s3d_job_dir}")
+                    else:
+                        logger.error(
+                            f"Suite3D job completed but registration validation failed. "
+                            f"Check {s3d_job_dir}/summary/summary.npy for plane_shifts. "
+                            f"Proceeding without registration."
+                        )
+                        s3d_job_dir = None
+                        lazy_array.metadata["apply_shift"] = False
+                else:
+                    logger.warning(
+                        "Z-plane registration failed. Proceeding without registration. "
+                        "Check that Suite3D and CuPy are installed correctly."
+                    )
+                    lazy_array.metadata["apply_shift"] = False
+
+        # Store s3d-job directory in metadata if available
+        if s3d_job_dir:
+            logger.info(f"Storing s3d-job path {s3d_job_dir} in metadata.")
+            lazy_array.metadata["s3d-job"] = str(s3d_job_dir)
     else:
-        logger.info("No s3d-job directory used or created.")
+        # Registration not requested
         lazy_array.metadata["apply_shift"] = False
 
     if hasattr(lazy_array, "_imwrite"):
