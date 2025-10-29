@@ -16,6 +16,8 @@ files = list(data_path.glob("*.tif*"))
 x = mbo.imread(files)
 x.phasecorr_method = None
 
+mbo.imwrite(x, "D://demo//ome", ome=True, ext=".zarr", planes=[7, 8])
+
 benchmark_dir = data_path.parent / "benchmark"
 benchmark_dir.mkdir(exist_ok=True)
 

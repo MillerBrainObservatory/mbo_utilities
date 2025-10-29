@@ -31,17 +31,11 @@ class Suite2pSettings:
     """
 
     # ==================== Main Settings ====================
-    nplanes: int = 1  # Number of planes in each tiff
-    nchannels: int = 1  # Number of channels per plane
+    # nplanes: int = 1  # Number of planes in each tiff
     functional_chan: int = 1  # Channel for functional ROI extraction (1-based)
     tau: float = 1.0  # Timescale of sensor (GCaMP6f=0.7, 6m=1.0, 6s=1.25-1.5)
-    fs: float = 10.0  # Sampling rate per plane (Hz)
-    force_sktiff: bool = False  # Use scikit-image for reading tiffs
-    do_bidiphase: bool = False  # Compute bidirectional phase offset
-    bidiphase: int = 0  # Bidirectional phase offset (user-set)
-    bidi_corrected: bool = False  # Whether bidi correction is done
     frames_include: int = -1  # Only process this many frames (for testing)
-    multiplane_parallel: bool = False  # Run pipeline on server
+    # multiplane_parallel: bool = False  # Run pipeline on server
     # ignore_flyback: list = field(default_factory=list)  # Planes to ignore
 
     # ==================== Output Settings ====================
@@ -217,42 +211,21 @@ def draw_section_suite2p(self):
 
         # --------------------------------------------------------------
         imgui.separator_text("Main Settings")
-        _, self.s2p.nplanes = imgui.input_int("Number of Planes", self.s2p.nplanes)
-        set_tooltip("Each tiff has this many planes in sequence.")
-        _, self.s2p.nchannels = imgui.input_int("Number of Channels", self.s2p.nchannels)
-        set_tooltip("Each tiff has this many channels per plane.")
+        # _, self.s2p.nplanes = imgui.input_int("Number of Planes", self.s2p.nplanes)
+        # set_tooltip("Each tiff has this many planes in sequence.")
         _, self.s2p.functional_chan = imgui.input_int(
             "Functional Channel", self.s2p.functional_chan
         )
         set_tooltip("Channel used for functional ROI extraction (1-based).")
         _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
         set_tooltip(
-            "Sensor decay timescale: GCaMP6f=0.7, GCaMP6m=1.0, GCaMP6s=1.25-1.5"
-        )
-        _, self.s2p.fs = imgui.input_float("Sampling Rate (Hz)", self.s2p.fs)
-        set_tooltip("Sampling rate per plane (e.g., 30Hz / 10 planes = 3Hz per plane).")
-        _, self.s2p.force_sktiff = imgui.checkbox(
-            "Force scikit-image TIFF", self.s2p.force_sktiff
-        )
-        set_tooltip("Use scikit-image for reading TIFFs instead of ScanImageTiffReader.")
-        _, self.s2p.do_bidiphase = imgui.checkbox(
-            "Compute Bidi Phase", self.s2p.do_bidiphase
-        )
-        set_tooltip("Compute bidirectional phase offset from data (2P only).")
-        _, self.s2p.bidiphase = imgui.input_int("Bidi Phase Offset", self.s2p.bidiphase)
-        set_tooltip("User-specified bidirectional phase offset (if known).")
-        _, self.s2p.bidi_corrected = imgui.checkbox(
-            "Bidi Corrected", self.s2p.bidi_corrected
-        )
-        set_tooltip("Whether bidirectional correction has been applied.")
-        _, self.s2p.frames_include = imgui.input_int(
-            "Frames to Process", self.s2p.frames_include
+            "Sensor decay timescale (round up): GCaMP6f=0.7, GCaMP6m=1.0, GCaMP6s=1.25-1.5"
         )
         set_tooltip("Only process this many frames (-1 = all frames, for testing).")
-        _, self.s2p.multiplane_parallel = imgui.checkbox(
-            "Multiplane Parallel", self.s2p.multiplane_parallel
-        )
-        set_tooltip("Run pipeline in parallel across planes on server.")
+        # _, self.s2p.multiplane_parallel = imgui.checkbox(
+        #     "Multiplane Parallel", self.s2p.multiplane_parallel
+        # )
+        # set_tooltip("Run pipeline in parallel across planes on server.")
 
         # --------------------------------------------------------------
         imgui.spacing()

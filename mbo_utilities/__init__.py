@@ -26,13 +26,14 @@ from .util import (
     is_imgui_installed,
     subsample_array,
 )
-from .lazy_array import imread, imwrite
+from .lazy_array import imread, imwrite, SUPPORTED_FTYPES
 
 
 __all__ = [
     # file_io
     "imread",
     "imwrite",
+    "SUPPORTED_FTYPES",
     # "run_gui",
     "get_mbo_dirs",
     "scanreader",
