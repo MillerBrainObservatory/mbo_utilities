@@ -10,6 +10,7 @@ from . import log
 from ._writers import _try_generic_writers
 from .array_types import (
     Suite2pArray,
+    BinArray,
     H5Array,
     MBOTiffArray,
     TiffArray,
@@ -40,6 +41,7 @@ _ARRAY_TYPE_KWARGS = {
     ZarrArray: {"filenames", "compressor", "rois"},
     MBOTiffArray: {"filenames", "_chunks"},
     Suite2pArray: set(),  # accepts no kwargs
+    BinArray: {"shape"},  # can provide shape if not inferrable
     H5Array: {"dataset"},
     TiffArray: set(),
     NpyArray: set(),
@@ -67,6 +69,7 @@ def imwrite(
     progress_callback: Callable | None = None,
     debug: bool = False,
     shift_vectors: np.ndarray | None = None,
+    output_name: str | None = None,
     **kwargs,
 ):
     """
@@ -154,6 +157,14 @@ def imwrite(
 
     debug : bool, default=False
         Enable verbose logging to terminal for troubleshooting.
+
+    output_name : str, optional
+        Filename for binary output when ext=".bin". Common options:
+        - "data_raw.bin" : Raw, unregistered data (default for BinArray)
+        - "data.bin" : Registered data (typical after Suite2p registration)
+        If None, defaults to "data_raw.bin" for new binaries or preserves
+        existing name when reading from BinArray/Suite2pArray.
+        Ignored for non-binary output formats.
 
     ome : bool, default=False
         Write OME-Zarr metadata when ext=".zarr". Creates OME-NGFF v0.5 compliant
@@ -432,15 +443,12 @@ def imwrite(
             progress_callback=progress_callback,
             planes=planes,
             debug=debug,
+            output_name=output_name,
             **kwargs,
         )
     else:
-        if isinstance(lazy_array, Suite2pArray):
-            raise TypeError(
-                "Attempting to write a Suite2pArray directly."
-                " Is there an ops.npy file in a directory with a tiff file?"
-                "Please make write these to separate directories."
-            )
+        # No TypeError safeguard - let users write Suite2pArray if they want
+        # The proper solution is using BinArray for direct binary manipulation
         logger.info(f"Falling back to generic writers for {type(lazy_array)}.")
         _try_generic_writers(
             lazy_array,
@@ -556,11 +564,23 @@ def imread(
         return TiffArray(paths)
 
     if first.suffix == ".bin":
+        # Check if user explicitly passed a .bin file (not a directory)
+        if isinstance(inputs, (str, Path)) and Path(inputs).suffix == ".bin":
+            # User wants THIS specific binary file - return BinArray
+            logger.debug(f"Reading binary file as BinArray: {first}")
+            return BinArray(first, **_filter_kwargs(BinArray, kwargs))
+
+        # User passed directory - check for Suite2p structure
         npy_file = first.parent / "ops.npy"
         if npy_file.exists():
-            logger.debug(f"Reading Suite2p binary from {npy_file}.")
+            logger.debug(f"Reading Suite2p directory from {npy_file}.")
             return Suite2pArray(npy_file)
-        raise NotImplementedError("BIN files without metadata are not yet supported.")
+
+        # No ops.npy found
+        raise ValueError(
+            f"Cannot read .bin file without ops.npy or shape parameter. "
+            f"Provide shape=(nframes, Ly, Lx) as kwarg or ensure ops.npy exists."
+        )
 
     if first.suffix == ".h5":
         logger.debug(f"Reading HDF5 files from {first}.")
