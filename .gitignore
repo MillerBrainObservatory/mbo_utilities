@@ -174,3 +174,8 @@ data/
 # ini files
 **/*.ini
 __marimo__
+
+# Claude Code files (case-insensitive)
+.claude/
+[Cc][Ll][Aa][Uu][Dd][Ee]*
+*[Cc][Ll][Aa][Uu][Dd][Ee]*
