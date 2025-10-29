@@ -1648,19 +1648,24 @@ class BinArray:
         ext: str = ".bin",
         progress_callback=None,
         debug: bool = False,
+        overwrite: bool = False,
+        output_name: str | None = None,
         **kwargs,
     ):
         """Write BinArray to disk."""
         from ._writers import _write_plane
 
-        output_name = kwargs.get("output_name", "data_raw.bin")
+        outpath = Path(outpath)
+        if output_name is None:
+            output_name = "data_raw.bin"
+
         outfile = outpath / output_name
 
         # Ensure directory exists
         outpath.mkdir(parents=True, exist_ok=True)
 
         # Write the binary file
-        if not outfile.exists() or kwargs.get("overwrite", False):
+        if not outfile.exists() or overwrite:
             logger.info(f"Writing binary to {outfile}")
             # Copy the memmap
             new_file = np.memmap(
@@ -1669,6 +1674,8 @@ class BinArray:
             new_file[:] = self._file[:]
             new_file.flush()
             del new_file
+        else:
+            logger.info(f"Binary file already exists: {outfile}")
 
         # Write ops.npy if we have metadata
         if self.metadata:
@@ -1681,6 +1688,8 @@ class BinArray:
             }
             np.save(ops_file, ops_data)
             logger.info(f"Wrote ops.npy to {ops_file}")
+
+        return outpath
 
 
 def iter_rois(obj):
