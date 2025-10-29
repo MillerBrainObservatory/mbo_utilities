@@ -21,14 +21,16 @@ jobs:
           python-version: "3.12.9"
           enable-cache: true
 
-      - name: Remove local sources for CI
-        run: |
-          sed -i '/^\[tool\.uv\.sources\]/,$d' pyproject.toml
+      - name: Install dependencies
+        run: uv sync --frozen --no-install-project
+        env:
+          GIT_LFS_SKIP_SMUDGE: 1
 
-      - name: Sync and build docs
-        run: |
-          GIT_LFS_SKIP_SMUDGE=1 uv sync --no-sources
-          GIT_LFS_SKIP_SMUDGE=1 uv run sphinx-build -b html docs docs/_build/html
+      - name: Build documentation
+        run: uv run sphinx-build -b html docs docs/_build/html
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          GIT_LFS_SKIP_SMUDGE: 1
 
       - name: Deploy docs
         if: github.repository == 'MillerBrainObservatory/mbo_utilities'
