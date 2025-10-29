@@ -435,6 +435,11 @@ def imwrite(
         lazy_array.metadata["apply_shift"] = False
 
     if hasattr(lazy_array, "_imwrite"):
+        # Pass num_frames explicitly if set
+        write_kwargs = kwargs.copy()
+        if num_frames is not None:
+            write_kwargs["num_frames"] = num_frames
+
         return lazy_array._imwrite(  # noqa
             outpath,
             overwrite=overwrite,
@@ -444,7 +449,7 @@ def imwrite(
             planes=planes,
             debug=debug,
             output_name=output_name,
-            **kwargs,
+            **write_kwargs,
         )
     else:
         # No TypeError safeguard - let users write Suite2pArray if they want
