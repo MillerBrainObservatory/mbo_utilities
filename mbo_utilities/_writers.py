@@ -414,6 +414,149 @@ def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
     _write_tiff._first_write[filename] = False
 
 
+def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
+    """
+    Build OME-Zarr NGFF v0.5 compliant metadata.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the array (T, Y, X) or (T, Z, Y, X)
+    metadata : dict
+        Metadata dict containing optional keys:
+        - pixel_resolution : tuple (x, y) pixel size in micrometers
+        - frame_rate : float, sampling rate in Hz
+        - fs : float, alias for frame_rate
+        - dx, dy : float, pixel sizes in micrometers
+        - dz : float, z-step in micrometers (for 4D data)
+        - z_step : float, alias for dz
+
+    Returns
+    -------
+    dict
+        OME-Zarr metadata dictionary ready for zarr.attrs.update()
+    """
+    ndim = len(shape)
+
+    # Extract spatial scales from metadata
+    pixel_resolution = metadata.get("pixel_resolution", None)
+    if pixel_resolution is not None:
+        if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
+            pixel_x = float(pixel_resolution[0])
+            pixel_y = float(pixel_resolution[1])
+        else:
+            pixel_x = pixel_y = 1.0
+    else:
+        pixel_x = metadata.get("dx", 1.0)
+        pixel_y = metadata.get("dy", 1.0)
+
+    # Extract temporal scale
+    frame_rate = metadata.get("frame_rate") or metadata.get("fs")
+    if frame_rate:
+        time_scale = 1.0 / float(frame_rate)  # seconds per frame
+    else:
+        time_scale = 1.0
+
+    # Extract z-scale (if 4D)
+    z_scale = metadata.get("z_step") or metadata.get("dz", 1.0)
+
+    # Build axes definition (OME-NGFF v0.5 requires specific ordering)
+    # Order: time (if present) -> channel (if present) -> spatial (z, y, x)
+    axes = []
+
+    if ndim == 3:
+        # Shape is (T, Y, X)
+        axes = [
+            {"name": "t", "type": "time", "unit": "second"},
+            {"name": "y", "type": "space", "unit": "micrometer"},
+            {"name": "x", "type": "space", "unit": "micrometer"},
+        ]
+        scale_values = [time_scale, pixel_y, pixel_x]
+
+    elif ndim == 4:
+        # Shape is (T, Z, Y, X)
+        axes = [
+            {"name": "t", "type": "time", "unit": "second"},
+            {"name": "z", "type": "space", "unit": "micrometer"},
+            {"name": "y", "type": "space", "unit": "micrometer"},
+            {"name": "x", "type": "space", "unit": "micrometer"},
+        ]
+        scale_values = [time_scale, z_scale, pixel_y, pixel_x]
+
+    else:
+        # Fallback for unexpected dimensions
+        logger.warning(
+            f"Unexpected dimensionality {ndim} for OME-Zarr. "
+            f"OME-Zarr expects 3D (TYX) or 4D (TZYX) data."
+        )
+        axes = [{"name": f"dim_{i}", "type": "space"} for i in range(ndim)]
+        scale_values = [1.0] * ndim
+
+    # Build coordinate transformations
+    # OME-NGFF requires scale transformation (and optionally translation)
+    coordinate_transforms = [{"type": "scale", "scale": scale_values}]
+
+    # Build datasets entry for multiscales
+    # Single resolution level stored at path "0" (the array inside the group)
+    datasets = [{"path": "0", "coordinateTransformations": coordinate_transforms}]
+
+    # Build multiscales metadata
+    # Note: coordinateTransformations are in datasets[], not at multiscales level
+    multiscales = [
+        {
+            "version": "0.5",
+            "name": metadata.get("name", ""),
+            "axes": axes,
+            "datasets": datasets,
+        }
+    ]
+
+    # Build OME metadata nested under "ome" namespace per OME-NGFF spec
+    # Spec: "metadata resides in zarr.json files under an ome namespace within attributes"
+    ome_content = {
+        "version": "0.5",  # OME-NGFF version
+        "multiscales": multiscales,
+    }
+
+    # Add optional OMERO rendering metadata if present
+    omero_metadata = {}
+    if "channel_names" in metadata:
+        omero_metadata["channels"] = metadata["channel_names"]
+    if omero_metadata:
+        ome_content["omero"] = omero_metadata
+
+    # Wrap in "ome" namespace as required by spec
+    # This creates: {"ome": {"version": "0.5", "multiscales": [...]}}
+    result = {"ome": ome_content}
+
+    # Add optional non-OME metadata at root level (outside ome namespace)
+    for k, v in metadata.items():
+        if k not in [
+            "pixel_resolution",
+            "frame_rate",
+            "fs",
+            "dx",
+            "dy",
+            "dz",
+            "z_step",
+            "num_frames",
+            "nframes",
+            "shape",
+            "channel_names",
+        ]:
+            # Only add JSON-serializable values
+            try:
+                import json
+
+                json.dumps(v)
+                result[k] = v
+            except (TypeError, ValueError):
+                # Skip non-serializable metadata
+                pass
+
+    return result
+
+
 def _write_zarr(
     path,
     data,
@@ -424,15 +567,19 @@ def _write_zarr(
     **kwargs,
 ):
     sharded = kwargs.get("sharded", False)
+    ome = kwargs.get("ome", False)
 
     filename = Path(path)
     if not hasattr(_write_zarr, "_arrays"):
         _write_zarr._arrays = {}
         _write_zarr._offsets = {}
+        _write_zarr._groups = {}
 
     if overwrite and filename in _write_zarr._arrays:
         del _write_zarr._arrays[filename]
         del _write_zarr._offsets[filename]
+        if filename in _write_zarr._groups:
+            del _write_zarr._groups[filename]
 
     if filename not in _write_zarr._arrays:
         if filename.exists() and overwrite:
@@ -458,17 +605,70 @@ def _write_zarr(
             codecs = None
             chunks = (1, h, w)
 
-        z = zarr.create(
-            store=str(filename),
-            shape=(nframes, h, w),
-            chunks=chunks,
-            dtype=data.dtype,
-            codecs=codecs,
-            overwrite=True,
-        )
+        if ome:
+            # Create OME-Zarr using Zarr v3 format per OME-NGFF 0.5 spec
+            # Spec: "OME-Zarr is implemented using Zarr format v3"
+            # Structure: my_image.zarr/ (group) -> 0/ (array with full resolution data)
 
-        for k, v in (metadata or {}).items():
-            z.attrs[k] = v
+            # Create Zarr v3 group (creates zarr.json with zarr_format: 3, node_type: "group")
+            root = zarr.open_group(str(filename), mode="w", zarr_format=3)
+
+            # Prepare codecs for v3
+            if sharded:
+                outer = (min(nframes, 100), h, w)  # 100-frame shards
+                inner = (1, h, w)
+                codec = ShardingCodec(
+                    chunk_shape=inner,
+                    codecs=[BytesCodec(), GzipCodec(level=level)],
+                    index_codecs=[BytesCodec(), Crc32cCodec()],
+                )
+                array_codecs = [codec]
+                array_chunks = outer
+            else:
+                # Use default v3 codecs (no compression)
+                array_codecs = None
+                array_chunks = chunks
+
+            # Create the array as "0" (full resolution level per OME-NGFF spec)
+            # Use zarr.create() with path parameter to create array within the group
+            # This creates 0/zarr.json with zarr_format: 3, node_type: "array"
+            z = zarr.create(
+                store=root.store,
+                path="0",
+                shape=(nframes, h, w),
+                chunks=array_chunks,
+                dtype=data.dtype,
+                codecs=array_codecs,
+                overwrite=True,
+            )
+
+            # Build OME metadata for the GROUP
+            # Per spec: metadata goes in attributes.ome namespace of group's zarr.json
+            ome_metadata = _build_ome_metadata(
+                shape=(nframes, h, w),
+                metadata=metadata or {},
+            )
+
+            # Set OME metadata on the GROUP (not the array)
+            # Zarr v3 uses .attrs to set attributes in zarr.json
+            for key, value in ome_metadata.items():
+                root.attrs[key] = value
+
+            _write_zarr._groups[filename] = root
+        else:
+            # Standard non-OME zarr (backward compatible)
+            z = zarr.create(
+                store=str(filename),
+                shape=(nframes, h, w),
+                chunks=chunks,
+                dtype=data.dtype,
+                codecs=codecs,
+                overwrite=True,
+            )
+
+            # Standard metadata (backward compatible)
+            for k, v in (metadata or {}).items():
+                z.attrs[k] = v
 
         _write_zarr._arrays[filename] = z
         _write_zarr._offsets[filename] = 0

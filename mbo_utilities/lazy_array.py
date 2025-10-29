@@ -155,6 +155,12 @@ def imwrite(
     debug : bool, default=False
         Enable verbose logging to terminal for troubleshooting.
 
+    ome : bool, default=False
+        Write OME-Zarr metadata when ext=".zarr". Creates OME-NGFF v0.5 compliant
+        metadata including multiscales, axes, and coordinate transformations.
+        Enables compatibility with OME-Zarr viewers and analysis tools.
+        If True and ext is not ".zarr", this parameter is ignored.
+
     **kwargs
         Additional format-specific options passed to writer backends.
 
@@ -276,6 +282,12 @@ def imwrite(
     >>> def progress_handler(progress, plane):
     ...     print(f"Plane {plane}: {progress*100:.1f}% complete")
     >>> imwrite(data, "output/session1", progress_callback=progress_handler)
+
+    **Save as OME-Zarr with NGFF v0.5 metadata:**
+
+    >>> imwrite(data, "output/session1", ext=".zarr", ome=True)
+    # Creates OME-Zarr stores with multiscales, axes, and coordinate transformations
+    # Compatible with OME-Zarr viewers (napari, vizarr, etc.)
 
     See Also
     --------
