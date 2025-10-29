@@ -64,6 +64,14 @@ def write_ops(metadata, raw_filename, **kwargs):
     shape = metadata["shape"]
     nt, Lx, Ly = shape[0], shape[-2], shape[-1]
 
+    # Check if num_frames was explicitly set (takes precedence over shape)
+    if "num_frames" in metadata:
+        nt = int(metadata["num_frames"])
+        logger.debug(f"Using explicit num_frames={nt} from metadata")
+    elif "nframes" in metadata:
+        nt = int(metadata["nframes"])
+        logger.debug(f"Using explicit nframes={nt} from metadata")
+
     if "pixel_resolution" not in metadata:
         logger.warning("No pixel resolution found in metadata, using default [2, 2].")
     if "fs" not in metadata:
@@ -98,6 +106,7 @@ def write_ops(metadata, raw_filename, **kwargs):
     )
 
     # Channel-specific entries
+    # Use the potentially overridden nt (from num_frames or nframes)
     if chan == 1:
         ops["nframes_chan1"] = nt
         ops["raw_file"] = str(filename)
@@ -107,16 +116,18 @@ def write_ops(metadata, raw_filename, **kwargs):
 
     ops["align_by_chan"] = chan
 
-    # Compatibility: prefer functional channel for top-level nframes
-    if "nframes_chan1" in ops:
-        ops["nframes"] = ops["nframes_chan1"]
-    elif "nframes_chan2" in ops:
-        ops["nframes"] = ops["nframes_chan2"]
+    # Set top-level nframes to match the written channel
+    # This ensures consistency between nframes and nframes_chan1/chan2
+    ops["nframes"] = nt
 
-    # Merge extra metadata without overwriting
-    ops = {**ops, **metadata}
+    # Merge extra metadata, but DON'T overwrite nframes fields
+    # This prevents inconsistency between nframes and nframes_chan1
+    for key, value in metadata.items():
+        if key not in ["nframes", "nframes_chan1", "nframes_chan2", "num_frames"]:
+            ops[key] = value
+
     np.save(ops_path, ops)
-    logger.debug(f"Ops file written to {ops_path} with metadata:\n{ops}")
+    logger.debug(f"Ops file written to {ops_path} with nframes={ops['nframes']}, nframes_chan1={ops.get('nframes_chan1')}")
 
 
 def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
