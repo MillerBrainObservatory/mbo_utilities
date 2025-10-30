@@ -715,6 +715,8 @@ def print_tree(path, max_depth=1, prefix=""):
         if max_depth > 1:
             extension = "    " if i == len(entries) - 1 else "│   "
             print_tree(entry, max_depth=max_depth - 1, prefix=prefix + extension)
+
+
 def merge_zarr_zplanes(
     zarr_paths: list[str | Path],
     output_path: str | Path,
@@ -743,9 +745,46 @@ def merge_zarr_zplanes(
         If provided, ROI masks will be added as OME-Zarr labels.
         Must match length of zarr_paths.
     metadata : dict, optional
-        Additional metadata to include in the OME-Zarr attributes.
-        Keys like 'pixel_resolution', 'frame_rate', 'dz' will be used
-        for coordinate transformations.
+        Comprehensive metadata dictionary. Coordinate-related keys are used for
+        OME-NGFF transformations, while additional keys are preserved as custom
+        metadata. Supported keys:
+
+        **Coordinate transformations:**
+        - pixel_resolution : tuple (x, y) in micrometers
+        - frame_rate : float, Hz (or 'fs')
+        - dz : float, z-step in micrometers (or 'z_step')
+        - name : str, volume name
+
+        **ScanImage metadata:**
+        - si : dict, complete ScanImage metadata structure
+        - roi_groups : list, ROI definitions with scanfield info
+        - objective_resolution : float, objective NA
+        - zoom_factor : float
+
+        **Acquisition metadata:**
+        - acquisition_date : str, ISO format
+        - experimenter : str
+        - description : str
+        - specimen : str
+
+        **Microscope metadata:**
+        - objective : str, objective name
+        - emission_wavelength : float, nm
+        - excitation_wavelength : float, nm
+        - numerical_aperture : float
+
+        **Processing metadata:**
+        - fix_phase : bool
+        - phasecorr_method : str
+        - use_fft : bool
+        - register_z : bool
+
+        **OMERO rendering:**
+        - channel_names : list of str
+        - num_planes : int, number of channels/planes
+
+        All metadata is organized into structured groups (scanimage, acquisition,
+        microscope, processing) in the output OME-Zarr attributes.
     overwrite : bool, default=True
         If True, overwrite existing output Zarr store.
     compression_level : int, default=1
@@ -842,16 +881,12 @@ def merge_zarr_zplanes(
     Z = len(zarr_paths)
     logger.info(f"Creating merged Zarr volume with shape (T={T}, Z={Z}, Y={Y}, X={X})")
 
-    # Remove existing if overwrite
     if output_path.exists() and overwrite:
         import shutil
 
         shutil.rmtree(output_path)
 
-    # Create OME-Zarr group (Zarr v3)
     root = zarr.open_group(str(output_path), mode="w", zarr_format=3)
-
-    # Create main image array
     image_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
     image = zarr.create(
         store=root.store,
@@ -863,7 +898,6 @@ def merge_zarr_zplanes(
         overwrite=True,
     )
 
-    # Copy data from each z-plane
     logger.info("Copying z-plane data...")
     for zi, zpath in enumerate(zarr_paths):
         z_arr = zarr.open(str(zpath), mode="r")
@@ -891,20 +925,76 @@ def merge_zarr_zplanes(
             root, suite2p_dirs, T, Z, Y, X, dtype, compression_level
         )
 
-    # Build OME metadata
     metadata = metadata or {}
+    ome_attrs = _build_rich_ome_metadata(
+        shape=(T, Z, Y, X),
+        dtype=dtype,
+        metadata=metadata,
+    )
+
+    for key, value in ome_attrs.items():
+        root.attrs[key] = value
+
+    # Add napari-specific scale metadata to the array for proper volumetric viewing
     pixel_resolution = metadata.get("pixel_resolution", [1.0, 1.0])
     frame_rate = metadata.get("frame_rate", metadata.get("fs", 1.0))
     dz = metadata.get("dz", metadata.get("z_step", 1.0))
 
     if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
-        pixel_x, pixel_y = pixel_resolution[0], pixel_resolution[1]
+        pixel_x, pixel_y = float(pixel_resolution[0]), float(pixel_resolution[1])
     else:
         pixel_x = pixel_y = 1.0
 
     time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
 
-    # Build OME-NGFF v0.5 metadata
+    # napari reads scale from array attributes for volumetric viewing
+    # Scale order: (T, Z, Y, X) in physical units
+    image.attrs["scale"] = [time_scale, float(dz), pixel_y, pixel_x]
+
+    logger.info(f"Successfully created merged OME-Zarr at {output_path}")
+    logger.info(f"Napari scale (t,z,y,x): {image.attrs['scale']}")
+    return output_path
+
+
+def _build_rich_ome_metadata(
+    shape: tuple,
+    dtype,
+    metadata: dict,
+) -> dict:
+    """
+    Build comprehensive OME-NGFF v0.5 metadata from ScanImage and other metadata.
+
+    Creates OMERO rendering settings, custom metadata fields, and proper
+    coordinate transformations based on available metadata.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the array (T, Z, Y, X)
+    dtype : np.dtype
+        Data type of the array
+    metadata : dict
+        Metadata dictionary with optional keys
+
+    Returns
+    -------
+    dict
+        Complete OME-NGFF v0.5 metadata attributes
+    """
+    T, Z, Y, X = shape
+
+    pixel_resolution = metadata.get("pixel_resolution", [1.0, 1.0])
+    frame_rate = metadata.get("frame_rate", metadata.get("fs", 1.0))
+    dz = metadata.get("dz", metadata.get("z_step", 1.0))
+
+    if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
+        pixel_x, pixel_y = float(pixel_resolution[0]), float(pixel_resolution[1])
+    else:
+        pixel_x = pixel_y = 1.0
+
+    time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
+
+    # Build OME-NGFF v0.5 multiscales
     axes = [
         {"name": "t", "type": "time", "unit": "second"},
         {"name": "z", "type": "space", "unit": "micrometer"},
@@ -912,7 +1002,7 @@ def merge_zarr_zplanes(
         {"name": "x", "type": "space", "unit": "micrometer"},
     ]
 
-    scale_values = [time_scale, float(dz), float(pixel_y), float(pixel_x)]
+    scale_values = [time_scale, float(dz), pixel_y, pixel_x]
 
     datasets = [
         {
@@ -924,35 +1014,208 @@ def merge_zarr_zplanes(
     multiscales = [
         {
             "version": "0.5",
-            "name": metadata.get("name", "merged_volume"),
+            "name": metadata.get("name", "volume"),
             "axes": axes,
             "datasets": datasets,
         }
     ]
 
-    # Set OME metadata on the group
-    root.attrs["ome"] = {"version": "0.5", "multiscales": multiscales}
+    # Build OME content
+    ome_content = {
+        "version": "0.5",
+        "multiscales": multiscales,
+    }
 
-    # Add optional metadata
+    # Add OMERO rendering metadata
+    omero_metadata = _build_omero_metadata(
+        shape=shape,
+        dtype=dtype,
+        metadata=metadata,
+    )
+    if omero_metadata:
+        ome_content["omero"] = omero_metadata
+
+    result = {"ome": ome_content}
+
+    # Add custom metadata fields (ScanImage, acquisition info, etc.)
+    custom_meta = {}
+
+    # Add ScanImage metadata
+    if "si" in metadata:
+        si = metadata["si"]
+        custom_meta["scanimage"] = {
+            "version": f"{si.get('VERSION_MAJOR', 'unknown')}.{si.get('VERSION_MINOR', 0)}",
+            "imaging_system": si.get("imagingSystem", "unknown"),
+            "objective_resolution": si.get("objectiveResolution", metadata.get("objective_resolution")),
+            "scan_mode": si.get("hScan2D", {}).get("scanMode", "unknown"),
+        }
+
+        # Add beam/laser info
+        if "hBeams" in si:
+            custom_meta["scanimage"]["laser_power"] = si["hBeams"].get("powers", 0)
+            custom_meta["scanimage"]["power_fraction"] = si["hBeams"].get("powerFractions", 0)
+
+        # Add ROI info
+        if "hRoiManager" in si:
+            roi_mgr = si["hRoiManager"]
+            custom_meta["scanimage"]["roi"] = {
+                "scan_zoom": roi_mgr.get("scanZoomFactor", metadata.get("zoom_factor")),
+                "lines_per_frame": roi_mgr.get("linesPerFrame"),
+                "pixels_per_line": roi_mgr.get("pixelsPerLine"),
+                "line_period": roi_mgr.get("linePeriod"),
+                "bidirectional": si.get("hScan2D", {}).get("bidirectional", True),
+            }
+
+    # Add ROI groups information
+    if "roi_groups" in metadata:
+        custom_meta["roi_groups"] = metadata["roi_groups"]
+
+    # Add acquisition metadata
+    acq_meta = {}
+    for key in ["acquisition_date", "experimenter", "description", "specimen"]:
+        if key in metadata:
+            acq_meta[key] = metadata[key]
+
+    if acq_meta:
+        custom_meta["acquisition"] = acq_meta
+
+    # Add microscope metadata
+    microscope_meta = {}
+    for key in ["objective", "emission_wavelength", "excitation_wavelength", "numerical_aperture"]:
+        if key in metadata:
+            microscope_meta[key] = metadata[key]
+
+    if microscope_meta:
+        custom_meta["microscope"] = microscope_meta
+
+    # Add processing metadata
+    processing_meta = {}
+    for key in ["fix_phase", "phasecorr_method", "use_fft", "register_z"]:
+        if key in metadata:
+            processing_meta[key] = metadata[key]
+
+    if processing_meta:
+        custom_meta["processing"] = processing_meta
+
+    # Add file info
+    if "file_paths" in metadata or "num_files" in metadata:
+        custom_meta["source_files"] = {
+            "num_files": metadata.get("num_files"),
+            "num_frames": metadata.get("num_frames"),
+            "frames_per_file": metadata.get("frames_per_file"),
+        }
+
+    # Add all serializable custom metadata
+    for key, value in custom_meta.items():
+        try:
+            json.dumps(value)
+            result[key] = value
+        except (TypeError, ValueError):
+            logger.debug(f"Skipping non-serializable metadata key: {key}")
+
+    # Add any other simple metadata fields
     for key, value in metadata.items():
         if key not in [
-            "pixel_resolution",
-            "frame_rate",
-            "fs",
-            "dz",
-            "z_step",
-            "name",
-        ]:
+            "pixel_resolution", "frame_rate", "fs", "dz", "z_step", "name",
+            "si", "roi_groups", "acquisition_date", "experimenter", "description",
+            "specimen", "objective", "emission_wavelength", "excitation_wavelength",
+            "numerical_aperture", "fix_phase", "phasecorr_method", "use_fft",
+            "register_z", "file_paths", "num_files", "num_frames", "frames_per_file",
+        ] and key not in result:
             try:
-                import json
-
                 json.dumps(value)
-                root.attrs[key] = value
+                result[key] = value
             except (TypeError, ValueError):
                 pass
 
-    logger.info(f"Successfully created merged OME-Zarr at {output_path}")
-    return output_path
+    return result
+
+
+def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
+    """
+    Build OMERO rendering metadata for OME-NGFF.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the array (T, Z, Y, X)
+    dtype : np.dtype
+        Data type of the array
+    metadata : dict
+        Metadata dictionary
+
+    Returns
+    -------
+    dict
+        OMERO metadata or empty dict if not enough info
+    """
+    import numpy as np
+
+    T, Z, Y, X = shape
+
+    # Determine data range for window settings
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        data_min, data_max = info.min, info.max
+    else:
+        data_min, data_max = 0.0, 1.0
+
+    # Build channel metadata
+    channels = []
+
+    # Get channel names from metadata
+    channel_names = metadata.get("channel_names")
+    num_channels = metadata.get("num_planes", 1)
+
+    if channel_names is None:
+        # Generate default channel names
+        if num_channels == 1:
+            channel_names = ["Channel 1"]
+        else:
+            channel_names = [f"Z-plane {i+1}" for i in range(num_channels)]
+
+    # Default colors (cycle through common microscopy colors)
+    default_colors = [
+        "00FF00",  # Green
+        "FF0000",  # Red
+        "0000FF",  # Blue
+        "FFFF00",  # Yellow
+        "FF00FF",  # Magenta
+        "00FFFF",  # Cyan
+        "FFFFFF",  # White
+    ]
+
+    for i, name in enumerate(channel_names[:num_channels]):
+        channel = {
+            "active": True,
+            "coefficient": 1.0,
+            "color": default_colors[i % len(default_colors)],
+            "family": "linear",
+            "inverted": False,
+            "label": name,
+            "window": {
+                "end": float(data_max),
+                "max": float(data_max),
+                "min": float(data_min),
+                "start": float(data_min),
+            },
+        }
+        channels.append(channel)
+
+    if not channels:
+        return {}
+
+    omero = {
+        "channels": channels,
+        "rdefs": {
+            "defaultT": 0,
+            "defaultZ": Z // 2,  # Middle z-plane
+            "model": "greyscale",
+        },
+        "version": "0.5",
+    }
+
+    return omero
 
 
 def _add_suite2p_labels(

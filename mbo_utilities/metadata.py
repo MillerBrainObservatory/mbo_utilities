@@ -157,6 +157,9 @@ def get_metadata(file, z_step=None, verbose=False):
     file_path = Path(file)
 
     if file_path.is_dir():
+        # check for .zarr , get_files doesn't work on nested zarr files
+        if file_path.suffix in [".zarr"]:
+            return get_metadata_single(file_path)
         tiff_files = get_files(file_path, "tif", sort_ascending=True)
         if not tiff_files:
             raise ValueError(f"No TIFF files found in directory: {file_path}")
@@ -217,6 +220,11 @@ def get_metadata_single(file: os.PathLike | str):
     >>> print(meta_verbose["all"])
     {... Includes all ScanImage FrameData ...}
     """
+    if file.suffix in [".zarr", ".h5"]:
+        from mbo_utilities import imread
+        file = imread(file)
+        return file.metadata
+
     tiff_file = tifffile.TiffFile(file)
     if not is_raw_scanimage(file):
         if (
