@@ -580,3 +580,67 @@ def _add_suite2p_labels(
     labels_group["0"].attrs.update(label_array_meta)
 
     logger.info(f"Added {roi_id - 1} total ROIs across {Z} z-planes")
+
+def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
+    """
+    Lazily build a Dask array or list of arrays depending on filename tags.
+
+    - "plane", "z", or "chan" → stacked along Z (TZYX)
+    - "roi" → list of 3D (T,Y,X) arrays, one per ROI
+    - otherwise → concatenate all files in time (T)
+    """
+    files = [Path(f) for f in files]
+    if not files:
+        raise ValueError("No input files provided.")
+
+    has_plane = any(re.search(r"(plane|z|chan)[_-]?\d+", f.stem, re.I) for f in files)
+    has_roi = any(re.search(r"roi[_-]?\d+", f.stem, re.I) for f in files)
+
+    # lazy-load utility inline
+    def load_lazy(f):
+        if f.suffix == ".npy":
+            arr = np.load(f, mmap_mode="r")
+        elif f.suffix in (".tif", ".tiff"):
+            arr = tifffile.memmap(f, mode="r")
+        else:
+            raise ValueError(f"Unsupported file type: {f}")
+        chunks = (min(chunk_t, arr.shape[0]),) + arr.shape[1:]
+        return da.from_array(arr, chunks=chunks)
+
+    if has_roi:
+        roi_groups = defaultdict(list)
+        for f in files:
+            m = re.search(r"roi[_-]?(\d+)", f.stem, re.I)
+            roi_idx = int(m.group(1)) if m else 0
+            roi_groups[roi_idx].append(f)
+
+        roi_arrays = []
+        for roi_idx, group in sorted(roi_groups.items()):
+            arrays = [load_lazy(f) for f in sorted(group)]
+            darr = da.concatenate(arrays, axis=0)  # concat in time
+            if astype:
+                darr = darr.astype(astype)
+            roi_arrays.append(darr)
+        return roi_arrays
+
+    # Plane or Z grouping case
+    if has_plane:
+        plane_groups = defaultdict(list)
+        for f in files:
+            m = re.search(r"(plane|z|chan)[_-]?(\d+)", f.stem, re.I)
+            plane_idx = int(m.group(2)) if m else 0
+            plane_groups[plane_idx].append(f)
+
+        plane_stacks = []
+        for z, group in sorted(plane_groups.items()):
+            arrays = [load_lazy(f) for f in sorted(group)]
+            plane = da.concatenate(arrays, axis=0)
+            plane_stacks.append(plane)
+
+        full = da.stack(plane_stacks, axis=1)  # (T,Z,Y,X)
+        return full.astype(astype) if astype else full
+
+    # Default: concatenate along time
+    arrays = [load_lazy(f) for f in sorted(files)]
+    full = da.concatenate(arrays, axis=0)  # (T,Y,X)
+    return full.astype(astype) if astype else full
