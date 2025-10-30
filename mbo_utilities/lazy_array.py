@@ -147,9 +147,9 @@ def imwrite(
         Reorder planes before writing. Must have same length as `planes`.
         Example: `planes=[1,2,3], order=[2,0,1]` writes planes in order [3,1,2]
 
-    target_chunk_mb : int, default=20
+    target_chunk_mb : int, optional
         Target chunk size in MB for streaming writes. Larger chunks may be faster
-        but use more memory. Adjust based on available RAM.
+        but use more memory. Adjust based on available RAM. Default is 20.
 
     progress_callback : Callable, optional
         Callback function for progress updates: `callback(progress, current_plane)`.

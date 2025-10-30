@@ -7,9 +7,24 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 import os
 import sys
+import shutil
+from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join("..")))
 sys.path.insert(0, os.path.abspath(os.path.join("..", "mbo_utilities")))
+
+# Copy user_guide notebook from demos to docs before building
+def setup(app):
+    """Copy the user_guide notebook from demos/ to docs/ before building."""
+    docs_dir = Path(__file__).parent
+    source_notebook = docs_dir.parent / "demos" / "user_guide.ipynb"
+    target_notebook = docs_dir / "user_guide.ipynb"
+
+    if source_notebook.exists():
+        shutil.copy2(source_notebook, target_notebook)
+        print(f"Copied {source_notebook} to {target_notebook}")
+    else:
+        print(f"Warning: Source notebook not found at {source_notebook}")
 
 project = "mbo_utilities"
 author = ""
