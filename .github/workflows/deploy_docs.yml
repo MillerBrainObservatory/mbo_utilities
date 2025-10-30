@@ -1,6 +1,8 @@
 name: Deploy Docs
 
 on:
+  push:
+    branches: [dev, master]
   pull_request:
     branches: [master]
   workflow_dispatch:
@@ -8,9 +10,9 @@ on:
 jobs:
   docs:
     if: |
-      github.event_name != 'pull_request' ||
-      contains(github.event.pull_request.title, 'bump') ||
-      contains(github.event.head_commit.message, 'bump')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && (contains(github.event.pull_request.title, 'bump') || contains(github.event.head_commit.message, 'bump'))) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, 'bump'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
