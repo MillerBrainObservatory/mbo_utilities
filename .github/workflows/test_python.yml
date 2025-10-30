@@ -9,17 +9,29 @@ on:
 
 jobs:
   test:
+    if: |
+      github.event_name != 'push' ||
+      contains(github.event.head_commit.message, 'ci')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y -qq
+          sudo apt-get install --no-install-recommends -y \
+            xorg-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxcb-glx0-dev
+
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12.9"
           enable-cache: true
 
-      - name: Sync Dependencies
-        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --no-sources
+      - name: Sync dependencies
+        run: GIT_LFS_SKIP_SMUDGE=1 uv sync
 
       # - name: Run tests
-      #   run: GIT_LFS_SKIP_SMUDGE=1 uv run pytest tests
+      #   run: uv run pytest tests
