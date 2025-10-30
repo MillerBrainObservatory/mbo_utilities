@@ -1339,20 +1339,78 @@ class ZarrArray:
             if not p.exists():
                 raise FileNotFoundError(f"No zarr store at {p}")
 
-        self.zs = [zarr.open(p, mode="r") for p in self.filenames]
+        # Open zarr stores - handle both standard arrays and OME-Zarr groups
+        opened = [zarr.open(p, mode="r") for p in self.filenames]
+
+        # If we opened a Group (OME-Zarr structure), get the "0" array
+        self.zs = []
+        self._groups = []  # Store groups separately to access their metadata
+        for z in opened:
+            if isinstance(z, zarr.Group):
+                # OME-Zarr structure: access the "0" array
+                if "0" not in z:
+                    raise ValueError(f"OME-Zarr group missing '0' array in {z.store.path}")
+                self.zs.append(z["0"])
+                self._groups.append(z)  # Keep reference to group for metadata
+            else:
+                # Standard zarr array
+                self.zs.append(z)
+                self._groups.append(None)
 
         shapes = [z.shape for z in self.zs]
         if len(set(shapes)) != 1:
             raise ValueError(f"Inconsistent shapes across zarr stores: {shapes}")
 
-        self._metadata = [dict(z.attrs) for z in self.zs]
+        # For OME-Zarr, metadata is on the group; for standard zarr, it's on the array
+        self._metadata = []
+        for i, z in enumerate(self.zs):
+            if self._groups[i] is not None:
+                # OME-Zarr: metadata on group
+                self._metadata.append(dict(self._groups[i].attrs))
+            else:
+                # Standard zarr: metadata on array
+                self._metadata.append(dict(z.attrs))
         self.compressor = compressor
 
     @property
     def metadata(self):
-        # if one store, return dict, if many, return the first
-        # TODO: zarr consolidate metadata
-        return self._metadata[0] if len(self._metadata) >= 1 else self._metadata
+        """
+        Return metadata as a dict.
+        - If single zarr file: return its metadata dict
+        - If multiple zarr files: return the first one's metadata
+
+        Note: _metadata is internally a list of dicts (one per zarr file)
+        """
+        if not self._metadata:
+            md = {}
+        else:
+            md = self._metadata[0]
+
+        # Ensure critical keys are present - extract from shape if missing
+        # This provides backward compatibility with old zarr files
+        if "num_frames" not in md and "nframes" not in md:
+            # Extract from shape: (T, H, W)
+            if self.zs:
+                md["num_frames"] = int(self.zs[0].shape[0])
+
+        return md
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        """
+        Set metadata. Updates the first zarr file's metadata.
+
+        Args:
+            value: dict of metadata to set
+        """
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+
+        if not self._metadata:
+            self._metadata = [value]
+        else:
+            # Update first metadata dict
+            self._metadata[0] = value
 
     @property
     def shape(self) -> tuple[int, int, int, int]:
@@ -1648,19 +1706,24 @@ class BinArray:
         ext: str = ".bin",
         progress_callback=None,
         debug: bool = False,
+        overwrite: bool = False,
+        output_name: str | None = None,
         **kwargs,
     ):
         """Write BinArray to disk."""
         from ._writers import _write_plane
 
-        output_name = kwargs.get("output_name", "data_raw.bin")
+        outpath = Path(outpath)
+        if output_name is None:
+            output_name = "data_raw.bin"
+
         outfile = outpath / output_name
 
         # Ensure directory exists
         outpath.mkdir(parents=True, exist_ok=True)
 
         # Write the binary file
-        if not outfile.exists() or kwargs.get("overwrite", False):
+        if not outfile.exists() or overwrite:
             logger.info(f"Writing binary to {outfile}")
             # Copy the memmap
             new_file = np.memmap(
@@ -1669,6 +1732,8 @@ class BinArray:
             new_file[:] = self._file[:]
             new_file.flush()
             del new_file
+        else:
+            logger.info(f"Binary file already exists: {outfile}")
 
         # Write ops.npy if we have metadata
         if self.metadata:
@@ -1681,6 +1746,8 @@ class BinArray:
             }
             np.save(ops_file, ops_data)
             logger.info(f"Wrote ops.npy to {ops_file}")
+
+        return outpath
 
 
 def iter_rois(obj):

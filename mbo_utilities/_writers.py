@@ -434,7 +434,7 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
     Returns
     -------
     dict
-        OME-Zarr metadata dictionary ready for zarr.attrs.update()
+        OME-Zarr NGFF v0.5 metadata dictionary ready for zarr.attrs.update()
     """
     ndim = len(shape)
 
@@ -460,7 +460,7 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
     # Extract z-scale (if 4D)
     z_scale = metadata.get("z_step") or metadata.get("dz", 1.0)
 
-    # Build axes definition (OME-NGFF v0.5 requires specific ordering)
+    # Build axes definition
     # Order: time (if present) -> channel (if present) -> spatial (z, y, x)
     axes = []
 
@@ -492,16 +492,11 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
         axes = [{"name": f"dim_{i}", "type": "space"} for i in range(ndim)]
         scale_values = [1.0] * ndim
 
-    # Build coordinate transformations
-    # OME-NGFF requires scale transformation (and optionally translation)
+    # Build OME-NGFF v0.5 metadata
+    # coordinateTransformations in each dataset
     coordinate_transforms = [{"type": "scale", "scale": scale_values}]
-
-    # Build datasets entry for multiscales
-    # Single resolution level stored at path "0" (the array inside the group)
     datasets = [{"path": "0", "coordinateTransformations": coordinate_transforms}]
 
-    # Build multiscales metadata
-    # Note: coordinateTransformations are in datasets[], not at multiscales level
     multiscales = [
         {
             "version": "0.5",
@@ -511,10 +506,9 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
         }
     ]
 
-    # Build OME metadata nested under "ome" namespace per OME-NGFF spec
-    # Spec: "metadata resides in zarr.json files under an ome namespace within attributes"
+    # v0.5 uses "ome" namespace
     ome_content = {
-        "version": "0.5",  # OME-NGFF version
+        "version": "0.5",
         "multiscales": multiscales,
     }
 
@@ -525,34 +519,25 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
     if omero_metadata:
         ome_content["omero"] = omero_metadata
 
-    # Wrap in "ome" namespace as required by spec
-    # This creates: {"ome": {"version": "0.5", "multiscales": [...]}}
     result = {"ome": ome_content}
 
-    # Add optional non-OME metadata at root level (outside ome namespace)
+    # Add all metadata at root level (outside ome namespace) for backward compatibility
+    # This preserves metadata that downstream tools expect (num_frames, pixel_resolution, etc.)
+    # while also maintaining OME-NGFF compliance
     for k, v in metadata.items():
-        if k not in [
-            "pixel_resolution",
-            "frame_rate",
-            "fs",
-            "dx",
-            "dy",
-            "dz",
-            "z_step",
-            "num_frames",
-            "nframes",
-            "shape",
-            "channel_names",
-        ]:
-            # Only add JSON-serializable values
-            try:
-                import json
+        if k == "channel_names":
+            # Already encoded in OME omero section
+            continue
 
-                json.dumps(v)
-                result[k] = v
-            except (TypeError, ValueError):
-                # Skip non-serializable metadata
-                pass
+        # Only add JSON-serializable values
+        try:
+            import json
+
+            json.dumps(v)
+            result[k] = v
+        except (TypeError, ValueError):
+            # Skip non-serializable metadata (e.g., numpy arrays, complex objects)
+            pass
 
     return result
 
@@ -606,11 +591,10 @@ def _write_zarr(
             chunks = (1, h, w)
 
         if ome:
-            # Create OME-Zarr using Zarr v3 format per OME-NGFF 0.5 spec
-            # Spec: "OME-Zarr is implemented using Zarr format v3"
-            # Structure: my_image.zarr/ (group) -> 0/ (array with full resolution data)
+            # Create OME-Zarr using NGFF v0.5 with Zarr v3
+            # Structure: my_image.zarr/ (group) -> 0/ (array)
 
-            # Create Zarr v3 group (creates zarr.json with zarr_format: 3, node_type: "group")
+            # Create Zarr v3 group
             root = zarr.open_group(str(filename), mode="w", zarr_format=3)
 
             # Prepare codecs for v3
@@ -629,9 +613,7 @@ def _write_zarr(
                 array_codecs = None
                 array_chunks = chunks
 
-            # Create the array as "0" (full resolution level per OME-NGFF spec)
-            # Use zarr.create() with path parameter to create array within the group
-            # This creates 0/zarr.json with zarr_format: 3, node_type: "array"
+            # Create the array as "0" (full resolution level)
             z = zarr.create(
                 store=root.store,
                 path="0",
@@ -642,15 +624,13 @@ def _write_zarr(
                 overwrite=True,
             )
 
-            # Build OME metadata for the GROUP
-            # Per spec: metadata goes in attributes.ome namespace of group's zarr.json
+            # Build and set OME metadata on the GROUP
             ome_metadata = _build_ome_metadata(
                 shape=(nframes, h, w),
                 metadata=metadata or {},
             )
 
-            # Set OME metadata on the GROUP (not the array)
-            # Zarr v3 uses .attrs to set attributes in zarr.json
+            # Set metadata on the group
             for key, value in ome_metadata.items():
                 root.attrs[key] = value
 

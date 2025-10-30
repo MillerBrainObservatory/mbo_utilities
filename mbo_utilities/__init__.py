@@ -15,6 +15,7 @@ from .file_io import (
     load_ops,
     write_ops,
     get_plane_from_filename,
+    merge_zarr_zplanes,
 )
 from .plot_util import save_png, save_mp4
 

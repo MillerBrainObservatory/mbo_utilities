@@ -9,11 +9,10 @@ This repository contains python functions to pre/post process datasets recording
 maxdepth: 1
 ---
 Installation <install>
-Assembly <assembly>
-Usage <usage/index>
+User Guide <user_guide>
+Array Types <array_types>
 API <api/index>
 venvs
-dff
 image_gallery
 glossary
 ```

@@ -64,6 +64,14 @@ def write_ops(metadata, raw_filename, **kwargs):
     shape = metadata["shape"]
     nt, Lx, Ly = shape[0], shape[-2], shape[-1]
 
+    # Check if num_frames was explicitly set (takes precedence over shape)
+    if "num_frames" in metadata:
+        nt = int(metadata["num_frames"])
+        logger.debug(f"Using explicit num_frames={nt} from metadata")
+    elif "nframes" in metadata:
+        nt = int(metadata["nframes"])
+        logger.debug(f"Using explicit nframes={nt} from metadata")
+
     if "pixel_resolution" not in metadata:
         logger.warning("No pixel resolution found in metadata, using default [2, 2].")
     if "fs" not in metadata:
@@ -98,6 +106,7 @@ def write_ops(metadata, raw_filename, **kwargs):
     )
 
     # Channel-specific entries
+    # Use the potentially overridden nt (from num_frames or nframes)
     if chan == 1:
         ops["nframes_chan1"] = nt
         ops["raw_file"] = str(filename)
@@ -107,16 +116,18 @@ def write_ops(metadata, raw_filename, **kwargs):
 
     ops["align_by_chan"] = chan
 
-    # Compatibility: prefer functional channel for top-level nframes
-    if "nframes_chan1" in ops:
-        ops["nframes"] = ops["nframes_chan1"]
-    elif "nframes_chan2" in ops:
-        ops["nframes"] = ops["nframes_chan2"]
+    # Set top-level nframes to match the written channel
+    # This ensures consistency between nframes and nframes_chan1/chan2
+    ops["nframes"] = nt
 
-    # Merge extra metadata without overwriting
-    ops = {**ops, **metadata}
+    # Merge extra metadata, but DON'T overwrite nframes fields
+    # This prevents inconsistency between nframes and nframes_chan1
+    for key, value in metadata.items():
+        if key not in ["nframes", "nframes_chan1", "nframes_chan2", "num_frames"]:
+            ops[key] = value
+
     np.save(ops_path, ops)
-    logger.debug(f"Ops file written to {ops_path} with metadata:\n{ops}")
+    logger.debug(f"Ops file written to {ops_path} with nframes={ops['nframes']}, nframes_chan1={ops.get('nframes_chan1')}")
 
 
 def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
@@ -704,3 +715,623 @@ def print_tree(path, max_depth=1, prefix=""):
         if max_depth > 1:
             extension = "    " if i == len(entries) - 1 else "│   "
             print_tree(entry, max_depth=max_depth - 1, prefix=prefix + extension)
+
+
+def merge_zarr_zplanes(
+    zarr_paths: list[str | Path],
+    output_path: str | Path,
+    *,
+    suite2p_dirs: list[str | Path] | None = None,
+    metadata: dict | None = None,
+    overwrite: bool = True,
+    compression_level: int = 1,
+) -> Path:
+    """
+    Merge multiple single z-plane Zarr files into a single OME-Zarr volume.
+
+    Creates an OME-NGFF v0.5 compliant Zarr store with shape (T, Z, Y, X) by
+    stacking individual z-plane Zarr files. Optionally includes Suite2p segmentation
+    masks as OME-Zarr labels.
+
+    Parameters
+    ----------
+    zarr_paths : list of str or Path
+        List of paths to single-plane Zarr stores. Should be ordered by z-plane.
+        Each Zarr should have shape (T, Y, X).
+    output_path : str or Path
+        Path for the output merged Zarr store.
+    suite2p_dirs : list of str or Path, optional
+        List of Suite2p output directories corresponding to each z-plane.
+        If provided, ROI masks will be added as OME-Zarr labels.
+        Must match length of zarr_paths.
+    metadata : dict, optional
+        Comprehensive metadata dictionary. Coordinate-related keys are used for
+        OME-NGFF transformations, while additional keys are preserved as custom
+        metadata. Supported keys:
+
+        **Coordinate transformations:**
+        - pixel_resolution : tuple (x, y) in micrometers
+        - frame_rate : float, Hz (or 'fs')
+        - dz : float, z-step in micrometers (or 'z_step')
+        - name : str, volume name
+
+        **ScanImage metadata:**
+        - si : dict, complete ScanImage metadata structure
+        - roi_groups : list, ROI definitions with scanfield info
+        - objective_resolution : float, objective NA
+        - zoom_factor : float
+
+        **Acquisition metadata:**
+        - acquisition_date : str, ISO format
+        - experimenter : str
+        - description : str
+        - specimen : str
+
+        **Microscope metadata:**
+        - objective : str, objective name
+        - emission_wavelength : float, nm
+        - excitation_wavelength : float, nm
+        - numerical_aperture : float
+
+        **Processing metadata:**
+        - fix_phase : bool
+        - phasecorr_method : str
+        - use_fft : bool
+        - register_z : bool
+
+        **OMERO rendering:**
+        - channel_names : list of str
+        - num_planes : int, number of channels/planes
+
+        All metadata is organized into structured groups (scanimage, acquisition,
+        microscope, processing) in the output OME-Zarr attributes.
+    overwrite : bool, default=True
+        If True, overwrite existing output Zarr store.
+    compression_level : int, default=1
+        Gzip compression level (0-9). Higher = better compression, slower.
+
+    Returns
+    -------
+    Path
+        Path to the created OME-Zarr store.
+
+    Raises
+    ------
+    ValueError
+        If zarr_paths is empty or shapes are incompatible.
+    FileNotFoundError
+        If any input Zarr or Suite2p directory doesn't exist.
+
+    Examples
+    --------
+    Merge z-plane Zarr files into a volume:
+
+    >>> zarr_files = [
+    ...     "session1/plane01.zarr",
+    ...     "session1/plane02.zarr",
+    ...     "session1/plane03.zarr",
+    ... ]
+    >>> merge_zarr_zplanes(zarr_files, "session1/volume.zarr")
+
+    Include Suite2p segmentation masks:
+
+    >>> s2p_dirs = [
+    ...     "session1/plane01_suite2p",
+    ...     "session1/plane02_suite2p",
+    ...     "session1/plane03_suite2p",
+    ... ]
+    >>> merge_zarr_zplanes(
+    ...     zarr_files,
+    ...     "session1/volume.zarr",
+    ...     suite2p_dirs=s2p_dirs,
+    ...     metadata={"pixel_resolution": (0.5, 0.5), "frame_rate": 30.0, "dz": 5.0}
+    ... )
+
+    See Also
+    --------
+    imwrite : Write imaging data to various formats including OME-Zarr
+    """
+    if not HAS_ZARR:
+        raise ImportError("zarr package required. Install with: pip install zarr")
+
+    import zarr
+    from zarr.codecs import BytesCodec, GzipCodec
+
+    zarr_paths = [Path(p) for p in zarr_paths]
+    output_path = Path(output_path)
+
+    if not zarr_paths:
+        raise ValueError("zarr_paths cannot be empty")
+
+    # Validate all input Zarrs exist
+    for zp in zarr_paths:
+        if not zp.exists():
+            raise FileNotFoundError(f"Zarr store not found: {zp}")
+
+    # Validate suite2p_dirs if provided
+    if suite2p_dirs is not None:
+        suite2p_dirs = [Path(p) for p in suite2p_dirs]
+        if len(suite2p_dirs) != len(zarr_paths):
+            raise ValueError(
+                f"suite2p_dirs length ({len(suite2p_dirs)}) must match "
+                f"zarr_paths length ({len(zarr_paths)})"
+            )
+        for s2p_dir in suite2p_dirs:
+            if not s2p_dir.exists():
+                raise FileNotFoundError(f"Suite2p directory not found: {s2p_dir}")
+
+    # Read first Zarr to get dimensions
+    z0 = zarr.open(str(zarr_paths[0]), mode="r")
+    if hasattr(z0, "shape"):
+        # Direct array
+        T, Y, X = z0.shape
+        dtype = z0.dtype
+    else:
+        # Group - look for "0" array (OME-Zarr)
+        if "0" in z0:
+            arr = z0["0"]
+            T, Y, X = arr.shape
+            dtype = arr.dtype
+        else:
+            raise ValueError(
+                f"Cannot determine shape of {zarr_paths[0]}. "
+                f"Expected direct array or group with '0' subarray."
+            )
+
+    Z = len(zarr_paths)
+    logger.info(f"Creating merged Zarr volume with shape (T={T}, Z={Z}, Y={Y}, X={X})")
+
+    if output_path.exists() and overwrite:
+        import shutil
+
+        shutil.rmtree(output_path)
+
+    root = zarr.open_group(str(output_path), mode="w", zarr_format=3)
+    image_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+    image = zarr.create(
+        store=root.store,
+        path="0",
+        shape=(T, Z, Y, X),
+        chunks=(1, 1, Y, X),  # Chunk by frame and z-plane
+        dtype=dtype,
+        codecs=image_codecs,
+        overwrite=True,
+    )
+
+    logger.info("Copying z-plane data...")
+    for zi, zpath in enumerate(zarr_paths):
+        z_arr = zarr.open(str(zpath), mode="r")
+
+        # Handle both direct arrays and OME-Zarr groups
+        if hasattr(z_arr, "shape"):
+            plane_data = z_arr[:]
+        elif "0" in z_arr:
+            plane_data = z_arr["0"][:]
+        else:
+            raise ValueError(f"Cannot read data from {zpath}")
+
+        if plane_data.shape != (T, Y, X):
+            raise ValueError(
+                f"Shape mismatch at z={zi}: expected {(T, Y, X)}, got {plane_data.shape}"
+            )
+
+        image[:, zi, :, :] = plane_data
+        logger.debug(f"Copied z-plane {zi + 1}/{Z} from {zpath.name}")
+
+    # Add Suite2p labels if provided
+    if suite2p_dirs is not None:
+        logger.info("Adding Suite2p segmentation masks as labels...")
+        _add_suite2p_labels(
+            root, suite2p_dirs, T, Z, Y, X, dtype, compression_level
+        )
+
+    metadata = metadata or {}
+    ome_attrs = _build_rich_ome_metadata(
+        shape=(T, Z, Y, X),
+        dtype=dtype,
+        metadata=metadata,
+    )
+
+    for key, value in ome_attrs.items():
+        root.attrs[key] = value
+
+    # Add napari-specific scale metadata to the array for proper volumetric viewing
+    pixel_resolution = metadata.get("pixel_resolution", [1.0, 1.0])
+    frame_rate = metadata.get("frame_rate", metadata.get("fs", 1.0))
+    dz = metadata.get("dz", metadata.get("z_step", 1.0))
+
+    if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
+        pixel_x, pixel_y = float(pixel_resolution[0]), float(pixel_resolution[1])
+    else:
+        pixel_x = pixel_y = 1.0
+
+    time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
+
+    # napari reads scale from array attributes for volumetric viewing
+    # Scale order: (T, Z, Y, X) in physical units
+    image.attrs["scale"] = [time_scale, float(dz), pixel_y, pixel_x]
+
+    logger.info(f"Successfully created merged OME-Zarr at {output_path}")
+    logger.info(f"Napari scale (t,z,y,x): {image.attrs['scale']}")
+    return output_path
+
+
+def _build_rich_ome_metadata(
+    shape: tuple,
+    dtype,
+    metadata: dict,
+) -> dict:
+    """
+    Build comprehensive OME-NGFF v0.5 metadata from ScanImage and other metadata.
+
+    Creates OMERO rendering settings, custom metadata fields, and proper
+    coordinate transformations based on available metadata.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the array (T, Z, Y, X)
+    dtype : np.dtype
+        Data type of the array
+    metadata : dict
+        Metadata dictionary with optional keys
+
+    Returns
+    -------
+    dict
+        Complete OME-NGFF v0.5 metadata attributes
+    """
+    T, Z, Y, X = shape
+
+    pixel_resolution = metadata.get("pixel_resolution", [1.0, 1.0])
+    frame_rate = metadata.get("frame_rate", metadata.get("fs", 1.0))
+    dz = metadata.get("dz", metadata.get("z_step", 1.0))
+
+    if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
+        pixel_x, pixel_y = float(pixel_resolution[0]), float(pixel_resolution[1])
+    else:
+        pixel_x = pixel_y = 1.0
+
+    time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
+
+    # Build OME-NGFF v0.5 multiscales
+    axes = [
+        {"name": "t", "type": "time", "unit": "second"},
+        {"name": "z", "type": "space", "unit": "micrometer"},
+        {"name": "y", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"},
+    ]
+
+    scale_values = [time_scale, float(dz), pixel_y, pixel_x]
+
+    datasets = [
+        {
+            "path": "0",
+            "coordinateTransformations": [{"type": "scale", "scale": scale_values}],
+        }
+    ]
+
+    multiscales = [
+        {
+            "version": "0.5",
+            "name": metadata.get("name", "volume"),
+            "axes": axes,
+            "datasets": datasets,
+        }
+    ]
+
+    # Build OME content
+    ome_content = {
+        "version": "0.5",
+        "multiscales": multiscales,
+    }
+
+    # Add OMERO rendering metadata
+    omero_metadata = _build_omero_metadata(
+        shape=shape,
+        dtype=dtype,
+        metadata=metadata,
+    )
+    if omero_metadata:
+        ome_content["omero"] = omero_metadata
+
+    result = {"ome": ome_content}
+
+    # Add custom metadata fields (ScanImage, acquisition info, etc.)
+    custom_meta = {}
+
+    # Add ScanImage metadata
+    if "si" in metadata:
+        si = metadata["si"]
+        custom_meta["scanimage"] = {
+            "version": f"{si.get('VERSION_MAJOR', 'unknown')}.{si.get('VERSION_MINOR', 0)}",
+            "imaging_system": si.get("imagingSystem", "unknown"),
+            "objective_resolution": si.get("objectiveResolution", metadata.get("objective_resolution")),
+            "scan_mode": si.get("hScan2D", {}).get("scanMode", "unknown"),
+        }
+
+        # Add beam/laser info
+        if "hBeams" in si:
+            custom_meta["scanimage"]["laser_power"] = si["hBeams"].get("powers", 0)
+            custom_meta["scanimage"]["power_fraction"] = si["hBeams"].get("powerFractions", 0)
+
+        # Add ROI info
+        if "hRoiManager" in si:
+            roi_mgr = si["hRoiManager"]
+            custom_meta["scanimage"]["roi"] = {
+                "scan_zoom": roi_mgr.get("scanZoomFactor", metadata.get("zoom_factor")),
+                "lines_per_frame": roi_mgr.get("linesPerFrame"),
+                "pixels_per_line": roi_mgr.get("pixelsPerLine"),
+                "line_period": roi_mgr.get("linePeriod"),
+                "bidirectional": si.get("hScan2D", {}).get("bidirectional", True),
+            }
+
+    # Add ROI groups information
+    if "roi_groups" in metadata:
+        custom_meta["roi_groups"] = metadata["roi_groups"]
+
+    # Add acquisition metadata
+    acq_meta = {}
+    for key in ["acquisition_date", "experimenter", "description", "specimen"]:
+        if key in metadata:
+            acq_meta[key] = metadata[key]
+
+    if acq_meta:
+        custom_meta["acquisition"] = acq_meta
+
+    # Add microscope metadata
+    microscope_meta = {}
+    for key in ["objective", "emission_wavelength", "excitation_wavelength", "numerical_aperture"]:
+        if key in metadata:
+            microscope_meta[key] = metadata[key]
+
+    if microscope_meta:
+        custom_meta["microscope"] = microscope_meta
+
+    # Add processing metadata
+    processing_meta = {}
+    for key in ["fix_phase", "phasecorr_method", "use_fft", "register_z"]:
+        if key in metadata:
+            processing_meta[key] = metadata[key]
+
+    if processing_meta:
+        custom_meta["processing"] = processing_meta
+
+    # Add file info
+    if "file_paths" in metadata or "num_files" in metadata:
+        custom_meta["source_files"] = {
+            "num_files": metadata.get("num_files"),
+            "num_frames": metadata.get("num_frames"),
+            "frames_per_file": metadata.get("frames_per_file"),
+        }
+
+    # Add all serializable custom metadata
+    for key, value in custom_meta.items():
+        try:
+            json.dumps(value)
+            result[key] = value
+        except (TypeError, ValueError):
+            logger.debug(f"Skipping non-serializable metadata key: {key}")
+
+    # Add any other simple metadata fields
+    for key, value in metadata.items():
+        if key not in [
+            "pixel_resolution", "frame_rate", "fs", "dz", "z_step", "name",
+            "si", "roi_groups", "acquisition_date", "experimenter", "description",
+            "specimen", "objective", "emission_wavelength", "excitation_wavelength",
+            "numerical_aperture", "fix_phase", "phasecorr_method", "use_fft",
+            "register_z", "file_paths", "num_files", "num_frames", "frames_per_file",
+        ] and key not in result:
+            try:
+                json.dumps(value)
+                result[key] = value
+            except (TypeError, ValueError):
+                pass
+
+    return result
+
+
+def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
+    """
+    Build OMERO rendering metadata for OME-NGFF.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the array (T, Z, Y, X)
+    dtype : np.dtype
+        Data type of the array
+    metadata : dict
+        Metadata dictionary
+
+    Returns
+    -------
+    dict
+        OMERO metadata or empty dict if not enough info
+    """
+    import numpy as np
+
+    T, Z, Y, X = shape
+
+    # Determine data range for window settings
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        data_min, data_max = info.min, info.max
+    else:
+        data_min, data_max = 0.0, 1.0
+
+    # Build channel metadata
+    channels = []
+
+    # Get channel names from metadata
+    channel_names = metadata.get("channel_names")
+    num_channels = metadata.get("num_planes", 1)
+
+    if channel_names is None:
+        # Generate default channel names
+        if num_channels == 1:
+            channel_names = ["Channel 1"]
+        else:
+            channel_names = [f"Z-plane {i+1}" for i in range(num_channels)]
+
+    # Default colors (cycle through common microscopy colors)
+    default_colors = [
+        "00FF00",  # Green
+        "FF0000",  # Red
+        "0000FF",  # Blue
+        "FFFF00",  # Yellow
+        "FF00FF",  # Magenta
+        "00FFFF",  # Cyan
+        "FFFFFF",  # White
+    ]
+
+    for i, name in enumerate(channel_names[:num_channels]):
+        channel = {
+            "active": True,
+            "coefficient": 1.0,
+            "color": default_colors[i % len(default_colors)],
+            "family": "linear",
+            "inverted": False,
+            "label": name,
+            "window": {
+                "end": float(data_max),
+                "max": float(data_max),
+                "min": float(data_min),
+                "start": float(data_min),
+            },
+        }
+        channels.append(channel)
+
+    if not channels:
+        return {}
+
+    omero = {
+        "channels": channels,
+        "rdefs": {
+            "defaultT": 0,
+            "defaultZ": Z // 2,  # Middle z-plane
+            "model": "greyscale",
+        },
+        "version": "0.5",
+    }
+
+    return omero
+
+
+def _add_suite2p_labels(
+    root_group,
+    suite2p_dirs: list[Path],
+    T: int,
+    Z: int,
+    Y: int,
+    X: int,
+    dtype,
+    compression_level: int,
+):
+    """
+    Add Suite2p segmentation masks as OME-Zarr labels.
+
+    Creates a 'labels' subgroup with ROI masks from Suite2p stat.npy files.
+    Follows OME-NGFF v0.5 labels specification.
+
+    Parameters
+    ----------
+    root_group : zarr.Group
+        Root Zarr group to add labels to.
+    suite2p_dirs : list of Path
+        Suite2p output directories for each z-plane.
+    T, Z, Y, X : int
+        Dimensions of the volume.
+    dtype : np.dtype
+        Data type for label array.
+    compression_level : int
+        Gzip compression level.
+    """
+    import zarr
+    from zarr.codecs import BytesCodec, GzipCodec
+
+    logger.info("Creating labels array from Suite2p masks...")
+
+    # Create labels subgroup
+    labels_group = root_group.create_group("labels", overwrite=True)
+
+    # Create ROI masks array (static across time, just Z, Y, X)
+    label_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+    masks = zarr.create(
+        store=labels_group.store,
+        path="labels/0",
+        shape=(Z, Y, X),
+        chunks=(1, Y, X),
+        dtype=np.uint32,  # uint32 for up to 4 billion ROIs
+        codecs=label_codecs,
+        overwrite=True,
+    )
+
+    # Process each z-plane
+    roi_id = 1  # Start ROI IDs at 1 (0 = background)
+
+    for zi, s2p_dir in enumerate(suite2p_dirs):
+        stat_path = s2p_dir / "stat.npy"
+        iscell_path = s2p_dir / "iscell.npy"
+
+        if not stat_path.exists():
+            logger.warning(f"stat.npy not found in {s2p_dir}, skipping z={zi}")
+            continue
+
+        # Load Suite2p data
+        stat = np.load(stat_path, allow_pickle=True)
+
+        # Load iscell if available to filter
+        if iscell_path.exists():
+            iscell = np.load(iscell_path, allow_pickle=True)[:, 0].astype(bool)
+        else:
+            iscell = np.ones(len(stat), dtype=bool)
+
+        # Create mask for this z-plane
+        plane_mask = np.zeros((Y, X), dtype=np.uint32)
+
+        for roi_idx, (roi_stat, is_cell) in enumerate(zip(stat, iscell)):
+            if not is_cell:
+                continue
+
+            # Get pixel coordinates for this ROI
+            ypix = roi_stat.get("ypix", [])
+            xpix = roi_stat.get("xpix", [])
+
+            if len(ypix) == 0 or len(xpix) == 0:
+                continue
+
+            # Ensure coordinates are within bounds
+            ypix = np.clip(ypix, 0, Y - 1)
+            xpix = np.clip(xpix, 0, X - 1)
+
+            # Assign unique ROI ID
+            plane_mask[ypix, xpix] = roi_id
+            roi_id += 1
+
+        # Write to Zarr
+        masks[zi, :, :] = plane_mask
+        logger.debug(
+            f"Added {(plane_mask > 0).sum()} labeled pixels for z-plane {zi + 1}/{Z}"
+        )
+
+    # Add OME-NGFF labels metadata
+    labels_metadata = {
+        "version": "0.5",
+        "labels": ["0"],  # Path to the label array
+    }
+
+    # Add metadata for label array
+    label_array_meta = {
+        "version": "0.5",
+        "image-label": {
+            "version": "0.5",
+            "colors": [],  # Can add color LUT here if desired
+            "source": {"image": "../../0"},  # Reference to main image
+        },
+    }
+
+    labels_group.attrs.update(labels_metadata)
+    labels_group["0"].attrs.update(label_array_meta)
+
+    logger.info(f"Added {roi_id - 1} total ROIs across {Z} z-planes")

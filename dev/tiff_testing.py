@@ -16,7 +16,23 @@ files = list(data_path.glob("*.tif*"))
 x = mbo.imread(files)
 x.phasecorr_method = None
 
-mbo.imwrite(x, "D://demo//ome", ome=True, ext=".zarr", planes=[7, 8])
+mbo.imwrite(
+    x, "D://demo//ome_v2//sharded",
+    ome=True,
+    ext=".zarr",
+    num_frames=1500,
+    overwrite=False,
+    sharded=True
+)
+
+mbo.imwrite(
+    x, "D://demo//ome_v2//not_sharded",
+    ome=True,
+    ext=".zarr",
+    num_frames=1500,
+    overwrite=False,
+    sharded=False
+)
 
 benchmark_dir = data_path.parent / "benchmark"
 benchmark_dir.mkdir(exist_ok=True)
