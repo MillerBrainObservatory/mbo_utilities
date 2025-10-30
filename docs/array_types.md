@@ -211,6 +211,4 @@ Input
   └─ .npy file? → NpyArray
 ```
 
-- {ref}`user_guide` - Data extraction and assembly workflows
-- {ref}`glossary` - Terminology and definitions
 - API Reference: `mbo_utilities.imread()`, `mbo_utilities.imwrite()`
