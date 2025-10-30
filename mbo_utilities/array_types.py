@@ -1339,20 +1339,78 @@ class ZarrArray:
             if not p.exists():
                 raise FileNotFoundError(f"No zarr store at {p}")
 
-        self.zs = [zarr.open(p, mode="r") for p in self.filenames]
+        # Open zarr stores - handle both standard arrays and OME-Zarr groups
+        opened = [zarr.open(p, mode="r") for p in self.filenames]
+
+        # If we opened a Group (OME-Zarr structure), get the "0" array
+        self.zs = []
+        self._groups = []  # Store groups separately to access their metadata
+        for z in opened:
+            if isinstance(z, zarr.Group):
+                # OME-Zarr structure: access the "0" array
+                if "0" not in z:
+                    raise ValueError(f"OME-Zarr group missing '0' array in {z.store.path}")
+                self.zs.append(z["0"])
+                self._groups.append(z)  # Keep reference to group for metadata
+            else:
+                # Standard zarr array
+                self.zs.append(z)
+                self._groups.append(None)
 
         shapes = [z.shape for z in self.zs]
         if len(set(shapes)) != 1:
             raise ValueError(f"Inconsistent shapes across zarr stores: {shapes}")
 
-        self._metadata = [dict(z.attrs) for z in self.zs]
+        # For OME-Zarr, metadata is on the group; for standard zarr, it's on the array
+        self._metadata = []
+        for i, z in enumerate(self.zs):
+            if self._groups[i] is not None:
+                # OME-Zarr: metadata on group
+                self._metadata.append(dict(self._groups[i].attrs))
+            else:
+                # Standard zarr: metadata on array
+                self._metadata.append(dict(z.attrs))
         self.compressor = compressor
 
     @property
     def metadata(self):
-        # if one store, return dict, if many, return the first
-        # TODO: zarr consolidate metadata
-        return self._metadata[0] if len(self._metadata) >= 1 else self._metadata
+        """
+        Return metadata as a dict.
+        - If single zarr file: return its metadata dict
+        - If multiple zarr files: return the first one's metadata
+
+        Note: _metadata is internally a list of dicts (one per zarr file)
+        """
+        if not self._metadata:
+            md = {}
+        else:
+            md = self._metadata[0]
+
+        # Ensure critical keys are present - extract from shape if missing
+        # This provides backward compatibility with old zarr files
+        if "num_frames" not in md and "nframes" not in md:
+            # Extract from shape: (T, H, W)
+            if self.zs:
+                md["num_frames"] = int(self.zs[0].shape[0])
+
+        return md
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        """
+        Set metadata. Updates the first zarr file's metadata.
+
+        Args:
+            value: dict of metadata to set
+        """
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+
+        if not self._metadata:
+            self._metadata = [value]
+        else:
+            # Update first metadata dict
+            self._metadata[0] = value
 
     @property
     def shape(self) -> tuple[int, int, int, int]:

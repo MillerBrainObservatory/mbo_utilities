@@ -521,30 +521,23 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
 
     result = {"ome": ome_content}
 
-    # Add optional non-OME metadata at root level (outside ome namespace)
+    # Add all metadata at root level (outside ome namespace) for backward compatibility
+    # This preserves metadata that downstream tools expect (num_frames, pixel_resolution, etc.)
+    # while also maintaining OME-NGFF compliance
     for k, v in metadata.items():
-        if k not in [
-            "pixel_resolution",
-            "frame_rate",
-            "fs",
-            "dx",
-            "dy",
-            "dz",
-            "z_step",
-            "num_frames",
-            "nframes",
-            "shape",
-            "channel_names",
-        ]:
-            # Only add JSON-serializable values
-            try:
-                import json
+        if k == "channel_names":
+            # Already encoded in OME omero section
+            continue
 
-                json.dumps(v)
-                result[k] = v
-            except (TypeError, ValueError):
-                # Skip non-serializable metadata
-                pass
+        # Only add JSON-serializable values
+        try:
+            import json
+
+            json.dumps(v)
+            result[k] = v
+        except (TypeError, ValueError):
+            # Skip non-serializable metadata (e.g., numpy arrays, complex objects)
+            pass
 
     return result
 
