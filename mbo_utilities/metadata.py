@@ -141,6 +141,9 @@ def get_metadata(file, z_step=None, verbose=False):
     >>> meta = get_metadata(files)
     """
     # Convert input to Path object and handle different input types
+    if hasattr(file, "metadata"):
+        return file.metadata
+
     if isinstance(file, (list, tuple)):
         # make sure all values in the list are strings or paths
         if not all(isinstance(f, (str, os.PathLike)) for f in file):
