@@ -59,8 +59,9 @@ uv run mbo
 ## Documentation
 
 - **[Installation & GPU Setup](https://millerbrainobservatory.github.io/mbo_utilities/venvs.html)**
-- **[File Conversion Guide](https://millerbrainobservatory.github.io/mbo_utilities/assembly.html)** - ScanImage TIFF processing
-- **[API Reference](https://millerbrainobservatory.github.io/mbo_utilities/api/usage.html)**
+- **[User Guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html)**
+- **[Array Types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html)** 
+- **[API Reference](https://millerbrainobservatory.github.io/mbo_utilities/api/index.html)**
 - **[GUI User Guide](./mbo_gui_user_guide.pdf)**
 
 ## Built With
