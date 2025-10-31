@@ -1414,8 +1414,20 @@ class ZarrArray:
 
     @property
     def shape(self) -> tuple[int, int, int, int]:
-        t, h, w = self.zs[0].shape
-        return t, len(self.zs), h, w
+        # Handle both 3D (T, H, W) and 4D (T, Z, H, W) zarr arrays
+        zarr_shape = self.zs[0].shape
+
+        if len(zarr_shape) == 3:
+            # Original format: (T, H, W) - one zarr per Z plane
+            t, h, w = zarr_shape
+            return t, len(self.zs), h, w
+        elif len(zarr_shape) == 4:
+            # Consolidated format: (T, Z, H, W) - single zarr with all data
+            t, z, h, w = zarr_shape
+            # If we have multiple zarr files, multiply Z dimension
+            return t, z * len(self.zs), h, w
+        else:
+            raise ValueError(f"Unexpected zarr shape: {zarr_shape}. Expected 3D or 4D array.")
 
     @property
     def dtype(self):
@@ -1427,9 +1439,23 @@ class ZarrArray:
 
     def __array__(self):
         """Materialize full array into memory: (T, Z, H, W)."""
-        arrs = [z[:] for z in self.zs]
-        stacked = np.stack(arrs, axis=1)  # (T, Z, H, W)
-        return stacked
+        zarr_shape = self.zs[0].shape
+
+        if len(zarr_shape) == 3:
+            # Original format: (T, H, W) - one zarr per Z plane
+            arrs = [z[:] for z in self.zs]
+            stacked = np.stack(arrs, axis=1)  # (T, Z, H, W)
+            return stacked
+        elif len(zarr_shape) == 4:
+            # Consolidated format: (T, Z, H, W) - already in correct shape
+            if len(self.zs) == 1:
+                return self.zs[0][:]
+            else:
+                # Multiple consolidated zarr files - concatenate along Z
+                arrs = [z[:] for z in self.zs]
+                return np.concatenate(arrs, axis=1)  # (T, Z, H, W)
+        else:
+            raise ValueError(f"Unexpected zarr shape: {zarr_shape}. Expected 3D or 4D array.")
 
     @property
     def min(self):
@@ -1464,22 +1490,56 @@ class ZarrArray:
         y_key = normalize(y_key)
         x_key = normalize(x_key)
 
-        if len(self.zs) == 1:
-            if isinstance(z_key, int) and z_key != 0:
-                raise IndexError("Z dimension has size 1, only index 0 is valid")
-            return self.zs[0][t_key, y_key, x_key]
+        zarr_shape = self.zs[0].shape
 
-        # multi-zarr
-        if isinstance(z_key, int):
-            return self.zs[z_key][t_key, y_key, x_key]
+        # Handle 4D consolidated zarr: (T, Z, H, W)
+        if len(zarr_shape) == 4:
+            if len(self.zs) == 1:
+                # Single consolidated zarr - direct indexing
+                return self.zs[0][t_key, z_key, y_key, x_key]
+            else:
+                # Multiple consolidated zarr files
+                # Need to map z_key across multiple files
+                t, z_per_file, h, w = zarr_shape
+                total_z = z_per_file * len(self.zs)
 
-        if isinstance(z_key, slice):
-            z_indices = range(len(self.zs))[z_key]
+                if isinstance(z_key, int):
+                    # Determine which file and which Z within that file
+                    file_idx = z_key // z_per_file
+                    z_in_file = z_key % z_per_file
+                    return self.zs[file_idx][t_key, z_in_file, y_key, x_key]
+                elif isinstance(z_key, slice):
+                    # Complex case: slice may span multiple files
+                    z_indices = range(total_z)[z_key]
+                    arrs = []
+                    for z_idx in z_indices:
+                        file_idx = z_idx // z_per_file
+                        z_in_file = z_idx % z_per_file
+                        arrs.append(self.zs[file_idx][t_key, z_in_file, y_key, x_key])
+                    return np.stack(arrs, axis=1) if len(arrs) > 1 else arrs[0]
+                else:
+                    raise IndexError("Z indexing must be int or slice")
+
+        # Handle 3D original format: (T, H, W) - one zarr per Z plane
+        elif len(zarr_shape) == 3:
+            if len(self.zs) == 1:
+                if isinstance(z_key, int) and z_key != 0:
+                    raise IndexError("Z dimension has size 1, only index 0 is valid")
+                return self.zs[0][t_key, y_key, x_key]
+
+            # multi-zarr
+            if isinstance(z_key, int):
+                return self.zs[z_key][t_key, y_key, x_key]
+
+            if isinstance(z_key, slice):
+                z_indices = range(len(self.zs))[z_key]
+            else:
+                raise IndexError("Z indexing must be int or slice")
+
+            arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
+            return np.stack(arrs, axis=1)
         else:
-            raise IndexError("Z indexing must be int or slice")
-
-        arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
-        return np.stack(arrs, axis=1)
+            raise ValueError(f"Unexpected zarr shape: {zarr_shape}. Expected 3D or 4D array.")
 
     def _imwrite(
         self,
