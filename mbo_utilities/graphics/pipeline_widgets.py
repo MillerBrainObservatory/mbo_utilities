@@ -210,6 +210,83 @@ def draw_section_suite2p(self):
         imgui.new_line()
 
         # --------------------------------------------------------------
+        imgui.separator_text("Processing Controls")
+
+        # Save path display
+        imgui.text("Save path:")
+        imgui.text_colored(
+            imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
+            self._saveas_outdir if self._saveas_outdir else "(not set)"
+        )
+        # Browse button below the text
+        if imgui.button("Browse"):
+            home = pathlib.Path().home()
+            res = pfd.select_folder(str(home))
+            if res:
+                self._saveas_outdir = res.result()
+
+        # Get max frames from data
+        if hasattr(self, 'image_widget') and self.image_widget.data:
+            data_arrays = self.image_widget.data if isinstance(self.image_widget.data, list) else [self.image_widget.data]
+            if len(data_arrays) > 0:
+                max_frames = data_arrays[0].shape[0]
+            else:
+                max_frames = 1000
+        else:
+            max_frames = 1000
+
+        # Frames to process slider
+        imgui.spacing()
+        if self.s2p.frames_include == -1:
+            # Initialize to max frames if set to -1
+            self.s2p.frames_include = max_frames
+
+        _, self.s2p.frames_include = imgui.slider_int(
+            "Frames to process",
+            self.s2p.frames_include,
+            1,
+            max_frames
+        )
+        set_tooltip(
+            f"Number of frames to process (1-{max_frames}). "
+            "Useful for testing on a subset of data."
+        )
+
+        imgui.separator()
+        if imgui.button("Run"):
+            print("Run button clicked")
+            self.logger.info("Running Suite2p pipeline...")
+            run_process(self)
+            self.logger.info("Suite2p pipeline completed.")
+        if self._install_error:
+            imgui.same_line()
+            if self._show_red_text:
+                imgui.text_colored(
+                    imgui.ImVec4(1.0, 0.0, 0.0, 1.0),
+                    "Error: lbm_suite2p_python is not installed.",
+                )
+            if self._show_green_text:
+                imgui.text_colored(
+                    imgui.ImVec4(1.0, 0.0, 0.0, 1.0),
+                    "lbm_suite2p_python install success.",
+                )
+            if self._show_install_button:
+                if imgui.button("Install"):
+                    import subprocess
+
+                    self.logger.log("info", "Installing lbm_suite2p_python...")
+                    try:
+                        subprocess.check_call(["pip", "install", "lbm_suite2p_python"])
+                        self.logger.log("info", "Installation complete.")
+                        self._install_error = False
+                        self._show_red_text = False
+                        self._show_green_text = True
+                        self._show_install_button = False
+                    except Exception as e:
+                        self.logger.log("error", f"Installation failed: {e}")
+
+        # --------------------------------------------------------------
+        imgui.spacing()
         imgui.separator_text("Main Settings")
         # _, self.s2p.nplanes = imgui.input_int("Number of Planes", self.s2p.nplanes)
         # set_tooltip("Each tiff has this many planes in sequence.")
@@ -221,7 +298,6 @@ def draw_section_suite2p(self):
         set_tooltip(
             "Sensor decay timescale (round up): GCaMP6f=0.7, GCaMP6m=1.0, GCaMP6s=1.25-1.5"
         )
-        set_tooltip("Only process this many frames (-1 = all frames, for testing).")
         # _, self.s2p.multiplane_parallel = imgui.checkbox(
         #     "Multiplane Parallel", self.s2p.multiplane_parallel
         # )
@@ -494,60 +570,6 @@ def draw_section_suite2p(self):
         )
         set_tooltip("Threshold for calling ROI detected on channel 2.")
 
-        imgui.spacing()
-        imgui.input_text("Save folder", self._saveas_outdir, 256)
-        imgui.same_line()
-        if imgui.button("Browse"):
-            home = pathlib.Path().home()
-            res = pfd.select_folder(str(home))
-            if res:
-                self._saveas_outdir = res.result()
-
-        imgui.separator()
-        if imgui.button("Run"):
-            self.logger.info("Running Suite2p pipeline...")
-            run_process(self)
-            self.logger.info("Suite2p pipeline completed.")
-        if self._install_error:
-            imgui.same_line()
-            if self._show_red_text:
-                imgui.text_colored(
-                    imgui.ImVec4(1.0, 0.0, 0.0, 1.0),
-                    "Error: lbm_suite2p_python is not installed.",
-                )
-            if self._show_green_text:
-                imgui.text_colored(
-                    imgui.ImVec4(1.0, 0.0, 0.0, 1.0),
-                    "lbm_suite2p_python install success.",
-                )
-            if self._show_install_button:
-                if imgui.button("Install"):
-                    import subprocess
-
-                    self.logger.log("info", "Installing lbm_suite2p_python...")
-                    try:
-                        subprocess.check_call(["pip", "install", "lbm_suite2p_python"])
-                        self.logger.log("info", "Installation complete.")
-                        self._install_error = False
-                        self._show_red_text = False
-                        self._show_green_text = True
-                    except Exception as e:
-                        try:
-                            self.logger.log(
-                                "error",
-                                f"Installation failed: {e}",
-                            )
-                            subprocess.check_call(
-                                ["uv", "pip", "install", "lbm_suite2p_python"]
-                            )
-                            self._show_red_text = False
-                            self._show_green_text = True
-                        except Exception as e:
-                            self.logger.log("error", f"Installation failed: {e}")
-                            self._show_red_text = True
-                            self._show_install_button = False
-                            self._show_green_text = True
-
         imgui.pop_item_width()
         imgui.spacing()
         # if imgui.button("Load Suite2p Masks"):
@@ -628,6 +650,7 @@ def run_process(self):
 
 
 def run_plane_from_data(self, arr_idx):
+    print(f"Thread {arr_idx} started")
     from mbo_utilities._writers import _write_bin
     from mbo_utilities.file_io import get_last_savedir_path, save_last_savedir
     from mbo_utilities.lazy_array import imread
@@ -729,6 +752,7 @@ def run_plane_from_data(self, arr_idx):
     user_ops.update(md)
 
     # Write functional channel (channel 1) binary with num_frames constraint
+    print(f"Writing binary: {data.shape[0]} frames, metadata num_frames={user_ops.get('num_frames')}")
     _write_bin(raw_file, data, overwrite=True, metadata=user_ops)
 
     # Write structural channel (channel 2) binary if provided

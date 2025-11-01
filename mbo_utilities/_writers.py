@@ -308,10 +308,13 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
         _write_bin._writers.pop(key, None)
         _write_bin._offsets.pop(key, None)
 
-    if key not in _write_bin._writers:
-        if overwrite and fname.exists():
-            fname.unlink()
+    # If overwrite is requested, clear cached writer and delete file
+    if overwrite and fname.exists():
+        fname.unlink()
+        _write_bin._writers.pop(key, None)
+        _write_bin._offsets.pop(key, None)
 
+    if key not in _write_bin._writers:
         Ly, Lx = data.shape[-2], data.shape[-1]
         nframes = metadata.get("nframes", None)
         if nframes is None:
