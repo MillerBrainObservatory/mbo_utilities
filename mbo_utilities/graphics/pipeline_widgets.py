@@ -214,8 +214,26 @@ def draw_section_suite2p(self):
 
         # Save path display
         imgui.text("Save path:")
+        imgui.same_line()
+
+        # Flash animation logic for "(not set)" text
+        text_color = imgui.ImVec4(0.6, 0.8, 1.0, 1.0)  # Default cyan color
+        if not self._saveas_outdir and self._s2p_savepath_flash_start is not None:
+            elapsed = time.time() - self._s2p_savepath_flash_start
+            flash_duration = 0.3  # Duration of each flash in seconds
+            total_flashes = 4
+
+            if elapsed < total_flashes * flash_duration:
+                # Determine if we should show red or cyan
+                current_flash = int(elapsed / flash_duration)
+                if current_flash % 2 == 0:  # Even flashes = red
+                    text_color = imgui.ImVec4(1.0, 0.2, 0.2, 1.0)  # Red
+            else:
+                # Animation finished, reset
+                self._s2p_savepath_flash_start = None
+
         imgui.text_colored(
-            imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
+            text_color,
             self._saveas_outdir if self._saveas_outdir else "(not set)"
         )
         # Browse button below the text
@@ -252,12 +270,32 @@ def draw_section_suite2p(self):
             "Useful for testing on a subset of data."
         )
 
-        imgui.separator()
         if imgui.button("Run"):
             print("Run button clicked")
-            self.logger.info("Running Suite2p pipeline...")
-            run_process(self)
+            # Validate save path is set
+            if not self._saveas_outdir:
+                self.logger.warning("Please select a save path before running.")
+                # Trigger flash animation
+                self._s2p_savepath_flash_start = time.time()
+                self._s2p_savepath_flash_count = 0
+                self._s2p_show_savepath_popup = True
+            else:
+                self.logger.info("Running Suite2p pipeline...")
+                run_process(self)
             self.logger.info("Suite2p pipeline completed.")
+
+        # Popup for missing save path
+        if self._s2p_show_savepath_popup:
+            imgui.open_popup("Missing Save Path")
+            self._s2p_show_savepath_popup = False
+
+        if imgui.begin_popup_modal("Missing Save Path")[0]:
+            imgui.text("Please select a save path before running.")
+            imgui.spacing()
+            if imgui.button("OK", imgui.ImVec2(120, 0)):
+                imgui.close_current_popup()
+            imgui.end_popup()
+
         if self._install_error:
             imgui.same_line()
             if self._show_red_text:
@@ -652,7 +690,7 @@ def run_process(self):
 def run_plane_from_data(self, arr_idx):
     print(f"Thread {arr_idx} started")
     from mbo_utilities._writers import _write_bin
-    from mbo_utilities.file_io import get_last_savedir_path, save_last_savedir
+    from mbo_utilities.file_io import load_last_savedir, save_last_savedir
     from mbo_utilities.lazy_array import imread
 
     arr = self.image_widget.data[arr_idx]
@@ -666,7 +704,7 @@ def run_plane_from_data(self, arr_idx):
         ind_x, ind_y = slice(None), slice(None)
 
     # output base
-    base_out = Path(self._saveas_outdir or get_last_savedir_path())
+    base_out = Path(self._saveas_outdir or load_last_savedir())
     base_out.mkdir(exist_ok=True)
 
     # Determine plane directory name based on ROI configuration

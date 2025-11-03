@@ -459,6 +459,9 @@ class PreviewDataWidget(EdgeWindow):
 
         self.s2p = Suite2pSettings()
         self._s2p_dir = ""
+        self._s2p_savepath_flash_start = None  # Track when flash animation starts
+        self._s2p_savepath_flash_count = 0  # Number of flashes
+        self._s2p_show_savepath_popup = False  # Show popup when save path is missing
         self.kwargs = kwargs
 
         if implot.get_current_context() is None:
@@ -595,7 +598,9 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_done = False
         self._saveas_progress = 0.0
         self._saveas_current_index = 0
-        self._saveas_outdir = str(getattr(self, "_save_dir", ""))
+        # Pre-fill with last saved directory if available
+        last_dir = load_last_savedir(default=None)
+        self._saveas_outdir = str(last_dir) if last_dir else str(getattr(self, "_save_dir", ""))
         self._saveas_total = 0
 
         self._saveas_selected_roi = set()  # -1 means all ROIs

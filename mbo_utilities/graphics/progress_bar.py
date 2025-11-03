@@ -1,7 +1,6 @@
 import time
 from collections import defaultdict
 
-from icecream import ic
 from imgui_bundle import (
     imgui,
     hello_imgui,
