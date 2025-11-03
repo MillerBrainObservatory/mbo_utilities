@@ -310,9 +310,12 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
 
     # If overwrite is requested, clear cached writer and delete file
     if overwrite and fname.exists():
+        # Close file handle before unlinking (Windows requirement)
+        if key in _write_bin._writers:
+            _write_bin._writers[key].close()
+            _write_bin._writers.pop(key, None)
+            _write_bin._offsets.pop(key, None)
         fname.unlink()
-        _write_bin._writers.pop(key, None)
-        _write_bin._offsets.pop(key, None)
 
     if key not in _write_bin._writers:
         Ly, Lx = data.shape[-2], data.shape[-1]
