@@ -68,7 +68,7 @@ def create_test_data_single_zplane(shape=(100, 512, 512)) -> np.ndarray:
         amplitude = rng.randint(200, 500)
         for t_idx in range(t):
             signal = baseline + amplitude * np.sin(2 * np.pi * t_idx / 20 + i)
-            data[t_idx][mask] += signal
+            data[t_idx][mask] += signal.astype(np.int16)
 
     # Add noise
     noise = rng.normal(0, 50, shape).astype(np.int16)
@@ -117,7 +117,7 @@ def create_test_data_multi_zplane(shape=(100, 5, 512, 512)) -> np.ndarray:
                 signal = (
                     baseline + amplitude * np.sin(2 * np.pi * t_idx / 20 + i)
                 ) * z_intensity
-                data[t_idx, z_idx][mask] += signal
+                data[t_idx, z_idx][mask] += signal.astype(np.int16)
 
     # Add noise
     noise = rng.normal(0, 50, shape).astype(np.int16)

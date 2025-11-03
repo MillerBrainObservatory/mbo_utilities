@@ -16,8 +16,12 @@ BASELINE_DIR = TEST_DATA_DIR / "baselines"
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_dirs():
     """Create output and baseline directories."""
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    BASELINE_DIR.mkdir(exist_ok=True)
+    # Skip if test data directory doesn't exist (e.g., on CI)
+    if not TEST_DATA_DIR.exists():
+        pytest.skip(f"Test data directory not found at {TEST_DATA_DIR}")
+
+    OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+    BASELINE_DIR.mkdir(exist_ok=True, parents=True)
     yield
     # Cleanup old outputs (keep for inspection)
     # shutil.rmtree(OUTPUT_DIR, ignore_errors=True)

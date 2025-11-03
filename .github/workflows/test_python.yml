@@ -36,12 +36,7 @@ jobs:
       - name: Install additional test dependencies
         run: uv pip install pytest pytest-xdist imageio
 
-      - name: Run unit tests
+      - name: Run graphics tests
         env:
           RENDERCANVAS_FORCE_OFFSCREEN: 1
-        run: uv run pytest tests/test_io_formats.py -v
-
-      - name: Run graphics tests (without screenshots)
-        env:
-          RENDERCANVAS_FORCE_OFFSCREEN: 1
-        run: uv run pytest tests/test_graphics_screenshots.py -v --tb=short
+        run: uv run pytest tests/test_graphics.py tests/test_graphics_screenshots.py -v --tb=short
