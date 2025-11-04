@@ -1,13 +1,10 @@
 # MBO Utilities
 
-> **Status:** Late-beta stage of development
+> **Status:** Late-beta stage of active development. There will be bugs that can be addressed quickly, file an [issue](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or reach out on slack.
 
+Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory/mbo_utilities/issues) (MBO).
 
-Microscopy image processing utilities for the Miller Brain Observatory (MBO).
-
-Provides efficient, lazy I/O for ScanImage and generic TIFF, Zarr v3, HDF5, and Suite2p binary formats with multi-ROI support, phase correction, and a GUI for volumetric visualization.
-
-A Suite2p processing pipeline is available via [LBM-Suite2p-Python](https://github.com/MillerBrainObservatory/LBM-Suite2p-Python).
+`imread`/`imwrite`: Reader and writer for a variety of [file types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) used at the mbo, such as raw scanimage tiffs, suite2p binaries, or zarr arrays.
 
 ---
 
@@ -19,9 +16,11 @@ A Suite2p processing pipeline is available via [LBM-Suite2p-Python](https://gith
 uv pip install mbo_utilities
 ```
 
-The GUI allows registration/segmentation for users to quickly process subsets of their datasets. These pipelines need to be installed separately.
+The GUI allows registration/segmentation for users to quickly process subsets of their datasets.
 
-Currently, the only supported pipeline is LBM-Suite2p-Python.
+These pipelines need to be installed separately.
+
+Currently, the only supported pipeline is LBM-Suite2p-Python. A few exciting future prospects include [masknmf](https://github.com/apasarkar/masknmf-toolbox).
 
 ```bash
 
@@ -31,10 +30,11 @@ uv pip install lbm_suite2p_python
 
 ## Usage
 
-We encourage users to start with the demo notebook [user_guide](./demos/user_guide.ipynb), available as a jupyter notebook or rendered in the [docs](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html) and can be downloaded on the top right of the page.
+We encourage users to start with the [user_guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html)
+
+You can run this code by available as a jupyter notebook or rendered in the [docs](./demos/user_guide.ipynb) and can be downloaded on the top right of the page.
 
 See [array types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) for additional information about each file-type and it's associated lazy array.
-
 
 **Launch GUI:**
 
