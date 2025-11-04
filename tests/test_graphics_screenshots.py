@@ -64,9 +64,7 @@ class TestSingleZPlaneGUI:
                     break
                 time.sleep(0.1)
 
-            assert all(
-                gui._zstats_done
-            ), "Stats computation did not complete in time"
+            assert all(gui._zstats_done), "Stats computation did not complete in time"
 
             # Check that stats were computed
             assert len(gui._zstats) > 0
