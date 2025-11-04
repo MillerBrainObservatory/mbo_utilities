@@ -343,7 +343,7 @@ def imwrite(
         # Validate indices are in range before using them
         if any(i < 0 or i >= len(planes) for i in order):
             raise ValueError(
-                f"order indices must be in range [0, {len(planes)-1}], got {order}"
+                f"order indices must be in range [0, {len(planes) - 1}], got {order}"
             )
         planes = [planes[i] for i in order]
 
@@ -644,6 +644,7 @@ def imread(
 
         # Regular .npy file - load as NumpyArray
         from mbo_utilities.array_types import NumpyArray
+
         logger.debug(f"Loading .npy file as NumpyArray: {first}")
         return NumpyArray(first)
 

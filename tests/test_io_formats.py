@@ -99,9 +99,9 @@ def validate_or_save_baseline(test_name, result):
 
 def test_imread_basic(test_data):
     """Test basic TIFF reading."""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("STARTING I/O FORMAT TESTS")
-    print("="*70)
+    print("=" * 70)
     print("\n=== Testing Basic TIFF Read ===")
 
     data = test_data["data"]
@@ -119,7 +119,9 @@ def test_imread_basic(test_data):
         "max": int(data_np.max()),
         "mean": float(data_np.mean()),
     }
-    print(f"Data stats - min: {baseline_info['min']}, max: {baseline_info['max']}, mean: {baseline_info['mean']:.2f}")
+    print(
+        f"Data stats - min: {baseline_info['min']}, max: {baseline_info['max']}, mean: {baseline_info['mean']:.2f}"
+    )
 
     print("Validating against baseline...")
     validate_or_save_baseline("imread_basic", baseline_info)
@@ -176,6 +178,7 @@ def test_imread_metadata(test_data):
 # Test: imwrite format variations
 # ==============================================================================
 
+
 def test_imwrite_tiff(test_data, output_path):
     """Test writing to TIFF format."""
     print("\n=== Testing TIFF Write ===")
@@ -210,14 +213,18 @@ def test_imwrite_tiff(test_data, output_path):
     # Multi-plane data: each file contains one plane
     # Original: (T, N_planes, Y, X) -> Each file: (T, 1, Y, X) or (T, Y, X)
     # Just validate spatial dimensions match
-    print(f"Validating spatial dimensions: {data_readback.shape[-2:]} == {data.shape[-2:]}")
+    print(
+        f"Validating spatial dimensions: {data_readback.shape[-2:]} == {data.shape[-2:]}"
+    )
     assert data_readback.shape[-2:] == data.shape[-2:], "Spatial dims mismatch"
 
     # Hash a small slice for baseline
     if data_readback.ndim == 4:
-        hash_slice = data_readback[:min(5, data_readback.shape[0]), :min(2, data_readback.shape[1])]
+        hash_slice = data_readback[
+            : min(5, data_readback.shape[0]), : min(2, data_readback.shape[1])
+        ]
     elif data_readback.ndim == 3:
-        hash_slice = data_readback[:min(10, data_readback.shape[0])]
+        hash_slice = data_readback[: min(10, data_readback.shape[0])]
     else:
         hash_slice = data_readback
 
@@ -278,13 +285,17 @@ def test_imwrite_zarr_basic(test_data, output_path):
 
     # Multi-plane data: each file may contain one plane
     # Just validate spatial dimensions match
-    print(f"Validating spatial dimensions: {data_readback_np.shape[-2:]} == {data_np.shape[-2:]}")
+    print(
+        f"Validating spatial dimensions: {data_readback_np.shape[-2:]} == {data_np.shape[-2:]}"
+    )
     assert data_readback_np.shape[-2:] == data_np.shape[-2:], "Spatial dims mismatch"
 
     if data_readback_np.ndim == 4:
-        hash_slice = data_readback_np[:min(5, data_readback_np.shape[0]), :min(2, data_readback_np.shape[1])]
+        hash_slice = data_readback_np[
+            : min(5, data_readback_np.shape[0]), : min(2, data_readback_np.shape[1])
+        ]
     elif data_readback_np.ndim == 3:
-        hash_slice = data_readback_np[:min(10, data_readback_np.shape[0])]
+        hash_slice = data_readback_np[: min(10, data_readback_np.shape[0])]
     else:
         hash_slice = data_readback_np
 
@@ -305,12 +316,14 @@ def test_imwrite_zarr_ome(test_data, output_path):
     data = test_data["data"]
     metadata = test_data["metadata"].copy()
 
-    metadata.update({
-        "name": "test_ome_zarr",
-        "acquisition_date": "2025-02-27",
-        "experimenter": "Test User",
-        "dz": 5.0,
-    })
+    metadata.update(
+        {
+            "name": "test_ome_zarr",
+            "acquisition_date": "2025-02-27",
+            "experimenter": "Test User",
+            "dz": 5.0,
+        }
+    )
 
     zarr_path = output_path / "test_ome.zarr"
     zarr_path.parent.mkdir(parents=True, exist_ok=True)
@@ -350,6 +363,7 @@ def test_imwrite_zarr_ome(test_data, output_path):
 
     # Try to open as zarr to check OME metadata
     import zarr
+
     try:
         z = zarr.open_group(str(zarr_to_check), mode="r")
         has_ome = "ome" in z.attrs
@@ -420,9 +434,11 @@ def test_imwrite_h5(test_data, output_path):
 
     # Handle 2D vs 3D for hashing
     if data_readback.ndim == 3:
-        hash_slice = data_readback[:min(10, data_readback.shape[0])]
+        hash_slice = data_readback[: min(10, data_readback.shape[0])]
     elif data_readback.ndim == 4:
-        hash_slice = data_readback[:min(5, data_readback.shape[0]), :min(2, data_readback.shape[1])]
+        hash_slice = data_readback[
+            : min(5, data_readback.shape[0]), : min(2, data_readback.shape[1])
+        ]
     else:
         hash_slice = data_readback
 
@@ -488,9 +504,11 @@ def test_imwrite_bin(test_data, output_path):
 
     # Handle 2D vs 3D for hashing
     if data_readback.ndim == 3:
-        hash_slice = data_readback[:min(10, data_readback.shape[0])]
+        hash_slice = data_readback[: min(10, data_readback.shape[0])]
     elif data_readback.ndim == 4:
-        hash_slice = data_readback[:min(5, data_readback.shape[0]), :min(2, data_readback.shape[1])]
+        hash_slice = data_readback[
+            : min(5, data_readback.shape[0]), : min(2, data_readback.shape[1])
+        ]
     else:
         hash_slice = data_readback
 
@@ -508,6 +526,7 @@ def test_imwrite_bin(test_data, output_path):
 # Test: Phase correction variations
 # ==============================================================================
 
+
 @pytest.mark.parametrize("method", ["mean"])
 def test_phase_correction_methods(test_data, output_path, method):
     """Test different phase correction methods."""
@@ -521,7 +540,7 @@ def test_phase_correction_methods(test_data, output_path, method):
 
     # Handle 2D vs 3D for hashing
     if data_corrected.ndim == 3:
-        hash_val = compute_hash(data_corrected[:min(10, data_corrected.shape[0])])
+        hash_val = compute_hash(data_corrected[: min(10, data_corrected.shape[0])])
     else:
         hash_val = compute_hash(data_corrected)
 
@@ -538,6 +557,7 @@ def test_phase_correction_methods(test_data, output_path, method):
 # Test: Zarr merging functionality
 # ==============================================================================
 
+
 def test_merge_zarr_zplanes(test_data, output_path):
     """Test merging multiple z-plane Zarr files."""
     data = test_data["data"]
@@ -553,7 +573,7 @@ def test_merge_zarr_zplanes(test_data, output_path):
     # Create 3 "z-plane" Zarr stores from single planes
     plane_zarrs = []
     for i in range(3):
-        plane_path = output_path / f"plane{i+1:02d}.zarr"
+        plane_path = output_path / f"plane{i + 1:02d}.zarr"
         # Extract a single plane: shape (T, Y, X)
         if data_np.ndim == 4:
             plane_data = data_np[:, i, :, :]
@@ -562,12 +582,15 @@ def test_merge_zarr_zplanes(test_data, output_path):
 
         # Write directly as zarr to avoid multi-plane splitting
         import zarr
+
         z = zarr.open_array(
             str(plane_path),
-            mode='w',
+            mode="w",
             shape=plane_data.shape,
             dtype=plane_data.dtype,
-            chunks=(1, *plane_data.shape[1:]) if plane_data.ndim == 3 else plane_data.shape,
+            chunks=(1, *plane_data.shape[1:])
+            if plane_data.ndim == 3
+            else plane_data.shape,
         )
         z[:] = plane_data
         plane_zarrs.append(plane_path)
@@ -617,6 +640,7 @@ def test_merge_zarr_zplanes(test_data, output_path):
 # ==============================================================================
 # Test: Round-trip consistency
 # ==============================================================================
+
 
 @pytest.mark.parametrize("format_ext", [".tif", ".zarr", ".h5", ".bin"])
 def test_roundtrip_consistency(test_data, output_path, format_ext):
@@ -699,9 +723,11 @@ def test_roundtrip_consistency(test_data, output_path, format_ext):
     # Hash data for validation
 
     if data_readback_np.ndim == 4:
-        hash_slice = data_readback_np[:min(5, data_readback_np.shape[0]), :min(2, data_readback_np.shape[1])]
+        hash_slice = data_readback_np[
+            : min(5, data_readback_np.shape[0]), : min(2, data_readback_np.shape[1])
+        ]
     elif data_readback_np.ndim == 3:
-        hash_slice = data_readback_np[:min(10, data_readback_np.shape[0])]
+        hash_slice = data_readback_np[: min(10, data_readback_np.shape[0])]
     else:
         hash_slice = data_readback_np
 
@@ -719,6 +745,7 @@ def test_roundtrip_consistency(test_data, output_path, format_ext):
 # Test: Performance and resource usage
 # ==============================================================================
 
+
 def test_memory_efficiency(test_data):
     """Test that data is loaded lazily without loading entire file."""
     import sys
@@ -729,7 +756,9 @@ def test_memory_efficiency(test_data):
 
     # Should be small (just metadata) for lazy arrays
     # Typical LazyArray or Dask array is < 1MB metadata
-    assert obj_size < 10 * 1024 * 1024, f"Data object too large: {obj_size / 1024**2:.1f}MB"
+    assert obj_size < 10 * 1024 * 1024, (
+        f"Data object too large: {obj_size / 1024**2:.1f}MB"
+    )
 
     print(f"Lazy array object size: {obj_size / 1024:.1f}KB")
 

@@ -127,7 +127,9 @@ def write_ops(metadata, raw_filename, **kwargs):
             ops[key] = value
 
     np.save(ops_path, ops)
-    logger.debug(f"Ops file written to {ops_path} with nframes={ops['nframes']}, nframes_chan1={ops.get('nframes_chan1')}")
+    logger.debug(
+        f"Ops file written to {ops_path} with nframes={ops['nframes']}, nframes_chan1={ops.get('nframes_chan1')}"
+    )
 
 
 def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
@@ -921,9 +923,7 @@ def merge_zarr_zplanes(
     # Add Suite2p labels if provided
     if suite2p_dirs is not None:
         logger.info("Adding Suite2p segmentation masks as labels...")
-        _add_suite2p_labels(
-            root, suite2p_dirs, T, Z, Y, X, dtype, compression_level
-        )
+        _add_suite2p_labels(root, suite2p_dirs, T, Z, Y, X, dtype, compression_level)
 
     metadata = metadata or {}
     ome_attrs = _build_rich_ome_metadata(
@@ -1046,14 +1046,18 @@ def _build_rich_ome_metadata(
         custom_meta["scanimage"] = {
             "version": f"{si.get('VERSION_MAJOR', 'unknown')}.{si.get('VERSION_MINOR', 0)}",
             "imaging_system": si.get("imagingSystem", "unknown"),
-            "objective_resolution": si.get("objectiveResolution", metadata.get("objective_resolution")),
+            "objective_resolution": si.get(
+                "objectiveResolution", metadata.get("objective_resolution")
+            ),
             "scan_mode": si.get("hScan2D", {}).get("scanMode", "unknown"),
         }
 
         # Add beam/laser info
         if "hBeams" in si:
             custom_meta["scanimage"]["laser_power"] = si["hBeams"].get("powers", 0)
-            custom_meta["scanimage"]["power_fraction"] = si["hBeams"].get("powerFractions", 0)
+            custom_meta["scanimage"]["power_fraction"] = si["hBeams"].get(
+                "powerFractions", 0
+            )
 
         # Add ROI info
         if "hRoiManager" in si:
@@ -1081,7 +1085,12 @@ def _build_rich_ome_metadata(
 
     # Add microscope metadata
     microscope_meta = {}
-    for key in ["objective", "emission_wavelength", "excitation_wavelength", "numerical_aperture"]:
+    for key in [
+        "objective",
+        "emission_wavelength",
+        "excitation_wavelength",
+        "numerical_aperture",
+    ]:
         if key in metadata:
             microscope_meta[key] = metadata[key]
 
@@ -1115,13 +1124,36 @@ def _build_rich_ome_metadata(
 
     # Add any other simple metadata fields
     for key, value in metadata.items():
-        if key not in [
-            "pixel_resolution", "frame_rate", "fs", "dz", "z_step", "name",
-            "si", "roi_groups", "acquisition_date", "experimenter", "description",
-            "specimen", "objective", "emission_wavelength", "excitation_wavelength",
-            "numerical_aperture", "fix_phase", "phasecorr_method", "use_fft",
-            "register_z", "file_paths", "num_files", "num_frames", "frames_per_file",
-        ] and key not in result:
+        if (
+            key
+            not in [
+                "pixel_resolution",
+                "frame_rate",
+                "fs",
+                "dz",
+                "z_step",
+                "name",
+                "si",
+                "roi_groups",
+                "acquisition_date",
+                "experimenter",
+                "description",
+                "specimen",
+                "objective",
+                "emission_wavelength",
+                "excitation_wavelength",
+                "numerical_aperture",
+                "fix_phase",
+                "phasecorr_method",
+                "use_fft",
+                "register_z",
+                "file_paths",
+                "num_files",
+                "num_frames",
+                "frames_per_file",
+            ]
+            and key not in result
+        ):
             try:
                 json.dumps(value)
                 result[key] = value
@@ -1172,7 +1204,7 @@ def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
         if num_channels == 1:
             channel_names = ["Channel 1"]
         else:
-            channel_names = [f"Z-plane {i+1}" for i in range(num_channels)]
+            channel_names = [f"Z-plane {i + 1}" for i in range(num_channels)]
 
     # Default colors (cycle through common microscopy colors)
     default_colors = [

@@ -222,6 +222,7 @@ def get_metadata_single(file: os.PathLike | str):
     """
     if file.suffix in [".zarr", ".h5"]:
         from mbo_utilities import imread
+
         file = imread(file)
         return file.metadata
 

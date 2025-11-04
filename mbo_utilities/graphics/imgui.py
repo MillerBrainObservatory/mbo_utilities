@@ -523,7 +523,9 @@ class PreviewDataWidget(EdgeWindow):
 
         self._fix_phase = False
         self._use_fft = False
-        self._computed_offsets = [None] * self.num_arrays  # Store computed offsets for lazy arrays
+        self._computed_offsets = [
+            None
+        ] * self.num_arrays  # Store computed offsets for lazy arrays
 
         if self.image_widget.window_funcs is None:
             self.image_widget.window_funcs = {"t": (np.mean, 0)}
@@ -600,7 +602,9 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_current_index = 0
         # Pre-fill with last saved directory if available
         last_dir = load_last_savedir(default=None)
-        self._saveas_outdir = str(last_dir) if last_dir else str(getattr(self, "_save_dir", ""))
+        self._saveas_outdir = (
+            str(last_dir) if last_dir else str(getattr(self, "_save_dir", ""))
+        )
         self._saveas_total = 0
 
         self._saveas_selected_roi = set()  # -1 means all ROIs
@@ -829,9 +833,13 @@ class PreviewDataWidget(EdgeWindow):
 
         # Different title for single vs multi z-plane
         if is_single_zplane:
-            imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Signal Quality Summary")
+            imgui.text_colored(
+                imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Signal Quality Summary"
+            )
         else:
-            imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats")
+            imgui.text_colored(
+                imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats"
+            )
 
         cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # type: ignore # noqa
         imgui.spacing()
@@ -933,7 +941,9 @@ class PreviewDataWidget(EdgeWindow):
                         if self._zstats[r] and "mean" in self._zstats[r]
                     ]
 
-                    if roi_means and implot.begin_plot("Signal Comparison", imgui.ImVec2(-1, 350)):
+                    if roi_means and implot.begin_plot(
+                        "Signal Comparison", imgui.ImVec2(-1, 350)
+                    ):
                         style_seaborn_dark()
                         implot.setup_axes(
                             f"{self._array_type.capitalize()}",
@@ -945,24 +955,33 @@ class PreviewDataWidget(EdgeWindow):
                         x_pos = np.arange(len(roi_means), dtype=np.float64)
                         heights = np.array(roi_means, dtype=np.float64)
 
-                        labels = [f"{i+1}" for i in range(len(roi_means))]
-                        implot.setup_axis_limits(implot.ImAxis_.x1.value, -0.5, len(roi_means) - 0.5)
+                        labels = [f"{i + 1}" for i in range(len(roi_means))]
+                        implot.setup_axis_limits(
+                            implot.ImAxis_.x1.value, -0.5, len(roi_means) - 0.5
+                        )
                         implot.setup_axis_ticks_custom(
-                            implot.ImAxis_.x1.value,
-                            x_pos,
-                            labels
+                            implot.ImAxis_.x1.value, x_pos, labels
                         )
 
                         implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                        implot.push_style_color(implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8))
-                        implot.plot_bars(f"{self._array_type.capitalize()} Signal", x_pos, heights, 0.6)
+                        implot.push_style_color(
+                            implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                        )
+                        implot.plot_bars(
+                            f"{self._array_type.capitalize()} Signal",
+                            x_pos,
+                            heights,
+                            0.6,
+                        )
                         implot.pop_style_color()
                         implot.pop_style_var()
 
                         # Add mean line
                         mean_line = np.full_like(heights, mean_vals[0])
                         implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
-                        implot.push_style_color(implot.Col_.line.value, (1.0, 0.4, 0.2, 0.8))
+                        implot.push_style_color(
+                            implot.Col_.line.value, (1.0, 0.4, 0.2, 0.8)
+                        )
                         implot.plot_line("Average", x_pos, mean_line)
                         implot.pop_style_color()
                         implot.pop_style_var()
@@ -987,7 +1006,12 @@ class PreviewDataWidget(EdgeWindow):
                         imgui.table_headers_row()
                         for i in range(len(z_vals)):
                             imgui.table_next_row()
-                            for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):
+                            for val in (
+                                z_vals[i],
+                                mean_vals[i],
+                                std_vals[i],
+                                snr_vals[i],
+                            ):
                                 imgui.table_next_column()
                                 imgui.text(f"{val:.2f}")
                         imgui.end_table()
@@ -1018,7 +1042,9 @@ class PreviewDataWidget(EdgeWindow):
                     lower = mean_vals - std_vals
                     upper = mean_vals + std_vals
 
-                    if implot.begin_plot("Z-Plane Plot (Combined)", imgui.ImVec2(-1, 300)):
+                    if implot.begin_plot(
+                        "Z-Plane Plot (Combined)", imgui.ImVec2(-1, 300)
+                    ):
                         style_seaborn_dark()
                         implot.setup_axes(
                             "Z-Plane",
@@ -1111,7 +1137,10 @@ class PreviewDataWidget(EdgeWindow):
                     f"##Plots1{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
                 ):
                     imgui.text("Signal Quality Metrics")
-                    set_tooltip("Bar chart showing mean fluorescence, standard deviation, and SNR", True)
+                    set_tooltip(
+                        "Bar chart showing mean fluorescence, standard deviation, and SNR",
+                        True,
+                    )
 
                     if implot.begin_plot(
                         f"Signal Metrics {array_idx}", imgui.ImVec2(-1, 350)
@@ -1126,20 +1155,24 @@ class PreviewDataWidget(EdgeWindow):
                         # Normalize values for better visualization
                         norm_mean = mean_vals[0]
                         norm_std = std_vals[0]
-                        norm_snr = snr_vals[0] * (norm_mean / max(snr_vals[0], 1.0))  # Scale SNR to be comparable
+                        norm_snr = snr_vals[0] * (
+                            norm_mean / max(snr_vals[0], 1.0)
+                        )  # Scale SNR to be comparable
 
                         x_pos = np.array([0.0, 1.0, 2.0], dtype=np.float64)
-                        heights = np.array([norm_mean, norm_std, norm_snr], dtype=np.float64)
+                        heights = np.array(
+                            [norm_mean, norm_std, norm_snr], dtype=np.float64
+                        )
 
                         implot.setup_axis_limits(implot.ImAxis_.x1.value, -0.5, 2.5)
                         implot.setup_axis_ticks_custom(
-                            implot.ImAxis_.x1.value,
-                            x_pos,
-                            ["Mean", "Std Dev", "SNR"]
+                            implot.ImAxis_.x1.value, x_pos, ["Mean", "Std Dev", "SNR"]
                         )
 
                         implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                        implot.push_style_color(implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8))
+                        implot.push_style_color(
+                            implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                        )
                         implot.plot_bars("Signal Metrics", x_pos, heights, 0.6)
                         implot.pop_style_color()
                         implot.pop_style_var()

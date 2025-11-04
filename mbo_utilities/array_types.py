@@ -1349,7 +1349,9 @@ class ZarrArray:
             if isinstance(z, zarr.Group):
                 # OME-Zarr structure: access the "0" array
                 if "0" not in z:
-                    raise ValueError(f"OME-Zarr group missing '0' array in {z.store.path}")
+                    raise ValueError(
+                        f"OME-Zarr group missing '0' array in {z.store.path}"
+                    )
                 self.zs.append(z["0"])
                 self._groups.append(z)  # Keep reference to group for metadata
             else:
@@ -1613,9 +1615,7 @@ class BinArray:
                         self.shape = (nframes, Ly, Lx)
                         # Optionally copy metadata from ops
                         self.metadata.update(ops)
-                        logger.debug(
-                            f"Inferred shape from ops.npy: {self.shape}"
-                        )
+                        logger.debug(f"Inferred shape from ops.npy: {self.shape}")
                 except Exception as e:
                     logger.warning(f"Could not read ops.npy: {e}")
 
@@ -1647,7 +1647,11 @@ class BinArray:
         """Allow assignment to the memmap."""
         if np.asarray(value).dtype != self.dtype:
             # Clip values to avoid overflow
-            max_val = np.iinfo(self.dtype).max - 1 if np.issubdtype(self.dtype, np.integer) else None
+            max_val = (
+                np.iinfo(self.dtype).max - 1
+                if np.issubdtype(self.dtype, np.integer)
+                else None
+            )
             if max_val:
                 self._file[key] = np.clip(value, None, max_val).astype(self.dtype)
             else:
@@ -1726,9 +1730,7 @@ class BinArray:
         if not outfile.exists() or overwrite:
             logger.info(f"Writing binary to {outfile}")
             # Copy the memmap
-            new_file = np.memmap(
-                outfile, mode="w+", dtype=self.dtype, shape=self.shape
-            )
+            new_file = np.memmap(outfile, mode="w+", dtype=self.dtype, shape=self.shape)
             new_file[:] = self._file[:]
             new_file.flush()
             del new_file

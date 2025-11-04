@@ -72,7 +72,9 @@ class Suite2pSettings:
 
     # --- Non-rigid Registration ---
     nonrigid: bool = True  # Perform non-rigid registration
-    block_size: list = None  # Block size for non-rigid (default [128, 128], power of 2/3)
+    block_size: list = (
+        None  # Block size for non-rigid (default [128, 128], power of 2/3)
+    )
     snr_thresh: float = 1.2  # Phase correlation peak threshold (1.5 for 1P)
     maxregshiftNR: float = 5.0  # Max block shift relative to rigid shift
 
@@ -179,9 +181,7 @@ def draw_section_suite2p(self):
     imgui.spacing()
 
     # Use proper child window flags to prevent scrollbar issues
-    child_flags = (
-        imgui.WindowFlags_.none
-    )
+    child_flags = imgui.WindowFlags_.none
 
     with imgui_ctx.begin_child("##Processing", imgui.ImVec2(0, 0), child_flags):
         # Set proper padding and spacing
@@ -233,8 +233,12 @@ def draw_section_suite2p(self):
                 self._saveas_outdir = res.result()
 
         # Get max frames from data
-        if hasattr(self, 'image_widget') and self.image_widget.data:
-            data_arrays = self.image_widget.data if isinstance(self.image_widget.data, list) else [self.image_widget.data]
+        if hasattr(self, "image_widget") and self.image_widget.data:
+            data_arrays = (
+                self.image_widget.data
+                if isinstance(self.image_widget.data, list)
+                else [self.image_widget.data]
+            )
             if len(data_arrays) > 0:
                 max_frames = data_arrays[0].shape[0]
             else:
@@ -249,10 +253,7 @@ def draw_section_suite2p(self):
             self.s2p.frames_include = max_frames
 
         _, self.s2p.frames_include = imgui.slider_int(
-            "Frames to process",
-            self.s2p.frames_include,
-            1,
-            max_frames
+            "Frames to process", self.s2p.frames_include, 1, max_frames
         )
         set_tooltip(
             f"Number of frames to process (1-{max_frames}). "
@@ -335,7 +336,9 @@ def draw_section_suite2p(self):
         # REGISTRATION SETTINGS SECTION
         # ==================================================================
         imgui.spacing()
-        if imgui.collapsing_header("Registration Settings", imgui.TreeNodeFlags_.default_open):
+        if imgui.collapsing_header(
+            "Registration Settings", imgui.TreeNodeFlags_.default_open
+        ):
             imgui.indent()
 
             # Main registration toggle
@@ -352,7 +355,9 @@ def draw_section_suite2p(self):
                 "Align by Channel", self.s2p.align_by_chan
             )
             set_tooltip("Channel index used for alignment (1-based).")
-            _, self.s2p.nimg_init = imgui.input_int("Initial Frames", self.s2p.nimg_init)
+            _, self.s2p.nimg_init = imgui.input_int(
+                "Initial Frames", self.s2p.nimg_init
+            )
             set_tooltip("Number of frames used to build the reference image.")
             _, self.s2p.batch_size = imgui.input_int("Batch Size", self.s2p.batch_size)
             set_tooltip("Number of frames processed per registration batch.")
@@ -376,13 +381,17 @@ def draw_section_suite2p(self):
                 "Two-Step Registration", self.s2p.two_step_registration
             )
             set_tooltip("Perform registration twice for low-SNR data.")
-            _, self.s2p.reg_tif = imgui.checkbox("Export Registered TIFF", self.s2p.reg_tif)
+            _, self.s2p.reg_tif = imgui.checkbox(
+                "Export Registered TIFF", self.s2p.reg_tif
+            )
             set_tooltip("Export registered movie as TIFF files.")
             _, self.s2p.reg_tif_chan2 = imgui.checkbox(
                 "Export Chan2 TIFF", self.s2p.reg_tif_chan2
             )
             set_tooltip("Export registered TIFFs for channel 2.")
-            _, self.s2p.subpixel = imgui.input_int("Subpixel Precision", self.s2p.subpixel)
+            _, self.s2p.subpixel = imgui.input_int(
+                "Subpixel Precision", self.s2p.subpixel
+            )
             set_tooltip("Subpixel precision level (1/subpixel step).")
             _, self.s2p.th_badframes = imgui.input_float(
                 "Bad Frame Threshold", self.s2p.th_badframes
@@ -392,7 +401,9 @@ def draw_section_suite2p(self):
                 "Normalize Frames", self.s2p.norm_frames
             )
             set_tooltip("Normalize frames during registration.")
-            _, self.s2p.force_refImg = imgui.checkbox("Force refImg", self.s2p.force_refImg)
+            _, self.s2p.force_refImg = imgui.checkbox(
+                "Force refImg", self.s2p.force_refImg
+            )
             set_tooltip("Use stored reference image instead of recomputing.")
             _, self.s2p.pad_fft = imgui.checkbox("Pad FFT", self.s2p.pad_fft)
             set_tooltip("Pad image for FFT registration to reduce edge artifacts.")
@@ -412,20 +423,30 @@ def draw_section_suite2p(self):
             # --- 1P Registration Collapsible Subsection ---
             imgui.spacing()
             if imgui.tree_node("1-Photon Registration"):
-                _, self.s2p.do_1Preg = imgui.checkbox("Enable 1P Registration", self.s2p.do_1Preg)
+                _, self.s2p.do_1Preg = imgui.checkbox(
+                    "Enable 1P Registration", self.s2p.do_1Preg
+                )
                 set_tooltip("Apply high-pass filtering and tapering for 1-photon data.")
 
                 imgui.begin_disabled(not self.s2p.do_1Preg)
                 _, self.s2p.spatial_hp_reg = imgui.input_int(
                     "Spatial HP Window", self.s2p.spatial_hp_reg
                 )
-                set_tooltip("Window size for spatial high-pass filtering before registration.")
-                _, self.s2p.pre_smooth = imgui.input_float("Pre-smooth Sigma", self.s2p.pre_smooth)
-                set_tooltip("Gaussian smoothing stddev before high-pass filtering (0=disabled).")
+                set_tooltip(
+                    "Window size for spatial high-pass filtering before registration."
+                )
+                _, self.s2p.pre_smooth = imgui.input_float(
+                    "Pre-smooth Sigma", self.s2p.pre_smooth
+                )
+                set_tooltip(
+                    "Gaussian smoothing stddev before high-pass filtering (0=disabled)."
+                )
                 _, self.s2p.spatial_taper = imgui.input_float(
                     "Spatial Taper", self.s2p.spatial_taper
                 )
-                set_tooltip("Pixels to set to zero on edges (important for vignetted windows).")
+                set_tooltip(
+                    "Pixels to set to zero on edges (important for vignetted windows)."
+                )
                 imgui.end_disabled()
 
                 imgui.tree_pop()
@@ -433,23 +454,39 @@ def draw_section_suite2p(self):
             # --- Non-rigid Registration Collapsible Subsection ---
             imgui.spacing()
             if imgui.tree_node("Non-rigid Registration"):
-                _, self.s2p.nonrigid = imgui.checkbox("Enable Non-rigid", self.s2p.nonrigid)
-                set_tooltip("Split FOV into blocks and compute registration offsets per block.")
+                _, self.s2p.nonrigid = imgui.checkbox(
+                    "Enable Non-rigid", self.s2p.nonrigid
+                )
+                set_tooltip(
+                    "Split FOV into blocks and compute registration offsets per block."
+                )
 
                 imgui.begin_disabled(not self.s2p.nonrigid)
 
                 # Block size as two separate inputs
                 if self.s2p.block_size is None:
                     self.s2p.block_size = [128, 128]
-                block_y_changed, block_y = imgui.input_int("Block Height", self.s2p.block_size[0])
-                set_tooltip("Block height for non-rigid registration (power of 2/3 recommended).")
-                block_x_changed, block_x = imgui.input_int("Block Width", self.s2p.block_size[1])
-                set_tooltip("Block width for non-rigid registration (power of 2/3 recommended).")
+                block_y_changed, block_y = imgui.input_int(
+                    "Block Height", self.s2p.block_size[0]
+                )
+                set_tooltip(
+                    "Block height for non-rigid registration (power of 2/3 recommended)."
+                )
+                block_x_changed, block_x = imgui.input_int(
+                    "Block Width", self.s2p.block_size[1]
+                )
+                set_tooltip(
+                    "Block width for non-rigid registration (power of 2/3 recommended)."
+                )
                 if block_y_changed or block_x_changed:
                     self.s2p.block_size = [block_y, block_x]
 
-                _, self.s2p.snr_thresh = imgui.input_float("SNR Threshold", self.s2p.snr_thresh)
-                set_tooltip("Phase correlation peak threshold (1.5 recommended for 1P).")
+                _, self.s2p.snr_thresh = imgui.input_float(
+                    "SNR Threshold", self.s2p.snr_thresh
+                )
+                set_tooltip(
+                    "Phase correlation peak threshold (1.5 recommended for 1P)."
+                )
                 _, self.s2p.maxregshiftNR = imgui.input_float(
                     "Max NR Shift", self.s2p.maxregshiftNR
                 )
@@ -466,21 +503,29 @@ def draw_section_suite2p(self):
         # ROI DETECTION SETTINGS SECTION
         # ==================================================================
         imgui.spacing()
-        if imgui.collapsing_header("ROI Detection Settings", imgui.TreeNodeFlags_.default_open):
+        if imgui.collapsing_header(
+            "ROI Detection Settings", imgui.TreeNodeFlags_.default_open
+        ):
             imgui.indent()
 
-            _, self.s2p.roidetect = imgui.checkbox("Enable ROI Detection", self.s2p.roidetect)
+            _, self.s2p.roidetect = imgui.checkbox(
+                "Enable ROI Detection", self.s2p.roidetect
+            )
             set_tooltip("Run ROI detection and extraction.")
 
             imgui.begin_disabled(not self.s2p.roidetect)
 
             imgui.spacing()
-            _, self.s2p.sparse_mode = imgui.checkbox("Sparse Mode", self.s2p.sparse_mode)
+            _, self.s2p.sparse_mode = imgui.checkbox(
+                "Sparse Mode", self.s2p.sparse_mode
+            )
             set_tooltip("Use sparse detection (recommended for soma).")
             _, self.s2p.spatial_scale = imgui.input_int(
                 "Spatial Scale", self.s2p.spatial_scale
             )
-            set_tooltip("ROI size scale. 0=auto, 1=small, 2=medium, 3=large, 4=very large.")
+            set_tooltip(
+                "ROI size scale. 0=auto, 1=small, 2=medium, 3=large, 4=very large."
+            )
             _, self.s2p.connected = imgui.checkbox("Connected ROIs", self.s2p.connected)
             set_tooltip("Require ROIs to be connected regions.")
             _, self.s2p.threshold_scaling = imgui.input_float(
@@ -491,11 +536,17 @@ def draw_section_suite2p(self):
                 "Spatial HP Detect", self.s2p.spatial_hp_detect
             )
             set_tooltip("Spatial high-pass filter size before ROI detection.")
-            _, self.s2p.max_overlap = imgui.input_float("Max Overlap", self.s2p.max_overlap)
+            _, self.s2p.max_overlap = imgui.input_float(
+                "Max Overlap", self.s2p.max_overlap
+            )
             set_tooltip("Maximum allowed fraction of overlapping ROI pixels.")
-            _, self.s2p.high_pass = imgui.input_int("High-Pass Window", self.s2p.high_pass)
+            _, self.s2p.high_pass = imgui.input_int(
+                "High-Pass Window", self.s2p.high_pass
+            )
             set_tooltip("Running mean subtraction window (frames).")
-            _, self.s2p.smooth_masks = imgui.checkbox("Smooth Masks", self.s2p.smooth_masks)
+            _, self.s2p.smooth_masks = imgui.checkbox(
+                "Smooth Masks", self.s2p.smooth_masks
+            )
             set_tooltip("Smooth masks in the final ROI detection pass.")
             _, self.s2p.max_iterations = imgui.input_int(
                 "Max Iterations", self.s2p.max_iterations
@@ -519,7 +570,9 @@ def draw_section_suite2p(self):
             _, self.s2p.anatomical_only = imgui.input_int(
                 "Anatomical Only", self.s2p.anatomical_only
             )
-            set_tooltip("0=disabled; 1-4 select Cellpose image type (mean, max, enhanced).")
+            set_tooltip(
+                "0=disabled; 1-4 select Cellpose image type (mean, max, enhanced)."
+            )
             _, self.s2p.diameter = imgui.input_int("Cell Diameter", self.s2p.diameter)
             set_tooltip("Expected cell diameter; 0=auto-estimate.")
             _, self.s2p.cellprob_threshold = imgui.input_float(
@@ -536,7 +589,9 @@ def draw_section_suite2p(self):
             set_tooltip("Spatial high-pass window for Cellpose preprocessing.")
             imgui.text("Pretrained Model:")
             imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
-            imgui.text(self.s2p.pretrained_model if self.s2p.pretrained_model else "cyto")
+            imgui.text(
+                self.s2p.pretrained_model if self.s2p.pretrained_model else "cyto"
+            )
             imgui.pop_text_wrap_pos()
             set_tooltip("Cellpose model name or custom path (e.g., 'cyto').")
             imgui.unindent()
@@ -556,7 +611,9 @@ def draw_section_suite2p(self):
             set_tooltip("Use Suite2p's built-in ROI classifier.")
             imgui.text("Classifier Path:")
             imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
-            imgui.text(self.s2p.classifier_path if self.s2p.classifier_path else "(none)")
+            imgui.text(
+                self.s2p.classifier_path if self.s2p.classifier_path else "(none)"
+            )
             imgui.pop_text_wrap_pos()
             set_tooltip("Path to external classifier if not using built-in.")
             imgui.unindent()
@@ -582,7 +639,9 @@ def draw_section_suite2p(self):
             set_tooltip("Combine per-plane results into one GUI-loadable folder.")
             _, self.s2p.aspect = imgui.input_float("Aspect Ratio", self.s2p.aspect)
             set_tooltip("um/pixel ratio X/Y for correct GUI aspect display.")
-            _, self.s2p.report_time = imgui.checkbox("Report Timing", self.s2p.report_time)
+            _, self.s2p.report_time = imgui.checkbox(
+                "Report Timing", self.s2p.report_time
+            )
             set_tooltip("Return timing dictionary for each processing stage.")
             imgui.unindent()
             imgui.spacing()
@@ -625,12 +684,18 @@ def draw_section_suite2p(self):
             _, self.s2p.spikedetect = imgui.checkbox(
                 "Enable Spike Deconvolution", self.s2p.spikedetect
             )
-            set_tooltip("Detect spikes from neuropil-corrected and baseline-corrected traces.")
+            set_tooltip(
+                "Detect spikes from neuropil-corrected and baseline-corrected traces."
+            )
 
             imgui.begin_disabled(not self.s2p.spikedetect)
 
-            _, self.s2p.neucoeff = imgui.input_float("Neuropil Coefficient", self.s2p.neucoeff)
-            set_tooltip("Neuropil coefficient for all ROIs (F_corrected = F - coeff * F_neu).")
+            _, self.s2p.neucoeff = imgui.input_float(
+                "Neuropil Coefficient", self.s2p.neucoeff
+            )
+            set_tooltip(
+                "Neuropil coefficient for all ROIs (F_corrected = F - coeff * F_neu)."
+            )
 
             # Baseline method as combo box
             baseline_options = ["maximin", "constant", "constant_percentile"]
@@ -815,7 +880,9 @@ def run_plane_from_data(self, arr_idx):
         # 3D array: already single plane, use as-is
         data = arr[:, :, :]
     else:
-        raise ValueError(f"Unexpected array dimensions: {actual_ndim} (shape={arr.shape}). Expected 3D (T,Y,X) or 4D (T,Z,Y,X)")
+        raise ValueError(
+            f"Unexpected array dimensions: {actual_ndim} (shape={arr.shape}). Expected 3D (T,Y,X) or 4D (T,Z,Y,X)"
+        )
 
     # Force computation for lazy arrays (dask, etc.)
     # np.asarray handles both dask arrays and memmap arrays correctly
@@ -852,7 +919,9 @@ def run_plane_from_data(self, arr_idx):
                 # 3D array: already single plane, use as-is
                 chan2_data = chan2_arr[:, :, :]
             else:
-                raise ValueError(f"Unexpected channel 2 array dimensions: {chan2_actual_ndim} (shape={chan2_arr.shape})")
+                raise ValueError(
+                    f"Unexpected channel 2 array dimensions: {chan2_actual_ndim} (shape={chan2_arr.shape})"
+                )
 
             # Force computation for lazy arrays (dask, etc.)
             chan2_data = np.asarray(chan2_data, dtype=np.int16)
@@ -893,7 +962,9 @@ def run_plane_from_data(self, arr_idx):
     user_ops.update(md)
 
     # Write functional channel (channel 1) binary with num_frames constraint
-    print(f"Writing binary: {data.shape[0]} frames, metadata num_frames={user_ops.get('num_frames')}")
+    print(
+        f"Writing binary: {data.shape[0]} frames, metadata num_frames={user_ops.get('num_frames')}"
+    )
     _write_bin(raw_file, data, overwrite=True, metadata=user_ops)
 
     # Write structural channel (channel 2) binary if provided
