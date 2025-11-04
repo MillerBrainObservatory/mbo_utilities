@@ -340,6 +340,11 @@ def imwrite(
             raise ValueError(
                 f"The length of the `order` ({len(order)}) does not match the number of planes ({len(planes)})."
             )
+        # Validate indices are in range before using them
+        if any(i < 0 or i >= len(planes) for i in order):
+            raise ValueError(
+                f"order indices must be in range [0, {len(planes)-1}], got {order}"
+            )
         planes = [planes[i] for i in order]
 
     existing_meta = getattr(lazy_array, "metadata", None)
@@ -360,19 +365,19 @@ def imwrite(
 
     s3d_job_dir = None
     if register_z:
-        lazy_array.metadata["apply_shift"] = True
+        file_metadata["apply_shift"] = True
         num_planes = file_metadata.get("num_planes")
 
         if shift_vectors is not None:
-            lazy_array.metadata["shift_vectors"] = shift_vectors
+            file_metadata["shift_vectors"] = shift_vectors
             logger.info("Using provided shift_vectors for registration.")
         else:
             # Check if we already have a valid s3d-job directory
             existing_s3d_dir = None
 
             # Option 1: Check metadata for existing s3d-job
-            if "s3d-job" in lazy_array.metadata:
-                candidate = Path(lazy_array.metadata["s3d-job"])
+            if "s3d-job" in file_metadata:
+                candidate = Path(file_metadata["s3d-job"])
                 if validate_s3d_registration(candidate, num_planes):
                     logger.info(f"Found valid s3d-job in metadata: {candidate}")
                     existing_s3d_dir = candidate
@@ -396,7 +401,7 @@ def imwrite(
                     dirs = np.load(s3d_job_dir / "dirs.npy", allow_pickle=True).item()
                     for k, v in dirs.items():
                         if Path(v).is_dir():
-                            lazy_array.metadata[k] = v
+                            file_metadata[k] = v
             else:
                 # Need to run registration
                 logger.info("No valid s3d-job found, running Suite3D registration.")
@@ -418,21 +423,28 @@ def imwrite(
                             f"Proceeding without registration."
                         )
                         s3d_job_dir = None
-                        lazy_array.metadata["apply_shift"] = False
+                        file_metadata["apply_shift"] = False
                 else:
                     logger.warning(
                         "Z-plane registration failed. Proceeding without registration. "
                         "Check that Suite3D and CuPy are installed correctly."
                     )
-                    lazy_array.metadata["apply_shift"] = False
+                    file_metadata["apply_shift"] = False
 
         # Store s3d-job directory in metadata if available
         if s3d_job_dir:
             logger.info(f"Storing s3d-job path {s3d_job_dir} in metadata.")
-            lazy_array.metadata["s3d-job"] = str(s3d_job_dir)
+            file_metadata["s3d-job"] = str(s3d_job_dir)
+
+        # Update lazy_array metadata if it has the attribute
+        if hasattr(lazy_array, "metadata"):
+            lazy_array.metadata = file_metadata
     else:
         # Registration not requested
-        lazy_array.metadata["apply_shift"] = False
+        file_metadata["apply_shift"] = False
+        # Update lazy_array metadata if it has the attribute
+        if hasattr(lazy_array, "metadata"):
+            lazy_array.metadata = file_metadata
 
     if hasattr(lazy_array, "_imwrite"):
         # Pass num_frames explicitly if set
@@ -523,9 +535,21 @@ def imread(
         else:
             paths = [p]
     elif isinstance(inputs, (list, tuple)):
-        if isinstance(inputs[0], np.ndarray):
+        if not inputs:
+            raise ValueError("Input list is empty")
+
+        # Check if all items are ndarrays
+        if all(isinstance(item, np.ndarray) for item in inputs):
             return inputs
-        paths = [Path(p) for p in inputs if isinstance(p, (str, Path))]
+
+        # Check if all items are paths
+        if not all(isinstance(item, (str, Path)) for item in inputs):
+            raise TypeError(
+                f"Mixed input types in list. Expected all paths or all ndarrays. "
+                f"Got: {[type(item).__name__ for item in inputs]}"
+            )
+
+        paths = [Path(p) for p in inputs]
     else:
         raise TypeError(f"Unsupported input type: {type(inputs)}")
 
@@ -598,7 +622,6 @@ def imread(
             logger.info(f"Detected nested zarr stores, loading as ZarrArray.")
             return ZarrArray(sub_zarrs, **_filter_kwargs(ZarrArray, kwargs))
 
-        tag = derive_tag_from_filename
         # Case 2: flat zarr store with zarr.json
         if (first / "zarr.json").exists():
             logger.info(f"Detected zarr.json, loading as ZarrArray.")

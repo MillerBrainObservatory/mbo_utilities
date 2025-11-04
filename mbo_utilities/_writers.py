@@ -216,14 +216,26 @@ def _write_plane(
     start = 0
     for i in range(nchunks):
         end = start + base + (1 if i < extra else 0)
-        chunk = (
-            data[start:end, plane_index, :, :]
-            if plane_index is not None
-            else data[start:end, :, :]
-        )
 
-        if chunk.ndim == 4 and chunk.shape[1] == 1:
-            chunk = chunk.squeeze()
+        # Extract chunk - handle plane_index for z-plane selection
+        # NOTE: Use len(data.shape) instead of data.ndim for MboRawArray compatibility
+        # (MboRawArray.ndim returns metadata ndim, not actual dimensions)
+        if plane_index is not None and len(data.shape) >= 4:
+            # For 4D data with plane_index, extract the specific z-plane
+            # Index both time and z dimensions in one operation
+            chunk = data[start:end, plane_index, :, :]
+        elif plane_index is not None:
+            # For 3D or 2D data, plane_index is just metadata
+            chunk = data[start:end]
+        else:
+            # No plane_index: standard slicing
+            chunk = data[start:end]
+
+        # Ensure chunk is 3D (T, Y, X) - squeeze any remaining singleton dimensions
+        # This handles cases where plane_index is None but Z dimension is singleton
+        if len(chunk.shape) == 4 and chunk.shape[1] == 1:
+            # Singleton Z dimension: squeeze it
+            chunk = chunk.squeeze(axis=1)
 
         if shift_applied:
             if chunk.shape[-2:] != (H0, W0):
@@ -334,9 +346,10 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     bf = _write_bin._writers[key]
     off = _write_bin._offsets[key]
 
-    # squeeze 4D arrays to 3D
-    if data.ndim == 4 and data.shape[1] == 1:
-        data = data.squeeze()
+    # Squeeze singleton Z dimension if present (but only Z, not time)
+    # NOTE: Use len(data.shape) instead of data.ndim for MboRawArray compatibility
+    if len(data.shape) == 4 and data.shape[1] == 1:
+        data = data.squeeze(axis=1)
     bf[off : off + data.shape[0]] = data
     bf.file.flush()
     _write_bin._offsets[key] = off + data.shape[0]
@@ -530,20 +543,13 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
     # Add all metadata at root level (outside ome namespace) for backward compatibility
     # This preserves metadata that downstream tools expect (num_frames, pixel_resolution, etc.)
     # while also maintaining OME-NGFF compliance
-    for k, v in metadata.items():
+    # Ensure metadata is JSON-serializable
+    serializable_metadata = _make_json_serializable(metadata)
+    for k, v in serializable_metadata.items():
         if k == "channel_names":
             # Already encoded in OME omero section
             continue
-
-        # Only add JSON-serializable values
-        try:
-            import json
-
-            json.dumps(v)
-            result[k] = v
-        except (TypeError, ValueError):
-            # Skip non-serializable metadata (e.g., numpy arrays, complex objects)
-            pass
+        result[k] = v
 
     return result
 
@@ -653,7 +659,9 @@ def _write_zarr(
             )
 
             # Standard metadata (backward compatible)
-            for k, v in (metadata or {}).items():
+            # Ensure metadata is JSON-serializable for Zarr
+            serializable_metadata = _make_json_serializable(metadata or {})
+            for k, v in serializable_metadata.items():
                 z.attrs[k] = v
 
         _write_zarr._arrays[filename] = z
