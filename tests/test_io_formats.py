@@ -290,20 +290,25 @@ def test_imwrite_zarr_basic(test_data, output_path):
     )
     assert data_readback_np.shape[-2:] == data_np.shape[-2:], "Spatial dims mismatch"
 
-    if data_readback_np.ndim == 4:
-        hash_slice = data_readback_np[
-            : min(5, data_readback_np.shape[0]), : min(2, data_readback_np.shape[1])
-        ]
-    elif data_readback_np.ndim == 3:
-        hash_slice = data_readback_np[: min(10, data_readback_np.shape[0])]
-    else:
-        hash_slice = data_readback_np
+    # IMPORTANT: Validate ALL frames, not just first 10
+    # Check for zero frames (data loss bug indicator)
+    if data_readback_np.ndim >= 3:
+        zero_frames = []
+        for i in range(data_readback_np.shape[0]):
+            if data_readback_np[i].max() == 0:
+                zero_frames.append(i)
+        if zero_frames:
+            raise AssertionError(
+                f"Found {len(zero_frames)} zero frames in Zarr readback! "
+                f"This indicates data loss. First zero frame: {zero_frames[0]}"
+            )
 
     baseline = {
         "shape_orig": list(data_np.shape),
         "shape_read": list(data_readback_np.shape),
         "num_files": len(zarr_files) if len(zarr_files) > 1 else 1,
-        "hash": compute_hash(hash_slice),
+        "hash": compute_hash(data_readback_np),
+        "num_frames": data_readback_np.shape[0],
     }
 
     print("Validating against baseline...")
@@ -432,21 +437,25 @@ def test_imwrite_h5(test_data, output_path):
     # Just validate spatial dimensions match
     assert data_readback.shape[-2:] == data.shape[-2:], "Spatial dims mismatch"
 
-    # Handle 2D vs 3D for hashing
-    if data_readback.ndim == 3:
-        hash_slice = data_readback[: min(10, data_readback.shape[0])]
-    elif data_readback.ndim == 4:
-        hash_slice = data_readback[
-            : min(5, data_readback.shape[0]), : min(2, data_readback.shape[1])
-        ]
-    else:
-        hash_slice = data_readback
+    # IMPORTANT: Validate ALL frames, not just first 10
+    # Check for zero frames (data loss bug indicator)
+    if data_readback.ndim >= 3:
+        zero_frames = []
+        for i in range(data_readback.shape[0]):
+            if data_readback[i].max() == 0:
+                zero_frames.append(i)
+        if zero_frames:
+            raise AssertionError(
+                f"Found {len(zero_frames)} zero frames in HDF5 readback! "
+                f"This indicates data loss. First zero frame: {zero_frames[0]}"
+            )
 
     baseline = {
         "shape_orig": list(data.shape),
         "shape_read": list(data_readback.shape),
         "num_files": len(h5_files),
-        "hash": compute_hash(hash_slice),
+        "hash": compute_hash(data_readback),
+        "num_frames": data_readback.shape[0],
     }
 
     validate_or_save_baseline("imwrite_h5", baseline)
@@ -502,21 +511,29 @@ def test_imwrite_bin(test_data, output_path):
     # Just validate spatial dimensions match
     assert data_readback.shape[-2:] == data.shape[-2:], "Spatial dims mismatch"
 
-    # Handle 2D vs 3D for hashing
-    if data_readback.ndim == 3:
-        hash_slice = data_readback[: min(10, data_readback.shape[0])]
-    elif data_readback.ndim == 4:
-        hash_slice = data_readback[
-            : min(5, data_readback.shape[0]), : min(2, data_readback.shape[1])
-        ]
-    else:
-        hash_slice = data_readback
+    # IMPORTANT: Validate ALL frames, not just first 10
+    # Previous bug: only first 10 frames were being written but test only checked first 10
+    data_readback_full = np.asarray(data_readback)
 
+    # Check for zero frames (data loss bug indicator)
+    if data_readback_full.ndim >= 3:
+        zero_frames = []
+        for i in range(data_readback_full.shape[0]):
+            if data_readback_full[i].max() == 0:
+                zero_frames.append(i)
+        if zero_frames:
+            raise AssertionError(
+                f"Found {len(zero_frames)} zero frames in readback! "
+                f"This indicates data loss. First zero frame: {zero_frames[0]}"
+            )
+
+    # Hash full data to detect any changes
     baseline = {
         "shape_orig": list(data.shape),
         "shape_read": list(data_readback.shape),
         "num_subdirs": len(subdirs),
-        "hash": compute_hash(hash_slice),
+        "hash": compute_hash(data_readback_full),
+        "num_frames": data_readback_full.shape[0],
     }
 
     validate_or_save_baseline("imwrite_bin", baseline)
@@ -720,22 +737,25 @@ def test_roundtrip_consistency(test_data, output_path, format_ext):
     assert data_readback_np.shape[-2:] == data_np.shape[-2:], "Spatial dims mismatch"
     assert data_readback_np.dtype == data_np.dtype, "Dtype mismatch"
 
-    # Hash data for validation
-
-    if data_readback_np.ndim == 4:
-        hash_slice = data_readback_np[
-            : min(5, data_readback_np.shape[0]), : min(2, data_readback_np.shape[1])
-        ]
-    elif data_readback_np.ndim == 3:
-        hash_slice = data_readback_np[: min(10, data_readback_np.shape[0])]
-    else:
-        hash_slice = data_readback_np
+    # IMPORTANT: Validate ALL frames to detect data loss
+    # Check for zero frames (data loss bug indicator)
+    if data_readback_np.ndim >= 3:
+        zero_frames = []
+        for i in range(data_readback_np.shape[0]):
+            if data_readback_np[i].max() == 0:
+                zero_frames.append(i)
+        if zero_frames:
+            raise AssertionError(
+                f"Found {len(zero_frames)} zero frames in {format_ext} roundtrip readback! "
+                f"This indicates data loss. First zero frame: {zero_frames[0]}"
+            )
 
     baseline = {
         "format": format_ext,
         "shape_orig": list(data_np.shape),
         "shape_read": list(data_readback_np.shape),
-        "hash": compute_hash(hash_slice),
+        "hash": compute_hash(data_readback_np),
+        "num_frames": data_readback_np.shape[0],
     }
 
     validate_or_save_baseline(f"roundtrip{format_ext.replace('.', '_')}", baseline)

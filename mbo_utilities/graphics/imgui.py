@@ -1487,6 +1487,8 @@ class PreviewDataWidget(EdgeWindow):
 
     def _compute_zstats_single_roi(self, roi, fpath):
         arr = imread(fpath)
+        if hasattr(arr, "fix_phase"):
+            arr.fix_phase = False
         if hasattr(arr, "roi"):
             arr.roi = roi
 
