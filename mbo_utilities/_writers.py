@@ -342,13 +342,9 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
         _write_bin._writers.pop(key, None)
         _write_bin._offsets.pop(key, None)
 
-    # If overwrite is requested, clear cached writer and delete file
-    if overwrite and fname.exists():
-        # Close file handle before unlinking (Windows requirement)
-        if key in _write_bin._writers:
-            _write_bin._writers[key].close()
-            _write_bin._writers.pop(key, None)
-            _write_bin._offsets.pop(key, None)
+    # Only overwrite if this is a brand new write session (file doesn't exist in cache)
+    # Don't delete during active chunked writing
+    if overwrite and key not in _write_bin._writers and fname.exists():
         fname.unlink()
 
     if key not in _write_bin._writers:
@@ -372,6 +368,7 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     # NOTE: Use len(data.shape) instead of data.ndim for MboRawArray compatibility
     if len(data.shape) == 4 and data.shape[1] == 1:
         data = data.squeeze(axis=1)
+
     bf[off : off + data.shape[0]] = data
     bf.file.flush()
     _write_bin._offsets[key] = off + data.shape[0]
@@ -414,6 +411,7 @@ def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
         _write_h5._offsets[filename] = 0
 
     offset = _write_h5._offsets[filename]
+
     with h5py.File(filename, "a") as f:
         f["mov"][offset : offset + data.shape[0]] = data
 
@@ -594,15 +592,12 @@ def _write_zarr(
         _write_zarr._offsets = {}
         _write_zarr._groups = {}
 
-    if overwrite and filename in _write_zarr._arrays:
-        del _write_zarr._arrays[filename]
-        del _write_zarr._offsets[filename]
-        if filename in _write_zarr._groups:
-            del _write_zarr._groups[filename]
+    # Only overwrite if this is a brand new write session (file doesn't exist in cache)
+    # Don't delete during active chunked writing
+    if overwrite and filename not in _write_zarr._arrays and filename.exists():
+        shutil.rmtree(filename)
 
     if filename not in _write_zarr._arrays:
-        if filename.exists() and overwrite:
-            shutil.rmtree(filename)
 
         import zarr
         from zarr.codecs import BytesCodec, GzipCodec, ShardingCodec, Crc32cCodec
@@ -691,6 +686,7 @@ def _write_zarr(
 
     z = _write_zarr._arrays[filename]
     offset = _write_zarr._offsets[filename]
+
     z[offset : offset + data.shape[0]] = data
     _write_zarr._offsets[filename] = offset + data.shape[0]
 
@@ -704,9 +700,12 @@ def _write_zarr_v2(path, data, *, overwrite=True, metadata=None, **kwargs):
         _write_zarr._arrays = {}
         _write_zarr._offsets = {}
 
+    # Only overwrite if this is a brand new write session (file doesn't exist in cache)
+    # Don't delete during active chunked writing
+    if overwrite and filename not in _write_zarr._arrays and filename.exists():
+        shutil.rmtree(filename)
+
     if filename not in _write_zarr._arrays:
-        if filename.exists() and overwrite:
-            shutil.rmtree(filename)
 
         import zarr
 
@@ -729,6 +728,7 @@ def _write_zarr_v2(path, data, *, overwrite=True, metadata=None, **kwargs):
 
     z = _write_zarr._arrays[filename]
     offset = _write_zarr._offsets[filename]
+
     z[offset : offset + data.shape[0]] = data
     _write_zarr._offsets[filename] = offset + data.shape[0]
 
