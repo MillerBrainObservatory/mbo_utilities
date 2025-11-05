@@ -1,6 +1,7 @@
+import os
 import pathlib
 from pathlib import Path
-import threading
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
 from dataclasses import dataclass
 
@@ -883,8 +884,120 @@ def draw_section_suite2p(self):
         #         self.image_widget.managed_graphics[1].data = combined
 
 
+def _run_plane_worker(
+    source_file,
+    arr_idx,
+    plane_num,
+    base_out,
+    roi,
+    num_frames,
+    user_ops,
+    s2p_settings,
+):
+    """
+    Worker function for processing a single plane in a separate process.
+    This function is module-level (not a method) so it can be pickled for multiprocessing.
+    """
+    try:
+        # Import here to avoid issues with multiprocessing pickling
+        from pathlib import Path
+        import numpy as np
+        from mbo_utilities.lazy_array import imread, imwrite
+        from lbm_suite2p_python.run_lsp import run_plane
+
+        print(f"Process ROI={arr_idx}, Plane={plane_num} started (PID={os.getpid()})")
+
+        base_out = Path(base_out)
+
+        # Reload array (lazy loading)
+        arr = imread(source_file, roi=roi)
+
+        # Write functional channel using imwrite (lazy!)
+        print(f"Writing plane {plane_num} for ROI {arr_idx} to {base_out}")
+        imwrite(
+            arr,
+            base_out,
+            ext=".bin",
+            planes=[plane_num],  # 1-indexed
+            num_frames=num_frames,
+            metadata=user_ops,
+            overwrite=True,
+        )
+
+        # Determine the plane directory that imwrite() created
+        if roi is None:
+            plane_dir = base_out / f"plane{plane_num:02d}_stitched"
+        else:
+            plane_dir = base_out / f"plane{plane_num:02d}_roi{roi}"
+
+        # Handle channel 2 if specified (only if path is valid and exists)
+        chan2_path = user_ops.get("chan2_file")
+        if chan2_path and Path(chan2_path).exists():
+            try:
+                print(f"Loading channel 2 from: {chan2_path}")
+                chan2_arr = imread(chan2_path, roi=roi)
+
+                chan2_metadata = user_ops.copy()
+                chan2_metadata["structural"] = True
+
+                imwrite(
+                    chan2_arr,
+                    base_out,
+                    ext=".bin",
+                    planes=[plane_num],
+                    num_frames=num_frames,
+                    metadata=chan2_metadata,
+                    overwrite=True,
+                    structural=True,
+                )
+            except Exception as e:
+                print(f"WARNING: Could not load channel 2 data: {e}")
+
+        # Define file paths
+        raw_file = plane_dir / "data_raw.bin"
+        ops_path = plane_dir / "ops.npy"
+
+        # Load ops
+        ops_dict = np.load(ops_path, allow_pickle=True).item() if ops_path.exists() else {}
+
+        # Run Suite2p processing
+        print(f"Running Suite2p for plane {plane_num}, ROI {arr_idx}")
+
+        # Only pass chan2_file if it's actually set (not empty string)
+        chan2 = user_ops.get("chan2_file")
+        if chan2 and Path(chan2).exists():
+            chan2_file_arg = chan2
+        else:
+            chan2_file_arg = None
+
+        result_ops = run_plane(
+            input_path=raw_file,
+            save_path=plane_dir,
+            ops=ops_dict,
+            chan2_file=chan2_file_arg,
+            keep_raw=s2p_settings.get("keep_raw", False),
+            keep_reg=s2p_settings.get("keep_reg", True),
+            force_reg=s2p_settings.get("force_reg", False),
+            force_detect=s2p_settings.get("force_detect", False),
+            dff_window_size=s2p_settings.get("dff_window_size", 300),
+            dff_percentile=s2p_settings.get("dff_percentile", 20),
+            save_json=s2p_settings.get("save_json", False),
+        )
+
+        print(f"Suite2p complete for plane {plane_num}, ROI {arr_idx}")
+        return (arr_idx, plane_num, "success", {"result_ops": str(result_ops)})
+
+    except ValueError as e:
+        print(f"WARNING: No cells found for plane {plane_num}, ROI {arr_idx}: {e}")
+        return (arr_idx, plane_num, "no_cells", {"error": str(e)})
+    except Exception as e:
+        print(f"ERROR: Suite2p failed for plane {plane_num}, ROI {arr_idx}: {e}")
+        import traceback
+        return (arr_idx, plane_num, "error", {"error": str(e), "traceback": traceback.format_exc()})
+
+
 def run_process(self):
-    """Runs the selected processing pipeline."""
+    """Runs the selected processing pipeline using parallel processing."""
     if self._current_pipeline != "suite2p":
         if self._current_pipeline == "masknmf":
             self.logger.info("Running MaskNMF pipeline (not yet implemented).")
@@ -895,153 +1008,143 @@ def run_process(self):
     self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
     if not HAS_LSP:
         self.logger.warning(
-            "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline."
+            "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline. "
             "`uv pip install lbm_suite2p_python`",
         )
         self._install_error = True
         return
 
-    if not self._install_error:
-        # Iterate over each array (ROI) and each selected plane
-        for i, arr in enumerate(self.image_widget.data):
-            for plane_num in self._selected_planes:
-                kwargs = {"self": self, "arr_idx": i, "plane_num": plane_num}
-                threading.Thread(
-                    target=run_plane_from_data, kwargs=kwargs, daemon=True
-                ).start()
+    if self._install_error:
+        return
 
-
-def run_plane_from_data(self, arr_idx, plane_num):
-    """Process a single plane for a single ROI/array."""
-    print(f"Thread ROI={arr_idx}, Plane={plane_num} started")
     from mbo_utilities.file_io import load_last_savedir, save_last_savedir
-    from mbo_utilities.lazy_array import imread, imwrite
 
-    if isinstance(self.fpath, list):
-        source_file = self.fpath[arr_idx]
-    else:
-        source_file = self.fpath
+    # Prepare tasks for all selected planes and ROIs
+    tasks = []
+    for i, arr in enumerate(self.image_widget.data):
+        # Determine source file
+        if isinstance(self.fpath, list):
+            source_file = self.fpath[i]
+        else:
+            source_file = self.fpath
 
-    # Reload full array with correct ROI selection (lazy - not loaded into memory)
-    if self.num_rois > 1 and arr_idx < self.num_rois:
-        arr = imread(source_file, roi=arr_idx + 1)
-        roi = arr_idx + 1
-    else:
-        arr = imread(source_file, roi=None)
-        roi = None
+        # Determine ROI
+        if self.num_rois > 1 and i < self.num_rois:
+            roi = i + 1
+        else:
+            roi = None
 
-    # output base - let imwrite() create the plane/roi subdirectories
-    base_out = Path(self._saveas_outdir or load_last_savedir())
-    base_out.mkdir(exist_ok=True)
+        # Output base directory
+        base_out = Path(self._saveas_outdir or load_last_savedir())
+        base_out.mkdir(exist_ok=True)
 
-    # Build metadata
-    user_ops = {}
-    if hasattr(self, "s2p"):
-        try:
-            user_ops = (
-                vars(self.s2p).copy()
-                if hasattr(self.s2p, "__dict__")
-                else dict(self.s2p)
-            )
-        except Exception as e:
-            self.logger.warning(f"Could not merge Suite2p params: {e}")
+        # Build metadata and ops dict
+        user_ops = {}
+        if hasattr(self, "s2p"):
+            try:
+                user_ops = (
+                    vars(self.s2p).copy()
+                    if hasattr(self.s2p, "__dict__")
+                    else dict(self.s2p)
+                )
+            except Exception as e:
+                self.logger.warning(f"Could not merge Suite2p params: {e}")
 
-    # Add metadata
-    user_ops.update({
-        "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "original_file": str(source_file),
-        "roi_index": arr_idx,
-        "mroi": roi,
-        "roi": roi,
-        "z_index": plane_num - 1,  # 0-indexed
-        "plane": plane_num,  # 1-indexed
-        "fs": arr.metadata.get("frame_rate", 15.0),
-        "dx": arr.metadata.get("pixel_size_xy", 1.0),
-        "dz": arr.metadata.get("z_step", 1.0),
-    })
+        # Determine num_frames
+        num_frames = None
+        if user_ops.get("frames_include", -1) > 0:
+            num_frames = user_ops["frames_include"]
 
-    # Determine num_frames
-    num_frames = None
-    if user_ops.get("frames_include", -1) > 0:
-        num_frames = user_ops["frames_include"]
+        # Create tasks for each selected plane
+        for plane_num in self._selected_planes:
+            # Update metadata for this specific plane
+            task_ops = user_ops.copy()
+            task_ops.update({
+                "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "original_file": str(source_file),
+                "roi_index": i,
+                "mroi": roi,
+                "roi": roi,
+                "z_index": plane_num - 1,  # 0-indexed
+                "plane": plane_num,  # 1-indexed
+                "fs": arr.metadata.get("frame_rate", 15.0),
+                "dx": arr.metadata.get("pixel_size_xy", 1.0),
+                "dz": arr.metadata.get("z_step", 1.0),
+            })
 
-    # Write functional channel using imwrite (lazy!)
-    # imwrite will create plane_dir automatically based on plane/roi
-    print(f"Writing plane {plane_num} for ROI {arr_idx} to {base_out}")
-    imwrite(
-        arr,
-        base_out,
-        ext=".bin",
-        planes=[plane_num],  # 1-indexed
-        num_frames=num_frames,
-        metadata=user_ops,
-        overwrite=True,
+            # Extract s2p settings as dict for pickling
+            s2p_dict = self.s2p.to_dict() if hasattr(self.s2p, "to_dict") else vars(self.s2p)
+
+            tasks.append({
+                "source_file": str(source_file),
+                "arr_idx": i,
+                "plane_num": plane_num,
+                "base_out": str(base_out),
+                "roi": roi,
+                "num_frames": num_frames,
+                "user_ops": task_ops,
+                "s2p_settings": s2p_dict,
+            })
+
+    if not tasks:
+        self.logger.warning("No planes selected for processing.")
+        return
+
+    # Determine optimal number of workers
+    # Use min of: number of tasks, CPU count, or 4 (to avoid memory issues)
+    max_workers = min(len(tasks), os.cpu_count() or 4, 4)
+
+    self.logger.info(f"Starting parallel processing of {len(tasks)} tasks with {max_workers} workers...")
+
+    # Run tasks in parallel using ProcessPoolExecutor
+    completed_count = 0
+    error_count = 0
+    no_cells_count = 0
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_task = {
+            executor.submit(_run_plane_worker, **task): task
+            for task in tasks
+        }
+
+        # Process results as they complete
+        for future in as_completed(future_to_task):
+            task = future_to_task[future]
+            try:
+                arr_idx, plane_num, status, info = future.result()
+
+                if status == "success":
+                    completed_count += 1
+                    self.logger.info(
+                        f"[{completed_count}/{len(tasks)}] ✓ Plane {plane_num}, ROI {arr_idx} complete"
+                    )
+                    # Save the last successful directory
+                    if "result_ops" in info:
+                        save_last_savedir(Path(info["result_ops"]).parent)
+
+                elif status == "no_cells":
+                    no_cells_count += 1
+                    self.logger.warning(
+                        f"[{completed_count + error_count + no_cells_count}/{len(tasks)}] "
+                        f"⚠ Plane {plane_num}, ROI {arr_idx}: No cells found"
+                    )
+                else:  # error
+                    error_count += 1
+                    self.logger.error(
+                        f"[{completed_count + error_count + no_cells_count}/{len(tasks)}] "
+                        f"✗ Plane {plane_num}, ROI {arr_idx} failed: {info.get('error', 'Unknown error')}"
+                    )
+
+            except Exception as e:
+                error_count += 1
+                self.logger.error(
+                    f"Task for plane {task['plane_num']}, ROI {task['arr_idx']} "
+                    f"raised exception: {e}"
+                )
+
+    # Final summary
+    self.logger.info(
+        f"Processing complete: {completed_count} succeeded, "
+        f"{no_cells_count} had no cells, {error_count} failed"
     )
-
-    # Determine the plane directory that imwrite() created
-    if roi is None:
-        plane_dir = base_out / f"plane{plane_num:02d}_stitched"
-    else:
-        plane_dir = base_out / f"plane{plane_num:02d}_roi{roi}"
-
-    if user_ops.get("chan2_file"):
-        try:
-            self.logger.info(f"Loading channel 2 from: {user_ops['chan2_file']}")
-            chan2_arr = imread(user_ops["chan2_file"], roi=roi)
-
-            chan2_metadata = user_ops.copy()
-            chan2_metadata["structural"] = True
-
-            imwrite(
-                chan2_arr,
-                base_out,
-                ext=".bin",
-                planes=[plane_num],
-                num_frames=num_frames,
-                metadata=chan2_metadata,
-                overwrite=True,
-                structural=True,
-            )
-        except Exception as e:
-            self.logger.warning(f"Could not load channel 2 data: {e}")
-
-    save_last_savedir(plane_dir)  # cache this location
-
-    # Define file paths (imwrite already created these)
-    raw_file = plane_dir / "data_raw.bin"
-    ops_path = plane_dir / "ops.npy"
-
-    # Load ops and merge with user settings
-    # LBM-Suite2p-Python will merge this with defaults automatically
-    ops_dict = np.load(ops_path, allow_pickle=True).item() if ops_path.exists() else {}
-
-    # Run Suite2p processing with full parameter set
-    print(f"Running Suite2p for plane {plane_num}, ROI {arr_idx}")
-    try:
-        result_ops = run_plane(
-            input_path=raw_file,
-            save_path=plane_dir,
-            ops=ops_dict,  # Pass dict instead of path for proper merging
-            chan2_file=user_ops.get("chan2_file"),
-            keep_raw=self.s2p.keep_raw,
-            keep_reg=self.s2p.keep_reg,
-            force_reg=self.s2p.force_reg,
-            force_detect=self.s2p.force_detect,
-            dff_window_size=self.s2p.dff_window_size,
-            dff_percentile=self.s2p.dff_percentile,
-            save_json=self.s2p.save_json,
-        )
-        self.logger.info(
-            f"Suite2p processing complete for plane {plane_num}, ROI {arr_idx}. "
-            f"Results saved to {result_ops}"
-        )
-    except ValueError as e:
-        self.logger.warning(
-            f"No cells found for plane {plane_num}, ROI {arr_idx}: \n{e}"
-        )
-        return
-    except Exception as e:
-        self.logger.error(
-            f"Suite2p processing failed for plane {plane_num}, ROI {arr_idx}: \n{e}"
-        )
-        return
