@@ -863,21 +863,28 @@ def merge_zarr_zplanes(
                 raise FileNotFoundError(f"Suite2p directory not found: {s2p_dir}")
 
     # Read first Zarr to get dimensions
+    logger.info(f"Reading first Zarr to determine dimensions: {zarr_paths[0]}")
     z0 = zarr.open(str(zarr_paths[0]), mode="r")
+    logger.debug(f"Zarr type: {type(z0)}")
+
     if hasattr(z0, "shape"):
         # Direct array
         T, Y, X = z0.shape
         dtype = z0.dtype
+        logger.debug(f"Detected direct array with shape {(T, Y, X)}, dtype {dtype}")
     else:
         # Group - look for "0" array (OME-Zarr)
+        logger.debug(f"Detected group with keys: {list(z0.keys())}")
         if "0" in z0:
             arr = z0["0"]
             T, Y, X = arr.shape
             dtype = arr.dtype
+            logger.debug(f"Using '0' subarray with shape {(T, Y, X)}, dtype {dtype}")
         else:
             raise ValueError(
                 f"Cannot determine shape of {zarr_paths[0]}. "
-                f"Expected direct array or group with '0' subarray."
+                f"Expected direct array or group with '0' subarray. "
+                f"Got group with keys: {list(z0.keys())}"
             )
 
     Z = len(zarr_paths)
@@ -902,23 +909,31 @@ def merge_zarr_zplanes(
 
     logger.info("Copying z-plane data...")
     for zi, zpath in enumerate(zarr_paths):
+        logger.debug(f"Reading z-plane {zi + 1}/{Z} from {zpath}")
         z_arr = zarr.open(str(zpath), mode="r")
 
         # Handle both direct arrays and OME-Zarr groups
         if hasattr(z_arr, "shape"):
             plane_data = z_arr[:]
+            logger.debug(f"  Read direct array with shape {plane_data.shape}")
         elif "0" in z_arr:
             plane_data = z_arr["0"][:]
+            logger.debug(f"  Read '0' subarray with shape {plane_data.shape}")
         else:
-            raise ValueError(f"Cannot read data from {zpath}")
+            raise ValueError(
+                f"Cannot read data from {zpath}. "
+                f"Got group with keys: {list(z_arr.keys()) if hasattr(z_arr, 'keys') else 'N/A'}"
+            )
 
         if plane_data.shape != (T, Y, X):
             raise ValueError(
-                f"Shape mismatch at z={zi}: expected {(T, Y, X)}, got {plane_data.shape}"
+                f"Shape mismatch at z={zi} (file: {zpath.name}): "
+                f"expected {(T, Y, X)}, got {plane_data.shape}"
             )
 
+        logger.debug(f"  Writing to output volume at z={zi}")
         image[:, zi, :, :] = plane_data
-        logger.debug(f"Copied z-plane {zi + 1}/{Z} from {zpath.name}")
+        logger.info(f"Copied z-plane {zi + 1}/{Z} from {zpath.name}")
 
     # Add Suite2p labels if provided
     if suite2p_dirs is not None:
