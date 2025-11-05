@@ -28,20 +28,30 @@ class Suite2pSettings:
     """
     Suite2p pipeline configuration settings.
     Organized by functional sections matching Suite2p documentation.
+    Defaults are optimized for LBM datasets based on LBM-Suite2p-Python.
     """
 
     # ==================== Main Settings ====================
     # nplanes: int = 1  # Number of planes in each tiff
     functional_chan: int = 1  # Channel for functional ROI extraction (1-based)
-    tau: float = 1.0  # Timescale of sensor (GCaMP6f=0.7, 6m=1.0, 6s=1.25-1.5)
+    tau: float = 1.3  # Timescale of sensor (LBM default for GCaMP6m-like)
     frames_include: int = -1  # Only process this many frames (for testing)
     # multiplane_parallel: bool = False  # Run pipeline on server
     # ignore_flyback: list = field(default_factory=list)  # Planes to ignore
+
+    # ==================== Processing Control ====================
+    keep_raw: bool = False  # Keep raw binary (data_raw.bin) after processing
+    keep_reg: bool = True  # Keep registered binary (data.bin) after processing
+    force_reg: bool = False  # Force re-registration even if already done
+    force_detect: bool = False  # Force ROI detection even if stat.npy exists
+    dff_window_size: int = 300  # Frames for rolling percentile baseline in ΔF/F
+    dff_percentile: int = 20  # Percentile for baseline F₀ estimation
 
     # ==================== Output Settings ====================
     preclassify: float = 0.0  # Apply classifier before extraction (0.0 = keep all)
     save_nwb: bool = False  # Save output as NWB file
     save_mat: bool = False  # Save results in Fall.mat
+    save_json: bool = False  # Save ops as JSON in addition to .npy
     combined: bool = True  # Combine results across planes
     aspect: float = 1.0  # Ratio of um/pixels X to Y (for GUI only)
     report_time: bool = True  # Return timing dictionary
@@ -81,7 +91,7 @@ class Suite2pSettings:
     # ==================== ROI Detection Settings ====================
     roidetect: bool = True  # Run ROI detection and extraction
     sparse_mode: bool = True  # Use sparse_mode cell detection
-    spatial_scale: int = 0  # Optimal recording scale (0=auto, 1-4 manual)
+    spatial_scale: int = 1  # Optimal recording scale (1=6-pixel cells, LBM default)
     connected: bool = True  # Require ROIs to be fully connected
     threshold_scaling: float = 1.0  # Detection threshold (higher=fewer ROIs)
     spatial_hp_detect: int = 25  # High-pass window for neuropil subtraction
@@ -93,11 +103,12 @@ class Suite2pSettings:
     denoise: bool = False  # Denoise binned movie (requires sparse_mode)
 
     # ==================== Cellpose Detection Settings ====================
-    anatomical_only: int = 0  # Use Cellpose (1-4 for different projections)
-    diameter: int = 0  # Cellpose diameter (0=auto-estimate)
-    cellprob_threshold: float = 0.0  # Cellpose cell detection threshold
-    flow_threshold: float = 1.5  # Cellpose flow threshold
-    spatial_hp_cp: int = 0  # High-pass window for Cellpose image
+    # LBM-optimized defaults for Cellpose-based detection
+    anatomical_only: int = 3  # Use enhanced mean image (LBM default)
+    diameter: int = 6  # Expected cell diameter in pixels (LBM datasets)
+    cellprob_threshold: float = -6.0  # More permissive detection threshold
+    flow_threshold: float = 0.0  # Standard Cellpose flow threshold
+    spatial_hp_cp: float = 0.5  # High-pass filtering strength for Cellpose
     pretrained_model: str = "cyto"  # Cellpose model path or type
 
     # ==================== Signal Extraction Settings ====================
@@ -260,6 +271,79 @@ def draw_section_suite2p(self):
             "Useful for testing on a subset of data."
         )
 
+        # Get number of planes from data
+        if hasattr(self, "image_widget") and self.image_widget.data:
+            data_arrays = (
+                self.image_widget.data
+                if isinstance(self.image_widget.data, list)
+                else [self.image_widget.data]
+            )
+            if len(data_arrays) > 0:
+                num_planes = data_arrays[0].shape[1] if data_arrays[0].ndim > 1 else 1
+            else:
+                num_planes = 1
+        else:
+            num_planes = 1
+
+        # Initialize selected planes if not already set
+        if not hasattr(self, "_selected_planes"):
+            self._selected_planes = set(range(1, num_planes + 1))  # All selected by default
+
+        # Plane selection UI
+        imgui.spacing()
+        imgui.separator_text("Plane Selection")
+        imgui.text("Select planes to process:")
+
+        # [All] and [None] buttons
+        if imgui.button("All##planes"):
+            self._selected_planes = set(range(1, num_planes + 1))
+        imgui.same_line()
+        if imgui.button("None##planes"):
+            self._selected_planes = set()
+
+        # Checkboxes for each plane (in rows of 5)
+        for i in range(num_planes):
+            plane_num = i + 1
+            checked = plane_num in self._selected_planes
+            changed, checked = imgui.checkbox(f"Plane {plane_num}", checked)
+            if changed:
+                if checked:
+                    self._selected_planes.add(plane_num)
+                else:
+                    self._selected_planes.discard(plane_num)
+            if (i + 1) % 5 != 0 and i < num_planes - 1:
+                imgui.same_line()
+
+        # Processing Control Options
+        imgui.spacing()
+        imgui.separator_text("Processing Options")
+
+        _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
+        set_tooltip("Keep data_raw.bin after processing (uses disk space)")
+
+        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
+        set_tooltip("Keep data.bin after processing (useful for QC)")
+
+        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
+        set_tooltip("Force re-registration even if already processed")
+
+        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
+        set_tooltip("Force ROI detection even if stat.npy exists")
+
+        imgui.spacing()
+        _, self.s2p.dff_window_size = imgui.input_int(
+            "ΔF/F Window (frames)", self.s2p.dff_window_size
+        )
+        set_tooltip("Frames for rolling percentile baseline in ΔF/F (default: 300)")
+
+        _, self.s2p.dff_percentile = imgui.input_int(
+            "ΔF/F Percentile", self.s2p.dff_percentile
+        )
+        set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
+
+        _, self.s2p.save_json = imgui.checkbox("Save JSON ops", self.s2p.save_json)
+        set_tooltip("Save ops as JSON in addition to .npy")
+
         imgui.spacing()
         if imgui.button("Run Suite2p", imgui.ImVec2(150, 30)):
             print("Run button clicked")
@@ -327,7 +411,7 @@ def draw_section_suite2p(self):
             set_tooltip("Channel used for functional ROI extraction (1-based).")
             _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
             set_tooltip(
-                "Sensor decay timescale (round up): GCaMP6f=0.7, GCaMP6m=1.0, GCaMP6s=1.25-1.5"
+                "Sensor decay timescale: GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
             )
             imgui.unindent()
             imgui.spacing()
@@ -524,7 +608,7 @@ def draw_section_suite2p(self):
                 "Spatial Scale", self.s2p.spatial_scale
             )
             set_tooltip(
-                "ROI size scale. 0=auto, 1=small, 2=medium, 3=large, 4=very large."
+                "ROI size scale: 0=auto, 1=6-pixel cells (LBM default), 2=medium, 3=large, 4=very large"
             )
             _, self.s2p.connected = imgui.checkbox("Connected ROIs", self.s2p.connected)
             set_tooltip("Require ROIs to be connected regions.")
@@ -571,22 +655,22 @@ def draw_section_suite2p(self):
                 "Anatomical Only", self.s2p.anatomical_only
             )
             set_tooltip(
-                "0=disabled; 1-4 select Cellpose image type (mean, max, enhanced)."
+                "0=disabled; 1=mean, 2=max, 3=enhanced (LBM default), 4=correlation"
             )
             _, self.s2p.diameter = imgui.input_int("Cell Diameter", self.s2p.diameter)
-            set_tooltip("Expected cell diameter; 0=auto-estimate.")
+            set_tooltip("Expected cell diameter in pixels (6 = LBM default for ~6μm cells)")
             _, self.s2p.cellprob_threshold = imgui.input_float(
                 "CellProb Threshold", self.s2p.cellprob_threshold
             )
-            set_tooltip("Cellpose detection probability threshold.")
+            set_tooltip("Cellpose detection threshold (-6 = LBM default for permissive detection)")
             _, self.s2p.flow_threshold = imgui.input_float(
                 "Flow Threshold", self.s2p.flow_threshold
             )
-            set_tooltip("Cellpose flow field threshold.")
-            _, self.s2p.spatial_hp_cp = imgui.input_int(
+            set_tooltip("Cellpose flow field threshold (0 = standard)")
+            _, self.s2p.spatial_hp_cp = imgui.input_float(
                 "Spatial HP (Cellpose)", self.s2p.spatial_hp_cp
             )
-            set_tooltip("Spatial high-pass window for Cellpose preprocessing.")
+            set_tooltip("High-pass filtering strength (0.5 = LBM default)")
             imgui.text("Pretrained Model:")
             imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
             imgui.text(
@@ -818,76 +902,39 @@ def run_process(self):
         return
 
     if not self._install_error:
+        # Iterate over each array (ROI) and each selected plane
         for i, arr in enumerate(self.image_widget.data):
-            kwargs = {"self": self, "arr_idx": i}
-            threading.Thread(
-                target=run_plane_from_data, kwargs=kwargs, daemon=True
-            ).start()
+            for plane_num in self._selected_planes:
+                kwargs = {"self": self, "arr_idx": i, "plane_num": plane_num}
+                threading.Thread(
+                    target=run_plane_from_data, kwargs=kwargs, daemon=True
+                ).start()
 
 
-def run_plane_from_data(self, arr_idx):
-    print(f"Thread {arr_idx} started")
-    from mbo_utilities._writers import _write_bin
+def run_plane_from_data(self, arr_idx, plane_num):
+    """Process a single plane for a single ROI/array."""
+    print(f"Thread ROI={arr_idx}, Plane={plane_num} started")
     from mbo_utilities.file_io import load_last_savedir, save_last_savedir
-    from mbo_utilities.lazy_array import imread
+    from mbo_utilities.lazy_array import imread, imwrite
 
-    # Get current displayed dimensions
-    dims = self.image_widget.current_index
-    current_z = dims.get("z", 0)
-
-    # Load the source array from file - image_widget.data contains 2D display slices, not the full 4D array
     if isinstance(self.fpath, list):
-        # Multiple files - one per ROI
         source_file = self.fpath[arr_idx]
     else:
-        # Single file with multiple ROIs
         source_file = self.fpath
 
-    # Reload full array with correct ROI selection
+    # Reload full array with correct ROI selection (lazy - not loaded into memory)
     if self.num_rois > 1 and arr_idx < self.num_rois:
-        # Multi-ROI: load specific ROI (1-indexed)
         arr = imread(source_file, roi=arr_idx + 1)
         roi = arr_idx + 1
     else:
-        # Single ROI or stitched: load all
-        arr = imread(source_file, roi=None)  # roi=None means stitched
+        arr = imread(source_file, roi=None)
         roi = None
 
-    # output base
+    # output base - let imwrite() create the plane/roi subdirectories
     base_out = Path(self._saveas_outdir or load_last_savedir())
     base_out.mkdir(exist_ok=True)
 
-    # Determine plane directory name based on ROI configuration
-    if roi is None:
-        # Stitched data
-        plane_dirname = f"plane{current_z + 1:02d}_stitched"
-    else:
-        # Separate ROI data
-        plane_dirname = f"plane{current_z + 1:02d}_roi{roi}"
-
-    plane_dir = base_out / plane_dirname
-    plane_dir.mkdir(parents=True, exist_ok=True)
-    raw_file = plane_dir / "data_raw.bin"
-    ops_path = plane_dir / "ops.npy"
-
-    # Extract z-plane - handle both 3D (T, Y, X) and 4D (T, Z, Y, X) arrays
-    # NOTE: Use len(arr.shape) instead of arr.ndim because MboRawArray.ndim returns metadata ndim (2 for TIFF pages)
-    actual_ndim = len(arr.shape)
-    if actual_ndim == 4:
-        # 4D array: extract specific z-plane, use full spatial dimensions
-        data = arr[:, current_z, :, :]
-    elif actual_ndim == 3:
-        # 3D array: already single plane, use as-is
-        data = arr[:, :, :]
-    else:
-        raise ValueError(
-            f"Unexpected array dimensions: {actual_ndim} (shape={arr.shape}). Expected 3D (T,Y,X) or 4D (T,Z,Y,X)"
-        )
-
-    # Force computation for lazy arrays (dask, etc.)
-    # np.asarray handles both dask arrays and memmap arrays correctly
-    data = np.asarray(data, dtype=np.int16)
-
+    # Build metadata
     user_ops = {}
     if hasattr(self, "s2p"):
         try:
@@ -899,108 +946,102 @@ def run_plane_from_data(self, arr_idx):
         except Exception as e:
             self.logger.warning(f"Could not merge Suite2p params: {e}")
 
-    # Handle chan2_file if provided
-    chan2_data = None
-    chan2_raw_file = None
-    min_frames = data.shape[0]  # default to functional data frames
+    # Add metadata
+    user_ops.update({
+        "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "original_file": str(source_file),
+        "roi_index": arr_idx,
+        "mroi": roi,
+        "roi": roi,
+        "z_index": plane_num - 1,  # 0-indexed
+        "plane": plane_num,  # 1-indexed
+        "fs": arr.metadata.get("frame_rate", 15.0),
+        "dx": arr.metadata.get("pixel_size_xy", 1.0),
+        "dz": arr.metadata.get("z_step", 1.0),
+    })
+
+    # Determine num_frames
+    num_frames = None
+    if user_ops.get("frames_include", -1) > 0:
+        num_frames = user_ops["frames_include"]
+
+    # Write functional channel using imwrite (lazy!)
+    # imwrite will create plane_dir automatically based on plane/roi
+    print(f"Writing plane {plane_num} for ROI {arr_idx} to {base_out}")
+    imwrite(
+        arr,
+        base_out,
+        ext=".bin",
+        planes=[plane_num],  # 1-indexed
+        num_frames=num_frames,
+        metadata=user_ops,
+        overwrite=True,
+    )
+
+    # Determine the plane directory that imwrite() created
+    if roi is None:
+        plane_dir = base_out / f"plane{plane_num:02d}_stitched"
+    else:
+        plane_dir = base_out / f"plane{plane_num:02d}_roi{roi}"
 
     if user_ops.get("chan2_file"):
         try:
             self.logger.info(f"Loading channel 2 from: {user_ops['chan2_file']}")
-            chan2_arr = imread(user_ops["chan2_file"])
+            chan2_arr = imread(user_ops["chan2_file"], roi=roi)
 
-            # Extract z-plane - handle both 3D and 4D arrays (same as functional channel)
-            # NOTE: Use len(shape) instead of ndim for MboRawArray compatibility
-            chan2_actual_ndim = len(chan2_arr.shape)
-            if chan2_actual_ndim == 4:
-                # 4D array: extract specific z-plane, use full spatial dimensions
-                chan2_data = chan2_arr[:, current_z, :, :]
-            elif chan2_actual_ndim == 3:
-                # 3D array: already single plane, use as-is
-                chan2_data = chan2_arr[:, :, :]
-            else:
-                raise ValueError(
-                    f"Unexpected channel 2 array dimensions: {chan2_actual_ndim} (shape={chan2_arr.shape})"
-                )
+            chan2_metadata = user_ops.copy()
+            chan2_metadata["structural"] = True
 
-            # Force computation for lazy arrays (dask, etc.)
-            chan2_data = np.asarray(chan2_data, dtype=np.int16)
-            # Get minimum frames between functional and structural
-            min_frames = min(data.shape[0], chan2_data.shape[0])
-            # Trim both to same number of frames
-            data = data[:min_frames]
-            chan2_data = chan2_data[:min_frames]
-            chan2_raw_file = plane_dir / "data_chan2.bin"
-            self.logger.info(f"Channel 2 loaded and trimmed to {min_frames} frames")
+            imwrite(
+                chan2_arr,
+                base_out,
+                ext=".bin",
+                planes=[plane_num],
+                num_frames=num_frames,
+                metadata=chan2_metadata,
+                overwrite=True,
+                structural=True,
+            )
         except Exception as e:
             self.logger.warning(f"Could not load channel 2 data: {e}")
-            chan2_data = None
-            min_frames = data.shape[0]
-
-    md = {
-        "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "original_file": str(self.fpath),
-        "roi_index": arr_idx,  # Array index in ImageWidget
-        "mroi": roi,  # Actual ROI number or None for stitched
-        "roi": roi,  # Alias for mroi (matches array_types.py convention)
-        "z_index": current_z,
-        "plane": current_z + 1,
-        "num_frames": min_frames,  # Use minimum frame count
-        "nframes": min_frames,  # Suite2p also uses nframes
-        "shape": (min_frames, data.shape[-2], data.shape[-1]),
-        "Ly": data.shape[-2],
-        "Lx": data.shape[-1],
-        "fs": arr.metadata.get("frame_rate", 15.0),
-        "dx": arr.metadata.get("pixel_size_xy", 1.0),
-        "dz": arr.metadata.get("z_step", 1.0),
-        "ops_path": str(ops_path),
-        "save_path": str(plane_dir),
-        "raw_file": str((plane_dir / "data_raw.bin").resolve()),
-        "reg_file": str((plane_dir / "data.bin").resolve()),
-    }
-
-    user_ops.update(md)
-
-    # Write functional channel (channel 1) binary with num_frames constraint
-    print(
-        f"Writing binary: {data.shape[0]} frames, metadata num_frames={user_ops.get('num_frames')}"
-    )
-    _write_bin(raw_file, data, overwrite=True, metadata=user_ops)
-
-    # Write structural channel (channel 2) binary if provided
-    # Both bins MUST have the same num_frames for suite2p
-    if chan2_data is not None and chan2_raw_file is not None:
-        chan2_metadata = user_ops.copy()
-        # CRITICAL: Keep the same num_frames for both bins
-        chan2_metadata["num_frames"] = min_frames
-        chan2_metadata["nframes"] = min_frames
-        chan2_metadata["shape"] = (
-            min_frames,
-            chan2_data.shape[-2],
-            chan2_data.shape[-1],
-        )
-        # Update the metadata to point to the chan2 file
-        chan2_metadata["chan2_file"] = str(chan2_raw_file.resolve())
-        _write_bin(chan2_raw_file, chan2_data, overwrite=True, metadata=chan2_metadata)
-        # Update ops to reference the chan2 file path
-        user_ops["chan2_file"] = str(chan2_raw_file.resolve())
 
     save_last_savedir(plane_dir)  # cache this location
 
-    # re-save user ops with correct num_frames
-    ops_dict = np.load(ops_path, allow_pickle=True).item()
-    ops_dict.update(user_ops)
-    np.save(ops_path, ops_dict)
+    # Define file paths (imwrite already created these)
+    raw_file = plane_dir / "data_raw.bin"
+    ops_path = plane_dir / "ops.npy"
 
+    # Load ops and merge with user settings
+    # LBM-Suite2p-Python will merge this with defaults automatically
+    ops_dict = np.load(ops_path, allow_pickle=True).item() if ops_path.exists() else {}
+
+    # Run Suite2p processing with full parameter set
+    print(f"Running Suite2p for plane {plane_num}, ROI {arr_idx}")
     try:
-        _ = run_plane(
-            raw_file, save_path=plane_dir, ops=ops_path, keep_raw=True, keep_reg=True
+        result_ops = run_plane(
+            input_path=raw_file,
+            save_path=plane_dir,
+            ops=ops_dict,  # Pass dict instead of path for proper merging
+            chan2_file=user_ops.get("chan2_file"),
+            keep_raw=self.s2p.keep_raw,
+            keep_reg=self.s2p.keep_reg,
+            force_reg=self.s2p.force_reg,
+            force_detect=self.s2p.force_detect,
+            dff_window_size=self.s2p.dff_window_size,
+            dff_percentile=self.s2p.dff_percentile,
+            save_json=self.s2p.save_json,
+        )
+        self.logger.info(
+            f"Suite2p processing complete for plane {plane_num}, ROI {arr_idx}. "
+            f"Results saved to {result_ops}"
         )
     except ValueError as e:
         self.logger.warning(
-            f"No cells found for plane {current_z}, ROI {arr_idx}: \n{e}"
+            f"No cells found for plane {plane_num}, ROI {arr_idx}: \n{e}"
         )
         return
-    self.logger.info(
-        f"Suite2p processing complete for plane {current_z}, ROI {arr_idx}."
-    )
+    except Exception as e:
+        self.logger.error(
+            f"Suite2p processing failed for plane {plane_num}, ROI {arr_idx}: \n{e}"
+        )
+        return
