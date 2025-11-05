@@ -917,17 +917,45 @@ def _run_plane_worker(
         base_out = Path(base_out)
 
         # Reload array (lazy loading)
+        print(f"Loading from source: {source_file}")
         arr = imread(source_file, roi=roi)
+        print(f"Loaded array shape: {arr.shape}, ndim: {arr.ndim}")
+
+        # For 4D arrays, extract the specific plane before writing
+        # For 3D arrays, write directly (they're already single-plane)
+        if arr.ndim == 4:
+            # Extract the specific z-plane (0-indexed)
+            z_idx = plane_num - 1
+            if z_idx >= arr.shape[1]:
+                raise IndexError(
+                    f"Plane {plane_num} requested but array only has {arr.shape[1]} planes. "
+                    f"Array shape: {arr.shape}"
+                )
+            # Extract plane: arr[:, z_idx, :, :] gives us (T, H, W)
+            plane_data = arr[:, z_idx, :, :]
+            write_planes = None  # Don't specify planes for extracted 3D data
+        else:
+            # 3D array - already a single plane
+            plane_data = arr
+            write_planes = None
 
         # Write functional channel using imwrite (lazy!)
         print(f"Writing plane {plane_num} for ROI {arr_idx} to {base_out}")
+
+        # Update metadata with plane-specific info
+        plane_metadata = user_ops.copy()
+        plane_metadata.update({
+            "plane": plane_num,
+            "z_index": plane_num - 1,
+        })
+
         imwrite(
-            arr,
+            plane_data,
             base_out,
             ext=".bin",
-            planes=[plane_num],  # 1-indexed
+            planes=write_planes,  # None for extracted plane data
             num_frames=num_frames,
-            metadata=user_ops,
+            metadata=plane_metadata,
             overwrite=True,
         )
 
@@ -944,14 +972,29 @@ def _run_plane_worker(
                 print(f"Loading channel 2 from: {chan2_path}")
                 chan2_arr = imread(chan2_path, roi=roi)
 
+                # Extract plane for 4D arrays
+                if chan2_arr.ndim == 4:
+                    z_idx = plane_num - 1
+                    if z_idx >= chan2_arr.shape[1]:
+                        raise IndexError(
+                            f"Plane {plane_num} requested but channel 2 array only has {chan2_arr.shape[1]} planes"
+                        )
+                    chan2_plane_data = chan2_arr[:, z_idx, :, :]
+                else:
+                    chan2_plane_data = chan2_arr
+
                 chan2_metadata = user_ops.copy()
                 chan2_metadata["structural"] = True
+                chan2_metadata.update({
+                    "plane": plane_num,
+                    "z_index": plane_num - 1,
+                })
 
                 imwrite(
-                    chan2_arr,
+                    chan2_plane_data,
                     base_out,
                     ext=".bin",
-                    planes=[plane_num],
+                    planes=None,  # Already extracted
                     num_frames=num_frames,
                     metadata=chan2_metadata,
                     overwrite=True,
@@ -1048,7 +1091,8 @@ def run_process(self):
     if is_single_4d:
         # Single 4D array: loop over selected planes only
         arr = data_arrays[0]
-        source_file = self.fpath if not isinstance(self.fpath, list) else self.fpath[0]
+        # Pass all files if it's a multi-file volume, or single file if it's a merged volume
+        source_file = self.fpath
         roi = None  # No multi-ROI for single 4D case
 
         base_out = Path(self._saveas_outdir or load_last_savedir())
