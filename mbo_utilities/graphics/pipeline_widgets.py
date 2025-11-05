@@ -280,7 +280,14 @@ def draw_section_suite2p(self):
                 else [self.image_widget.data]
             )
             if len(data_arrays) > 0:
-                num_planes = data_arrays[0].shape[1] if data_arrays[0].ndim > 1 else 1
+                # For 4D arrays (T, Z, H, W), get Z from shape[1]
+                # For 3D arrays (T, H, W), only 1 plane
+                if data_arrays[0].ndim == 4:
+                    num_planes = data_arrays[0].shape[1]
+                elif data_arrays[0].ndim == 3:
+                    num_planes = 1
+                else:
+                    num_planes = 1
             else:
                 num_planes = 1
         else:
@@ -1021,20 +1028,29 @@ def run_process(self):
 
     # Prepare tasks for all selected planes and ROIs
     tasks = []
-    for i, arr in enumerate(self.image_widget.data):
-        # Determine source file
-        if isinstance(self.fpath, list):
-            source_file = self.fpath[i]
-        else:
-            source_file = self.fpath
 
-        # Determine ROI
-        if self.num_rois > 1 and i < self.num_rois:
-            roi = i + 1
-        else:
-            roi = None
+    # Determine if we have a single 4D array or multiple 3D arrays
+    data_arrays = (
+        self.image_widget.data
+        if isinstance(self.image_widget.data, list)
+        else [self.image_widget.data]
+    )
+    first_array = data_arrays[0] if len(data_arrays) > 0 else None
 
-        # Output base directory
+    # Case 1: Single 4D array (T, Z, H, W) - one file with multiple planes
+    # Case 2: Multiple 3D arrays (T, H, W) - multiple files, one plane each
+    is_single_4d = (
+        first_array is not None
+        and first_array.ndim == 4
+        and len(data_arrays) == 1
+    )
+
+    if is_single_4d:
+        # Single 4D array: loop over selected planes only
+        arr = data_arrays[0]
+        source_file = self.fpath if not isinstance(self.fpath, list) else self.fpath[0]
+        roi = None  # No multi-ROI for single 4D case
+
         base_out = Path(self._saveas_outdir or load_last_savedir())
         base_out.mkdir(exist_ok=True)
 
@@ -1057,6 +1073,81 @@ def run_process(self):
 
         # Create tasks for each selected plane
         for plane_num in self._selected_planes:
+            # Update metadata for this specific plane
+            task_ops = user_ops.copy()
+            task_ops.update({
+                "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "original_file": str(source_file),
+                "roi_index": 0,
+                "mroi": roi,
+                "roi": roi,
+                "z_index": plane_num - 1,  # 0-indexed
+                "plane": plane_num,  # 1-indexed
+                "fs": arr.metadata.get("frame_rate", 15.0),
+                "dx": arr.metadata.get("pixel_size_xy", 1.0),
+                "dz": arr.metadata.get("z_step", 1.0),
+            })
+
+            # Extract s2p settings as dict for pickling
+            s2p_dict = self.s2p.to_dict() if hasattr(self.s2p, "to_dict") else vars(self.s2p)
+
+            tasks.append({
+                "source_file": str(source_file),
+                "arr_idx": 0,
+                "plane_num": plane_num,
+                "base_out": str(base_out),
+                "roi": roi,
+                "num_frames": num_frames,
+                "user_ops": task_ops,
+                "s2p_settings": s2p_dict,
+            })
+    else:
+        # Multiple 3D arrays: each array is already a single plane/ROI
+        for i, arr in enumerate(data_arrays):
+            # Determine source file
+            if isinstance(self.fpath, list):
+                source_file = self.fpath[i]
+            else:
+                source_file = self.fpath
+
+            # Determine ROI
+            if self.num_rois > 1 and i < self.num_rois:
+                roi = i + 1
+            else:
+                roi = None
+
+            # For 3D arrays, plane_num should be derived from array index or metadata
+            # Use i+1 as plane_num (1-indexed) if planes are selected
+            if self._selected_planes and (i + 1) in self._selected_planes:
+                plane_num = i + 1
+            elif not self._selected_planes:
+                # If no planes selected, skip
+                continue
+            else:
+                # This array's plane is not in selected_planes
+                continue
+
+            # Output base directory
+            base_out = Path(self._saveas_outdir or load_last_savedir())
+            base_out.mkdir(exist_ok=True)
+
+            # Build metadata and ops dict
+            user_ops = {}
+            if hasattr(self, "s2p"):
+                try:
+                    user_ops = (
+                        vars(self.s2p).copy()
+                        if hasattr(self.s2p, "__dict__")
+                        else dict(self.s2p)
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Could not merge Suite2p params: {e}")
+
+            # Determine num_frames
+            num_frames = None
+            if user_ops.get("frames_include", -1) > 0:
+                num_frames = user_ops["frames_include"]
+
             # Update metadata for this specific plane
             task_ops = user_ops.copy()
             task_ops.update({
