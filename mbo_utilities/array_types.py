@@ -1455,6 +1455,12 @@ class ZarrArray:
         t_key, z_key, y_key, x_key = key
 
         def normalize(idx):
+            # convert range objects to slices (zarr doesn't support range objects)
+            if isinstance(idx, range):
+                # Convert range to slice for zarr compatibility
+                if len(idx) == 0:
+                    return slice(0, 0)
+                return slice(idx.start, idx.stop, idx.step)
             # convert contiguous lists to slices for zarr
             if isinstance(idx, list) and len(idx) > 0:
                 if all(idx[i] + 1 == idx[i + 1] for i in range(len(idx) - 1)):
@@ -1463,6 +1469,7 @@ class ZarrArray:
                     return np.array(idx)  # will require looping later
             return idx
 
+        t_key = normalize(t_key)
         y_key = normalize(y_key)
         x_key = normalize(x_key)
 
