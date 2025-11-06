@@ -4,7 +4,12 @@
 
 Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory/mbo_utilities/issues) (MBO).
 
-`imread`/`imwrite`: Reader and writer for a variety of [file types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) used at the mbo, such as raw scanimage tiffs, suite2p binaries, or zarr arrays.
+## Features
+
+- **Fast, lazy I/O** with `imread`/`imwrite` for [multiple array types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) (ScanImage and generic TIFFs, Suite2p binaries, Zarr and HDF5)
+- **Interactive GUI** via `uv run mbo` for visualization and processing
+- **Pollen calibration** via `uv run pollen`
+- **Multiple array wrappers** for seamless data handling
 
 ---
 
@@ -46,7 +51,6 @@ uv run mbo
   <img src="docs/_images/GUI_Slide1.png" alt="GUI Screenshot" width="45%">
   <img src="docs/_images/GUI_Slide2.png" alt="GUI Screenshot" width="45%">
 </p>
-
 
 ## Built With
 
