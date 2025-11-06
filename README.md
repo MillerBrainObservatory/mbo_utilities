@@ -1,52 +1,43 @@
 # MBO Utilities
 
-> **Status:** Late-beta stage of development
+> **Status:** Late-beta stage of active development. There will be bugs that can be addressed quickly, file an [issue](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or reach out on slack.
+
+Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory/mbo_utilities/issues) (MBO).
+
+`imread`/`imwrite`: Reader and writer for a variety of [file types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) used at the mbo, such as raw scanimage tiffs, suite2p binaries, or zarr arrays.
+
+---
 
 [![Documentation](https://img.shields.io/badge/Documentation-black?style=for-the-badge&logo=readthedocs&logoColor=white)](https://millerbrainobservatory.github.io/mbo_utilities/)
 
-Microscopy image processing utilities for the Miller Brain Observatory (MBO). Provides lazy-loading I/O for ScanImage TIFF, Zarr, HDF5, and Suite2p binary formats with multi-ROI support, phase correction, and a GUI for volumetric visualization.
-
-A Suite2p processing pipeline is available via [LBM-Suite2p-Python](https://github.com/MillerBrainObservatory/LBM-Suite2p-Python).
-
-## Quick Start
-
-See the [installation documentation](https://millerbrainobservatory.github.io/mbo_utilities/venvs.html) for environment setup and GPU troubleshooting.
+## Installation
 
 ```bash
 uv pip install mbo_utilities
 ```
 
-**With GUI support:**
+The GUI allows registration/segmentation for users to quickly process subsets of their datasets.
+
+These pipelines need to be installed separately.
+
+Currently, the only supported pipeline is LBM-Suite2p-Python. A few exciting future prospects include [masknmf](https://github.com/apasarkar/masknmf-toolbox).
+
 ```bash
+
 uv pip install lbm_suite2p_python
+
 ```
 
-## Basic Usage
+## Usage
 
-**Read formats:**
-```python
-from mbo_utilities import imread
+We encourage users to start with the [user_guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html)
 
-# Multi-ROI ScanImage with phase correction
-arr = imread("scanimage_mROI.tif")           # Stitched FOV
-arr = imread("scanimage_mROI.tif", roi=0)    # Single ROI
+You can run this code by available as a jupyter notebook or rendered in the [docs](./demos/user_guide.ipynb) and can be downloaded on the top right of the page.
 
-# Other formats
-arr = imread("suite2p/data.bin")             # Suite2p binary
-arr = imread("volume.zarr")                  # Zarr array
-arr = imread("/path/to/planes/")             # Multi-file volumes
-```
-
-**Convert formats:**
-```python
-from mbo_utilities import imread, imwrite
-
-data = imread("scanimage_file.tif")
-imwrite(data, "output_dir", ext=".zarr")     # To Zarr
-imwrite(data, "output_dir", ext=".tiff", roi=0)  # Split ROIs to TIFF
-```
+See [array types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) for additional information about each file-type and it's associated lazy array.
 
 **Launch GUI:**
+
 ```bash
 uv run mbo
 ```
@@ -56,19 +47,11 @@ uv run mbo
   <img src="docs/_images/GUI_Slide2.png" alt="GUI Screenshot" width="45%">
 </p>
 
-## Documentation
-
-- **[Installation & GPU Setup](https://millerbrainobservatory.github.io/mbo_utilities/venvs.html)**
-- **[User Guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html)**
-- **[Array Types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html)** 
-- **[API Reference](https://millerbrainobservatory.github.io/mbo_utilities/api/index.html)**
-- **[GUI User Guide](./mbo_gui_user_guide.pdf)**
 
 ## Built With
 
 This package integrates several open-source tools:
 
-- **[scanreader](https://github.com/atlab/scanreader)** - ScanImage TIFF parsing
 - **[Suite2p](https://github.com/MouseLand/suite2p)** - Integration support
 - **[Rastermap](https://github.com/MouseLand/rastermap)** - Visualization
 - **[Suite3D](https://github.com/alihaydaroglu/suite3d)** - Volumetric processing

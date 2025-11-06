@@ -33,5 +33,10 @@ jobs:
       - name: Sync dependencies
         run: GIT_LFS_SKIP_SMUDGE=1 uv sync
 
-      # - name: Run tests
-      #   run: uv run pytest tests
+      - name: Install additional test dependencies
+        run: uv pip install pytest pytest-xdist imageio
+
+      - name: Run graphics tests
+        env:
+          RENDERCANVAS_FORCE_OFFSCREEN: 1
+        run: uv run pytest tests/test_graphics.py tests/test_graphics_screenshots.py -v --tb=short

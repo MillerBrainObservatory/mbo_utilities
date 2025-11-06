@@ -166,7 +166,7 @@ def get_metadata(file, z_step=None, verbose=False):
         return get_metadata_batch(tiff_files, z_step=z_step, verbose=verbose)
 
     elif file_path.is_file():
-        return get_metadata_single(file_path, z_step=z_step, verbose=verbose)
+        return get_metadata_single(file_path)
 
     else:
         raise ValueError(f"Path does not exist or is not accessible: {file_path}")
@@ -222,6 +222,7 @@ def get_metadata_single(file: os.PathLike | str):
     """
     if file.suffix in [".zarr", ".h5"]:
         from mbo_utilities import imread
+
         file = imread(file)
         return file.metadata
 

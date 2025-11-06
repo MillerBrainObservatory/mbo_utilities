@@ -89,6 +89,8 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False):
             scores[i] = num / denom if denom else 0.0
 
         k_best = offsets[np.argmax(scores)]
+        # Integer method tests "how much is b already shifted?"
+        # If b is shifted RIGHT by k, we need to shift LEFT by -k to correct
         dx = -float(k_best)
         logger.debug(f"Integer phase correlation shift: {dx:.2f}")
 
@@ -141,7 +143,7 @@ def bidir_phasecorr(
         Number of pixels to crop from edges (t, b, l, r).
     """
     if arr.ndim == 2:
-        _offsets = _phase_corr_2d(arr, upsample, border, max_offset)
+        _offsets = _phase_corr_2d(arr, upsample, border, max_offset, use_fft)
     else:
         flat = arr.reshape(arr.shape[0], *arr.shape[-2:])
         if method == "frame":
@@ -174,7 +176,7 @@ def bidir_phasecorr(
         out = _apply_offset(arr.copy(), float(_offsets), use_fft)
     else:
         out = np.stack(
-            [_apply_offset(f.copy(), float(s)) for f, s in zip(arr, _offsets)]
+            [_apply_offset(f.copy(), float(s), use_fft) for f, s in zip(arr, _offsets)]
         )
     return out, _offsets
 

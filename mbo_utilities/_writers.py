@@ -29,17 +29,38 @@ CHUNKS = {0: "auto", 1: -1, 2: -1}
 
 def _close_bin_writers():
     if hasattr(_write_bin, "_writers"):
-        for bf in _write_bin._writers.values():
+        # Create a snapshot to avoid "dictionary changed size during iteration"
+        for bf in list(_write_bin._writers.values()):
             bf.close()
         _write_bin._writers.clear()
         _write_bin._offsets.clear()
 
 
+def _close_specific_bin_writer(filepath):
+    """Close a specific binary writer by filepath (thread-safe)."""
+    if hasattr(_write_bin, "_writers"):
+        key = str(Path(filepath))
+        if key in _write_bin._writers:
+            _write_bin._writers[key].close()
+            _write_bin._writers.pop(key, None)
+            _write_bin._offsets.pop(key, None)
+
+
 def _close_tiff_writers():
     if hasattr(_write_tiff, "_writers"):
-        for writer in _write_tiff._writers.values():
+        # Create a snapshot to avoid "dictionary changed size during iteration"
+        for writer in list(_write_tiff._writers.values()):
             writer.close()
         _write_tiff._writers.clear()
+
+
+def _close_specific_tiff_writer(filepath):
+    """Close a specific TIFF writer by filepath (thread-safe)."""
+    if hasattr(_write_tiff, "_writers"):
+        key = str(Path(filepath))
+        if key in _write_tiff._writers:
+            _write_tiff._writers[key].close()
+            _write_tiff._writers.pop(key, None)
 
 
 def compute_pad_from_shifts(plane_shifts):
@@ -216,14 +237,26 @@ def _write_plane(
     start = 0
     for i in range(nchunks):
         end = start + base + (1 if i < extra else 0)
-        chunk = (
-            data[start:end, plane_index, :, :]
-            if plane_index is not None
-            else data[start:end, :, :]
-        )
 
-        if chunk.ndim == 4 and chunk.shape[1] == 1:
-            chunk = chunk.squeeze()
+        # Extract chunk - handle plane_index for z-plane selection
+        # NOTE: Use len(data.shape) instead of data.ndim for MboRawArray compatibility
+        # (MboRawArray.ndim returns metadata ndim, not actual dimensions)
+        if plane_index is not None and len(data.shape) >= 4:
+            # For 4D data with plane_index, extract the specific z-plane
+            # Index both time and z dimensions in one operation
+            chunk = data[start:end, plane_index, :, :]
+        elif plane_index is not None:
+            # For 3D or 2D data, plane_index is just metadata
+            chunk = data[start:end]
+        else:
+            # No plane_index: standard slicing
+            chunk = data[start:end]
+
+        # Ensure chunk is 3D (T, Y, X) - squeeze any remaining singleton dimensions
+        # This handles cases where plane_index is None but Z dimension is singleton
+        if len(chunk.shape) == 4 and chunk.shape[1] == 1:
+            # Singleton Z dimension: squeeze it
+            chunk = chunk.squeeze(axis=1)
 
         if shift_applied:
             if chunk.shape[-2:] != (H0, W0):
@@ -253,10 +286,11 @@ def _write_plane(
     if pbar:
         pbar.close()
 
+    # Close only the specific writer for this file (thread-safe)
     if fname.suffix in [".tiff", ".tif"]:
-        _close_tiff_writers()
+        _close_specific_tiff_writer(fname)
     elif fname.suffix in [".bin"]:
-        _close_bin_writers()
+        _close_specific_bin_writer(fname)
 
     if "cleaned_scanimage_metadata" in metadata:
         meta_path = filename.parent.joinpath("metadata.html")
@@ -308,10 +342,12 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
         _write_bin._writers.pop(key, None)
         _write_bin._offsets.pop(key, None)
 
-    if key not in _write_bin._writers:
-        if overwrite and fname.exists():
-            fname.unlink()
+    # Only overwrite if this is a brand new write session (file doesn't exist in cache)
+    # Don't delete during active chunked writing
+    if overwrite and key not in _write_bin._writers and fname.exists():
+        fname.unlink()
 
+    if key not in _write_bin._writers:
         Ly, Lx = data.shape[-2], data.shape[-1]
         nframes = metadata.get("nframes", None)
         if nframes is None:
@@ -328,9 +364,11 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     bf = _write_bin._writers[key]
     off = _write_bin._offsets[key]
 
-    # squeeze 4D arrays to 3D
-    if data.ndim == 4 and data.shape[1] == 1:
-        data = data.squeeze()
+    # Squeeze singleton Z dimension if present (but only Z, not time)
+    # NOTE: Use len(data.shape) instead of data.ndim for MboRawArray compatibility
+    if len(data.shape) == 4 and data.shape[1] == 1:
+        data = data.squeeze(axis=1)
+
     bf[off : off + data.shape[0]] = data
     bf.file.flush()
     _write_bin._offsets[key] = off + data.shape[0]
@@ -373,6 +411,7 @@ def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
         _write_h5._offsets[filename] = 0
 
     offset = _write_h5._offsets[filename]
+
     with h5py.File(filename, "a") as f:
         f["mov"][offset : offset + data.shape[0]] = data
 
@@ -524,20 +563,13 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
     # Add all metadata at root level (outside ome namespace) for backward compatibility
     # This preserves metadata that downstream tools expect (num_frames, pixel_resolution, etc.)
     # while also maintaining OME-NGFF compliance
-    for k, v in metadata.items():
+    # Ensure metadata is JSON-serializable
+    serializable_metadata = _make_json_serializable(metadata)
+    for k, v in serializable_metadata.items():
         if k == "channel_names":
             # Already encoded in OME omero section
             continue
-
-        # Only add JSON-serializable values
-        try:
-            import json
-
-            json.dumps(v)
-            result[k] = v
-        except (TypeError, ValueError):
-            # Skip non-serializable metadata (e.g., numpy arrays, complex objects)
-            pass
+        result[k] = v
 
     return result
 
@@ -560,15 +592,12 @@ def _write_zarr(
         _write_zarr._offsets = {}
         _write_zarr._groups = {}
 
-    if overwrite and filename in _write_zarr._arrays:
-        del _write_zarr._arrays[filename]
-        del _write_zarr._offsets[filename]
-        if filename in _write_zarr._groups:
-            del _write_zarr._groups[filename]
+    # Only overwrite if this is a brand new write session (file doesn't exist in cache)
+    # Don't delete during active chunked writing
+    if overwrite and filename not in _write_zarr._arrays and filename.exists():
+        shutil.rmtree(filename)
 
     if filename not in _write_zarr._arrays:
-        if filename.exists() and overwrite:
-            shutil.rmtree(filename)
 
         import zarr
         from zarr.codecs import BytesCodec, GzipCodec, ShardingCodec, Crc32cCodec
@@ -647,7 +676,9 @@ def _write_zarr(
             )
 
             # Standard metadata (backward compatible)
-            for k, v in (metadata or {}).items():
+            # Ensure metadata is JSON-serializable for Zarr
+            serializable_metadata = _make_json_serializable(metadata or {})
+            for k, v in serializable_metadata.items():
                 z.attrs[k] = v
 
         _write_zarr._arrays[filename] = z
@@ -655,6 +686,7 @@ def _write_zarr(
 
     z = _write_zarr._arrays[filename]
     offset = _write_zarr._offsets[filename]
+
     z[offset : offset + data.shape[0]] = data
     _write_zarr._offsets[filename] = offset + data.shape[0]
 
@@ -668,9 +700,12 @@ def _write_zarr_v2(path, data, *, overwrite=True, metadata=None, **kwargs):
         _write_zarr._arrays = {}
         _write_zarr._offsets = {}
 
+    # Only overwrite if this is a brand new write session (file doesn't exist in cache)
+    # Don't delete during active chunked writing
+    if overwrite and filename not in _write_zarr._arrays and filename.exists():
+        shutil.rmtree(filename)
+
     if filename not in _write_zarr._arrays:
-        if filename.exists() and overwrite:
-            shutil.rmtree(filename)
 
         import zarr
 
@@ -693,6 +728,7 @@ def _write_zarr_v2(path, data, *, overwrite=True, metadata=None, **kwargs):
 
     z = _write_zarr._arrays[filename]
     offset = _write_zarr._offsets[filename]
+
     z[offset : offset + data.shape[0]] = data
     _write_zarr._offsets[filename] = offset + data.shape[0]
 

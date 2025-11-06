@@ -127,7 +127,9 @@ def write_ops(metadata, raw_filename, **kwargs):
             ops[key] = value
 
     np.save(ops_path, ops)
-    logger.debug(f"Ops file written to {ops_path} with nframes={ops['nframes']}, nframes_chan1={ops.get('nframes_chan1')}")
+    logger.debug(
+        f"Ops file written to {ops_path} with nframes={ops['nframes']}, nframes_chan1={ops.get('nframes_chan1')}"
+    )
 
 
 def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
@@ -861,21 +863,28 @@ def merge_zarr_zplanes(
                 raise FileNotFoundError(f"Suite2p directory not found: {s2p_dir}")
 
     # Read first Zarr to get dimensions
+    logger.info(f"Reading first Zarr to determine dimensions: {zarr_paths[0]}")
     z0 = zarr.open(str(zarr_paths[0]), mode="r")
+    logger.debug(f"Zarr type: {type(z0)}")
+
     if hasattr(z0, "shape"):
         # Direct array
         T, Y, X = z0.shape
         dtype = z0.dtype
+        logger.debug(f"Detected direct array with shape {(T, Y, X)}, dtype {dtype}")
     else:
         # Group - look for "0" array (OME-Zarr)
+        logger.debug(f"Detected group with keys: {list(z0.keys())}")
         if "0" in z0:
             arr = z0["0"]
             T, Y, X = arr.shape
             dtype = arr.dtype
+            logger.debug(f"Using '0' subarray with shape {(T, Y, X)}, dtype {dtype}")
         else:
             raise ValueError(
                 f"Cannot determine shape of {zarr_paths[0]}. "
-                f"Expected direct array or group with '0' subarray."
+                f"Expected direct array or group with '0' subarray. "
+                f"Got group with keys: {list(z0.keys())}"
             )
 
     Z = len(zarr_paths)
@@ -900,30 +909,36 @@ def merge_zarr_zplanes(
 
     logger.info("Copying z-plane data...")
     for zi, zpath in enumerate(zarr_paths):
+        logger.debug(f"Reading z-plane {zi + 1}/{Z} from {zpath}")
         z_arr = zarr.open(str(zpath), mode="r")
 
         # Handle both direct arrays and OME-Zarr groups
         if hasattr(z_arr, "shape"):
             plane_data = z_arr[:]
+            logger.debug(f"  Read direct array with shape {plane_data.shape}")
         elif "0" in z_arr:
             plane_data = z_arr["0"][:]
+            logger.debug(f"  Read '0' subarray with shape {plane_data.shape}")
         else:
-            raise ValueError(f"Cannot read data from {zpath}")
+            raise ValueError(
+                f"Cannot read data from {zpath}. "
+                f"Got group with keys: {list(z_arr.keys()) if hasattr(z_arr, 'keys') else 'N/A'}"
+            )
 
         if plane_data.shape != (T, Y, X):
             raise ValueError(
-                f"Shape mismatch at z={zi}: expected {(T, Y, X)}, got {plane_data.shape}"
+                f"Shape mismatch at z={zi} (file: {zpath.name}): "
+                f"expected {(T, Y, X)}, got {plane_data.shape}"
             )
 
+        logger.debug(f"  Writing to output volume at z={zi}")
         image[:, zi, :, :] = plane_data
-        logger.debug(f"Copied z-plane {zi + 1}/{Z} from {zpath.name}")
+        logger.info(f"Copied z-plane {zi + 1}/{Z} from {zpath.name}")
 
     # Add Suite2p labels if provided
     if suite2p_dirs is not None:
         logger.info("Adding Suite2p segmentation masks as labels...")
-        _add_suite2p_labels(
-            root, suite2p_dirs, T, Z, Y, X, dtype, compression_level
-        )
+        _add_suite2p_labels(root, suite2p_dirs, T, Z, Y, X, dtype, compression_level)
 
     metadata = metadata or {}
     ome_attrs = _build_rich_ome_metadata(
@@ -1046,14 +1061,18 @@ def _build_rich_ome_metadata(
         custom_meta["scanimage"] = {
             "version": f"{si.get('VERSION_MAJOR', 'unknown')}.{si.get('VERSION_MINOR', 0)}",
             "imaging_system": si.get("imagingSystem", "unknown"),
-            "objective_resolution": si.get("objectiveResolution", metadata.get("objective_resolution")),
+            "objective_resolution": si.get(
+                "objectiveResolution", metadata.get("objective_resolution")
+            ),
             "scan_mode": si.get("hScan2D", {}).get("scanMode", "unknown"),
         }
 
         # Add beam/laser info
         if "hBeams" in si:
             custom_meta["scanimage"]["laser_power"] = si["hBeams"].get("powers", 0)
-            custom_meta["scanimage"]["power_fraction"] = si["hBeams"].get("powerFractions", 0)
+            custom_meta["scanimage"]["power_fraction"] = si["hBeams"].get(
+                "powerFractions", 0
+            )
 
         # Add ROI info
         if "hRoiManager" in si:
@@ -1081,7 +1100,12 @@ def _build_rich_ome_metadata(
 
     # Add microscope metadata
     microscope_meta = {}
-    for key in ["objective", "emission_wavelength", "excitation_wavelength", "numerical_aperture"]:
+    for key in [
+        "objective",
+        "emission_wavelength",
+        "excitation_wavelength",
+        "numerical_aperture",
+    ]:
         if key in metadata:
             microscope_meta[key] = metadata[key]
 
@@ -1115,13 +1139,36 @@ def _build_rich_ome_metadata(
 
     # Add any other simple metadata fields
     for key, value in metadata.items():
-        if key not in [
-            "pixel_resolution", "frame_rate", "fs", "dz", "z_step", "name",
-            "si", "roi_groups", "acquisition_date", "experimenter", "description",
-            "specimen", "objective", "emission_wavelength", "excitation_wavelength",
-            "numerical_aperture", "fix_phase", "phasecorr_method", "use_fft",
-            "register_z", "file_paths", "num_files", "num_frames", "frames_per_file",
-        ] and key not in result:
+        if (
+            key
+            not in [
+                "pixel_resolution",
+                "frame_rate",
+                "fs",
+                "dz",
+                "z_step",
+                "name",
+                "si",
+                "roi_groups",
+                "acquisition_date",
+                "experimenter",
+                "description",
+                "specimen",
+                "objective",
+                "emission_wavelength",
+                "excitation_wavelength",
+                "numerical_aperture",
+                "fix_phase",
+                "phasecorr_method",
+                "use_fft",
+                "register_z",
+                "file_paths",
+                "num_files",
+                "num_frames",
+                "frames_per_file",
+            ]
+            and key not in result
+        ):
             try:
                 json.dumps(value)
                 result[key] = value
@@ -1172,7 +1219,7 @@ def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
         if num_channels == 1:
             channel_names = ["Channel 1"]
         else:
-            channel_names = [f"Z-plane {i+1}" for i in range(num_channels)]
+            channel_names = [f"Z-plane {i + 1}" for i in range(num_channels)]
 
     # Default colors (cycle through common microscopy colors)
     default_colors = [

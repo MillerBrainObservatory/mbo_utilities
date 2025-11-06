@@ -1349,7 +1349,9 @@ class ZarrArray:
             if isinstance(z, zarr.Group):
                 # OME-Zarr structure: access the "0" array
                 if "0" not in z:
-                    raise ValueError(f"OME-Zarr group missing '0' array in {z.store.path}")
+                    raise ValueError(
+                        f"OME-Zarr group missing '0' array in {z.store.path}"
+                    )
                 self.zs.append(z["0"])
                 self._groups.append(z)  # Keep reference to group for metadata
             else:
@@ -1414,8 +1416,19 @@ class ZarrArray:
 
     @property
     def shape(self) -> tuple[int, int, int, int]:
-        t, h, w = self.zs[0].shape
-        return t, len(self.zs), h, w
+        first_shape = self.zs[0].shape
+        if len(first_shape) == 4:
+            # Single merged 4D zarr: (T, Z, H, W)
+            return first_shape
+        elif len(first_shape) == 3:
+            # Multiple 3D zarrs: stack them as (T, Z, H, W)
+            t, h, w = first_shape
+            return t, len(self.zs), h, w
+        else:
+            raise ValueError(
+                f"Unexpected zarr shape: {first_shape}. "
+                f"Expected 3D (T, H, W) or 4D (T, Z, H, W)"
+            )
 
     @property
     def dtype(self):
@@ -1427,6 +1440,12 @@ class ZarrArray:
 
     def __array__(self):
         """Materialize full array into memory: (T, Z, H, W)."""
+        # Check if single 4D merged array
+        if len(self.zs) == 1 and len(self.zs[0].shape) == 4:
+            # Already 4D, just return it
+            return np.asarray(self.zs[0][:])
+
+        # Multiple 3D arrays: stack them along Z axis
         arrs = [z[:] for z in self.zs]
         stacked = np.stack(arrs, axis=1)  # (T, Z, H, W)
         return stacked
@@ -1453,6 +1472,12 @@ class ZarrArray:
         t_key, z_key, y_key, x_key = key
 
         def normalize(idx):
+            # convert range objects to slices (zarr doesn't support range objects)
+            if isinstance(idx, range):
+                # Convert range to slice for zarr compatibility
+                if len(idx) == 0:
+                    return slice(0, 0)
+                return slice(idx.start, idx.stop, idx.step)
             # convert contiguous lists to slices for zarr
             if isinstance(idx, list) and len(idx) > 0:
                 if all(idx[i] + 1 == idx[i + 1] for i in range(len(idx) - 1)):
@@ -1461,22 +1486,43 @@ class ZarrArray:
                     return np.array(idx)  # will require looping later
             return idx
 
+        t_key = normalize(t_key)
         y_key = normalize(y_key)
         x_key = normalize(x_key)
+        z_key = normalize(z_key)  # Also normalize z_key
 
+        # Check if we have a single 4D merged zarr or multiple 3D zarrs
+        is_single_4d = len(self.zs) == 1 and len(self.zs[0].shape) == 4
+
+        if is_single_4d:
+            # Single merged 4D zarr: directly index with all 4 dimensions
+            return self.zs[0][t_key, z_key, y_key, x_key]
+
+        # Multiple 3D zarrs: stack them
         if len(self.zs) == 1:
-            if isinstance(z_key, int) and z_key != 0:
-                raise IndexError("Z dimension has size 1, only index 0 is valid")
-            return self.zs[0][t_key, y_key, x_key]
+            # Single 3D zarr: z_key must be 0 or slice(None)
+            if isinstance(z_key, int):
+                if z_key != 0:
+                    raise IndexError("Z dimension has size 1, only index 0 is valid")
+                return self.zs[0][t_key, y_key, x_key]
+            elif isinstance(z_key, slice):
+                # Return with Z dimension added
+                data = self.zs[0][t_key, y_key, x_key]
+                return data[:, np.newaxis, ...]  # Add Z dimension
+            else:
+                return self.zs[0][t_key, y_key, x_key]
 
-        # multi-zarr
+        # Multi-zarr case
         if isinstance(z_key, int):
             return self.zs[z_key][t_key, y_key, x_key]
 
         if isinstance(z_key, slice):
             z_indices = range(len(self.zs))[z_key]
+        elif isinstance(z_key, np.ndarray) or isinstance(z_key, list):
+            z_indices = z_key
         else:
-            raise IndexError("Z indexing must be int or slice")
+            # Fallback: assume all z
+            z_indices = range(len(self.zs))
 
         arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
         return np.stack(arrs, axis=1)
@@ -1613,9 +1659,7 @@ class BinArray:
                         self.shape = (nframes, Ly, Lx)
                         # Optionally copy metadata from ops
                         self.metadata.update(ops)
-                        logger.debug(
-                            f"Inferred shape from ops.npy: {self.shape}"
-                        )
+                        logger.debug(f"Inferred shape from ops.npy: {self.shape}")
                 except Exception as e:
                     logger.warning(f"Could not read ops.npy: {e}")
 
@@ -1647,7 +1691,11 @@ class BinArray:
         """Allow assignment to the memmap."""
         if np.asarray(value).dtype != self.dtype:
             # Clip values to avoid overflow
-            max_val = np.iinfo(self.dtype).max - 1 if np.issubdtype(self.dtype, np.integer) else None
+            max_val = (
+                np.iinfo(self.dtype).max - 1
+                if np.issubdtype(self.dtype, np.integer)
+                else None
+            )
             if max_val:
                 self._file[key] = np.clip(value, None, max_val).astype(self.dtype)
             else:
@@ -1726,9 +1774,7 @@ class BinArray:
         if not outfile.exists() or overwrite:
             logger.info(f"Writing binary to {outfile}")
             # Copy the memmap
-            new_file = np.memmap(
-                outfile, mode="w+", dtype=self.dtype, shape=self.shape
-            )
+            new_file = np.memmap(outfile, mode="w+", dtype=self.dtype, shape=self.shape)
             new_file[:] = self._file[:]
             new_file.flush()
             del new_file
