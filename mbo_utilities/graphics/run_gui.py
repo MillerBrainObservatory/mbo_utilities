@@ -120,17 +120,17 @@ def run_gui(data_in=None, widget=None, roi=None, metadata_only=False):
             data=arrays,
             names=names,
             histogram_widget=True,
-            figure_kwargs={"size": (800, 1000)},
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
-            window_funcs={"t": (np.mean, 0)},
+            figure_kwargs={"size": (800, 800)},
+            graphic_kwargs={"vmin": -100, "vmax": 4000},
+            # window_funcs={"t": (np.mean, 0)},
         )
     else:
         iw = fpl.ImageWidget(
             data=data_array,
             histogram_widget=True,
-            figure_kwargs={"size": (800, 1000)},
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
-            window_funcs={"t": (np.mean, 0)},
+            figure_kwargs={"size": (800, 800)},
+            graphic_kwargs={"vmin": -100, "vmax": 4000},
+            # window_funcs={"t": (np.mean, 0)},
         )
 
     iw.show()
