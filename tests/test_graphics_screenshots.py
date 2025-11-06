@@ -54,19 +54,13 @@ class TestSingleZPlaneGUI:
         from tests.test_utils import run_gui_with_screenshot
 
         def show_stats_tab(gui, iw):
-            # Wait for stats to compute
-            import time
-
-            max_wait = 10  # seconds
-            start = time.time()
-            while not all(gui._zstats_done):
-                if time.time() - start > max_wait:
-                    break
-                time.sleep(0.1)
-
-            assert all(gui._zstats_done), "Stats computation did not complete in time"
+            # Manually compute stats (threading is disabled in tests)
+            # Call the internal method directly to avoid threading
+            for idx, arr in enumerate(iw.data, start=1):
+                gui._compute_zstats_single_array(idx, arr)
 
             # Check that stats were computed
+            assert all(gui._zstats_done), "Stats computation did not complete"
             assert len(gui._zstats) > 0
             assert "mean" in gui._zstats[0]
 
@@ -97,17 +91,13 @@ class TestSingleZPlaneGUI:
         from tests.test_utils import run_gui_with_screenshot
 
         def verify_metrics(gui, iw):
-            import time
-
-            # Wait for stats
-            max_wait = 10
-            start = time.time()
-            while not all(gui._zstats_done):
-                if time.time() - start > max_wait:
-                    break
-                time.sleep(0.1)
+            # Manually compute stats (threading is disabled in tests)
+            # Call the internal method directly to avoid threading
+            for idx, arr in enumerate(iw.data, start=1):
+                gui._compute_zstats_single_array(idx, arr)
 
             # Verify stats structure
+            assert all(gui._zstats_done), "Stats computation did not complete"
             stats = gui._zstats[0]
             assert "mean" in stats
             assert "std" in stats
@@ -126,15 +116,10 @@ class TestSingleZPlaneGUI:
         from tests.test_utils import run_gui_with_screenshot
 
         def verify_chart(gui, iw):
-            import time
-
-            # Wait for stats
-            max_wait = 10
-            start = time.time()
-            while not all(gui._zstats_done):
-                if time.time() - start > max_wait:
-                    break
-                time.sleep(0.1)
+            # Manually compute stats (threading is disabled in tests)
+            # Call the internal method directly to avoid threading
+            for idx, arr in enumerate(iw.data, start=1):
+                gui._compute_zstats_single_array(idx, arr)
 
             # Select stats section
             gui._selected_array = 0
@@ -177,17 +162,13 @@ class TestMultiZPlaneGUI:
         from tests.test_utils import run_gui_with_screenshot
 
         def verify_plot(gui, iw):
-            import time
-
-            # Wait for stats
-            max_wait = 10
-            start = time.time()
-            while not all(gui._zstats_done):
-                if time.time() - start > max_wait:
-                    break
-                time.sleep(0.1)
+            # Manually compute stats (threading is disabled in tests)
+            # Call the internal method directly to avoid threading
+            for idx, arr in enumerate(iw.data, start=1):
+                gui._compute_zstats_single_array(idx, arr)
 
             # Check stats for multiple z-planes
+            assert all(gui._zstats_done), "Stats computation did not complete"
             stats = gui._zstats[0]
             assert len(stats["mean"]) == gui.nz, "Stats should match number of z-planes"
 
@@ -203,15 +184,10 @@ class TestMultiZPlaneGUI:
         from tests.test_utils import run_gui_with_screenshot
 
         def show_combined(gui, iw):
-            import time
-
-            # Wait for stats
-            max_wait = 10
-            start = time.time()
-            while not all(gui._zstats_done):
-                if time.time() - start > max_wait:
-                    break
-                time.sleep(0.1)
+            # Manually compute stats (threading is disabled in tests)
+            # Call the internal method directly to avoid threading
+            for idx, arr in enumerate(iw.data, start=1):
+                gui._compute_zstats_single_array(idx, arr)
 
             # Select combined view (last option)
             gui._selected_array = len(gui._zstats)
@@ -228,15 +204,12 @@ class TestMultiZPlaneGUI:
         from tests.test_utils import run_gui_with_screenshot
 
         def verify_table(gui, iw):
-            import time
+            # Manually compute stats (threading is disabled in tests)
+            # Call the internal method directly to avoid threading
+            for idx, arr in enumerate(iw.data, start=1):
+                gui._compute_zstats_single_array(idx, arr)
 
-            max_wait = 10
-            start = time.time()
-            while not all(gui._zstats_done):
-                if time.time() - start > max_wait:
-                    break
-                time.sleep(0.1)
-
+            assert all(gui._zstats_done), "Stats computation did not complete"
             stats = gui._zstats[0]
             # Should have multiple z-planes
             assert len(stats["mean"]) > 1
@@ -284,8 +257,7 @@ class TestGUIMenuItems:
             gui.show_debug_panel = not initial_state
             # Render a few frames
             for _ in range(5):
-                iw.canvas.update()
-                iw.canvas.draw()
+                iw.figure.canvas.draw()
 
         run_gui_with_screenshot(
             test_data,
@@ -299,15 +271,10 @@ class TestGUIMenuItems:
         from tests.test_utils import run_gui_with_screenshot
 
         def test_selector(gui, iw):
-            import time
-
-            # Wait for stats
-            max_wait = 10
-            start = time.time()
-            while not all(gui._zstats_done):
-                if time.time() - start > max_wait:
-                    break
-                time.sleep(0.1)
+            # Manually compute stats (threading is disabled in tests)
+            # Call the internal method directly to avoid threading
+            for idx, arr in enumerate(iw.data, start=1):
+                gui._compute_zstats_single_array(idx, arr)
 
             # Try selecting different arrays
             initial_selection = gui._selected_array
@@ -341,8 +308,7 @@ class TestGUIWindowFunctions:
             projections = ["mean", "max", "std"]
             for proj in projections:
                 gui._proj = proj
-                iw.canvas.update()
-                iw.canvas.draw()
+                iw.figure.canvas.draw()
 
         run_gui_with_screenshot(
             test_data,
@@ -358,8 +324,7 @@ class TestGUIWindowFunctions:
         def test_window_size(gui, iw):
             # Test different window sizes
             gui._window_size = 5
-            iw.canvas.update()
-            iw.canvas.draw()
+            iw.figure.canvas.draw()
 
         run_gui_with_screenshot(
             test_data,
@@ -439,4 +404,9 @@ def test_gui_initialization(data_shape):
     else:
         assert gui.nz == data_shape[1]
 
-    iw.close()
+    # Close widget (handle offscreen mode)
+    try:
+        iw.close()
+    except AttributeError:
+        if hasattr(iw.figure, "canvas"):
+            iw.figure.canvas.close()

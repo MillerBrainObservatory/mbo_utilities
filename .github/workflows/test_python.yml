@@ -15,14 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install system dependencies
+      - name: Install system dependencies for offscreen rendering
         run: |
           sudo apt-get update -y -qq
           sudo apt-get install --no-install-recommends -y \
-            xorg-dev \
-            libx11-dev \
-            libxcb1-dev \
-            libxcb-glx0-dev
+            ffmpeg \
+            libegl1-mesa-dev \
+            libgl1-mesa-dri \
+            libxcb-xfixes0-dev \
+            mesa-vulkan-drivers \
+            xorg-dev
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
