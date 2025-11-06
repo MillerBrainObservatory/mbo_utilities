@@ -617,7 +617,9 @@ class PreviewDataWidget(EdgeWindow):
             threading.Thread(target=self.compute_zstats, daemon=True).start()
 
     def set_context_info(self):
-        if isinstance(self.fpath, list):
+        if self.fpath is None:
+            title = "Test Data"
+        elif isinstance(self.fpath, list):
             title = f"{[Path(f).stem for f in self.fpath]}"
         else:
             title = f"Filepath: {Path(self.fpath).stem}"
