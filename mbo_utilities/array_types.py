@@ -740,6 +740,9 @@ class MboRawArray:
         self.dtype = self._metadata["dtype"]
         self._ndim = self._metadata["ndim"]
 
+        # Cache frames_per_file to avoid slow len(tf.pages) calls
+        self._frames_per_file = self._metadata.get("frames_per_file", None)
+
         # self._rois = self._create_rois()
         self._rois = self._extract_roi_info()
         # self.fields = self._create_fields()
@@ -957,8 +960,17 @@ class MboRawArray:
         buf = np.empty((len(pages), tiff_height_px, tiff_width_px), dtype=self.dtype)
 
         start = 0
-        for tf in self.tiff_files:
-            end = start + len(tf.pages)
+        # Use cached frames_per_file to avoid slow len(tf.pages) calls
+        # Note: frames_per_file is per-time-frame, need to multiply by num_channels for total pages
+        # If not available, fall back to len(tf.pages) which triggers seek
+        tiff_iterator = (
+            zip(self.tiff_files, (f * self.num_channels for f in self._frames_per_file))
+            if self._frames_per_file is not None
+            else ((tf, len(tf.pages)) for tf in self.tiff_files)
+        )
+
+        for tf, num_pages in tiff_iterator:
+            end = start + num_pages
             idxs = [i for i, p in enumerate(pages) if start <= p < end]
             if not idxs:
                 start = end

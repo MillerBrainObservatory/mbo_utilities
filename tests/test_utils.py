@@ -27,9 +27,10 @@ def should_regenerate_screenshots() -> bool:
 def get_wgpu_backend():
     """Get the WGPU backend being used."""
     try:
-        import wgpu
+        import wgpu.utils
 
-        return wgpu.gpu.request_adapter_sync().request_device_sync()._backend_type
+        info = wgpu.utils.get_default_device().adapter.info
+        return f"{info['adapter_type']} {info['backend_type']}"
     except Exception:
         return "unknown"
 
@@ -177,11 +178,19 @@ def run_gui_with_screenshot(
 
     # Render a few frames to ensure GUI is ready
     for _ in range(frames):
-        iw.canvas.update()
-        iw.canvas.draw()
+        # Request draw with render callback
+        iw.figure.canvas.request_draw(
+            lambda: iw.figure.renderer.render(
+                iw.figure[0, 0].scene, iw.figure[0, 0].camera
+            )
+        )
+        iw.figure.canvas.draw()
 
-    # Capture screenshot
-    img = iw.canvas.snapshot()
+    # Capture screenshot (request one more draw and capture the result)
+    iw.figure.canvas.request_draw(
+        lambda: iw.figure.renderer.render(iw.figure[0, 0].scene, iw.figure[0, 0].camera)
+    )
+    img = np.asarray(iw.figure.canvas.draw())
 
     # Save screenshot
     if should_regenerate_screenshots() or not screenshot_path.exists():
@@ -189,5 +198,11 @@ def run_gui_with_screenshot(
 
         imageio.imwrite(screenshot_path, img)
 
-    # Close the widget
-    iw.close()
+    # Close the widget (handle offscreen mode where _output is None)
+    try:
+        iw.close()
+    except AttributeError:
+        # In offscreen mode, _output may be None
+        # Clean up canvas and renderer directly
+        if hasattr(iw.figure, "canvas"):
+            iw.figure.canvas.close()
