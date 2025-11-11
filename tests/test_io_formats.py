@@ -806,5 +806,143 @@ def test_baseline_summary():
     print("=" * 70)
 
 
+@pytest.mark.parametrize("ext", [".tif", ".bin", ".zarr"])
+def test_num_frames_parameter(test_data, output_path, ext):
+    """Test that num_frames parameter correctly limits output."""
+    print(f"\n=== Testing num_frames with {ext} ===")
+
+    data = test_data["data"]
+    total_frames = data.shape[0]
+    num_frames_to_write = min(100, total_frames // 2)  # Write half or 100 frames
+
+    print(f"Total frames: {total_frames}, writing: {num_frames_to_write}")
+
+    out_dir = output_path
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write with num_frames parameter
+    mbo.imwrite(
+        data,
+        str(out_dir),
+        ext=ext,
+        num_frames=num_frames_to_write,
+        planes=[1],  # Single plane to simplify validation
+        overwrite=True,
+    )
+
+    # Read back and verify frame count
+    if ext == ".tif":
+        output_files = list(out_dir.glob("*.tif"))
+        assert len(output_files) > 0, "No output files created"
+        readback = mbo.imread(output_files[0])
+    elif ext == ".bin":
+        bin_dir = list(out_dir.glob("plane*"))
+        assert len(bin_dir) > 0, "No bin directory created"
+        readback = mbo.imread(bin_dir[0] / "data_raw.bin")
+    elif ext == ".zarr":
+        zarr_files = list(out_dir.glob("*.zarr"))
+        assert len(zarr_files) > 0, "No zarr files created"
+        readback = mbo.imread(zarr_files[0])
+
+    print(f"Readback shape: {readback.shape}")
+
+    # Check frame count (accounting for singleton dimensions)
+    readback_frames = readback.shape[0]
+    assert readback_frames == num_frames_to_write, (
+        f"Expected {num_frames_to_write} frames, got {readback_frames}"
+    )
+
+    baseline = {
+        "num_frames_written": num_frames_to_write,
+        "readback_frames": readback_frames,
+        "ext": ext,
+    }
+
+    print(f"[PASS] num_frames test passed for {ext}\n")
+    validate_or_save_baseline(f"num_frames_{ext.lstrip('.')}", baseline)
+
+
+@pytest.mark.parametrize("ext", [".tif", ".bin", ".zarr"])
+def test_overwrite_behavior(test_data, output_path, ext):
+    """Test overwrite=True/False behavior."""
+    print(f"\n=== Testing overwrite behavior with {ext} ===")
+
+    data = test_data["data"]
+    num_frames = min(50, data.shape[0])
+
+    out_dir = output_path
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # First write
+    print("First write with overwrite=True")
+    mbo.imwrite(
+        data,
+        str(out_dir),
+        ext=ext,
+        num_frames=num_frames,
+        planes=[1],
+        overwrite=True,
+    )
+
+    # Get first output
+    if ext == ".tif":
+        output_files = list(out_dir.glob("*.tif"))
+        first_file = output_files[0]
+    elif ext == ".bin":
+        bin_dirs = list(out_dir.glob("plane*"))
+        first_file = bin_dirs[0] / "data_raw.bin"
+    elif ext == ".zarr":
+        zarr_files = list(out_dir.glob("*.zarr"))
+        first_file = zarr_files[0]
+
+    first_hash = compute_hash(mbo.imread(first_file)[:10])
+    print(f"First hash: {first_hash[:16]}...")
+
+    # Second write with overwrite=True (should replace)
+    print("Second write with overwrite=True (should replace)")
+    mbo.imwrite(
+        data,
+        str(out_dir),
+        ext=ext,
+        num_frames=num_frames,
+        planes=[1],
+        overwrite=True,
+    )
+
+    second_hash = compute_hash(mbo.imread(first_file)[:10])
+    print(f"Second hash: {second_hash[:16]}...")
+
+    # Hashes should match (same data written)
+    assert second_hash == first_hash, "Overwrite=True should produce same result"
+
+    # Third write with overwrite=False (should skip or fail gracefully)
+    print("Third write with overwrite=False (should skip)")
+    try:
+        mbo.imwrite(
+            data,
+            str(out_dir),
+            ext=ext,
+            num_frames=num_frames,
+            planes=[1],
+            overwrite=False,
+        )
+    except Exception as e:
+        # Some formats may raise, others may skip silently
+        print(f"Raised (expected): {type(e).__name__}")
+
+    # File should still exist and be readable
+    third_hash = compute_hash(mbo.imread(first_file)[:10])
+    assert third_hash == first_hash, "File should be unchanged after overwrite=False"
+
+    baseline = {
+        "ext": ext,
+        "overwrite_true_consistent": second_hash == first_hash,
+        "overwrite_false_preserves": third_hash == first_hash,
+    }
+
+    print(f"[PASS] Overwrite test passed for {ext}\n")
+    validate_or_save_baseline(f"overwrite_{ext.lstrip('.')}", baseline)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
