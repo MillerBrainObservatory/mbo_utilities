@@ -1232,6 +1232,10 @@ class MboRawArray:
                 md["plane"] = plane + 1  # back to 1-based indexing
                 md["mroi"] = roi
                 md["roi"] = roi  # alias
+
+                # Determine actual number of frames to write
+                num_frames = kwargs.get("num_frames", self.shape[0])
+
                 _write_plane(
                     self,
                     target,
@@ -1240,7 +1244,7 @@ class MboRawArray:
                     metadata=md,
                     progress_callback=progress_callback,
                     debug=debug,
-                    dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+                    dshape=(num_frames, self.shape[-1], self.shape[-2]),
                     plane_index=plane,
                     **kwargs,
                 )
@@ -1264,7 +1268,7 @@ class MboRawArray:
         figure_kwargs = kwargs.get(
             "figure_kwargs",
             {
-                "size": (1000, 1200),
+                "size": (600, 600),
             },
         )
         window_funcs = kwargs.get("window_funcs", None)
