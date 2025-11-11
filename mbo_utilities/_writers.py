@@ -50,6 +50,16 @@ def _close_specific_tiff_writer(filepath):
                 _write_tiff._first_write.pop(key, None)
 
 
+def _close_all_tiff_writers():
+    """Close all open TIFF writers (for testing/cleanup)."""
+    if hasattr(_write_tiff, "_writers"):
+        for writer in _write_tiff._writers.values():
+            writer.close()
+        _write_tiff._writers.clear()
+        if hasattr(_write_tiff, "_first_write"):
+            _write_tiff._first_write.clear()
+
+
 def compute_pad_from_shifts(plane_shifts):
     shifts = np.asarray(plane_shifts, dtype=int)
     dy_min, dx_min = shifts.min(axis=0)
@@ -437,8 +447,6 @@ def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
 
     writer = _write_tiff._writers[filename]
     is_first = _write_tiff._first_write.get(filename, True)
-
-    print(f"DEBUG _write_tiff: Writing {len(data)} frames to {filename.name}, is_new_session={is_new_session}")
 
     for frame in data:
         writer.write(
