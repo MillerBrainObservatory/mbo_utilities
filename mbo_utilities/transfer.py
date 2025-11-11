@@ -22,18 +22,18 @@ def copy_dir(src: Path, dst: Path) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Copy local result folders (e.g. zarr outputs) to SMB or network path and record metrics."
+        description="Copy local result folders to SMB or network path, with I/O benchmarks."
     )
     parser.add_argument(
         "--src",
         nargs="+",
         required=True,
-        help="One or more local source directories to copy (e.g. ./zarr ./zarr-sharded).",
+        help="One or more local source directories to copy.",
     )
     parser.add_argument(
         "--dst",
         required=True,
-        help="Destination root directory (e.g. \\\\rbo-s1\\S1_DATA\\lbm\\foconnell).",
+        help="Destination root directory.",
     )
     args = parser.parse_args()
 

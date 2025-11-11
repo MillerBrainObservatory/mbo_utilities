@@ -48,6 +48,7 @@ dependencies = [
 mbo = "mbo_utilities.graphics.run_gui:run_gui"  # alias
 pollen = "pollen.pollen_calibration_mbo:main"
 docs = "scripts.build_docs:main"
+transfer = "mbo_utilities.transfer:main"
 
 [project.urls]
 Homepage = "https://github.com/millerbrainobservatory/mbo_utilities"
