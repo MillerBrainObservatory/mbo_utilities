@@ -737,7 +737,8 @@ class MboRawArray:
         self.num_channels = self._metadata["num_planes"]
         self.num_rois = self._metadata["num_rois"]
         self.num_frames = self._metadata["num_frames"]
-        self.dtype = self._metadata["dtype"]
+        self._source_dtype = self._metadata["dtype"]  # Original dtype from file
+        self._target_dtype = None  # Target dtype for conversion (set by astype)
         self._ndim = self._metadata["ndim"]
 
         # Cache frames_per_file to avoid slow len(tf.pages) calls
@@ -826,6 +827,11 @@ class MboRawArray:
     @property
     def ndim(self):
         return self._ndim
+
+    @property
+    def dtype(self):
+        """Return target dtype if set via astype(), otherwise source dtype."""
+        return self._target_dtype if self._target_dtype is not None else self._source_dtype
 
     @property
     def metadata(self):
@@ -1028,6 +1034,14 @@ class MboRawArray:
                 out = tuple(np.squeeze(x, axis=tuple(squeeze)) for x in out)
             else:
                 out = np.squeeze(out, axis=tuple(squeeze))
+
+        # Convert dtype if astype() was called
+        if self._target_dtype is not None:
+            if isinstance(out, tuple):
+                out = tuple(x.astype(self._target_dtype) for x in out)
+            else:
+                out = out.astype(self._target_dtype)
+
         return out
 
     def process_rois(self, frames, chans):
@@ -1122,6 +1136,34 @@ class MboRawArray:
         max_height = max(roi["height"] for roi in self._rois)
         return self.num_frames * self.num_channels * max_height * total_width
 
+    def astype(self, dtype, copy=True):
+        """
+        Set target dtype for lazy conversion on data access.
+
+        This modifies the array in-place to convert dtype when data is loaded,
+        preserving lazy loading behavior.
+
+        Parameters
+        ----------
+        dtype : np.dtype or str
+            Target dtype for conversion
+        copy : bool, optional
+            Kept for numpy compatibility (dtype conversion always creates a copy)
+
+        Returns
+        -------
+        self : MboRawArray
+            Returns self for method chaining
+
+        Examples
+        --------
+        >>> arr = imread("data.tif")  # MboRawArray, dtype=uint16
+        >>> arr_float = arr.astype(np.float32)  # No data loaded yet
+        >>> frame = arr_float[0]  # Data loaded and converted on access
+        """
+        self._target_dtype = np.dtype(dtype)
+        return self
+
     @property
     def _page_height(self):
         return self._metadata["page_height"]
@@ -1190,6 +1232,10 @@ class MboRawArray:
                 md["plane"] = plane + 1  # back to 1-based indexing
                 md["mroi"] = roi
                 md["roi"] = roi  # alias
+
+                # Determine actual number of frames to write
+                num_frames = kwargs.get("num_frames", self.shape[0])
+
                 _write_plane(
                     self,
                     target,
@@ -1198,7 +1244,7 @@ class MboRawArray:
                     metadata=md,
                     progress_callback=progress_callback,
                     debug=debug,
-                    dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+                    dshape=(num_frames, self.shape[-1], self.shape[-2]),
                     plane_index=plane,
                     **kwargs,
                 )
@@ -1222,7 +1268,7 @@ class MboRawArray:
         figure_kwargs = kwargs.get(
             "figure_kwargs",
             {
-                "size": (1000, 1200),
+                "size": (600, 600),
             },
         )
         window_funcs = kwargs.get("window_funcs", None)

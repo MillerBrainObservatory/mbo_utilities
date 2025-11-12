@@ -1,4 +1,3 @@
-print("Starting imgui imports")
 import logging
 import webbrowser
 from pathlib import Path
@@ -43,7 +42,8 @@ from mbo_utilities.graphics.progress_bar import (
     draw_saveas_progress,
     draw_register_z_progress,
 )
-from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
+# Lazy import to avoid loading suite2p/torch/cupy until needed
+# from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
 from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.phasecorr import apply_scan_phase_offsets
 from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler
@@ -70,8 +70,6 @@ except ImportError:
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
-
-print("Finished imgui imports")
 
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
 USER_PIPELINES = ["suite2p"]
@@ -166,6 +164,7 @@ def draw_tabs(parent):
                 imgui.end_tab_item()
             imgui.end_disabled()
             if imgui.begin_tab_item("Process")[0]:
+                from mbo_utilities.graphics.pipeline_widgets import draw_tab_process
                 draw_tab_process(parent)
                 imgui.end_tab_item()
             imgui.end_tab_bar()
@@ -457,6 +456,7 @@ class PreviewDataWidget(EdgeWindow):
 
         self.logger.info("Logger initialized.")
 
+        from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings
         self.s2p = Suite2pSettings()
         self._s2p_dir = ""
         self._s2p_savepath_flash_start = None  # Track when flash animation starts

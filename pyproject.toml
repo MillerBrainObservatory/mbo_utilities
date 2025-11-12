@@ -37,7 +37,7 @@ dependencies = [
 	"wgpu[imgui]",
 	"pygfx>=0.14.0",
 	"jupyter_rfb>=0.5.1",
-	"suite2p_mbo>=1.1.0",
+	"suite2p_mbo>=1.1.1",
 	"mbo-suite3d>=0.0.6",
 	"mbo-fpl",
 	"llvmlite>=0.43.0",
@@ -48,6 +48,7 @@ dependencies = [
 mbo = "mbo_utilities.graphics.run_gui:run_gui"  # alias
 pollen = "pollen.pollen_calibration_mbo:main"
 docs = "scripts.build_docs:main"
+transfer = "mbo_utilities.transfer:main"
 
 [project.urls]
 Homepage = "https://github.com/millerbrainobservatory/mbo_utilities"

@@ -27,14 +27,6 @@ ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
 CHUNKS = {0: "auto", 1: -1, 2: -1}
 
 
-def _close_bin_writers():
-    if hasattr(_write_bin, "_writers"):
-        # Create a snapshot to avoid "dictionary changed size during iteration"
-        for bf in list(_write_bin._writers.values()):
-            bf.close()
-        _write_bin._writers.clear()
-        _write_bin._offsets.clear()
-
 
 def _close_specific_bin_writer(filepath):
     """Close a specific binary writer by filepath (thread-safe)."""
@@ -46,21 +38,26 @@ def _close_specific_bin_writer(filepath):
             _write_bin._offsets.pop(key, None)
 
 
-def _close_tiff_writers():
-    if hasattr(_write_tiff, "_writers"):
-        # Create a snapshot to avoid "dictionary changed size during iteration"
-        for writer in list(_write_tiff._writers.values()):
-            writer.close()
-        _write_tiff._writers.clear()
-
-
 def _close_specific_tiff_writer(filepath):
     """Close a specific TIFF writer by filepath (thread-safe)."""
     if hasattr(_write_tiff, "_writers"):
-        key = str(Path(filepath))
+        # Key must match the type used in _write_tiff (Path object, not string)
+        key = Path(filepath).with_suffix(".tif")
         if key in _write_tiff._writers:
             _write_tiff._writers[key].close()
             _write_tiff._writers.pop(key, None)
+            if hasattr(_write_tiff, "_first_write"):
+                _write_tiff._first_write.pop(key, None)
+
+
+def _close_all_tiff_writers():
+    """Close all open TIFF writers (for testing/cleanup)."""
+    if hasattr(_write_tiff, "_writers"):
+        for writer in _write_tiff._writers.values():
+            writer.close()
+        _write_tiff._writers.clear()
+        if hasattr(_write_tiff, "_first_write"):
+            _write_tiff._first_write.clear()
 
 
 def compute_pad_from_shifts(plane_shifts):
@@ -429,14 +426,22 @@ def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
     if not hasattr(_write_tiff, "_first_write"):
         _write_tiff._first_write = {}
 
-    if filename not in _write_tiff._writers:
+    # Check if we're starting a new write session (no writer exists yet)
+    is_new_session = filename not in _write_tiff._writers
+
+    # Handle overwrite logic ONLY at the start of a new write session
+    if is_new_session:
         if filename.exists() and not overwrite:
             logger.warning(
                 f"File {filename} already exists and overwrite=False. Skipping write."
             )
             return
+
         if filename.exists() and overwrite:
+            # Delete existing file before creating new writer
             filename.unlink()
+
+        # Create new writer
         _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
         _write_tiff._first_write[filename] = True
 
