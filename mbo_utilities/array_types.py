@@ -476,6 +476,10 @@ class MBOTiffArray:
     def metadata(self) -> dict:
         return self._metadata or {}
 
+    @metadata.setter
+    def metadata(self, metadata: dict):
+        self._metadata = metadata
+
     @property
     def chunks(self):
         return self._chunks or CHUNKS_4D
@@ -708,6 +712,7 @@ class MboRawArray:
         upsample: int = 5,
         max_offset: int = 4,
         use_fft: bool = False,
+        fft_method: str = "1d",
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
@@ -715,6 +720,7 @@ class MboRawArray:
         self.roi = self._roi = roi
         self._fix_phase = fix_phase
         self._use_fft = use_fft
+        self._fft_method = fft_method
         self._phasecorr_method = phasecorr_method
         self.border = border
         self.max_offset = max_offset
@@ -989,6 +995,7 @@ class MboRawArray:
             chunk = chunk[..., yslice, xslice]
 
             if self.fix_phase:
+                # Use z-aware correction if we have multiple channels
                 corrected, offset = bidir_phasecorr(
                     chunk,
                     method=self.phasecorr_method,
@@ -996,6 +1003,9 @@ class MboRawArray:
                     max_offset=self.max_offset,
                     border=self.border,
                     use_fft=self.use_fft,
+                    fft_method=self._fft_method,
+                    z_aware=(len(chans) > 1),
+                    num_z_planes=len(chans),
                 )
                 buf[idxs] = corrected
                 self.offset = offset

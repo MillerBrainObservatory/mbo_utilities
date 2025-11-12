@@ -45,7 +45,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mbo = "mbo_utilities.graphics.run_gui:run_gui"  # alias
+mbo = "mbo_utilities.graphics.run_gui:_cli_entry"  # alias
 pollen = "pollen.pollen_calibration_mbo:main"
 docs = "scripts.build_docs:main"
 transfer = "mbo_utilities.transfer:main"
