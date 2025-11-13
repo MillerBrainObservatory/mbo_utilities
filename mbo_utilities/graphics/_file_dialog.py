@@ -1,4 +1,5 @@
 import os, shutil
+import urllib.request
 from pathlib import Path
 import imgui_bundle
 import mbo_utilities as mbo
@@ -123,6 +124,24 @@ class FileDialog:
                     self._select_folder = pfd.select_folder("Select folder")
                 if imgui.is_item_hovered():
                     imgui.set_tooltip("Select a folder containing image data.")
+
+                imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
+
+                # download notebook button -------------------------------
+                bsz_notebook = hello_imgui.em_to_vec2(20, 2.2)
+                x_notebook = (imgui.get_window_width() - bsz_notebook.x) * 0.5
+                imgui.set_cursor_pos_x(x_notebook)
+                if imgui.button("Download User Guide Notebook", bsz_notebook):
+                    url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
+                    output_path = Path.cwd() / "mbo_user_guide.ipynb"
+                    try:
+                        urllib.request.urlretrieve(url, output_path)
+                        # Show success message in a popup or console
+                        print(f"✓ Downloaded user guide to: {output_path}")
+                    except Exception as e:
+                        print(f"✗ Failed to download notebook: {e}")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Download the mbo_utilities user guide Jupyter notebook to current directory.")
 
                 # load options -------------------------------------------
                 imgui.dummy(hello_imgui.em_to_vec2(0, 2.0))
