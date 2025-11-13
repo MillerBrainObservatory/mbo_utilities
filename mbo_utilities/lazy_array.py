@@ -569,8 +569,14 @@ def imread(
 
     # Suite2p ops file
     if ops_file and ops_file.exists():
-        logger.debug(f"Ops.npy detected - reading {ops_file} from {ops_file}.")
-        return Suite2pArray(parent / "ops.npy")
+        # If user clicked on a specific .bin file, pass that to Suite2pArray
+        # Otherwise pass ops.npy and let Suite2pArray choose the best file
+        if len(paths) == 1 and paths[0].suffix.lower() == ".bin":
+            logger.debug(f"Ops.npy detected - reading specific binary {paths[0]}.")
+            return Suite2pArray(paths[0])
+        else:
+            logger.debug(f"Ops.npy detected - reading from {ops_file}.")
+            return Suite2pArray(ops_file)
 
     exts = {p.suffix.lower() for p in paths}
     first = paths[0]

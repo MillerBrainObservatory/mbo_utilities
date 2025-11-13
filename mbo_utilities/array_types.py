@@ -264,23 +264,38 @@ class Suite2pArray:
         self.metadata = np.load(ops_path, allow_pickle=True).item()
         self.num_rois = self.metadata.get("num_rois", 1)
 
-        # resolve both possible bins
-        self.raw_file = Path(
-            self.metadata.get("raw_file", path.with_name("data_raw.bin"))
-        )
-        self.reg_file = Path(self.metadata.get("reg_file", path.with_name("data.bin")))
+        # resolve both possible bins - always look in the same directory as ops.npy
+        # (metadata paths may be stale if data was moved)
+        ops_dir = ops_path.parent
+        self.raw_file = ops_dir / "data_raw.bin"
+        self.reg_file = ops_dir / "data.bin"
 
         # choose which one to use
         if path.suffix == ".bin":
+            # User clicked directly on a .bin file - use that specific file
             self.active_file = path
+            if not self.active_file.exists():
+                raise FileNotFoundError(
+                    f"Binary file not found: {self.active_file}\n"
+                    f"Available files in {ops_dir}:\n"
+                    f"  - data.bin: {'exists' if self.reg_file.exists() else 'missing'}\n"
+                    f"  - data_raw.bin: {'exists' if self.raw_file.exists() else 'missing'}"
+                )
         else:
-            self.active_file = (
-                self.reg_file if self.reg_file.exists() else self.raw_file
-            )
-
-        # confirm
-        if not self.active_file.exists():
-            raise FileNotFoundError(f"Active binary not found: {self.active_file}")
+            # User clicked on directory/ops.npy - choose best available file
+            # Prefer registered (data.bin) over raw (data_raw.bin)
+            if self.reg_file.exists():
+                self.active_file = self.reg_file
+            elif self.raw_file.exists():
+                self.active_file = self.raw_file
+            else:
+                raise FileNotFoundError(
+                    f"No binary files found in {ops_dir}\n"
+                    f"Expected either:\n"
+                    f"  - {self.reg_file} (registered)\n"
+                    f"  - {self.raw_file} (raw)\n"
+                    f"Please check that Suite2p processing completed successfully."
+                )
 
         self.Ly = self.metadata["Ly"]
         self.Lx = self.metadata["Lx"]
@@ -328,37 +343,37 @@ class Suite2pArray:
         arrays = []
         names = []
 
-        # if both are available, and the same shape, show both
-        if "raw_file" in self.metadata and "reg_file" in self.metadata:
-            try:
-                raw = Suite2pArray(self.metadata["raw_file"])
-                reg = Suite2pArray(self.metadata["reg_file"])
-                if raw.shape == reg.shape:
-                    arrays.extend([raw, reg])
-                    names.extend(["raw", "registered"])
-                else:
-                    arrays.append(reg)
-                    names.append("registered")
-            except Exception as e:
-                logger.warning(f"Could not open raw_file or reg_file: {e}")
-        if "reg_file" in self.metadata:
-            try:
-                reg = Suite2pArray(self.metadata["reg_file"])
-                arrays.append(reg)
-                names.append("registered")
-            except Exception as e:
-                logger.warning(f"Could not open reg_file: {e}")
+        # Try to load both files if they exist
+        raw_loaded = False
+        reg_loaded = False
 
-        elif "raw_file" in self.metadata:
+        if self.raw_file.exists():
             try:
-                raw = Suite2pArray(self.metadata["raw_file"])
+                raw = Suite2pArray(self.raw_file)
                 arrays.append(raw)
                 names.append("raw")
+                raw_loaded = True
             except Exception as e:
-                logger.warning(f"Could not open raw_file: {e}")
+                logger.warning(f"Could not open raw file {self.raw_file}: {e}")
 
+        if self.reg_file.exists():
+            try:
+                reg = Suite2pArray(self.reg_file)
+                arrays.append(reg)
+                names.append("registered")
+                reg_loaded = True
+            except Exception as e:
+                logger.warning(f"Could not open registered file {self.reg_file}: {e}")
+
+        # If neither file could be loaded, show the currently active file
         if not arrays:
-            raise ValueError("No loadable raw_file or reg_file in ops")
+            arrays.append(self)
+            if self.active_file == self.raw_file:
+                names.append("raw")
+            elif self.active_file == self.reg_file:
+                names.append("registered")
+            else:
+                names.append(self.active_file.name)
 
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
         histogram_widget = kwargs.get("histogram_widget", True)
