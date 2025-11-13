@@ -95,12 +95,17 @@ def _write_plane(
         assert type(plane_index) is int, "plane_index must be an integer"
         metadata["plane"] = plane_index + 1
 
+    # Get target frame count from kwargs, metadata, or data shape (in that priority)
     nframes_target = kwargs.get("num_frames", metadata.get("num_frames"))
+
+    # If nframes_target is 0 or None, use actual data shape
+    if nframes_target is None or nframes_target == 0:
+        nframes_target = data.shape[0]
+
+    # Update metadata with the actual target
     if nframes_target is not None:
         metadata["num_frames"] = int(nframes_target)
         metadata["nframes"] = int(nframes_target)
-    else:
-        nframes_target = data.shape[0]
 
     H0, W0 = data.shape[-2], data.shape[-1]
     fname = filename
@@ -109,6 +114,10 @@ def _write_plane(
     # get chunk size via bytes per timepoint
     itemsize = np.dtype(data.dtype).itemsize
     ntime = int(nframes_target)  # T
+
+    # Handle empty data
+    if ntime == 0:
+        raise ValueError(f"Cannot write file with 0 frames. Data shape: {data.shape}, nframes_target: {nframes_target}")
 
     bytes_per_t = int(np.prod(dshape[1:], dtype=np.int64)) * int(itemsize)
     chunk_size = int(target_chunk_mb) * 1024 * 1024

@@ -404,9 +404,27 @@ def run_gui(
     help="Verify the installation of mbo_utilities and dependencies.",
 )
 @click.argument("data_in", required=False)
-def _cli_entry(data_in, widget, roi, metadata_only):
+def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, download_notebook=False, check_install=False):
     """CLI entry point for mbo-gui command."""
-    _run_gui_impl(
+    # Handle installation check first
+    if check_install:
+        _check_installation()
+        if download_notebook:
+            click.echo("\n")
+            url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
+            click.echo(f"Opening browser to download user guide notebook from: {url}")
+            webbrowser.open(url)
+        return
+
+    # Handle download notebook option
+    if download_notebook:
+        url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
+        click.echo(f"Opening browser to download user guide notebook from: {url}")
+        webbrowser.open(url)
+        return
+
+    # Run the GUI
+    run_gui(
         data_in=data_in,
         roi=roi if roi else None,
         widget=widget,
