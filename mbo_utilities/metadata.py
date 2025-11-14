@@ -174,13 +174,7 @@ def get_metadata(file, z_step=None, verbose=False):
 
 def get_metadata_single(file: os.PathLike | str):
     """
-    Extract metadata from a TIFF file produced by ScanImage or processed via the save_as function.
-
-    This function opens the given TIFF file and retrieves critical imaging parameters and acquisition details.
-    It supports both raw ScanImage TIFFs and those modified by downstream processing. If the file contains
-    raw ScanImage metadata, the function extracts key fields such as channel information, number of frames,
-    field-of-view, pixel resolution, and ROI details. When verbose output is enabled, the complete metadata
-    document is returned in addition to the parsed key values.
+    Extract metadata from a single TIFF file produced by ScanImage or processed via the save_as function.
 
     Parameters
     ----------
@@ -196,8 +190,7 @@ def get_metadata_single(file: os.PathLike | str):
     -------
     dict
         A dictionary containing the extracted metadata (e.g., number of planes, frame rate, field-of-view,
-        pixel resolution). When verbose is True, the dictionary also includes a key "all" with the full metadata
-        from the TIFF header.
+        pixel resolution).
 
     Raises
     ------

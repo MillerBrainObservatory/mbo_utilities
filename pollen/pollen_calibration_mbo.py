@@ -124,12 +124,11 @@ def pollen_calibration_mbo(filepath, order=None):
 
     # Safely get z_step_um from metadata or tifffile
     try:
-        import tifffile as tf
-        tiff_file = tf.TiffFile(filepath)
-        si = tiff_file.scanimage_metadata.get('FrameData', {})
-        z_step_um = si.get("SI.hStackManager.stackZStepSize", 1.0)
+        z_step_um = metadata.get("si.hStackManager.stackZStepSize", 1.0)
     except:
         z_step_um = metadata.get("z_step_um", 1.0)
+        if z_step_um is 1.0:
+            print("Z-Step not found, setting to 1") 
 
     nx = metadata["roi_width_px"]
     ny = metadata["roi_height_px"]
