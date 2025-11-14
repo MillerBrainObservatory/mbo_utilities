@@ -128,10 +128,13 @@ def pollen_calibration_mbo(filepath, order=None):
     except:
         z_step_um = metadata.get("z_step_um", 1.0)
         if z_step_um is 1.0:
-            print("Z-Step not found, setting to 1") 
+            print("Z-Step not found, setting to 1")
 
-    nx = metadata["roi_width_px"]
-    ny = metadata["roi_height_px"]
+    # Get ROI dimensions from metadata
+    # fov_px is a tuple (width, height) in pixels
+    fov_px = metadata.get("fov_px", (512, 512))
+    nx = fov_px[0]  # roi_width_px
+    ny = fov_px[1]  # roi_height_px
     nc = metadata["num_planes"]
 
     # nz comes from TIFF, not metadata
