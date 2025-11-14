@@ -281,9 +281,19 @@ def get_metadata_single(file: os.PathLike | str):
         else:
             num_rois = len(roi_group)
 
-        num_planes = len(si["SI.hChannels.channelSave"])
+        # Handle single channel case where channelSave is int instead of list
+        channel_save = si["SI.hChannels.channelSave"]
+        if isinstance(channel_save, (int, float)):
+            num_planes = 1
+        else:
+            num_planes = len(channel_save)
+
+        if "SI.hScan2D.uniformSampling" in si.keys():
+            uniform_sampling = si["SI.hScan2D.uniformSampling"]
+        else:
+            uniform_sampling = "NA"
+            
         zoom_factor = si["SI.hRoiManager.scanZoomFactor"]
-        uniform_sampling = si["SI.hScan2D.uniformSampling"]
         objective_resolution = si["SI.objectiveResolution"]
         frame_rate = si["SI.hRoiManager.scanFrameRate"]
 
