@@ -266,7 +266,7 @@ def get_metadata_single(file: os.PathLike | str):
 
         si = meta.get("FrameData", {})
         if not si:
-            print(f"No FrameData found in {file}.")
+            logger.warning(f"No FrameData found in {file}.")
             return None
 
         pages = tiff_file.pages
@@ -288,12 +288,8 @@ def get_metadata_single(file: os.PathLike | str):
         else:
             num_planes = len(channel_save)
 
-        if "SI.hScan2D.uniformSampling" in si.keys():
-            uniform_sampling = si["SI.hScan2D.uniformSampling"]
-        else:
-            uniform_sampling = "NA"
-            
         zoom_factor = si["SI.hRoiManager.scanZoomFactor"]
+        uniform_sampling = si.get("SI.hScan2D.uniformSampling", "NA")
         objective_resolution = si["SI.objectiveResolution"]
         frame_rate = si["SI.hRoiManager.scanFrameRate"]
 
@@ -760,7 +756,7 @@ def _params_from_metadata_caiman(metadata):
     params = _default_params_caiman()
 
     if metadata is None:
-        print("No metadata found. Using default parameters.")
+        logger.info("No metadata found. Using default parameters.")
         return params
 
     params["main"]["fr"] = metadata["frame_rate"]
@@ -782,7 +778,7 @@ def _params_from_metadata_caiman(metadata):
     # overlap should be ~neuron diameter
     overlaps = [int(round(gSig / px)) for px in metadata["pixel_resolution"]]
     if overlaps[0] < gSig:
-        print("Overlaps too small. Increasing to neuron diameter.")
+        logger.info("Overlaps too small. Increasing to neuron diameter.")
         overlaps = [int(gSig)] * 2
     params["main"]["overlaps"] = overlaps
 
