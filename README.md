@@ -2,7 +2,7 @@
 
 > **Status:** Late-beta stage of active development. There will be bugs that can be addressed quickly, file an [issue](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or reach out on slack.
 
-Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory/mbo_utilities/issues) (MBO).
+Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO).
 
 ## Features
 
