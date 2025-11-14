@@ -1649,13 +1649,17 @@ wheels = [
 
 [[package]]
 name = "mbo-fpl"
-version = "0.5.1"
-source = { git = "https://github.com/MillerBrainObservatory/mbo_fastplotlib.git?branch=main#a859efe4a4371ecde2a378c87e5bc221d1dbebf7" }
+version = "0.5.2"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cmap" },
     { name = "numpy" },
     { name = "pygfx" },
     { name = "wgpu" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/91/17/8269dc43a255a47bd4907ffe1681981e440e0613cef7c908e78b630a880c/mbo_fpl-0.5.2.tar.gz", hash = "sha256:d34dc6b9da7f71ac0b2287a84f71ca645f5b32eb7ed7baee2da376f142999680", size = 151337, upload-time = "2025-10-24T17:09:31.5Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/65/c3/85e02a0f4dc3a7d29bdfb670ba0114d8dd44ca300a5801b7362211dc1167/mbo_fpl-0.5.2-py3-none-any.whl", hash = "sha256:ad036124b17b476a916019ff0b2dba5b7da2b509d49a42312441c767a99ae217", size = 181712, upload-time = "2025-10-24T17:09:30.307Z" },
 ]
 
 [[package]]
@@ -1786,7 +1790,7 @@ requires-dist = [
     { name = "jupytext", marker = "extra == 'docs'" },
     { name = "llvmlite", specifier = ">=0.43.0" },
     { name = "matplotlib", specifier = ">=3.10.1" },
-    { name = "mbo-fpl", git = "https://github.com/MillerBrainObservatory/mbo_fastplotlib.git?branch=main" },
+    { name = "mbo-fpl" },
     { name = "mbo-suite3d", specifier = ">=0.0.6" },
     { name = "mkl-fft", specifier = ">=2.0.0" },
     { name = "myst-nb", marker = "extra == 'docs'" },

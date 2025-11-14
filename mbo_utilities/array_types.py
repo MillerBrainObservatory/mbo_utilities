@@ -1114,9 +1114,7 @@ class MboRawArray:
             chunk = chunk[..., yslice, xslice]
 
             if self.fix_phase:
-                # Use z-aware correction if we have multiple channels
-                # min_window_size is enforced in bidir_phasecorr for method='mean' etc.
-                # For method='frame', single frames are allowed
+                # Apply phase correction to the current chunk
                 corrected, offset = bidir_phasecorr(
                     chunk,
                     method=self.phasecorr_method,
@@ -1125,9 +1123,6 @@ class MboRawArray:
                     border=self.border,
                     use_fft=self.use_fft,
                     fft_method=self._fft_method,
-                    z_aware=(len(chans) > 1),
-                    num_z_planes=len(chans),
-                    min_window_size=4,  # Require at least 4 frames for reliable correction
                 )
                 buf[idxs] = corrected
                 self.offset = offset

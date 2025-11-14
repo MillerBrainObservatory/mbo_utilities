@@ -240,6 +240,47 @@ def test_imwrite_tiff(test_data, output_path):
     print("[PASS] TIFF write test passed\n")
 
 
+def test_imwrite_tiff_baseline(test_data, validate_on_write):
+    """Generate and validate TIFF baseline with automatic frame correlation checks."""
+    print("\n=== Generating TIFF Baseline with Validation ===")
+
+    source_path = test_data["path"]
+    baseline_path = BASELINE_DIR / "imwrite_tiff_validated.tif"
+
+    # For multi-plane source data, extract a single plane
+    # because TIFF writes each plane separately
+    source_data_full = mbo.imread(source_path)
+
+    # Extract plane 0 for validation
+    if source_data_full.ndim == 4:
+        print(f"Source has {source_data_full.shape[1]} planes, extracting plane 0 for baseline")
+        source_plane0 = np.asarray(source_data_full[:, 0, :, :])  # (T, Y, X) - materialize
+    else:
+        source_plane0 = np.asarray(source_data_full)
+
+    print(f"Writing baseline: {baseline_path}")
+    print(f"  Shape: {source_plane0.shape}")
+    print(f"  Dtype: {source_plane0.dtype}")
+    print(f"  Is numpy array: {isinstance(source_plane0, np.ndarray)}")
+
+    # Write baseline - use full path directly
+    mbo.imwrite(
+        source_plane0,
+        str(baseline_path),
+        overwrite=True,
+    )
+
+    # Validate with automatic correlation checks
+    validate_on_write(source_plane0, baseline_path, metadata={
+        "test_name": "test_imwrite_tiff_baseline",
+        "format": "tiff",
+        "source_path": str(source_path),
+        "plane": 0,
+    })
+
+    print("[PASS] TIFF baseline generated and validated\n")
+
+
 def test_imwrite_zarr_basic(test_data, output_path):
     """Test writing to Zarr format (non-OME)."""
     print("\n=== Testing Zarr Write (non-OME) ===")
@@ -314,6 +355,40 @@ def test_imwrite_zarr_basic(test_data, output_path):
     print("Validating against baseline...")
     validate_or_save_baseline("imwrite_zarr_basic", baseline)
     print("[PASS] Zarr (non-OME) write test passed\n")
+
+
+def test_imwrite_zarr_baseline(test_data, validate_on_write):
+    """Generate and validate Zarr baseline with automatic frame correlation checks."""
+    print("\n=== Generating Zarr Baseline with Validation ===")
+
+    source_path = test_data["path"]
+    baseline_path = BASELINE_DIR / "imwrite_zarr_validated.zarr"
+
+    # Load source data (with default phase correction enabled)
+    source_data = mbo.imread(source_path)
+
+    print(f"Writing baseline: {baseline_path}")
+    print(f"  Shape: {source_data.shape}")
+    print(f"  Dtype: {source_data.dtype}")
+    print(f"  Phase correction: {source_data.fix_phase}")
+
+    # Write full multi-dimensional data to Zarr
+    mbo.imwrite(
+        source_data,
+        str(baseline_path),
+        ext=".zarr",
+        ome=False,
+        overwrite=True,
+    )
+
+    # Validate with automatic correlation checks
+    validate_on_write(source_data, baseline_path, metadata={
+        "test_name": "test_imwrite_zarr_baseline",
+        "format": "zarr",
+        "source_path": str(source_path),
+    })
+
+    print("[PASS] Zarr baseline generated and validated\n")
 
 
 def test_imwrite_zarr_ome(test_data, output_path):
@@ -895,7 +970,12 @@ def test_overwrite_behavior(test_data, output_path, ext):
         zarr_files = list(out_dir.glob("*.zarr"))
         first_file = zarr_files[0]
 
-    first_hash = compute_hash(mbo.imread(first_file)[:10])
+    # Load data and compute hash, ensuring file is closed
+    first_data = mbo.imread(first_file)[:10]
+    if hasattr(first_data, 'compute'):
+        first_data = first_data.compute()
+    first_hash = compute_hash(first_data)
+    del first_data  # Explicitly delete to close file handles
     print(f"First hash: {first_hash[:16]}...")
 
     # Second write with overwrite=True (should replace)
@@ -909,11 +989,20 @@ def test_overwrite_behavior(test_data, output_path, ext):
         overwrite=True,
     )
 
-    second_hash = compute_hash(mbo.imread(first_file)[:10])
+    # Load data and compute hash, ensuring file is closed
+    second_data = mbo.imread(first_file)[:10]
+    if hasattr(second_data, 'compute'):
+        second_data = second_data.compute()
+    second_hash = compute_hash(second_data)
+    del second_data  # Explicitly delete to close file handles
     print(f"Second hash: {second_hash[:16]}...")
 
     # Hashes should match (same data written)
     assert second_hash == first_hash, "Overwrite=True should produce same result"
+
+    # Force garbage collection to close any lingering file handles (Windows issue)
+    import gc
+    gc.collect()
 
     # Third write with overwrite=False (should skip or fail gracefully)
     print("Third write with overwrite=False (should skip)")
@@ -931,7 +1020,11 @@ def test_overwrite_behavior(test_data, output_path, ext):
         print(f"Raised (expected): {type(e).__name__}")
 
     # File should still exist and be readable
-    third_hash = compute_hash(mbo.imread(first_file)[:10])
+    third_data = mbo.imread(first_file)[:10]
+    if hasattr(third_data, 'compute'):
+        third_data = third_data.compute()
+    third_hash = compute_hash(third_data)
+    del third_data
     assert third_hash == first_hash, "File should be unchanged after overwrite=False"
 
     baseline = {

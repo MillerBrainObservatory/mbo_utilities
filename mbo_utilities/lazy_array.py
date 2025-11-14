@@ -65,7 +65,7 @@ def imwrite(
     metadata: dict | None = None,
     overwrite: bool = False,
     order: list | tuple = None,
-    target_chunk_mb: int = 20,
+    target_chunk_mb: int = 100,
     progress_callback: Callable | None = None,
     debug: bool = False,
     shift_vectors: np.ndarray | None = None,
@@ -149,7 +149,8 @@ def imwrite(
 
     target_chunk_mb : int, optional
         Target chunk size in MB for streaming writes. Larger chunks may be faster
-        but use more memory. Adjust based on available RAM. Default is 20.
+        but use more memory. Default is 100 MB (~200 frames for typical 512x512 int16 data).
+        This ensures sufficient frames for accurate phase correction when enabled.
 
     progress_callback : Callable, optional
         Callback function for progress updates: `callback(progress, current_plane)`.

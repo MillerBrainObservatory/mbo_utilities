@@ -241,7 +241,7 @@ def _apply_offset(img, offset, use_fft=False, fft_method="1d"):
 
 def bidir_phasecorr(
     arr, *, method="mean", use_fft=False, upsample=4, max_offset=4, border=0, fft_method="1d",
-    z_aware=False, num_z_planes=None, use_gradient=True, min_window_size=4
+    z_aware=False, num_z_planes=None, use_gradient=True, min_window_size=None
 ):
     """
     Correct for bi-directional scanning offsets in 2D or 3D array.
@@ -267,71 +267,21 @@ def bidir_phasecorr(
         - '1d': Fast 1D correlation (horizontal only, ~10x faster, recommended)
         - '2d': Full 2D correlation (scikit-image, slightly more accurate)
     z_aware : bool, optional
-        If True and num_z_planes is provided, compute separate offset for each z-plane.
-        This assumes arr is shaped (T*Z, H, W) where frames cycle through z-planes.
+        Deprecated - no longer used. Phase correction is applied consistently regardless of z-planes.
     num_z_planes : int, optional
-        Number of z-planes (required if z_aware=True).
+        Deprecated - no longer used.
     use_gradient : bool, optional
         If True, use gradient-based edge features for more robust correlation.
         This is particularly helpful for single-frame datasets with low SNR.
     min_window_size : int, optional
-        Minimum number of frames required for reliable phase correction.
-        If fewer frames are provided (and method != 'frame'), returns input unchanged.
-        Default: 4 (recommended minimum for reliable statistics).
+        Deprecated - no longer enforced. Phase correction is always applied.
     """
     if arr.ndim == 2:
         _offsets = _phase_corr_2d(arr, upsample, border, max_offset, use_fft, fft_method, use_gradient)
     else:
         flat = arr.reshape(arr.shape[0], *arr.shape[-2:])
 
-        # Check minimum window size for non-frame methods
-        if method != "frame" and flat.shape[0] < min_window_size:
-            logger.warning(
-                f"Window size ({flat.shape[0]} frames) < minimum ({min_window_size}). "
-                f"Skipping phase correction. Use window_size >= {min_window_size} or method='frame'."
-            )
-            return arr.copy(), 0.0
-
-        # Z-plane aware correction
-        if z_aware and num_z_planes is not None:
-            logger.debug(f"Z-aware correction: computing offset per z-plane (num_z={num_z_planes})")
-
-            # Reshape to (T, Z, H, W) by grouping consecutive z-planes
-            num_time_frames = flat.shape[0] // num_z_planes
-            if flat.shape[0] % num_z_planes != 0:
-                logger.warning(f"Array size {flat.shape[0]} not divisible by num_z_planes {num_z_planes}")
-
-            # Compute one offset per z-plane using all time frames
-            _offsets = np.zeros(num_z_planes)
-            for z in range(num_z_planes):
-                # Extract all frames for this z-plane
-                z_frames = flat[z::num_z_planes]  # Every num_z_planes-th frame starting at z
-
-                # Use selected method to compute reference
-                if method not in MBO_WINDOW_METHODS:
-                    raise ValueError(f"unknown method {method}")
-                ref_frame = MBO_WINDOW_METHODS[method](z_frames)
-
-                _offsets[z] = _phase_corr_2d(
-                    frame=ref_frame,
-                    upsample=upsample,
-                    border=border,
-                    max_offset=max_offset,
-                    use_fft=use_fft,
-                    fft_method=fft_method,
-                    use_gradient=use_gradient,
-                )
-                logger.debug(f"  Z-plane {z}: offset = {_offsets[z]:.3f} pixels")
-
-            # Apply the appropriate offset to each frame
-            out = flat.copy()
-            for i in range(flat.shape[0]):
-                z_idx = i % num_z_planes
-                out[i] = _apply_offset(out[i], float(_offsets[z_idx]), use_fft, fft_method)
-
-            return out, _offsets
-
-        # Original behavior (not z-aware)
+        # Apply phase correction consistently
         if method == "frame":
             logger.debug("Using individual frames for phase correlation")
             _offsets = np.array(
