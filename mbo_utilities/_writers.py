@@ -450,7 +450,20 @@ def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
 
         if filename.exists() and overwrite:
             # Delete existing file before creating new writer
-            filename.unlink()
+            # On Windows, retry if file is locked by another process
+            import time
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    filename.unlink()
+                    break
+                except PermissionError:
+                    if attempt < max_retries - 1:
+                        time.sleep(0.1)
+                        import gc
+                        gc.collect()
+                    else:
+                        raise
 
         # Create new writer
         _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
