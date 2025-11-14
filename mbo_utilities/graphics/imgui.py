@@ -101,6 +101,20 @@ def draw_menu(parent):
         if opened:
             parent.debug_panel.draw()
         imgui.end()
+    if parent.show_metadata_viewer:
+        size = begin_popup_size()
+        imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)
+        _, parent.show_metadata_viewer = imgui.begin(
+            "Metadata Viewer",
+            parent.show_metadata_viewer,
+        )
+        if parent.image_widget and parent.image_widget.data:
+            metadata = parent.image_widget.data[0].metadata
+            from mbo_utilities.graphics._widgets import draw_metadata_inspector
+            draw_metadata_inspector(metadata)
+        else:
+            imgui.text("No data loaded")
+        imgui.end()
     with imgui_ctx.begin_child(
         "menu",
         window_flags=imgui.WindowFlags_.menu_bar,  # noqa,
@@ -140,6 +154,9 @@ def draw_menu(parent):
                 )
                 _, parent.show_scope_window = imgui.menu_item(
                     "Scope Inspector", "", parent.show_scope_window, True
+                )
+                _, parent.show_metadata_viewer = imgui.menu_item(
+                    "Metadata Viewer", "", parent.show_metadata_viewer, True
                 )
                 imgui.end_menu()
         imgui.end_menu_bar()
@@ -560,6 +577,7 @@ class PreviewDataWidget(EdgeWindow):
         # Settings menu flags
         self.show_debug_panel = False
         self.show_scope_window = False
+        self.show_metadata_viewer = False
 
         # ------------------------properties
         for arr in self.image_widget.data:
@@ -806,6 +824,15 @@ class PreviewDataWidget(EdgeWindow):
 
     @window_size.setter
     def window_size(self, value):
+        if value < 1:
+            self.logger.warning(f"Window size must be >= 1, got {value}. Setting to 1.")
+            value = 1
+        elif value < 4 and self.fix_phase:
+            self.logger.warning(
+                f"Window size ({value}) < 4 with phase correction enabled. "
+                f"Phase correction requires >= 4 frames for reliable results. "
+                f"Consider increasing window size or disabling phase correction."
+            )
         self.logger.info(f"Window size set to {value}.")
         self.image_widget.window_funcs["t"].window_size = value
         self._window_size = value
@@ -1173,7 +1200,7 @@ class PreviewDataWidget(EdgeWindow):
                         )
 
                         implot.setup_axis_limits(implot.ImAxis_.x1.value, -0.5, 2.5)
-                        implot.setup_axis_ticks_custom(
+                        implot.setup_axis_ticks(
                             implot.ImAxis_.x1.value, x_pos, ["Mean", "Std Dev", "SNR"]
                         )
 

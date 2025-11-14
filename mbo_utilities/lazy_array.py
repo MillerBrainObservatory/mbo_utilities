@@ -452,6 +452,11 @@ def imwrite(
         if num_frames is not None:
             write_kwargs["num_frames"] = num_frames
 
+        # Always pass metadata through kwargs to ensure propagation
+        # even for arrays without metadata attribute
+        if "metadata" not in write_kwargs:
+            write_kwargs["metadata"] = file_metadata
+
         return lazy_array._imwrite(  # noqa
             outpath,
             overwrite=overwrite,

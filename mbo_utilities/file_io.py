@@ -39,7 +39,7 @@ def load_ops(ops_input: str | Path | list[str | Path]):
         return np.load(ops_input, allow_pickle=True).item()
     elif isinstance(ops_input, dict):
         return ops_input
-    print("Warning: No valid ops file provided, returning None.")
+    logger.warning("No valid ops file provided, returning empty dict.")
     return {}
 
 
@@ -50,7 +50,8 @@ def write_ops(metadata, raw_filename, **kwargs):
     'shape', 'pixel_resolution', 'frame_rate' keys.
     """
     logger.debug(f"Writing ops file for {raw_filename} with metadata: {metadata}")
-    assert isinstance(raw_filename, (str, Path))
+    if not isinstance(raw_filename, (str, Path)):
+        raise TypeError(f"raw_filename must be str or Path, got {type(raw_filename)}")
     filename = Path(raw_filename).expanduser().resolve()
 
     structural = kwargs.get("structural", False)
@@ -62,14 +63,30 @@ def write_ops(metadata, raw_filename, **kwargs):
     logger.info(f"Writing ops file to {ops_path}")
 
     shape = metadata["shape"]
-    nt, Lx, Ly = shape[0], shape[-2], shape[-1]
+    nt, Ly, Lx = shape[0], shape[-2], shape[-1]  # Fixed: shape is (T, Y, X), so [-2]=Ly, [-1]=Lx
 
     # Check if num_frames was explicitly set (takes precedence over shape)
     if "num_frames" in metadata:
-        nt = int(metadata["num_frames"])
+        nt_metadata = int(metadata["num_frames"])
+        if nt_metadata != shape[0]:
+            raise ValueError(
+                f"Inconsistent frame count in metadata!\n"
+                f"metadata['num_frames'] = {nt_metadata}\n"
+                f"metadata['shape'][0] = {shape[0]}\n"
+                f"These must match. Check your data and metadata."
+            )
+        nt = nt_metadata
         logger.debug(f"Using explicit num_frames={nt} from metadata")
     elif "nframes" in metadata:
-        nt = int(metadata["nframes"])
+        nt_metadata = int(metadata["nframes"])
+        if nt_metadata != shape[0]:
+            raise ValueError(
+                f"Inconsistent frame count in metadata!\n"
+                f"metadata['nframes'] = {nt_metadata}\n"
+                f"metadata['shape'][0] = {shape[0]}\n"
+                f"These must match. Check your data and metadata."
+            )
+        nt = nt_metadata
         logger.debug(f"Using explicit nframes={nt} from metadata")
 
     if "pixel_resolution" not in metadata:
@@ -288,7 +305,8 @@ def save_fsspec(filenames):
 
 
 def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
-    assert len(tif_files) > 1, "Need at least two TIFF files to combine."
+    if len(tif_files) <= 1:
+        raise ValueError("Need at least two TIFF files to combine.")
 
     combined_refs: dict[str, str] = {}
     per_file_refs = []
@@ -308,8 +326,10 @@ def _multi_tiff_to_fsspec(tif_files: list[Path], base_dir: Path) -> dict:
             total_shape = shape.copy()
             total_chunks = chunks
         else:
-            assert shape[1:] == total_shape[1:], f"Shape mismatch in {tif_path}"
-            assert chunks == total_chunks, f"Chunk mismatch in {tif_path}"
+            if shape[1:] != total_shape[1:]:
+                raise ValueError(f"Shape mismatch in {tif_path}: {shape[1:]} != {total_shape[1:]}")
+            if chunks != total_chunks:
+                raise ValueError(f"Chunk mismatch in {tif_path}: {chunks} != {total_chunks}")
             total_shape[0] += shape[0]  # accumulate along axis 0
 
         per_file_refs.append((inner_refs, shape))
@@ -537,7 +557,8 @@ def merge_zarr_rois(input_dir, output_dir=None, overwrite=True):
     if not roi1_dirs or not roi2_dirs:
         logger.critical("No roi1 or roi2 in input dir")
         return None
-    assert len(roi1_dirs) == len(roi2_dirs), "Mismatched ROI dirs"
+    if len(roi1_dirs) != len(roi2_dirs):
+        raise ValueError(f"Mismatched ROI dirs: {len(roi1_dirs)} roi1 dirs vs {len(roi2_dirs)} roi2 dirs")
 
     for roi1, roi2 in zip(roi1_dirs, roi2_dirs):
         zplane = roi1.stem.split("_")[0]  # "plane01"
@@ -556,8 +577,10 @@ def merge_zarr_rois(input_dir, output_dir=None, overwrite=True):
         z1 = da.from_zarr(roi1)
         z2 = da.from_zarr(roi2)
 
-        assert z1.shape[0] == z2.shape[0], "Frame count mismatch"
-        assert z1.shape[1] == z2.shape[1], "Height mismatch"
+        if z1.shape[0] != z2.shape[0]:
+            raise ValueError(f"Frame count mismatch for {zplane}: {z1.shape[0]} != {z2.shape[0]}")
+        if z1.shape[1] != z2.shape[1]:
+            raise ValueError(f"Height mismatch for {zplane}: {z1.shape[1]} != {z2.shape[1]}")
 
         # concatenate along width (axis=2)
         z_merged = da.concatenate([z1, z2], axis=2)
@@ -687,7 +710,8 @@ def load_last_savedir(default=None) -> Path:
             path = Path(json.loads(f.read_text()).get("last_savedir", ""))
             if path.exists():
                 return path
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to load last savedir from {f}: {e}")
             pass
     return Path(default or Path().cwd())
 

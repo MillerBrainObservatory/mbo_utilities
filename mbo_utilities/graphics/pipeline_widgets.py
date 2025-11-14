@@ -1262,7 +1262,7 @@ def run_process(self):
                     no_cells_count += 1
                     self.logger.warning(
                         f"[{completed_count + error_count + no_cells_count}/{len(tasks)}] "
-                        f"⚠ Plane {plane_num}, ROI {arr_idx}: No cells found"
+                        f"WARNING: Plane {plane_num}, ROI {arr_idx}: No cells found"
                     )
                 else:  # error
                     error_count += 1

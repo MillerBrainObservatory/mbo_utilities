@@ -302,6 +302,27 @@ class Suite2pArray:
         self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
         self.shape = (self.nframes, self.Ly, self.Lx)
         self.dtype = np.int16
+
+        # Validate file size matches expected shape
+        expected_bytes = int(np.prod(self.shape)) * np.dtype(self.dtype).itemsize
+        actual_bytes = self.active_file.stat().st_size
+        if actual_bytes < expected_bytes:
+            raise ValueError(
+                f"Binary file {self.active_file.name} is too small!\n"
+                f"Expected: {expected_bytes:,} bytes for shape {self.shape}\n"
+                f"Actual: {actual_bytes:,} bytes\n"
+                f"File may be corrupted or ops.npy metadata may be incorrect."
+            )
+        elif actual_bytes > expected_bytes:
+            import warnings
+            warnings.warn(
+                f"Binary file {self.active_file.name} is larger than expected.\n"
+                f"Expected: {expected_bytes:,} bytes for shape {self.shape}\n"
+                f"Actual: {actual_bytes:,} bytes\n"
+                f"Extra data will be ignored.",
+                UserWarning
+            )
+
         self._file = np.memmap(
             self.active_file, mode="r", dtype=self.dtype, shape=self.shape
         )
@@ -393,18 +414,65 @@ class Suite2pArray:
 
 
 class H5Array:
-    def __init__(self, filenames: Path | str, dataset: str = "mov"):
+    def __init__(self, filenames: Path | str, dataset: str = None):
         self.filenames = Path(filenames)
         self._f = h5py.File(self.filenames, "r")
-        self._d = self._f[dataset]
+
+        # Auto-detect dataset if not specified
+        if dataset is None:
+            if "mov" in self._f:
+                dataset = "mov"
+            elif "data" in self._f:
+                dataset = "data"
+            elif "scan_corrections" in self._f:
+                dataset = "scan_corrections"
+                logger.info(f"Detected pollen calibration file: {self.filenames.name}")
+            else:
+                available = list(self._f.keys())
+                if not available:
+                    raise ValueError(f"No datasets found in {self.filenames}")
+                dataset = available[0]
+                logger.warning(
+                    f"Using first available dataset '{dataset}' in {self.filenames.name}. "
+                    f"Available: {available}"
+                )
+
+        try:
+            self._d = self._f[dataset]
+        except KeyError:
+            available = list(self._f.keys())
+            raise KeyError(
+                f"Dataset '{dataset}' not found in {self.filenames}. "
+                f"Available datasets: {available}"
+            ) from None
+
+        self.dataset_name = dataset
         self.shape = self._d.shape
         self.dtype = self._d.dtype
         self.ndim = self._d.ndim
 
     @property
     def num_planes(self) -> int:
-        # TODO: not sure what to do here
-        return 14
+        # Try to get from metadata first
+        metadata = self.metadata
+        if "num_planes" in metadata:
+            return int(metadata["num_planes"])
+
+        # Infer from shape based on data dimensionality
+        if self.ndim >= 4:  # (T, Z, Y, X) - volumetric time series
+            return int(self.shape[1])
+        elif self.ndim == 3:  # (T, Y, X) - single plane time series
+            return 1
+        elif self.ndim == 1:
+            # Special case: pollen scan_corrections (nc,)
+            if self.dataset_name == "scan_corrections":
+                return int(self.shape[0])
+            return 1
+        elif self.ndim == 2:  # (Y, X) - single frame
+            return 1
+
+        # Fallback
+        return 1
 
     def __len__(self) -> int:
         return self.shape[0]
@@ -571,7 +639,7 @@ class MBOTiffArray:
             metadata=md,
             progress_callback=progress_callback,
             debug=debug,
-            dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+            dshape=(self.shape[0], self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
             plane_index=None,
             **kwargs,
         )
@@ -711,7 +779,7 @@ class TiffArray:
             metadata=md,
             progress_callback=progress_callback,
             debug=debug,
-            dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+            dshape=(self.shape[0], self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
             plane_index=None,
         )
 
@@ -756,7 +824,7 @@ class MboRawArray:
         self._metadata = get_metadata(self.filenames)
 
         self.num_channels = self._metadata["num_planes"]
-        self.num_rois = self._metadata["num_rois"]
+        self.num_rois = self._metadata.get("num_rois", 1)
         self.num_frames = self._metadata["num_frames"]
         self._source_dtype = self._metadata["dtype"]  # Original dtype from file
         self._target_dtype = None  # Target dtype for conversion (set by astype)
@@ -764,6 +832,19 @@ class MboRawArray:
 
         # Cache frames_per_file to avoid slow len(tf.pages) calls
         self._frames_per_file = self._metadata.get("frames_per_file", None)
+
+        # Validate page counts match expected values
+        if self._frames_per_file is not None:
+            expected_total_pages = sum(self._frames_per_file) * self.num_channels
+            actual_total_pages = sum(len(tf.pages) for tf in self.tiff_files)
+            if actual_total_pages != expected_total_pages:
+                raise ValueError(
+                    f"TIFF page count mismatch!\n"
+                    f"Expected: {expected_total_pages} pages "
+                    f"({sum(self._frames_per_file)} frames × {self.num_channels} channels)\n"
+                    f"Actual: {actual_total_pages} pages in {len(self.tiff_files)} file(s)\n"
+                    f"Files may be corrupted or metadata may be incorrect."
+                )
 
         # self._rois = self._create_rois()
         self._rois = self._extract_roi_info()
@@ -957,6 +1038,22 @@ class MboRawArray:
         Set the current ROI index.
         If value is None, sets roi to -1 to indicate no specific ROI.
         """
+        # Validate ROI bounds
+        if value is not None and value != 0:  # 0 means "split all", None means "stitch"
+            if isinstance(value, int):
+                if value < 1 or value > self.num_rois:
+                    raise ValueError(
+                        f"ROI index {value} out of bounds.\n"
+                        f"Valid range: 1 to {self.num_rois} (1-indexed)\n"
+                        f"Use roi=0 to split all ROIs, or roi=None to stitch."
+                    )
+            elif isinstance(value, (list, tuple)):
+                for v in value:
+                    if v < 1 or v > self.num_rois:
+                        raise ValueError(
+                            f"ROI index {v} in {value} out of bounds.\n"
+                            f"Valid range: 1 to {self.num_rois} (1-indexed)"
+                        )
         self._roi = value
 
     @property
@@ -1004,13 +1101,22 @@ class MboRawArray:
                 continue
 
             frame_idx = [pages[i] - start for i in idxs]
-            chunk = tf.asarray(key=frame_idx)
+            try:
+                chunk = tf.asarray(key=frame_idx)
+            except Exception as e:
+                raise IOError(
+                    f"Failed to read pages {frame_idx} from TIFF file {tf.filename}\n"
+                    f"File may be corrupted or incomplete.\n"
+                    f"Original error: {type(e).__name__}: {e}"
+                ) from e
             if chunk.ndim == 2:  # Single page was squeezed to 2D
                 chunk = chunk[np.newaxis, ...]  # Add back the first dimension
             chunk = chunk[..., yslice, xslice]
 
             if self.fix_phase:
                 # Use z-aware correction if we have multiple channels
+                # min_window_size is enforced in bidir_phasecorr for method='mean' etc.
+                # For method='frame', single frames are allowed
                 corrected, offset = bidir_phasecorr(
                     chunk,
                     method=self.phasecorr_method,
@@ -1021,6 +1127,7 @@ class MboRawArray:
                     fft_method=self._fft_method,
                     z_aware=(len(chans) > 1),
                     num_z_planes=len(chans),
+                    min_window_size=4,  # Require at least 4 frames for reliable correction
                 )
                 buf[idxs] = corrected
                 self.offset = offset
@@ -1269,7 +1376,7 @@ class MboRawArray:
                     metadata=md,
                     progress_callback=progress_callback,
                     debug=debug,
-                    dshape=(num_frames, self.shape[-1], self.shape[-2]),
+                    dshape=(num_frames, self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
                     plane_index=plane,
                     **kwargs,
                 )
@@ -1663,7 +1770,7 @@ class ZarrArray:
                 metadata=md,
                 progress_callback=progress_callback,
                 debug=debug,
-                dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+                dshape=(self.shape[0], self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
                 plane_index=plane,
                 **kwargs,
             )

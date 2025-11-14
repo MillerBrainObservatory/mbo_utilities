@@ -84,7 +84,7 @@ def _phase_corr_1d_fft(a, b, upsample=10):
     return float(shift)
 
 
-def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False, fft_method="1d"):
+def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False, fft_method="1d", use_gradient=True):
     """
     Estimate horizontal shift between even and odd rows of a 2D frame.
 
@@ -105,6 +105,9 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False, fft
         FFT method to use if use_fft=True:
         - '1d': Fast 1D correlation (horizontal only, ~10x faster)
         - '2d': Full 2D correlation (scikit-image, more accurate)
+    use_gradient : bool
+        If True, use gradient-based edge features for more robust correlation.
+        This is particularly helpful for single-frame datasets with low SNR.
     """
     if frame.ndim != 2:
         raise ValueError("Expected 2D frame, got shape {}".format(frame.shape))
@@ -130,15 +133,35 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False, fft
 
     if use_fft:
         if fft_method == "1d":
-            dx = _phase_corr_1d_fft(a, b_, upsample=upsample)
+            # Apply gradient enhancement for better edge detection
+            if use_gradient:
+                # Compute horizontal gradient to emphasize edges
+                a_grad = np.abs(np.diff(a, axis=1, prepend=a[:, :1]))
+                b_grad = np.abs(np.diff(b_, axis=1, prepend=b_[:, :1]))
+                dx = _phase_corr_1d_fft(a_grad, b_grad, upsample=upsample)
+            else:
+                dx = _phase_corr_1d_fft(a, b_, upsample=upsample)
             logger.debug(f"1D FFT phase correlation shift: {dx:.2f}")
         else:  # fft_method == "2d"
-            _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
+            if use_gradient:
+                # Compute horizontal gradient
+                a_grad = np.abs(np.diff(a, axis=1, prepend=a[:, :1]))
+                b_grad = np.abs(np.diff(b_, axis=1, prepend=b_[:, :1]))
+                _shift, *_ = phase_cross_correlation(a_grad, b_grad, upsample_factor=upsample)
+            else:
+                _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
             dx = float(_shift[1])
             logger.debug(f"2D FFT phase correlation shift: {dx:.2f}")
     else:
-        a_mean = a.mean(axis=0) - np.mean(a)
-        b_mean = b_.mean(axis=0) - np.mean(b_)
+        # Use gradient for integer method too
+        if use_gradient:
+            a_grad = np.abs(np.diff(a, axis=1, prepend=a[:, :1]))
+            b_grad = np.abs(np.diff(b_, axis=1, prepend=b_[:, :1]))
+            a_mean = a_grad.mean(axis=0) - np.mean(a_grad)
+            b_mean = b_grad.mean(axis=0) - np.mean(b_grad)
+        else:
+            a_mean = a.mean(axis=0) - np.mean(a)
+            b_mean = b_.mean(axis=0) - np.mean(b_)
 
         offsets = np.arange(-4, 4, 1)
         scores = np.empty_like(offsets, dtype=float)
@@ -218,7 +241,7 @@ def _apply_offset(img, offset, use_fft=False, fft_method="1d"):
 
 def bidir_phasecorr(
     arr, *, method="mean", use_fft=False, upsample=4, max_offset=4, border=0, fft_method="1d",
-    z_aware=False, num_z_planes=None
+    z_aware=False, num_z_planes=None, use_gradient=True, min_window_size=4
 ):
     """
     Correct for bi-directional scanning offsets in 2D or 3D array.
@@ -248,11 +271,26 @@ def bidir_phasecorr(
         This assumes arr is shaped (T*Z, H, W) where frames cycle through z-planes.
     num_z_planes : int, optional
         Number of z-planes (required if z_aware=True).
+    use_gradient : bool, optional
+        If True, use gradient-based edge features for more robust correlation.
+        This is particularly helpful for single-frame datasets with low SNR.
+    min_window_size : int, optional
+        Minimum number of frames required for reliable phase correction.
+        If fewer frames are provided (and method != 'frame'), returns input unchanged.
+        Default: 4 (recommended minimum for reliable statistics).
     """
     if arr.ndim == 2:
-        _offsets = _phase_corr_2d(arr, upsample, border, max_offset, use_fft, fft_method)
+        _offsets = _phase_corr_2d(arr, upsample, border, max_offset, use_fft, fft_method, use_gradient)
     else:
         flat = arr.reshape(arr.shape[0], *arr.shape[-2:])
+
+        # Check minimum window size for non-frame methods
+        if method != "frame" and flat.shape[0] < min_window_size:
+            logger.warning(
+                f"Window size ({flat.shape[0]} frames) < minimum ({min_window_size}). "
+                f"Skipping phase correction. Use window_size >= {min_window_size} or method='frame'."
+            )
+            return arr.copy(), 0.0
 
         # Z-plane aware correction
         if z_aware and num_z_planes is not None:
@@ -281,6 +319,7 @@ def bidir_phasecorr(
                     max_offset=max_offset,
                     use_fft=use_fft,
                     fft_method=fft_method,
+                    use_gradient=use_gradient,
                 )
                 logger.debug(f"  Z-plane {z}: offset = {_offsets[z]:.3f} pixels")
 
@@ -304,6 +343,7 @@ def bidir_phasecorr(
                         max_offset=max_offset,
                         use_fft=use_fft,
                         fft_method=fft_method,
+                        use_gradient=use_gradient,
                     )
                     for f in flat
                 ]
@@ -319,6 +359,7 @@ def bidir_phasecorr(
                 max_offset=max_offset,
                 use_fft=use_fft,
                 fft_method=fft_method,
+                use_gradient=use_gradient,
             )
 
     if np.ndim(_offsets) == 0:  # scalar
@@ -337,22 +378,3 @@ def apply_scan_phase_offsets(arr, offs):
     for k, off in enumerate(offs):
         out[k] = _apply_offset(out[k], off)
     return out
-
-
-if __name__ == "__main__":
-    import numpy as np
-    import tifffile
-    from pathlib import Path
-    from mbo_utilities import imread
-
-    data_path = Path(
-        r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw\mk355_7_27_2025_180mw_right_m2_go_to_2x-mROI-880x1100um_220x550px_2um-px_14p00Hz_00001_00001_00001.tif"
-    )
-    data = imread(data_path)
-    data.fix_phase = False
-
-    test = []
-    for idx in range(5):
-        frame = data[idx, 0, :, :]
-        dx_int = _phase_corr_2d(frame, use_fft=False)
-        dx_fft = _phase_corr_2d(frame, use_fft=True)

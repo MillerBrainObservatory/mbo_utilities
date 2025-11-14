@@ -92,7 +92,8 @@ def _write_plane(
     metadata["shape"] = dshape
 
     if plane_index is not None:
-        assert type(plane_index) is int, "plane_index must be an integer"
+        if not isinstance(plane_index, int):
+            raise TypeError(f"plane_index must be an integer, got {type(plane_index)}")
         metadata["plane"] = plane_index + 1
 
     # Get target frame count from kwargs, metadata, or data shape (in that priority)
@@ -217,7 +218,8 @@ def _write_plane(
                 f"Expected (n_planes, 2)"
             )
 
-        assert plane_index is not None, "plane_index must be provided when using shifts"
+        if plane_index is None:
+            raise ValueError("plane_index must be provided when using shifts")
 
         if plane_index >= len(plane_shifts):
             raise IndexError(
