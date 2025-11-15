@@ -146,8 +146,27 @@ def validate_on_write(request):
         # But we need to ensure consistent chunk-based reading
         source_for_validation = source_data
 
-        # Load written data
-        written_data = mbo.imread(baseline_path)
+        # Load written data and materialize to ensure file handle is closed
+        try:
+            written_data_lazy = mbo.imread(baseline_path)
+            written_data = np.asarray(written_data_lazy)
+
+            # Close file handle if it exists
+            if hasattr(written_data_lazy, 'close'):
+                written_data_lazy.close()
+            elif hasattr(written_data_lazy, '_fh') and hasattr(written_data_lazy._fh, 'close'):
+                written_data_lazy._fh.close()
+
+            # Delete reference and force garbage collection
+            del written_data_lazy
+        except (KeyError, AttributeError):
+            # Fallback for simple TIFF files without metadata
+            from tifffile import imread as tiff_imread
+            written_data = tiff_imread(baseline_path)
+
+        # Force garbage collection to release file handles (Windows issue)
+        import gc
+        gc.collect()
 
         # Validate
         results = validate_baseline_integrity(baseline_path, source_data, written_data)

@@ -263,7 +263,6 @@ def _write_plane(
         # Ensure chunk is 3D (T, Y, X) - squeeze any remaining singleton dimensions
         # This handles cases where plane_index is None but Z dimension is singleton
         if len(chunk.shape) == 4 and chunk.shape[1] == 1:
-            # Singleton Z dimension: squeeze it
             chunk = chunk.squeeze(axis=1)
 
         if shift_applied:
@@ -768,9 +767,27 @@ def _try_generic_writers(
     overwrite: bool = True,
     metadata: dict = {},
 ):
+    import shutil
+    import gc
+    import time
+
     outpath = Path(outpath)
-    if outpath.exists() and not overwrite:
-        raise FileExistsError(f"{outpath} already exists and overwrite=False")
+    if outpath.exists():
+        if not overwrite:
+            raise FileExistsError(f"{outpath} already exists and overwrite=False")
+        # Remove existing file or directory to allow overwrite
+        if outpath.is_dir():
+            shutil.rmtree(outpath)
+        else:
+            # Force garbage collection to release any open file handles
+            gc.collect()
+            try:
+                outpath.unlink()
+            except PermissionError:
+                # Windows file locking - wait briefly and retry
+                time.sleep(0.1)
+                gc.collect()
+                outpath.unlink()
 
     if outpath.suffix.lower() in {".npy", ".npz"}:
         if metadata is None:

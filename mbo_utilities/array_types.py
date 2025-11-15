@@ -1375,7 +1375,7 @@ class MboRawArray:
                     metadata=md,
                     progress_callback=progress_callback,
                     debug=debug,
-                    dshape=(num_frames, self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
+                    dshape=(num_frames, self.shape[-2], self.shape[-1]),  # (T, Y, X)
                     plane_index=plane,
                     **write_kwargs,
                 )
