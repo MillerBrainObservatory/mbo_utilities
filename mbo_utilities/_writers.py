@@ -588,10 +588,6 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
 
     result = {"ome": ome_content}
 
-    # Add all metadata at root level (outside ome namespace) for backward compatibility
-    # This preserves metadata that downstream tools expect (num_frames, pixel_resolution, etc.)
-    # while also maintaining OME-NGFF compliance
-    # Ensure metadata is JSON-serializable
     serializable_metadata = _make_json_serializable(metadata)
     for k, v in serializable_metadata.items():
         if k == "channel_names":
@@ -608,11 +604,14 @@ def _write_zarr(
     *,
     overwrite=True,
     metadata=None,
-    level=1,
     **kwargs,
 ):
-    sharded = kwargs.get("sharded", False)
-    ome = kwargs.get("ome", False)
+    sharded = kwargs.get("sharded", True)
+    ome = kwargs.get("ome", True)
+    level = kwargs.get("level", 1)
+
+    if metadata is None:
+        metadata = {}
 
     filename = Path(path)
     if not hasattr(_write_zarr, "_arrays"):
@@ -719,57 +718,18 @@ def _write_zarr(
     _write_zarr._offsets[filename] = offset + data.shape[0]
 
 
-def _write_zarr_v2(path, data, *, overwrite=True, metadata=None, **kwargs):
-    compressor = None
-
-    filename = Path(path)
-
-    if not hasattr(_write_zarr, "_arrays"):
-        _write_zarr._arrays = {}
-        _write_zarr._offsets = {}
-
-    # Only overwrite if this is a brand new write session (file doesn't exist in cache)
-    # Don't delete during active chunked writing
-    if overwrite and filename not in _write_zarr._arrays and filename.exists():
-        shutil.rmtree(filename)
-
-    if filename not in _write_zarr._arrays:
-
-        import zarr
-
-        nframes = metadata["num_frames"]
-        h, w = data.shape[-2:]
-        z = zarr.open(
-            store=str(filename),
-            mode="w",
-            shape=(nframes, h, w),
-            chunks=(1, h, w),
-            dtype=data.dtype,
-            filters=compressor,
-        )
-        metadata = _make_json_serializable(metadata) if metadata else {}
-        for k, v in metadata.items():
-            z.attrs[k] = v
-
-        _write_zarr._arrays[filename] = z
-        _write_zarr._offsets[filename] = 0
-
-    z = _write_zarr._arrays[filename]
-    offset = _write_zarr._offsets[filename]
-
-    z[offset : offset + data.shape[0]] = data
-    _write_zarr._offsets[filename] = offset + data.shape[0]
-
-
 def _try_generic_writers(
     data: Any,
     outpath: str | Path,
     overwrite: bool = True,
-    metadata: dict = {},
+    metadata: dict | None = None,
 ):
     import shutil
     import gc
     import time
+
+    if metadata is None:
+        metadata = {}
 
     outpath = Path(outpath)
     if outpath.exists():
