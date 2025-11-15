@@ -99,6 +99,24 @@ def _check_installation():
             # Try to create a simple array to test CUDA functionality
             test_array = cp.array([1, 2, 3])
 
+            # Test NVRTC compilation (required for Suite3D)
+            # This will fail if nvrtc64_*.dll is missing
+            try:
+                kernel = cp.ElementwiseKernel(
+                    'float32 x', 'float32 y', 'y = x * 2', 'test_kernel'
+                )
+                # Actually execute the kernel to trigger compilation
+                test_in = cp.array([1.0], dtype='float32')
+                test_out = cp.empty_like(test_in)
+                kernel(test_in, test_out)
+                click.secho(f"  [OK] NVRTC (CUDA JIT compiler) working", fg="green")
+            except Exception as nvrtc_err:
+                click.secho(f"  [FAIL] NVRTC compilation failed", fg="red")
+                click.echo(f"         Error: {str(nvrtc_err)[:100]}")
+                click.echo("         Suite3D z-registration will NOT work without NVRTC.")
+                click.echo("         Install CUDA Toolkit 12.0 runtime libraries to fix this.")
+                all_good = False
+
             # Get CUDA runtime version
             cuda_version = cp.cuda.runtime.runtimeGetVersion()
             cuda_major = cuda_version // 1000
