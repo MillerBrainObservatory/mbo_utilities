@@ -18,119 +18,139 @@ x.phasecorr_method = None
 
 mbo.imwrite(
     x,
-    "D://demo//ome_v2//sharded",
+    "D://demo//ome_v2//tiff",
     ome=True,
-    ext=".zarr",
-    num_frames=1500,
-    overwrite=False,
+    ext=".tif",
+    num_frames=400,
+    overwrite=True,
     sharded=True,
 )
 
 mbo.imwrite(
     x,
-    "D://demo//ome_v2//not_sharded",
-    ome=True,
-    ext=".zarr",
-    num_frames=1500,
+    "D://demo//ome_v2//tiff",
+    # ome=True,
+    ext=".tiff",
+    num_frames=400,
     overwrite=False,
-    sharded=False,
 )
 
-benchmark_dir = data_path.parent / "benchmark"
-benchmark_dir.mkdir(exist_ok=True)
 
-# zarr
+mbo.imwrite(
+    x,
+    "D://demo//ome_v2//tiff",
+    # ome=True,
+    ext=".tif",
+    num_frames=400,
+    overwrite=True,
+    # sharded=True,
+)
 
-outpath = benchmark_dir / "zarr"
-outpath.mkdir(exist_ok=True, parents=True)
+mbo.imwrite(
+    x,
+    "D://demo//ome_v2//tiff",
+    # ome=True,
+    ext=".tiff",
+    num_frames=400,
+    overwrite=True,
+    # sharded=False,
+)
 
-start = time.time()
-mbo.imwrite(x, outpath, planes=[1, 2, 3], ext=".zarr")
-end = time.time()
-fname = "zarr_log.txt"
+# benchmark_dir = data_path.parent / "benchmark"
+# benchmark_dir.mkdir(exist_ok=True)
 
-with open(outpath / fname, "a") as f:
-    f.write(
-        f"Time to write: {end - start:.2f}\n"
-        f"Array shape: {x.shape}\n"
-        f"Dtype: {x.dtype}\n"
-        f"Phase correction: {x.phasecorr_method}\n\n"
-        f"----------------------------------------\n"
-    )
-print(f"Time to write zarr: {end - start:.2f}")
+# # zarr
 
+# outpath = benchmark_dir / "zarr"
+# outpath.mkdir(exist_ok=True, parents=True)
 
-# tiff
+# start = time.time()
+# mbo.imwrite(x, outpath, planes=[1, 2, 3], ext=".zarr")
+# end = time.time()
+# fname = "zarr_log.txt"
 
-
-outpath = benchmark_dir / "tiff"
-start = time.time()
-mbo.imwrite(x, outpath, planes=[1, 2, 3], ext=".tif")
-end = time.time()
-fname = "zarr_log.txt"
-
-with open(outpath / fname, "a") as f:
-    f.write(
-        f"Time to write: {end - start:.2f}\n"
-        f"Array shape: {x.shape}\n"
-        f"Dtype: {x.dtype}\n"
-        f"Phase correction: {x.phasecorr_method}\n\n"
-        f"----------------------------------------\n"
-    )
-
-print(f"Time to write tiff: {end - start:.2f}")
-
-
-# binary
-outpath = benchmark_dir / "s2p_bin"
-outpath.mkdir(exist_ok=True, parents=True)
-start = time.time()
-mbo.imwrite(x, outpath, planes=[2], ext=".bin")
-end = time.time()
-
-with open(outpath / fname, "a") as f:
-    f.write(
-        f"Time to write: {time.time() - start:.2f}\n"
-        f"Array shape: {x.shape}\n"
-        f"Dtype: {x.dtype}\n"
-        f"Phase correction: {x.phasecorr_method}\n\n"
-        f"----------------------------------------\n"
-    )
-
-print(f"Time to write binary: {end - start:.2f}")
-
-# h5
-outpath = benchmark_dir / "h5"
-outpath.mkdir(exist_ok=True, parents=True)
-start = time.time()
-mbo.imwrite(x, outpath, planes=[2], ext=".bin")
-end = time.time()
-
-with open(outpath / fname, "a") as f:
-    f.write(
-        f"Time to write: {end - start:.2f}\n"
-        f"Array shape: {x.shape}\n"
-        f"Dtype: {x.dtype}\n"
-        f"Phase correction: {x.phasecorr_method}\n\n"
-        f"----------------------------------------\n"
-    )
-print(f"Time to write h5: {end - start:.2f}")
+# with open(outpath / fname, "a") as f:
+#     f.write(
+#         f"Time to write: {end - start:.2f}\n"
+#         f"Array shape: {x.shape}\n"
+#         f"Dtype: {x.dtype}\n"
+#         f"Phase correction: {x.phasecorr_method}\n\n"
+#         f"----------------------------------------\n"
+#     )
+# print(f"Time to write zarr: {end - start:.2f}")
 
 
-# import zarr
-# import fastplotlib as fpl
-# arr = zarr.open(outpath)["plane02_stitched.zarr"]
-# fpl.ImageWidget(arr).show(); fpl.loop.run()
+# # tiff
 
+
+# outpath = benchmark_dir / "tiff"
+# start = time.time()
+# mbo.imwrite(x, outpath, planes=[1, 2, 3], ext=".tif")
+# end = time.time()
+# fname = "zarr_log.txt"
+
+# with open(outpath / fname, "a") as f:
+#     f.write(
+#         f"Time to write: {end - start:.2f}\n"
+#         f"Array shape: {x.shape}\n"
+#         f"Dtype: {x.dtype}\n"
+#         f"Phase correction: {x.phasecorr_method}\n\n"
+#         f"----------------------------------------\n"
+#     )
+
+# print(f"Time to write tiff: {end - start:.2f}")
+
+
+# # binary
+# outpath = benchmark_dir / "s2p_bin"
+# outpath.mkdir(exist_ok=True, parents=True)
 # start = time.time()
 # mbo.imwrite(x, outpath, planes=[2], ext=".bin")
 # end = time.time()
+
+# with open(outpath / fname, "a") as f:
+#     f.write(
+#         f"Time to write: {time.time() - start:.2f}\n"
+#         f"Array shape: {x.shape}\n"
+#         f"Dtype: {x.dtype}\n"
+#         f"Phase correction: {x.phasecorr_method}\n\n"
+#         f"----------------------------------------\n"
+#     )
+
 # print(f"Time to write binary: {end - start:.2f}")
-#
+
+# # h5
+# outpath = benchmark_dir / "h5"
+# outpath.mkdir(exist_ok=True, parents=True)
 # start = time.time()
-# mbo.imwrite(x, outpath, planes=[2], ext=".h5")
+# mbo.imwrite(x, outpath, planes=[2], ext=".bin")
 # end = time.time()
+
+# with open(outpath / fname, "a") as f:
+#     f.write(
+#         f"Time to write: {end - start:.2f}\n"
+#         f"Array shape: {x.shape}\n"
+#         f"Dtype: {x.dtype}\n"
+#         f"Phase correction: {x.phasecorr_method}\n\n"
+#         f"----------------------------------------\n"
+#     )
 # print(f"Time to write h5: {end - start:.2f}")
 
-x = 2
-# mbo.imwrite(x, temp_outfile)
+
+# # import zarr
+# # import fastplotlib as fpl
+# # arr = zarr.open(outpath)["plane02_stitched.zarr"]
+# # fpl.ImageWidget(arr).show(); fpl.loop.run()
+
+# # start = time.time()
+# # mbo.imwrite(x, outpath, planes=[2], ext=".bin")
+# # end = time.time()
+# # print(f"Time to write binary: {end - start:.2f}")
+# #
+# # start = time.time()
+# # mbo.imwrite(x, outpath, planes=[2], ext=".h5")
+# # end = time.time()
+# # print(f"Time to write h5: {end - start:.2f}")
+
+# x = 2
+# # mbo.imwrite(x, temp_outfile)
