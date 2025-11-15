@@ -1363,10 +1363,6 @@ class MboRawArray:
                 # Determine actual number of frames to write
                 num_frames = kwargs.get("num_frames", self.shape[0])
 
-                # Remove metadata from kwargs to avoid duplicate argument error
-                # (we're passing it explicitly as md)
-                write_kwargs = {k: v for k, v in kwargs.items() if k != 'metadata'}
-
                 _write_plane(
                     self,
                     target,
@@ -1377,7 +1373,7 @@ class MboRawArray:
                     debug=debug,
                     dshape=(num_frames, self.shape[-2], self.shape[-1]),  # (T, Y, X)
                     plane_index=plane,
-                    **write_kwargs,
+                    **kwargs,
                 )
 
     def imshow(self, **kwargs):
