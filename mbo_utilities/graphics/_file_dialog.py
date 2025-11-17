@@ -128,7 +128,7 @@ class FileDialog:
                 imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
 
                 # download notebook button -------------------------------
-                bsz_notebook = hello_imgui.em_to_vec2(20, 2.2)
+                bsz_notebook = hello_imgui.em_to_vec2(18, 2.0)
                 x_notebook = (imgui.get_window_width() - bsz_notebook.x) * 0.5
                 imgui.set_cursor_pos_x(x_notebook)
                 if imgui.button("Download User Guide Notebook", bsz_notebook):

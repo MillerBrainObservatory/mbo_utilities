@@ -173,8 +173,11 @@ def draw_tab_process(self):
         imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Select a processing pipeline:"
     )
 
+    # Set combo width to match button size
+    imgui.push_item_width(100)
     current_display_idx = USER_PIPELINES.index(self._current_pipeline)
-    changed, selected_idx = imgui.combo("Pipeline", current_display_idx, USER_PIPELINES)
+    changed, selected_idx = imgui.combo("##Pipeline", current_display_idx, USER_PIPELINES)
+    imgui.pop_item_width()
 
     if changed:
         self._current_pipeline = USER_PIPELINES[selected_idx]
@@ -192,8 +195,8 @@ def draw_section_suite2p(self):
     """Draw Suite2p configuration UI with collapsible sections and proper styling."""
     imgui.spacing()
 
-    # Use proper child window flags to prevent scrollbar issues
-    child_flags = imgui.WindowFlags_.none
+    # Enable vertical scrollbar for child window to prevent clipping
+    child_flags = imgui.ChildFlags_.auto_resize_x
 
     with imgui_ctx.begin_child("##Processing", imgui.ImVec2(0, 0), child_flags):
         # Set proper padding and spacing
@@ -273,25 +276,29 @@ def draw_section_suite2p(self):
         )
 
         # Get number of planes from data
-        if hasattr(self, "image_widget") and self.image_widget.data:
-            data_arrays = (
-                self.image_widget.data
-                if isinstance(self.image_widget.data, list)
-                else [self.image_widget.data]
-            )
-            if len(data_arrays) > 0:
-                # For 4D arrays (T, Z, H, W), get Z from shape[1]
-                # For 3D arrays (T, H, W), only 1 plane
-                if data_arrays[0].ndim == 4:
-                    num_planes = data_arrays[0].shape[1]
-                elif data_arrays[0].ndim == 3:
-                    num_planes = 1
+        try:
+            num_planes = self.image_widget.data[0].num_channels
+        except (AttributeError, IndexError, TypeError):
+            # Fallback: try to get from shape
+            if hasattr(self, "image_widget") and self.image_widget.data:
+                data_arrays = (
+                    self.image_widget.data
+                    if isinstance(self.image_widget.data, list)
+                    else [self.image_widget.data]
+                )
+                if len(data_arrays) > 0:
+                    # For 4D arrays (T, Z, H, W), get Z from shape[1]
+                    # For 3D arrays (T, H, W), only 1 plane
+                    if data_arrays[0].ndim == 4:
+                        num_planes = data_arrays[0].shape[1]
+                    elif data_arrays[0].ndim == 3:
+                        num_planes = 1
+                    else:
+                        num_planes = 1
                 else:
                     num_planes = 1
             else:
                 num_planes = 1
-        else:
-            num_planes = 1
 
         # Initialize selected planes if not already set
         if not hasattr(self, "_selected_planes"):
@@ -309,18 +316,34 @@ def draw_section_suite2p(self):
         if imgui.button("None##planes"):
             self._selected_planes = set()
 
-        # Checkboxes for each plane (in rows of 5)
-        for i in range(num_planes):
-            plane_num = i + 1
-            checked = plane_num in self._selected_planes
-            changed, checked = imgui.checkbox(f"Plane {plane_num}", checked)
-            if changed:
-                if checked:
-                    self._selected_planes.add(plane_num)
-                else:
-                    self._selected_planes.discard(plane_num)
-            if (i + 1) % 5 != 0 and i < num_planes - 1:
-                imgui.same_line()
+        # Checkboxes for each plane
+        # Use 2 columns if more than 4 planes, otherwise single row
+        if num_planes > 4:
+            imgui.columns(2, "plane_columns", borders=False)
+            for i in range(num_planes):
+                plane_num = i + 1
+                checked = plane_num in self._selected_planes
+                changed, checked = imgui.checkbox(f"Plane {plane_num}", checked)
+                if changed:
+                    if checked:
+                        self._selected_planes.add(plane_num)
+                    else:
+                        self._selected_planes.discard(plane_num)
+                imgui.next_column()
+            imgui.columns(1)
+        else:
+            # 4 or fewer planes: display in a single row
+            for i in range(num_planes):
+                plane_num = i + 1
+                checked = plane_num in self._selected_planes
+                changed, checked = imgui.checkbox(f"Plane {plane_num}", checked)
+                if changed:
+                    if checked:
+                        self._selected_planes.add(plane_num)
+                    else:
+                        self._selected_planes.discard(plane_num)
+                if i < num_planes - 1:
+                    imgui.same_line()
 
         # Processing Control Options
         imgui.spacing()
@@ -353,8 +376,19 @@ def draw_section_suite2p(self):
         set_tooltip("Save ops as JSON in addition to .npy")
 
         imgui.spacing()
-        if imgui.button("Run Suite2p", imgui.ImVec2(150, 30)):
+        # Green Run button, smaller size
+        imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.7, 0.2, 1.0))
+        imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.8, 0.3, 1.0))
+        imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.6, 0.1, 1.0))
+        button_clicked = imgui.button("Run Suite2p", imgui.ImVec2(100, 0))
+        imgui.pop_style_color(3)
+
+        if button_clicked:
             print("Run button clicked")
+            print(f"Save path: {self._saveas_outdir}")
+            print(f"Selected planes: {self._selected_planes}")
+            print(f"Image widget data: {type(self.image_widget.data)}")
+
             # Validate save path is set
             if not self._saveas_outdir:
                 self.logger.warning("Please select a save path before running.")
@@ -363,9 +397,9 @@ def draw_section_suite2p(self):
                 self._s2p_savepath_flash_count = 0
                 self._s2p_show_savepath_popup = True
             else:
-                self.logger.info("Running Suite2p pipeline...")
+                self.logger.info(f"Running Suite2p pipeline on {len(self._selected_planes)} planes...")
                 run_process(self)
-            self.logger.info("Suite2p pipeline completed.")
+                self.logger.info("Suite2p processing submitted (running in background).")
 
         # Popup for missing save path
         if self._s2p_show_savepath_popup:
@@ -918,8 +952,19 @@ def _run_plane_worker(
 
         # Reload array (lazy loading)
         print(f"Loading from source: {source_file}")
-        arr = imread(source_file, roi=roi)
-        print(f"Loaded array shape: {arr.shape}, ndim: {arr.ndim}")
+        print(f"roi parameter: {roi}")
+        try:
+            arr = imread(source_file, roi=roi)
+            print(f"Loaded array shape: {arr.shape}, ndim: {arr.ndim}")
+            print(f"Array type: {type(arr)}")
+            print(f"Has num_rois: {hasattr(arr, 'num_rois')}")
+            if hasattr(arr, 'num_rois'):
+                print(f"Array num_rois: {arr.num_rois}")
+        except Exception as e:
+            import traceback
+            print(f"ERROR in imread: {e}")
+            print(traceback.format_exc())
+            raise
 
         # For 4D arrays, extract the specific plane before writing
         # For 3D arrays, write directly (they're already single-plane)
@@ -933,11 +978,15 @@ def _run_plane_worker(
                 )
             # Extract plane: arr[:, z_idx, :, :] gives us (T, H, W)
             plane_data = arr[:, z_idx, :, :]
+            print(f"Extracted plane_data type: {type(plane_data)}, shape: {plane_data.shape}")
             write_planes = None  # Don't specify planes for extracted 3D data
         else:
             # 3D array - already a single plane
             plane_data = arr
+            print(f"Using 3D array directly, type: {type(plane_data)}, shape: {plane_data.shape}")
             write_planes = None
+
+        print(f"plane_data has num_rois: {hasattr(plane_data, 'num_rois')}")
 
         # Write functional channel using imwrite (lazy!)
         print(f"Writing plane {plane_num} for ROI {arr_idx} to {base_out}")
@@ -947,6 +996,7 @@ def _run_plane_worker(
         plane_metadata.update({
             "plane": plane_num,
             "z_index": plane_num - 1,
+            "num_rois": arr.num_rois if hasattr(arr, 'num_rois') else 1,
         })
 
         imwrite(
@@ -988,6 +1038,7 @@ def _run_plane_worker(
                 chan2_metadata.update({
                     "plane": plane_num,
                     "z_index": plane_num - 1,
+                    "num_rois": chan2_arr.num_rois if hasattr(chan2_arr, 'num_rois') else 1,
                 })
 
                 imwrite(
@@ -1012,14 +1063,29 @@ def _run_plane_worker(
 
         # Run Suite2p processing
         print(f"Running Suite2p for plane {plane_num}, ROI {arr_idx}")
+        print(f"="*60)
+        print(f"Suite2p run_plane() parameters:")
+        print(f"  input_path: {raw_file}")
+        print(f"  save_path: {plane_dir}")
+        print(f"  input_path exists: {raw_file.exists()}")
+        print(f"  save_path exists: {plane_dir.exists()}")
 
         # Only pass chan2_file if it's actually set (not empty string)
         chan2 = user_ops.get("chan2_file")
         if chan2 and Path(chan2).exists():
             chan2_file_arg = chan2
+            print(f"  chan2_file: {chan2_file_arg}")
         else:
             chan2_file_arg = None
+            print(f"  chan2_file: None")
 
+        print(f"  keep_raw: {s2p_settings.get('keep_raw', False)}")
+        print(f"  keep_reg: {s2p_settings.get('keep_reg', True)}")
+        print(f"  force_reg: {s2p_settings.get('force_reg', False)}")
+        print(f"  force_detect: {s2p_settings.get('force_detect', False)}")
+        print(f"="*60)
+
+        print(f"CALLING run_plane() NOW...")
         result_ops = run_plane(
             input_path=raw_file,
             save_path=plane_dir,
@@ -1033,6 +1099,10 @@ def _run_plane_worker(
             dff_percentile=s2p_settings.get("dff_percentile", 20),
             save_json=s2p_settings.get("save_json", False),
         )
+        print(f"run_plane() RETURNED!")
+        print(f"  Return type: {type(result_ops)}")
+        print(f"  Return value: {result_ops}")
+        print(f"="*60)
 
         print(f"Suite2p complete for plane {plane_num}, ROI {arr_idx}")
         return (arr_idx, plane_num, "success", {"result_ops": str(result_ops)})
@@ -1048,6 +1118,8 @@ def _run_plane_worker(
 
 def run_process(self):
     """Runs the selected processing pipeline using parallel processing."""
+    print(f"DEBUG: run_process called, pipeline={self._current_pipeline}")
+
     if self._current_pipeline != "suite2p":
         if self._current_pipeline == "masknmf":
             self.logger.info("Running MaskNMF pipeline (not yet implemented).")
@@ -1055,6 +1127,7 @@ def run_process(self):
             self.logger.error(f"Unknown pipeline selected: {self._current_pipeline}")
         return
 
+    print(f"DEBUG: About to check HAS_LSP={HAS_LSP}")
     self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
     if not HAS_LSP:
         self.logger.warning(
@@ -1220,6 +1293,10 @@ def run_process(self):
                 "user_ops": task_ops,
                 "s2p_settings": s2p_dict,
             })
+
+    print(f"DEBUG: Created {len(tasks)} tasks")
+    for i, task in enumerate(tasks):
+        print(f"  Task {i}: plane={task['plane_num']}, arr_idx={task['arr_idx']}, source={task['source_file']}")
 
     if not tasks:
         self.logger.warning("No planes selected for processing.")
