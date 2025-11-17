@@ -800,7 +800,15 @@ class MboRawArray:
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
 
-        self.roi = self._roi = roi
+        # Initialize data attributes first (needed for roi setter validation)
+        self._metadata = get_metadata(self.filenames)
+        self.num_channels = self._metadata["num_planes"]
+        self.num_rois = self._metadata.get("num_rois", 1)
+
+        # Now set roi (this will call the setter which validates against num_rois)
+        self._roi = roi
+        self.roi = roi
+
         self._fix_phase = fix_phase
         self._use_fft = use_fft
         self._fft_method = fft_method
@@ -819,12 +827,6 @@ class MboRawArray:
             "roi_array_shape": False,
             "phase_offset": False,
         }
-
-        # Initialize data attributes (set in read_data)
-        self._metadata = get_metadata(self.filenames)
-
-        self.num_channels = self._metadata["num_planes"]
-        self.num_rois = self._metadata.get("num_rois", 1)
         self.num_frames = self._metadata["num_frames"]
         self._source_dtype = self._metadata["dtype"]  # Original dtype from file
         self._target_dtype = None  # Target dtype for conversion (set by astype)
@@ -1104,10 +1106,11 @@ class MboRawArray:
             try:
                 chunk = tf.asarray(key=frame_idx)
             except Exception as e:
+                # TODO: wrap this for all array types
                 raise IOError(
-                    f"Failed to read pages {frame_idx} from TIFF file {tf.filename}\n"
+                    f"MboRawArray: Failed to read pages {frame_idx} from TIFF file {tf.filename}\n"
                     f"File may be corrupted or incomplete.\n"
-                    f"Original error: {type(e).__name__}: {e}"
+                    f": {type(e).__name__}: {e}"
                 ) from e
             if chunk.ndim == 2:  # Single page was squeezed to 2D
                 chunk = chunk[np.newaxis, ...]  # Add back the first dimension

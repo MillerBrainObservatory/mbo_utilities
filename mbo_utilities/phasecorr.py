@@ -240,8 +240,8 @@ def _apply_offset(img, offset, use_fft=False, fft_method="1d"):
 
 
 def bidir_phasecorr(
-    arr, *, method="mean", use_fft=False, upsample=4, max_offset=4, border=0, fft_method="1d",
-    z_aware=False, num_z_planes=None, use_gradient=True, min_window_size=None
+    arr, *, method="mean", use_fft=False, upsample=4, max_offset=10, border=4, fft_method="2d",
+    z_aware=False, num_z_planes=None, use_gradient=False, min_window_size=None
 ):
     """
     Correct for bi-directional scanning offsets in 2D or 3D array.
