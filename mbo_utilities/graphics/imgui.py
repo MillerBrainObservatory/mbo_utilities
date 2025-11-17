@@ -593,7 +593,7 @@ class PreviewDataWidget(EdgeWindow):
             if hasattr(arr, "max_offset"):
                 arr.max_offset = 3
             if hasattr(arr, "upsample"):
-                arr.upsample = 20
+                arr.upsample = 5
             if hasattr(arr, "fix_phase"):
                 arr.fix_phase = False
             if hasattr(arr, "use_fft"):
@@ -603,7 +603,7 @@ class PreviewDataWidget(EdgeWindow):
         self._gaussian_sigma = 0
         self._current_offset = [0.0] * self.num_arrays
         self._window_size = 1
-        self._phase_upsample = 20
+        self._phase_upsample = 5
         self._border = 3
         self._auto_update = False
         self._proj = "mean"
@@ -728,7 +728,7 @@ class PreviewDataWidget(EdgeWindow):
             # Compute phase correction offsets for lazy arrays
             if value:
                 self._compute_phase_offsets()
-            self.update_frame_apply()
+        self.update_frame_apply()
         self.image_widget.current_index = self.image_widget.current_index
 
     @property
@@ -765,6 +765,7 @@ class PreviewDataWidget(EdgeWindow):
         if self._fix_phase and not self.is_mbo_scan:
             self._compute_phase_offsets()
 
+        self.update_frame_apply()
         self.image_widget.current_index = self.image_widget.current_index
 
     @property
