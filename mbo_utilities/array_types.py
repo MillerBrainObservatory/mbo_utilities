@@ -795,7 +795,7 @@ class MboRawArray:
         upsample: int = 5,
         max_offset: int = 4,
         use_fft: bool = False,
-        fft_method: str = "1d",
+        fft_method: str = "2d",
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
