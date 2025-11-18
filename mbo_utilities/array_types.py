@@ -1147,11 +1147,6 @@ class MboRawArray:
         if not frames or not chans:
             return np.empty(0)
 
-        logger.debug(
-            f"Phase-corrected: {self.fix_phase}/{self.phasecorr_method},"
-            f" channels: {chans},"
-            f" roi: {self.roi}",
-        )
         out = self.process_rois(frames, chans)
 
         squeeze = []

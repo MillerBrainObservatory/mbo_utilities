@@ -383,8 +383,6 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     if first_write:
         write_ops(metadata, fname, **kwargs)
 
-    logger.debug(f"Wrote {data.shape[0]} frames to {fname}.")
-
 
 def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
     if metadata is None:

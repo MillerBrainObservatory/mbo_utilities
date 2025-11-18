@@ -37,7 +37,8 @@ class Suite2pSettings:
     # nplanes: int = 1  # Number of planes in each tiff
     functional_chan: int = 1  # Channel for functional ROI extraction (1-based)
     tau: float = 1.3  # Timescale of sensor (LBM default for GCaMP6m-like)
-    frames_include: int = -1  # Only process this many frames (for testing)
+    frames_include: int = -1
+    target_frames: int = -1
     # multiplane_parallel: bool = False  # Run pipeline on server
     # ignore_flyback: list = field(default_factory=list)  # Planes to ignore
 
@@ -107,11 +108,11 @@ class Suite2pSettings:
     # ==================== Cellpose Detection Settings ====================
     # LBM-optimized defaults for Cellpose-based detection
     anatomical_only: int = 3  # Use enhanced mean image (LBM default)
-    diameter: int = 6  # Expected cell diameter in pixels (LBM datasets)
+    diameter: int = 4  # Expected cell diameter in pixels (LBM datasets)
     cellprob_threshold: float = -6.0  # More permissive detection threshold
     flow_threshold: float = 0.0  # Standard Cellpose flow threshold
     spatial_hp_cp: float = 0.5  # High-pass filtering strength for Cellpose
-    pretrained_model: str = "cyto"  # Cellpose model path or type
+    pretrained_model: str = "cpsam"  # Cellpose model path or type
 
     # ==================== Signal Extraction Settings ====================
     neuropil_extract: bool = True  # Extract neuropil signal
@@ -264,87 +265,123 @@ def draw_section_suite2p(self):
 
         # Frames to process slider
         imgui.spacing()
-        if self.s2p.frames_include == -1:
-            # Initialize to max frames if set to -1
-            self.s2p.frames_include = max_frames
+        # Initialize target_frames only once, or when max_frames changes
+        if not hasattr(self, '_frames_initialized'):
+            self._frames_initialized = True
+            self._last_max_frames = max_frames
+            if self.s2p.target_frames == -1:
+                self.s2p.target_frames = max_frames
+        elif hasattr(self, '_last_max_frames') and self._last_max_frames != max_frames:
+            # Max frames changed (different data loaded), reset to new max
+            self._last_max_frames = max_frames
+            self.s2p.target_frames = max_frames
 
-        _, self.s2p.frames_include = imgui.slider_int(
-            "Frames to process", self.s2p.frames_include, 1, max_frames
-        )
+        # Use input_int for precise control, with slider for convenience
+        imgui.push_item_width(150)
+        changed, new_value = imgui.input_int("##frames_input", self.s2p.target_frames, step=1, step_fast=100)
+        if changed:
+            self.s2p.target_frames = max(1, min(new_value, max_frames))
+        imgui.pop_item_width()
+
+        imgui.same_line()
+        imgui.text("Frames to process")
         set_tooltip(
             f"Number of frames to process (1-{max_frames}). "
-            "Useful for testing on a subset of data."
+            "Use arrows or type exact value. Useful for testing on subsets."
         )
 
-        # Get number of planes from data
-        try:
-            num_planes = self.image_widget.data[0].num_channels
-        except (AttributeError, IndexError, TypeError):
-            # Fallback: try to get from shape
-            if hasattr(self, "image_widget") and self.image_widget.data:
-                data_arrays = (
-                    self.image_widget.data
-                    if isinstance(self.image_widget.data, list)
-                    else [self.image_widget.data]
-                )
-                if len(data_arrays) > 0:
-                    # For 4D arrays (T, Z, H, W), get Z from shape[1]
-                    # For 3D arrays (T, H, W), only 1 plane
-                    if data_arrays[0].ndim == 4:
-                        num_planes = data_arrays[0].shape[1]
-                    elif data_arrays[0].ndim == 3:
-                        num_planes = 1
-                    else:
-                        num_planes = 1
-                else:
-                    num_planes = 1
-            else:
-                num_planes = 1
+        # Add a slider below for visual feedback and easier adjustment
+        imgui.push_item_width(-1)
+        slider_changed, slider_value = imgui.slider_int(
+            "##frames_slider", self.s2p.target_frames, 1, max_frames
+        )
+        if slider_changed:
+            self.s2p.target_frames = slider_value
+        imgui.pop_item_width()
 
-        # Initialize selected planes if not already set
-        if not hasattr(self, "_selected_planes"):
-            self._selected_planes = set(range(1, num_planes + 1))  # All selected by default
+        # # Get number of planes from data
+        # try:
+        #     num_planes = self.image_widget.data[0].num_channels
+        # except (AttributeError, IndexError, TypeError):
+        #     # Fallback: try to get from shape
+        #     if hasattr(self, "image_widget") and self.image_widget.data:
+        #         data_arrays = (
+        #             self.image_widget.data
+        #             if isinstance(self.image_widget.data, list)
+        #             else [self.image_widget.data]
+        #         )
+        #         if len(data_arrays) > 0:
+        #             # For 4D arrays (T, Z, H, W), get Z from shape[1]
+        #             # For 3D arrays (T, H, W), only 1 plane
+        #             if data_arrays[0].ndim == 4:
+        #                 num_planes = data_arrays[0].shape[1]
+        #             elif data_arrays[0].ndim == 3:
+        #                 num_planes = 1
+        #             else:
+        #                 num_planes = 1
+        #         else:
+        #             num_planes = 1
+        #     else:
+        #         num_planes = 1
 
-        # Plane selection UI
+        # Use current z-plane only (commented out multi-plane selection for now)
+        # Get current z index from image widget
+        # arr_idx = 0
+        # arr = self.image_widget.data[arr_idx]
+        dims = self.image_widget.current_index
+        current_z = dims.get("z", 0)
+        # current_z = self.image_widget.idx.get("z", 0)
+        current_plane = current_z + 1  # Convert 0-indexed to 1-indexed
+        self._selected_planes = {current_plane}
+
         imgui.spacing()
         imgui.separator_text("Plane Selection")
-        imgui.text("Select planes to process:")
+        imgui.text(f"Processing current plane: {current_plane}")
 
-        # [All] and [None] buttons
-        if imgui.button("All##planes"):
-            self._selected_planes = set(range(1, num_planes + 1))
-        imgui.same_line()
-        if imgui.button("None##planes"):
-            self._selected_planes = set()
+        # # Initialize selected planes if not already set
+        # if not hasattr(self, "_selected_planes"):
+        #     self._selected_planes = set(range(1, num_planes + 1))  # All selected by default
 
-        # Checkboxes for each plane
-        # Use 2 columns if more than 4 planes, otherwise single row
-        if num_planes > 4:
-            imgui.columns(2, "plane_columns", borders=False)
-            for i in range(num_planes):
-                plane_num = i + 1
-                checked = plane_num in self._selected_planes
-                changed, checked = imgui.checkbox(f"Plane {plane_num}", checked)
-                if changed:
-                    if checked:
-                        self._selected_planes.add(plane_num)
-                    else:
-                        self._selected_planes.discard(plane_num)
-                imgui.next_column()
-            imgui.columns(1)
-        else:
-            # 4 or fewer planes: display in a single row
-            for i in range(num_planes):
-                plane_num = i + 1
-                checked = plane_num in self._selected_planes
-                changed, checked = imgui.checkbox(f"Plane {plane_num}", checked)
-                if changed:
-                    if checked:
-                        self._selected_planes.add(plane_num)
-                    else:
-                        self._selected_planes.discard(plane_num)
-                if i < num_planes - 1:
-                    imgui.same_line()
+        # # Plane selection UI
+        # imgui.spacing()
+        # imgui.separator_text("Plane Selection")
+        # imgui.text("Select planes to process:")
+
+        # # [All] and [None] buttons
+        # if imgui.button("All##planes"):
+        #     self._selected_planes = set(range(1, num_planes + 1))
+        # imgui.same_line()
+        # if imgui.button("None##planes"):
+        #     self._selected_planes = set()
+
+        # # Checkboxes for each plane
+        # # Use 2 columns if more than 4 planes, otherwise single row
+        # if num_planes > 4:
+        #     imgui.columns(2, "plane_columns", borders=False)
+        #     for i in range(num_planes):
+        #         plane_num = i + 1
+        #         checked = plane_num in self._selected_planes
+        #         changed, checked = imgui.checkbox(f"Plane {plane_num}", checked)
+        #         if changed:
+        #             if checked:
+        #                 self._selected_planes.add(plane_num)
+        #             else:
+        #                 self._selected_planes.discard(plane_num)
+        #         imgui.next_column()
+        #     imgui.columns(1)
+        # else:
+        #     # 4 or fewer planes: display in a single row
+        #     for i in range(num_planes):
+        #         plane_num = i + 1
+        #         checked = plane_num in self._selected_planes
+        #         changed, checked = imgui.checkbox(f"Plane {plane_num}", checked)
+        #         if changed:
+        #             if checked:
+        #                 self._selected_planes.add(plane_num)
+        #             else:
+        #                 self._selected_planes.discard(plane_num)
+        #         if i < num_planes - 1:
+        #             imgui.same_line()
 
         # Processing Control Options
         imgui.spacing()
@@ -983,51 +1020,97 @@ def run_plane_from_data(self, arr_idx):
     ops_path = plane_dir / "ops.npy"
 
     lazy_mdata = getattr(arr, "metadata", {}).copy()
+
+    # Get dimensions without extracting - let imwrite handle extraction lazily
+    # For 4D: shape is (T, Z, H, W), imwrite with planes=N will write that z-plane
+    # For 3D: shape is (T, H, W), imwrite writes all frames
+    Lx = arr.shape[-1]
+    Ly = arr.shape[-2]
+
+    # Extract only scalar metadata needed for Suite2p - do NOT pass shape arrays
+    # that could confuse the pipeline when processing 4D data
     md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "num_frames": self.s2p.target_frames,
+        "nframes": self.s2p.target_frames,
+        "n_frames": self.s2p.target_frames,
         "original_file": str(self.fpath),
         "roi_index": arr_idx,
         "z_index": current_z,
-        "num_frames": arr.shape[0],
-        "nframes": arr.shape[0],
-        "n_frames": arr.shape[0],
-        "Ly": arr.shape[-2],
-        "Lx": arr.shape[-1],
+        "plane": plane,
+        "Ly": Ly,
+        "Lx": Lx,
         "fs": lazy_mdata.get("frame_rate", 15.0),
         "dx": lazy_mdata.get("pixel_size_xy", 1.0),
         "dz": lazy_mdata.get("z_step", 1.0),
         "ops_path": str(ops_path),
         "save_path": str(plane_dir),
         "raw_file": str((plane_dir / "data_raw.bin").resolve()),
-        # "reg_file": str((plane_dir / "data.bin").resolve()),
     }
-    lazy_mdata.update(md)
-    from lbm_suite2p_python import run_plane_bin, default_ops
+
+    from lbm_suite2p_python import default_ops
 
     ops = self.s2p.to_dict()
     defaults = default_ops()
     defaults.update(ops)
-    defaults.update(lazy_mdata)
+    # Only update with md dict, not the full lazy_mdata which may have 4D shape
+    defaults.update(md)
+
+    # Remove any shape-related keys that could confuse the pipeline
+    # imwrite will set the correct shape based on what it actually writes
+    # CRITICAL: Remove these AFTER updating with md, but BEFORE passing to imwrite
+    for key in ['shape', 'num_frames', 'nframes', 'n_frames']:
+        defaults.pop(key, None)
+
+    # Also clean lazy_mdata to prevent shape contamination from arr.metadata
+    lazy_mdata.pop('shape', None)
+    lazy_mdata.pop('num_frames', None)
+    lazy_mdata.pop('nframes', None)
+    lazy_mdata.pop('n_frames', None)
+
+    # CRITICAL: Also clean arr.metadata directly to prevent imwrite from getting
+    # the full shape when it does file_metadata = dict(lazy_array.metadata)
+    if hasattr(arr, 'metadata'):
+        arr.metadata.pop('shape', None)
+        arr.metadata.pop('num_frames', None)
+        arr.metadata.pop('nframes', None)
+        arr.metadata.pop('n_frames', None)
 
     from mbo_utilities.lazy_array import imwrite
     imwrite(
-        arr,
+        arr,  # Keep it lazy
         base_out, #plane_dir,
         ext=".bin",
         overwrite=True,
         register_z=False,
-        # metadata=ops,
-        planes= plane, #plane_index=plane,
+        planes= plane,
         output_name="data_raw.bin",
         roi=roi,
         metadata=defaults,
+        num_frames=self.s2p.target_frames,
     )
 
-    complete = run_plane_bin(defaults)
-    if complete:
+    # Use run_plane instead of run_plane_bin - it handles initialization properly
+    from lbm_suite2p_python import run_plane
+    raw_file = plane_dir / "data_raw.bin"
+
+    try:
+        result = run_plane(
+            input_path=raw_file,
+            save_path=plane_dir,
+            ops=defaults,
+            keep_raw=self.s2p.keep_raw,
+            keep_reg=self.s2p.keep_reg,
+            force_reg=self.s2p.force_reg,
+            force_detect=self.s2p.force_detect,
+            dff_window_size=self.s2p.dff_window_size,
+            dff_percentile=self.s2p.dff_percentile,
+        )
         self.logger.info(f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}")
-    else:
-        self.logger.error(f"---- Suite2p processing failed for plane {current_z}, roi {arr_idx}. See log above.")
+    except Exception as e:
+        self.logger.error(f"Suite2p processing failed for plane {current_z}, roi {arr_idx}: {e}")
+        import traceback
+        traceback.print_exc()
 #
 # def _run_plane_worker(
 #     source_file,

@@ -76,7 +76,9 @@ USER_PIPELINES = ["suite2p"]
 
 
 def _save_as_worker(path, **imwrite_kwargs):
-    data = imread(path, roi=imwrite_kwargs.pop("roi", None))
+    # Don't pass roi to imread - let it load all ROIs
+    # Then imwrite will handle splitting/filtering based on roi parameter
+    data = imread(path)
     imwrite(data, **imwrite_kwargs)
 
 
@@ -155,9 +157,6 @@ def draw_menu(parent):
                 _, parent.show_scope_window = imgui.menu_item(
                     "Scope Inspector", "", parent.show_scope_window, True
                 )
-                _, parent.show_metadata_viewer = imgui.menu_item(
-                    "Metadata Viewer", "", parent.show_metadata_viewer, True
-                )
                 imgui.end_menu()
         imgui.end_menu_bar()
     pass
@@ -171,6 +170,18 @@ def draw_tabs(parent):
         if imgui.begin_tab_item("Preview")[0]:
             imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
             imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+
+            # Add metadata button at top of Preview tab
+            imgui.spacing()
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.0, 0.0, 0.0, 1.0))  # Black button
+            imgui.push_style_color(imgui.Col_.border, imgui.ImVec4(1.0, 1.0, 1.0, 1.0))  # White border
+            imgui.push_style_var(imgui.StyleVar_.frame_border_size, 1.0)
+            if imgui.button("Show Metadata"):
+                parent.show_metadata_viewer = not parent.show_metadata_viewer
+            imgui.pop_style_var()
+            imgui.pop_style_color(2)
+            imgui.spacing()
+
             parent.draw_preview_section()
             imgui.pop_style_var()
             imgui.pop_style_var()
@@ -383,14 +394,22 @@ def draw_saveas_popup(parent):
                 parent._saveas_outdir = last_dir
             try:
                 save_planes = [p + 1 for p in parent._selected_planes]
+
+                # Validate that at least one plane is selected
+                if not save_planes:
+                    parent.logger.error("No z-planes selected! Please select at least one plane.")
+                    imgui.close_current_popup()
+                    return
+
                 parent._saveas_total = len(save_planes)
                 if parent._saveas_rois:
                     if (
                         not parent._saveas_selected_roi
                         or len(parent._saveas_selected_roi) == set()
                     ):
-                        parent._saveas_selected_roi = set(range(1, parent.num_rois + 1))
-                    rois = sorted(parent._saveas_selected_roi)
+                        parent._saveas_selected_roi = set(range(parent.num_rois))
+                    # Convert 0-indexed UI values to 1-indexed ROI values for MboRawArray
+                    rois = sorted([r + 1 for r in parent._saveas_selected_roi])
                 else:
                     rois = None
 
@@ -412,7 +431,7 @@ def draw_saveas_popup(parent):
                     "progress_callback": lambda frac,
                     current_plane: parent.gui_progress_callback(frac, current_plane),
                 }
-                parent.logger.info(f"Saving planes {save_planes}")
+                parent.logger.info(f"Saving planes {save_planes} with ROIs {rois if rois else 'stitched'}")
                 parent.logger.info(
                     f"Saving to {parent._saveas_outdir} as {parent._ext}"
                 )
@@ -898,7 +917,14 @@ class PreviewDataWidget(EdgeWindow):
             for i in range(len(stats_list))
             if stats_list[i] and "mean" in stats_list[i]
         ]
-        array_labels.append("Combined")
+        # Only show "Combined" if there are multiple arrays
+        if len(array_labels) > 1:
+            array_labels.append("Combined")
+
+        # Ensure selected array is within bounds
+        if self._selected_array >= len(array_labels):
+            self._selected_array = 0
+
         avail = imgui.get_content_region_avail().x
         xpos = 0
 
@@ -918,7 +944,11 @@ class PreviewDataWidget(EdgeWindow):
 
         imgui.separator()
 
-        if self._selected_array == len(array_labels) - 1:  # Combined
+        # Check if "Combined" view is selected (only valid if there are multiple arrays)
+        has_combined = len(array_labels) > 1 and array_labels[-1] == "Combined"
+        is_combined_selected = has_combined and self._selected_array == len(array_labels) - 1
+
+        if is_combined_selected:  # Combined
             imgui.text(f"Stats for Combined {self._array_type}s")
             mean_vals = np.mean(
                 [np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0
@@ -1212,7 +1242,7 @@ class PreviewDataWidget(EdgeWindow):
 
                     implot.setup_axis_limits(implot.ImAxis_.x1.value, -0.5, 2.5)
                     implot.setup_axis_ticks(
-                        implot.ImAxis_.x1.value, x_pos, ["Mean", "Std Dev", "SNR"]
+                        implot.ImAxis_.x1.value, x_pos, ["Mean", "Std Dev", "SNR"], False
                     )
 
                     implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
