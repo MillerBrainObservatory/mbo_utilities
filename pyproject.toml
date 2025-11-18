@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.2.1"
+version = "2.2.2"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -37,7 +37,7 @@ dependencies = [
 	"wgpu[imgui]",
 	"pygfx>=0.14.0",
 	"jupyter_rfb>=0.5.1",
-	"suite2p_mbo>=1.1.1",
+	"suite2p_mbo>=1.1.2",
 	"mbo-suite3d>=0.0.6",
 	"mbo-fpl",
 	"llvmlite>=0.43.0",
