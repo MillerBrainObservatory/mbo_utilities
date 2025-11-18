@@ -76,7 +76,9 @@ USER_PIPELINES = ["suite2p"]
 
 
 def _save_as_worker(path, **imwrite_kwargs):
-    data = imread(path, roi=imwrite_kwargs.pop("roi", None))
+    # Don't pass roi to imread - let it load all ROIs
+    # Then imwrite will handle splitting/filtering based on roi parameter
+    data = imread(path)
     imwrite(data, **imwrite_kwargs)
 
 
@@ -101,6 +103,20 @@ def draw_menu(parent):
         if opened:
             parent.debug_panel.draw()
         imgui.end()
+    if parent.show_metadata_viewer:
+        size = begin_popup_size()
+        imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)
+        _, parent.show_metadata_viewer = imgui.begin(
+            "Metadata Viewer",
+            parent.show_metadata_viewer,
+        )
+        if parent.image_widget and parent.image_widget.data:
+            metadata = parent.image_widget.data[0].metadata
+            from mbo_utilities.graphics._widgets import draw_metadata_inspector
+            draw_metadata_inspector(metadata)
+        else:
+            imgui.text("No data loaded")
+        imgui.end()
     with imgui_ctx.begin_child(
         "menu",
         window_flags=imgui.WindowFlags_.menu_bar,  # noqa,
@@ -120,6 +136,12 @@ def draw_menu(parent):
                 )[0]:
                     webbrowser.open(
                         "https://millerbrainobservatory.github.io/mbo_utilities/"
+                    )
+                if imgui.menu_item(
+                    "Download User Guide Notebook", "", p_selected=False, enabled=True
+                )[0]:
+                    webbrowser.open(
+                        "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
                     )
                 imgui.end_menu()
             if imgui.begin_menu("Settings", True):
@@ -141,33 +163,45 @@ def draw_menu(parent):
 
 
 def draw_tabs(parent):
-    with imgui_ctx.begin_child(
-        "tabs",
-    ):
-        # For single z-plane data, show all tabs
-        # For multi-zplane data, show all tabs (user wants all tabs visible)
-        if imgui.begin_tab_bar("MainPreviewTabs"):
-            if imgui.begin_tab_item("Preview")[0]:
-                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
-                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
-                parent.draw_preview_section()
-                imgui.pop_style_var()
-                imgui.pop_style_var()
-                imgui.end_tab_item()
-            imgui.begin_disabled(not all(parent._zstats_done))
-            if imgui.begin_tab_item("Summary Stats")[0]:
-                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))  # noqa
-                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))  # noqa
+    # Don't create an outer child window - let each tab manage its own scrolling
+    # For single z-plane data, show all tabs
+    # For multi-zplane data, show all tabs (user wants all tabs visible)
+    if imgui.begin_tab_bar("MainPreviewTabs"):
+        if imgui.begin_tab_item("Preview")[0]:
+            imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+
+            # Add metadata button at top of Preview tab
+            imgui.spacing()
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.0, 0.0, 0.0, 1.0))  # Black button
+            imgui.push_style_color(imgui.Col_.border, imgui.ImVec4(1.0, 1.0, 1.0, 1.0))  # White border
+            imgui.push_style_var(imgui.StyleVar_.frame_border_size, 1.0)
+            if imgui.button("Show Metadata"):
+                parent.show_metadata_viewer = not parent.show_metadata_viewer
+            imgui.pop_style_var()
+            imgui.pop_style_color(2)
+            imgui.spacing()
+
+            parent.draw_preview_section()
+            imgui.pop_style_var()
+            imgui.pop_style_var()
+            imgui.end_tab_item()
+        imgui.begin_disabled(not all(parent._zstats_done))
+        if imgui.begin_tab_item("Summary Stats")[0]:
+            imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+            # Create scrollable child for stats content
+            with imgui_ctx.begin_child("##StatsContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.none):
                 parent.draw_stats_section()
-                imgui.pop_style_var()
-                imgui.pop_style_var()
-                imgui.end_tab_item()
-            imgui.end_disabled()
-            if imgui.begin_tab_item("Process")[0]:
-                from mbo_utilities.graphics.pipeline_widgets import draw_tab_process
-                draw_tab_process(parent)
-                imgui.end_tab_item()
-            imgui.end_tab_bar()
+            imgui.pop_style_var()
+            imgui.pop_style_var()
+            imgui.end_tab_item()
+        imgui.end_disabled()
+        if imgui.begin_tab_item("Process")[0]:
+            from mbo_utilities.graphics.pipeline_widgets import draw_tab_process
+            draw_tab_process(parent)
+            imgui.end_tab_item()
+        imgui.end_tab_bar()
 
 
 def draw_saveas_popup(parent):
@@ -360,14 +394,22 @@ def draw_saveas_popup(parent):
                 parent._saveas_outdir = last_dir
             try:
                 save_planes = [p + 1 for p in parent._selected_planes]
+
+                # Validate that at least one plane is selected
+                if not save_planes:
+                    parent.logger.error("No z-planes selected! Please select at least one plane.")
+                    imgui.close_current_popup()
+                    return
+
                 parent._saveas_total = len(save_planes)
                 if parent._saveas_rois:
                     if (
                         not parent._saveas_selected_roi
                         or len(parent._saveas_selected_roi) == set()
                     ):
-                        parent._saveas_selected_roi = set(range(1, parent.num_rois + 1))
-                    rois = sorted(parent._saveas_selected_roi)
+                        parent._saveas_selected_roi = set(range(parent.num_rois))
+                    # Convert 0-indexed UI values to 1-indexed ROI values for MboRawArray
+                    rois = sorted([r + 1 for r in parent._saveas_selected_roi])
                 else:
                     rois = None
 
@@ -389,7 +431,7 @@ def draw_saveas_popup(parent):
                     "progress_callback": lambda frac,
                     current_plane: parent.gui_progress_callback(frac, current_plane),
                 }
-                parent.logger.info(f"Saving planes {save_planes}")
+                parent.logger.info(f"Saving planes {save_planes} with ROIs {rois if rois else 'stitched'}")
                 parent.logger.info(
                     f"Saving to {parent._saveas_outdir} as {parent._ext}"
                 )
@@ -451,6 +493,13 @@ class PreviewDataWidget(EdgeWindow):
         gui_handler.setFormatter(logging.Formatter("%(message)s"))
         gui_handler.setLevel(logging.DEBUG)
         log.attach(gui_handler)
+
+        # Also add console handler so logs appear in terminal
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(logging.Formatter("%(levelname)s - %(name)s - %(message)s"))
+        console_handler.setLevel(logging.DEBUG)
+        log.attach(console_handler)
+
         log.set_global_level(logging.DEBUG)
         self.logger = log.get("gui")
 
@@ -554,6 +603,7 @@ class PreviewDataWidget(EdgeWindow):
         # Settings menu flags
         self.show_debug_panel = False
         self.show_scope_window = False
+        self.show_metadata_viewer = False
 
         # ------------------------properties
         for arr in self.image_widget.data:
@@ -562,7 +612,7 @@ class PreviewDataWidget(EdgeWindow):
             if hasattr(arr, "max_offset"):
                 arr.max_offset = 3
             if hasattr(arr, "upsample"):
-                arr.upsample = 20
+                arr.upsample = 5
             if hasattr(arr, "fix_phase"):
                 arr.fix_phase = False
             if hasattr(arr, "use_fft"):
@@ -572,7 +622,7 @@ class PreviewDataWidget(EdgeWindow):
         self._gaussian_sigma = 0
         self._current_offset = [0.0] * self.num_arrays
         self._window_size = 1
-        self._phase_upsample = 20
+        self._phase_upsample = 5
         self._border = 3
         self._auto_update = False
         self._proj = "mean"
@@ -666,8 +716,14 @@ class PreviewDataWidget(EdgeWindow):
 
         offsets = []
         for i, array in enumerate(self.image_widget.data):
-            # MboRawArray computes its own offset
-            if hasattr(array, "offset"):
+            # MboRawArray computes offset during read - trigger a read to get current offset
+            if isinstance(array, MboRawArray):
+                # Read current frame to compute offset (this updates array.offset)
+                idx = self.image_widget.current_index
+                t = idx.get("t", 0)
+                z = idx.get("z", 0)
+                # Reading the frame triggers offset computation
+                _ = ndim_to_frame(array, t, z)
                 offsets.append(array.offset)
             # Use computed offset for other lazy arrays
             elif self._computed_offsets[i] is not None:
@@ -691,7 +747,7 @@ class PreviewDataWidget(EdgeWindow):
             # Compute phase correction offsets for lazy arrays
             if value:
                 self._compute_phase_offsets()
-            self.update_frame_apply()
+        self.update_frame_apply()
         self.image_widget.current_index = self.image_widget.current_index
 
     @property
@@ -728,6 +784,7 @@ class PreviewDataWidget(EdgeWindow):
         if self._fix_phase and not self.is_mbo_scan:
             self._compute_phase_offsets()
 
+        self.update_frame_apply()
         self.image_widget.current_index = self.image_widget.current_index
 
     @property
@@ -800,6 +857,15 @@ class PreviewDataWidget(EdgeWindow):
 
     @window_size.setter
     def window_size(self, value):
+        if value < 1:
+            self.logger.warning(f"Window size must be >= 1, got {value}. Setting to 1.")
+            value = 1
+        elif value < 4 and self.fix_phase:
+            self.logger.warning(
+                f"Window size ({value}) < 4 with phase correction enabled. "
+                f"Phase correction requires >= 4 frames for reliable results. "
+                f"Consider increasing window size or disabling phase correction."
+            )
         self.logger.info(f"Window size set to {value}.")
         self.image_widget.window_funcs["t"].window_size = value
         self._window_size = value
@@ -843,7 +909,6 @@ class PreviewDataWidget(EdgeWindow):
                 imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats"
             )
 
-        cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize  # type: ignore # noqa
         imgui.spacing()
 
         # ROI selector
@@ -852,7 +917,14 @@ class PreviewDataWidget(EdgeWindow):
             for i in range(len(stats_list))
             if stats_list[i] and "mean" in stats_list[i]
         ]
-        array_labels.append("Combined")
+        # Only show "Combined" if there are multiple arrays
+        if len(array_labels) > 1:
+            array_labels.append("Combined")
+
+        # Ensure selected array is within bounds
+        if self._selected_array >= len(array_labels):
+            self._selected_array = 0
+
         avail = imgui.get_content_region_avail().x
         xpos = 0
 
@@ -872,7 +944,11 @@ class PreviewDataWidget(EdgeWindow):
 
         imgui.separator()
 
-        if self._selected_array == len(array_labels) - 1:  # Combined
+        # Check if "Combined" view is selected (only valid if there are multiple arrays)
+        has_combined = len(array_labels) > 1 and array_labels[-1] == "Combined"
+        is_combined_selected = has_combined and self._selected_array == len(array_labels) - 1
+
+        if is_combined_selected:  # Combined
             imgui.text(f"Stats for Combined {self._array_type}s")
             mean_vals = np.mean(
                 [np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0
@@ -897,190 +973,189 @@ class PreviewDataWidget(EdgeWindow):
             # For single z-plane, show simplified combined view
             if is_single_zplane:
                 # Show just the single plane combined stats
-                with imgui_ctx.begin_child(
-                    "##SummaryCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
+                if imgui.begin_table(
+                    f"Stats (averaged over {self._array_type}s)",
+                    3,
+                    imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
                 ):
-                    if imgui.begin_table(
-                        f"Stats (averaged over {self._array_type}s)",
-                        3,
-                        imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
-                    ):
-                        for col in ["Metric", "Value", "Unit"]:
-                            imgui.table_setup_column(
-                                col, imgui.TableColumnFlags_.width_stretch
-                            )
-                        imgui.table_headers_row()
+                    for col in ["Metric", "Value", "Unit"]:
+                        imgui.table_setup_column(
+                            col, imgui.TableColumnFlags_.width_stretch
+                        )
+                    imgui.table_headers_row()
 
-                        metrics = [
-                            ("Mean Fluorescence", mean_vals[0], "a.u."),
-                            ("Std. Deviation", std_vals[0], "a.u."),
-                            ("Signal-to-Noise", snr_vals[0], "ratio"),
-                        ]
-
-                        for metric_name, value, unit in metrics:
-                            imgui.table_next_row()
-                            imgui.table_next_column()
-                            imgui.text(metric_name)
-                            imgui.table_next_column()
-                            imgui.text(f"{value:.2f}")
-                            imgui.table_next_column()
-                            imgui.text(unit)
-                        imgui.end_table()
-
-                with imgui_ctx.begin_child(
-                    "##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
-                ):
-                    imgui.text("Signal Quality Comparison")
-                    set_tooltip(
-                        f"Comparison of mean fluorescence across all {self._array_type}s",
-                        True,
-                    )
-
-                    # Get per-ROI mean values
-                    roi_means = [
-                        np.asarray(self._zstats[r]["mean"][0], float)
-                        for r in range(self.num_rois)
-                        if self._zstats[r] and "mean" in self._zstats[r]
+                    metrics = [
+                        ("Mean Fluorescence", mean_vals[0], "a.u."),
+                        ("Std. Deviation", std_vals[0], "a.u."),
+                        ("Signal-to-Noise", snr_vals[0], "ratio"),
                     ]
 
-                    if roi_means and implot.begin_plot(
-                        "Signal Comparison", imgui.ImVec2(-1, 350)
-                    ):
-                        style_seaborn_dark()
-                        implot.setup_axes(
-                            f"{self._array_type.capitalize()}",
-                            "Mean Fluorescence (a.u.)",
-                            implot.AxisFlags_.none.value,
-                            implot.AxisFlags_.auto_fit.value,
-                        )
+                    for metric_name, value, unit in metrics:
+                        imgui.table_next_row()
+                        imgui.table_next_column()
+                        imgui.text(metric_name)
+                        imgui.table_next_column()
+                        imgui.text(f"{value:.2f}")
+                        imgui.table_next_column()
+                        imgui.text(unit)
+                    imgui.end_table()
 
-                        x_pos = np.arange(len(roi_means), dtype=np.float64)
-                        heights = np.array(roi_means, dtype=np.float64)
+                imgui.spacing()
+                imgui.separator()
+                imgui.spacing()
 
-                        labels = [f"{i + 1}" for i in range(len(roi_means))]
-                        implot.setup_axis_limits(
-                            implot.ImAxis_.x1.value, -0.5, len(roi_means) - 0.5
-                        )
-                        implot.setup_axis_ticks_custom(
-                            implot.ImAxis_.x1.value, x_pos, labels
-                        )
+                imgui.text("Signal Quality Comparison")
+                set_tooltip(
+                    f"Comparison of mean fluorescence across all {self._array_type}s",
+                    True,
+                )
 
-                        implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                        implot.push_style_color(
-                            implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
-                        )
-                        implot.plot_bars(
-                            f"{self._array_type.capitalize()} Signal",
-                            x_pos,
-                            heights,
-                            0.6,
-                        )
-                        implot.pop_style_color()
-                        implot.pop_style_var()
+                # Get per-ROI mean values
+                roi_means = [
+                    np.asarray(self._zstats[r]["mean"][0], float)
+                    for r in range(self.num_rois)
+                    if self._zstats[r] and "mean" in self._zstats[r]
+                ]
 
-                        # Add mean line
-                        mean_line = np.full_like(heights, mean_vals[0])
-                        implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
-                        implot.push_style_color(
-                            implot.Col_.line.value, (1.0, 0.4, 0.2, 0.8)
-                        )
-                        implot.plot_line("Average", x_pos, mean_line)
-                        implot.pop_style_color()
-                        implot.pop_style_var()
+                plot_width = imgui.get_content_region_avail().x
+                if roi_means and implot.begin_plot(
+                    "Signal Comparison", imgui.ImVec2(plot_width, 350)
+                ):
+                    style_seaborn_dark()
+                    implot.setup_axes(
+                        f"{self._array_type.capitalize()}",
+                        "Mean Fluorescence (a.u.)",
+                        implot.AxisFlags_.none.value,
+                        implot.AxisFlags_.auto_fit.value,
+                    )
 
-                        implot.end_plot()
+                    x_pos = np.arange(len(roi_means), dtype=np.float64)
+                    heights = np.array(roi_means, dtype=np.float64)
+
+                    labels = [f"{i + 1}" for i in range(len(roi_means))]
+                    implot.setup_axis_limits(
+                        implot.ImAxis_.x1.value, -0.5, len(roi_means) - 0.5
+                    )
+                    implot.setup_axis_ticks_custom(
+                        implot.ImAxis_.x1.value, x_pos, labels
+                    )
+
+                    implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
+                    implot.push_style_color(
+                        implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                    )
+                    implot.plot_bars(
+                        f"{self._array_type.capitalize()} Signal",
+                        x_pos,
+                        heights,
+                        0.6,
+                    )
+                    implot.pop_style_color()
+                    implot.pop_style_var()
+
+                    # Add mean line
+                    mean_line = np.full_like(heights, mean_vals[0])
+                    implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
+                    implot.push_style_color(
+                        implot.Col_.line.value, (1.0, 0.4, 0.2, 0.8)
+                    )
+                    implot.plot_line("Average", x_pos, mean_line)
+                    implot.pop_style_color()
+                    implot.pop_style_var()
+
+                    implot.end_plot()
 
             else:
                 # Multi-z-plane: show original table and combined plot
                 # Table
-                with imgui_ctx.begin_child(
-                    "##SummaryCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
-                ):
-                    if imgui.begin_table(
-                        f"Stats, averaged over {self._array_type}s",
-                        4,
-                        imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,  # type: ignore # noqa
-                    ):  # type: ignore # noqa
-                        for col in ["Z", "Mean", "Std", "SNR"]:
-                            imgui.table_setup_column(
-                                col, imgui.TableColumnFlags_.width_stretch
-                            )  # type: ignore # noqa
-                        imgui.table_headers_row()
-                        for i in range(len(z_vals)):
-                            imgui.table_next_row()
-                            for val in (
-                                z_vals[i],
-                                mean_vals[i],
-                                std_vals[i],
-                                snr_vals[i],
-                            ):
-                                imgui.table_next_column()
-                                imgui.text(f"{val:.2f}")
-                        imgui.end_table()
+                if imgui.begin_table(
+                    f"Stats, averaged over {self._array_type}s",
+                    4,
+                    imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,  # type: ignore # noqa
+                ):  # type: ignore # noqa
+                    for col in ["Z", "Mean", "Std", "SNR"]:
+                        imgui.table_setup_column(
+                            col, imgui.TableColumnFlags_.width_stretch
+                        )  # type: ignore # noqa
+                    imgui.table_headers_row()
+                    for i in range(len(z_vals)):
+                        imgui.table_next_row()
+                        for val in (
+                            z_vals[i],
+                            mean_vals[i],
+                            std_vals[i],
+                            snr_vals[i],
+                        ):
+                            imgui.table_next_column()
+                            imgui.text(f"{val:.2f}")
+                    imgui.end_table()
 
-                with imgui_ctx.begin_child(
-                    "##PlotsCombined", size=imgui.ImVec2(0, 0), child_flags=cflags
+                imgui.spacing()
+                imgui.separator()
+                imgui.spacing()
+
+                imgui.text("Z-plane Signal: Combined")
+                set_tooltip(
+                    f"Gray = per-ROI z-profiles (mean over frames)."
+                    f" Blue shade = across-ROI mean ± std; blue line = mean."
+                    f" Hover gray lines for values.",
+                    True,
+                )
+
+                # build per-ROI series
+                roi_series = [
+                    np.asarray(self._zstats[r]["mean"], float)
+                    for r in range(self.num_rois)
+                ]
+
+                L = min(len(s) for s in roi_series)
+                z = np.asarray(z_vals[:L], float)
+                roi_series = [s[:L] for s in roi_series]
+                stack = np.vstack(roi_series)
+                mean_vals = stack.mean(axis=0)
+                std_vals = stack.std(axis=0)
+                lower = mean_vals - std_vals
+                upper = mean_vals + std_vals
+
+                # Use available width to prevent cutoff
+                plot_width = imgui.get_content_region_avail().x
+                if implot.begin_plot(
+                    "Z-Plane Plot (Combined)", imgui.ImVec2(plot_width, 300)
                 ):
-                    imgui.text("Z-plane Signal: Combined")
-                    set_tooltip(
-                        f"Gray = per-ROI z-profiles (mean over frames)."
-                        f" Blue shade = across-ROI mean ± std; blue line = mean."
-                        f" Hover gray lines for values.",
-                        True,
+                    style_seaborn_dark()
+                    implot.setup_axes(
+                        "Z-Plane",
+                        "Mean Fluorescence",
+                        implot.AxisFlags_.none.value,
+                        implot.AxisFlags_.auto_fit.value,
                     )
 
-                    # build per-ROI series
-                    roi_series = [
-                        np.asarray(self._zstats[r]["mean"], float)
-                        for r in range(self.num_rois)
-                    ]
+                    implot.setup_axis_limits(
+                        implot.ImAxis_.x1.value, float(z[0]), float(z[-1])
+                    )
+                    implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
 
-                    L = min(len(s) for s in roi_series)
-                    z = np.asarray(z_vals[:L], float)
-                    roi_series = [s[:L] for s in roi_series]
-                    stack = np.vstack(roi_series)
-                    mean_vals = stack.mean(axis=0)
-                    std_vals = stack.std(axis=0)
-                    lower = mean_vals - std_vals
-                    upper = mean_vals + std_vals
-
-                    if implot.begin_plot(
-                        "Z-Plane Plot (Combined)", imgui.ImVec2(-1, 300)
-                    ):
-                        style_seaborn_dark()
-                        implot.setup_axes(
-                            "Z-Plane",
-                            "Mean Fluorescence",
-                            implot.AxisFlags_.none.value,
-                            implot.AxisFlags_.auto_fit.value,
-                        )
-
-                        implot.setup_axis_limits(
-                            implot.ImAxis_.x1.value, float(z[0]), float(z[-1])
-                        )
-                        implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
-
-                        for i, ys in enumerate(roi_series):
-                            label = f"ROI {i + 1}##roi{i}"
-                            implot.push_style_var(implot.StyleVar_.line_weight.value, 1)
-                            implot.push_style_color(
-                                implot.Col_.line.value, (0.6, 0.6, 0.6, 0.35)
-                            )
-                            implot.plot_line(label, z, ys)
-                            implot.pop_style_color()
-                            implot.pop_style_var()
-
+                    for i, ys in enumerate(roi_series):
+                        label = f"ROI {i + 1}##roi{i}"
+                        implot.push_style_var(implot.StyleVar_.line_weight.value, 1)
                         implot.push_style_color(
-                            implot.Col_.fill.value, (0.2, 0.4, 0.8, 0.25)
+                            implot.Col_.line.value, (0.6, 0.6, 0.6, 0.35)
                         )
-                        implot.plot_shaded("Mean ± Std##band", z, lower, upper)
+                        implot.plot_line(label, z, ys)
                         implot.pop_style_color()
-
-                        implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
-                        implot.plot_line("Mean##line", z, mean_vals)
                         implot.pop_style_var()
 
-                        implot.end_plot()
+                    implot.push_style_color(
+                        implot.Col_.fill.value, (0.2, 0.4, 0.8, 0.25)
+                    )
+                    implot.plot_shaded("Mean ± Std##band", z, lower, upper)
+                    implot.pop_style_color()
+
+                    implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
+                    implot.plot_line("Mean##line", z, mean_vals)
+                    implot.pop_style_var()
+
+                    implot.end_plot()
 
         else:
             array_idx = self._selected_array
@@ -1104,130 +1179,128 @@ class PreviewDataWidget(EdgeWindow):
             # For single z-plane, show simplified table and visualization
             if is_single_zplane:
                 # Show just the single plane stats in a nice format
-                with imgui_ctx.begin_child(
-                    f"##Summary{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
+                if imgui.begin_table(
+                    f"stats{array_idx}",
+                    3,
+                    imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
                 ):
-                    if imgui.begin_table(
-                        f"stats{array_idx}",
-                        3,
-                        imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
-                    ):
-                        for col in ["Metric", "Value", "Unit"]:
-                            imgui.table_setup_column(
-                                col, imgui.TableColumnFlags_.width_stretch
-                            )
-                        imgui.table_headers_row()
+                    for col in ["Metric", "Value", "Unit"]:
+                        imgui.table_setup_column(
+                            col, imgui.TableColumnFlags_.width_stretch
+                        )
+                    imgui.table_headers_row()
 
-                        metrics = [
-                            ("Mean Fluorescence", mean_vals[0], "a.u."),
-                            ("Std. Deviation", std_vals[0], "a.u."),
-                            ("Signal-to-Noise", snr_vals[0], "ratio"),
-                        ]
+                    metrics = [
+                        ("Mean Fluorescence", mean_vals[0], "a.u."),
+                        ("Std. Deviation", std_vals[0], "a.u."),
+                        ("Signal-to-Noise", snr_vals[0], "ratio"),
+                    ]
 
-                        for metric_name, value, unit in metrics:
-                            imgui.table_next_row()
-                            imgui.table_next_column()
-                            imgui.text(metric_name)
-                            imgui.table_next_column()
-                            imgui.text(f"{value:.2f}")
-                            imgui.table_next_column()
-                            imgui.text(unit)
-                        imgui.end_table()
+                    for metric_name, value, unit in metrics:
+                        imgui.table_next_row()
+                        imgui.table_next_column()
+                        imgui.text(metric_name)
+                        imgui.table_next_column()
+                        imgui.text(f"{value:.2f}")
+                        imgui.table_next_column()
+                        imgui.text(unit)
+                    imgui.end_table()
+
+                imgui.spacing()
+                imgui.separator()
+                imgui.spacing()
 
                 style_seaborn_dark()
-                with imgui_ctx.begin_child(
-                    f"##Plots1{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
+                imgui.text("Signal Quality Metrics")
+                set_tooltip(
+                    "Bar chart showing mean fluorescence, standard deviation, and SNR",
+                    True,
+                )
+
+                plot_width = imgui.get_content_region_avail().x
+                if implot.begin_plot(
+                    f"Signal Metrics {array_idx}", imgui.ImVec2(plot_width, 350)
                 ):
-                    imgui.text("Signal Quality Metrics")
-                    set_tooltip(
-                        "Bar chart showing mean fluorescence, standard deviation, and SNR",
-                        True,
+                    implot.setup_axes(
+                        "Metric",
+                        "Value (normalized)",
+                        implot.AxisFlags_.none.value,
+                        implot.AxisFlags_.auto_fit.value,
                     )
 
-                    if implot.begin_plot(
-                        f"Signal Metrics {array_idx}", imgui.ImVec2(-1, 350)
-                    ):
-                        implot.setup_axes(
-                            "Metric",
-                            "Value (normalized)",
-                            implot.AxisFlags_.none.value,
-                            implot.AxisFlags_.auto_fit.value,
-                        )
+                    # Normalize values for better visualization
+                    norm_mean = mean_vals[0]
+                    norm_std = std_vals[0]
+                    norm_snr = snr_vals[0] * (
+                        norm_mean / max(snr_vals[0], 1.0)
+                    )  # Scale SNR to be comparable
 
-                        # Normalize values for better visualization
-                        norm_mean = mean_vals[0]
-                        norm_std = std_vals[0]
-                        norm_snr = snr_vals[0] * (
-                            norm_mean / max(snr_vals[0], 1.0)
-                        )  # Scale SNR to be comparable
+                    x_pos = np.array([0.0, 1.0, 2.0], dtype=np.float64)
+                    heights = np.array(
+                        [norm_mean, norm_std, norm_snr], dtype=np.float64
+                    )
 
-                        x_pos = np.array([0.0, 1.0, 2.0], dtype=np.float64)
-                        heights = np.array(
-                            [norm_mean, norm_std, norm_snr], dtype=np.float64
-                        )
+                    implot.setup_axis_limits(implot.ImAxis_.x1.value, -0.5, 2.5)
+                    implot.setup_axis_ticks(
+                        implot.ImAxis_.x1.value, x_pos, ["Mean", "Std Dev", "SNR"], False
+                    )
 
-                        implot.setup_axis_limits(implot.ImAxis_.x1.value, -0.5, 2.5)
-                        implot.setup_axis_ticks_custom(
-                            implot.ImAxis_.x1.value, x_pos, ["Mean", "Std Dev", "SNR"]
-                        )
+                    implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
+                    implot.push_style_color(
+                        implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                    )
+                    implot.plot_bars("Signal Metrics", x_pos, heights, 0.6)
+                    implot.pop_style_color()
+                    implot.pop_style_var()
 
-                        implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                        implot.push_style_color(
-                            implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
-                        )
-                        implot.plot_bars("Signal Metrics", x_pos, heights, 0.6)
-                        implot.pop_style_color()
-                        implot.pop_style_var()
-
-                        implot.end_plot()
+                    implot.end_plot()
 
             else:
                 # Multi-z-plane: show original table and line plot
-                with imgui_ctx.begin_child(
-                    f"##Summary{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
+                if imgui.begin_table(
+                    f"zstats{array_idx}",
+                    4,
+                    imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
                 ):
-                    if imgui.begin_table(
-                        f"zstats{array_idx}",
-                        4,
-                        imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
-                    ):
-                        for col in ["Z", "Mean", "Std", "SNR"]:
-                            imgui.table_setup_column(
-                                col, imgui.TableColumnFlags_.width_stretch
-                            )
-                        imgui.table_headers_row()
-                        for j in range(n):
-                            imgui.table_next_row()
-                            for val in (
-                                int(z_vals[j]),
-                                mean_vals[j],
-                                std_vals[j],
-                                snr_vals[j],
-                            ):
-                                imgui.table_next_column()
-                                imgui.text(f"{val:.2f}")
-                        imgui.end_table()
+                    for col in ["Z", "Mean", "Std", "SNR"]:
+                        imgui.table_setup_column(
+                            col, imgui.TableColumnFlags_.width_stretch
+                        )
+                    imgui.table_headers_row()
+                    for j in range(n):
+                        imgui.table_next_row()
+                        for val in (
+                            int(z_vals[j]),
+                            mean_vals[j],
+                            std_vals[j],
+                            snr_vals[j],
+                        ):
+                            imgui.table_next_column()
+                            imgui.text(f"{val:.2f}")
+                    imgui.end_table()
+
+                imgui.spacing()
+                imgui.separator()
+                imgui.spacing()
 
                 style_seaborn_dark()
-                with imgui_ctx.begin_child(
-                    f"##Plots1{array_idx}", size=imgui.ImVec2(0, 0), child_flags=cflags
+                imgui.text("Z-plane Signal: Mean ± Std")
+                plot_width = imgui.get_content_region_avail().x
+                if implot.begin_plot(
+                    f"Z-Plane Signal {array_idx}", imgui.ImVec2(plot_width, 300)
                 ):
-                    imgui.text("Z-plane Signal: Mean ± Std")
-                    if implot.begin_plot(
-                        f"Z-Plane Signal {array_idx}", imgui.ImVec2(-1, 300)
-                    ):
-                        implot.setup_axes(
-                            "Z-Plane",
-                            "Mean Fluorescence",
-                            implot.AxisFlags_.auto_fit.value,
-                            implot.AxisFlags_.auto_fit.value,
-                        )
-                        implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
-                        implot.plot_error_bars(
-                            f"Mean ± Std {array_idx}", z_vals, mean_vals, std_vals
-                        )
-                        implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals)
-                        implot.end_plot()
+                    implot.setup_axes(
+                        "Z-Plane",
+                        "Mean Fluorescence",
+                        implot.AxisFlags_.auto_fit.value,
+                        implot.AxisFlags_.auto_fit.value,
+                    )
+                    implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
+                    implot.plot_error_bars(
+                        f"Mean ± Std {array_idx}", z_vals, mean_vals, std_vals
+                    )
+                    implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals)
+                    implot.end_plot()
 
     def draw_preview_section(self):
         imgui.dummy(imgui.ImVec2(0, 5))

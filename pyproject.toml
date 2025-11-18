@@ -45,7 +45,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mbo = "mbo_utilities.graphics.run_gui:run_gui"  # alias
+mbo = "mbo_utilities.graphics.run_gui:_cli_entry"  # alias
 pollen = "pollen.pollen_calibration_mbo:main"
 docs = "scripts.build_docs:main"
 transfer = "mbo_utilities.transfer:main"
@@ -90,7 +90,7 @@ url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [tool.uv.sources]
-mbo-fpl = { git = "https://github.com/MillerBrainObservatory/mbo_fastplotlib.git", branch = "main"}
+# mbo-fpl = { git = "https://github.com/MillerBrainObservatory/mbo_fastplotlib.git", branch = "main"}
 # mbo-suite3d = { git = "https://github.com/MillerBrainObservatory/suite3d.git", branch = "main"}
 torch = [
   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },

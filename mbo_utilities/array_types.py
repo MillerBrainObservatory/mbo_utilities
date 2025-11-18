@@ -264,29 +264,65 @@ class Suite2pArray:
         self.metadata = np.load(ops_path, allow_pickle=True).item()
         self.num_rois = self.metadata.get("num_rois", 1)
 
-        # resolve both possible bins
-        self.raw_file = Path(
-            self.metadata.get("raw_file", path.with_name("data_raw.bin"))
-        )
-        self.reg_file = Path(self.metadata.get("reg_file", path.with_name("data.bin")))
+        # resolve both possible bins - always look in the same directory as ops.npy
+        # (metadata paths may be stale if data was moved)
+        ops_dir = ops_path.parent
+        self.raw_file = ops_dir / "data_raw.bin"
+        self.reg_file = ops_dir / "data.bin"
 
         # choose which one to use
         if path.suffix == ".bin":
+            # User clicked directly on a .bin file - use that specific file
             self.active_file = path
+            if not self.active_file.exists():
+                raise FileNotFoundError(
+                    f"Binary file not found: {self.active_file}\n"
+                    f"Available files in {ops_dir}:\n"
+                    f"  - data.bin: {'exists' if self.reg_file.exists() else 'missing'}\n"
+                    f"  - data_raw.bin: {'exists' if self.raw_file.exists() else 'missing'}"
+                )
         else:
-            self.active_file = (
-                self.reg_file if self.reg_file.exists() else self.raw_file
-            )
-
-        # confirm
-        if not self.active_file.exists():
-            raise FileNotFoundError(f"Active binary not found: {self.active_file}")
+            # User clicked on directory/ops.npy - choose best available file
+            # Prefer registered (data.bin) over raw (data_raw.bin)
+            if self.reg_file.exists():
+                self.active_file = self.reg_file
+            elif self.raw_file.exists():
+                self.active_file = self.raw_file
+            else:
+                raise FileNotFoundError(
+                    f"No binary files found in {ops_dir}\n"
+                    f"Expected either:\n"
+                    f"  - {self.reg_file} (registered)\n"
+                    f"  - {self.raw_file} (raw)\n"
+                    f"Please check that Suite2p processing completed successfully."
+                )
 
         self.Ly = self.metadata["Ly"]
         self.Lx = self.metadata["Lx"]
         self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
         self.shape = (self.nframes, self.Ly, self.Lx)
         self.dtype = np.int16
+
+        # Validate file size matches expected shape
+        expected_bytes = int(np.prod(self.shape)) * np.dtype(self.dtype).itemsize
+        actual_bytes = self.active_file.stat().st_size
+        if actual_bytes < expected_bytes:
+            raise ValueError(
+                f"Binary file {self.active_file.name} is too small!\n"
+                f"Expected: {expected_bytes:,} bytes for shape {self.shape}\n"
+                f"Actual: {actual_bytes:,} bytes\n"
+                f"File may be corrupted or ops.npy metadata may be incorrect."
+            )
+        elif actual_bytes > expected_bytes:
+            import warnings
+            warnings.warn(
+                f"Binary file {self.active_file.name} is larger than expected.\n"
+                f"Expected: {expected_bytes:,} bytes for shape {self.shape}\n"
+                f"Actual: {actual_bytes:,} bytes\n"
+                f"Extra data will be ignored.",
+                UserWarning
+            )
+
         self._file = np.memmap(
             self.active_file, mode="r", dtype=self.dtype, shape=self.shape
         )
@@ -328,37 +364,37 @@ class Suite2pArray:
         arrays = []
         names = []
 
-        # if both are available, and the same shape, show both
-        if "raw_file" in self.metadata and "reg_file" in self.metadata:
-            try:
-                raw = Suite2pArray(self.metadata["raw_file"])
-                reg = Suite2pArray(self.metadata["reg_file"])
-                if raw.shape == reg.shape:
-                    arrays.extend([raw, reg])
-                    names.extend(["raw", "registered"])
-                else:
-                    arrays.append(reg)
-                    names.append("registered")
-            except Exception as e:
-                logger.warning(f"Could not open raw_file or reg_file: {e}")
-        if "reg_file" in self.metadata:
-            try:
-                reg = Suite2pArray(self.metadata["reg_file"])
-                arrays.append(reg)
-                names.append("registered")
-            except Exception as e:
-                logger.warning(f"Could not open reg_file: {e}")
+        # Try to load both files if they exist
+        raw_loaded = False
+        reg_loaded = False
 
-        elif "raw_file" in self.metadata:
+        if self.raw_file.exists():
             try:
-                raw = Suite2pArray(self.metadata["raw_file"])
+                raw = Suite2pArray(self.raw_file)
                 arrays.append(raw)
                 names.append("raw")
+                raw_loaded = True
             except Exception as e:
-                logger.warning(f"Could not open raw_file: {e}")
+                logger.warning(f"Could not open raw file {self.raw_file}: {e}")
 
+        if self.reg_file.exists():
+            try:
+                reg = Suite2pArray(self.reg_file)
+                arrays.append(reg)
+                names.append("registered")
+                reg_loaded = True
+            except Exception as e:
+                logger.warning(f"Could not open registered file {self.reg_file}: {e}")
+
+        # If neither file could be loaded, show the currently active file
         if not arrays:
-            raise ValueError("No loadable raw_file or reg_file in ops")
+            arrays.append(self)
+            if self.active_file == self.raw_file:
+                names.append("raw")
+            elif self.active_file == self.reg_file:
+                names.append("registered")
+            else:
+                names.append(self.active_file.name)
 
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
         histogram_widget = kwargs.get("histogram_widget", True)
@@ -378,18 +414,65 @@ class Suite2pArray:
 
 
 class H5Array:
-    def __init__(self, filenames: Path | str, dataset: str = "mov"):
+    def __init__(self, filenames: Path | str, dataset: str = None):
         self.filenames = Path(filenames)
         self._f = h5py.File(self.filenames, "r")
-        self._d = self._f[dataset]
+
+        # Auto-detect dataset if not specified
+        if dataset is None:
+            if "mov" in self._f:
+                dataset = "mov"
+            elif "data" in self._f:
+                dataset = "data"
+            elif "scan_corrections" in self._f:
+                dataset = "scan_corrections"
+                logger.info(f"Detected pollen calibration file: {self.filenames.name}")
+            else:
+                available = list(self._f.keys())
+                if not available:
+                    raise ValueError(f"No datasets found in {self.filenames}")
+                dataset = available[0]
+                logger.warning(
+                    f"Using first available dataset '{dataset}' in {self.filenames.name}. "
+                    f"Available: {available}"
+                )
+
+        try:
+            self._d = self._f[dataset]
+        except KeyError:
+            available = list(self._f.keys())
+            raise KeyError(
+                f"Dataset '{dataset}' not found in {self.filenames}. "
+                f"Available datasets: {available}"
+            ) from None
+
+        self.dataset_name = dataset
         self.shape = self._d.shape
         self.dtype = self._d.dtype
         self.ndim = self._d.ndim
 
     @property
     def num_planes(self) -> int:
-        # TODO: not sure what to do here
-        return 14
+        # Try to get from metadata first
+        metadata = self.metadata
+        if "num_planes" in metadata:
+            return int(metadata["num_planes"])
+
+        # Infer from shape based on data dimensionality
+        if self.ndim >= 4:  # (T, Z, Y, X) - volumetric time series
+            return int(self.shape[1])
+        elif self.ndim == 3:  # (T, Y, X) - single plane time series
+            return 1
+        elif self.ndim == 1:
+            # Special case: pollen scan_corrections (nc,)
+            if self.dataset_name == "scan_corrections":
+                return int(self.shape[0])
+            return 1
+        elif self.ndim == 2:  # (Y, X) - single frame
+            return 1
+
+        # Fallback
+        return 1
 
     def __len__(self) -> int:
         return self.shape[0]
@@ -476,6 +559,10 @@ class MBOTiffArray:
     def metadata(self) -> dict:
         return self._metadata or {}
 
+    @metadata.setter
+    def metadata(self, metadata: dict):
+        self._metadata = metadata
+
     @property
     def chunks(self):
         return self._chunks or CHUNKS_4D
@@ -552,7 +639,7 @@ class MBOTiffArray:
             metadata=md,
             progress_callback=progress_callback,
             debug=debug,
-            dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+            dshape=(self.shape[0], self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
             plane_index=None,
             **kwargs,
         )
@@ -692,7 +779,7 @@ class TiffArray:
             metadata=md,
             progress_callback=progress_callback,
             debug=debug,
-            dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+            dshape=(self.shape[0], self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
             plane_index=None,
         )
 
@@ -708,13 +795,23 @@ class MboRawArray:
         upsample: int = 5,
         max_offset: int = 4,
         use_fft: bool = False,
+        fft_method: str = "2d",
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
 
-        self.roi = self._roi = roi
+        # Initialize data attributes first (needed for roi setter validation)
+        self._metadata = get_metadata(self.filenames)
+        self.num_channels = self._metadata["num_planes"]
+        self.num_rois = self._metadata.get("num_rois", 1)
+
+        # Now set roi (this will call the setter which validates against num_rois)
+        self._roi = roi
+        self.roi = roi
+
         self._fix_phase = fix_phase
         self._use_fft = use_fft
+        self._fft_method = fft_method
         self._phasecorr_method = phasecorr_method
         self.border = border
         self.max_offset = max_offset
@@ -730,12 +827,6 @@ class MboRawArray:
             "roi_array_shape": False,
             "phase_offset": False,
         }
-
-        # Initialize data attributes (set in read_data)
-        self._metadata = get_metadata(self.filenames)
-
-        self.num_channels = self._metadata["num_planes"]
-        self.num_rois = self._metadata["num_rois"]
         self.num_frames = self._metadata["num_frames"]
         self._source_dtype = self._metadata["dtype"]  # Original dtype from file
         self._target_dtype = None  # Target dtype for conversion (set by astype)
@@ -743,6 +834,19 @@ class MboRawArray:
 
         # Cache frames_per_file to avoid slow len(tf.pages) calls
         self._frames_per_file = self._metadata.get("frames_per_file", None)
+
+        # Validate page counts match expected values
+        if self._frames_per_file is not None:
+            expected_total_pages = sum(self._frames_per_file) * self.num_channels
+            actual_total_pages = sum(len(tf.pages) for tf in self.tiff_files)
+            if actual_total_pages != expected_total_pages:
+                raise ValueError(
+                    f"TIFF page count mismatch!\n"
+                    f"Expected: {expected_total_pages} pages "
+                    f"({sum(self._frames_per_file)} frames × {self.num_channels} channels)\n"
+                    f"Actual: {actual_total_pages} pages in {len(self.tiff_files)} file(s)\n"
+                    f"Files may be corrupted or metadata may be incorrect."
+                )
 
         # self._rois = self._create_rois()
         self._rois = self._extract_roi_info()
@@ -936,6 +1040,22 @@ class MboRawArray:
         Set the current ROI index.
         If value is None, sets roi to -1 to indicate no specific ROI.
         """
+        # Validate ROI bounds
+        if value is not None and value != 0:  # 0 means "split all", None means "stitch"
+            if isinstance(value, int):
+                if value < 1 or value > self.num_rois:
+                    raise ValueError(
+                        f"ROI index {value} out of bounds.\n"
+                        f"Valid range: 1 to {self.num_rois} (1-indexed)\n"
+                        f"Use roi=0 to split all ROIs, or roi=None to stitch."
+                    )
+            elif isinstance(value, (list, tuple)):
+                for v in value:
+                    if v < 1 or v > self.num_rois:
+                        raise ValueError(
+                            f"ROI index {v} in {value} out of bounds.\n"
+                            f"Valid range: 1 to {self.num_rois} (1-indexed)"
+                        )
         self._roi = value
 
     @property
@@ -983,12 +1103,21 @@ class MboRawArray:
                 continue
 
             frame_idx = [pages[i] - start for i in idxs]
-            chunk = tf.asarray(key=frame_idx)
+            try:
+                chunk = tf.asarray(key=frame_idx)
+            except Exception as e:
+                # TODO: wrap this for all array types
+                raise IOError(
+                    f"MboRawArray: Failed to read pages {frame_idx} from TIFF file {tf.filename}\n"
+                    f"File may be corrupted or incomplete.\n"
+                    f": {type(e).__name__}: {e}"
+                ) from e
             if chunk.ndim == 2:  # Single page was squeezed to 2D
                 chunk = chunk[np.newaxis, ...]  # Add back the first dimension
             chunk = chunk[..., yslice, xslice]
 
             if self.fix_phase:
+                # Apply phase correction to the current chunk
                 corrected, offset = bidir_phasecorr(
                     chunk,
                     method=self.phasecorr_method,
@@ -996,6 +1125,7 @@ class MboRawArray:
                     max_offset=self.max_offset,
                     border=self.border,
                     use_fft=self.use_fft,
+                    fft_method=self._fft_method,
                 )
                 buf[idxs] = corrected
                 self.offset = offset
@@ -1017,11 +1147,6 @@ class MboRawArray:
         if not frames or not chans:
             return np.empty(0)
 
-        logger.debug(
-            f"Phase-corrected: {self.fix_phase}/{self.phasecorr_method},"
-            f" channels: {chans},"
-            f" roi: {self.roi}",
-        )
         out = self.process_rois(frames, chans)
 
         squeeze = []
@@ -1244,7 +1369,7 @@ class MboRawArray:
                     metadata=md,
                     progress_callback=progress_callback,
                     debug=debug,
-                    dshape=(num_frames, self.shape[-1], self.shape[-2]),
+                    dshape=(num_frames, self.shape[-2], self.shape[-1]),  # (T, Y, X)
                     plane_index=plane,
                     **kwargs,
                 )
@@ -1638,7 +1763,7 @@ class ZarrArray:
                 metadata=md,
                 progress_callback=progress_callback,
                 debug=debug,
-                dshape=(self.shape[0], self.shape[-1], self.shape[-2]),
+                dshape=(self.shape[0], self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
                 plane_index=plane,
                 **kwargs,
             )

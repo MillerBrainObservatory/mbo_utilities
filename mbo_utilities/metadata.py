@@ -174,13 +174,7 @@ def get_metadata(file, z_step=None, verbose=False):
 
 def get_metadata_single(file: os.PathLike | str):
     """
-    Extract metadata from a TIFF file produced by ScanImage or processed via the save_as function.
-
-    This function opens the given TIFF file and retrieves critical imaging parameters and acquisition details.
-    It supports both raw ScanImage TIFFs and those modified by downstream processing. If the file contains
-    raw ScanImage metadata, the function extracts key fields such as channel information, number of frames,
-    field-of-view, pixel resolution, and ROI details. When verbose output is enabled, the complete metadata
-    document is returned in addition to the parsed key values.
+    Extract metadata from a single TIFF file produced by ScanImage or processed via the save_as function.
 
     Parameters
     ----------
@@ -196,8 +190,7 @@ def get_metadata_single(file: os.PathLike | str):
     -------
     dict
         A dictionary containing the extracted metadata (e.g., number of planes, frame rate, field-of-view,
-        pixel resolution). When verbose is True, the dictionary also includes a key "all" with the full metadata
-        from the TIFF header.
+        pixel resolution).
 
     Raises
     ------
@@ -266,7 +259,7 @@ def get_metadata_single(file: os.PathLike | str):
 
         si = meta.get("FrameData", {})
         if not si:
-            print(f"No FrameData found in {file}.")
+            logger.warning(f"No FrameData found in {file}.")
             return None
 
         pages = tiff_file.pages
@@ -281,9 +274,15 @@ def get_metadata_single(file: os.PathLike | str):
         else:
             num_rois = len(roi_group)
 
-        num_planes = len(si["SI.hChannels.channelSave"])
+        # Handle single channel case where channelSave is int instead of list
+        channel_save = si["SI.hChannels.channelSave"]
+        if isinstance(channel_save, (int, float)):
+            num_planes = 1
+        else:
+            num_planes = len(channel_save)
+
         zoom_factor = si["SI.hRoiManager.scanZoomFactor"]
-        uniform_sampling = si["SI.hScan2D.uniformSampling"]
+        uniform_sampling = si.get("SI.hScan2D.uniformSampling", "NA")
         objective_resolution = si["SI.objectiveResolution"]
         frame_rate = si["SI.hRoiManager.scanFrameRate"]
 
@@ -750,7 +749,7 @@ def _params_from_metadata_caiman(metadata):
     params = _default_params_caiman()
 
     if metadata is None:
-        print("No metadata found. Using default parameters.")
+        logger.info("No metadata found. Using default parameters.")
         return params
 
     params["main"]["fr"] = metadata["frame_rate"]
@@ -772,7 +771,7 @@ def _params_from_metadata_caiman(metadata):
     # overlap should be ~neuron diameter
     overlaps = [int(round(gSig / px)) for px in metadata["pixel_resolution"]]
     if overlaps[0] < gSig:
-        print("Overlaps too small. Increasing to neuron diameter.")
+        logger.info("Overlaps too small. Increasing to neuron diameter.")
         overlaps = [int(gSig)] * 2
     params["main"]["overlaps"] = overlaps
 

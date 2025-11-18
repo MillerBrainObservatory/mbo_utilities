@@ -41,7 +41,8 @@ def set_tooltip(_tooltip, _show_mark=True):
 
 def draw_metadata_inspector(metadata: dict):
     with imgui_ctx.begin_child("Metadata Viewer"):
-        imgui_md.render("# Metadata Viewer")
+        # Use text instead of imgui_md.render to avoid "Markdown was not initialized" warning
+        imgui.text("Metadata Viewer")
         imgui.separator()
         imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4))
         try:

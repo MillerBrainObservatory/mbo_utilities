@@ -65,7 +65,7 @@ def imwrite(
     metadata: dict | None = None,
     overwrite: bool = False,
     order: list | tuple = None,
-    target_chunk_mb: int = 20,
+    target_chunk_mb: int = 100,
     progress_callback: Callable | None = None,
     debug: bool = False,
     shift_vectors: np.ndarray | None = None,
@@ -149,7 +149,8 @@ def imwrite(
 
     target_chunk_mb : int, optional
         Target chunk size in MB for streaming writes. Larger chunks may be faster
-        but use more memory. Adjust based on available RAM. Default is 20.
+        but use more memory. Default is 100 MB (~200 frames for typical 512x512 int16 data).
+        This ensures sufficient frames for accurate phase correction when enabled.
 
     progress_callback : Callable, optional
         Callback function for progress updates: `callback(progress, current_plane)`.
@@ -452,6 +453,9 @@ def imwrite(
         if num_frames is not None:
             write_kwargs["num_frames"] = num_frames
 
+        # NOTE: Do NOT pass metadata in kwargs - each _imwrite() method
+        # uses self.metadata internally. We already updated lazy_array.metadata above.
+
         return lazy_array._imwrite(  # noqa
             outpath,
             overwrite=overwrite,
@@ -569,8 +573,14 @@ def imread(
 
     # Suite2p ops file
     if ops_file and ops_file.exists():
-        logger.debug(f"Ops.npy detected - reading {ops_file} from {ops_file}.")
-        return Suite2pArray(parent / "ops.npy")
+        # If user clicked on a specific .bin file, pass that to Suite2pArray
+        # Otherwise pass ops.npy and let Suite2pArray choose the best file
+        if len(paths) == 1 and paths[0].suffix.lower() == ".bin":
+            logger.debug(f"Ops.npy detected - reading specific binary {paths[0]}.")
+            return Suite2pArray(paths[0])
+        else:
+            logger.debug(f"Ops.npy detected - reading from {ops_file}.")
+            return Suite2pArray(ops_file)
 
     exts = {p.suffix.lower() for p in paths}
     first = paths[0]

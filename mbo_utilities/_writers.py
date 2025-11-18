@@ -92,15 +92,21 @@ def _write_plane(
     metadata["shape"] = dshape
 
     if plane_index is not None:
-        assert type(plane_index) is int, "plane_index must be an integer"
+        if not isinstance(plane_index, int):
+            raise TypeError(f"plane_index must be an integer, got {type(plane_index)}")
         metadata["plane"] = plane_index + 1
 
+    # Get target frame count from kwargs, metadata, or data shape (in that priority)
     nframes_target = kwargs.get("num_frames", metadata.get("num_frames"))
+
+    # If nframes_target is 0 or None, use actual data shape
+    if nframes_target is None or nframes_target == 0:
+        nframes_target = data.shape[0]
+
+    # Update metadata with the actual target
     if nframes_target is not None:
         metadata["num_frames"] = int(nframes_target)
         metadata["nframes"] = int(nframes_target)
-    else:
-        nframes_target = data.shape[0]
 
     H0, W0 = data.shape[-2], data.shape[-1]
     fname = filename
@@ -109,6 +115,10 @@ def _write_plane(
     # get chunk size via bytes per timepoint
     itemsize = np.dtype(data.dtype).itemsize
     ntime = int(nframes_target)  # T
+
+    # Handle empty data
+    if ntime == 0:
+        raise ValueError(f"Cannot write file with 0 frames. Data shape: {data.shape}, nframes_target: {nframes_target}")
 
     bytes_per_t = int(np.prod(dshape[1:], dtype=np.int64)) * int(itemsize)
     chunk_size = int(target_chunk_mb) * 1024 * 1024
@@ -208,7 +218,8 @@ def _write_plane(
                 f"Expected (n_planes, 2)"
             )
 
-        assert plane_index is not None, "plane_index must be provided when using shifts"
+        if plane_index is None:
+            raise ValueError("plane_index must be provided when using shifts")
 
         if plane_index >= len(plane_shifts):
             raise IndexError(
@@ -252,7 +263,6 @@ def _write_plane(
         # Ensure chunk is 3D (T, Y, X) - squeeze any remaining singleton dimensions
         # This handles cases where plane_index is None but Z dimension is singleton
         if len(chunk.shape) == 4 and chunk.shape[1] == 1:
-            # Singleton Z dimension: squeeze it
             chunk = chunk.squeeze(axis=1)
 
         if shift_applied:
@@ -373,8 +383,6 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     if first_write:
         write_ops(metadata, fname, **kwargs)
 
-    logger.debug(f"Wrote {data.shape[0]} frames to {fname}.")
-
 
 def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
     if metadata is None:
@@ -439,7 +447,20 @@ def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
 
         if filename.exists() and overwrite:
             # Delete existing file before creating new writer
-            filename.unlink()
+            # On Windows, retry if file is locked by another process
+            import time
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    filename.unlink()
+                    break
+                except PermissionError:
+                    if attempt < max_retries - 1:
+                        time.sleep(0.1)
+                        import gc
+                        gc.collect()
+                    else:
+                        raise
 
         # Create new writer
         _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
@@ -565,10 +586,6 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
 
     result = {"ome": ome_content}
 
-    # Add all metadata at root level (outside ome namespace) for backward compatibility
-    # This preserves metadata that downstream tools expect (num_frames, pixel_resolution, etc.)
-    # while also maintaining OME-NGFF compliance
-    # Ensure metadata is JSON-serializable
     serializable_metadata = _make_json_serializable(metadata)
     for k, v in serializable_metadata.items():
         if k == "channel_names":
@@ -585,11 +602,14 @@ def _write_zarr(
     *,
     overwrite=True,
     metadata=None,
-    level=1,
     **kwargs,
 ):
-    sharded = kwargs.get("sharded", False)
-    ome = kwargs.get("ome", False)
+    sharded = kwargs.get("sharded", True)
+    ome = kwargs.get("ome", True)
+    level = kwargs.get("level", 1)
+
+    if metadata is None:
+        metadata = {}
 
     filename = Path(path)
     if not hasattr(_write_zarr, "_arrays"):
@@ -696,57 +716,36 @@ def _write_zarr(
     _write_zarr._offsets[filename] = offset + data.shape[0]
 
 
-def _write_zarr_v2(path, data, *, overwrite=True, metadata=None, **kwargs):
-    compressor = None
-
-    filename = Path(path)
-
-    if not hasattr(_write_zarr, "_arrays"):
-        _write_zarr._arrays = {}
-        _write_zarr._offsets = {}
-
-    # Only overwrite if this is a brand new write session (file doesn't exist in cache)
-    # Don't delete during active chunked writing
-    if overwrite and filename not in _write_zarr._arrays and filename.exists():
-        shutil.rmtree(filename)
-
-    if filename not in _write_zarr._arrays:
-
-        import zarr
-
-        nframes = metadata["num_frames"]
-        h, w = data.shape[-2:]
-        z = zarr.open(
-            store=str(filename),
-            mode="w",
-            shape=(nframes, h, w),
-            chunks=(1, h, w),
-            dtype=data.dtype,
-            filters=compressor,
-        )
-        metadata = _make_json_serializable(metadata) if metadata else {}
-        for k, v in metadata.items():
-            z.attrs[k] = v
-
-        _write_zarr._arrays[filename] = z
-        _write_zarr._offsets[filename] = 0
-
-    z = _write_zarr._arrays[filename]
-    offset = _write_zarr._offsets[filename]
-
-    z[offset : offset + data.shape[0]] = data
-    _write_zarr._offsets[filename] = offset + data.shape[0]
-
-
 def _try_generic_writers(
     data: Any,
     outpath: str | Path,
     overwrite: bool = True,
-    metadata: dict = {},
+    metadata: dict | None = None,
 ):
+    import shutil
+    import gc
+    import time
+
+    if metadata is None:
+        metadata = {}
+
     outpath = Path(outpath)
-    if outpath.exists() and not overwrite:
-        raise FileExistsError(f"{outpath} already exists and overwrite=False")
+    if outpath.exists():
+        if not overwrite:
+            raise FileExistsError(f"{outpath} already exists and overwrite=False")
+        # Remove existing file or directory to allow overwrite
+        if outpath.is_dir():
+            shutil.rmtree(outpath)
+        else:
+            # Force garbage collection to release any open file handles
+            gc.collect()
+            try:
+                outpath.unlink()
+            except PermissionError:
+                # Windows file locking - wait briefly and retry
+                time.sleep(0.1)
+                gc.collect()
+                outpath.unlink()
 
     if outpath.suffix.lower() in {".npy", ".npz"}:
         if metadata is None:

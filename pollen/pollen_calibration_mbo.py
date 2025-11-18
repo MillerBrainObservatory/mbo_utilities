@@ -121,10 +121,20 @@ def pollen_calibration_mbo(filepath, order=None):
         raise FileNotFoundError(filepath)
 
     metadata = get_metadata(filepath, verbose=True)
-    z_step_um = metadata["all"]["FrameData"]["SI.hStackManager.stackZStepSize"]
 
-    nx = metadata["roi_width_px"]
-    ny = metadata["roi_height_px"]
+    # Safely get z_step_um from metadata or tifffile
+    try:
+        z_step_um = metadata.get("si.hStackManager.stackZStepSize", 1.0)
+    except:
+        z_step_um = metadata.get("z_step_um", 1.0)
+        if z_step_um is 1.0:
+            print("Z-Step not found, setting to 1")
+
+    # Get ROI dimensions from metadata
+    # fov_px is a tuple (width, height) in pixels
+    fov_px = metadata.get("fov_px", (512, 512))
+    nx = fov_px[0]  # roi_width_px
+    ny = fov_px[1]  # roi_height_px
     nc = metadata["num_planes"]
 
     # nz comes from TIFF, not metadata
@@ -137,7 +147,7 @@ def pollen_calibration_mbo(filepath, order=None):
     vol = load_or_read_data(filepath, ny, nx, nc, nz)
 
     # 1. scan offset correction
-    vol, scan_corrections = correct_scan_phase(vol, filepath)
+    vol, scan_corrections = correct_scan_phase(vol, filepath, z_step_um, metadata)
 
     # 2. user marked pollen
     xs, ys, Iz, III = user_pollen_selection(vol)
@@ -187,7 +197,7 @@ def load_or_read_data(filepath, ny, nx, nc, nz):
     return vol
 
 
-def correct_scan_phase(vol, filepath):
+def correct_scan_phase(vol, filepath, z_step_um, metadata):
     """Detect and correct scan phase offsets along Y-axis."""
     scan_corrections = []
     nz, nc, ny, nx = vol.shape
@@ -202,12 +212,27 @@ def correct_scan_phase(vol, filepath):
         for z in range(nz):
             vol[z, c, :, :] = fix_scan_phase(vol[z, c, :, :], offset)
 
-    # Save scan corrections
+    # Save scan corrections with metadata
     h5_path = filepath.with_name(filepath.stem + "_pollen.h5")
     with h5py.File(h5_path, "a") as f:
         if "scan_corrections" in f:
             del f["scan_corrections"]
         f.create_dataset("scan_corrections", data=np.array(scan_corrections))
+
+        # Save metadata as file attributes for H5Array compatibility
+        f.attrs['num_planes'] = nc
+        f.attrs['roi_width_px'] = nx
+        f.attrs['roi_height_px'] = ny
+        f.attrs['z_step_um'] = z_step_um
+        f.attrs['source_file'] = filepath.name
+        f.attrs['pollen_calibration_version'] = '1.0'
+
+        # Save additional metadata if available
+        if 'frame_rate' in metadata:
+            f.attrs['frame_rate'] = metadata['frame_rate']
+        if 'pixel_resolution' in metadata:
+            px_res = metadata['pixel_resolution']
+            f.attrs['pixel_resolution'] = px_res if np.isscalar(px_res) else str(px_res)
 
     return vol, scan_corrections
 
