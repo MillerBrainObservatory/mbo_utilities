@@ -1,8 +1,8 @@
 import copy
 import sys
-import webbrowser
 from pathlib import Path
 from typing import Any, Optional, Union
+import urllib.request
 import click
 import numpy as np
 from mbo_utilities.array_types import iter_rois, normalize_roi
@@ -182,6 +182,43 @@ def _check_installation():
                 click.echo("    Example (Linux/Mac): export CUDA_PATH=/usr/local/cuda")
         click.echo("\nFor other issues, try reinstalling with: uv sync")
         return False
+
+
+def _download_notebook_file(output_path: Optional[Union[str, Path]] = None):
+    """Download the user guide notebook to a local file.
+
+    Parameters
+    ----------
+    output_path : str, Path, optional
+        Directory or file path to save the notebook. If None or '.', saves to current directory.
+        If a directory, saves as 'user_guide.ipynb' in that directory.
+        If a file path, uses that exact filename.
+    """
+    url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
+
+    # Determine output file path
+    if output_path is None or output_path == ".":
+        output_file = Path.cwd() / "user_guide.ipynb"
+    else:
+        output_file = Path(output_path)
+        if output_file.is_dir():
+            output_file = output_file / "user_guide.ipynb"
+
+    try:
+        click.echo(f"Downloading user guide notebook from:\n  {url}")
+        click.echo(f"Saving to:\n  {output_file.resolve()}")
+
+        # Download the file
+        urllib.request.urlretrieve(url, output_file)
+
+        click.secho(f"\n✓ Successfully downloaded notebook to: {output_file.resolve()}", fg="green")
+        click.echo("\nTo use the notebook:")
+        click.echo(f"  jupyter lab {output_file.resolve()}")
+
+    except Exception as e:
+        click.secho(f"\n✗ Failed to download notebook: {e}", fg="red")
+        click.echo(f"\nYou can manually download from: {url}")
+        sys.exit(1)
 
 
 def _select_file() -> tuple[Any, Any, Any, bool]:
@@ -429,16 +466,12 @@ def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, downloa
         _check_installation()
         if download_notebook:
             click.echo("\n")
-            url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
-            click.echo(f"Opening browser to download user guide notebook from: {url}")
-            webbrowser.open(url)
+            _download_notebook_file(data_in)
         return
 
     # Handle download notebook option
     if download_notebook:
-        url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
-        click.echo(f"Opening browser to download user guide notebook from: {url}")
-        webbrowser.open(url)
+        _download_notebook_file(data_in)
         return
 
     # Run the GUI
