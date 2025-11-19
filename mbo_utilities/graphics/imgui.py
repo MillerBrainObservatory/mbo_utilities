@@ -68,6 +68,10 @@ except ImportError:
     HAS_TORCH = False
     torch = None
 
+# CRITICAL: Select working adapter BEFORE importing fastplotlib
+from mbo_utilities.graphics._adapter_selection import ensure_working_adapter
+ensure_working_adapter()
+
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
 
