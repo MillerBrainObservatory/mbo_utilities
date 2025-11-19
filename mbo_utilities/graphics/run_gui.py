@@ -5,8 +5,83 @@ from pathlib import Path
 from typing import Any, Optional, Union
 import click
 import numpy as np
+import subprocess
+import os
 from mbo_utilities.array_types import iter_rois, normalize_roi
 from mbo_utilities.graphics._file_dialog import FileDialog, setup_imgui
+
+# CRITICAL: Select working GPU/CPU adapter BEFORE any fastplotlib imports
+# This must happen at module level to take effect
+_ADAPTER_SELECTED = False
+
+
+def _ensure_working_adapter():
+    """Ensure a working adapter is selected before using fastplotlib."""
+    global _ADAPTER_SELECTED
+
+    if _ADAPTER_SELECTED:
+        return
+
+    try:
+        import wgpu
+        import fastplotlib as fpl
+
+        adapters = wgpu.gpu.enumerate_adapters_sync()
+        fpl_adapters = fpl.enumerate_adapters()
+
+        # Try adapters in priority order: DiscreteGPU > IntegratedGPU > CPU
+        priority = {"DiscreteGPU": 3, "IntegratedGPU": 2, "CPU": 1, "Unknown": 0}
+
+        sorted_adapters = sorted(
+            enumerate(adapters),
+            key=lambda x: priority.get(x[1].info.get("adapter_type", "Unknown"), 0),
+            reverse=True
+        )
+
+        for i, adapter in sorted_adapters:
+            adapter_type = adapter.info.get("adapter_type", "Unknown")
+            device_name = adapter.info.get("device", "Unknown")
+
+            # Quick test: can this adapter create an on-screen window?
+            test_code = f"""
+import sys
+try:
+    import wgpu
+    from rendercanvas.auto import RenderCanvas
+    adapter = wgpu.gpu.enumerate_adapters_sync()[{i}]
+    device = adapter.request_device_sync()
+    canvas = RenderCanvas(size=(640, 480), title="GPU Test")
+    context = canvas.get_wgpu_context()
+    canvas_format = context.get_preferred_format(adapter)
+    context.configure(device=device, format=canvas_format)
+    current_texture = context.get_current_texture()
+    canvas.close()
+    sys.exit(0)
+except:
+    sys.exit(1)
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", test_code],
+                capture_output=True,
+                timeout=5,
+                env=os.environ.copy()
+            )
+
+            if result.returncode == 0:
+                # This adapter works!
+                print(f"✓ Selected rendering adapter: {device_name} ({adapter_type})")
+                fpl.select_adapter(fpl_adapters[i])
+                _ADAPTER_SELECTED = True
+                return
+
+        # If we get here, no adapter worked
+        print("✗ Warning: No working GPU adapter found, using default")
+        _ADAPTER_SELECTED = True
+
+    except Exception as e:
+        print(f"⚠ Warning: Adapter selection failed: {e}")
+        print("  Continuing with default adapter...")
+        _ADAPTER_SELECTED = True
 
 
 def _check_installation():
@@ -233,78 +308,12 @@ def _show_metadata_viewer(metadata: dict) -> None:
     immapp.run(runner_params=params, add_ons_params=addons)
 
 
-def _select_working_adapter():
-    """Select a working GPU/CPU adapter, with fallback to llvmpipe if GPUs fail."""
-    import fastplotlib as fpl
-    import wgpu
-    import subprocess
-    import sys
-    import os
-
-    try:
-        adapters = wgpu.gpu.enumerate_adapters_sync()
-        fpl_adapters = fpl.enumerate_adapters()
-
-        # Try adapters in priority order: DiscreteGPU > IntegratedGPU > CPU
-        priority = {"DiscreteGPU": 3, "IntegratedGPU": 2, "CPU": 1, "Unknown": 0}
-
-        sorted_adapters = sorted(
-            enumerate(adapters),
-            key=lambda x: priority.get(x[1].info.get("adapter_type", "Unknown"), 0),
-            reverse=True
-        )
-
-        for i, adapter in sorted_adapters:
-            adapter_type = adapter.info.get("adapter_type", "Unknown")
-            device_name = adapter.info.get("device", "Unknown")
-
-            # Quick test: can this adapter create an on-screen window?
-            test_code = f"""
-import sys
-try:
-    import wgpu
-    from rendercanvas.auto import RenderCanvas
-    adapter = wgpu.gpu.enumerate_adapters_sync()[{i}]
-    device = adapter.request_device_sync()
-    canvas = RenderCanvas(size=(640, 480), title="GPU Test")
-    context = canvas.get_wgpu_context()
-    canvas_format = context.get_preferred_format(adapter)
-    context.configure(device=device, format=canvas_format)
-    current_texture = context.get_current_texture()
-    canvas.close()
-    sys.exit(0)
-except:
-    sys.exit(1)
-"""
-            result = subprocess.run(
-                [sys.executable, "-c", test_code],
-                capture_output=True,
-                timeout=5,
-                env=os.environ.copy()
-            )
-
-            if result.returncode == 0:
-                # This adapter works!
-                print(f"✓ Selected GPU adapter: {device_name} ({adapter_type})")
-                fpl.select_adapter(fpl_adapters[i])
-                return True
-
-        # If we get here, no adapter worked
-        print("✗ No working GPU adapter found")
-        return False
-
-    except Exception as e:
-        print(f"⚠ Warning: Adapter selection failed: {e}")
-        print("  Continuing with default adapter...")
-        return False
-
-
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
-    import fastplotlib as fpl
+    # Ensure we have a working adapter selected BEFORE importing fastplotlib
+    _ensure_working_adapter()
 
-    # Try to select a working adapter before creating widgets
-    _select_working_adapter()
+    import fastplotlib as fpl
 
     # Handle multi-ROI data
     if hasattr(data_array, "rois"):
