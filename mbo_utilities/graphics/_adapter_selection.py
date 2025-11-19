@@ -47,6 +47,8 @@ def ensure_working_adapter():
             adapter_type = adapter.info.get("adapter_type", "Unknown")
             device_name = adapter.info.get("device", "Unknown")
 
+            print(f"  Testing adapter [{i}]: {device_name} ({adapter_type})...")
+
             # Quick test: can this adapter create an on-screen window?
             # We run this in a subprocess because wgpu Rust panics can't be caught in Python
             test_code = f"""
@@ -63,22 +65,27 @@ try:
     current_texture = context.get_current_texture()
     canvas.close()
     sys.exit(0)
-except:
+except Exception as e:
     sys.exit(1)
 """
-            result = subprocess.run(
-                [sys.executable, "-c", test_code],
-                capture_output=True,
-                timeout=5,
-                env=os.environ.copy()
-            )
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-c", test_code],
+                    capture_output=True,
+                    timeout=5,
+                    env=os.environ.copy()
+                )
 
-            if result.returncode == 0:
-                # This adapter works!
-                print(f"✓ Selected rendering adapter: {device_name} ({adapter_type})")
-                fpl.select_adapter(fpl_adapters[i])
-                _ADAPTER_SELECTED = True
-                return
+                if result.returncode == 0:
+                    # This adapter works!
+                    print(f"✓ Selected rendering adapter: {device_name} ({adapter_type})")
+                    fpl.select_adapter(fpl_adapters[i])
+                    _ADAPTER_SELECTED = True
+                    return
+                else:
+                    print(f"    Failed (exit code {result.returncode})")
+            except subprocess.TimeoutExpired:
+                print(f"    Failed (timeout after 5s)")
 
         # If we get here, no adapter worked
         print("✗ Warning: No working GPU adapter found, using default")
