@@ -17,14 +17,14 @@ def _check_installation():
     try:
         import mbo_utilities
         version = getattr(mbo_utilities, "__version__", "unknown")
-        click.secho(f"[OK] mbo_utilities {version} installed", fg="green")
+        click.secho(f"mbo_utilities {version} installed", fg="green")
     except ImportError as e:
-        click.secho(f"[FAIL] mbo_utilities import failed: {e}", fg="red")
+        click.secho(f"mbo_utilities import failed: {e}", fg="red")
         return False
 
     # Check Python version
     py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    click.secho(f"[OK] Python {py_version}", fg="green")
+    click.secho(f"Python {py_version}", fg="green")
 
     # Check critical dependencies
     dependencies = {
@@ -44,9 +44,9 @@ def _check_installation():
         try:
             mod = __import__(module)
             ver = getattr(mod, "__version__", "installed")
-            click.secho(f"  [OK] {desc}: {ver}", fg="green")
+            click.secho(f"  {desc}: {ver}", fg="green")
         except ImportError:
-            click.secho(f"  [FAIL] {desc}: not installed", fg="red")
+            click.secho(f"  {desc}: not installed", fg="red")
             all_good = False
 
     click.echo("\nOptional Dependencies:")
@@ -55,11 +55,11 @@ def _check_installation():
         try:
             mod = __import__(module)
             ver = getattr(mod, "__version__", "installed")
-            click.secho(f"  [OK] {desc}: {ver}", fg="green")
+            click.secho(f"  {desc}: {ver}", fg="green")
             if module == "cupy":
                 cupy_installed = True
         except ImportError:
-            click.secho(f"  [SKIP] {desc}: not installed (optional)", fg="yellow")
+            click.secho(f"  {desc}: not installed (optional)", fg="yellow")
 
     # Check CUDA/GPU configuration if CuPy is installed
     cuda_path = None
@@ -87,11 +87,11 @@ def _check_installation():
                         break
 
         if cuda_path:
-            click.secho(f"  [OK] CUDA_PATH environment variable set: {cuda_path}", fg="green")
+            click.secho(f"  CUDA_PATH environment variable set: {cuda_path}", fg="green")
         else:
-            click.secho(f"  [WARN] CUDA_PATH environment variable not set", fg="yellow")
+            click.secho(f"  CUDA_PATH environment variable not set", fg="yellow")
             if suggested_cuda_path:
-                click.secho(f"  [INFO] Found CUDA installation at: {suggested_cuda_path}", fg="cyan")
+                click.secho(f"  Found CUDA installation at: {suggested_cuda_path}", fg="cyan")
             all_good = False
 
         try:
@@ -109,9 +109,9 @@ def _check_installation():
                 test_in = cp.array([1.0], dtype='float32')
                 test_out = cp.empty_like(test_in)
                 kernel(test_in, test_out)
-                click.secho(f"  [OK] NVRTC (CUDA JIT compiler) working", fg="green")
+                click.secho(f"  NVRTC (CUDA JIT compiler) working", fg="green")
             except Exception as nvrtc_err:
-                click.secho(f"  [FAIL] NVRTC compilation failed", fg="red")
+                click.secho(f"  NVRTC compilation failed", fg="red")
                 click.echo(f"         Error: {str(nvrtc_err)[:100]}")
                 click.echo("         Suite3D z-registration will NOT work without NVRTC.")
                 click.echo("         Install CUDA Toolkit 12.0 runtime libraries to fix this.")
@@ -121,23 +121,23 @@ def _check_installation():
             cuda_version = cp.cuda.runtime.runtimeGetVersion()
             cuda_major = cuda_version // 1000
             cuda_minor = (cuda_version % 1000) // 10
-            click.secho(f"  [OK] CUDA Runtime Version: {cuda_major}.{cuda_minor}", fg="green")
+            click.secho(f"  CUDA Runtime Version: {cuda_major}.{cuda_minor}", fg="green")
 
             device_count = cp.cuda.runtime.getDeviceCount()
             if device_count > 0:
                 device = cp.cuda.Device()
                 device_name = device.attributes.get("Name", "Unknown")
-                click.secho(f"  [OK] CUDA device available: {device_name} (Device {device.id})", fg="green")
-                click.secho(f"  [OK] Total CUDA devices: {device_count}", fg="green")
+                click.secho(f"  CUDA device available: {device_name} (Device {device.id})", fg="green")
+                click.secho(f"  Total CUDA devices: {device_count}", fg="green")
 
                 # Detect likely CUDA installation path from version
                 if not suggested_cuda_path and sys.platform == "win32":
                     suggested_cuda_path = f"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v{cuda_major}.{cuda_minor}"
             else:
-                click.secho(f"  [FAIL] No CUDA devices found", fg="red")
+                click.secho(f"  No CUDA devices found", fg="red")
                 all_good = False
         except Exception as e:
-            click.secho(f"  [FAIL] CuPy CUDA initialization failed: {e}", fg="red")
+            click.secho(f"  CuPy CUDA initialization failed: {e}", fg="red")
             click.echo("         This will prevent GPU-accelerated operations like Suite3D z-registration.")
             click.echo("         Action required: Set CUDA_PATH environment variable to your CUDA installation directory.")
             all_good = False
@@ -147,9 +147,9 @@ def _check_installation():
     try:
         from mbo_utilities.file_io import get_mbo_dirs
         dirs = get_mbo_dirs()
-        click.secho(f"  [OK] Config directory: {dirs.get('base', 'unknown')}", fg="green")
+        click.secho(f"  Config directory: {dirs.get('base', 'unknown')}", fg="green")
     except Exception as e:
-        click.secho(f"  [FAIL] Failed to get config directories: {e}", fg="red")
+        click.secho(f"  Failed to get config directories: {e}", fg="red")
         all_good = False
 
     # Summary
@@ -158,6 +158,7 @@ def _check_installation():
         click.secho("Installation check passed!", fg="green", bold=True)
         click.echo("\nYou can now:")
         click.echo("  - Run 'uv run mbo' to open the GUI")
+        click.echo("  - Run 'uv run mbo /path/to/file' to directly open any supported file")
         click.echo("  - Run 'uv run mbo --download-notebook' to get the user guide")
         return True
     else:
