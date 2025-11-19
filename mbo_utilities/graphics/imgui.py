@@ -69,11 +69,15 @@ except ImportError:
     torch = None
 
 # CRITICAL: Select working adapter BEFORE importing fastplotlib
+print("DEBUG: imgui.py about to import _adapter_selection...")
 from mbo_utilities.graphics._adapter_selection import ensure_working_adapter
+print("DEBUG: imgui.py calling ensure_working_adapter()...")
 ensure_working_adapter()
+print("DEBUG: imgui.py about to import fastplotlib...")
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
+print("DEBUG: imgui.py finished importing fastplotlib")
 
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
 USER_PIPELINES = ["suite2p"]

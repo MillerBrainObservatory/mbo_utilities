@@ -91,4 +91,6 @@ except:
 
 
 # Auto-select adapter when this module is imported
+print("DEBUG: _adapter_selection.py being imported, running ensure_working_adapter()...")
 ensure_working_adapter()
+print("DEBUG: ensure_working_adapter() completed")
