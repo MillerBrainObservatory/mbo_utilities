@@ -500,7 +500,15 @@ class PreviewDataWidget(EdgeWindow):
         console_handler.setLevel(logging.DEBUG)
         log.attach(console_handler)
 
-        log.set_global_level(logging.DEBUG)
+        # Only set global DEBUG level if MBO_DEBUG environment variable is set
+        # The handlers above are set to DEBUG so they can capture debug logs when enabled
+        # but the actual logger level is controlled by MBO_DEBUG env var
+        import os
+        if bool(int(os.getenv("MBO_DEBUG", "0"))):
+            log.set_global_level(logging.DEBUG)
+        else:
+            log.set_global_level(logging.INFO)
+
         self.logger = log.get("gui")
 
         self.logger.info("Logger initialized.")
