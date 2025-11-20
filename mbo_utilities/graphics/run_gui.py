@@ -274,20 +274,25 @@ def _show_metadata_viewer(metadata: dict) -> None:
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
     import fastplotlib as fpl
+    from mbo_utilities.graphics._processors import MboImageProcessor
 
     # Handle multi-ROI data
     if hasattr(data_array, "rois"):
         arrays = []
         names = []
+        processors = []
         for r in iter_rois(data_array):
             arr = copy.copy(data_array)
             arr.fix_phase = False
             arr.roi = r
             arrays.append(arr)
             names.append(f"ROI {r}" if r else "Full Image")
+            # Create processor for each ROI
+            processors.append(MboImageProcessor)
 
         iw = fpl.ImageWidget(
             data=arrays,
+            processors=processors,
             names=names,
             histogram_widget=True,
             figure_kwargs={"size": (800, 800)},
@@ -296,6 +301,7 @@ def _create_image_widget(data_array, widget: bool = True):
     else:
         iw = fpl.ImageWidget(
             data=data_array,
+            processors=MboImageProcessor,
             histogram_widget=True,
             figure_kwargs={"size": (800, 800)},
             graphic_kwargs={"vmin": -100, "vmax": 4000},

@@ -6,6 +6,8 @@ Graphics module with lazy imports to avoid loading heavy dependencies
 __all__ = [
     "PreviewDataWidget",
     "run_gui",
+    "MboImageProcessor",
+    "MultiSessionImageProcessor",
 ]
 
 
@@ -17,4 +19,10 @@ def __getattr__(name):
     elif name == "PreviewDataWidget":
         from .imgui import PreviewDataWidget
         return PreviewDataWidget
+    elif name == "MboImageProcessor":
+        from ._processors import MboImageProcessor
+        return MboImageProcessor
+    elif name == "MultiSessionImageProcessor":
+        from ._processors import MultiSessionImageProcessor
+        return MultiSessionImageProcessor
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
