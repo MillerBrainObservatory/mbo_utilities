@@ -1,42 +1,37 @@
-#!/usr/bin/env python
-"""Minimal test to find where surface creation fails"""
 import os
-os.environ['DISPLAY'] = ':17'
-
-print("Step 1: Import wgpu")
 import wgpu
 
-print("\nStep 2: Get adapter")
 adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
-print(f"  Got: {adapter.info.get('device')}")
+print(f"  Request adapter sync: {adapter.info.get('device')}")
 
-print("\nStep 3: Create device")
 device = adapter.request_device_sync()
-print("  Device created!")
+print("  Device created successfully: \n  {device}")
 
-print("\nStep 4: Try to create Qt canvas")
+print("\nCreate Qt canvas")
 try:
     from qtpy import QtWidgets
     import sys
     from rendercanvas.qt import QRenderCanvas
 
+    print("Creating app")
     app = QtWidgets.QApplication(sys.argv)
-    print("  Qt app created!")
+    print("  Qt app created")
 
+    print("Creating canvas")
     canvas = QRenderCanvas(size=(800, 600), title="Test")
-    print("  Qt canvas created!")
+    print("  Qt canvas created")
 
-    print("\nStep 5: Get wgpu context from canvas")
+    print("Retrieve wgpu context")
     present_context = canvas.get_wgpu_context()
     print(f"  Context: {present_context}")
 
-    print("\nStep 6: Configure context")
+    print("\nConfigure context")
     render_texture_format = present_context.get_preferred_format(adapter)
     present_context.configure(device=device, format=render_texture_format)
-    print("  SUCCESS! Context configured!")
+    print("  Context configured")
 
 except Exception as e:
-    print(f"\nFAILED at current step!")
-    print(f"Error: {e}")
+    print(f"\nFailed with error: {e}")
     import traceback
+
     traceback.print_exc()
