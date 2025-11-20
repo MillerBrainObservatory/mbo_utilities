@@ -16,9 +16,9 @@ print("  Device created!")
 
 print("\nStep 4: Try to create Qt canvas")
 try:
-    from rendercanvas.qt import QRenderCanvas
     from qtpy import QtWidgets
     import sys
+    from rendercanvas.qt import QRenderCanvas
 
     app = QtWidgets.QApplication(sys.argv)
     print("  Qt app created!")
