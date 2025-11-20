@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import os
-# Use Qt canvas (works over remote desktop) with Vulkan (has features)
 os.environ['WGPU_BACKEND_TYPE'] = 'Vulkan'
 os.environ['RENDERCANVAS_BACKEND'] = 'qt'
 
