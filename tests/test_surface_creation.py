@@ -51,6 +51,10 @@ print("=" * 80)
 # Now try to use fastplotlib with default adapter
 print("\n\nAttempting to create ImageWidget with default adapter...")
 try:
+    # Force GLFW backend instead of Qt
+    import os
+    os.environ['RENDERCANVAS_BACKEND'] = 'glfw'
+
     import fastplotlib as fpl
 
     data = np.random.rand(10, 512, 512).astype(np.float32)
