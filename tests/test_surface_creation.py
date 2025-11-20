@@ -18,7 +18,7 @@ for idx, adapter in enumerate(adapters):
     print(f"{'=' * 80}")
 
     # Get adapter info
-    info = adapter.request_adapter_info()
+    info = adapter.info
 
     print("\nAdapter Info:")
     pprint.pprint(info, indent=2, width=100)
@@ -35,12 +35,12 @@ for idx, adapter in enumerate(adapters):
 
     # Try to get device and show limits
     try:
-        device = adapter.request_device()
+        device = adapter.request_device_sync()
         limits = device.limits
         print(f"\nDevice Limits (subset):")
-        print(f"  max_texture_dimension_2d: {limits.get('max_texture_dimension_2d', 'N/A')}")
-        print(f"  max_buffer_size: {limits.get('max_buffer_size', 'N/A')}")
-        print(f"  max_bindings_per_bind_group: {limits.get('max_bindings_per_bind_group', 'N/A')}")
+        print(f"  max-texture-dimension-2d: {limits.get('max-texture-dimension-2d', 'N/A')}")
+        print(f"  max-buffer-size: {limits.get('max-buffer-size', 'N/A')}")
+        print(f"  max-bindings-per-bind-group: {limits.get('max-bindings-per-bind-group', 'N/A')}")
     except Exception as e:
         print(f"\n  WARNING: Could not request device: {e}")
 

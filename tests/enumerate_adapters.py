@@ -22,7 +22,7 @@ try:
 
         # Get adapter info
         try:
-            info = adapter.request_adapter_info()
+            info = adapter.info
             print("\nFull Adapter Info:")
             pprint.pprint(info, indent=2, width=100)
 
@@ -43,17 +43,17 @@ try:
         # Try to request device and show limits
         try:
             print("\nRequesting device...")
-            device = adapter.request_device()
+            device = adapter.request_device_sync()
             print("  Device requested successfully!")
 
             limits = device.limits
             print(f"\nDevice Limits:")
-            print(f"  max_texture_dimension_1d      : {limits.get('max_texture_dimension_1d', 'N/A')}")
-            print(f"  max_texture_dimension_2d      : {limits.get('max_texture_dimension_2d', 'N/A')}")
-            print(f"  max_texture_dimension_3d      : {limits.get('max_texture_dimension_3d', 'N/A')}")
-            print(f"  max_buffer_size               : {limits.get('max_buffer_size', 'N/A')}")
-            print(f"  max_bindings_per_bind_group   : {limits.get('max_bindings_per_bind_group', 'N/A')}")
-            print(f"  max_vertex_buffers            : {limits.get('max_vertex_buffers', 'N/A')}")
+            print(f"  max-texture-dimension-1d      : {limits.get('max-texture-dimension-1d', 'N/A')}")
+            print(f"  max-texture-dimension-2d      : {limits.get('max-texture-dimension-2d', 'N/A')}")
+            print(f"  max-texture-dimension-3d      : {limits.get('max-texture-dimension-3d', 'N/A')}")
+            print(f"  max-buffer-size               : {limits.get('max-buffer-size', 'N/A')}")
+            print(f"  max-bindings-per-bind-group   : {limits.get('max-bindings-per-bind-group', 'N/A')}")
+            print(f"  max-vertex-buffers            : {limits.get('max-vertex-buffers', 'N/A')}")
 
             # Try to get features
             try:
@@ -75,9 +75,9 @@ try:
 
     # Identify discrete GPUs
     discrete_gpus = [
-        (idx, a.request_adapter_info())
+        (idx, a.info)
         for idx, a in enumerate(adapters)
-        if a.request_adapter_info().get("adapter_type") == "DiscreteGPU"
+        if a.info.get("adapter_type") == "DiscreteGPU"
     ]
 
     if discrete_gpus:
