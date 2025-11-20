@@ -11,6 +11,7 @@ from typing import Any, List, Sequence
 import h5py
 import numpy as np
 import tifffile
+import dask
 from dask import array as da
 from tifffile import TiffFile
 
@@ -567,28 +568,66 @@ class MBOTiffArray:
     def chunks(self):
         return self._chunks or CHUNKS_4D
 
+    def _get_file_shape_dtype(self):
+        """Get shape/dtype from first file only, cache it."""
+        if not hasattr(self, '_cached_shape'):
+            with tifffile.TiffFile(self.filenames[0]) as tf:
+                self._cached_shape = tf.series[0].shape
+                self._cached_dtype = tf.series[0].dtype
+        return self._cached_shape, self._cached_dtype
+
     @property
     def dask(self) -> da.Array:
         if self._dask_array is not None:
             return self._dask_array
 
-        if len(self.filenames) == 1:
-            arr = tifffile.imread(self.filenames[0], aszarr=True)
-            darr = da.from_zarr(arr)
+        # Get metadata from first file only
+        shape, dtype = self._get_file_shape_dtype()
+
+        # Create lazy loaders that don't open files until data is accessed
+        lazy_arrays = []
+        for fname in self.filenames:
+            # Use dask.delayed to create truly lazy task - file only opens when computed
+            darr = da.from_delayed(
+                dask.delayed(tifffile.imread)(fname),
+                shape=shape,
+                dtype=dtype
+            )
+            lazy_arrays.append(darr)
+
+        if len(lazy_arrays) == 1:
+            darr = lazy_arrays[0]
             if darr.ndim == 2:
                 darr = darr[None, None, :, :]
             elif darr.ndim == 3:
                 darr = darr[:, None, :, :]
         else:
-            darr = files_to_dask(self.filenames)
+            # Concatenate along time axis
+            darr = da.concatenate(lazy_arrays, axis=0)
             if darr.ndim == 3:
                 darr = darr[None, :, :, :]
+
         self._dask_array = darr
         return darr
 
     @property
     def shape(self):
-        return tuple(self.dask.shape)
+        if self._dask_array is not None:
+            return tuple(self._dask_array.shape)
+        # Infer shape without building full dask array
+        file_shape, _ = self._get_file_shape_dtype()
+        if len(self.filenames) == 1:
+            if len(file_shape) == 2:
+                return (1, 1, *file_shape)
+            elif len(file_shape) == 3:
+                return (file_shape[0], 1, file_shape[1], file_shape[2])
+            return file_shape
+        else:
+            # Multiple files concatenated on time
+            total_t = sum(1 for _ in self.filenames) * file_shape[0]
+            if len(file_shape) == 3:
+                return (1, total_t, *file_shape[1:])
+            return (total_t, *file_shape[1:])
 
     @property
     def ndim(self):
@@ -602,7 +641,18 @@ class MBOTiffArray:
         return self.dask[key]
 
     def __getattr__(self, attr):
-        return getattr(self.dask, attr)
+        # Prevent recursion by never delegating internal attributes
+        if attr.startswith('_') or attr in ('dask', 'filenames', 'metadata'):
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
+        # Use object.__getattribute__ to avoid recursion when accessing self.dask
+        try:
+            dask_arr = object.__getattribute__(self, '_dask_array')
+            if dask_arr is None:
+                # Force dask property to initialize
+                dask_arr = object.__getattribute__(self, 'dask')
+            return getattr(dask_arr, attr)
+        except AttributeError:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
 
     def _imwrite(
         self,
@@ -735,7 +785,12 @@ class TiffArray:
         return self.dask[key]
 
     def __getattr__(self, attr):
-        return getattr(self.dask, attr)
+        if attr.startswith('_'):
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
+        try:
+            return getattr(self.dask, attr)
+        except AttributeError:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
 
     def __array__(self):
         n = min(10, self.dask.shape[0])
