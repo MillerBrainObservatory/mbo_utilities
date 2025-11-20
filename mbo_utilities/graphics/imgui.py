@@ -201,6 +201,10 @@ def draw_tabs(parent):
             from mbo_utilities.graphics.pipeline_widgets import draw_tab_process
             draw_tab_process(parent)
             imgui.end_tab_item()
+        if imgui.begin_tab_item("Suite2p Results")[0]:
+            from mbo_utilities.graphics.suite2p_results import draw_tab_suite2p_results
+            draw_tab_suite2p_results(parent)
+            imgui.end_tab_item()
         imgui.end_tab_bar()
 
 
@@ -497,10 +501,17 @@ class PreviewDataWidget(EdgeWindow):
         # Also add console handler so logs appear in terminal
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter("%(levelname)s - %(name)s - %(message)s"))
-        console_handler.setLevel(logging.DEBUG)
-        log.attach(console_handler)
 
-        log.set_global_level(logging.DEBUG)
+        # Only show DEBUG logs if MBO_DEBUG is set
+        import os
+        if bool(int(os.getenv("MBO_DEBUG", "0"))):
+            console_handler.setLevel(logging.DEBUG)
+            log.set_global_level(logging.DEBUG)
+        else:
+            console_handler.setLevel(logging.INFO)
+            log.set_global_level(logging.INFO)
+
+        log.attach(console_handler)
         self.logger = log.get("gui")
 
         self.logger.info("Logger initialized.")
@@ -564,7 +575,6 @@ class PreviewDataWidget(EdgeWindow):
             self.num_rois = 1
             self._array_type = "array"
 
-        print(f"Num rois: {self.num_rois}")
         if self.is_mbo_scan:
             for arr in self.image_widget.data:
                 arr.fix_phase = False
@@ -598,7 +608,6 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_done = [False] * self.num_rois
         self._zstats_progress = [0.0] * self.num_rois
         self._zstats_current_z = [0] * self.num_rois
-        print(f"zstats: {self._zstats}")
 
         # Settings menu flags
         self.show_debug_panel = False
