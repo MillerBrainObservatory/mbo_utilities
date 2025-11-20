@@ -335,6 +335,13 @@ def _run_gui_impl(
     metadata_only: bool = False,
 ):
     """Internal implementation of GUI launcher."""
+    # Force OpenGL backend for better compatibility with remote desktop
+    import os
+    if 'WGPU_BACKEND_TYPE' not in os.environ:
+        os.environ['WGPU_BACKEND_TYPE'] = 'Gl'
+    if 'RENDERCANVAS_BACKEND' not in os.environ:
+        os.environ['RENDERCANVAS_BACKEND'] = 'glfw'
+
     setup_imgui()  # ensure assets (fonts + icons) are available
 
     # Handle file selection if no path provided
