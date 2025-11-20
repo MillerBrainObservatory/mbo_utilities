@@ -26,22 +26,14 @@ try:
     canvas = QRenderCanvas(size=(800, 600), title="Test")
     print("  Qt canvas created!")
 
-    print("\nStep 5: Try to get wgpu surface from canvas")
-    surface = canvas.get_surface()
-    print(f"  Surface: {surface}")
+    print("\nStep 5: Get wgpu context from canvas")
+    present_context = canvas.get_wgpu_context()
+    print(f"  Context: {present_context}")
 
-    print("\nStep 6: Configure surface")
-    # This is where it probably fails
-    from wgpu import TextureFormat
-    config = {
-        "device": device,
-        "format": TextureFormat.bgra8unorm,
-        "usage": wgpu.TextureUsage.RENDER_ATTACHMENT,
-        "width": 800,
-        "height": 600,
-    }
-    surface.configure(**config)
-    print("  SUCCESS! Surface configured!")
+    print("\nStep 6: Configure context")
+    render_texture_format = present_context.get_preferred_format(adapter)
+    present_context.configure(device=device, format=render_texture_format)
+    print("  SUCCESS! Context configured!")
 
 except Exception as e:
     print(f"\nFAILED at current step!")
