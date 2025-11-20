@@ -163,7 +163,7 @@ def get_metadata(file, z_step=None, verbose=False):
         tiff_files = get_files(file_path, "tif", sort_ascending=True)
         if not tiff_files:
             raise ValueError(f"No TIFF files found in directory: {file_path}")
-        return get_metadata_batch(tiff_files, z_step=z_step, verbose=verbose)
+        return get_metadata_batch(tiff_files)
 
     elif file_path.is_file():
         return get_metadata_single(file_path)
@@ -172,13 +172,13 @@ def get_metadata(file, z_step=None, verbose=False):
         raise ValueError(f"Path does not exist or is not accessible: {file_path}")
 
 
-def get_metadata_single(file: os.PathLike | str):
+def get_metadata_single(file: Path):
     """
     Extract metadata from a single TIFF file produced by ScanImage or processed via the save_as function.
 
     Parameters
     ----------
-    file : os.PathLike or str
+    file : Path
         The full path to the TIFF file from which metadata is to be extracted.
     verbose : bool, optional
         If True, returns an extended metadata dictionary that includes all available ScanImage attributes.
@@ -397,7 +397,7 @@ def get_metadata_batch(file_paths: list | tuple):
 
     # Get metadata from first file only
     metadata = get_metadata_single(file_paths[0])
-    n_planes = metadata["num_planes"]
+    n_planes = metadata.get("num_planes", 1)
 
     # Count frames for all files
     frames_per_file = [

@@ -1,25 +1,18 @@
 from pathlib import Path
-import numpy as np
-import time
 import mbo_utilities as mbo
+from mbo_utilities.widgets import select_files
 import fastplotlib as fpl
-import zarr
-import tifffile
 
-data_path = Path(r"D:\example_extraction\zarr_with_zreg")
-data_path_og = Path(r"D:\example_extraction\zarr")
+# data_path_a = select_files()
+data_path_a = r"\\rbo-w1\W1_E_USER_DATA\kbarber\11_04_2025_green_full\plane_1"
+tiffs = [x for x in Path(data_path_a).glob("*.tif")]
 
-no_reg = mbo.imread(data_path_og)
-with_reg = mbo.imread(data_path)
+data = mbo.imread(tiffs)
 
-iw = fpl.ImageWidget([no_reg, with_reg], names=["No Plane Alignment", "Suite3D Plane Alignment"])
+iw = fpl.ImageWidget(
+    [data],
+    names=["No Plane Alignment"],
+)
+
 iw.show()
 fpl.loop.run()
-
-# job_path = align_zplanes(data_path)
-# full_job_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw_suite3d_plane_alignment\s3d-v2_1-init-file_500-init-frames_gpu\summary\summary.npy")
-# summary = np.load(job_path.joinpath("summary/summary.npy"), allow_pickle=True).item()
-# tvecs = summary["tvecs"]
-
-x = mbo.imread(files)
-x.phasecorr_method = None
