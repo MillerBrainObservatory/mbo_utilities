@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+import os
+# Force OpenGL backend like napari uses (works over remote desktop)
+os.environ['WGPU_BACKEND_TYPE'] = 'OpenGL'
+os.environ['RENDERCANVAS_BACKEND'] = 'glfw'
+
 import numpy as np
 import fastplotlib as fpl
 
