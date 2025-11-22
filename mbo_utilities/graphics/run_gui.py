@@ -8,9 +8,11 @@ import urllib.request
 
 # Force rendercanvas to use Qt backend if PySide6 is available
 # This must happen BEFORE importing fastplotlib to avoid glfw selection
+# Note: rendercanvas.qt requires PySide6 to be IMPORTED, not just available
 # see: https://github.com/pygfx/wgpu-py/issues/776#issuecomment-3561870603
 if importlib.util.find_spec("PySide6") is not None:
     os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
+    import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
 
 import click
 import numpy as np

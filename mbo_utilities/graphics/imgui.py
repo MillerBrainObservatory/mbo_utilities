@@ -9,8 +9,10 @@ import importlib.util
 
 # Force rendercanvas to use Qt backend if PySide6 is available
 # This must happen BEFORE importing fastplotlib to avoid glfw selection
+# Note: rendercanvas.qt requires PySide6 to be IMPORTED, not just available
 if importlib.util.find_spec("PySide6") is not None:
     os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
+    import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
 
 import imgui_bundle
 import numpy as np
@@ -1485,47 +1487,16 @@ class PreviewDataWidget(EdgeWindow):
             if winsize_changed and new_winsize > 0:
                 self.window_size = new_winsize
 
-            # Gaussian Filter - slider for fine control, +/- buttons for integer steps
-            imgui.text("Gaussian Blur")
-
-            # Slider for fine decimal control (0.0 to 5.0)
-            imgui.set_next_item_width(hello_imgui.em_size(8))
-            slider_changed, slider_val = imgui.slider_float(
-                "##sigma_slider",
-                self.gaussian_sigma,
-                v_min=0.0,
-                v_max=5.0,
-                format="%.2f",
+            # Gaussian Filter
+            imgui.set_next_item_width(hello_imgui.em_size(6))
+            gaussian_changed, new_sigma = imgui.input_float(
+                "Gaussian Sigma", self.gaussian_sigma, step=0.1, step_fast=1.0, format="%.1f"
             )
-            if slider_changed:
-                self.gaussian_sigma = slider_val
-
-            imgui.same_line()
-
-            # +/- buttons for integer steps
-            if imgui.button("-##sigma"):
-                self.gaussian_sigma = max(0.0, self.gaussian_sigma - 1.0)
-            imgui.same_line()
-            if imgui.button("+##sigma"):
-                self.gaussian_sigma = self.gaussian_sigma + 1.0
-
-            imgui.same_line()
-
-            # Input field for direct entry
-            imgui.set_next_item_width(hello_imgui.em_size(4))
-            input_changed, input_val = imgui.input_float(
-                "##sigma_input",
-                self.gaussian_sigma,
-                step=0.1,
-                step_fast=1.0,
-                format="%.2f",
-            )
-            if input_changed:
-                self.gaussian_sigma = max(0.0, input_val)
-
             set_tooltip(
                 "Apply a Gaussian blur to the preview image. Sigma is in pixels; larger values yield stronger smoothing."
             )
+            if gaussian_changed:
+                self.gaussian_sigma = max(0.0, new_sigma)
 
             imgui.end_group()
 
