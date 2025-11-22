@@ -11,7 +11,6 @@ from typing import Any, List, Sequence
 import h5py
 import numpy as np
 import tifffile
-import dask
 from dask import array as da
 from tifffile import TiffFile
 
@@ -20,7 +19,6 @@ from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
     _convert_range_to_slice,
     expand_paths,
-    files_to_dask,
     derive_tag_from_filename,
 )
 from mbo_utilities.metadata import get_metadata
@@ -31,55 +29,6 @@ logger = log.get("array_types")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
-
-
-class LazyArrayProtocol:
-    """
-    Protocol for lazy array types.
-
-    Must implement:
-    - __getitem__    (method)
-    - __len__        (method)
-    - min            (property)
-    - max            (property)
-    - ndim           (property)
-    - shape          (property)
-    - dtype          (property)
-    - metadata       (property)
-
-    Optionally implement:
-    - __array__      (method)
-    - imshow         (method)
-    - _imwrite       (method)
-    - close          (method)
-    - chunks         (property)
-    - dask           (property)
-    """
-
-    def __getitem__(self, key: int | slice | tuple[int, ...]) -> np.ndarray:
-        raise NotImplementedError
-
-    def __len__(self) -> int:
-        raise NotImplementedError
-
-    def __array__(self) -> np.ndarray:
-        raise NotImplementedError
-
-    @property
-    def min(self) -> float:
-        raise NotImplementedError
-
-    @property
-    def max(self) -> float:
-        raise NotImplementedError
-
-    @property
-    def ndim(self) -> int:
-        raise NotImplementedError
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        raise NotImplementedError
 
 
 def validate_s3d_registration(s3d_job_dir: Path, num_planes: int = None) -> bool:
@@ -2004,7 +1953,6 @@ class BinArray:
         **kwargs,
     ):
         """Write BinArray to disk."""
-        from ._writers import _write_plane
 
         outpath = Path(outpath)
         if output_name is None:

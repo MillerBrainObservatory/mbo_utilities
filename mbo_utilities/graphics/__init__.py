@@ -3,6 +3,32 @@ Graphics module with lazy imports to avoid loading heavy dependencies
 (torch, cupy, suite2p) until actually needed.
 """
 
+import os
+import sys
+import importlib.util
+
+# Force rendercanvas to use Qt backend if PySide6 is available
+# This must happen BEFORE importing fastplotlib to avoid glfw selection
+if importlib.util.find_spec("PySide6") is not None:
+    os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
+
+# Configure wgpu instance to skip OpenGL backend and avoid EGL warnings
+# This must be done before any wgpu instance is created (before enumerate_adapters/request_adapter)
+# Only applies to native platforms (not pyodide/emscripten)
+if sys.platform != "emscripten":
+    try:
+        from wgpu.backends.wgpu_native.extras import set_instance_extras
+        # Use Vulkan on Linux, DX12 on Windows, Metal on macOS - skip GL to avoid EGL errors
+        if sys.platform == "win32":
+            set_instance_extras(backends=["Vulkan", "DX12"])
+        elif sys.platform == "darwin":
+            set_instance_extras(backends=["Metal"])
+        else:
+            # Linux - Vulkan only, skip GL/EGL
+            set_instance_extras(backends=["Vulkan"])
+    except ImportError:
+        pass  # wgpu not installed or older version without extras
+
 __all__ = [
     "PreviewDataWidget",
     "run_gui",

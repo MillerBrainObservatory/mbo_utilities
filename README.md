@@ -8,19 +8,16 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 - **Fast, lazy I/O** with `imread`/`imwrite` for [multiple array types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) (ScanImage and generic TIFFs, Suite2p binaries, Zarr and HDF5)
 - **Interactive GUI** via `uv run mbo` for visualization and processing
-- **Pollen calibration** via `uv run pollen`
-- **Multiple array wrappers** for seamless data handling
-
+- **(WIP) Pollen calibration** via `uv run pollen`
 
 [![Documentation](https://img.shields.io/badge/Documentation-black?style=for-the-badge&logo=readthedocs&logoColor=white)](https://millerbrainobservatory.github.io/mbo_utilities/)
 
 ## Installation
 
+`mbo_utilities` is installable with pip.
+
 ```bash
 uv pip install mbo_utilities
-
-# download the user_guide notebook
-uv run mbo --download-notebook
 ```
 
 The GUI allows registration/segmentation for users to quickly process subsets of their datasets.
@@ -31,7 +28,7 @@ Currently, the only supported pipeline is LBM-Suite2p-Python. A few exciting fut
 
 ```bash
 
-uv pip install lbm_suite2p_python
+uv pip install mbo_utiltiies[suite2p]
 
 ```
 
