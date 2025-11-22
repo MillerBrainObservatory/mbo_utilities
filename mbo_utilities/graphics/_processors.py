@@ -25,9 +25,8 @@ import os
 import importlib.util
 
 if importlib.util.find_spec("PySide6") is not None:
-    # Set environment variable to force Qt backend in rendercanvas
-    # This prevents glfw from being selected even if it's imported
     os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
+    import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
 
 try:
     from fastplotlib.widgets.image_widget import NDImageProcessor
