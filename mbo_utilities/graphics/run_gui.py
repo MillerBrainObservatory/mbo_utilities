@@ -1,8 +1,17 @@
 import copy
 import sys
+import os
+import importlib.util
 from pathlib import Path
 from typing import Any, Optional, Union
 import urllib.request
+
+# Force rendercanvas to use Qt backend if PySide6 is available
+# This must happen BEFORE importing fastplotlib to avoid glfw selection
+# see: https://github.com/pygfx/wgpu-py/issues/776#issuecomment-3561870603
+if importlib.util.find_spec("PySide6") is not None:
+    os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
+
 import click
 import numpy as np
 from mbo_utilities.array_types import iter_rois, normalize_roi
@@ -275,6 +284,19 @@ def _show_metadata_viewer(metadata: dict) -> None:
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
     import fastplotlib as fpl
+    try:
+        from rendercanvas.pyside6 import RenderCanvas
+    except ImportError:
+        RenderCanvas = None
+
+    if RenderCanvas is not None:
+        figure_kwargs = {
+            "canvas": "pyside6",
+            "canvas_kwargs": {"present_method": "bitmap"},
+            "size": (800, 800)
+        }
+    else:
+        figure_kwargs = {"size": (800, 800)}
 
     # Determine slider dimension names and window functions based on data dimensionality
     # MBO data is typically TZYX (4D) or TYX (3D)
@@ -307,6 +329,7 @@ def _create_image_widget(data_array, widget: bool = True):
             names.append(f"ROI {r}" if r else "Full Image")
             processors.append(RasterScanProcessor)
 
+
         iw = fpl.ImageWidget(
             data=arrays,
             processors=processors,
@@ -315,7 +338,7 @@ def _create_image_widget(data_array, widget: bool = True):
             window_funcs=window_funcs,
             window_sizes=window_sizes,
             histogram_widget=True,
-            figure_kwargs={"size": (800, 800)},
+            figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
     else:
@@ -326,7 +349,7 @@ def _create_image_widget(data_array, widget: bool = True):
             window_funcs=window_funcs,
             window_sizes=window_sizes,
             histogram_widget=True,
-            figure_kwargs={"size": (800, 800)},
+            figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
 

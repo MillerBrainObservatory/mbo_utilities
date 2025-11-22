@@ -19,6 +19,16 @@ from typing import Callable, Literal
 import numpy as np
 from numpy.typing import ArrayLike
 
+# Force rendercanvas to use Qt backend if PySide6 is available
+# This must happen BEFORE importing fastplotlib to avoid glfw selection
+import os
+import importlib.util
+
+if importlib.util.find_spec("PySide6") is not None:
+    # Set environment variable to force Qt backend in rendercanvas
+    # This prevents glfw from being selected even if it's imported
+    os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
+
 try:
     from fastplotlib.widgets.image_widget import NDImageProcessor
 except ImportError:

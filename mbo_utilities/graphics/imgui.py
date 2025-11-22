@@ -4,6 +4,13 @@ from pathlib import Path
 from typing import Literal
 import threading
 from functools import partial
+import os
+import importlib.util
+
+# Force rendercanvas to use Qt backend if PySide6 is available
+# This must happen BEFORE importing fastplotlib to avoid glfw selection
+if importlib.util.find_spec("PySide6") is not None:
+    os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
 
 import imgui_bundle
 import numpy as np
