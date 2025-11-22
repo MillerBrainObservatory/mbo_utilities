@@ -105,18 +105,11 @@ class MboImageProcessor(NDImageProcessor):
         Returns
         -------
         np.ndarray
-            Processed frame
+            Processed frame (2D for n_display_dims=2)
         """
-        # if no window funcs or spatial funcs, don't need the subclass
-        if (self._window_funcs is None or
-            all(wf is None for wf in (self._window_funcs if isinstance(self._window_funcs, tuple) else [self._window_funcs]))) and \
-           self._spatial_func is None:
-            frame = self.data[indices]
-            return np.asarray(frame)
-
-        # Otherwise use parent class get() which handles window funcs and spatial_func
+        # Use parent class get() which properly handles indexing and window funcs
         frame = super().get(indices)
-        return frame
+        return np.asarray(frame)
 
 
 class MultiSessionImageProcessor(MboImageProcessor):
