@@ -7,6 +7,7 @@ import click
 import numpy as np
 from mbo_utilities.array_types import iter_rois, normalize_roi
 from mbo_utilities.graphics._file_dialog import FileDialog, setup_imgui
+from mbo_utilities.graphics._processors import BaseImageProcessor, RasterScanProcessor
 
 
 def _check_installation():
@@ -274,7 +275,6 @@ def _show_metadata_viewer(metadata: dict) -> None:
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
     import fastplotlib as fpl
-    from mbo_utilities.graphics._processors import MboImageProcessor
 
     # Determine slider dimension names and window functions based on data dimensionality
     # MBO data is typically TZYX (4D) or TYX (3D)
@@ -305,7 +305,7 @@ def _create_image_widget(data_array, widget: bool = True):
             arr.roi = r
             arrays.append(arr)
             names.append(f"ROI {r}" if r else "Full Image")
-            processors.append(MboImageProcessor)
+            processors.append(RasterScanProcessor)
 
         iw = fpl.ImageWidget(
             data=arrays,
@@ -321,7 +321,7 @@ def _create_image_widget(data_array, widget: bool = True):
     else:
         iw = fpl.ImageWidget(
             data=data_array,
-            processors=MboImageProcessor,
+            processors=BaseImageProcessor,
             slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
             window_sizes=window_sizes,

@@ -118,15 +118,14 @@ def draw_saveas_progress(self):
 
 
 def draw_zstats_progress(self):
-    # if self.num_rois > 1:
-    for i in range(self.num_rois):
-        roi_key = f"zstats_roi{i + 1}"
-        roi_state = _progress_state[roi_key]
+    for i in range(self.num_graphics):
+        key = f"zstats_{i}"
+        state = _progress_state[key]
 
-        if roi_state["done_cleared"]:
+        if state["done_cleared"]:
             continue
 
-        # Make sure these are valid per-ROI lists
+        # Make sure these are valid per-graphic lists
         current_z = (
             self._zstats_current_z[i] if isinstance(self._zstats_current_z, list) else 0
         )
@@ -136,12 +135,12 @@ def draw_zstats_progress(self):
         done = self._zstats_done[i] if isinstance(self._zstats_done, list) else False
 
         draw_progress(
-            key=roi_key,
+            key=key,
             current_index=current_z,
             total_count=self.nz,
             percent_complete=progress,
-            running_text=f"Computing stats: ROI {i + 1}, plane(s)",
-            done_text=f"Z-stats complete (ROI {i + 1})",
+            running_text=f"Computing stats: graphic {i + 1}, plane(s)",
+            done_text=f"Z-stats complete (graphic {i + 1})",
             done=done,
         )
 
