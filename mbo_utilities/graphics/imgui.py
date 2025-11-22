@@ -741,8 +741,28 @@ class PreviewDataWidget(EdgeWindow):
 
     @property
     def current_offset(self) -> list[float]:
-        """Get current phase offset from each processor."""
-        return [proc.current_offset for proc in self.processors]
+        """
+        Get current phase offset from each processor or underlying array.
+
+        For MboRawArray data, the offset is computed by the array itself.
+        For other array types, the processor computes and caches it.
+        """
+        offsets = []
+        for i, proc in enumerate(self.processors):
+            # First check if processor has a cached offset
+            if proc.current_offset != 0.0:
+                offsets.append(proc.current_offset)
+            # For MboRawArray, check the array's offset property
+            elif hasattr(self.image_widget.data[i], 'offset'):
+                arr_offset = self.image_widget.data[i].offset
+                # offset can be a scalar or array
+                if isinstance(arr_offset, np.ndarray):
+                    offsets.append(float(arr_offset.mean()) if arr_offset.size > 0 else 0.0)
+                else:
+                    offsets.append(float(arr_offset) if arr_offset else 0.0)
+            else:
+                offsets.append(0.0)
+        return offsets
 
     @property
     def fix_phase(self) -> bool:
@@ -1465,19 +1485,47 @@ class PreviewDataWidget(EdgeWindow):
             if winsize_changed and new_winsize > 0:
                 self.window_size = new_winsize
 
-            # Gaussian Filter
-            imgui.set_next_item_width(hello_imgui.em_size(6))
-            gaussian_changed, new_gaussian_sigma = imgui.slider_float(
-                label="sigma",
-                v=self.gaussian_sigma,
+            # Gaussian Filter - slider for fine control, +/- buttons for integer steps
+            imgui.text("Gaussian Blur")
+
+            # Slider for fine decimal control (0.0 to 5.0)
+            imgui.set_next_item_width(hello_imgui.em_size(8))
+            slider_changed, slider_val = imgui.slider_float(
+                "##sigma_slider",
+                self.gaussian_sigma,
                 v_min=0.0,
-                v_max=20.0,
+                v_max=5.0,
+                format="%.2f",
             )
+            if slider_changed:
+                self.gaussian_sigma = slider_val
+
+            imgui.same_line()
+
+            # +/- buttons for integer steps
+            if imgui.button("-##sigma"):
+                self.gaussian_sigma = max(0.0, self.gaussian_sigma - 1.0)
+            imgui.same_line()
+            if imgui.button("+##sigma"):
+                self.gaussian_sigma = self.gaussian_sigma + 1.0
+
+            imgui.same_line()
+
+            # Input field for direct entry
+            imgui.set_next_item_width(hello_imgui.em_size(4))
+            input_changed, input_val = imgui.input_float(
+                "##sigma_input",
+                self.gaussian_sigma,
+                step=0.1,
+                step_fast=1.0,
+                format="%.2f",
+            )
+            if input_changed:
+                self.gaussian_sigma = max(0.0, input_val)
+
             set_tooltip(
                 "Apply a Gaussian blur to the preview image. Sigma is in pixels; larger values yield stronger smoothing."
             )
-            if gaussian_changed:
-                self.gaussian_sigma = new_gaussian_sigma
 
             imgui.end_group()
 
@@ -1509,15 +1557,17 @@ class PreviewDataWidget(EdgeWindow):
             if fft_changed:
                 self.use_fft = fft_value
 
+            # Display current offsets - use self.current_offset which checks both
+            # processor cache and MboRawArray.offset
+            current_offsets = self.current_offset
             imgui.columns(2, "offsets", False)
-            for i, proc in enumerate(self.processors):
-                ofs = proc.current_offset
+            for i, ofs in enumerate(current_offsets):
                 max_abs_offset = abs(ofs)
 
                 imgui.text(f"graphic {i + 1}:")
                 imgui.next_column()
 
-                display_text = f"{np.round(ofs, 2):.3f}"
+                display_text = f"{ofs:.3f}"
 
                 if max_abs_offset > self.max_offset:
                     imgui.push_style_color(

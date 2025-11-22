@@ -10,6 +10,7 @@ print(f"Initial data shape: {data.shape}")
 
 # Create ImageWidget
 pdw = run_gui(data)
+x = 5
 # iw = fpl.ImageWidget(
 #     [data],
 #     names=["My Custom Filetype"],
