@@ -250,15 +250,12 @@ def draw_section_suite2p(self):
                 self._saveas_outdir = res.result()
 
         # Get max frames from data
+        # iw-array API: data is an ImageWidgetProperty indexer, access with data[0]
         if hasattr(self, "image_widget") and self.image_widget.data:
-            data_arrays = (
-                self.image_widget.data
-                if isinstance(self.image_widget.data, list)
-                else [self.image_widget.data]
-            )
-            if len(data_arrays) > 0:
-                max_frames = data_arrays[0].shape[0]
-            else:
+            try:
+                first_array = self.image_widget.data[0]
+                max_frames = first_array.shape[0]
+            except (IndexError, AttributeError):
                 max_frames = 1000
         else:
             max_frames = 1000
@@ -326,10 +323,9 @@ def draw_section_suite2p(self):
 
         # Use current z-plane only (commented out multi-plane selection for now)
         # Get current z index from image widget
-        # arr_idx = 0
-        # arr = self.image_widget.data[arr_idx]
-        dims = self.image_widget.current_index
-        current_z = dims.get("z", 0)
+        # iw-array API: use indices property with named dimension access
+        names = self.image_widget._slider_dim_names or ()
+        current_z = self.image_widget.indices["z"] if "z" in names else 0
         # current_z = self.image_widget.idx.get("z", 0)
         current_plane = current_z + 1  # Convert 0-indexed to 1-indexed
         self._selected_planes = {current_plane}
@@ -993,8 +989,9 @@ def run_plane_from_data(self, arr_idx):
         return
 
     arr = self.image_widget.data[arr_idx]
-    dims = self.image_widget.current_index
-    current_z = dims.get("z", 0)
+    # iw-array API: use indices property with named dimension access
+    names = self.image_widget._slider_dim_names or ()
+    current_z = self.image_widget.indices["z"] if "z" in names else 0
 
     base_out = Path(self._saveas_outdir) if getattr(self, "_saveas_outdir", None) else None
     if not base_out:

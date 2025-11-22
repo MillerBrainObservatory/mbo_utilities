@@ -6,7 +6,9 @@ Graphics module with lazy imports to avoid loading heavy dependencies
 __all__ = [
     "PreviewDataWidget",
     "run_gui",
-    "MboImageProcessor",
+    "BaseImageProcessor",
+    "RasterScanProcessor",
+    "MboImageProcessor",  # Alias for backwards compatibility
     "MultiSessionImageProcessor",
 ]
 
@@ -19,7 +21,14 @@ def __getattr__(name):
     elif name == "PreviewDataWidget":
         from .imgui import PreviewDataWidget
         return PreviewDataWidget
+    elif name == "BaseImageProcessor":
+        from ._processors import BaseImageProcessor
+        return BaseImageProcessor
+    elif name == "RasterScanProcessor":
+        from ._processors import RasterScanProcessor
+        return RasterScanProcessor
     elif name == "MboImageProcessor":
+        # Backwards compatibility alias
         from ._processors import MboImageProcessor
         return MboImageProcessor
     elif name == "MultiSessionImageProcessor":

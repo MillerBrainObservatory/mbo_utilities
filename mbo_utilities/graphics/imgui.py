@@ -8,8 +8,8 @@ from functools import partial
 import imgui_bundle
 import numpy as np
 from numpy import ndarray
-from scipy.ndimage import gaussian_filter
 from skimage.registration import phase_cross_correlation
+from scipy.ndimage import gaussian_filter
 
 from imgui_bundle import (
     imgui,
@@ -45,7 +45,6 @@ from mbo_utilities.graphics.progress_bar import (
 # Lazy import to avoid loading suite2p/torch/cupy until needed
 # from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
 from mbo_utilities.lazy_array import imread, imwrite
-from mbo_utilities.phasecorr import apply_scan_phase_offsets
 from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler
 from mbo_utilities import log
 
@@ -127,7 +126,9 @@ def draw_menu(parent):
             if imgui.begin_menu("File", True):
                 # Open File - iw-array API
                 if imgui.menu_item("Open File", "Ctrl+O", p_selected=False, enabled=True)[0]:
-                    start_dir = str(Path(parent.fpath).parent) if parent.fpath and Path(parent.fpath).exists() else str(Path.home())
+                    # Handle fpath being a list or a string
+                    fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
+                    start_dir = str(Path(fpath).parent) if fpath and Path(fpath).exists() else str(Path.home())
                     parent._file_dialog = pfd.open_file(
                         "Select Data File",
                         start_dir,
@@ -135,7 +136,9 @@ def draw_menu(parent):
                     )
                 # Open Folder - iw-array API
                 if imgui.menu_item("Open Folder", "", p_selected=False, enabled=True)[0]:
-                    start_dir = str(parent.fpath) if parent.fpath and Path(parent.fpath).exists() else str(Path.home())
+                    # Handle fpath being a list or a string
+                    fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
+                    start_dir = str(Path(fpath).parent) if fpath and Path(fpath).exists() else str(Path.home())
                     parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
                 imgui.separator()
                 if imgui.menu_item(
@@ -316,7 +319,7 @@ def draw_saveas_popup(parent):
             "Register adjacent z-planes to each other using Suite3D.",
         )
         fix_phase_changed, fix_phase_value = imgui.checkbox(
-            "Fix Scan Phase", parent._fix_phase
+            "Fix Scan Phase", parent.fix_phase
         )
         imgui.same_line()
         imgui.text_disabled("(?)")
@@ -330,7 +333,7 @@ def draw_saveas_popup(parent):
             parent.fix_phase = fix_phase_value
 
         use_fft, use_fft_value = imgui.checkbox(
-            "Subpixel Phase Correction", parent._use_fft
+            "Subpixel Phase Correction", parent.use_fft
         )
         imgui.same_line()
         imgui.text_disabled("(?)")
@@ -424,7 +427,12 @@ def draw_saveas_popup(parent):
                         not parent._saveas_selected_roi
                         or len(parent._saveas_selected_roi) == set()
                     ):
-                        parent._saveas_selected_roi = set(range(parent.num_rois))
+                        # Get mROI count from data array (ScanImage-specific)
+                        try:
+                            mroi_count = parent.image_widget.data[0].num_rois
+                        except Exception:
+                            mroi_count = 1
+                        parent._saveas_selected_roi = set(range(mroi_count))
                     # Convert 0-indexed UI values to 1-indexed ROI values for MboRawArray
                     rois = sorted([r + 1 for r in parent._saveas_selected_roi])
                 else:
@@ -443,7 +451,7 @@ def draw_saveas_popup(parent):
                     "debug": parent._debug,
                     "ext": parent._ext,
                     "target_chunk_mb": parent._saveas_chunk_mb,
-                    "use_fft": parent._use_fft,
+                    "use_fft": parent.use_fft,
                     "register_z": parent._register_z,
                     "progress_callback": lambda frac,
                     current_plane: parent.gui_progress_callback(frac, current_plane),
@@ -569,40 +577,17 @@ class PreviewDataWidget(EdgeWindow):
         # image widget setup
         self.image_widget = iw
 
-        self.num_arrays = len(self.image_widget.managed_graphics)
+        # Unified naming: num_graphics matches len(iw.graphics)
+        self.num_graphics = len(self.image_widget.graphics)
         self.shape = self.image_widget.data[0].shape
         self.is_mbo_scan = (
             True if isinstance(self.image_widget.data[0], MboRawArray) else False
         )
 
-        if (
-            hasattr(self.image_widget.data[0], "rois")
-            and self.image_widget.data[0].rois is not None
-        ):
-            self.num_rois = len(self.image_widget.data[0].rois)
-            if self.num_arrays > 1:
-                self._array_type = "roi"
-            else:
-                self._array_type = "array"
-        else:
-            self.num_rois = 1
-            self._array_type = "array"
-
-        if self.is_mbo_scan:
-            for arr in self.image_widget.data:
-                arr.fix_phase = False
-                arr.use_fft = False
-
-        self._fix_phase = False
-        self._use_fft = False
-        self._computed_offsets = [
-            None
-        ] * self.num_arrays  # Store computed offsets for lazy arrays
-
-        # iw-array API: window_funcs is set via processors or directly on the widget
-        # Initialize window_funcs if not already set
-        if self.image_widget.window_funcs is None or "t" not in self.image_widget.window_funcs:
-            self.image_widget.window_funcs = {"t": (np.mean, 1)}
+        # Only set if not already configured - the ImageWidget/processor handles defaults
+        # We just need to track the window size for our UI
+        self._window_size = 1
+        self._gaussian_sigma = 0.0  # Track gaussian sigma locally, applied via spatial_func
 
         if len(self.shape) == 4:
             self.nz = self.shape[1]
@@ -613,41 +598,24 @@ class PreviewDataWidget(EdgeWindow):
 
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
-        self.image_widget._image_widget_sliders._loop = True  # noqa
+        self.image_widget._sliders_ui._loop = True  # noqa
 
         self._zstats = [
-            {"mean": [], "std": [], "snr": []} for _ in range(self.num_rois)
+            {"mean": [], "std": [], "snr": []} for _ in range(self.num_graphics)
         ]
-        self._zstats_means = [None] * self.num_rois
-        self._zstats_mean_scalar = [0.0] * self.num_rois
-        self._zstats_done = [False] * self.num_rois
-        self._zstats_progress = [0.0] * self.num_rois
-        self._zstats_current_z = [0] * self.num_rois
+        self._zstats_means = [None] * self.num_graphics
+        self._zstats_mean_scalar = [0.0] * self.num_graphics
+        self._zstats_done = [False] * self.num_graphics
+        self._zstats_progress = [0.0] * self.num_graphics
+        self._zstats_current_z = [0] * self.num_graphics
 
         # Settings menu flags
         self.show_debug_panel = False
         self.show_scope_window = False
         self.show_metadata_viewer = False
 
-        # ------------------------properties
-        for arr in self.image_widget.data:
-            if hasattr(arr, "border"):
-                arr.border = 3
-            if hasattr(arr, "max_offset"):
-                arr.max_offset = 3
-            if hasattr(arr, "upsample"):
-                arr.upsample = 5
-            if hasattr(arr, "fix_phase"):
-                arr.fix_phase = False
-            if hasattr(arr, "use_fft"):
-                arr.use_fft = False
-
-        self._max_offset = 3
-        self._gaussian_sigma = 0
-        self._current_offset = [0.0] * self.num_arrays
-        self._window_size = 1
-        self._phase_upsample = 5
-        self._border = 3
+        # Processing properties are now on the processor, not the widget
+        # We just track UI state here
         self._auto_update = False
         self._proj = "mean"
 
@@ -710,16 +678,20 @@ class PreviewDataWidget(EdgeWindow):
         """
         Trigger a frame refresh on the ImageWidget.
 
-        Handles both iw-array API (using indices assignment) and
-        fallback for older API (using current_index).
+        Uses the internal _set_slider_index method to force a display update
+        without changing the actual index value.
         """
-        # iw-array API: reassign indices to trigger update
-        if hasattr(self.image_widget, 'indices'):
-            idx = dict(self.image_widget.indices)
-            self.image_widget.indices = idx
-        # Fallback for older API
-        elif hasattr(self.image_widget, 'current_index'):
-            self.image_widget.current_index = self.image_widget.current_index
+        # iw-array API: trigger refresh by re-setting the current t index
+        # This forces the widget to re-render the current frame
+        names = self.image_widget._slider_dim_names or ()
+        if "t" in names:
+            current_t = self.image_widget.indices["t"]
+            # Use internal method to trigger update without full re-index
+            if hasattr(self.image_widget, '_set_slider_index'):
+                self.image_widget._set_slider_index(0, current_t)
+            else:
+                # Fallback: reassign the index to trigger update
+                self.image_widget.indices["t"] = current_t
 
     def gui_progress_callback(self, frac, meta=None):
         """
@@ -756,154 +728,145 @@ class PreviewDataWidget(EdgeWindow):
         self._register_z = value
 
     @property
-    def current_offset(self) -> list[float]:
-        if not self.fix_phase:
-            return [0.0 for _ in self.image_widget.data]
-
-        offsets = []
-        for i, array in enumerate(self.image_widget.data):
-            # MboRawArray computes offset during read - trigger a read to get current offset
-            if isinstance(array, MboRawArray):
-                # Read current frame to compute offset (this updates array.offset)
-                # iw-array API: use indices property for named dimension access
-                idx = self.image_widget.indices
-                t = idx.get("t", 0)
-                z = idx.get("z", 0)
-                # Reading the frame triggers offset computation
-                _ = ndim_to_frame(array, t, z)
-                offsets.append(array.offset)
-            # Use computed offset for other lazy arrays
-            elif self._computed_offsets[i] is not None:
-                offsets.append(self._computed_offsets[i])
-            else:
-                offsets.append(0.0)
-        return offsets
+    def processors(self) -> list:
+        """Access to underlying MboImageProcessor instances."""
+        return self.image_widget._image_processors
 
     @property
-    def fix_phase(self):
-        return self._fix_phase
+    def current_offset(self) -> list[float]:
+        """Get current phase offset from each processor."""
+        return [proc.current_offset for proc in self.processors]
+
+    @property
+    def fix_phase(self) -> bool:
+        """Whether bidirectional phase correction is enabled."""
+        return self.processors[0].fix_phase if self.processors else False
 
     @fix_phase.setter
-    def fix_phase(self, value):
-        self._fix_phase = value
-        if self.is_mbo_scan:
-            for arr in self.image_widget.data:
-                if isinstance(arr, MboRawArray):
-                    arr.fix_phase = value
-        else:
-            # Compute phase correction offsets for lazy arrays
-            if value:
-                self._compute_phase_offsets()
-        self.update_frame_apply()
+    def fix_phase(self, value: bool):
+        self.logger.info(f"Setting fix_phase to {value}.")
+        for proc in self.processors:
+            proc.fix_phase = value
         self._refresh_image_widget()
 
     @property
-    def use_fft(self):
-        return self._use_fft
+    def use_fft(self) -> bool:
+        """Whether FFT-based phase correlation is used."""
+        return self.processors[0].use_fft if self.processors else False
 
     @use_fft.setter
-    def use_fft(self, value):
-        self._use_fft = value
-        for arr in self.image_widget.data:
-            if hasattr(arr, "use_fft"):
-                arr.use_fft = value
-
-        # Recompute phase offsets for lazy arrays if phase correction is enabled
-        if self._fix_phase and not self.is_mbo_scan:
-            self._compute_phase_offsets()
-
-        self.update_frame_apply()
+    def use_fft(self, value: bool):
+        self.logger.info(f"Setting use_fft to {value}.")
+        for proc in self.processors:
+            proc.use_fft = value
         self._refresh_image_widget()
 
     @property
-    def border(self):
-        return self._border
+    def border(self) -> int:
+        """Border pixels to exclude from phase correlation."""
+        return self.processors[0].border if self.processors else 3
 
     @border.setter
-    def border(self, value):
-        self._border = value
-        for arr in self.image_widget.data:
-            if isinstance(arr, MboRawArray):
-                arr.border = value
-        self.logger.info(f"Border set to {value}.")
-
-        # Recompute phase offsets for lazy arrays if phase correction is enabled
-        if self._fix_phase and not self.is_mbo_scan:
-            self._compute_phase_offsets()
-
-        self.update_frame_apply()
+    def border(self, value: int):
+        self.logger.info(f"Setting border to {value}.")
+        for proc in self.processors:
+            proc.border = value
         self._refresh_image_widget()
 
     @property
-    def max_offset(self):
-        return self._max_offset
+    def max_offset(self) -> int:
+        """Maximum pixel offset for phase correction."""
+        return self.processors[0].max_offset if self.processors else 3
 
     @max_offset.setter
-    def max_offset(self, value):
-        self._max_offset = value
-        for arr in self.image_widget.data:
-            if hasattr(arr, "max_offset"):
-                arr.max_offset = value
-        self.logger.info(f"Max offset set to {value}.")
-
-        # Recompute phase offsets for lazy arrays if phase correction is enabled
-        if self._fix_phase and not self.is_mbo_scan:
-            self._compute_phase_offsets()
-
+    def max_offset(self, value: int):
+        self.logger.info(f"Setting max_offset to {value}.")
+        for proc in self.processors:
+            proc.max_offset = value
         self._refresh_image_widget()
 
     @property
-    def selected_array(self):
+    def selected_array(self) -> int:
         return self._selected_array
 
     @selected_array.setter
-    def selected_array(self, value):
-        if value < 0 or value >= len(self.image_widget.data):
+    def selected_array(self, value: int):
+        if value < 0 or value >= self.num_graphics:
             raise ValueError(
                 f"Invalid array index: {value}. "
-                f"Must be between 0 and {len(self.image_widget.managed_graphics) - 1}."
+                f"Must be between 0 and {self.num_graphics - 1}."
             )
         self._selected_array = value
         self.logger.info(f"Selected array index set to {value}.")
-        # self.image_widget.current_index = {"roi": value}
-        self.update_frame_apply()
 
     @property
-    def gaussian_sigma(self):
+    def gaussian_sigma(self) -> float:
+        """Sigma for Gaussian blur (0 = disabled). Uses fastplotlib spatial_func API."""
         return self._gaussian_sigma
 
     @gaussian_sigma.setter
-    def gaussian_sigma(self, value):
-        if value > 0:
-            self._gaussian_sigma = value
-            self.logger.info(f"Gaussian sigma set to {value}.")
-            self.update_frame_apply()
+    def gaussian_sigma(self, value: float):
+        """Set gaussian blur using fastplotlib's spatial_func API."""
+        self._gaussian_sigma = max(0.0, value)
+        self.logger.info(f"Setting gaussian_sigma to {self._gaussian_sigma}.")
+
+        if self._gaussian_sigma > 0:
+            # Use partial to create a spatial_func with the current sigma
+            spatial_func = partial(gaussian_filter, sigma=self._gaussian_sigma)
         else:
-            self.logger.warning(f"Invalid gaussian sigma value: {value}. ")
+            # Use identity function instead of None to work around fastplotlib bug
+            # (processor.spatial_func setter has incorrect None check)
+            def _identity(x):
+                return x
+            spatial_func = _identity
+
+        # Apply to all graphics via ImageWidget's spatial_func API
+        self.image_widget.spatial_func = spatial_func
         self._refresh_image_widget()
 
     @property
-    def proj(self):
+    def proj(self) -> str:
+        """Current projection mode (mean, max, std, mean-sub)."""
         return self._proj
 
     @proj.setter
-    def proj(self, value):
+    def proj(self, value: str):
         if value != self._proj:
-            if value == "mean-sub":
-                self.logger.info("Setting projection to mean-subtracted.")
-                self.update_frame_apply()
-            else:
-                self.logger.info(f"Setting projection to np.{value}.")
-                self.image_widget.window_funcs["t"].func = getattr(np, value)
+            self.logger.info(f"Setting projection to {value}.")
             self._proj = value
+            # For mean-sub, update processor mean_image when z-stats are ready
+            self._update_mean_subtraction()
         self._refresh_image_widget()
 
+    def _update_mean_subtraction(self):
+        """Update processor mean_image based on current projection mode."""
+        if self._proj == "mean-sub":
+            # Set mean image on each processor from z-stats
+            names = self.image_widget._slider_dim_names or ()
+            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+            for i, proc in enumerate(self.processors):
+                if self._zstats_done[i] and self._zstats_mean_scalar[i] is not None:
+                    # Use the scalar mean for the current z-plane
+                    proc.mean_image = self._zstats_mean_scalar[i][z_idx]
+                else:
+                    proc.mean_image = None
+        else:
+            # Clear mean image
+            for proc in self.processors:
+                proc.mean_image = None
+
     @property
-    def window_size(self):
+    def window_size(self) -> int:
+        """
+        Window size for temporal projection.
+
+        This sets the window size for the first slider dimension (typically 't').
+        Uses fastplotlib's window_sizes API which expects a tuple per slider dim.
+        """
         return self._window_size
 
     @window_size.setter
-    def window_size(self, value):
+    def window_size(self, value: int):
         if value < 1:
             self.logger.warning(f"Window size must be >= 1, got {value}. Setting to 1.")
             value = 1
@@ -913,25 +876,44 @@ class PreviewDataWidget(EdgeWindow):
                 f"Phase correction requires >= 4 frames for reliable results. "
                 f"Consider increasing window size or disabling phase correction."
             )
-        self.logger.info(f"Window size set to {value}.")
-        self.image_widget.window_funcs["t"].window_size = value
+
         self._window_size = value
+        self.logger.info(f"Window size set to {value}.")
+
+        # Use fastplotlib's window_sizes API
+        # ImageWidget.window_sizes expects a list with one entry per processor
+        # Each entry is a tuple with one value per slider dim
+        # For 4D data (t, z, y, x) we have 2 slider dims: (t_window, z_window)
+        # For 3D data (t, y, x) we have 1 slider dim: (t_window,)
+        n_slider_dims = self.processors[0].n_slider_dims if self.processors else 1
+
+        if n_slider_dims == 1:
+            # Only temporal dimension
+            per_processor_sizes = (value,)
+        elif n_slider_dims == 2:
+            # Temporal and z dimensions - only apply window to temporal (first dim)
+            per_processor_sizes = (value, None)
+        else:
+            # More dimensions - apply to first, None for rest
+            per_processor_sizes = (value,) + (None,) * (n_slider_dims - 1)
+
+        # Create list with same window_sizes for each processor
+        window_sizes = [per_processor_sizes] * len(self.processors)
+
+        # Set via ImageWidget API (applies to all graphics)
+        self.image_widget.window_sizes = window_sizes
+        self._refresh_image_widget()
 
     @property
-    def phase_upsample(self):
-        return self._phase_upsample
+    def phase_upsample(self) -> int:
+        """Upsampling factor for subpixel phase correlation."""
+        return self.processors[0].phase_upsample if self.processors else 5
 
     @phase_upsample.setter
-    def phase_upsample(self, value):
-        self._phase_upsample = value
-        for arr in self.image_widget.data:
-            if hasattr(arr, "upsample"):
-                arr.upsample = value
-
-        # Recompute phase offsets for lazy arrays if phase correction is enabled
-        if self._fix_phase and not self.is_mbo_scan:
-            self._compute_phase_offsets()
-
+    def phase_upsample(self, value: int):
+        self.logger.info(f"Setting phase_upsample to {value}.")
+        for proc in self.processors:
+            proc.phase_upsample = value
         self._refresh_image_widget()
 
     def update(self):
@@ -961,7 +943,7 @@ class PreviewDataWidget(EdgeWindow):
         """
         Load new data from the specified path using iw-array API.
 
-        Uses iw.data[0] = new_data to swap data without recreating the widget.
+        Uses iw.set_data() to swap data arrays, which handles shape changes.
         """
         from mbo_utilities.lazy_array import imread
 
@@ -979,7 +961,8 @@ class PreviewDataWidget(EdgeWindow):
 
             new_data = imread(path)
 
-            # Update ImageWidget data using iw-array API
+            # iw-array API: use data indexer for replacing data
+            # iw.data[0] = new_array handles shape changes automatically
             self.image_widget.data[0] = new_data
 
             # Reset indices
@@ -1031,7 +1014,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # ROI selector
         array_labels = [
-            f"{self._array_type} {i + 1}"
+            f"{"graphic"} {i + 1}"
             for i in range(len(stats_list))
             if stats_list[i] and "mean" in stats_list[i]
         ]
@@ -1067,7 +1050,7 @@ class PreviewDataWidget(EdgeWindow):
         is_combined_selected = has_combined and self._selected_array == len(array_labels) - 1
 
         if is_combined_selected:  # Combined
-            imgui.text(f"Stats for Combined {self._array_type}s")
+            imgui.text(f"Stats for Combined {"graphic"}s")
             mean_vals = np.mean(
                 [np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0
             )
@@ -1092,7 +1075,7 @@ class PreviewDataWidget(EdgeWindow):
             if is_single_zplane:
                 # Show just the single plane combined stats
                 if imgui.begin_table(
-                    f"Stats (averaged over {self._array_type}s)",
+                    f"Stats (averaged over {"graphic"}s)",
                     3,
                     imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
                 ):
@@ -1124,35 +1107,35 @@ class PreviewDataWidget(EdgeWindow):
 
                 imgui.text("Signal Quality Comparison")
                 set_tooltip(
-                    f"Comparison of mean fluorescence across all {self._array_type}s",
+                    f"Comparison of mean fluorescence across all {"graphic"}s",
                     True,
                 )
 
-                # Get per-ROI mean values
-                roi_means = [
+                # Get per-graphic mean values
+                graphic_means = [
                     np.asarray(self._zstats[r]["mean"][0], float)
-                    for r in range(self.num_rois)
+                    for r in range(self.num_graphics)
                     if self._zstats[r] and "mean" in self._zstats[r]
                 ]
 
                 plot_width = imgui.get_content_region_avail().x
-                if roi_means and implot.begin_plot(
+                if graphic_means and implot.begin_plot(
                     "Signal Comparison", imgui.ImVec2(plot_width, 350)
                 ):
                     style_seaborn_dark()
                     implot.setup_axes(
-                        f"{self._array_type.capitalize()}",
+                        "Graphic",
                         "Mean Fluorescence (a.u.)",
                         implot.AxisFlags_.none.value,
                         implot.AxisFlags_.auto_fit.value,
                     )
 
-                    x_pos = np.arange(len(roi_means), dtype=np.float64)
-                    heights = np.array(roi_means, dtype=np.float64)
+                    x_pos = np.arange(len(graphic_means), dtype=np.float64)
+                    heights = np.array(graphic_means, dtype=np.float64)
 
-                    labels = [f"{i + 1}" for i in range(len(roi_means))]
+                    labels = [f"{i + 1}" for i in range(len(graphic_means))]
                     implot.setup_axis_limits(
-                        implot.ImAxis_.x1.value, -0.5, len(roi_means) - 0.5
+                        implot.ImAxis_.x1.value, -0.5, len(graphic_means) - 0.5
                     )
                     implot.setup_axis_ticks_custom(
                         implot.ImAxis_.x1.value, x_pos, labels
@@ -1163,7 +1146,7 @@ class PreviewDataWidget(EdgeWindow):
                         implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
                     )
                     implot.plot_bars(
-                        f"{self._array_type.capitalize()} Signal",
+                        "Graphic Signal",
                         x_pos,
                         heights,
                         0.6,
@@ -1187,7 +1170,7 @@ class PreviewDataWidget(EdgeWindow):
                 # Multi-z-plane: show original table and combined plot
                 # Table
                 if imgui.begin_table(
-                    f"Stats, averaged over {self._array_type}s",
+                    f"Stats, averaged over {"graphic"}s",
                     4,
                     imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,  # type: ignore # noqa
                 ):  # type: ignore # noqa
@@ -1220,16 +1203,16 @@ class PreviewDataWidget(EdgeWindow):
                     True,
                 )
 
-                # build per-ROI series
-                roi_series = [
+                # build per-graphic series
+                graphic_series = [
                     np.asarray(self._zstats[r]["mean"], float)
-                    for r in range(self.num_rois)
+                    for r in range(self.num_graphics)
                 ]
 
-                L = min(len(s) for s in roi_series)
+                L = min(len(s) for s in graphic_series)
                 z = np.asarray(z_vals[:L], float)
-                roi_series = [s[:L] for s in roi_series]
-                stack = np.vstack(roi_series)
+                graphic_series = [s[:L] for s in graphic_series]
+                stack = np.vstack(graphic_series)
                 mean_vals = stack.mean(axis=0)
                 std_vals = stack.std(axis=0)
                 lower = mean_vals - std_vals
@@ -1253,7 +1236,7 @@ class PreviewDataWidget(EdgeWindow):
                     )
                     implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
 
-                    for i, ys in enumerate(roi_series):
+                    for i, ys in enumerate(graphic_series):
                         label = f"ROI {i + 1}##roi{i}"
                         implot.push_style_var(implot.StyleVar_.line_weight.value, 1)
                         implot.push_style_color(
@@ -1292,7 +1275,7 @@ class PreviewDataWidget(EdgeWindow):
             mean_vals = np.ascontiguousarray(mean_vals, dtype=np.float64)
             std_vals = np.ascontiguousarray(std_vals, dtype=np.float64)
 
-            imgui.text(f"Stats for {self._array_type} {array_idx + 1}")
+            imgui.text(f"Stats for {"graphic"} {array_idx + 1}")
 
             # For single z-plane, show simplified table and visualization
             if is_single_zplane:
@@ -1460,15 +1443,10 @@ class PreviewDataWidget(EdgeWindow):
                 if selected_label == "mean-sub (pending)":
                     pass
                 else:
+                    # The proj setter handles updating window_funcs and calling update_frame_apply
                     self.proj = selected_label
-                    if self.proj == "mean-sub":
-                        self.update_frame_apply()
-                    else:
-                        self.image_widget.window_funcs["t"].func = getattr(
-                            np, self.proj
-                        )
 
-            # Window size for projections
+            # Window size for projections (temporal dimension)
             imgui.set_next_item_width(hello_imgui.em_size(6))
             winsize_changed, new_winsize = imgui.input_int(
                 "Window Size", self.window_size, step=1, step_fast=2
@@ -1479,7 +1457,6 @@ class PreviewDataWidget(EdgeWindow):
             )
             if winsize_changed and new_winsize > 0:
                 self.window_size = new_winsize
-                self.logger.info(f"New Window Size: {new_winsize}")
 
             # Gaussian Filter
             imgui.set_next_item_width(hello_imgui.em_size(6))
@@ -1509,47 +1486,31 @@ class PreviewDataWidget(EdgeWindow):
             imgui.begin_group()
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
-            phase_changed, phase_value = imgui.checkbox("Fix Phase", self._fix_phase)
+            phase_changed, phase_value = imgui.checkbox("Fix Phase", self.fix_phase)
             set_tooltip(
                 "Enable to apply scan-phase correction which shifts every other line/row of pixels "
                 "to maximize correlation between these rows."
             )
             if phase_changed:
                 self.fix_phase = phase_value
-                self.logger.info(f"Fix Phase: {phase_value}")
 
             imgui.set_next_item_width(hello_imgui.em_size(10))
-            fft_changed, fft_value = imgui.checkbox("Sub-Pixel (slower)", self._use_fft)
+            fft_changed, fft_value = imgui.checkbox("Sub-Pixel (slower)", self.use_fft)
             set_tooltip(
                 "Use FFT-based sub-pixel registration (slower but more accurate)."
             )
             if fft_changed:
                 self.use_fft = fft_value
-                self.logger.info(f"Use-FFT: {fft_value}")
 
             imgui.columns(2, "offsets", False)
-            for i, iw in enumerate(self.image_widget.data):
-                ofs = self.current_offset[i]
-                is_sequence = isinstance(ofs, (list, np.ndarray, tuple))
+            for i, proc in enumerate(self.processors):
+                ofs = proc.current_offset
+                max_abs_offset = abs(ofs)
 
-                if is_sequence:
-                    ofs_list = [float(x) for x in ofs]
-                    max_abs_offset = max(abs(x) for x in ofs_list) if ofs_list else 0.0
-                else:
-                    ofs_list = None
-                    max_abs_offset = abs(ofs)
-
-                imgui.text(f"{self._array_type} {i + 1}:")
+                imgui.text(f"graphic {i + 1}:")
                 imgui.next_column()
 
-                if is_sequence:
-                    display_text = "avg."
-                    if len(ofs_list) > 1:
-                        display_text += f" {np.round(np.mean(ofs_list), 2)}"
-                    else:
-                        display_text += f" {np.round(ofs_list[0], 2):.3f}"
-                else:
-                    display_text = f"{np.round(ofs, 2):.3f}"
+                display_text = f"{np.round(ofs, 2):.3f}"
 
                 if max_abs_offset > self.max_offset:
                     imgui.push_style_color(
@@ -1560,49 +1521,38 @@ class PreviewDataWidget(EdgeWindow):
                 else:
                     imgui.text(display_text)
 
-                if is_sequence and imgui.is_item_hovered():
-                    imgui.begin_tooltip()
-                    imgui.text_colored(
-                        imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Per‐frame offsets:"
-                    )
-                    for frame_idx, val in enumerate(ofs_list):
-                        imgui.text(f"  frame {frame_idx}: {val:.3f}")
-                    imgui.end_tooltip()
-
                 imgui.next_column()
             imgui.columns(1)
 
             imgui.set_next_item_width(hello_imgui.em_size(5))
             upsample_changed, upsample_val = imgui.input_int(
-                "Upsample", self._phase_upsample, step=1, step_fast=2
+                "Upsample", self.phase_upsample, step=1, step_fast=2
             )
             set_tooltip(
                 "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment."
             )
             if upsample_changed:
                 self.phase_upsample = max(1, upsample_val)
-                self.logger.info(f"New upsample: {upsample_val}")
+
             imgui.set_next_item_width(hello_imgui.em_size(5))
             border_changed, border_val = imgui.input_int(
-                "Exclude border-px", self._border, step=1, step_fast=2
+                "Exclude border-px", self.border, step=1, step_fast=2
             )
             set_tooltip(
                 "Number of pixels to exclude from the edges of the image when computing the scan-phase offset."
             )
             if border_changed:
                 self.border = max(0, border_val)
-                self.logger.info(f"New border: {border_val}")
 
             imgui.set_next_item_width(hello_imgui.em_size(5))
-            max_offset_changed, max_offset = imgui.input_int(
-                "max-offset", self._max_offset, step=1, step_fast=2
+            max_offset_changed, max_offset_val = imgui.input_int(
+                "max-offset", self.max_offset, step=1, step_fast=2
             )
             set_tooltip(
                 "Maximum allowed pixel shift (in pixels) when estimating the scan-phase offset."
             )
             if max_offset_changed:
-                self.max_offset = max(1, max_offset)
-                self.logger.info(f"New max-offset: {max_offset}")
+                self.max_offset = max(1, max_offset_val)
 
             imgui.end_group()
             imgui.separator()
@@ -1616,70 +1566,13 @@ class PreviewDataWidget(EdgeWindow):
     def get_raw_frame(self) -> tuple[ndarray, ...]:
         # iw-array API: use indices property for named dimension access
         idx = self.image_widget.indices
-        t = idx.get("t", 0)
-        z = idx.get("z", 0)
+        names = self.image_widget._slider_dim_names or ()
+        t = idx["t"] if "t" in names else 0
+        z = idx["z"] if "z" in names else 0
         return tuple(ndim_to_frame(arr, t, z) for arr in self.image_widget.data)
 
-    def _compute_phase_offsets(self):
-        """
-        Compute phase correction offsets for lazy arrays that don't have built-in phase correction.
-
-        This method samples the current frame from each array and computes the bi-directional
-        scan phase offset using the same algorithm as MboRawArray.
-        """
-        from mbo_utilities.phasecorr import _phase_corr_2d
-
-        # iw-array API: use indices property for named dimension access
-        idx = self.image_widget.indices
-        t = idx.get("t", 0)
-        z = idx.get("z", 0)
-
-        for i, arr in enumerate(self.image_widget.data):
-            # Skip arrays that compute their own offsets (e.g., MboRawArray)
-            if isinstance(arr, MboRawArray):
-                continue
-
-            try:
-                # Get current frame
-                frame = ndim_to_frame(arr, t, z)
-
-                # Compute phase correction offset
-                offset = _phase_corr_2d(
-                    frame=frame,
-                    upsample=self._phase_upsample,
-                    border=self._border,
-                    max_offset=self._max_offset,
-                    use_fft=self._use_fft,
-                )
-
-                self._computed_offsets[i] = offset
-                self.logger.debug(
-                    f"Computed phase offset for array {i}: {offset:.2f} px"
-                )
-
-            except Exception as e:
-                self.logger.warning(
-                    f"Failed to compute phase offset for array {i}: {e}"
-                )
-                self._computed_offsets[i] = 0.0
-
-    def update_frame_apply(self):
-        self.image_widget.frame_apply = {
-            i: partial(self._combined_frame_apply, arr_idx=i)
-            for i in range(len(self.image_widget.managed_graphics))
-        }
-
-    def _combined_frame_apply(self, frame: np.ndarray, arr_idx: int = 0) -> np.ndarray:
-        """alter final frame only once, in ImageWidget.frame_apply"""
-        if self._gaussian_sigma > 0:
-            frame = gaussian_filter(frame, sigma=self.gaussian_sigma)
-        if (not self.is_mbo_scan) and self._fix_phase:
-            frame = apply_scan_phase_offsets(frame, self.current_offset[arr_idx])
-        if self.proj == "mean-sub" and self._zstats_done[arr_idx]:
-            # iw-array API: use indices property for named dimension access
-            z_idx = self.image_widget.indices.get("z", 0)
-            frame = frame - self._zstats_mean_scalar[arr_idx][z_idx]
-        return frame
+    # NOTE: _compute_phase_offsets, update_frame_apply, and _combined_frame_apply
+    # have been removed. Processing logic is now on MboImageProcessor.get()
 
     def _compute_zstats_single_roi(self, roi, fpath):
         arr = imread(fpath)
@@ -1744,19 +1637,10 @@ class PreviewDataWidget(EdgeWindow):
         if not self.image_widget or not self.image_widget.data:
             return
 
-        # if arrays have .roi attribute (multi-ROI mode)
-        if hasattr(self.image_widget.data[0], "roi") or self.num_rois > 1:
-            for roi in range(1, self.num_rois + 1):
-                threading.Thread(
-                    target=self._compute_zstats_single_roi,
-                    args=(roi, self.fpath),
-                    daemon=True,
-                ).start()
-        else:
-            # treat each array as a virtual ROI
-            for idx, arr in enumerate(self.image_widget.data, start=1):
-                threading.Thread(
-                    target=self._compute_zstats_single_array,
-                    args=(idx, arr),
-                    daemon=True,
-                ).start()
+        # Compute z-stats for each graphic (array)
+        for idx, arr in enumerate(self.image_widget.data, start=1):
+            threading.Thread(
+                target=self._compute_zstats_single_array,
+                args=(idx, arr),
+                daemon=True,
+            ).start()
