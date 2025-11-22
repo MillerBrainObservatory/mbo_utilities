@@ -10,12 +10,15 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 try:
-    from fastplotlib.widgets.image_widget import NDImageProcessor, WindowFuncCallable
+    from fastplotlib.widgets.image_widget import NDImageProcessor
 except ImportError:
     raise ImportError(
         "fastplotlib iw-array branch required. "
         "Install with: pip install git+https://github.com/fastplotlib/fastplotlib.git@iw-array"
     )
+
+# Type alias for window functions (not exported by fastplotlib)
+WindowFuncCallable = Callable[[ArrayLike, int, bool], ArrayLike]
 
 
 class MboImageProcessor(NDImageProcessor):
@@ -61,7 +64,7 @@ class MboImageProcessor(NDImageProcessor):
         window_sizes: tuple[int | None, ...] | int = None,
         window_order: tuple[int, ...] = None,
         spatial_func: Callable[[ArrayLike], ArrayLike] = None,
-        compute_histogram: bool = True,
+        compute_histogram: bool = False,
     ):
         # Store MBO-specific parameters
         self.fix_phase = fix_phase
@@ -104,12 +107,15 @@ class MboImageProcessor(NDImageProcessor):
         np.ndarray
             Processed frame
         """
-        # Use parent class get() which handles window funcs and spatial_func
+        # if no window funcs or spatial funcs, don't need the subclass
+        if (self._window_funcs is None or
+            all(wf is None for wf in (self._window_funcs if isinstance(self._window_funcs, tuple) else [self._window_funcs]))) and \
+           self._spatial_func is None:
+            frame = self.data[indices]
+            return np.asarray(frame)
+
+        # Otherwise use parent class get() which handles window funcs and spatial_func
         frame = super().get(indices)
-
-        # Additional MBO-specific processing could go here if needed
-        # (currently handled by the array itself via fix_phase/use_fft flags)
-
         return frame
 
 
