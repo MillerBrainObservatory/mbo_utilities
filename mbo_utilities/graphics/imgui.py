@@ -125,6 +125,19 @@ def draw_menu(parent):
     ):
         if imgui.begin_menu_bar():
             if imgui.begin_menu("File", True):
+                # Open File - iw-array API
+                if imgui.menu_item("Open File", "Ctrl+O", p_selected=False, enabled=True)[0]:
+                    start_dir = str(Path(parent.fpath).parent) if parent.fpath and Path(parent.fpath).exists() else str(Path.home())
+                    parent._file_dialog = pfd.open_file(
+                        "Select Data File",
+                        start_dir,
+                        ["TIFF Files", "*.tif *.tiff", "Raw Files", "*.raw", "All Files", "*.*"]
+                    )
+                # Open Folder - iw-array API
+                if imgui.menu_item("Open Folder", "", p_selected=False, enabled=True)[0]:
+                    start_dir = str(parent.fpath) if parent.fpath and Path(parent.fpath).exists() else str(Path.home())
+                    parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
+                imgui.separator()
                 if imgui.menu_item(
                     "Save as", "Ctrl+S", p_selected=False, enabled=parent.is_mbo_scan
                 )[0]:
@@ -586,8 +599,10 @@ class PreviewDataWidget(EdgeWindow):
             None
         ] * self.num_arrays  # Store computed offsets for lazy arrays
 
-        if self.image_widget.window_funcs is None:
-            self.image_widget.window_funcs = {"t": (np.mean, 0)}
+        # iw-array API: window_funcs is set via processors or directly on the widget
+        # Initialize window_funcs if not already set
+        if self.image_widget.window_funcs is None or "t" not in self.image_widget.window_funcs:
+            self.image_widget.window_funcs = {"t": (np.mean, 1)}
 
         if len(self.shape) == 4:
             self.nz = self.shape[1]
@@ -669,6 +684,13 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_selected_roi = set()  # -1 means all ROIs
         self._saveas_rois = False
         self._saveas_selected_roi_mode = "All"
+
+        # File/folder dialog state for loading new data (iw-array API)
+        self._file_dialog = None
+        self._folder_dialog = None
+        self._load_status_msg = ""
+        self._load_status_color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
+
         self.set_context_info()
 
         if threading_enabled:
@@ -683,6 +705,21 @@ class PreviewDataWidget(EdgeWindow):
         else:
             title = f"Filepath: {Path(self.fpath).stem}"
         self.image_widget.figure.canvas.set_title(str(title))
+
+    def _refresh_image_widget(self):
+        """
+        Trigger a frame refresh on the ImageWidget.
+
+        Handles both iw-array API (using indices assignment) and
+        fallback for older API (using current_index).
+        """
+        # iw-array API: reassign indices to trigger update
+        if hasattr(self.image_widget, 'indices'):
+            idx = dict(self.image_widget.indices)
+            self.image_widget.indices = idx
+        # Fallback for older API
+        elif hasattr(self.image_widget, 'current_index'):
+            self.image_widget.current_index = self.image_widget.current_index
 
     def gui_progress_callback(self, frac, meta=None):
         """
@@ -728,7 +765,8 @@ class PreviewDataWidget(EdgeWindow):
             # MboRawArray computes offset during read - trigger a read to get current offset
             if isinstance(array, MboRawArray):
                 # Read current frame to compute offset (this updates array.offset)
-                idx = self.image_widget.current_index
+                # iw-array API: use indices property for named dimension access
+                idx = self.image_widget.indices
                 t = idx.get("t", 0)
                 z = idx.get("z", 0)
                 # Reading the frame triggers offset computation
@@ -757,7 +795,7 @@ class PreviewDataWidget(EdgeWindow):
             if value:
                 self._compute_phase_offsets()
         self.update_frame_apply()
-        self.image_widget.current_index = self.image_widget.current_index
+        self._refresh_image_widget()
 
     @property
     def use_fft(self):
@@ -775,7 +813,7 @@ class PreviewDataWidget(EdgeWindow):
             self._compute_phase_offsets()
 
         self.update_frame_apply()
-        self.image_widget.current_index = self.image_widget.current_index
+        self._refresh_image_widget()
 
     @property
     def border(self):
@@ -794,7 +832,7 @@ class PreviewDataWidget(EdgeWindow):
             self._compute_phase_offsets()
 
         self.update_frame_apply()
-        self.image_widget.current_index = self.image_widget.current_index
+        self._refresh_image_widget()
 
     @property
     def max_offset(self):
@@ -812,7 +850,7 @@ class PreviewDataWidget(EdgeWindow):
         if self._fix_phase and not self.is_mbo_scan:
             self._compute_phase_offsets()
 
-        self.image_widget.current_index = self.image_widget.current_index
+        self._refresh_image_widget()
 
     @property
     def selected_array(self):
@@ -842,7 +880,7 @@ class PreviewDataWidget(EdgeWindow):
             self.update_frame_apply()
         else:
             self.logger.warning(f"Invalid gaussian sigma value: {value}. ")
-        self.image_widget.current_index = self.image_widget.current_index
+        self._refresh_image_widget()
 
     @property
     def proj(self):
@@ -858,7 +896,7 @@ class PreviewDataWidget(EdgeWindow):
                 self.logger.info(f"Setting projection to np.{value}.")
                 self.image_widget.window_funcs["t"].func = getattr(np, value)
             self._proj = value
-        self.image_widget.current_index = self.image_widget.current_index
+        self._refresh_image_widget()
 
     @property
     def window_size(self):
@@ -894,12 +932,83 @@ class PreviewDataWidget(EdgeWindow):
         if self._fix_phase and not self.is_mbo_scan:
             self._compute_phase_offsets()
 
-        self.image_widget.current_index = self.image_widget.current_index
+        self._refresh_image_widget()
 
     def update(self):
+        # Check for file/folder dialog results (iw-array API)
+        self._check_file_dialogs()
         draw_saveas_popup(self)
         draw_menu(self)
         draw_tabs(self)
+
+    def _check_file_dialogs(self):
+        """Check if file/folder dialogs have results and load data if so."""
+        # Check file dialog
+        if self._file_dialog is not None and self._file_dialog.ready():
+            result = self._file_dialog.result()
+            if result and len(result) > 0:
+                self._load_new_data(result[0])
+            self._file_dialog = None
+
+        # Check folder dialog
+        if self._folder_dialog is not None and self._folder_dialog.ready():
+            result = self._folder_dialog.result()
+            if result:
+                self._load_new_data(result)
+            self._folder_dialog = None
+
+    def _load_new_data(self, path: str):
+        """
+        Load new data from the specified path using iw-array API.
+
+        Uses iw.data[0] = new_data to swap data without recreating the widget.
+        """
+        from mbo_utilities.lazy_array import imread
+
+        path_obj = Path(path)
+        if not path_obj.exists():
+            self.logger.error(f"Path does not exist: {path}")
+            self._load_status_msg = f"Error: Path does not exist"
+            self._load_status_color = imgui.ImVec4(1.0, 0.3, 0.3, 1.0)
+            return
+
+        try:
+            self.logger.info(f"Loading data from: {path}")
+            self._load_status_msg = "Loading..."
+            self._load_status_color = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
+
+            new_data = imread(path)
+
+            # Update ImageWidget data using iw-array API
+            self.image_widget.data[0] = new_data
+
+            # Reset indices
+            self.image_widget.indices["t"] = 0
+            if new_data.ndim >= 4:
+                self.image_widget.indices["z"] = 0
+
+            # Update internal state
+            self.fpath = path
+            self.shape = new_data.shape
+            self.is_mbo_scan = isinstance(new_data, MboRawArray)
+
+            # Update nz for z-plane count
+            if len(self.shape) == 4:
+                self.nz = self.shape[1]
+            elif len(self.shape) == 3:
+                self.nz = 1
+            else:
+                self.nz = 1
+
+            self._load_status_msg = f"Loaded: {path_obj.name}"
+            self._load_status_color = imgui.ImVec4(0.3, 1.0, 0.3, 1.0)
+            self.logger.info(f"Loaded successfully, shape: {new_data.shape}")
+            self.set_context_info()
+
+        except Exception as e:
+            self.logger.error(f"Error loading data: {e}")
+            self._load_status_msg = f"Error: {str(e)}"
+            self._load_status_color = imgui.ImVec4(1.0, 0.3, 0.3, 1.0)
 
     def draw_stats_section(self):
         if not any(self._zstats_done):
@@ -1505,7 +1614,8 @@ class PreviewDataWidget(EdgeWindow):
         draw_saveas_progress(self)
 
     def get_raw_frame(self) -> tuple[ndarray, ...]:
-        idx = self.image_widget.current_index
+        # iw-array API: use indices property for named dimension access
+        idx = self.image_widget.indices
         t = idx.get("t", 0)
         z = idx.get("z", 0)
         return tuple(ndim_to_frame(arr, t, z) for arr in self.image_widget.data)
@@ -1519,7 +1629,8 @@ class PreviewDataWidget(EdgeWindow):
         """
         from mbo_utilities.phasecorr import _phase_corr_2d
 
-        idx = self.image_widget.current_index
+        # iw-array API: use indices property for named dimension access
+        idx = self.image_widget.indices
         t = idx.get("t", 0)
         z = idx.get("z", 0)
 
@@ -1565,7 +1676,8 @@ class PreviewDataWidget(EdgeWindow):
         if (not self.is_mbo_scan) and self._fix_phase:
             frame = apply_scan_phase_offsets(frame, self.current_offset[arr_idx])
         if self.proj == "mean-sub" and self._zstats_done[arr_idx]:
-            z_idx = self.image_widget.current_index.get("z", 0)
+            # iw-array API: use indices property for named dimension access
+            z_idx = self.image_widget.indices.get("z", 0)
             frame = frame - self._zstats_mean_scalar[arr_idx][z_idx]
         return frame
 

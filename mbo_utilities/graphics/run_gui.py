@@ -287,7 +287,6 @@ def _create_image_widget(data_array, widget: bool = True):
             arr.roi = r
             arrays.append(arr)
             names.append(f"ROI {r}" if r else "Full Image")
-            # Create processor for each ROI
             processors.append(MboImageProcessor)
 
         iw = fpl.ImageWidget(
