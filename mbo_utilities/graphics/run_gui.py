@@ -276,6 +276,24 @@ def _create_image_widget(data_array, widget: bool = True):
     import fastplotlib as fpl
     from mbo_utilities.graphics._processors import MboImageProcessor
 
+    # Determine slider dimension names and window functions based on data dimensionality
+    # MBO data is typically TZYX (4D) or TYX (3D)
+    # window_funcs tuple must match slider_dim_names: (t_func, z_func) for 4D, (t_func,) for 3D
+    ndim = data_array.ndim
+    if ndim == 4:
+        slider_dim_names = ("t", "z")
+        # Apply mean to t-dim only, None for z-dim
+        window_funcs = (np.mean, None)
+        window_sizes = (1, None)
+    elif ndim == 3:
+        slider_dim_names = ("t",)
+        window_funcs = (np.mean,)
+        window_sizes = (1,)
+    else:
+        slider_dim_names = None
+        window_funcs = None
+        window_sizes = None
+
     # Handle multi-ROI data
     if hasattr(data_array, "rois"):
         arrays = []
@@ -293,6 +311,9 @@ def _create_image_widget(data_array, widget: bool = True):
             data=arrays,
             processors=processors,
             names=names,
+            slider_dim_names=slider_dim_names,
+            window_funcs=window_funcs,
+            window_sizes=window_sizes,
             histogram_widget=True,
             figure_kwargs={"size": (800, 800)},
             graphic_kwargs={"vmin": -100, "vmax": 4000},
@@ -301,6 +322,9 @@ def _create_image_widget(data_array, widget: bool = True):
         iw = fpl.ImageWidget(
             data=data_array,
             processors=MboImageProcessor,
+            slider_dim_names=slider_dim_names,
+            window_funcs=window_funcs,
+            window_sizes=window_sizes,
             histogram_widget=True,
             figure_kwargs={"size": (800, 800)},
             graphic_kwargs={"vmin": -100, "vmax": 4000},
@@ -339,7 +363,6 @@ def _run_gui_impl(
     widget: bool = True,
     metadata_only: bool = False,
 ):
-    """Internal implementation of GUI launcher."""
     setup_imgui()  # ensure assets (fonts + icons) are available
 
     # Handle file selection if no path provided
