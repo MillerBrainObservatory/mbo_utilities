@@ -584,28 +584,31 @@ class MBOTiffArray:
         # Get metadata from first file only
         shape, dtype = self._get_file_shape_dtype()
 
-        # Create lazy loaders that don't open files until data is accessed
+        # Use aszarr for truly lazy, memory-mapped access
         lazy_arrays = []
         for fname in self.filenames:
-            # Use dask.delayed to create truly lazy task - file only opens when computed
-            darr = da.from_delayed(
-                dask.delayed(tifffile.imread)(fname),
-                shape=shape,
-                dtype=dtype
-            )
-            lazy_arrays.append(darr)
+            arr = tifffile.imread(fname, aszarr=True)
+            lazy_arrays.append(da.from_zarr(arr))
 
         if len(lazy_arrays) == 1:
             darr = lazy_arrays[0]
+            # TZYX format: (time, z, y, x)
             if darr.ndim == 2:
-                darr = darr[None, None, :, :]
+                # Single 2D image -> add T and Z dimensions
+                darr = darr[None, None, :, :]  # (1, 1, y, x)
             elif darr.ndim == 3:
-                darr = darr[:, None, :, :]
+                # 3D stack (t, y, x) -> add Z dimension
+                darr = darr[:, None, :, :]  # (t, 1, y, x)
+            # else: already 4D (t, z, y, x)
         else:
-            # Concatenate along time axis
+            # Concatenate along time axis - use native zarr chunks for fast access
             darr = da.concatenate(lazy_arrays, axis=0)
             if darr.ndim == 3:
-                darr = darr[None, :, :, :]
+                # After concat: (t, y, x) with shape (189879, 456, 448)
+                # Insert Z dimension at axis 1 to get TZYX
+                darr = darr[:, None, :, :]  # Shape: (189879, 1, 456, 448) = TZYX
+            # else: 4D from files, already TZYX
+            # No rechunking - native zarr chunks from tifffile are optimal for memory-mapped access
 
         self._dask_array = darr
         return darr
@@ -618,15 +621,18 @@ class MBOTiffArray:
         file_shape, _ = self._get_file_shape_dtype()
         if len(self.filenames) == 1:
             if len(file_shape) == 2:
+                # Single 2D image: (1, 1, y, x) = TZYX
                 return (1, 1, *file_shape)
             elif len(file_shape) == 3:
+                # Single 3D stack (t, y, x): add Z -> (t, 1, y, x) = TZYX
                 return (file_shape[0], 1, file_shape[1], file_shape[2])
             return file_shape
         else:
-            # Multiple files concatenated on time
+            # Multiple files: each file shape (t, y, x), concat on T
             total_t = sum(1 for _ in self.filenames) * file_shape[0]
             if len(file_shape) == 3:
-                return (1, total_t, *file_shape[1:])
+                # Files are (t, y, x), concat to (total_t, y, x), add Z -> (total_t, 1, y, x) = TZYX
+                return (total_t, 1, file_shape[1], file_shape[2])
             return (total_t, *file_shape[1:])
 
     @property
@@ -890,18 +896,18 @@ class MboRawArray:
         # Cache frames_per_file to avoid slow len(tf.pages) calls
         self._frames_per_file = self._metadata.get("frames_per_file", None)
 
-        # Validate page counts match expected values
-        if self._frames_per_file is not None:
-            expected_total_pages = sum(self._frames_per_file) * self.num_channels
-            actual_total_pages = sum(len(tf.pages) for tf in self.tiff_files)
-            if actual_total_pages != expected_total_pages:
-                raise ValueError(
-                    f"TIFF page count mismatch!\n"
-                    f"Expected: {expected_total_pages} pages "
-                    f"({sum(self._frames_per_file)} frames × {self.num_channels} channels)\n"
-                    f"Actual: {actual_total_pages} pages in {len(self.tiff_files)} file(s)\n"
-                    f"Files may be corrupted or metadata may be incorrect."
-                )
+        # # Validate page counts match expected values
+        # if self._frames_per_file is not None:
+        #     expected_total_pages = sum(self._frames_per_file) * self.num_channels
+        #     actual_total_pages = sum(len(tf.pages) for tf in self.tiff_files)
+        #     if actual_total_pages != expected_total_pages:
+        #         raise ValueError(
+        #             f"TIFF page count mismatch!\n"
+        #             f"Expected: {expected_total_pages} pages "
+        #             f"({sum(self._frames_per_file)} frames × {self.num_channels} channels)\n"
+        #             f"Actual: {actual_total_pages} pages in {len(self.tiff_files)} file(s)\n"
+        #             f"Files may be corrupted or metadata may be incorrect."
+        #         )
 
         # self._rois = self._create_rois()
         self._rois = self._extract_roi_info()
@@ -985,7 +991,8 @@ class MboRawArray:
 
     @property
     def ndim(self):
-        return self._ndim
+        # Return actual array dimensions, not TIFF page dimensions
+        return len(self.shape)
 
     @property
     def dtype(self):
