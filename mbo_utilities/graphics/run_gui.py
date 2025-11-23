@@ -344,9 +344,11 @@ def _create_image_widget(data_array, widget: bool = True):
             graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
     else:
+        # Always use RasterScanProcessor (extends BaseImageProcessor)
+        # Phase correction will just be disabled for non-raster data
         iw = fpl.ImageWidget(
             data=data_array,
-            processors=BaseImageProcessor,
+            processors=RasterScanProcessor,
             slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
             window_sizes=window_sizes,

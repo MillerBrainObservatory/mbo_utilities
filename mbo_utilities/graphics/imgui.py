@@ -51,6 +51,8 @@ from mbo_utilities.graphics.progress_bar import (
     draw_saveas_progress,
     draw_register_z_progress,
 )
+from mbo_utilities.graphics._ui_sections import get_supported_sections, draw_all_sections
+from mbo_utilities.graphics._protocols import supports_raster_scan
 # Lazy import to avoid loading suite2p/torch/cupy until needed
 # from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
 from mbo_utilities.lazy_array import imread, imwrite
@@ -668,6 +670,9 @@ class PreviewDataWidget(EdgeWindow):
         self._load_status_msg = ""
         self._load_status_color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
 
+        # Initialize modular UI sections based on data/processor capabilities
+        self._ui_sections = get_supported_sections(self)
+
         self.set_context_info()
 
         if threading_enabled:
@@ -701,6 +706,17 @@ class PreviewDataWidget(EdgeWindow):
             else:
                 # Fallback: reassign the index to trigger update
                 self.image_widget.indices["t"] = current_t
+
+    def _refresh_ui_sections(self):
+        """
+        Refresh UI sections based on current data/processor capabilities.
+
+        Call this after loading new data to update which UI sections are shown.
+        """
+        self._ui_sections = get_supported_sections(self)
+        self.logger.debug(
+            f"Refreshed UI sections: {[s.name for s in self._ui_sections]}"
+        )
 
     def gui_progress_callback(self, frac, meta=None):
         """
@@ -767,51 +783,78 @@ class PreviewDataWidget(EdgeWindow):
         return offsets
 
     @property
+    def has_raster_scan_support(self) -> bool:
+        """Check if any processor supports raster scan phase correction."""
+        if not self.processors:
+            return False
+        return any(supports_raster_scan(proc) for proc in self.processors)
+
+    @property
     def fix_phase(self) -> bool:
         """Whether bidirectional phase correction is enabled."""
+        if not self.has_raster_scan_support:
+            return False
         return self.processors[0].fix_phase if self.processors else False
 
     @fix_phase.setter
     def fix_phase(self, value: bool):
+        if not self.has_raster_scan_support:
+            return
         self.logger.info(f"Setting fix_phase to {value}.")
         for proc in self.processors:
-            proc.fix_phase = value
+            if supports_raster_scan(proc):
+                proc.fix_phase = value
         self._refresh_image_widget()
 
     @property
     def use_fft(self) -> bool:
         """Whether FFT-based phase correlation is used."""
+        if not self.has_raster_scan_support:
+            return False
         return self.processors[0].use_fft if self.processors else False
 
     @use_fft.setter
     def use_fft(self, value: bool):
+        if not self.has_raster_scan_support:
+            return
         self.logger.info(f"Setting use_fft to {value}.")
         for proc in self.processors:
-            proc.use_fft = value
+            if supports_raster_scan(proc):
+                proc.use_fft = value
         self._refresh_image_widget()
 
     @property
     def border(self) -> int:
         """Border pixels to exclude from phase correlation."""
+        if not self.has_raster_scan_support:
+            return 3
         return self.processors[0].border if self.processors else 3
 
     @border.setter
     def border(self, value: int):
+        if not self.has_raster_scan_support:
+            return
         self.logger.info(f"Setting border to {value}.")
         for proc in self.processors:
-            proc.border = value
+            if supports_raster_scan(proc):
+                proc.border = value
         self._refresh_image_widget()
 
     @property
     def max_offset(self) -> int:
         """Maximum pixel offset for phase correction."""
+        if not self.has_raster_scan_support:
+            return 3
         return self.processors[0].max_offset if self.processors else 3
 
     @max_offset.setter
     def max_offset(self, value: int):
+        if not self.has_raster_scan_support:
+            return
         self.logger.info(f"Setting max_offset to {value}.")
         for proc in self.processors:
-            proc.max_offset = value
+            if supports_raster_scan(proc):
+                proc.max_offset = value
         self._refresh_image_widget()
 
     @property
@@ -936,10 +979,14 @@ class PreviewDataWidget(EdgeWindow):
     @property
     def phase_upsample(self) -> int:
         """Upsampling factor for subpixel phase correlation."""
+        if not self.has_raster_scan_support:
+            return 5
         return self.processors[0].phase_upsample if self.processors else 5
 
     @phase_upsample.setter
     def phase_upsample(self, value: int):
+        if not self.has_raster_scan_support:
+            return
         self.logger.info(f"Setting phase_upsample to {value}.")
         for proc in self.processors:
             proc.phase_upsample = value
@@ -1016,6 +1063,9 @@ class PreviewDataWidget(EdgeWindow):
             self._load_status_color = imgui.ImVec4(0.3, 1.0, 0.3, 1.0)
             self.logger.info(f"Loaded successfully, shape: {new_data.shape}")
             self.set_context_info()
+
+            # Refresh UI sections based on new data capabilities
+            self._refresh_ui_sections()
 
         except Exception as e:
             self.logger.error(f"Error loading data: {e}")
@@ -1433,157 +1483,12 @@ class PreviewDataWidget(EdgeWindow):
                     implot.end_plot()
 
     def draw_preview_section(self):
+        """Draw preview section using modular UI sections based on data capabilities."""
         imgui.dummy(imgui.ImVec2(0, 5))
         cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
         with imgui_ctx.begin_child("##PreviewChild", imgui.ImVec2(0, 0), cflags):
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Window Functions")
-            imgui.spacing()
-
-            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(2, 2))
-            imgui.begin_group()
-
-            options = ["mean", "max", "std"]
-            disabled_label = (
-                "mean-sub (pending)" if not all(self._zstats_done) else "mean-sub"
-            )
-            options.append(disabled_label)
-
-            current_display_idx = options.index(
-                self.proj if self._proj != "mean-sub" else disabled_label
-            )
-
-            imgui.set_next_item_width(hello_imgui.em_size(6))
-            proj_changed, selected_display_idx = imgui.combo(
-                "Projection", current_display_idx, options
-            )
-            set_tooltip(
-                "Choose projection method over the sliding window:\n\n"
-                " “mean” (average)\n"
-                " “max” (peak)\n"
-                " “std” (variance)\n"
-                " “mean-sub” (mean-subtracted)."
-            )
-
-            if proj_changed:
-                selected_label = options[selected_display_idx]
-                if selected_label == "mean-sub (pending)":
-                    pass
-                else:
-                    # The proj setter handles updating window_funcs and calling update_frame_apply
-                    self.proj = selected_label
-
-            # Window size for projections (temporal dimension)
-            imgui.set_next_item_width(hello_imgui.em_size(6))
-            winsize_changed, new_winsize = imgui.input_int(
-                "Window Size", self.window_size, step=1, step_fast=2
-            )
-            set_tooltip(
-                "Size of the temporal window (in frames) used for projection."
-                " E.g. a value of 3 averages over 3 consecutive frames."
-            )
-            if winsize_changed and new_winsize > 0:
-                self.window_size = new_winsize
-
-            # Gaussian Filter
-            imgui.set_next_item_width(hello_imgui.em_size(6))
-            gaussian_changed, new_sigma = imgui.input_float(
-                "Gaussian Sigma", self.gaussian_sigma, step=0.1, step_fast=1.0, format="%.1f"
-            )
-            set_tooltip(
-                "Apply a Gaussian blur to the preview image. Sigma is in pixels; larger values yield stronger smoothing."
-            )
-            if gaussian_changed:
-                self.gaussian_sigma = max(0.0, new_sigma)
-
-            imgui.end_group()
-
-            imgui.pop_style_var()
-
-            imgui.spacing()
-            imgui.separator()
-            imgui.text_colored(
-                imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Scan-Phase Correction"
-            )
-
-            imgui.separator()
-            imgui.begin_group()
-
-            imgui.set_next_item_width(hello_imgui.em_size(10))
-            phase_changed, phase_value = imgui.checkbox("Fix Phase", self.fix_phase)
-            set_tooltip(
-                "Enable to apply scan-phase correction which shifts every other line/row of pixels "
-                "to maximize correlation between these rows."
-            )
-            if phase_changed:
-                self.fix_phase = phase_value
-
-            imgui.set_next_item_width(hello_imgui.em_size(10))
-            fft_changed, fft_value = imgui.checkbox("Sub-Pixel (slower)", self.use_fft)
-            set_tooltip(
-                "Use FFT-based sub-pixel registration (slower but more accurate)."
-            )
-            if fft_changed:
-                self.use_fft = fft_value
-
-            # Display current offsets - use self.current_offset which checks both
-            # processor cache and MboRawArray.offset
-            current_offsets = self.current_offset
-            imgui.columns(2, "offsets", False)
-            for i, ofs in enumerate(current_offsets):
-                max_abs_offset = abs(ofs)
-
-                imgui.text(f"graphic {i + 1}:")
-                imgui.next_column()
-
-                display_text = f"{ofs:.3f}"
-
-                if max_abs_offset > self.max_offset:
-                    imgui.push_style_color(
-                        imgui.Col_.text, imgui.ImVec4(1.0, 0.0, 0.0, 1.0)
-                    )
-                    imgui.text(display_text)
-                    imgui.pop_style_color()
-                else:
-                    imgui.text(display_text)
-
-                imgui.next_column()
-            imgui.columns(1)
-
-            imgui.set_next_item_width(hello_imgui.em_size(5))
-            upsample_changed, upsample_val = imgui.input_int(
-                "Upsample", self.phase_upsample, step=1, step_fast=2
-            )
-            set_tooltip(
-                "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment."
-            )
-            if upsample_changed:
-                self.phase_upsample = max(1, upsample_val)
-
-            imgui.set_next_item_width(hello_imgui.em_size(5))
-            border_changed, border_val = imgui.input_int(
-                "Exclude border-px", self.border, step=1, step_fast=2
-            )
-            set_tooltip(
-                "Number of pixels to exclude from the edges of the image when computing the scan-phase offset."
-            )
-            if border_changed:
-                self.border = max(0, border_val)
-
-            imgui.set_next_item_width(hello_imgui.em_size(5))
-            max_offset_changed, max_offset_val = imgui.input_int(
-                "max-offset", self.max_offset, step=1, step_fast=2
-            )
-            set_tooltip(
-                "Maximum allowed pixel shift (in pixels) when estimating the scan-phase offset."
-            )
-            if max_offset_changed:
-                self.max_offset = max(1, max_offset_val)
-
-            imgui.end_group()
-            imgui.separator()
+            # Draw all supported UI sections
+            draw_all_sections(self, self._ui_sections)
 
         imgui.separator()
 
