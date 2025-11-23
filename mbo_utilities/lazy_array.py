@@ -17,6 +17,7 @@ from .array_types import (
     MboRawArray,
     NpyArray,
     ZarrArray,
+    IsoviewArray,
     register_zplanes_s3d,
     validate_s3d_registration,
     supports_roi,
@@ -527,6 +528,21 @@ def imread(
             paths = [p]
         elif p.is_dir():
             logger.debug(f"Input is a directory, searching for supported files in {p}")
+
+            # Check for Isoview structure: TM* subfolders with .zarr files
+            tm_folders = [d for d in p.iterdir() if d.is_dir() and d.name.startswith("TM")]
+            if tm_folders:
+                # Multi-timepoint Isoview data
+                logger.info(f"Detected Isoview structure with {len(tm_folders)} TM folders, loading as IsoviewArray.")
+                return IsoviewArray(p)
+
+            # Check if this IS a TM folder (single timepoint)
+            if p.name.startswith("TM"):
+                zarrs = list(p.glob("*.zarr"))
+                if zarrs:
+                    logger.info(f"Detected single TM folder with {len(zarrs)} zarr files, loading as IsoviewArray.")
+                    return IsoviewArray(p)
+
             zarrs = list(p.glob("*.zarr"))
             if zarrs:
                 logger.debug(
