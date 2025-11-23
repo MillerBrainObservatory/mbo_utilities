@@ -73,11 +73,9 @@ uv run mbo --check-install
 uv run pollen
 ```
 
-
-
 ## Installation Troubleshooting
 
-### Git LFS Download Errors
+### Git LFS Download Errors (when installing directly from Github)
 
 There is a [bug in fastplotlib](https://github.com/fastplotlib/fastplotlib/issues/861) causing `git lfs` errors.
 
