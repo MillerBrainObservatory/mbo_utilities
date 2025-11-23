@@ -1,12 +1,24 @@
 import copy
 import sys
-import webbrowser
+import os
+import importlib.util
 from pathlib import Path
 from typing import Any, Optional, Union
+import urllib.request
+
+# Force rendercanvas to use Qt backend if PySide6 is available
+# This must happen BEFORE importing fastplotlib to avoid glfw selection
+# Note: rendercanvas.qt requires PySide6 to be IMPORTED, not just available
+# see: https://github.com/pygfx/wgpu-py/issues/776#issuecomment-3561870603
+if importlib.util.find_spec("PySide6") is not None:
+    os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
+    import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
+
 import click
 import numpy as np
 from mbo_utilities.array_types import iter_rois, normalize_roi
 from mbo_utilities.graphics._file_dialog import FileDialog, setup_imgui
+from mbo_utilities.graphics._processors import BaseImageProcessor, RasterScanProcessor
 
 
 def _check_installation():
@@ -17,14 +29,14 @@ def _check_installation():
     try:
         import mbo_utilities
         version = getattr(mbo_utilities, "__version__", "unknown")
-        click.secho(f"[OK] mbo_utilities {version} installed", fg="green")
+        click.secho(f"mbo_utilities {version} installed", fg="green")
     except ImportError as e:
-        click.secho(f"[FAIL] mbo_utilities import failed: {e}", fg="red")
+        click.secho(f"mbo_utilities import failed: {e}", fg="red")
         return False
 
     # Check Python version
     py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    click.secho(f"[OK] Python {py_version}", fg="green")
+    click.secho(f"Python {py_version}", fg="green")
 
     # Check critical dependencies
     dependencies = {
@@ -44,9 +56,9 @@ def _check_installation():
         try:
             mod = __import__(module)
             ver = getattr(mod, "__version__", "installed")
-            click.secho(f"  [OK] {desc}: {ver}", fg="green")
+            click.secho(f"  {desc}: {ver}", fg="green")
         except ImportError:
-            click.secho(f"  [FAIL] {desc}: not installed", fg="red")
+            click.secho(f"  {desc}: not installed", fg="red")
             all_good = False
 
     click.echo("\nOptional Dependencies:")
@@ -55,11 +67,11 @@ def _check_installation():
         try:
             mod = __import__(module)
             ver = getattr(mod, "__version__", "installed")
-            click.secho(f"  [OK] {desc}: {ver}", fg="green")
+            click.secho(f"  {desc}: {ver}", fg="green")
             if module == "cupy":
                 cupy_installed = True
         except ImportError:
-            click.secho(f"  [SKIP] {desc}: not installed (optional)", fg="yellow")
+            click.secho(f"  {desc}: not installed (optional)", fg="yellow")
 
     # Check CUDA/GPU configuration if CuPy is installed
     cuda_path = None
@@ -87,11 +99,11 @@ def _check_installation():
                         break
 
         if cuda_path:
-            click.secho(f"  [OK] CUDA_PATH environment variable set: {cuda_path}", fg="green")
+            click.secho(f"  CUDA_PATH environment variable set: {cuda_path}", fg="green")
         else:
-            click.secho(f"  [WARN] CUDA_PATH environment variable not set", fg="yellow")
+            click.secho(f"  CUDA_PATH environment variable not set", fg="yellow")
             if suggested_cuda_path:
-                click.secho(f"  [INFO] Found CUDA installation at: {suggested_cuda_path}", fg="cyan")
+                click.secho(f"  Found CUDA installation at: {suggested_cuda_path}", fg="cyan")
             all_good = False
 
         try:
@@ -109,9 +121,9 @@ def _check_installation():
                 test_in = cp.array([1.0], dtype='float32')
                 test_out = cp.empty_like(test_in)
                 kernel(test_in, test_out)
-                click.secho(f"  [OK] NVRTC (CUDA JIT compiler) working", fg="green")
+                click.secho(f"  NVRTC (CUDA JIT compiler) working", fg="green")
             except Exception as nvrtc_err:
-                click.secho(f"  [FAIL] NVRTC compilation failed", fg="red")
+                click.secho(f"  NVRTC compilation failed", fg="red")
                 click.echo(f"         Error: {str(nvrtc_err)[:100]}")
                 click.echo("         Suite3D z-registration will NOT work without NVRTC.")
                 click.echo("         Install CUDA Toolkit 12.0 runtime libraries to fix this.")
@@ -121,23 +133,23 @@ def _check_installation():
             cuda_version = cp.cuda.runtime.runtimeGetVersion()
             cuda_major = cuda_version // 1000
             cuda_minor = (cuda_version % 1000) // 10
-            click.secho(f"  [OK] CUDA Runtime Version: {cuda_major}.{cuda_minor}", fg="green")
+            click.secho(f"  CUDA Runtime Version: {cuda_major}.{cuda_minor}", fg="green")
 
             device_count = cp.cuda.runtime.getDeviceCount()
             if device_count > 0:
                 device = cp.cuda.Device()
                 device_name = device.attributes.get("Name", "Unknown")
-                click.secho(f"  [OK] CUDA device available: {device_name} (Device {device.id})", fg="green")
-                click.secho(f"  [OK] Total CUDA devices: {device_count}", fg="green")
+                click.secho(f"  CUDA device available: {device_name} (Device {device.id})", fg="green")
+                click.secho(f"  Total CUDA devices: {device_count}", fg="green")
 
                 # Detect likely CUDA installation path from version
                 if not suggested_cuda_path and sys.platform == "win32":
                     suggested_cuda_path = f"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v{cuda_major}.{cuda_minor}"
             else:
-                click.secho(f"  [FAIL] No CUDA devices found", fg="red")
+                click.secho(f"  No CUDA devices found", fg="red")
                 all_good = False
         except Exception as e:
-            click.secho(f"  [FAIL] CuPy CUDA initialization failed: {e}", fg="red")
+            click.secho(f"  CuPy CUDA initialization failed: {e}", fg="red")
             click.echo("         This will prevent GPU-accelerated operations like Suite3D z-registration.")
             click.echo("         Action required: Set CUDA_PATH environment variable to your CUDA installation directory.")
             all_good = False
@@ -147,9 +159,9 @@ def _check_installation():
     try:
         from mbo_utilities.file_io import get_mbo_dirs
         dirs = get_mbo_dirs()
-        click.secho(f"  [OK] Config directory: {dirs.get('base', 'unknown')}", fg="green")
+        click.secho(f"  Config directory: {dirs.get('base', 'unknown')}", fg="green")
     except Exception as e:
-        click.secho(f"  [FAIL] Failed to get config directories: {e}", fg="red")
+        click.secho(f"  Failed to get config directories: {e}", fg="red")
         all_good = False
 
     # Summary
@@ -158,6 +170,7 @@ def _check_installation():
         click.secho("Installation check passed!", fg="green", bold=True)
         click.echo("\nYou can now:")
         click.echo("  - Run 'uv run mbo' to open the GUI")
+        click.echo("  - Run 'uv run mbo /path/to/file' to directly open any supported file")
         click.echo("  - Run 'uv run mbo --download-notebook' to get the user guide")
         return True
     else:
@@ -182,6 +195,43 @@ def _check_installation():
                 click.echo("    Example (Linux/Mac): export CUDA_PATH=/usr/local/cuda")
         click.echo("\nFor other issues, try reinstalling with: uv sync")
         return False
+
+
+def _download_notebook_file(output_path: Optional[Union[str, Path]] = None):
+    """Download the user guide notebook to a local file.
+
+    Parameters
+    ----------
+    output_path : str, Path, optional
+        Directory or file path to save the notebook. If None or '.', saves to current directory.
+        If a directory, saves as 'user_guide.ipynb' in that directory.
+        If a file path, uses that exact filename.
+    """
+    url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
+
+    # Determine output file path
+    if output_path is None or output_path == ".":
+        output_file = Path.cwd() / "user_guide.ipynb"
+    else:
+        output_file = Path(output_path)
+        if output_file.is_dir():
+            output_file = output_file / "user_guide.ipynb"
+
+    try:
+        click.echo(f"Downloading user guide notebook from:\n  {url}")
+        click.echo(f"Saving to:\n  {output_file.resolve()}")
+
+        # Download the file
+        urllib.request.urlretrieve(url, output_file)
+
+        click.secho(f"\n✓ Successfully downloaded notebook to: {output_file.resolve()}", fg="green")
+        click.echo("\nTo use the notebook:")
+        click.echo(f"  jupyter lab {output_file.resolve()}")
+
+    except Exception as e:
+        click.secho(f"\n✗ Failed to download notebook: {e}", fg="red")
+        click.echo(f"\nYou can manually download from: {url}")
+        sys.exit(1)
 
 
 def _select_file() -> tuple[Any, Any, Any, bool]:
@@ -236,30 +286,74 @@ def _show_metadata_viewer(metadata: dict) -> None:
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
     import fastplotlib as fpl
+    try:
+        from rendercanvas.pyside6 import RenderCanvas
+    except ImportError:
+        RenderCanvas = None
+
+    if RenderCanvas is not None:
+        figure_kwargs = {
+            "canvas": "pyside6",
+            "canvas_kwargs": {"present_method": "bitmap"},
+            "size": (800, 800)
+        }
+    else:
+        figure_kwargs = {"size": (800, 800)}
+
+    # Determine slider dimension names and window functions based on data dimensionality
+    # MBO data is typically TZYX (4D) or TYX (3D)
+    # window_funcs tuple must match slider_dim_names: (t_func, z_func) for 4D, (t_func,) for 3D
+    ndim = data_array.ndim
+    if ndim == 4:
+        slider_dim_names = ("t", "z")
+        # Apply mean to t-dim only, None for z-dim
+        window_funcs = (np.mean, None)
+        window_sizes = (1, None)
+    elif ndim == 3:
+        slider_dim_names = ("t",)
+        window_funcs = (np.mean,)
+        window_sizes = (1,)
+    else:
+        slider_dim_names = None
+        window_funcs = None
+        window_sizes = None
 
     # Handle multi-ROI data
     if hasattr(data_array, "rois"):
         arrays = []
         names = []
+        processors = []
         for r in iter_rois(data_array):
             arr = copy.copy(data_array)
             arr.fix_phase = False
             arr.roi = r
             arrays.append(arr)
             names.append(f"ROI {r}" if r else "Full Image")
+            processors.append(RasterScanProcessor)
+
 
         iw = fpl.ImageWidget(
             data=arrays,
+            processors=processors,
             names=names,
+            slider_dim_names=slider_dim_names,
+            window_funcs=window_funcs,
+            window_sizes=window_sizes,
             histogram_widget=True,
-            figure_kwargs={"size": (800, 800)},
+            figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
     else:
+        # Always use RasterScanProcessor (extends BaseImageProcessor)
+        # Phase correction will just be disabled for non-raster data
         iw = fpl.ImageWidget(
             data=data_array,
+            processors=RasterScanProcessor,
+            slider_dim_names=slider_dim_names,
+            window_funcs=window_funcs,
+            window_sizes=window_sizes,
             histogram_widget=True,
-            figure_kwargs={"size": (800, 800)},
+            figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
 
@@ -296,7 +390,6 @@ def _run_gui_impl(
     widget: bool = True,
     metadata_only: bool = False,
 ):
-    """Internal implementation of GUI launcher."""
     setup_imgui()  # ensure assets (fonts + icons) are available
 
     # Handle file selection if no path provided
@@ -429,16 +522,12 @@ def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, downloa
         _check_installation()
         if download_notebook:
             click.echo("\n")
-            url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
-            click.echo(f"Opening browser to download user guide notebook from: {url}")
-            webbrowser.open(url)
+            _download_notebook_file(data_in)
         return
 
     # Handle download notebook option
     if download_notebook:
-        url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
-        click.echo(f"Opening browser to download user guide notebook from: {url}")
-        webbrowser.open(url)
+        _download_notebook_file(data_in)
         return
 
     # Run the GUI
