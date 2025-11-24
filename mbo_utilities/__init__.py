@@ -1,3 +1,13 @@
+"""
+mbo_utilities - Miller Brain Observatory data processing utilities.
+
+This package uses lazy imports to minimize startup time. Heavy dependencies
+like numpy, dask, and tifffile are only loaded when actually needed.
+
+For fastest CLI startup (e.g., `mbo --download-notebook`), avoid importing
+from this module directly - use `from mbo_utilities.graphics.run_gui import _cli_entry`.
+"""
+
 from importlib.metadata import version, PackageNotFoundError
 
 try:
@@ -7,53 +17,76 @@ except PackageNotFoundError:
     __version__ = "0.0.0"
 
 
-from .file_io import (
-    get_files,
-    files_to_dask,
-    expand_paths,
-    get_mbo_dirs,
-    load_ops,
-    write_ops,
-    get_plane_from_filename,
-    merge_zarr_zplanes,
-)
-from .plot_util import save_png, save_mp4
-
-from .metadata import is_raw_scanimage, get_metadata
-from .util import (
-    norm_minmax,
-    smooth_data,
-    is_running_jupyter,
-    is_imgui_installed,
-    subsample_array,
-)
-from .lazy_array import imread, imwrite, SUPPORTED_FTYPES
-
-
+# Define what's available for lazy loading
 __all__ = [
-    # file_io
+    # Core I/O
     "imread",
     "imwrite",
     "SUPPORTED_FTYPES",
-    # "run_gui",
+    # File utilities
     "get_mbo_dirs",
-    "scanreader",
     "files_to_dask",
     "get_files",
-    "subsample_array",
+    "expand_paths",
     "load_ops",
     "write_ops",
     "get_plane_from_filename",
-    # metadata
+    "merge_zarr_zplanes",
+    # Metadata
     "is_raw_scanimage",
     "get_metadata",
-    # util
-    "expand_paths",
+    # Utilities
     "norm_minmax",
     "smooth_data",
     "is_running_jupyter",
-    "is_imgui_installed",  # we may just enforce imgui?
-    # assembly
+    "is_imgui_installed",
+    "subsample_array",
+    # Visualization
     "save_mp4",
     "save_png",
 ]
+
+
+def __getattr__(name):
+    """Lazy import attributes to avoid loading heavy dependencies at startup."""
+    # Core I/O (lazy_array -> array_types -> numpy, dask, tifffile)
+    if name in ("imread", "imwrite", "SUPPORTED_FTYPES"):
+        from . import lazy_array
+        return getattr(lazy_array, name)
+
+    # File utilities (file_io -> dask, tifffile, zarr)
+    if name in (
+        "get_mbo_dirs",
+        "files_to_dask",
+        "get_files",
+        "expand_paths",
+        "load_ops",
+        "write_ops",
+        "get_plane_from_filename",
+        "merge_zarr_zplanes",
+    ):
+        from . import file_io
+        return getattr(file_io, name)
+
+    # Metadata (metadata -> tifffile)
+    if name in ("is_raw_scanimage", "get_metadata"):
+        from . import metadata
+        return getattr(metadata, name)
+
+    # Utilities (util -> potentially torch, pandas)
+    if name in (
+        "norm_minmax",
+        "smooth_data",
+        "is_running_jupyter",
+        "is_imgui_installed",
+        "subsample_array",
+    ):
+        from . import util
+        return getattr(util, name)
+
+    # Visualization (plot_util -> matplotlib, imageio)
+    if name in ("save_mp4", "save_png"):
+        from . import plot_util
+        return getattr(plot_util, name)
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

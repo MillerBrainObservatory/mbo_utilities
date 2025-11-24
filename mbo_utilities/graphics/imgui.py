@@ -51,10 +51,9 @@ from mbo_utilities.graphics.progress_bar import (
     draw_saveas_progress,
     draw_register_z_progress,
 )
-from mbo_utilities.graphics._ui_sections import get_supported_sections, draw_all_sections
+from mbo_utilities.graphics.widgets import get_supported_widgets, draw_all_widgets
 from mbo_utilities.graphics._protocols import supports_raster_scan
-# Lazy import to avoid loading suite2p/torch/cupy until needed
-# from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings, draw_tab_process
+from mbo_utilities.graphics._availability import HAS_SUITE2P, HAS_SUITE3D
 from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler
 from mbo_utilities import log
@@ -82,7 +81,6 @@ import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
 
 REGION_TYPES = ["Full FOV", "Sub-FOV"]
-USER_PIPELINES = ["suite2p"]
 
 
 def _save_as_worker(path, **imwrite_kwargs):
@@ -224,13 +222,14 @@ def draw_tabs(parent):
             imgui.pop_style_var()
             imgui.end_tab_item()
         imgui.end_disabled()
-        if imgui.begin_tab_item("Process")[0]:
-            from mbo_utilities.graphics.pipeline_widgets import draw_tab_process
-            draw_tab_process(parent)
-            imgui.end_tab_item()
-        if imgui.begin_tab_item("Suite2p Results")[0]:
-            from mbo_utilities.graphics.suite2p_results import draw_tab_suite2p_results
-            draw_tab_suite2p_results(parent)
+        # Run tab for processing pipelines
+        if imgui.begin_tab_item("Run")[0]:
+            imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+            from mbo_utilities.graphics.widgets.pipelines import draw_run_tab
+            draw_run_tab(parent)
+            imgui.pop_style_var()
+            imgui.pop_style_var()
             imgui.end_tab_item()
         imgui.end_tab_bar()
 
@@ -324,11 +323,13 @@ def draw_saveas_popup(parent):
         parent._overwrite = checkbox_with_tooltip(
             "Overwrite", parent._overwrite, "Replace any existing output files."
         )
-        parent._register_z = checkbox_with_tooltip(
-            "Register Z-Planes Axially",
-            parent._register_z,
-            "Register adjacent z-planes to each other using Suite3D.",
-        )
+        # Only show Suite3D registration option if suite3d is installed
+        if HAS_SUITE3D:
+            parent._register_z = checkbox_with_tooltip(
+                "Register Z-Planes Axially",
+                parent._register_z,
+                "Register adjacent z-planes to each other using Suite3D.",
+            )
         fix_phase_changed, fix_phase_value = imgui.checkbox(
             "Fix Scan Phase", parent.fix_phase
         )
@@ -548,8 +549,12 @@ class PreviewDataWidget(EdgeWindow):
 
         self.logger.info("Logger initialized.")
 
-        from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings
-        self.s2p = Suite2pSettings()
+        # Only initialize Suite2p settings if suite2p is installed
+        if HAS_SUITE2P:
+            from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings
+            self.s2p = Suite2pSettings()
+        else:
+            self.s2p = None
         self._s2p_dir = ""
         self._s2p_savepath_flash_start = None  # Track when flash animation starts
         self._s2p_savepath_flash_count = 0  # Number of flashes
@@ -670,8 +675,8 @@ class PreviewDataWidget(EdgeWindow):
         self._load_status_msg = ""
         self._load_status_color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
 
-        # Initialize modular UI sections based on data/processor capabilities
-        self._ui_sections = get_supported_sections(self)
+        # initialize widgets based on data capabilities
+        self._widgets = get_supported_widgets(self)
 
         self.set_context_info()
 
@@ -707,15 +712,15 @@ class PreviewDataWidget(EdgeWindow):
                 # Fallback: reassign the index to trigger update
                 self.image_widget.indices["t"] = current_t
 
-    def _refresh_ui_sections(self):
+    def _refresh_widgets(self):
         """
-        Refresh UI sections based on current data/processor capabilities.
+        refresh widgets based on current data capabilities.
 
-        Call this after loading new data to update which UI sections are shown.
+        call this after loading new data to update which widgets are shown.
         """
-        self._ui_sections = get_supported_sections(self)
+        self._widgets = get_supported_widgets(self)
         self.logger.debug(
-            f"Refreshed UI sections: {[s.name for s in self._ui_sections]}"
+            f"refreshed widgets: {[w.name for w in self._widgets]}"
         )
 
     def gui_progress_callback(self, frac, meta=None):
@@ -1064,8 +1069,8 @@ class PreviewDataWidget(EdgeWindow):
             self.logger.info(f"Loaded successfully, shape: {new_data.shape}")
             self.set_context_info()
 
-            # Refresh UI sections based on new data capabilities
-            self._refresh_ui_sections()
+            # refresh widgets based on new data capabilities
+            self._refresh_widgets()
 
         except Exception as e:
             self.logger.error(f"Error loading data: {e}")
@@ -1487,8 +1492,8 @@ class PreviewDataWidget(EdgeWindow):
         imgui.dummy(imgui.ImVec2(0, 5))
         cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
         with imgui_ctx.begin_child("##PreviewChild", imgui.ImVec2(0, 0), cflags):
-            # Draw all supported UI sections
-            draw_all_sections(self, self._ui_sections)
+            # draw all supported widgets
+            draw_all_widgets(self, self._widgets)
 
         imgui.separator()
 

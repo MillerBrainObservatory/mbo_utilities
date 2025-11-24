@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import os
 import tempfile
+import threading
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -809,6 +810,7 @@ class MboRawArray:
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
+        self._tiff_lock = threading.Lock()  # Protect concurrent access to tiff_files
 
         # Initialize data attributes first (needed for roi setter validation)
         self._metadata = get_metadata(self.filenames)
@@ -842,28 +844,9 @@ class MboRawArray:
         self._target_dtype = None  # Target dtype for conversion (set by astype)
         self._ndim = self._metadata["ndim"]
 
-        # Cache frames_per_file to avoid slow len(tf.pages) calls
         self._frames_per_file = self._metadata.get("frames_per_file", None)
 
-        # # Validate page counts match expected values
-        # if self._frames_per_file is not None:
-        #     expected_total_pages = sum(self._frames_per_file) * self.num_channels
-        #     actual_total_pages = sum(len(tf.pages) for tf in self.tiff_files)
-        #     if actual_total_pages != expected_total_pages:
-        #         raise ValueError(
-        #             f"TIFF page count mismatch!\n"
-        #             f"Expected: {expected_total_pages} pages "
-        #             f"({sum(self._frames_per_file)} frames × {self.num_channels} channels)\n"
-        #             f"Actual: {actual_total_pages} pages in {len(self.tiff_files)} file(s)\n"
-        #             f"Files may be corrupted or metadata may be incorrect."
-        #         )
-
-        # self._rois = self._create_rois()
         self._rois = self._extract_roi_info()
-        # self.fields = self._create_fields()
-        # self._join_contiguous_fields()
-        # end = time.time()
-        # print(f"Raw initialization took {end - start} seconds")
 
     def _extract_roi_info(self):
         """
@@ -1114,15 +1097,17 @@ class MboRawArray:
                 continue
 
             frame_idx = [pages[i] - start for i in idxs]
-            try:
-                chunk = tf.asarray(key=frame_idx)
-            except Exception as e:
-                # TODO: wrap this for all array types
-                raise IOError(
-                    f"MboRawArray: Failed to read pages {frame_idx} from TIFF file {tf.filename}\n"
-                    f"File may be corrupted or incomplete.\n"
-                    f": {type(e).__name__}: {e}"
-                ) from e
+            # Use lock to protect TiffFile access from concurrent threads
+            with self._tiff_lock:
+                try:
+                    chunk = tf.asarray(key=frame_idx)
+                except Exception as e:
+                    # TODO: wrap this for all array types
+                    raise IOError(
+                        f"MboRawArray: Failed to read pages {frame_idx} from TIFF file {tf.filename}\n"
+                        f"File may be corrupted or incomplete.\n"
+                        f": {type(e).__name__}: {e}"
+                    ) from e
             if chunk.ndim == 2:  # Single page was squeezed to 2D
                 chunk = chunk[np.newaxis, ...]  # Add back the first dimension
             chunk = chunk[..., yslice, xslice]

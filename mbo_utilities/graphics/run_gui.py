@@ -1,24 +1,54 @@
-import copy
+"""
+CLI entry point for mbo_utilities GUI.
+
+This module is designed for fast startup - heavy imports are deferred until needed.
+Operations like --download-notebook and --check-install should be near-instant.
+"""
 import sys
 import os
 import importlib.util
 from pathlib import Path
 from typing import Any, Optional, Union
-import urllib.request
-
-# Force rendercanvas to use Qt backend if PySide6 is available
-# This must happen BEFORE importing fastplotlib to avoid glfw selection
-# Note: rendercanvas.qt requires PySide6 to be IMPORTED, not just available
-# see: https://github.com/pygfx/wgpu-py/issues/776#issuecomment-3561870603
-if importlib.util.find_spec("PySide6") is not None:
-    os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
-    import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
 
 import click
-import numpy as np
-from mbo_utilities.array_types import iter_rois, normalize_roi
-from mbo_utilities.graphics._file_dialog import FileDialog, setup_imgui
-from mbo_utilities.graphics._processors import BaseImageProcessor, RasterScanProcessor
+
+def _download_notebook_file(output_path: Optional[Union[str, Path]] = None):
+    """Download the user guide notebook to a local file.
+
+    Parameters
+    ----------
+    output_path : str, Path, optional
+        Directory or file path to save the notebook. If None or '.', saves to current directory.
+        If a directory, saves as 'user_guide.ipynb' in that directory.
+        If a file path, uses that exact filename.
+    """
+    import urllib.request
+
+    url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
+
+    # Determine output file path
+    if output_path is None or output_path == ".":
+        output_file = Path.cwd() / "user_guide.ipynb"
+    else:
+        output_file = Path(output_path)
+        if output_file.is_dir():
+            output_file = output_file / "user_guide.ipynb"
+
+    try:
+        click.echo(f"Downloading user guide notebook from:\n  {url}")
+        click.echo(f"Saving to:\n  {output_file.resolve()}")
+
+        # Download the file
+        urllib.request.urlretrieve(url, output_file)
+
+        click.secho(f"\n✓ Successfully downloaded notebook to: {output_file.resolve()}", fg="green")
+        click.echo("\nTo use the notebook:")
+        click.echo(f"  jupyter lab {output_file.resolve()}")
+
+    except Exception as e:
+        click.secho(f"\n✗ Failed to download notebook: {e}", fg="red")
+        click.echo(f"\nYou can manually download from: {url}")
+        sys.exit(1)
 
 
 def _check_installation():
@@ -78,7 +108,6 @@ def _check_installation():
     suggested_cuda_path = None
     if cupy_installed:
         click.echo("\nGPU/CUDA Configuration:")
-        import os
         cuda_path = os.environ.get("CUDA_PATH")
 
         # Try to find CUDA installation
@@ -101,7 +130,7 @@ def _check_installation():
         if cuda_path:
             click.secho(f"  CUDA_PATH environment variable set: {cuda_path}", fg="green")
         else:
-            click.secho(f"  CUDA_PATH environment variable not set", fg="yellow")
+            click.secho("  CUDA_PATH environment variable not set", fg="yellow")
             if suggested_cuda_path:
                 click.secho(f"  Found CUDA installation at: {suggested_cuda_path}", fg="cyan")
             all_good = False
@@ -121,9 +150,9 @@ def _check_installation():
                 test_in = cp.array([1.0], dtype='float32')
                 test_out = cp.empty_like(test_in)
                 kernel(test_in, test_out)
-                click.secho(f"  NVRTC (CUDA JIT compiler) working", fg="green")
+                click.secho("  NVRTC (CUDA JIT compiler) working", fg="green")
             except Exception as nvrtc_err:
-                click.secho(f"  NVRTC compilation failed", fg="red")
+                click.secho("  NVRTC compilation failed", fg="red")
                 click.echo(f"         Error: {str(nvrtc_err)[:100]}")
                 click.echo("         Suite3D z-registration will NOT work without NVRTC.")
                 click.echo("         Install CUDA Toolkit 12.0 runtime libraries to fix this.")
@@ -146,7 +175,7 @@ def _check_installation():
                 if not suggested_cuda_path and sys.platform == "win32":
                     suggested_cuda_path = f"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v{cuda_major}.{cuda_minor}"
             else:
-                click.secho(f"  No CUDA devices found", fg="red")
+                click.secho("  No CUDA devices found", fg="red")
                 all_good = False
         except Exception as e:
             click.secho(f"  CuPy CUDA initialization failed: {e}", fg="red")
@@ -181,7 +210,7 @@ def _check_installation():
             click.echo("    Fix: Set CUDA_PATH environment variable to your CUDA installation")
             if suggested_cuda_path:
                 if sys.platform == "win32":
-                    click.secho(f"\n    Run this command (then restart terminal):", fg="cyan")
+                    click.secho("\n    Run this command (then restart terminal):", fg="cyan")
                     click.secho(f"      setx CUDA_PATH \"{suggested_cuda_path}\"", fg="cyan", bold=True)
                     click.echo("\n    Or set for current session only:")
                     click.secho(f"      $env:CUDA_PATH = \"{suggested_cuda_path}\"", fg="cyan")
@@ -197,48 +226,23 @@ def _check_installation():
         return False
 
 
-def _download_notebook_file(output_path: Optional[Union[str, Path]] = None):
-    """Download the user guide notebook to a local file.
+def _setup_qt_backend():
+    """Set up Qt backend for rendercanvas if PySide6 is available.
 
-    Parameters
-    ----------
-    output_path : str, Path, optional
-        Directory or file path to save the notebook. If None or '.', saves to current directory.
-        If a directory, saves as 'user_guide.ipynb' in that directory.
-        If a file path, uses that exact filename.
+    This must happen BEFORE importing fastplotlib to avoid glfw selection.
     """
-    url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
-
-    # Determine output file path
-    if output_path is None or output_path == ".":
-        output_file = Path.cwd() / "user_guide.ipynb"
-    else:
-        output_file = Path(output_path)
-        if output_file.is_dir():
-            output_file = output_file / "user_guide.ipynb"
-
-    try:
-        click.echo(f"Downloading user guide notebook from:\n  {url}")
-        click.echo(f"Saving to:\n  {output_file.resolve()}")
-
-        # Download the file
-        urllib.request.urlretrieve(url, output_file)
-
-        click.secho(f"\n✓ Successfully downloaded notebook to: {output_file.resolve()}", fg="green")
-        click.echo("\nTo use the notebook:")
-        click.echo(f"  jupyter lab {output_file.resolve()}")
-
-    except Exception as e:
-        click.secho(f"\n✗ Failed to download notebook: {e}", fg="red")
-        click.echo(f"\nYou can manually download from: {url}")
-        sys.exit(1)
+    if importlib.util.find_spec("PySide6") is not None:
+        os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
+        import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
 
 
 def _select_file() -> tuple[Any, Any, Any, bool]:
     """Show file selection dialog and return user choices."""
     from mbo_utilities.file_io import get_mbo_dirs
+    from mbo_utilities.graphics._file_dialog import FileDialog, setup_imgui
     from imgui_bundle import immapp, hello_imgui
 
+    setup_imgui()  # ensure assets (fonts + icons) are available
     dlg = FileDialog()
 
     params = hello_imgui.RunnerParams()
@@ -285,10 +289,15 @@ def _show_metadata_viewer(metadata: dict) -> None:
 
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
+    import copy
+    import numpy as np
     import fastplotlib as fpl
+    from mbo_utilities.array_types import iter_rois
+    from mbo_utilities.graphics._processors import RasterScanProcessor
+
     try:
         from rendercanvas.pyside6 import RenderCanvas
-    except ImportError:
+    except (ImportError, RuntimeError): # RuntimeError if qt is already selected
         RenderCanvas = None
 
     if RenderCanvas is not None:
@@ -390,6 +399,14 @@ def _run_gui_impl(
     widget: bool = True,
     metadata_only: bool = False,
 ):
+    """Internal implementation of run_gui with all heavy imports."""
+    # Set up Qt backend before any GUI imports
+    _setup_qt_backend()
+
+    # Import heavy dependencies only when actually running GUI
+    from mbo_utilities.array_types import normalize_roi
+    from mbo_utilities.graphics._file_dialog import setup_imgui
+
     setup_imgui()  # ensure assets (fonts + icons) are available
 
     # Handle file selection if no path provided
@@ -484,7 +501,6 @@ def run_gui(
     )
 
 
-# Create CLI wrapper
 @click.command()
 @click.option(
     "--roi",
@@ -517,7 +533,7 @@ def run_gui(
 @click.argument("data_in", required=False)
 def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, download_notebook=False, check_install=False):
     """CLI entry point for mbo-gui command."""
-    # Handle installation check first
+    # Handle installation check first (light operation)
     if check_install:
         _check_installation()
         if download_notebook:
@@ -525,12 +541,12 @@ def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, downloa
             _download_notebook_file(data_in)
         return
 
-    # Handle download notebook option
+    # Handle download notebook option (light operation)
     if download_notebook:
         _download_notebook_file(data_in)
         return
 
-    # Run the GUI
+    # Run the GUI (heavy imports happen here)
     run_gui(
         data_in=data_in,
         roi=roi if roi else None,

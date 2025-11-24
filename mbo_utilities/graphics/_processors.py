@@ -73,11 +73,9 @@ class BaseImageProcessor(NDImageProcessor):
         window_order: tuple[int, ...] = None,
         spatial_func: Callable[[ArrayLike], ArrayLike] = None,
         compute_histogram: bool = False,
-        **kwargs,
     ):
         self._mean_image = mean_image
 
-        # Initialize parent NDImageProcessor
         super().__init__(
             data=data,
             n_display_dims=n_display_dims,
