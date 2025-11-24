@@ -891,14 +891,16 @@ class PreviewDataWidget(EdgeWindow):
             # Use partial to create a spatial_func with the current sigma
             spatial_func = partial(gaussian_filter, sigma=self._gaussian_sigma)
         else:
-            # Use identity function instead of None to work around fastplotlib bug
-            # (processor.spatial_func setter has incorrect None check)
-            def _identity(x):
-                return x
-            spatial_func = _identity
+            spatial_func = None
+
+        # save current vmin/vmax before update (fastplotlib resets them)
+        saved_vmin_vmax = self._save_vmin_vmax()
 
         # Apply to all graphics via ImageWidget's spatial_func API
         self.image_widget.spatial_func = spatial_func
+
+        # restore vmin/vmax
+        self._restore_vmin_vmax(saved_vmin_vmax)
         self._refresh_image_widget()
 
     @property
@@ -913,6 +915,8 @@ class PreviewDataWidget(EdgeWindow):
             self._proj = value
             # For mean-sub, update processor mean_image when z-stats are ready
             self._update_mean_subtraction()
+            # Update window_funcs on the image widget based on projection type
+            self._update_window_funcs()
         self._refresh_image_widget()
 
     def _update_mean_subtraction(self):
@@ -931,6 +935,57 @@ class PreviewDataWidget(EdgeWindow):
             # Clear mean image
             for proc in self.processors:
                 proc.mean_image = None
+
+    def _save_vmin_vmax(self) -> list:
+        """Save current vmin/vmax from histogram LUT tools."""
+        saved = []
+        for subplot in self.image_widget.figure:
+            if "histogram_lut" in subplot.docks["right"]:
+                hlut = subplot.docks["right"]["histogram_lut"]
+                saved.append((hlut.vmin, hlut.vmax))
+            else:
+                saved.append(None)
+        return saved
+
+    def _restore_vmin_vmax(self, saved: list) -> None:
+        """Restore vmin/vmax to histogram LUT tools."""
+        for i, subplot in enumerate(self.image_widget.figure):
+            if saved[i] is not None and "histogram_lut" in subplot.docks["right"]:
+                hlut = subplot.docks["right"]["histogram_lut"]
+                hlut.vmin, hlut.vmax = saved[i]
+
+    def _update_window_funcs(self):
+        """Update window_funcs on image widget based on current projection mode."""
+        # map projection name to numpy function
+        proj_funcs = {
+            "mean": np.mean,
+            "max": np.max,
+            "std": np.std,
+            "mean-sub": np.mean,  # mean-sub uses mean projection with subtraction on processor
+        }
+        proj_func = proj_funcs.get(self._proj, np.mean)
+
+        # build window_funcs tuple based on data dimensionality
+        n_slider_dims = self.processors[0].n_slider_dims if self.processors else 1
+
+        if n_slider_dims == 1:
+            # only temporal dimension
+            window_funcs = (proj_func,)
+        elif n_slider_dims == 2:
+            # temporal and z dimensions - apply projection to temporal only
+            window_funcs = (proj_func, None)
+        else:
+            # more dimensions - apply to first, None for rest
+            window_funcs = (proj_func,) + (None,) * (n_slider_dims - 1)
+
+        # save current vmin/vmax before update (fastplotlib resets them)
+        saved_vmin_vmax = self._save_vmin_vmax()
+
+        # set via ImageWidget API (this triggers reset_vmin_vmax internally)
+        self.image_widget.window_funcs = window_funcs
+
+        # restore vmin/vmax
+        self._restore_vmin_vmax(saved_vmin_vmax)
 
     @property
     def window_size(self) -> int:
