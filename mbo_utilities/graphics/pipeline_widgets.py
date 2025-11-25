@@ -770,7 +770,7 @@ def draw_section_suite2p(self):
             "Anatomical Only", self.s2p.anatomical_only
         )
         set_tooltip(
-            "0=disabled; 1=mean, 2=max, 3=enhanced (LBM default), 4=correlation"
+            "0=disabled; 1=max/mean, 2=mean, 3=enhanced mean (LBM default), 4=max projection"
         )
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.diameter = imgui.input_int("Cell Diameter", self.s2p.diameter)

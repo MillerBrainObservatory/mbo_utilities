@@ -503,10 +503,6 @@ class PreviewDataWidget(EdgeWindow):
         window_flags: int | None = None,
         **kwargs,
     ):
-        """
-        Fastplotlib attachment, callable with fastplotlib.ImageWidget.add_gui(PreviewDataWidget)
-        """
-
         flags = (
             (imgui.WindowFlags_.no_title_bar if not show_title else 0)
             | (imgui.WindowFlags_.no_move if not movable else 0)
