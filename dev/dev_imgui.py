@@ -16,8 +16,8 @@ from fastplotlib.ui import EdgeWindow
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 # Initial data path
-data_path = r"E:\tests\lbm\mbo_utilities\big_raw"
-data = mbo.imread(data_path)
+data_path = r"E:\W2_DATA\christian"
+data = mbo.imread(data_path)[:2000, 0, :, :]
 print(f"Initial data shape: {data.shape}")
 
 # Create ImageWidget

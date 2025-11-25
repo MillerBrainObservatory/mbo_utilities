@@ -83,7 +83,7 @@ def get_supported_widgets(parent: "PreviewDataWidget") -> list[Widget]:
 
 
 def draw_all_widgets(parent: "PreviewDataWidget", widgets: list[Widget]) -> None:
-    """draw all supported widgets with error handling."""
+    """draw all supported widgets."""
     for widget in widgets:
         try:
             widget.draw()

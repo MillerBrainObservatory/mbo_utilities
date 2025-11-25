@@ -17,7 +17,7 @@ from .array_types import (
     MboRawArray,
     NpyArray,
     ZarrArray,
-    IsoviewArray,
+    # IsoviewArray,
     register_zplanes_s3d,
     validate_s3d_registration,
     supports_roi,
@@ -518,6 +518,11 @@ def imread(
         return inputs
     if isinstance(inputs, MboRawArray):
         return inputs
+
+    if "isoview" in kwargs.items():
+        print("Isoview!")
+        from .arrays.isoview import IsoviewArray
+        return IsoviewArray(inputs)
 
     if isinstance(inputs, (str, Path)):
         p = Path(inputs)

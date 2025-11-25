@@ -2,7 +2,7 @@
 raster scan phase correction widget.
 
 shows ui for bidirectional scan phase correction on data
-that has scanimage metadata (metadata.get('si')).
+that supports phase correction (has fix_phase and use_fft attributes).
 """
 
 from typing import TYPE_CHECKING
@@ -16,17 +16,6 @@ if TYPE_CHECKING:
     from mbo_utilities.graphics.imgui import PreviewDataWidget
 
 
-def has_raster_scan_support(parent: "PreviewDataWidget") -> bool:
-    """check if any data array supports raster scan phase correction."""
-    try:
-        for arr in parent.image_widget.data:
-            if hasattr(arr, 'fix_phase') and hasattr(arr, 'use_fft'):
-                return True
-    except Exception:
-        pass
-    return False
-
-
 class RasterScanWidget(Widget):
     """ui widget for raster scan phase correction controls."""
 
@@ -35,8 +24,8 @@ class RasterScanWidget(Widget):
 
     @classmethod
     def is_supported(cls, parent: "PreviewDataWidget") -> bool:
-        """show only if data array supports phase correction (has fix_phase and use_fft)."""
-        return has_raster_scan_support(parent)
+        """show only if data array supports phase correction (cached on parent)."""
+        return parent.has_raster_scan_support
 
     def draw(self) -> None:
         """draw raster scan phase correction controls."""

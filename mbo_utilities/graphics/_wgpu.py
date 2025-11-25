@@ -11,7 +11,8 @@
 import wgpu
 import sys
 from imgui_bundle import imgui, imgui_ctx
-from wgpu.gui.auto import WgpuCanvas, run
+# from wgpu.gui.auto import WgpuCanvas, run
+from rendercanvas.auto import RenderCanvas
 from wgpu.utils.imgui import ImguiRenderer
 import fastplotlib as fpl
 import numpy as np

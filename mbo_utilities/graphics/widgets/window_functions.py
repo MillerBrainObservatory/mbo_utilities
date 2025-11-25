@@ -1,7 +1,7 @@
 """
 window functions widget.
 
-controls for projection type, window size, and gaussian blur.
+controls for projection type and window size (temporal operations).
 always shows for any data with temporal dimension.
 """
 
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class WindowFunctionsWidget(Widget):
-    """ui widget for window functions (projection, window size, gaussian)."""
+    """ui widget for window functions (projection, window size)."""
 
     name = "Window Functions"
     priority = 10  # show first
@@ -37,16 +37,10 @@ class WindowFunctionsWidget(Widget):
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Window Functions")
         imgui.spacing()
 
-        # projection type combo
+        # projection type combo (temporal operations only)
         options = ["mean", "max", "std"]
-        disabled_label = (
-            "mean-sub (pending)" if not all(parent._zstats_done) else "mean-sub"
-        )
-        options.append(disabled_label)
 
-        current_display_idx = options.index(
-            parent.proj if parent._proj != "mean-sub" else disabled_label
-        )
+        current_display_idx = options.index(parent.proj) if parent.proj in options else 0
 
         imgui.set_next_item_width(hello_imgui.em_size(6))
         proj_changed, selected_display_idx = imgui.combo(
@@ -56,16 +50,11 @@ class WindowFunctionsWidget(Widget):
             "Choose projection method over the sliding window:\n\n"
             ' "mean" (average)\n'
             ' "max" (peak)\n'
-            ' "std" (variance)\n'
-            ' "mean-sub" (mean-subtracted).'
+            ' "std" (variance)'
         )
 
         if proj_changed:
-            selected_label = options[selected_display_idx]
-            if selected_label == "mean-sub (pending)":
-                pass  # don't change if pending
-            else:
-                parent.proj = selected_label
+            parent.proj = options[selected_display_idx]
 
         # window size
         imgui.set_next_item_width(hello_imgui.em_size(6))
@@ -79,6 +68,28 @@ class WindowFunctionsWidget(Widget):
         if winsize_changed and new_winsize > 0:
             parent.window_size = new_winsize
 
+
+class SpatialFunctionsWidget(Widget):
+    """ui widget for spatial functions (gaussian blur, mean subtraction)."""
+
+    name = "Spatial Functions"
+    priority = 11  # show after window functions
+
+    @classmethod
+    def is_supported(cls, parent: "PreviewDataWidget") -> bool:
+        """always supported."""
+        return True
+
+    def draw(self) -> None:
+        """draw spatial functions controls."""
+        parent = self.parent
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Spatial Functions")
+        imgui.spacing()
+
         # gaussian sigma
         imgui.set_next_item_width(hello_imgui.em_size(6))
         gaussian_changed, new_sigma = imgui.input_float(
@@ -89,3 +100,22 @@ class WindowFunctionsWidget(Widget):
         )
         if gaussian_changed:
             parent.gaussian_sigma = max(0.0, new_sigma)
+
+        # mean subtraction checkbox
+        zstats_ready = all(parent._zstats_done)
+        if not zstats_ready:
+            imgui.begin_disabled()
+
+        mean_sub_changed, mean_sub_value = imgui.checkbox(
+            "Mean Subtraction", parent.mean_subtraction
+        )
+        if not zstats_ready:
+            set_tooltip("Mean subtraction requires z-stats to be computed first (in progress...)")
+            imgui.end_disabled()
+        else:
+            set_tooltip(
+                "Subtract the mean image from each frame. Useful for visualizing activity changes."
+            )
+
+        if mean_sub_changed and zstats_ready:
+            parent.mean_subtraction = mean_sub_value

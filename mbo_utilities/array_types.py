@@ -1782,393 +1782,393 @@ def normalize_roi(value):
     return value
 
 
-class IsoviewArray:
-    """
-    Reader for Isoview lightsheet microscopy data stored as zarr arrays.
-
-    Expects a directory structure like:
-        base_dir/
-            TM000000/
-                SPM00_TM000000_CM00_CHN01.zarr  (Z, Y, X)
-                SPM00_TM000000_CM01_CHN01.zarr
-                SPM00_TM000000_CM02_CHN00.zarr
-                SPM00_TM000000_CM03_CHN00.zarr
-            TM000001/
-                ...
-
-    Or a single TM folder:
-        TM000010/
-            SPM00_TM000010_CM00_CHN01.zarr
-            ...
-
-    Each .zarr file is 3D (Z, Y, X) for a single camera/channel at one timepoint.
-
-    Note: Not all camera/channel combinations may exist. The array tracks which
-    combinations are available and provides access by sequential index.
-
-    Shape depends on input:
-    - Multiple TM folders: (T, Z, Views, Y, X) - 5D
-    - Single TM folder: (Z, Views, Y, X) - 4D
-
-    Parameters
-    ----------
-    path : str or Path
-        Path to the base directory containing TM* folders, or a single TM folder
-
-    Examples
-    --------
-    >>> arr = IsoviewArray("path/to/zarr_output")  # Multiple timepoints
-    >>> print(arr.shape)  # (T, Z, NumViews, Y, X)
-    >>> arr = IsoviewArray("path/to/TM000010")  # Single timepoint
-    >>> print(arr.shape)  # (Z, NumViews, Y, X)
-    >>> print(arr.views)  # [(0, 1), (1, 1), (2, 0), (3, 0)] - (camera, channel) pairs
-    """
-
-    def __init__(self, path: str | Path):
-        try:
-            import zarr
-        except ImportError:
-            raise ImportError("zarr is required. Install with `pip install zarr>=3.0`")
-
-        self.base_path = Path(path)
-        if not self.base_path.exists():
-            raise FileNotFoundError(f"Path does not exist: {self.base_path}")
-
-        # Check if the input IS a TM folder (single timepoint)
-        self._single_timepoint = False
-        if self.base_path.name.startswith("TM"):
-            # Single TM folder provided
-            zarr_files_in_path = list(self.base_path.glob("*.zarr"))
-            if zarr_files_in_path:
-                self._single_timepoint = True
-                self.tm_folders = [self.base_path]
-            else:
-                raise ValueError(f"TM folder {self.base_path} contains no .zarr files")
-        else:
-            # Find all TM folders and sort them
-            self.tm_folders = sorted(
-                [d for d in self.base_path.iterdir() if d.is_dir() and d.name.startswith("TM")],
-                key=lambda x: int(x.name[2:])  # Sort by TM number
-            )
-
-            if not self.tm_folders:
-                raise ValueError(f"No TM* folders found in {self.base_path}")
-
-        # Parse the first TM folder to discover camera/channel combinations
-        first_tm = self.tm_folders[0]
-        zarr_files = sorted(first_tm.glob("*.zarr"))
-
-        if not zarr_files:
-            raise ValueError(f"No .zarr files found in {first_tm}")
-
-        # Parse filenames to extract camera/channel info
-        # Expected format: SPM00_TM000000_CM{camera:02d}_CHN{channel:02d}.zarr
-        # Store as list of (camera, channel) tuples - "views"
-        self._views = []  # List of (camera, channel) tuples
-
-        for zf in sorted(zarr_files):
-            name = zf.stem  # e.g., SPM00_TM000000_CM00_CHN01
-            parts = name.split("_")
-
-            # Find CM and CHN parts
-            cm_idx = None
-            chn_idx = None
-            for part in parts:
-                if part.startswith("CM"):
-                    cm_idx = int(part[2:])
-                elif part.startswith("CHN"):
-                    chn_idx = int(part[3:])
-
-            if cm_idx is not None and chn_idx is not None:
-                self._views.append((cm_idx, chn_idx))
-
-        if not self._views:
-            raise ValueError(f"No valid camera/channel combinations found in {first_tm}")
-
-        logger.info(
-            f"IsoviewArray: {len(self.tm_folders)} timepoints, "
-            f"{len(self._views)} views: {self._views}"
-        )
-
-        # Open first zarr to get Z, Y, X dimensions and metadata
-        first_zarr_path = zarr_files[0]
-        first_zarr = zarr.open(first_zarr_path, mode="r")
-
-        # Handle OME-Zarr groups
-        if isinstance(first_zarr, zarr.Group):
-            if "0" in first_zarr:
-                first_arr = first_zarr["0"]
-            else:
-                raise ValueError(f"OME-Zarr group missing '0' array: {first_zarr_path}")
-            # Store group attrs as metadata
-            self._zarr_attrs = dict(first_zarr.attrs)
-        else:
-            first_arr = first_zarr
-            self._zarr_attrs = dict(first_arr.attrs) if hasattr(first_arr, 'attrs') else {}
-
-        self._single_shape = first_arr.shape  # (Z, Y, X)
-        self._dtype = first_arr.dtype
-
-        # Cache for opened zarr arrays: (t_idx, view_idx) -> zarr array
-        self._zarr_cache = {}
-
-    def _get_zarr(self, t_idx: int, view_idx: int):
-        """Get or open a zarr array for the given timepoint and view index."""
-        import zarr
-
-        cache_key = (t_idx, view_idx)
-        if cache_key in self._zarr_cache:
-            return self._zarr_cache[cache_key]
-
-        camera, channel = self._views[view_idx]
-        tm_folder = self.tm_folders[t_idx]
-
-        # Find matching zarr file
-        pattern = f"*_CM{camera:02d}_CHN{channel:02d}.zarr"
-        matches = list(tm_folder.glob(pattern))
-
-        if not matches:
-            raise FileNotFoundError(
-                f"No zarr file matching {pattern} in {tm_folder}"
-            )
-
-        zarr_path = matches[0]
-        z = zarr.open(zarr_path, mode="r")
-
-        # Handle OME-Zarr groups
-        if isinstance(z, zarr.Group):
-            if "0" in z:
-                z = z["0"]
-            else:
-                raise ValueError(f"OME-Zarr group missing '0' array: {zarr_path}")
-
-        self._zarr_cache[cache_key] = z
-        return z
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        """
-        Shape depends on input:
-        - Multiple TM folders: (T, Z, Views, Y, X) - 5D
-        - Single TM folder: (Z, Views, Y, X) - 4D
-        """
-        z, y, x = self._single_shape
-        if self._single_timepoint:
-            return (z, len(self._views), y, x)
-        else:
-            t = len(self.tm_folders)
-            return (t, z, len(self._views), y, x)
-
-    @property
-    def dtype(self):
-        return self._dtype
-
-    @property
-    def ndim(self):
-        return 4 if self._single_timepoint else 5
-
-    @property
-    def size(self):
-        return np.prod(self.shape)
-
-    @property
-    def views(self) -> list[tuple[int, int]]:
-        """List of (camera, channel) tuples for each view index."""
-        return self._views
-
-    @property
-    def num_views(self) -> int:
-        """Number of camera/channel views."""
-        return len(self._views)
-
-    @property
-    def num_timepoints(self) -> int:
-        """Number of timepoints."""
-        return len(self.tm_folders)
-
-    @property
-    def metadata(self) -> dict:
-        """
-        Metadata extracted from zarr attributes.
-
-        Returns a dict with keys like:
-        - timestamp, time_point, camera_type, wavelength, exposure_time
-        - dimensions, z_step, planes, detection_objective
-        - pixel_resolution, dz, frame_rate, num_frames
-        - Plus computed fields: num_timepoints, views, shape
-        """
-        # Start with zarr attrs
-        meta = dict(self._zarr_attrs)
-
-        # Remove nested OME metadata (keep it accessible separately)
-        ome = meta.pop("ome", None)
-
-        # Add computed fields
-        meta["num_timepoints"] = len(self.tm_folders)
-        meta["views"] = self._views
-        meta["shape"] = self.shape
-        meta["single_timepoint"] = self._single_timepoint
-
-        # Extract useful info from OME if present
-        if ome and "multiscales" in ome:
-            multiscales = ome["multiscales"]
-            if multiscales and len(multiscales) > 0:
-                ms = multiscales[0]
-                if "axes" in ms:
-                    meta["axes"] = ms["axes"]
-                if "datasets" in ms and len(ms["datasets"]) > 0:
-                    ds = ms["datasets"][0]
-                    if "coordinateTransformations" in ds:
-                        for ct in ds["coordinateTransformations"]:
-                            if ct.get("type") == "scale":
-                                meta["scale"] = ct.get("scale")
-
-        return meta
-
-    @property
-    def ome_metadata(self) -> dict | None:
-        """Raw OME-Zarr metadata if available."""
-        return self._zarr_attrs.get("ome")
-
-    def __len__(self):
-        return self.shape[0]
-
-    def view_index(self, camera: int, channel: int) -> int:
-        """Get view index for a specific camera/channel combination."""
-        try:
-            return self._views.index((camera, channel))
-        except ValueError:
-            raise ValueError(
-                f"No view for camera={camera}, channel={channel}. "
-                f"Available views: {self._views}"
-            )
-
-    def __getitem__(self, key):
-        """
-        Index the array.
-
-        Shape depends on input:
-        - Multiple TM folders: (T, Z, Views, Y, X) - 5D
-        - Single TM folder: (Z, Views, Y, X) - 4D
-
-        Supports integer indexing, slices, and combinations.
-        """
-        if not isinstance(key, tuple):
-            key = (key,)
-
-        # Normalize indices helper
-        def to_indices(k, max_val):
-            """Convert key to list of indices."""
-            if isinstance(k, int):
-                if k < 0:
-                    k = max_val + k
-                return [k]
-            elif isinstance(k, slice):
-                return list(range(*k.indices(max_val)))
-            elif isinstance(k, (list, np.ndarray)):
-                return list(k)
-            else:
-                return list(range(max_val))
-
-        if self._single_timepoint:
-            # 4D indexing: (Z, Views, Y, X)
-            key = key + (slice(None),) * (4 - len(key))
-            z_key, view_key, y_key, x_key = key
-            t_indices = [0]  # Only one timepoint
-            t_key = 0  # For squeeze tracking
-        else:
-            # 5D indexing: (T, Z, Views, Y, X)
-            key = key + (slice(None),) * (5 - len(key))
-            t_key, z_key, view_key, y_key, x_key = key
-            t_indices = to_indices(t_key, len(self.tm_folders))
-
-        z_indices = to_indices(z_key, self._single_shape[0])
-        view_indices = to_indices(view_key, len(self._views))
-
-        # Build output array (always 5D internally for simplicity)
-        out_shape = (
-            len(t_indices),
-            len(z_indices),
-            len(view_indices),
-            *self._single_shape[1:],  # Y, X
-        )
-
-        # Handle Y, X slicing
-        if isinstance(y_key, int):
-            out_shape = out_shape[:3] + (1,) + out_shape[4:]
-        elif isinstance(y_key, slice):
-            y_size = len(range(*y_key.indices(self._single_shape[1])))
-            out_shape = out_shape[:3] + (y_size,) + out_shape[4:]
-
-        if isinstance(x_key, int):
-            out_shape = out_shape[:4] + (1,)
-        elif isinstance(x_key, slice):
-            x_size = len(range(*x_key.indices(self._single_shape[2])))
-            out_shape = out_shape[:4] + (x_size,)
-
-        result = np.empty(out_shape, dtype=self._dtype)
-
-        for ti, t_idx in enumerate(t_indices):
-            for vi, view_idx in enumerate(view_indices):
-                zarr_arr = self._get_zarr(t_idx, view_idx)
-
-                # Index the zarr array (Z, Y, X)
-                data = zarr_arr[z_key, y_key, x_key]
-
-                # Handle dimension reduction from integer indexing
-                if isinstance(z_key, int):
-                    data = data[np.newaxis, ...]
-                if isinstance(y_key, int):
-                    data = data[:, np.newaxis, :]
-                if isinstance(x_key, int):
-                    data = data[:, :, np.newaxis]
-
-                result[ti, :, vi, ...] = data
-
-        # Squeeze out singleton dimensions from integer indexing
-        if self._single_timepoint:
-            # 4D: always squeeze out the T dimension, then check Z, Views, Y, X
-            result = np.squeeze(result, axis=0)
-            int_indexed = [
-                isinstance(z_key, int),
-                isinstance(view_key, int),
-                isinstance(y_key, int),
-                isinstance(x_key, int),
-            ]
-            # Squeeze in reverse order to preserve axis indices
-            for ax in range(3, -1, -1):
-                if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
-                    result = np.squeeze(result, axis=ax)
-        else:
-            # 5D: check T, Z, Views, Y, X
-            int_indexed = [
-                isinstance(t_key, int),
-                isinstance(z_key, int),
-                isinstance(view_key, int),
-                isinstance(y_key, int),
-                isinstance(x_key, int),
-            ]
-            # Squeeze in reverse order to preserve axis indices
-            for ax in range(4, -1, -1):
-                if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
-                    result = np.squeeze(result, axis=ax)
-
-        return result
-
-    def __array__(self):
-        """Materialize full array into memory."""
-        return self[:]
-
-    @property
-    def filenames(self) -> list[str]:
-        """Return list of TM folder paths as strings (for GUI compatibility)."""
-        return [str(f) for f in self.tm_folders]
-
-    def __repr__(self):
-        return (
-            f"IsoviewArray(shape={self.shape}, dtype={self.dtype}, "
-            f"views={self._views})"
-        )
+# class IsoviewArray:
+#     """
+#     Reader for Isoview lightsheet microscopy data stored as zarr arrays.
+
+#     Expects a directory structure like:
+#         base_dir/
+#             TM000000/
+#                 SPM00_TM000000_CM00_CHN01.zarr  (Z, Y, X)
+#                 SPM00_TM000000_CM01_CHN01.zarr
+#                 SPM00_TM000000_CM02_CHN00.zarr
+#                 SPM00_TM000000_CM03_CHN00.zarr
+#             TM000001/
+#                 ...
+
+#     Or a single TM folder:
+#         TM000010/
+#             SPM00_TM000010_CM00_CHN01.zarr
+#             ...
+
+#     Each .zarr file is 3D (Z, Y, X) for a single camera/channel at one timepoint.
+
+#     Note: Not all camera/channel combinations may exist. The array tracks which
+#     combinations are available and provides access by sequential index.
+
+#     Shape depends on input:
+#     - Multiple TM folders: (T, Z, Views, Y, X) - 5D
+#     - Single TM folder: (Z, Views, Y, X) - 4D
+
+#     Parameters
+#     ----------
+#     path : str or Path
+#         Path to the base directory containing TM* folders, or a single TM folder
+
+#     Examples
+#     --------
+#     >>> arr = IsoviewArray("path/to/zarr_output")  # Multiple timepoints
+#     >>> print(arr.shape)  # (T, Z, NumViews, Y, X)
+#     >>> arr = IsoviewArray("path/to/TM000010")  # Single timepoint
+#     >>> print(arr.shape)  # (Z, NumViews, Y, X)
+#     >>> print(arr.views)  # [(0, 1), (1, 1), (2, 0), (3, 0)] - (camera, channel) pairs
+#     """
+
+#     def __init__(self, path: str | Path):
+#         try:
+#             import zarr
+#         except ImportError:
+#             raise ImportError("zarr is required. Install with `pip install zarr>=3.0`")
+
+#         self.base_path = Path(path)
+#         if not self.base_path.exists():
+#             raise FileNotFoundError(f"Path does not exist: {self.base_path}")
+
+#         # Check if the input IS a TM folder (single timepoint)
+#         self._single_timepoint = False
+#         if self.base_path.name.startswith("TM"):
+#             # Single TM folder provided
+#             zarr_files_in_path = list(self.base_path.glob("*.zarr"))
+#             if zarr_files_in_path:
+#                 self._single_timepoint = True
+#                 self.tm_folders = [self.base_path]
+#             else:
+#                 raise ValueError(f"TM folder {self.base_path} contains no .zarr files")
+#         else:
+#             # Find all TM folders and sort them
+#             self.tm_folders = sorted(
+#                 [d for d in self.base_path.iterdir() if d.is_dir() and d.name.startswith("TM")],
+#                 key=lambda x: int(x.name[2:])  # Sort by TM number
+#             )
+
+#             if not self.tm_folders:
+#                 raise ValueError(f"No TM* folders found in {self.base_path}")
+
+#         # Parse the first TM folder to discover camera/channel combinations
+#         first_tm = self.tm_folders[0]
+#         zarr_files = sorted(first_tm.glob("*.zarr"))
+
+#         if not zarr_files:
+#             raise ValueError(f"No .zarr files found in {first_tm}")
+
+#         # Parse filenames to extract camera/channel info
+#         # Expected format: SPM00_TM000000_CM{camera:02d}_CHN{channel:02d}.zarr
+#         # Store as list of (camera, channel) tuples - "views"
+#         self._views = []  # List of (camera, channel) tuples
+
+#         for zf in sorted(zarr_files):
+#             name = zf.stem  # e.g., SPM00_TM000000_CM00_CHN01
+#             parts = name.split("_")
+
+#             # Find CM and CHN parts
+#             cm_idx = None
+#             chn_idx = None
+#             for part in parts:
+#                 if part.startswith("CM"):
+#                     cm_idx = int(part[2:])
+#                 elif part.startswith("CHN"):
+#                     chn_idx = int(part[3:])
+
+#             if cm_idx is not None and chn_idx is not None:
+#                 self._views.append((cm_idx, chn_idx))
+
+#         if not self._views:
+#             raise ValueError(f"No valid camera/channel combinations found in {first_tm}")
+
+#         logger.info(
+#             f"IsoviewArray: {len(self.tm_folders)} timepoints, "
+#             f"{len(self._views)} views: {self._views}"
+#         )
+
+#         # Open first zarr to get Z, Y, X dimensions and metadata
+#         first_zarr_path = zarr_files[0]
+#         first_zarr = zarr.open(first_zarr_path, mode="r")
+
+#         # Handle OME-Zarr groups
+#         if isinstance(first_zarr, zarr.Group):
+#             if "0" in first_zarr:
+#                 first_arr = first_zarr["0"]
+#             else:
+#                 raise ValueError(f"OME-Zarr group missing '0' array: {first_zarr_path}")
+#             # Store group attrs as metadata
+#             self._zarr_attrs = dict(first_zarr.attrs)
+#         else:
+#             first_arr = first_zarr
+#             self._zarr_attrs = dict(first_arr.attrs) if hasattr(first_arr, 'attrs') else {}
+
+#         self._single_shape = first_arr.shape  # (Z, Y, X)
+#         self._dtype = first_arr.dtype
+
+#         # Cache for opened zarr arrays: (t_idx, view_idx) -> zarr array
+#         self._zarr_cache = {}
+
+#     def _get_zarr(self, t_idx: int, view_idx: int):
+#         """Get or open a zarr array for the given timepoint and view index."""
+#         import zarr
+
+#         cache_key = (t_idx, view_idx)
+#         if cache_key in self._zarr_cache:
+#             return self._zarr_cache[cache_key]
+
+#         camera, channel = self._views[view_idx]
+#         tm_folder = self.tm_folders[t_idx]
+
+#         # Find matching zarr file
+#         pattern = f"*_CM{camera:02d}_CHN{channel:02d}.zarr"
+#         matches = list(tm_folder.glob(pattern))
+
+#         if not matches:
+#             raise FileNotFoundError(
+#                 f"No zarr file matching {pattern} in {tm_folder}"
+#             )
+
+#         zarr_path = matches[0]
+#         z = zarr.open(zarr_path, mode="r")
+
+#         # Handle OME-Zarr groups
+#         if isinstance(z, zarr.Group):
+#             if "0" in z:
+#                 z = z["0"]
+#             else:
+#                 raise ValueError(f"OME-Zarr group missing '0' array: {zarr_path}")
+
+#         self._zarr_cache[cache_key] = z
+#         return z
+
+#     @property
+#     def shape(self) -> tuple[int, ...]:
+#         """
+#         Shape depends on input:
+#         - Multiple TM folders: (T, Z, Views, Y, X) - 5D
+#         - Single TM folder: (Z, Views, Y, X) - 4D
+#         """
+#         z, y, x = self._single_shape
+#         if self._single_timepoint:
+#             return (z, len(self._views), y, x)
+#         else:
+#             t = len(self.tm_folders)
+#             return (t, z, len(self._views), y, x)
+
+#     @property
+#     def dtype(self):
+#         return self._dtype
+
+#     @property
+#     def ndim(self):
+#         return 4 if self._single_timepoint else 5
+
+#     @property
+#     def size(self):
+#         return np.prod(self.shape)
+
+#     @property
+#     def views(self) -> list[tuple[int, int]]:
+#         """List of (camera, channel) tuples for each view index."""
+#         return self._views
+
+#     @property
+#     def num_views(self) -> int:
+#         """Number of camera/channel views."""
+#         return len(self._views)
+
+#     @property
+#     def num_timepoints(self) -> int:
+#         """Number of timepoints."""
+#         return len(self.tm_folders)
+
+#     @property
+#     def metadata(self) -> dict:
+#         """
+#         Metadata extracted from zarr attributes.
+
+#         Returns a dict with keys like:
+#         - timestamp, time_point, camera_type, wavelength, exposure_time
+#         - dimensions, z_step, planes, detection_objective
+#         - pixel_resolution, dz, frame_rate, num_frames
+#         - Plus computed fields: num_timepoints, views, shape
+#         """
+#         # Start with zarr attrs
+#         meta = dict(self._zarr_attrs)
+
+#         # Remove nested OME metadata (keep it accessible separately)
+#         ome = meta.pop("ome", None)
+
+#         # Add computed fields
+#         meta["num_timepoints"] = len(self.tm_folders)
+#         meta["views"] = self._views
+#         meta["shape"] = self.shape
+#         meta["single_timepoint"] = self._single_timepoint
+
+#         # Extract useful info from OME if present
+#         if ome and "multiscales" in ome:
+#             multiscales = ome["multiscales"]
+#             if multiscales and len(multiscales) > 0:
+#                 ms = multiscales[0]
+#                 if "axes" in ms:
+#                     meta["axes"] = ms["axes"]
+#                 if "datasets" in ms and len(ms["datasets"]) > 0:
+#                     ds = ms["datasets"][0]
+#                     if "coordinateTransformations" in ds:
+#                         for ct in ds["coordinateTransformations"]:
+#                             if ct.get("type") == "scale":
+#                                 meta["scale"] = ct.get("scale")
+
+#         return meta
+
+#     @property
+#     def ome_metadata(self) -> dict | None:
+#         """Raw OME-Zarr metadata if available."""
+#         return self._zarr_attrs.get("ome")
+
+#     def __len__(self):
+#         return self.shape[0]
+
+#     def view_index(self, camera: int, channel: int) -> int:
+#         """Get view index for a specific camera/channel combination."""
+#         try:
+#             return self._views.index((camera, channel))
+#         except ValueError:
+#             raise ValueError(
+#                 f"No view for camera={camera}, channel={channel}. "
+#                 f"Available views: {self._views}"
+#             )
+
+#     def __getitem__(self, key):
+#         """
+#         Index the array.
+
+#         Shape depends on input:
+#         - Multiple TM folders: (T, Z, Views, Y, X) - 5D
+#         - Single TM folder: (Z, Views, Y, X) - 4D
+
+#         Supports integer indexing, slices, and combinations.
+#         """
+#         if not isinstance(key, tuple):
+#             key = (key,)
+
+#         # Normalize indices helper
+#         def to_indices(k, max_val):
+#             """Convert key to list of indices."""
+#             if isinstance(k, int):
+#                 if k < 0:
+#                     k = max_val + k
+#                 return [k]
+#             elif isinstance(k, slice):
+#                 return list(range(*k.indices(max_val)))
+#             elif isinstance(k, (list, np.ndarray)):
+#                 return list(k)
+#             else:
+#                 return list(range(max_val))
+
+#         if self._single_timepoint:
+#             # 4D indexing: (Z, Views, Y, X)
+#             key = key + (slice(None),) * (4 - len(key))
+#             z_key, view_key, y_key, x_key = key
+#             t_indices = [0]  # Only one timepoint
+#             t_key = 0  # For squeeze tracking
+#         else:
+#             # 5D indexing: (T, Z, Views, Y, X)
+#             key = key + (slice(None),) * (5 - len(key))
+#             t_key, z_key, view_key, y_key, x_key = key
+#             t_indices = to_indices(t_key, len(self.tm_folders))
+
+#         z_indices = to_indices(z_key, self._single_shape[0])
+#         view_indices = to_indices(view_key, len(self._views))
+
+#         # Build output array (always 5D internally for simplicity)
+#         out_shape = (
+#             len(t_indices),
+#             len(z_indices),
+#             len(view_indices),
+#             *self._single_shape[1:],  # Y, X
+#         )
+
+#         # Handle Y, X slicing
+#         if isinstance(y_key, int):
+#             out_shape = out_shape[:3] + (1,) + out_shape[4:]
+#         elif isinstance(y_key, slice):
+#             y_size = len(range(*y_key.indices(self._single_shape[1])))
+#             out_shape = out_shape[:3] + (y_size,) + out_shape[4:]
+
+#         if isinstance(x_key, int):
+#             out_shape = out_shape[:4] + (1,)
+#         elif isinstance(x_key, slice):
+#             x_size = len(range(*x_key.indices(self._single_shape[2])))
+#             out_shape = out_shape[:4] + (x_size,)
+
+#         result = np.empty(out_shape, dtype=self._dtype)
+
+#         for ti, t_idx in enumerate(t_indices):
+#             for vi, view_idx in enumerate(view_indices):
+#                 zarr_arr = self._get_zarr(t_idx, view_idx)
+
+#                 # Index the zarr array (Z, Y, X)
+#                 data = zarr_arr[z_key, y_key, x_key]
+
+#                 # Handle dimension reduction from integer indexing
+#                 if isinstance(z_key, int):
+#                     data = data[np.newaxis, ...]
+#                 if isinstance(y_key, int):
+#                     data = data[:, np.newaxis, :]
+#                 if isinstance(x_key, int):
+#                     data = data[:, :, np.newaxis]
+
+#                 result[ti, :, vi, ...] = data
+
+#         # Squeeze out singleton dimensions from integer indexing
+#         if self._single_timepoint:
+#             # 4D: always squeeze out the T dimension, then check Z, Views, Y, X
+#             result = np.squeeze(result, axis=0)
+#             int_indexed = [
+#                 isinstance(z_key, int),
+#                 isinstance(view_key, int),
+#                 isinstance(y_key, int),
+#                 isinstance(x_key, int),
+#             ]
+#             # Squeeze in reverse order to preserve axis indices
+#             for ax in range(3, -1, -1):
+#                 if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
+#                     result = np.squeeze(result, axis=ax)
+#         else:
+#             # 5D: check T, Z, Views, Y, X
+#             int_indexed = [
+#                 isinstance(t_key, int),
+#                 isinstance(z_key, int),
+#                 isinstance(view_key, int),
+#                 isinstance(y_key, int),
+#                 isinstance(x_key, int),
+#             ]
+#             # Squeeze in reverse order to preserve axis indices
+#             for ax in range(4, -1, -1):
+#                 if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
+#                     result = np.squeeze(result, axis=ax)
+
+#         return result
+
+#     def __array__(self):
+#         """Materialize full array into memory."""
+#         return self[:]
+
+#     @property
+#     def filenames(self) -> list[str]:
+#         """Return list of TM folder paths as strings (for GUI compatibility)."""
+#         return [str(f) for f in self.tm_folders]
+
+#     def __repr__(self):
+#         return (
+#             f"IsoviewArray(shape={self.shape}, dtype={self.dtype}, "
+#             f"views={self._views})"
+#         )
 
 
 @dataclass

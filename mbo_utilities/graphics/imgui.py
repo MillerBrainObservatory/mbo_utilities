@@ -629,6 +629,7 @@ class PreviewDataWidget(EdgeWindow):
         # We just track UI state here
         self._auto_update = False
         self._proj = "mean"
+        self._mean_subtraction = False
 
         self._register_z = False
         self._register_z_progress = 0.0
@@ -669,6 +670,9 @@ class PreviewDataWidget(EdgeWindow):
         self._folder_dialog = None
         self._load_status_msg = ""
         self._load_status_color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
+
+        # cache raster scan support check (done once on init)
+        # self._has_raster_scan_support = self._check_raster_scan_support()
 
         # initialize widgets based on data capabilities
         self._widgets = get_supported_widgets(self)
@@ -757,12 +761,15 @@ class PreviewDataWidget(EdgeWindow):
         """Access to underlying NDImageProcessor instances."""
         return self.image_widget._image_processors
 
+    def _get_data_arrays(self) -> list:
+        """Get underlying data arrays from image processors."""
+        return [proc.data for proc in self.processors]
+
     @property
     def current_offset(self) -> list[float]:
         """Get current phase offset from each data array (MboRawArray)."""
         offsets = []
-        for i in range(len(self.image_widget.data)):
-            arr = self.image_widget.data[i]
+        for arr in self._get_data_arrays():
             if hasattr(arr, 'offset'):
                 arr_offset = arr.offset
                 if isinstance(arr_offset, np.ndarray):
@@ -773,30 +780,28 @@ class PreviewDataWidget(EdgeWindow):
                 offsets.append(0.0)
         return offsets
 
-    @property
-    def has_raster_scan_support(self) -> bool:
-        """Check if any data array supports raster scan phase correction."""
-        for i in range(len(self.image_widget.data)):
-            arr = self.image_widget.data[i]
-            if hasattr(arr, 'fix_phase'):
-                return True
-        return False
+    # @property
+    # def has_raster_scan_support(self) -> bool:
+    #     """Check if any data array supports raster scan phase correction (cached on init)."""
+    #     return self._has_raster_scan_support
+
+    # # def _check_raster_scan_support(self) -> bool:
+    # #     """Check if any data array supports raster scan phase correction."""
+    # #     for arr in self._get_data_arrays():
+    # #         if hasattr(arr, 'fix_phase') and hasattr(arr, 'use_fft'):
+    # #             return True
+    #     return False
 
     @property
     def fix_phase(self) -> bool:
         """Whether bidirectional phase correction is enabled."""
-        if not self.has_raster_scan_support:
-            return False
-        arr = self.image_widget.data[0]
-        return getattr(arr, 'fix_phase', False)
+        arrays = self._get_data_arrays()
+        return getattr(arrays[0], 'fix_phase', False) if arrays else False
 
     @fix_phase.setter
     def fix_phase(self, value: bool):
-        if not self.has_raster_scan_support:
-            return
         self.logger.info(f"Setting fix_phase to {value}.")
-        for i in range(len(self.image_widget.data)):
-            arr = self.image_widget.data[i]
+        for arr in self._get_data_arrays():
             if hasattr(arr, 'fix_phase'):
                 arr.fix_phase = value
         self._refresh_image_widget()
@@ -804,18 +809,13 @@ class PreviewDataWidget(EdgeWindow):
     @property
     def use_fft(self) -> bool:
         """Whether FFT-based phase correlation is used."""
-        if not self.has_raster_scan_support:
-            return False
-        arr = self.image_widget.data[0]
-        return getattr(arr, 'use_fft', False)
+        arrays = self._get_data_arrays()
+        return getattr(arrays[0], 'use_fft', False) if arrays else False
 
     @use_fft.setter
     def use_fft(self, value: bool):
-        if not self.has_raster_scan_support:
-            return
         self.logger.info(f"Setting use_fft to {value}.")
-        for i in range(len(self.image_widget.data)):
-            arr = self.image_widget.data[i]
+        for arr in self._get_data_arrays():
             if hasattr(arr, 'use_fft'):
                 arr.use_fft = value
         self._refresh_image_widget()
@@ -823,18 +823,13 @@ class PreviewDataWidget(EdgeWindow):
     @property
     def border(self) -> int:
         """Border pixels to exclude from phase correlation."""
-        if not self.has_raster_scan_support:
-            return 3
-        arr = self.image_widget.data[0]
-        return getattr(arr, 'border', 3)
+        arrays = self._get_data_arrays()
+        return getattr(arrays[0], 'border', 3) if arrays else 3
 
     @border.setter
     def border(self, value: int):
-        if not self.has_raster_scan_support:
-            return
         self.logger.info(f"Setting border to {value}.")
-        for i in range(len(self.image_widget.data)):
-            arr = self.image_widget.data[i]
+        for arr in self._get_data_arrays():
             if hasattr(arr, 'border'):
                 arr.border = value
         self._refresh_image_widget()
@@ -842,18 +837,13 @@ class PreviewDataWidget(EdgeWindow):
     @property
     def max_offset(self) -> int:
         """Maximum pixel offset for phase correction."""
-        if not self.has_raster_scan_support:
-            return 3
-        arr = self.image_widget.data[0]
-        return getattr(arr, 'max_offset', 3)
+        arrays = self._get_data_arrays()
+        return getattr(arrays[0], 'max_offset', 3) if arrays else 3
 
     @max_offset.setter
     def max_offset(self, value: int):
-        if not self.has_raster_scan_support:
-            return
         self.logger.info(f"Setting max_offset to {value}.")
-        for i in range(len(self.image_widget.data)):
-            arr = self.image_widget.data[i]
+        for arr in self._get_data_arrays():
             if hasattr(arr, 'max_offset'):
                 arr.max_offset = value
         self._refresh_image_widget()
@@ -881,43 +871,40 @@ class PreviewDataWidget(EdgeWindow):
     def gaussian_sigma(self, value: float):
         """Set gaussian blur using fastplotlib's spatial_func API."""
         self._gaussian_sigma = max(0.0, value)
-        self.logger.info(f"Setting gaussian_sigma to {self._gaussian_sigma}.")
 
         if self._gaussian_sigma > 0:
-            # Use partial to create a spatial_func with the current sigma
             spatial_func = partial(gaussian_filter, sigma=self._gaussian_sigma)
         else:
             spatial_func = None
 
-        # save current vmin/vmax before update (fastplotlib resets them)
-        saved_vmin_vmax = self._save_vmin_vmax()
-
-        # Apply to all graphics via ImageWidget's spatial_func API
+        # Just set spatial_func - ImageWidget handles the update
         self.image_widget.spatial_func = spatial_func
-
-        # restore vmin/vmax
-        self._restore_vmin_vmax(saved_vmin_vmax)
-        self._refresh_image_widget()
 
     @property
     def proj(self) -> str:
-        """Current projection mode (mean, max, std, mean-sub)."""
+        """Current projection mode (mean, max, std)."""
         return self._proj
 
     @proj.setter
     def proj(self, value: str):
         if value != self._proj:
-            self.logger.info(f"Setting projection to {value}.")
             self._proj = value
-            # For mean-sub, update processor mean_image when z-stats are ready
-            self._update_mean_subtraction()
-            # Update window_funcs on the image widget based on projection type
             self._update_window_funcs()
-        self._refresh_image_widget()
+
+    @property
+    def mean_subtraction(self) -> bool:
+        """Whether mean subtraction is enabled (spatial function)."""
+        return self._mean_subtraction
+
+    @mean_subtraction.setter
+    def mean_subtraction(self, value: bool):
+        if value != self._mean_subtraction:
+            self._mean_subtraction = value
+            self._update_mean_subtraction()
 
     def _update_mean_subtraction(self):
-        """Update processor mean_image based on current projection mode."""
-        if self._proj == "mean-sub":
+        """Update processor mean_image based on mean_subtraction setting."""
+        if self._mean_subtraction:
             # Set mean image on each processor from z-stats
             names = self.image_widget._slider_dim_names or ()
             z_idx = self.image_widget.indices["z"] if "z" in names else 0
@@ -932,32 +919,12 @@ class PreviewDataWidget(EdgeWindow):
             for proc in self.processors:
                 proc.mean_image = None
 
-    def _save_vmin_vmax(self) -> list:
-        """Save current vmin/vmax from histogram LUT tools."""
-        saved = []
-        for subplot in self.image_widget.figure:
-            if "histogram_lut" in subplot.docks["right"]:
-                hlut = subplot.docks["right"]["histogram_lut"]
-                saved.append((hlut.vmin, hlut.vmax))
-            else:
-                saved.append(None)
-        return saved
-
-    def _restore_vmin_vmax(self, saved: list) -> None:
-        """Restore vmin/vmax to histogram LUT tools."""
-        for i, subplot in enumerate(self.image_widget.figure):
-            if saved[i] is not None and "histogram_lut" in subplot.docks["right"]:
-                hlut = subplot.docks["right"]["histogram_lut"]
-                hlut.vmin, hlut.vmax = saved[i]
-
     def _update_window_funcs(self):
         """Update window_funcs on image widget based on current projection mode."""
-        # map projection name to numpy function
         proj_funcs = {
             "mean": np.mean,
             "max": np.max,
             "std": np.std,
-            "mean-sub": np.mean,  # mean-sub uses mean projection with subtraction on processor
         }
         proj_func = proj_funcs.get(self._proj, np.mean)
 
@@ -965,23 +932,14 @@ class PreviewDataWidget(EdgeWindow):
         n_slider_dims = self.processors[0].n_slider_dims if self.processors else 1
 
         if n_slider_dims == 1:
-            # only temporal dimension
             window_funcs = (proj_func,)
         elif n_slider_dims == 2:
-            # temporal and z dimensions - apply projection to temporal only
             window_funcs = (proj_func, None)
         else:
-            # more dimensions - apply to first, None for rest
             window_funcs = (proj_func,) + (None,) * (n_slider_dims - 1)
 
-        # save current vmin/vmax before update (fastplotlib resets them)
-        saved_vmin_vmax = self._save_vmin_vmax()
-
-        # set via ImageWidget API (this triggers reset_vmin_vmax internally)
+        # Just set window_funcs - ImageWidget handles the update
         self.image_widget.window_funcs = window_funcs
-
-        # restore vmin/vmax
-        self._restore_vmin_vmax(saved_vmin_vmax)
 
     @property
     def window_size(self) -> int:
@@ -995,16 +953,6 @@ class PreviewDataWidget(EdgeWindow):
 
     @window_size.setter
     def window_size(self, value: int):
-        if value < 1:
-            self.logger.warning(f"Window size must be >= 1, got {value}. Setting to 1.")
-            value = 1
-        elif value < 4 and self.fix_phase:
-            self.logger.warning(
-                f"Window size ({value}) < 4 with phase correction enabled. "
-                f"Phase correction requires >= 4 frames for reliable results. "
-                f"Consider increasing window size or disabling phase correction."
-            )
-
         self._window_size = value
         self.logger.info(f"Window size set to {value}.")
 
@@ -1037,16 +985,15 @@ class PreviewDataWidget(EdgeWindow):
         """Upsampling factor for subpixel phase correlation."""
         if not self.has_raster_scan_support:
             return 5
-        arr = self.image_widget.data[0]
-        return getattr(arr, 'upsample', 5)
+        arrays = self._get_data_arrays()
+        return getattr(arrays[0], 'upsample', 5) if arrays else 5
 
     @phase_upsample.setter
     def phase_upsample(self, value: int):
         if not self.has_raster_scan_support:
             return
         self.logger.info(f"Setting phase_upsample to {value}.")
-        for i in range(len(self.image_widget.data)):
-            arr = self.image_widget.data[i]
+        for arr in self._get_data_arrays():
             if hasattr(arr, 'upsample'):
                 arr.upsample = value
         self._refresh_image_widget()

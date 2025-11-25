@@ -83,26 +83,9 @@ def draw_run_tab(parent: "PreviewDataWidget") -> None:
         )
         return
 
-    # pipeline selector
-    pipeline_names = [p.name for p in _PIPELINE_CLASSES]
-    imgui.set_next_item_width(120)
-    changed, parent._selected_pipeline_idx = imgui.combo(
-        "##pipeline_select",
-        parent._selected_pipeline_idx,
-        pipeline_names
-    )
-
-    # get selected pipeline class
-    pipeline_cls = _PIPELINE_CLASSES[parent._selected_pipeline_idx]
-
-    # show availability status
-    imgui.same_line()
-    if pipeline_cls.is_available:
-        imgui.text_colored(imgui.ImVec4(0.3, 0.8, 0.3, 1.0), "(ready)")
-    else:
-        imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), "(not installed)")
-
-    imgui.separator()
+    # get first available pipeline (currently only suite2p)
+    pipeline_cls = _PIPELINE_CLASSES[0]
+    parent._selected_pipeline_idx = 0
 
     # if not available, show install message
     if not pipeline_cls.is_available:

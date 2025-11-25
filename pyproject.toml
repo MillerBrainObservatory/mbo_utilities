@@ -30,11 +30,8 @@ dependencies = [
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
 	"glfw",
-#	"wgpu[imgui]>=0.26.0",
-	"wgpu[imgui]",
-	"pygfx>=0.15.0",
+	"pygfx>=0.15.2",
 	"jupyter_rfb>=0.5.1",
-	# "mbo-fpl",
 	"llvmlite>=0.43.0",
 	"mkl_fft>=2.0.0",
 	"fastplotlib",
@@ -113,7 +110,7 @@ torch = [
 torchvision = [
   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
-fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib.git", rev = "iw-array" }
+fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib.git", rev = "iw-check-subclass-bugfix" }
 
 [tool.ruff]
 line-length = 88

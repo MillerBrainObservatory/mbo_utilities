@@ -417,86 +417,35 @@ def draw_section_suite2p(self):
                 pass  # Skip memory estimate if we can't calculate
 
     imgui.spacing()
-    imgui.separator_text("Pipeline")
 
-    imgui.push_item_width(100)
-    current_display_idx = USER_PIPELINES.index(self._current_pipeline)
-    changed, selected_idx = imgui.combo("##Pipeline", current_display_idx, USER_PIPELINES)
-    imgui.pop_item_width()
+    # Green Run button - disabled if no save path
+    has_save_path = bool(self._saveas_outdir)
 
-    if changed:
-        self._current_pipeline = USER_PIPELINES[selected_idx]
-    set_tooltip("Select a processing pipeline to configure.")
+    # Green button color
+    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
+    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0))
+    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.45, 0.1, 1.0))
 
-    # Processing Options (pipeline-specific)
-    imgui.spacing()
-    imgui.separator_text("Suite2p Options")
+    if not has_save_path:
+        imgui.begin_disabled()
 
-    _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
-    set_tooltip("Keep data_raw.bin after processing (uses disk space)")
-
-    _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
-    set_tooltip("Keep data.bin after processing (useful for QC)")
-
-    _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
-    set_tooltip("Force re-registration even if already processed")
-
-    _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
-    set_tooltip("Force ROI detection even if stat.npy exists")
-
-    imgui.spacing()
-    imgui.set_next_item_width(INPUT_WIDTH)
-    _, self.s2p.dff_window_size = imgui.input_int(
-        "ΔF/F Window", self.s2p.dff_window_size
-    )
-    set_tooltip("Frames for rolling percentile baseline in ΔF/F (default: 300)")
-
-    imgui.set_next_item_width(INPUT_WIDTH)
-    _, self.s2p.dff_percentile = imgui.input_int(
-        "ΔF/F Percentile", self.s2p.dff_percentile
-    )
-    set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
-
-    _, self.s2p.save_json = imgui.checkbox("Save JSON ops", self.s2p.save_json)
-    set_tooltip("Save ops as JSON in addition to .npy")
-
-    imgui.spacing()
-    # Green Run button, smaller size
-    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.7, 0.2, 1.0))
-    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.8, 0.3, 1.0))
-    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.6, 0.1, 1.0))
     button_clicked = imgui.button("Run Suite2p", imgui.ImVec2(100, 0))
+
+    if not has_save_path:
+        imgui.end_disabled()
+
     imgui.pop_style_color(3)
 
-    if button_clicked:
-        print("Run button clicked")
-        print(f"Save path: {self._saveas_outdir}")
-        print(f"Selected planes: {self._selected_planes}")
-        print(f"Image widget data: {type(self.image_widget.data)}")
+    # Show tooltip on button hover when disabled
+    if not has_save_path and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+        imgui.begin_tooltip()
+        imgui.text("Set a save path first (see 'Save path:' above)")
+        imgui.end_tooltip()
 
-        # Validate save path is set
-        if not self._saveas_outdir:
-            self.logger.warning("Please select a save path before running.")
-            # Trigger flash animation
-            self._s2p_savepath_flash_start = time.time()
-            self._s2p_savepath_flash_count = 0
-            self._s2p_show_savepath_popup = True
-        else:
-            self.logger.info(f"Running Suite2p pipeline on {len(self._selected_planes)} planes...")
-            run_process(self)
-            self.logger.info("Suite2p processing submitted (running in background).")
-
-    # Popup for missing save path
-    if self._s2p_show_savepath_popup:
-        imgui.open_popup("Missing Save Path")
-        self._s2p_show_savepath_popup = False
-
-    if imgui.begin_popup_modal("Missing Save Path")[0]:
-        imgui.text("Please select a save path before running.")
-        imgui.spacing()
-        if imgui.button("OK", imgui.ImVec2(120, 0)):
-            imgui.close_current_popup()
-        imgui.end_popup()
+    if button_clicked and has_save_path:
+        self.logger.info(f"Running Suite2p pipeline on {len(self._selected_planes)} planes...")
+        run_process(self)
+        self.logger.info("Suite2p processing submitted (running in background).")
 
     if self._install_error:
         imgui.same_line()
@@ -525,7 +474,36 @@ def draw_section_suite2p(self):
                 except Exception as e:
                     self.logger.log("error", f"Installation failed: {e}")
 
-    if compact_header("Main Settings", default_open=True):
+    if compact_header("LBM-Suite2p Options"):
+        _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
+        set_tooltip("Keep data_raw.bin after processing (uses disk space)")
+
+        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
+        set_tooltip("Keep data.bin after processing (useful for QC)")
+
+        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
+        set_tooltip("Force re-registration even if already processed")
+
+        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
+        set_tooltip("Force ROI detection even if stat.npy exists")
+
+        imgui.spacing()
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_window_size = imgui.input_int(
+            "ΔF/F Window", self.s2p.dff_window_size
+        )
+        set_tooltip("Frames for rolling percentile baseline in ΔF/F (default: 300)")
+
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_percentile = imgui.input_int(
+            "ΔF/F Percentile", self.s2p.dff_percentile
+        )
+        set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
+
+        _, self.s2p.save_json = imgui.checkbox("Save JSON ops", self.s2p.save_json)
+        set_tooltip("Save ops as JSON in addition to .npy")
+
+    if compact_header("Main Settings"):
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.functional_chan = imgui.input_int(
             "Functional Channel", self.s2p.functional_chan
@@ -537,7 +515,7 @@ def draw_section_suite2p(self):
             "Sensor decay timescale: GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
         )
 
-    if compact_header("Registration Settings", default_open=True):
+    if compact_header("Registration Settings"):
         # Main registration toggle
         _, self.s2p.do_registration = imgui.checkbox(
             "Enable Registration", self.s2p.do_registration
@@ -706,7 +684,7 @@ def draw_section_suite2p(self):
 
         imgui.end_disabled()  # End registration disabled block
 
-    if compact_header("ROI Detection Settings", default_open=True):
+    if compact_header("ROI Detection Settings"):
         _, self.s2p.roidetect = imgui.checkbox(
             "Enable ROI Detection", self.s2p.roidetect
         )

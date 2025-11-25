@@ -50,11 +50,11 @@ class PipelineWidget(ABC):
         imgui.text("Mode:")
         imgui.same_line()
 
-        # toggle button styled as switch
+        # toggle button styled as switch - green for process mode, blue for results
         if self._show_results:
-            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.6, 0.2, 1.0))
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.4, 0.6, 1.0))
         else:
-            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.3, 0.3, 0.3, 1.0))
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
 
         if imgui.button("Process" if not self._show_results else "Results"):
             self.toggle_mode()
