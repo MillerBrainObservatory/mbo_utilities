@@ -16,14 +16,12 @@ if TYPE_CHECKING:
     from mbo_utilities.graphics.imgui import PreviewDataWidget
 
 
-def has_scanimage_metadata(parent: "PreviewDataWidget") -> bool:
-    """check if any data array has scanimage metadata."""
+def has_raster_scan_support(parent: "PreviewDataWidget") -> bool:
+    """check if any data array supports raster scan phase correction."""
     try:
         for arr in parent.image_widget.data:
-            if hasattr(arr, 'metadata'):
-                md = arr.metadata
-                if md and md.get('si'):
-                    return True
+            if hasattr(arr, 'fix_phase') and hasattr(arr, 'use_fft'):
+                return True
     except Exception:
         pass
     return False
@@ -37,8 +35,8 @@ class RasterScanWidget(Widget):
 
     @classmethod
     def is_supported(cls, parent: "PreviewDataWidget") -> bool:
-        """show only if data has scanimage metadata."""
-        return has_scanimage_metadata(parent)
+        """show only if data array supports phase correction (has fix_phase and use_fft)."""
+        return has_raster_scan_support(parent)
 
     def draw(self) -> None:
         """draw raster scan phase correction controls."""

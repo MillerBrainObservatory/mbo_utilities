@@ -293,7 +293,6 @@ def _create_image_widget(data_array, widget: bool = True):
     import numpy as np
     import fastplotlib as fpl
     from mbo_utilities.array_types import iter_rois
-    from mbo_utilities.graphics._processors import RasterScanProcessor
 
     try:
         from rendercanvas.pyside6 import RenderCanvas
@@ -331,19 +330,15 @@ def _create_image_widget(data_array, widget: bool = True):
     if hasattr(data_array, "rois"):
         arrays = []
         names = []
-        processors = []
         for r in iter_rois(data_array):
             arr = copy.copy(data_array)
             arr.fix_phase = False
             arr.roi = r
             arrays.append(arr)
             names.append(f"ROI {r}" if r else "Full Image")
-            processors.append(RasterScanProcessor)
-
 
         iw = fpl.ImageWidget(
             data=arrays,
-            processors=processors,
             names=names,
             slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
@@ -353,11 +348,9 @@ def _create_image_widget(data_array, widget: bool = True):
             graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
     else:
-        # Always use RasterScanProcessor (extends BaseImageProcessor)
-        # Phase correction will just be disabled for non-raster data
+        # Use default NDImageProcessor - MboRawArray handles phase correction internally
         iw = fpl.ImageWidget(
             data=data_array,
-            processors=RasterScanProcessor,
             slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
             window_sizes=window_sizes,

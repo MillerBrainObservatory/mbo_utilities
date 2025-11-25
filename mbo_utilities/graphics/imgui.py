@@ -52,7 +52,6 @@ from mbo_utilities.graphics.progress_bar import (
     draw_register_z_progress,
 )
 from mbo_utilities.graphics.widgets import get_supported_widgets, draw_all_widgets
-from mbo_utilities.graphics._protocols import supports_raster_scan
 from mbo_utilities.graphics._availability import HAS_SUITE2P, HAS_SUITE3D
 from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler
@@ -759,26 +758,17 @@ class PreviewDataWidget(EdgeWindow):
 
     @property
     def processors(self) -> list:
-        """Access to underlying MboImageProcessor instances."""
+        """Access to underlying NDImageProcessor instances."""
         return self.image_widget._image_processors
 
     @property
     def current_offset(self) -> list[float]:
-        """
-        Get current phase offset from each processor or underlying array.
-
-        For MboRawArray data, the offset is computed by the array itself.
-        For other array types, the processor computes and caches it.
-        """
+        """Get current phase offset from each data array (MboRawArray)."""
         offsets = []
-        for i, proc in enumerate(self.processors):
-            # First check if processor has a cached offset
-            if proc.current_offset != 0.0:
-                offsets.append(proc.current_offset)
-            # For MboRawArray, check the array's offset property
-            elif hasattr(self.image_widget.data[i], 'offset'):
-                arr_offset = self.image_widget.data[i].offset
-                # offset can be a scalar or array
+        for i in range(len(self.image_widget.data)):
+            arr = self.image_widget.data[i]
+            if hasattr(arr, 'offset'):
+                arr_offset = arr.offset
                 if isinstance(arr_offset, np.ndarray):
                     offsets.append(float(arr_offset.mean()) if arr_offset.size > 0 else 0.0)
                 else:
@@ -789,26 +779,30 @@ class PreviewDataWidget(EdgeWindow):
 
     @property
     def has_raster_scan_support(self) -> bool:
-        """Check if any processor supports raster scan phase correction."""
-        if not self.processors:
-            return False
-        return any(supports_raster_scan(proc) for proc in self.processors)
+        """Check if any data array supports raster scan phase correction."""
+        for i in range(len(self.image_widget.data)):
+            arr = self.image_widget.data[i]
+            if hasattr(arr, 'fix_phase'):
+                return True
+        return False
 
     @property
     def fix_phase(self) -> bool:
         """Whether bidirectional phase correction is enabled."""
         if not self.has_raster_scan_support:
             return False
-        return self.processors[0].fix_phase if self.processors else False
+        arr = self.image_widget.data[0]
+        return getattr(arr, 'fix_phase', False)
 
     @fix_phase.setter
     def fix_phase(self, value: bool):
         if not self.has_raster_scan_support:
             return
         self.logger.info(f"Setting fix_phase to {value}.")
-        for proc in self.processors:
-            if supports_raster_scan(proc):
-                proc.fix_phase = value
+        for i in range(len(self.image_widget.data)):
+            arr = self.image_widget.data[i]
+            if hasattr(arr, 'fix_phase'):
+                arr.fix_phase = value
         self._refresh_image_widget()
 
     @property
@@ -816,16 +810,18 @@ class PreviewDataWidget(EdgeWindow):
         """Whether FFT-based phase correlation is used."""
         if not self.has_raster_scan_support:
             return False
-        return self.processors[0].use_fft if self.processors else False
+        arr = self.image_widget.data[0]
+        return getattr(arr, 'use_fft', False)
 
     @use_fft.setter
     def use_fft(self, value: bool):
         if not self.has_raster_scan_support:
             return
         self.logger.info(f"Setting use_fft to {value}.")
-        for proc in self.processors:
-            if supports_raster_scan(proc):
-                proc.use_fft = value
+        for i in range(len(self.image_widget.data)):
+            arr = self.image_widget.data[i]
+            if hasattr(arr, 'use_fft'):
+                arr.use_fft = value
         self._refresh_image_widget()
 
     @property
@@ -833,16 +829,18 @@ class PreviewDataWidget(EdgeWindow):
         """Border pixels to exclude from phase correlation."""
         if not self.has_raster_scan_support:
             return 3
-        return self.processors[0].border if self.processors else 3
+        arr = self.image_widget.data[0]
+        return getattr(arr, 'border', 3)
 
     @border.setter
     def border(self, value: int):
         if not self.has_raster_scan_support:
             return
         self.logger.info(f"Setting border to {value}.")
-        for proc in self.processors:
-            if supports_raster_scan(proc):
-                proc.border = value
+        for i in range(len(self.image_widget.data)):
+            arr = self.image_widget.data[i]
+            if hasattr(arr, 'border'):
+                arr.border = value
         self._refresh_image_widget()
 
     @property
@@ -850,16 +848,18 @@ class PreviewDataWidget(EdgeWindow):
         """Maximum pixel offset for phase correction."""
         if not self.has_raster_scan_support:
             return 3
-        return self.processors[0].max_offset if self.processors else 3
+        arr = self.image_widget.data[0]
+        return getattr(arr, 'max_offset', 3)
 
     @max_offset.setter
     def max_offset(self, value: int):
         if not self.has_raster_scan_support:
             return
         self.logger.info(f"Setting max_offset to {value}.")
-        for proc in self.processors:
-            if supports_raster_scan(proc):
-                proc.max_offset = value
+        for i in range(len(self.image_widget.data)):
+            arr = self.image_widget.data[i]
+            if hasattr(arr, 'max_offset'):
+                arr.max_offset = value
         self._refresh_image_widget()
 
     @property
@@ -1041,15 +1041,18 @@ class PreviewDataWidget(EdgeWindow):
         """Upsampling factor for subpixel phase correlation."""
         if not self.has_raster_scan_support:
             return 5
-        return self.processors[0].phase_upsample if self.processors else 5
+        arr = self.image_widget.data[0]
+        return getattr(arr, 'upsample', 5)
 
     @phase_upsample.setter
     def phase_upsample(self, value: int):
         if not self.has_raster_scan_support:
             return
         self.logger.info(f"Setting phase_upsample to {value}.")
-        for proc in self.processors:
-            proc.phase_upsample = value
+        for i in range(len(self.image_widget.data)):
+            arr = self.image_widget.data[i]
+            if hasattr(arr, 'upsample'):
+                arr.upsample = value
         self._refresh_image_widget()
 
     def update(self):
