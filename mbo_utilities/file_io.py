@@ -58,7 +58,14 @@ def write_ops(metadata, raw_filename, **kwargs):
     chan = 2 if structural or "data_chan2.bin" in str(filename) else 1
     logger.debug(f"Detected channel {chan}")
 
-    root = filename.parent if filename.is_file() else filename
+    # Always use parent directory - raw_filename should be a file path like data_raw.bin
+    # The old check `filename.is_file()` failed when file was just created but not yet flushed
+    if filename.suffix:
+        # Has a file extension, use parent as root
+        root = filename.parent
+    else:
+        # No extension, assume it's a directory path (backward compatibility)
+        root = filename if filename.is_dir() else filename.parent
     ops_path = root / "ops.npy"
     logger.info(f"Writing ops file to {ops_path}")
 

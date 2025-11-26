@@ -12,43 +12,124 @@ from typing import Any, Optional, Union
 
 import click
 
-def _download_notebook_file(output_path: Optional[Union[str, Path]] = None):
-    """Download the user guide notebook to a local file.
+def _download_notebook_file(
+    output_path: Optional[Union[str, Path]] = None,
+    notebook_url: Optional[str] = None,
+):
+    """Download a Jupyter notebook from a URL to a local file.
 
     Parameters
     ----------
     output_path : str, Path, optional
         Directory or file path to save the notebook. If None or '.', saves to current directory.
-        If a directory, saves as 'user_guide.ipynb' in that directory.
+        If a directory, saves using the notebook's filename from the URL.
         If a file path, uses that exact filename.
+    notebook_url : str, optional
+        URL to the notebook file. If None, downloads the default user guide notebook.
+        Supports GitHub blob URLs (automatically converted to raw URLs).
+
+    Examples
+    --------
+    # Download default user guide
+    _download_notebook_file()
+
+    # Download specific notebook from GitHub
+    _download_notebook_file(
+        output_path="./notebooks",
+        notebook_url="https://github.com/org/repo/blob/main/demos/example.ipynb"
+    )
     """
     import urllib.request
 
-    url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
+    default_url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
+    url = notebook_url or default_url
+
+    # Convert GitHub blob URLs to raw URLs
+    if "github.com" in url and "/blob/" in url:
+        url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+
+    # Extract filename from URL
+    url_filename = url.split("/")[-1]
+    if not url_filename.endswith(".ipynb"):
+        url_filename = "notebook.ipynb"
 
     # Determine output file path
     if output_path is None or output_path == ".":
-        output_file = Path.cwd() / "user_guide.ipynb"
+        output_file = Path.cwd() / url_filename
     else:
         output_file = Path(output_path)
         if output_file.is_dir():
-            output_file = output_file / "user_guide.ipynb"
+            output_file = output_file / url_filename
+        elif output_file.suffix != ".ipynb":
+            # If it's a directory that doesn't exist yet, create it and use url filename
+            output_file.mkdir(parents=True, exist_ok=True)
+            output_file = output_file / url_filename
+
+    # Ensure parent directory exists
+    output_file.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        click.echo(f"Downloading user guide notebook from:\n  {url}")
+        click.echo(f"Downloading notebook from:\n  {url}")
         click.echo(f"Saving to:\n  {output_file.resolve()}")
 
         # Download the file
         urllib.request.urlretrieve(url, output_file)
 
-        click.secho(f"\n✓ Successfully downloaded notebook to: {output_file.resolve()}", fg="green")
+        click.secho(f"\nSuccessfully downloaded notebook to: {output_file.resolve()}", fg="green")
         click.echo("\nTo use the notebook:")
         click.echo(f"  jupyter lab {output_file.resolve()}")
 
     except Exception as e:
-        click.secho(f"\n✗ Failed to download notebook: {e}", fg="red")
+        click.secho(f"\nFailed to download notebook: {e}", fg="red")
         click.echo(f"\nYou can manually download from: {url}")
         sys.exit(1)
+
+    return output_file
+
+
+def download_notebook(
+    output_path: Optional[Union[str, Path]] = None,
+    notebook_url: Optional[str] = None,
+) -> Path:
+    """Download a Jupyter notebook from a URL to a local file.
+
+    This is the public API for downloading notebooks programmatically.
+
+    Parameters
+    ----------
+    output_path : str, Path, optional
+        Directory or file path to save the notebook. If None, saves to current directory.
+        If a directory, saves using the notebook's filename from the URL.
+        If a file path, uses that exact filename.
+    notebook_url : str, optional
+        URL to the notebook file. If None, downloads the default user guide notebook.
+        Supports GitHub blob URLs (automatically converted to raw URLs).
+
+    Returns
+    -------
+    Path
+        Path to the downloaded notebook file.
+
+    Examples
+    --------
+    >>> from mbo_utilities.graphics import download_notebook
+
+    # Download default user guide to current directory
+    >>> download_notebook()
+
+    # Download specific notebook from GitHub
+    >>> download_notebook(
+    ...     output_path="./notebooks",
+    ...     notebook_url="https://github.com/org/repo/blob/main/demos/example.ipynb"
+    ... )
+
+    # Download to specific filename
+    >>> download_notebook(
+    ...     output_path="./my_notebook.ipynb",
+    ...     notebook_url="https://github.com/org/repo/blob/main/nb.ipynb"
+    ... )
+    """
+    return _download_notebook_file(output_path=output_path, notebook_url=notebook_url)
 
 
 def _check_installation():
@@ -516,7 +597,13 @@ def run_gui(
 @click.option(
     "--download-notebook",
     is_flag=True,
-    help="Download the user guide Jupyter notebook and exit.",
+    help="Download a Jupyter notebook and exit. Uses --notebook-url if provided, else downloads user guide.",
+)
+@click.option(
+    "--notebook-url",
+    type=str,
+    default=None,
+    help="URL of notebook to download. Supports GitHub blob URLs (auto-converted to raw). Use with --download-notebook.",
 )
 @click.option(
     "--check-install",
@@ -524,19 +611,19 @@ def run_gui(
     help="Verify the installation of mbo_utilities and dependencies.",
 )
 @click.argument("data_in", required=False)
-def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, download_notebook=False, check_install=False):
+def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, download_notebook=False, notebook_url=None, check_install=False):
     """CLI entry point for mbo-gui command."""
     # Handle installation check first (light operation)
     if check_install:
         _check_installation()
         if download_notebook:
             click.echo("\n")
-            _download_notebook_file(data_in)
+            _download_notebook_file(output_path=data_in, notebook_url=notebook_url)
         return
 
     # Handle download notebook option (light operation)
     if download_notebook:
-        _download_notebook_file(data_in)
+        _download_notebook_file(output_path=data_in, notebook_url=notebook_url)
         return
 
     # Run the GUI (heavy imports happen here)

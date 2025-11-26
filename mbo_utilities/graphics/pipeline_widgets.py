@@ -1101,11 +1101,12 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     # Only update with md dict, not the full lazy_mdata which may have 4D shape
     defaults.update(md)
 
-    # Remove any shape-related keys that could confuse the pipeline
-    # imwrite will set the correct shape based on what it actually writes
-    # CRITICAL: Remove these AFTER updating with md, but BEFORE passing to imwrite
-    for key in ['shape', 'num_frames', 'nframes', 'n_frames']:
-        defaults.pop(key, None)
+    # Set the correct 3D shape for the output binary (T, Ly, Lx)
+    # This is needed by write_ops to create ops.npy
+    # CRITICAL: Override any 4D shape from the source array with the correct 3D shape
+    defaults['shape'] = (self.s2p.target_frames, Ly, Lx)
+    defaults['num_frames'] = self.s2p.target_frames
+    defaults['nframes'] = self.s2p.target_frames
 
     # Also clean lazy_mdata to prevent shape contamination from arr.metadata
     lazy_mdata.pop('shape', None)
@@ -1129,11 +1130,11 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     from mbo_utilities.lazy_array import imwrite
     imwrite(
         arr,  # Keep it lazy
-        base_out, #plane_dir,
+        base_out,  # _imwrite creates plane_dir structure: base_out/plane01_stitched/data_raw.bin
         ext=".bin",
         overwrite=True,
         register_z=False,
-        planes= plane,
+        planes=plane,
         output_name="data_raw.bin",
         roi=roi,
         metadata=defaults,

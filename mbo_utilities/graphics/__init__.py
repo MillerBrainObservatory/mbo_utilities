@@ -14,6 +14,7 @@ import importlib.util
 __all__ = [
     "PreviewDataWidget",
     "run_gui",
+    "download_notebook",
     "BaseImageProcessor",
     "RasterScanProcessor",
     "MboImageProcessor",  # Alias for backwards compatibility
@@ -60,6 +61,9 @@ def __getattr__(name):
     if name == "run_gui":
         from .run_gui import run_gui
         return run_gui
+    elif name == "download_notebook":
+        from .run_gui import download_notebook
+        return download_notebook
     elif name == "PreviewDataWidget":
         _configure_wgpu_backend()  # Configure before GUI imports
         from .imgui import PreviewDataWidget

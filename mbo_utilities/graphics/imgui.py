@@ -497,7 +497,7 @@ def draw_saveas_popup(parent):
         if not parent._selected_planes:
             # Get current z index from image widget
             names = parent.image_widget._slider_dim_names or ()
-            current_z = parent.image_widget.indices.get("z", 0) if "z" in names else 0
+            current_z = parent.image_widget.indices["z"] if "z" in names else 0
             parent._selected_planes = {current_z}
 
         if imgui.button("All"):
@@ -508,7 +508,7 @@ def draw_saveas_popup(parent):
         imgui.same_line()
         if imgui.button("Current"):
             names = parent.image_widget._slider_dim_names or ()
-            current_z = parent.image_widget.indices.get("z", 0) if "z" in names else 0
+            current_z = parent.image_widget.indices["z"] if "z" in names else 0
             parent._selected_planes = {current_z}
 
         imgui.columns(2, borders=False)
@@ -840,6 +840,52 @@ class PreviewDataWidget(EdgeWindow):
                 # Fallback: reassign the index to trigger update
                 self.image_widget.indices["t"] = current_t
 
+    def _set_processor_attr_fast(self, attr: str, value):
+        """
+        Set processor attribute without expensive histogram recomputation.
+
+        Uses the proper fastplotlib ImageWidget API but temporarily disables
+        histogram computation to avoid expensive full-array reads on lazy arrays.
+
+        Parameters
+        ----------
+        attr : str
+            Attribute name to set (window_funcs, window_sizes, spatial_func)
+        value
+            Value to set. Applied to all processors via ImageWidget API.
+        """
+        # Save original compute_histogram states and disable on all processors
+        original_states = []
+        for proc in self.processors:
+            original_states.append(proc._compute_histogram)
+            proc._compute_histogram = False
+
+        try:
+            # Use proper ImageWidget API - this handles validation and index refresh
+            # The histogram recomputation is skipped because _compute_histogram is False
+            if attr == "window_funcs":
+                self.image_widget.window_funcs = value
+            elif attr == "window_sizes":
+                # ImageWidget expects a list with one entry per processor
+                if isinstance(value, (tuple, list)) and not isinstance(value[0], (tuple, list, type(None))):
+                    # Single tuple like (5, None) - wrap for all processors
+                    value = [value] * len(self.processors)
+                self.image_widget.window_sizes = value
+            elif attr == "spatial_func":
+                self.image_widget.spatial_func = value
+            else:
+                # Fallback for other attributes
+                for proc in self.processors:
+                    setattr(proc, attr, value)
+                self._refresh_image_widget()
+        finally:
+            # Restore original compute_histogram states
+            for proc, orig in zip(self.processors, original_states):
+                proc._compute_histogram = orig
+
+        # Reset vmin/vmax from current frame data (fast!)
+        self.image_widget.reset_vmin_vmax_frame()
+
     def _refresh_widgets(self):
         """
         refresh widgets based on current data capabilities.
@@ -1002,8 +1048,9 @@ class PreviewDataWidget(EdgeWindow):
         else:
             spatial_func = None
 
-        # Just set spatial_func - ImageWidget handles the update
-        self.image_widget.spatial_func = spatial_func
+        # Set directly on processors with histogram computation disabled
+        # to avoid expensive full-array histogram recomputation
+        self._set_processor_attr_fast("spatial_func", spatial_func)
 
     @property
     def proj(self) -> str:
@@ -1063,8 +1110,9 @@ class PreviewDataWidget(EdgeWindow):
         else:
             window_funcs = (proj_func,) + (None,) * (n_slider_dims - 1)
 
-        # Just set window_funcs - ImageWidget handles the update
-        self.image_widget.window_funcs = window_funcs
+        # Set directly on processors with histogram computation disabled
+        # to avoid expensive full-array histogram recomputation
+        self._set_processor_attr_fast("window_funcs", window_funcs)
 
     @property
     def window_size(self) -> int:
@@ -1098,12 +1146,9 @@ class PreviewDataWidget(EdgeWindow):
             # More dimensions - apply to first, None for rest
             per_processor_sizes = (value,) + (None,) * (n_slider_dims - 1)
 
-        # Create list with same window_sizes for each processor
-        window_sizes = [per_processor_sizes] * len(self.processors)
-
-        # Set via ImageWidget API (applies to all graphics)
-        self.image_widget.window_sizes = window_sizes
-        self._refresh_image_widget()
+        # Set directly on processors with histogram computation disabled
+        # to avoid expensive full-array histogram recomputation
+        self._set_processor_attr_fast("window_sizes", per_processor_sizes)
 
     @property
     def phase_upsample(self) -> int:
