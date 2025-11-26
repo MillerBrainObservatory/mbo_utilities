@@ -338,7 +338,7 @@ class Suite2pArray:
         md["num_frames"] = self.nframes
 
         if ext_clean == "bin":
-            fname = kwargs.get("output_name", "data_raw.bin")
+            fname = kwargs.get("output_name") or "data_raw.bin"
             target = outpath / fname
         else:
             fname = f"plane01.{ext_clean}"
@@ -562,7 +562,7 @@ class H5Array:
                 if ext_clean == "bin":
                     plane_dir = outpath / f"plane{plane_idx + 1:02d}"
                     plane_dir.mkdir(parents=True, exist_ok=True)
-                    target = plane_dir / kwargs.get("output_name", "data_raw.bin")
+                    target = plane_dir / (kwargs.get("output_name") or "data_raw.bin")
                 else:
                     target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
 
@@ -584,7 +584,7 @@ class H5Array:
         else:
             # Single plane data
             if ext_clean == "bin":
-                target = outpath / kwargs.get("output_name", "data_raw.bin")
+                target = outpath / (kwargs.get("output_name") or "data_raw.bin")
             else:
                 target = outpath / f"plane01.{ext_clean}"
 
@@ -770,7 +770,7 @@ class MBOTiffArray:
                 if ext_clean == "bin":
                     plane_dir = outpath / f"plane{plane_idx + 1:02d}"
                     plane_dir.mkdir(parents=True, exist_ok=True)
-                    target = plane_dir / kwargs.get("output_name", "data_raw.bin")
+                    target = plane_dir / (kwargs.get("output_name") or "data_raw.bin")
                 else:
                     target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
 
@@ -792,7 +792,7 @@ class MBOTiffArray:
         else:
             # Single plane data
             if ext_clean == "bin":
-                target = outpath / kwargs.get("output_name", "data_raw.bin")
+                target = outpath / (kwargs.get("output_name") or "data_raw.bin")
             else:
                 target = outpath / f"plane01.{ext_clean}"
 
@@ -974,7 +974,7 @@ class TiffArray:
                 if ext_clean == "bin":
                     plane_dir = outpath / f"plane{plane_idx + 1:02d}"
                     plane_dir.mkdir(parents=True, exist_ok=True)
-                    target = plane_dir / kwargs.get("output_name", "data_raw.bin")
+                    target = plane_dir / (kwargs.get("output_name") or "data_raw.bin")
                 else:
                     target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
 
@@ -996,7 +996,7 @@ class TiffArray:
         else:
             # Single plane data
             if ext_clean == "bin":
-                target = outpath / kwargs.get("output_name", "data_raw.bin")
+                target = outpath / (kwargs.get("output_name") or "data_raw.bin")
             else:
                 target = outpath / f"plane01.{ext_clean}"
 
@@ -1724,7 +1724,7 @@ class NumpyArray:
         md["num_frames"] = nframes
 
         if ext_clean == "bin":
-            fname = kwargs.get("output_name", "data_raw.bin")
+            fname = kwargs.get("output_name") or "data_raw.bin"
             target = outpath / fname
         else:
             fname = f"plane01.{ext_clean}"
@@ -1744,7 +1744,7 @@ class NumpyArray:
                 if ext_clean == "bin":
                     plane_dir = outpath / f"plane{plane_idx + 1:02d}"
                     plane_dir.mkdir(parents=True, exist_ok=True)
-                    target = plane_dir / kwargs.get("output_name", "data_raw.bin")
+                    target = plane_dir / (kwargs.get("output_name") or "data_raw.bin")
                 else:
                     target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
 
@@ -1852,7 +1852,7 @@ class NWBArray:
         md["num_frames"] = nframes
 
         if ext_clean == "bin":
-            fname = kwargs.get("output_name", "data_raw.bin")
+            fname = kwargs.get("output_name") or "data_raw.bin"
             target = outpath / fname
         else:
             fname = f"plane01.{ext_clean}"
@@ -1872,7 +1872,7 @@ class NWBArray:
                 if ext_clean == "bin":
                     plane_dir = outpath / f"plane{plane_idx + 1:02d}"
                     plane_dir.mkdir(parents=True, exist_ok=True)
-                    target = plane_dir / kwargs.get("output_name", "data_raw.bin")
+                    target = plane_dir / (kwargs.get("output_name") or "data_raw.bin")
                 else:
                     target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
 

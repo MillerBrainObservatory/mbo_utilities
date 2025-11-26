@@ -364,9 +364,14 @@ def imwrite(
         file_metadata["num_frames"] = int(num_frames)
         file_metadata["nframes"] = int(num_frames)
 
-    # Only assign back if object supports metadata
+    # Only assign back if object supports writable metadata
+    # Some arrays (H5Array, ZarrArray) have read-only metadata properties
     if hasattr(lazy_array, "metadata"):
-        lazy_array.metadata = file_metadata
+        try:
+            lazy_array.metadata = file_metadata
+        except AttributeError:
+            # Read-only metadata property, skip assignment
+            pass
 
     s3d_job_dir = None
     if register_z:
@@ -443,13 +448,19 @@ def imwrite(
 
         # Update lazy_array metadata if it has the attribute
         if hasattr(lazy_array, "metadata"):
-            lazy_array.metadata = file_metadata
+            try:
+                lazy_array.metadata = file_metadata
+            except AttributeError:
+                pass
     else:
         # Registration not requested
         file_metadata["apply_shift"] = False
         # Update lazy_array metadata if it has the attribute
         if hasattr(lazy_array, "metadata"):
-            lazy_array.metadata = file_metadata
+            try:
+                lazy_array.metadata = file_metadata
+            except AttributeError:
+                pass
 
     if hasattr(lazy_array, "_imwrite"):
         # Pass num_frames explicitly if set
