@@ -113,7 +113,10 @@ class FileDialog:
 
         win_w = imgui.get_window_width()
 
-        with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0)):
+        # disable scrollbars - content is fixed size
+        child_flags = imgui.ChildFlags_.none
+        window_flags = imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse
+        with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0), child_flags=child_flags, window_flags=window_flags):
             imgui.push_id("pfd")
 
             # header
@@ -130,15 +133,15 @@ class FileDialog:
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
             imgui.separator()
-            imgui.dummy(hello_imgui.em_to_vec2(0, 1.0))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.8))
 
             # description
-            desc = "Preview raw ScanImage TIFFs, 3D/4D TIFF/Zarr stacks, and Suite2p outputs."
+            desc = "Preview ScanImage, TIFF, Zarr, and Suite2p datasets"
             desc_sz = imgui.calc_text_size(desc)
             imgui.set_cursor_pos_x((win_w - desc_sz.x) * 0.5)
             imgui.text_colored(COL_TEXT_DIM, desc)
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 2.0))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 1.8))
 
             # action buttons
             btn_w = hello_imgui.em_size(20)
@@ -157,9 +160,9 @@ class FileDialog:
                     pfd.opt.multiselect
                 )
             pop_button_style()
-            set_tooltip("Open one or multiple supported files")
+            set_tooltip("Select one or more image files")
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.8))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.6))
 
             # select folder
             imgui.set_cursor_pos_x(btn_x)
@@ -167,9 +170,9 @@ class FileDialog:
             if imgui.button("Select Folder", imgui.ImVec2(btn_w, btn_h)):
                 self._select_folder = pfd.select_folder("Select folder")
             pop_button_style()
-            set_tooltip("Select a folder containing image data")
+            set_tooltip("Select folder with image data")
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 2.5))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 2.0))
 
             # options section
             opts_w = hello_imgui.em_size(28)
@@ -178,7 +181,9 @@ class FileDialog:
 
             imgui.push_style_color(imgui.Col_.child_bg, COL_BG_CARD)
             imgui.push_style_var(imgui.StyleVar_.child_rounding, 8.0)
-            with imgui_ctx.begin_child("##options", size=imgui.ImVec2(opts_w, hello_imgui.em_size(9)), child_flags=imgui.ChildFlags_.borders):
+            # auto-resize options section, no scrollbars
+            opts_child_flags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.borders
+            with imgui_ctx.begin_child("##options", size=imgui.ImVec2(opts_w, 0), child_flags=opts_child_flags):
                 imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
                 imgui.text_colored(COL_TEXT_DIM, "  Options")
                 imgui.separator()
@@ -186,23 +191,34 @@ class FileDialog:
 
                 imgui.indent(hello_imgui.em_size(0.8))
 
-                _, self._widget_enabled = imgui.checkbox("Enable data preview widget", self._widget_enabled)
-                set_tooltip("Enable or disable the interactive visualization widget")
+                _, self._widget_enabled = imgui.checkbox("Enable preview widget", self._widget_enabled)
+                set_tooltip("Toggle interactive visualization")
 
-                _, self.split_rois = imgui.checkbox("Separate ScanImage mROIs", self.split_rois)
-                set_tooltip("Display each ScanImage mROI separately (raw TIFFs only)")
+                _, self.split_rois = imgui.checkbox("Separate multi-ROIs", self.split_rois)
+                set_tooltip("Display each ScanImage ROI separately")
 
-                _, self.metadata_only = imgui.checkbox("Metadata preview only", self.metadata_only)
-                set_tooltip("Load only metadata for selected files")
+                _, self.metadata_only = imgui.checkbox("Metadata only", self.metadata_only)
+                set_tooltip("Load metadata without full data")
 
                 imgui.unindent(hello_imgui.em_size(0.8))
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
 
             imgui.pop_style_var()
             imgui.pop_style_color()
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 2.0))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
 
-            # links
+            # documentation links
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.8))
+
+            link_label = "Documentation"
+            link_label_sz = imgui.calc_text_size(link_label)
+            imgui.set_cursor_pos_x((win_w - link_label_sz.x) * 0.5)
+            imgui.text_colored(COL_TEXT_DIM, link_label)
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.5))
+
             links_w = hello_imgui.em_size(24)
             links_x = (win_w - links_w) * 0.5
             imgui.set_cursor_pos_x(links_x)
@@ -214,14 +230,17 @@ class FileDialog:
             if imgui.button("Docs", imgui.ImVec2(link_btn_w, link_btn_h)):
                 import webbrowser
                 webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/")
+            set_tooltip("Full documentation")
             imgui.same_line()
             if imgui.button("Assembly", imgui.ImVec2(link_btn_w, link_btn_h)):
                 import webbrowser
                 webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/assembly.html")
+            set_tooltip("TIFF assembly guide")
             imgui.same_line()
             if imgui.button("Examples", imgui.ImVec2(link_btn_w, link_btn_h)):
                 import webbrowser
                 webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/api/usage.html")
+            set_tooltip("Usage examples")
             pop_button_style()
 
             # file/folder completion
@@ -236,8 +255,8 @@ class FileDialog:
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._select_folder = None
 
-            # quit button - use spacing to push to bottom
-            imgui.dummy(hello_imgui.em_to_vec2(0, 2.0))
+            # quit button
+            imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
             qsz = imgui.ImVec2(hello_imgui.em_size(8), hello_imgui.em_size(2.0))
             imgui.set_cursor_pos_x(win_w - qsz.x - hello_imgui.em_size(2))
             push_button_style(primary=False)
@@ -245,7 +264,6 @@ class FileDialog:
                 self.selected_path = None
                 hello_imgui.get_runner_params().app_shall_exit = True
             pop_button_style()
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.5))
 
             imgui.pop_id()
 
