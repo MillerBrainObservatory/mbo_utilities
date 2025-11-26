@@ -260,6 +260,12 @@ def _write_plane(
             # No plane_index: standard slicing
             chunk = data[start:end]
 
+        # Convert dask arrays to numpy - dask can hang during implicit compute in writers
+        if hasattr(chunk, 'compute'):
+            chunk = chunk.compute()
+        elif not isinstance(chunk, np.ndarray):
+            chunk = np.asarray(chunk)
+
         # Ensure chunk is 3D (T, Y, X) - squeeze any remaining singleton dimensions
         # This handles cases where plane_index is None but Z dimension is singleton
         if len(chunk.shape) == 4 and chunk.shape[1] == 1:
@@ -766,5 +772,22 @@ def _try_generic_writers(
             if metadata:
                 for k, v in metadata.items():
                     f.attrs[k] = v if np.isscalar(v) else str(v)
+    elif outpath.suffix.lower() == ".bin":
+        # Suite2p binary format - write data + ops.npy
+        arr = np.asarray(data)
+        if arr.dtype != np.int16:
+            arr = arr.astype(np.int16)
+
+        # Write binary data
+        with open(outpath, "wb") as f:
+            arr.tofile(f)
+
+        # Write ops.npy alongside
+        if metadata:
+            ops = metadata.copy()
+            ops["Ly"] = arr.shape[-2] if arr.ndim >= 2 else 1
+            ops["Lx"] = arr.shape[-1] if arr.ndim >= 1 else 1
+            ops["nframes"] = arr.shape[0] if arr.ndim >= 1 else 1
+            np.save(outpath.parent / "ops.npy", ops)
     else:
         raise ValueError(f"Unsupported file extension: {outpath.suffix}")
