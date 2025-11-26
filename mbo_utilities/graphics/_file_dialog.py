@@ -47,18 +47,18 @@ def setup_imgui():
 # setup_imgui()
 
 
-# colors
-COL_BG_DARK = imgui.ImVec4(0.12, 0.12, 0.14, 1.0)
-COL_BG_CARD = imgui.ImVec4(0.18, 0.18, 0.22, 1.0)
-COL_ACCENT = imgui.ImVec4(0.35, 0.55, 0.85, 1.0)
-COL_ACCENT_HOVER = imgui.ImVec4(0.45, 0.65, 0.95, 1.0)
-COL_ACCENT_ACTIVE = imgui.ImVec4(0.25, 0.45, 0.75, 1.0)
-COL_TEXT = imgui.ImVec4(0.92, 0.92, 0.94, 1.0)
-COL_TEXT_DIM = imgui.ImVec4(0.6, 0.6, 0.65, 1.0)
-COL_BORDER = imgui.ImVec4(0.3, 0.3, 0.35, 0.5)
-COL_SUCCESS = imgui.ImVec4(0.3, 0.7, 0.4, 1.0)
-COL_SECONDARY = imgui.ImVec4(0.4, 0.4, 0.45, 1.0)
-COL_SECONDARY_HOVER = imgui.ImVec4(0.5, 0.5, 0.55, 1.0)
+# colors - professional single-tone dark theme
+COL_BG = imgui.ImVec4(0.14, 0.14, 0.15, 1.0)
+COL_BG_CARD = imgui.ImVec4(0.18, 0.18, 0.19, 1.0)
+COL_ACCENT = imgui.ImVec4(0.26, 0.59, 0.98, 1.0)
+COL_ACCENT_HOVER = imgui.ImVec4(0.36, 0.69, 1.0, 1.0)
+COL_ACCENT_ACTIVE = imgui.ImVec4(0.16, 0.49, 0.88, 1.0)
+COL_TEXT = imgui.ImVec4(0.95, 0.95, 0.96, 1.0)
+COL_TEXT_DIM = imgui.ImVec4(0.65, 0.65, 0.67, 1.0)
+COL_BORDER = imgui.ImVec4(0.28, 0.28, 0.30, 0.6)
+COL_SECONDARY = imgui.ImVec4(0.28, 0.28, 0.30, 1.0)
+COL_SECONDARY_HOVER = imgui.ImVec4(0.35, 0.35, 0.37, 1.0)
+COL_SECONDARY_ACTIVE = imgui.ImVec4(0.22, 0.22, 0.24, 1.0)
 
 
 def push_button_style(primary=True):
@@ -66,17 +66,19 @@ def push_button_style(primary=True):
         imgui.push_style_color(imgui.Col_.button, COL_ACCENT)
         imgui.push_style_color(imgui.Col_.button_hovered, COL_ACCENT_HOVER)
         imgui.push_style_color(imgui.Col_.button_active, COL_ACCENT_ACTIVE)
+        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 1.0, 1.0, 1.0))
     else:
         imgui.push_style_color(imgui.Col_.button, COL_SECONDARY)
         imgui.push_style_color(imgui.Col_.button_hovered, COL_SECONDARY_HOVER)
-        imgui.push_style_color(imgui.Col_.button_active, COL_SECONDARY)
+        imgui.push_style_color(imgui.Col_.button_active, COL_SECONDARY_ACTIVE)
+        imgui.push_style_color(imgui.Col_.text, COL_TEXT)
     imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
     imgui.push_style_var(imgui.StyleVar_.frame_border_size, 0.0)
 
 
 def pop_button_style():
     imgui.pop_style_var(2)
-    imgui.pop_style_color(3)
+    imgui.pop_style_color(4)
 
 
 class FileDialog:
@@ -87,6 +89,7 @@ class FileDialog:
         self._widget_enabled = True
         self.metadata_only = False
         self.split_rois = False
+        self._show_array_docs = False
 
     @property
     def widget_enabled(self):
@@ -97,14 +100,14 @@ class FileDialog:
         self._widget_enabled = value
 
     def render(self):
-        # global style
-        imgui.push_style_color(imgui.Col_.window_bg, COL_BG_DARK)
+        # global style - professional single-tone
+        imgui.push_style_color(imgui.Col_.window_bg, COL_BG)
         imgui.push_style_color(imgui.Col_.child_bg, imgui.ImVec4(0, 0, 0, 0))
         imgui.push_style_color(imgui.Col_.text, COL_TEXT)
         imgui.push_style_color(imgui.Col_.border, COL_BORDER)
-        imgui.push_style_color(imgui.Col_.separator, imgui.ImVec4(0.3, 0.3, 0.35, 0.3))
-        imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.15, 0.15, 0.18, 1.0))
-        imgui.push_style_color(imgui.Col_.frame_bg_hovered, imgui.ImVec4(0.2, 0.2, 0.24, 1.0))
+        imgui.push_style_color(imgui.Col_.separator, imgui.ImVec4(0.28, 0.28, 0.30, 0.5))
+        imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.20, 0.20, 0.21, 1.0))
+        imgui.push_style_color(imgui.Col_.frame_bg_hovered, imgui.ImVec4(0.25, 0.25, 0.26, 1.0))
         imgui.push_style_color(imgui.Col_.check_mark, COL_ACCENT)
         imgui.push_style_var(imgui.StyleVar_.window_padding, hello_imgui.em_to_vec2(2.5, 2.5))
         imgui.push_style_var(imgui.StyleVar_.frame_padding, hello_imgui.em_to_vec2(0.8, 0.5))
@@ -206,18 +209,58 @@ class FileDialog:
             imgui.pop_style_var()
             imgui.pop_style_color()
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 1.0))
+
+            # array types documentation
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.5))
+
+            # collapsible header for documentation
+            arrow = "▼" if self._show_array_docs else "▶"
+            if imgui.selectable(f"{arrow} Array Types Reference", self._show_array_docs)[0]:
+                self._show_array_docs = not self._show_array_docs
+            set_tooltip("Click to show/hide supported array types")
+
+            if self._show_array_docs:
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+                docs_w = hello_imgui.em_size(50)
+                docs_x = (win_w - docs_w) * 0.5
+                imgui.set_cursor_pos_x(docs_x)
+
+                imgui.push_style_color(imgui.Col_.child_bg, COL_BG_CARD)
+                imgui.push_style_var(imgui.StyleVar_.child_rounding, 6.0)
+                docs_child_flags = imgui.ChildFlags_.borders
+                with imgui_ctx.begin_child("##array_docs", size=imgui.ImVec2(docs_w, hello_imgui.em_size(25)), child_flags=docs_child_flags):
+                    imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+                    imgui_md.render_unindented("""
+# Array Types
+
+`imread()` automatically returns the appropriate array type:
+
+| Input | Returns | Use Case |
+|-------|---------|----------|
+| `.tif` (raw ScanImage) | `MboRawArray` | Multi-ROI with phase correction |
+| `.tif` (processed) | `TiffArray` | Standard TIFF files |
+| Directory with `ops.npy` | `Suite2pArray` | Suite2p workflow |
+| `.bin` (direct path) | `BinArray` | Binary file access |
+| `.h5` / `.hdf5` | `H5Array` | HDF5 datasets |
+| `.zarr` | `ZarrArray` | Zarr stores |
+| `.npy` | `NpyArray` | NumPy arrays |
+
+**Key Features:**
+- **MboRawArray**: ROI stitching/splitting, phase correction, lazy loading
+- **Suite2pArray**: Access to both raw and registered data
+- **BinArray**: Direct binary file manipulation
+                    """)
+                    imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+                imgui.pop_style_var()
+                imgui.pop_style_color()
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.8))
 
             # documentation links
             imgui.separator()
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.8))
-
-            link_label = "Documentation"
-            link_label_sz = imgui.calc_text_size(link_label)
-            imgui.set_cursor_pos_x((win_w - link_label_sz.x) * 0.5)
-            imgui.text_colored(COL_TEXT_DIM, link_label)
-
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.5))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.6))
 
             links_w = hello_imgui.em_size(24)
             links_x = (win_w - links_w) * 0.5

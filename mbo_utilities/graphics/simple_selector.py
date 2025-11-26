@@ -139,7 +139,7 @@ def select_files(
 if __name__ == "__main__":
     selected = select_file(
         title="Choose a TIFF file",
-        filters=["TIFF Files", "*.tif *.tiff"],
+        filters=None,
         start_path=Path.home()
     )
 
