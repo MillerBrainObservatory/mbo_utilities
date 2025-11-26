@@ -86,6 +86,23 @@ def _save_as_worker(path, **imwrite_kwargs):
     # Don't pass roi to imread - let it load all ROIs
     # Then imwrite will handle splitting/filtering based on roi parameter
     data = imread(path)
+
+    # Apply scan-phase correction settings to the array before writing
+    # These must be set on the array object for MboRawArray phase correction
+    fix_phase = imwrite_kwargs.pop("fix_phase", False)
+    use_fft = imwrite_kwargs.pop("use_fft", False)
+    phase_upsample = imwrite_kwargs.pop("phase_upsample", 10)
+    border = imwrite_kwargs.pop("border", 10)
+
+    if hasattr(data, "fix_phase"):
+        data.fix_phase = fix_phase
+    if hasattr(data, "use_fft"):
+        data.use_fft = use_fft
+    if hasattr(data, "phase_upsample"):
+        data.phase_upsample = phase_upsample
+    if hasattr(data, "border"):
+        data.border = border
+
     imwrite(data, **imwrite_kwargs)
 
 
@@ -149,10 +166,20 @@ def draw_menu(parent):
                     start_dir = str(Path(fpath).parent) if fpath and Path(fpath).exists() else str(Path.home())
                     parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
                 imgui.separator()
+                # Check if current data supports imwrite
+                can_save = parent.is_mbo_scan
+                if parent.image_widget and parent.image_widget.data:
+                    arr = parent.image_widget.data[0]
+                    can_save = hasattr(arr, "_imwrite")
                 if imgui.menu_item(
-                    "Save as", "Ctrl+S", p_selected=False, enabled=parent.is_mbo_scan
+                    "Save as", "Ctrl+S", p_selected=False, enabled=can_save
                 )[0]:
                     parent._saveas_popup_open = True
+                if not can_save and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                    imgui.begin_tooltip()
+                    arr_type = type(parent.image_widget.data[0]).__name__ if parent.image_widget and parent.image_widget.data else "Unknown"
+                    imgui.text(f"{arr_type} does not support saving.")
+                    imgui.end_tooltip()
                 imgui.end_menu()
             if imgui.begin_menu("Docs", True):
                 if imgui.menu_item(
@@ -380,6 +407,76 @@ def draw_saveas_popup(parent):
             v_max=1024,
         )
 
+        # Format-specific options
+        if parent._ext in (".zarr",):
+            imgui.spacing()
+            imgui.separator()
+            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Zarr Options")
+            imgui.dummy(imgui.ImVec2(0, 5))
+
+            _, parent._zarr_sharded = imgui.checkbox("Sharded", parent._zarr_sharded)
+            set_tooltip(
+                "Use sharding to group multiple chunks into single files (100 frames/shard). "
+                "Improves read/write performance for large datasets by reducing filesystem overhead.",
+            )
+
+            _, parent._zarr_ome = imgui.checkbox("OME-Zarr", parent._zarr_ome)
+            set_tooltip(
+                "Write OME-NGFF v0.5 metadata for compatibility with OME-Zarr viewers "
+                "(napari, vizarr, etc). Includes multiscales, axes, and coordinate transforms.",
+            )
+
+            imgui.text("Compression Level")
+            set_tooltip(
+                "GZip compression level (0-9). Higher = smaller files, slower write. "
+                "Level 1 is fast with decent compression. Level 0 disables compression.",
+            )
+            imgui.set_next_item_width(hello_imgui.em_size(10))
+            _, parent._zarr_compression_level = imgui.slider_int(
+                "##zarr_level", parent._zarr_compression_level, 0, 9
+            )
+
+        imgui.spacing()
+        imgui.separator()
+
+        # Num frames slider
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Frames")
+        imgui.dummy(imgui.ImVec2(0, 5))
+
+        # Get max frames from data
+        try:
+            first_array = parent.image_widget.data[0]
+            max_frames = first_array.shape[0]
+        except (IndexError, AttributeError):
+            max_frames = 1000
+
+        # Initialize num_frames if not set or if max changed
+        if not hasattr(parent, '_saveas_num_frames') or parent._saveas_num_frames is None:
+            parent._saveas_num_frames = max_frames
+        if not hasattr(parent, '_saveas_last_max_frames'):
+            parent._saveas_last_max_frames = max_frames
+        elif parent._saveas_last_max_frames != max_frames:
+            parent._saveas_last_max_frames = max_frames
+            parent._saveas_num_frames = max_frames
+
+        imgui.set_next_item_width(hello_imgui.em_size(8))
+        changed, new_value = imgui.input_int("##frames_input", parent._saveas_num_frames, step=1, step_fast=100)
+        if changed:
+            parent._saveas_num_frames = max(1, min(new_value, max_frames))
+        imgui.same_line()
+        imgui.text(f"/ {max_frames}")
+        set_tooltip(
+            f"Number of frames to save (1-{max_frames}). "
+            "Useful for testing on subsets before full conversion."
+        )
+
+        imgui.set_next_item_width(hello_imgui.em_size(20))
+        slider_changed, slider_value = imgui.slider_int(
+            "##frames_slider", parent._saveas_num_frames, 1, max_frames
+        )
+        if slider_changed:
+            parent._saveas_num_frames = slider_value
+
         imgui.spacing()
         imgui.separator()
 
@@ -396,11 +493,23 @@ def draw_saveas_popup(parent):
                 f"Could not read number of planes: {e}",
             )
 
+        # Auto-select current z-plane if none selected
+        if not parent._selected_planes:
+            # Get current z index from image widget
+            names = parent.image_widget._slider_dim_names or ()
+            current_z = parent.image_widget.indices.get("z", 0) if "z" in names else 0
+            parent._selected_planes = {current_z}
+
         if imgui.button("All"):
             parent._selected_planes = set(range(num_planes))
         imgui.same_line()
         if imgui.button("None"):
             parent._selected_planes = set()
+        imgui.same_line()
+        if imgui.button("Current"):
+            names = parent.image_widget._slider_dim_names or ()
+            current_z = parent.image_widget.indices.get("z", 0) if "z" in names else 0
+            parent._selected_planes = {current_z}
 
         imgui.columns(2, borders=False)
         for i in range(num_planes):
@@ -429,51 +538,69 @@ def draw_saveas_popup(parent):
                 # Validate that at least one plane is selected
                 if not save_planes:
                     parent.logger.error("No z-planes selected! Please select at least one plane.")
-                    imgui.close_current_popup()
-                    return
-
-                parent._saveas_total = len(save_planes)
-                if parent._saveas_rois:
-                    if (
-                        not parent._saveas_selected_roi
-                        or len(parent._saveas_selected_roi) == set()
-                    ):
-                        # Get mROI count from data array (ScanImage-specific)
-                        try:
-                            mroi_count = parent.image_widget.data[0].num_rois
-                        except Exception:
-                            mroi_count = 1
-                        parent._saveas_selected_roi = set(range(mroi_count))
-                    # Convert 0-indexed UI values to 1-indexed ROI values for MboRawArray
-                    rois = sorted([r + 1 for r in parent._saveas_selected_roi])
                 else:
-                    rois = None
+                    parent._saveas_total = len(save_planes)
+                    if parent._saveas_rois:
+                        if (
+                            not parent._saveas_selected_roi
+                            or len(parent._saveas_selected_roi) == set()
+                        ):
+                            # Get mROI count from data array (ScanImage-specific)
+                            try:
+                                mroi_count = parent.image_widget.data[0].num_rois
+                            except Exception:
+                                mroi_count = 1
+                            parent._saveas_selected_roi = set(range(mroi_count))
+                        # Convert 0-indexed UI values to 1-indexed ROI values for MboRawArray
+                        rois = sorted([r + 1 for r in parent._saveas_selected_roi])
+                    else:
+                        rois = None
 
-                outdir = Path(parent._saveas_outdir).expanduser()
-                if not outdir.exists():
-                    outdir.mkdir(parents=True, exist_ok=True)
+                    outdir = Path(parent._saveas_outdir).expanduser()
+                    if not outdir.exists():
+                        outdir.mkdir(parents=True, exist_ok=True)
 
-                save_kwargs = {
-                    "path": parent.fpath,
-                    "outpath": parent._saveas_outdir,
-                    "planes": save_planes,
-                    "roi": rois,
-                    "overwrite": parent._overwrite,
-                    "debug": parent._debug,
-                    "ext": parent._ext,
-                    "target_chunk_mb": parent._saveas_chunk_mb,
-                    "use_fft": parent.use_fft,
-                    "register_z": parent._register_z,
-                    "progress_callback": lambda frac,
-                    current_plane: parent.gui_progress_callback(frac, current_plane),
-                }
-                parent.logger.info(f"Saving planes {save_planes} with ROIs {rois if rois else 'stitched'}")
-                parent.logger.info(
-                    f"Saving to {parent._saveas_outdir} as {parent._ext}"
-                )
-                threading.Thread(
-                    target=_save_as_worker, kwargs=save_kwargs, daemon=True
-                ).start()
+                    # Get num_frames (None means all frames)
+                    num_frames = getattr(parent, '_saveas_num_frames', None)
+                    try:
+                        max_frames = parent.image_widget.data[0].shape[0]
+                        if num_frames is not None and num_frames >= max_frames:
+                            num_frames = None  # All frames, don't limit
+                    except (IndexError, AttributeError):
+                        pass
+
+                    save_kwargs = {
+                        "path": parent.fpath,
+                        "outpath": parent._saveas_outdir,
+                        "planes": save_planes,
+                        "roi": rois,
+                        "overwrite": parent._overwrite,
+                        "debug": parent._debug,
+                        "ext": parent._ext,
+                        "target_chunk_mb": parent._saveas_chunk_mb,
+                        "num_frames": num_frames,
+                        # scan-phase correction settings
+                        "fix_phase": parent.fix_phase,
+                        "use_fft": parent.use_fft,
+                        "phase_upsample": parent.phase_upsample,
+                        "border": parent.border,
+                        "register_z": parent._register_z,
+                        "progress_callback": lambda frac,
+                        current_plane: parent.gui_progress_callback(frac, current_plane),
+                    }
+                    # Add zarr-specific options if saving to zarr
+                    if parent._ext == ".zarr":
+                        save_kwargs["sharded"] = parent._zarr_sharded
+                        save_kwargs["ome"] = parent._zarr_ome
+                        save_kwargs["level"] = parent._zarr_compression_level
+                    frames_msg = f"{num_frames} frames" if num_frames else "all frames"
+                    parent.logger.info(f"Saving planes {save_planes} ({frames_msg}) with ROIs {rois if rois else 'stitched'}")
+                    parent.logger.info(
+                        f"Saving to {parent._saveas_outdir} as {parent._ext}"
+                    )
+                    threading.Thread(
+                        target=_save_as_worker, kwargs=save_kwargs, daemon=True
+                    ).start()
                 imgui.close_current_popup()
             except Exception as e:
                 parent.logger.info(f"Error saving data: {e}")
@@ -650,6 +777,11 @@ class PreviewDataWidget(EdgeWindow):
 
         self._saveas_chunk_mb = 100
 
+        # zarr-specific options
+        self._zarr_sharded = True
+        self._zarr_ome = True
+        self._zarr_compression_level = 1
+
         self._saveas_popup_open = False
         self._saveas_done = False
         self._saveas_progress = 0.0
@@ -670,9 +802,6 @@ class PreviewDataWidget(EdgeWindow):
         self._folder_dialog = None
         self._load_status_msg = ""
         self._load_status_color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
-
-        # cache raster scan support check (done once on init)
-        # self._has_raster_scan_support = self._check_raster_scan_support()
 
         # initialize widgets based on data capabilities
         self._widgets = get_supported_widgets(self)
@@ -780,17 +909,13 @@ class PreviewDataWidget(EdgeWindow):
                 offsets.append(0.0)
         return offsets
 
-    # @property
-    # def has_raster_scan_support(self) -> bool:
-    #     """Check if any data array supports raster scan phase correction (cached on init)."""
-    #     return self._has_raster_scan_support
-
-    # # def _check_raster_scan_support(self) -> bool:
-    # #     """Check if any data array supports raster scan phase correction."""
-    # #     for arr in self._get_data_arrays():
-    # #         if hasattr(arr, 'fix_phase') and hasattr(arr, 'use_fft'):
-    # #             return True
-    #     return False
+    @property
+    def has_raster_scan_support(self) -> bool:
+        """Check if any data array supports raster scan phase correction."""
+        for arr in self._get_data_arrays():
+            if hasattr(arr, 'fix_phase') and hasattr(arr, 'use_fft'):
+                return True
+        return False
 
     @property
     def fix_phase(self) -> bool:

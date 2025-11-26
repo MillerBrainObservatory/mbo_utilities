@@ -1115,11 +1115,16 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
 
     # CRITICAL: Also clean arr.metadata directly to prevent imwrite from getting
     # the full shape when it does file_metadata = dict(lazy_array.metadata)
+    # Note: Some arrays have read-only metadata, so wrap in try/except
     if hasattr(arr, 'metadata'):
-        arr.metadata.pop('shape', None)
-        arr.metadata.pop('num_frames', None)
-        arr.metadata.pop('nframes', None)
-        arr.metadata.pop('n_frames', None)
+        try:
+            arr.metadata.pop('shape', None)
+            arr.metadata.pop('num_frames', None)
+            arr.metadata.pop('nframes', None)
+            arr.metadata.pop('n_frames', None)
+        except (TypeError, AttributeError):
+            # Read-only metadata, skip cleaning
+            pass
 
     from mbo_utilities.lazy_array import imwrite
     imwrite(
