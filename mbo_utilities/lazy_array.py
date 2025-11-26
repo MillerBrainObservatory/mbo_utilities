@@ -332,10 +332,13 @@ def imwrite(
 
     if roi is not None:
         if not supports_roi(lazy_array):
-            raise ValueError(
-                f"{type(lazy_array)} does not support ROIs, but `roi` was provided."
+            # Don't raise error - just log and ignore ROI for unsupported types
+            logger.debug(
+                f"{type(lazy_array).__name__} does not support ROIs. "
+                f"Ignoring roi={roi}, defaulting to single ROI behavior."
             )
-        lazy_array.roi = roi
+        else:
+            lazy_array.roi = roi
 
     if order is not None:
         if len(order) != len(planes):

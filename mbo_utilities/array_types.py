@@ -311,6 +311,54 @@ class Suite2pArray:
     def close(self):
         self._file._mmap.close()  # type: ignore
 
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
+        progress_callback=None,
+        debug=None,
+        planes=None,
+        **kwargs,
+    ):
+        """Write Suite2pArray to disk in various formats."""
+        outpath = Path(outpath)
+        outpath.mkdir(parents=True, exist_ok=True)
+
+        # Suite2pArray is always 3D (T, Y, X), so planes parameter is ignored
+        # but we still support it for API consistency
+        ext_clean = ext.lower().lstrip(".")
+
+        # Build metadata for output
+        md = dict(self.metadata) if self.metadata else {}
+        md["Ly"] = self.Ly
+        md["Lx"] = self.Lx
+        md["nframes"] = self.nframes
+        md["num_frames"] = self.nframes
+
+        if ext_clean == "bin":
+            fname = kwargs.get("output_name", "data_raw.bin")
+            target = outpath / fname
+        else:
+            fname = f"plane01.{ext_clean}"
+            target = outpath / fname
+
+        _write_plane(
+            self,
+            target,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            metadata=md,
+            progress_callback=progress_callback,
+            debug=debug,
+            dshape=self.shape,
+            plane_index=None,
+            **kwargs,
+        )
+
+        return outpath
+
     def imshow(self, **kwargs):
         arrays = []
         names = []
@@ -473,16 +521,87 @@ class H5Array:
     def metadata(self) -> dict:
         return dict(self._f.attrs)
 
-    def _imwrite(self, outpath, **kwargs):
-        _write_plane(
-            self._d,
-            Path(outpath),
-            overwrite=kwargs.get("overwrite", False),
-            metadata=self.metadata,
-            target_chunk_mb=kwargs.get("target_chunk_mb", 20),
-            progress_callback=kwargs.get("progress_callback", None),
-            debug=kwargs.get("debug", False),
-        )
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
+        progress_callback=None,
+        debug=None,
+        planes=None,
+        **kwargs,
+    ):
+        """Write H5Array to disk in various formats."""
+        outpath = Path(outpath)
+        outpath.mkdir(parents=True, exist_ok=True)
+
+        ext_clean = ext.lower().lstrip(".")
+        md = dict(self.metadata) if self.metadata else {}
+
+        # Determine dimensions
+        nframes = self.shape[0]
+        num_planes = self.shape[1] if self.ndim == 4 else 1
+        Ly, Lx = self.shape[-2], self.shape[-1]
+
+        md["Ly"] = Ly
+        md["Lx"] = Lx
+        md["nframes"] = nframes
+        md["num_frames"] = nframes
+
+        # Handle planes parameter
+        if num_planes > 1:
+            if planes is None:
+                planes = list(range(num_planes))
+            elif isinstance(planes, int):
+                planes = [planes - 1]
+            else:
+                planes = [p - 1 for p in planes]
+
+            for plane_idx in planes:
+                if ext_clean == "bin":
+                    plane_dir = outpath / f"plane{plane_idx + 1:02d}"
+                    plane_dir.mkdir(parents=True, exist_ok=True)
+                    target = plane_dir / kwargs.get("output_name", "data_raw.bin")
+                else:
+                    target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
+
+                plane_md = md.copy()
+                plane_md["plane"] = plane_idx + 1
+
+                _write_plane(
+                    self,
+                    target,
+                    overwrite=overwrite,
+                    target_chunk_mb=target_chunk_mb,
+                    metadata=plane_md,
+                    progress_callback=progress_callback,
+                    debug=debug,
+                    dshape=(nframes, Ly, Lx),
+                    plane_index=plane_idx,
+                    **kwargs,
+                )
+        else:
+            # Single plane data
+            if ext_clean == "bin":
+                target = outpath / kwargs.get("output_name", "data_raw.bin")
+            else:
+                target = outpath / f"plane01.{ext_clean}"
+
+            _write_plane(
+                self,
+                target,
+                overwrite=overwrite,
+                target_chunk_mb=target_chunk_mb,
+                metadata=md,
+                progress_callback=progress_callback,
+                debug=debug,
+                dshape=(nframes, Ly, Lx),
+                plane_index=None,
+                **kwargs,
+            )
+
+        return outpath
 
 
 @dataclass
@@ -618,37 +737,79 @@ class MBOTiffArray:
         ext=".tiff",
         progress_callback=None,
         debug=None,
+        planes=None,
         **kwargs,
     ):
-        from mbo_utilities._writers import _write_plane
-        from mbo_utilities.file_io import get_plane_from_filename
-
-        md = self.metadata.copy()
-        plane = md.get("plane") or get_plane_from_filename(Path(outpath).stem, None)
-        if plane is None:
-            raise ValueError("Cannot determine plane from metadata.")
-
+        """Write MBOTiffArray to disk in various formats."""
         outpath = Path(outpath)
-        ext = ext.lower().lstrip(".")
-        fname = f"plane{plane:03d}.{ext}" if ext != "bin" else "data_raw.bin"
-        target = (
-            outpath.joinpath(fname)
-            if outpath.is_dir()
-            else outpath.parent.joinpath(fname)
-        )
+        outpath.mkdir(parents=True, exist_ok=True)
 
-        _write_plane(
-            self,
-            target,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            metadata=md,
-            progress_callback=progress_callback,
-            debug=debug,
-            dshape=(self.shape[0], self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
-            plane_index=None,
-            **kwargs,
-        )
+        ext_clean = ext.lower().lstrip(".")
+        md = self.metadata.copy()
+
+        # Determine number of planes from shape
+        nframes = self.shape[0]
+        num_planes = self.shape[1] if len(self.shape) == 4 else 1
+        Ly, Lx = self.shape[-2], self.shape[-1]
+
+        md["Ly"] = Ly
+        md["Lx"] = Lx
+        md["nframes"] = nframes
+        md["num_frames"] = nframes
+
+        # Handle planes parameter
+        if num_planes > 1:
+            if planes is None:
+                planes = list(range(num_planes))
+            elif isinstance(planes, int):
+                planes = [planes - 1]
+            else:
+                planes = [p - 1 for p in planes]
+
+            for plane_idx in planes:
+                if ext_clean == "bin":
+                    plane_dir = outpath / f"plane{plane_idx + 1:02d}"
+                    plane_dir.mkdir(parents=True, exist_ok=True)
+                    target = plane_dir / kwargs.get("output_name", "data_raw.bin")
+                else:
+                    target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
+
+                plane_md = md.copy()
+                plane_md["plane"] = plane_idx + 1
+
+                _write_plane(
+                    self,
+                    target,
+                    overwrite=overwrite,
+                    target_chunk_mb=target_chunk_mb,
+                    metadata=plane_md,
+                    progress_callback=progress_callback,
+                    debug=debug,
+                    dshape=(nframes, Ly, Lx),
+                    plane_index=plane_idx,
+                    **kwargs,
+                )
+        else:
+            # Single plane data
+            if ext_clean == "bin":
+                target = outpath / kwargs.get("output_name", "data_raw.bin")
+            else:
+                target = outpath / f"plane01.{ext_clean}"
+
+            _write_plane(
+                self,
+                target,
+                overwrite=overwrite,
+                target_chunk_mb=target_chunk_mb,
+                metadata=md,
+                progress_callback=progress_callback,
+                debug=debug,
+                dshape=(nframes, Ly, Lx),
+                plane_index=None,
+                **kwargs,
+            )
+
+        return outpath
 
 
 @dataclass
@@ -777,22 +938,82 @@ class TiffArray:
         outpath: Path | str,
         overwrite=False,
         target_chunk_mb=50,
+        ext=".tiff",
         progress_callback=None,
         debug=None,
+        planes=None,
+        **kwargs,
     ):
+        """Write TiffArray to disk in various formats."""
         outpath = Path(outpath)
+        outpath.mkdir(parents=True, exist_ok=True)
+
+        ext_clean = ext.lower().lstrip(".")
         md = dict(self.metadata) if isinstance(self.metadata, dict) else {}
-        _write_plane(
-            self,
-            outpath,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            metadata=md,
-            progress_callback=progress_callback,
-            debug=debug,
-            dshape=(self.shape[0], self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
-            plane_index=None,
-        )
+
+        # Determine dimensions
+        nframes = self.shape[0]
+        num_planes = self.shape[1] if len(self.shape) == 4 else 1
+        Ly, Lx = self.shape[-2], self.shape[-1]
+
+        md["Ly"] = Ly
+        md["Lx"] = Lx
+        md["nframes"] = nframes
+        md["num_frames"] = nframes
+
+        # Handle planes parameter
+        if num_planes > 1:
+            if planes is None:
+                planes = list(range(num_planes))
+            elif isinstance(planes, int):
+                planes = [planes - 1]
+            else:
+                planes = [p - 1 for p in planes]
+
+            for plane_idx in planes:
+                if ext_clean == "bin":
+                    plane_dir = outpath / f"plane{plane_idx + 1:02d}"
+                    plane_dir.mkdir(parents=True, exist_ok=True)
+                    target = plane_dir / kwargs.get("output_name", "data_raw.bin")
+                else:
+                    target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
+
+                plane_md = md.copy()
+                plane_md["plane"] = plane_idx + 1
+
+                _write_plane(
+                    self,
+                    target,
+                    overwrite=overwrite,
+                    target_chunk_mb=target_chunk_mb,
+                    metadata=plane_md,
+                    progress_callback=progress_callback,
+                    debug=debug,
+                    dshape=(nframes, Ly, Lx),
+                    plane_index=plane_idx,
+                    **kwargs,
+                )
+        else:
+            # Single plane data
+            if ext_clean == "bin":
+                target = outpath / kwargs.get("output_name", "data_raw.bin")
+            else:
+                target = outpath / f"plane01.{ext_clean}"
+
+            _write_plane(
+                self,
+                target,
+                overwrite=overwrite,
+                target_chunk_mb=target_chunk_mb,
+                metadata=md,
+                progress_callback=progress_callback,
+                debug=debug,
+                dshape=(nframes, Ly, Lx),
+                plane_index=None,
+                **kwargs,
+            )
+
+        return outpath
 
 
 class MboRawArray:
@@ -1462,6 +1683,102 @@ class NumpyArray:
     def __del__(self):
         self.close()
 
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
+        progress_callback=None,
+        debug=None,
+        planes=None,
+        **kwargs,
+    ):
+        """Write NumpyArray to disk in various formats."""
+        outpath = Path(outpath)
+        outpath.mkdir(parents=True, exist_ok=True)
+
+        ext_clean = ext.lower().lstrip(".")
+
+        # Build metadata for output - infer from shape
+        md = dict(self._metadata) if self._metadata else {}
+
+        # Handle different dimensionalities
+        if self.ndim == 2:
+            # Single frame (Y, X)
+            nframes = 1
+            Ly, Lx = self.shape
+        elif self.ndim == 3:
+            # Time series (T, Y, X)
+            nframes, Ly, Lx = self.shape
+        elif self.ndim == 4:
+            # Volumetric (T, Z, Y, X)
+            nframes = self.shape[0]
+            Ly, Lx = self.shape[-2], self.shape[-1]
+        else:
+            raise ValueError(f"Unsupported NumpyArray dimensionality: {self.ndim}")
+
+        md["Ly"] = Ly
+        md["Lx"] = Lx
+        md["nframes"] = nframes
+        md["num_frames"] = nframes
+
+        if ext_clean == "bin":
+            fname = kwargs.get("output_name", "data_raw.bin")
+            target = outpath / fname
+        else:
+            fname = f"plane01.{ext_clean}"
+            target = outpath / fname
+
+        # For 4D data, handle plane iteration
+        if self.ndim == 4:
+            num_planes = self.shape[1]
+            if planes is None:
+                planes = list(range(num_planes))
+            elif isinstance(planes, int):
+                planes = [planes - 1]
+            else:
+                planes = [p - 1 for p in planes]
+
+            for plane_idx in planes:
+                if ext_clean == "bin":
+                    plane_dir = outpath / f"plane{plane_idx + 1:02d}"
+                    plane_dir.mkdir(parents=True, exist_ok=True)
+                    target = plane_dir / kwargs.get("output_name", "data_raw.bin")
+                else:
+                    target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
+
+                plane_md = md.copy()
+                plane_md["plane"] = plane_idx + 1
+
+                _write_plane(
+                    self,
+                    target,
+                    overwrite=overwrite,
+                    target_chunk_mb=target_chunk_mb,
+                    metadata=plane_md,
+                    progress_callback=progress_callback,
+                    debug=debug,
+                    dshape=(nframes, Ly, Lx),
+                    plane_index=plane_idx,
+                    **kwargs,
+                )
+        else:
+            _write_plane(
+                self,
+                target,
+                overwrite=overwrite,
+                target_chunk_mb=target_chunk_mb,
+                metadata=md,
+                progress_callback=progress_callback,
+                debug=debug,
+                dshape=(nframes, Ly, Lx) if self.ndim >= 3 else (1, Ly, Lx),
+                plane_index=None,
+                **kwargs,
+            )
+
+        return outpath
+
 
 class NWBArray:
     def __init__(self, path: Path | str):
@@ -1482,9 +1799,113 @@ class NWBArray:
         self.shape = self.data.shape
         self.dtype = self.data.dtype
         self.ndim = self.data.ndim
+        self._metadata = {}
 
     def __getitem__(self, item):
         return self.data[item]
+
+    @property
+    def metadata(self):
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError("metadata must be a dict")
+        self._metadata = value
+
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
+        progress_callback=None,
+        debug=None,
+        planes=None,
+        **kwargs,
+    ):
+        """Write NWBArray to disk in various formats."""
+        outpath = Path(outpath)
+        outpath.mkdir(parents=True, exist_ok=True)
+
+        ext_clean = ext.lower().lstrip(".")
+
+        # Build metadata for output - infer from shape
+        md = dict(self._metadata) if self._metadata else {}
+
+        # Handle different dimensionalities
+        if self.ndim == 2:
+            nframes = 1
+            Ly, Lx = self.shape
+        elif self.ndim == 3:
+            nframes, Ly, Lx = self.shape
+        elif self.ndim == 4:
+            nframes = self.shape[0]
+            Ly, Lx = self.shape[-2], self.shape[-1]
+        else:
+            raise ValueError(f"Unsupported NWBArray dimensionality: {self.ndim}")
+
+        md["Ly"] = Ly
+        md["Lx"] = Lx
+        md["nframes"] = nframes
+        md["num_frames"] = nframes
+
+        if ext_clean == "bin":
+            fname = kwargs.get("output_name", "data_raw.bin")
+            target = outpath / fname
+        else:
+            fname = f"plane01.{ext_clean}"
+            target = outpath / fname
+
+        # For 4D data, handle plane iteration
+        if self.ndim == 4:
+            num_planes = self.shape[1]
+            if planes is None:
+                planes = list(range(num_planes))
+            elif isinstance(planes, int):
+                planes = [planes - 1]
+            else:
+                planes = [p - 1 for p in planes]
+
+            for plane_idx in planes:
+                if ext_clean == "bin":
+                    plane_dir = outpath / f"plane{plane_idx + 1:02d}"
+                    plane_dir.mkdir(parents=True, exist_ok=True)
+                    target = plane_dir / kwargs.get("output_name", "data_raw.bin")
+                else:
+                    target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
+
+                plane_md = md.copy()
+                plane_md["plane"] = plane_idx + 1
+
+                _write_plane(
+                    self,
+                    target,
+                    overwrite=overwrite,
+                    target_chunk_mb=target_chunk_mb,
+                    metadata=plane_md,
+                    progress_callback=progress_callback,
+                    debug=debug,
+                    dshape=(nframes, Ly, Lx),
+                    plane_index=plane_idx,
+                    **kwargs,
+                )
+        else:
+            _write_plane(
+                self,
+                target,
+                overwrite=overwrite,
+                target_chunk_mb=target_chunk_mb,
+                metadata=md,
+                progress_callback=progress_callback,
+                debug=debug,
+                dshape=(nframes, Ly, Lx) if self.ndim >= 3 else (1, Ly, Lx),
+                plane_index=None,
+                **kwargs,
+            )
+
+        return outpath
 
 
 class ZarrArray:
@@ -2316,9 +2737,9 @@ class BinArray:
 
     def _imwrite(
         self,
-        outpath: Path,
+        outpath: Path | str,
         planes=None,
-        target_chunk_mb: int = 20,
+        target_chunk_mb: int = 50,
         ext: str = ".bin",
         progress_callback=None,
         debug: bool = False,
@@ -2326,39 +2747,55 @@ class BinArray:
         output_name: str | None = None,
         **kwargs,
     ):
-        """Write BinArray to disk."""
-
+        """Write BinArray to disk in various formats."""
         outpath = Path(outpath)
-        if output_name is None:
-            output_name = "data_raw.bin"
-
-        outfile = outpath / output_name
-
-        # Ensure directory exists
         outpath.mkdir(parents=True, exist_ok=True)
 
-        # Write the binary file
-        if not outfile.exists() or overwrite:
-            logger.info(f"Writing binary to {outfile}")
-            # Copy the memmap
-            new_file = np.memmap(outfile, mode="w+", dtype=self.dtype, shape=self.shape)
-            new_file[:] = self._file[:]
-            new_file.flush()
-            del new_file
-        else:
-            logger.info(f"Binary file already exists: {outfile}")
+        ext_clean = ext.lower().lstrip(".")
 
-        # Write ops.npy if we have metadata
-        if self.metadata:
+        # Build metadata
+        md = dict(self.metadata) if self.metadata else {}
+        md["Ly"] = self.Ly
+        md["Lx"] = self.Lx
+        md["nframes"] = self.nframes
+        md["num_frames"] = self.nframes
+
+        # BinArray is always 3D (T, Y, X) - single plane
+        if ext_clean == "bin":
+            # Direct binary copy for .bin output
+            if output_name is None:
+                output_name = "data_raw.bin"
+            outfile = outpath / output_name
+
+            if not outfile.exists() or overwrite:
+                logger.info(f"Writing binary to {outfile}")
+                new_file = np.memmap(outfile, mode="w+", dtype=self.dtype, shape=self.shape)
+                new_file[:] = self._file[:]
+                new_file.flush()
+                del new_file
+            else:
+                logger.info(f"Binary file already exists: {outfile}")
+
+            # Write ops.npy
             ops_file = outpath / "ops.npy"
-            ops_data = {
-                **self.metadata,
-                "Ly": self.Ly,
-                "Lx": self.Lx,
-                "nframes": self.nframes,
-            }
-            np.save(ops_file, ops_data)
+            np.save(ops_file, md)
             logger.info(f"Wrote ops.npy to {ops_file}")
+        else:
+            # Use _write_plane for other formats (tiff, zarr, h5)
+            target = outpath / f"plane01.{ext_clean}"
+
+            _write_plane(
+                self,
+                target,
+                overwrite=overwrite,
+                target_chunk_mb=target_chunk_mb,
+                metadata=md,
+                progress_callback=progress_callback,
+                debug=debug,
+                dshape=self.shape,
+                plane_index=None,
+                **kwargs,
+            )
 
         return outpath
 
