@@ -35,6 +35,13 @@ __all__ = [
     # Metadata
     "is_raw_scanimage",
     "get_metadata",
+    # Preferences
+    "get_recent_files",
+    "add_recent_file",
+    "get_last_open_dir",
+    "set_last_open_dir",
+    "get_last_save_dir",
+    "set_last_save_dir",
     # Utilities
     "norm_minmax",
     "smooth_data",
@@ -72,6 +79,18 @@ def __getattr__(name):
     if name in ("is_raw_scanimage", "get_metadata"):
         from . import metadata
         return getattr(metadata, name)
+
+    # Preferences (lightweight, no heavy deps)
+    if name in (
+        "get_recent_files",
+        "add_recent_file",
+        "get_last_open_dir",
+        "set_last_open_dir",
+        "get_last_save_dir",
+        "set_last_save_dir",
+    ):
+        from . import preferences
+        return getattr(preferences, name)
 
     # Utilities (util -> potentially torch, pandas)
     if name in (
