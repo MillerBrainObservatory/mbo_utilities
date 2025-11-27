@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from pathlib import Path
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from numpy.typing import DTypeLike
 
 ARRAY_LIKE_ATTRS = ["shape", "ndim", "__getitem__"]
 
@@ -18,50 +22,125 @@ class ArrayProtocol(Protocol):
     def __getitem__(self, key): ...
 
 
-class LazyArrayProtocol:
+@runtime_checkable
+class LazyArrayProtocol(Protocol):
     """
-    Protocol for lazy array types.
+    Protocol for lazy array types used in mbo_utilities.
 
-    Must implement:
-    - __getitem__    (method)
-    - __len__        (method)
-    - min            (property)
-    - max            (property)
-    - ndim           (property)
-    - shape          (property)
-    - dtype          (property)
-    - metadata       (property)
+    All array types (MboRawArray, Suite2pArray, ZarrArray, etc.) should implement
+    this protocol to ensure compatibility with imread/imwrite and downstream
+    processing pipelines like Suite2p.
 
-    Optionally implement:
-    - __array__      (method)
-    - imshow         (method)
-    - _imwrite       (method)
-    - close          (method)
-    - chunks         (property)
-    - dask           (property)
+    Required Properties
+    -------------------
+    shape : tuple[int, ...]
+        Array dimensions. For imaging data, typically (T, Y, X) or (T, Z, Y, X).
+    dtype : numpy.dtype
+        Data type of array elements.
+    ndim : int
+        Number of dimensions.
+    metadata : dict
+        Metadata dictionary. Must include 'nframes' for Suite2p compatibility.
+        Use 'num_frames' as an alias for backwards compatibility with old datasets.
+    filenames : list[Path]
+        Source file path(s) for the array data.
+    min : float
+        Minimum value in the array (used for display scaling).
+    max : float
+        Maximum value in the array (used for display scaling).
+
+    Required Methods
+    ----------------
+    __getitem__(key) -> np.ndarray
+        Indexing support. Should return numpy arrays for slices.
+    __len__() -> int
+        Number of frames (first dimension).
+
+    Optional Methods
+    ----------------
+    __array__() -> np.ndarray
+        Convert to numpy array. May load subset for large arrays.
+    _imwrite(outpath, **kwargs)
+        Write array to disk. Called by mbo.imwrite().
+    imshow(**kwargs)
+        Display array using fastplotlib ImageWidget.
+    close()
+        Release resources (file handles, memmaps).
+
+    Metadata Keys
+    -------------
+    The following metadata keys are used by Suite2p and should be populated:
+
+    - nframes : int (required) - Number of frames/timepoints
+    - num_frames : int (alias) - Backwards compatibility alias for nframes
+    - Ly : int - Height in pixels
+    - Lx : int - Width in pixels
+    - fs : float - Frame rate in Hz
+    - plane : int - Z-plane index (1-based)
+
+    Example
+    -------
+    >>> class MyArray:
+    ...     def __init__(self, path):
+    ...         self._data = np.load(path, mmap_mode='r')
+    ...         self._path = Path(path)
+    ...
+    ...     @property
+    ...     def shape(self) -> tuple[int, ...]:
+    ...         return self._data.shape
+    ...
+    ...     @property
+    ...     def dtype(self):
+    ...         return self._data.dtype
+    ...
+    ...     @property
+    ...     def ndim(self) -> int:
+    ...         return self._data.ndim
+    ...
+    ...     @property
+    ...     def metadata(self) -> dict:
+    ...         return {"nframes": self.shape[0], "num_frames": self.shape[0]}
+    ...
+    ...     @property
+    ...     def filenames(self) -> list[Path]:
+    ...         return [self._path]
+    ...
+    ...     @property
+    ...     def min(self) -> float:
+    ...         return float(self._data[0].min())
+    ...
+    ...     @property
+    ...     def max(self) -> float:
+    ...         return float(self._data[0].max())
+    ...
+    ...     def __getitem__(self, key):
+    ...         return self._data[key]
+    ...
+    ...     def __len__(self) -> int:
+    ...         return self.shape[0]
     """
 
-    def __getitem__(self, key: int | slice | tuple[int, ...]) -> np.ndarray:
-        raise NotImplementedError
-
-    def __len__(self) -> int:
-        raise NotImplementedError
-
-    def __array__(self) -> np.ndarray:
-        raise NotImplementedError
+    @property
+    def shape(self) -> tuple[int, ...]: ...
 
     @property
-    def min(self) -> float:
-        raise NotImplementedError
+    def dtype(self) -> "DTypeLike": ...
 
     @property
-    def max(self) -> float:
-        raise NotImplementedError
+    def ndim(self) -> int: ...
 
     @property
-    def ndim(self) -> int:
-        raise NotImplementedError
+    def metadata(self) -> dict: ...
 
     @property
-    def shape(self) -> tuple[int, ...]:
-        raise NotImplementedError
+    def filenames(self) -> list[Path]: ...
+
+    @property
+    def min(self) -> float: ...
+
+    @property
+    def max(self) -> float: ...
+
+    def __getitem__(self, key: int | slice | tuple) -> np.ndarray: ...
+
+    def __len__(self) -> int: ...
