@@ -405,9 +405,10 @@ def get_metadata_batch(file_paths: list | tuple):
         for fp in tqdm(file_paths, desc="Counting frames")
     ]
 
-    # Return metadata with batch info (dict.update() returns None, so use | operator)
+    total_frames = sum(frames_per_file)
     return metadata | {
-        "num_frames": sum(frames_per_file),
+        "nframes": total_frames,
+        "num_frames": total_frames,  # alias for backwards compatibility
         "frames_per_file": frames_per_file,
         "file_paths": [str(fp) for fp in file_paths],
         "num_files": len(file_paths),

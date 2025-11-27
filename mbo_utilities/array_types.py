@@ -1162,7 +1162,8 @@ class MboRawArray:
                 "border": self.border,
                 "upsample": self.upsample,
                 "max_offset": self.max_offset,
-                "num_frames": self.num_frames,
+                "nframes": self.num_frames,
+                "num_frames": self.num_frames,  # alias for backwards compatibility
                 "use_fft": self.use_fft,
             }
         )
@@ -1543,26 +1544,36 @@ class MboRawArray:
             raise RuntimeError(
                 f"Invalid values for requested z-plane type: {type(planes)}"
             )
+        output_name = kwargs.get("output_name")
+
         for roi in iter_rois(self):
             for plane in planes:
                 if not isinstance(plane, int):
                     raise ValueError(f"Plane must be an integer, got {type(plane)}")
                 self.roi = roi
-                if roi is None:
-                    fname = f"plane{plane + 1:02d}_stitched{ext}"
-                else:
-                    fname = f"plane{plane + 1:02d}_roi{roi}{ext}"
 
                 if ext in [".bin", ".binary"]:
-                    # saving to bin for suite2p
-                    # we want the filename to be data_raw.bin
-                    # so put the fname as the folder name
-                    fname_bin_stripped = Path(fname).stem  # remove extension
-                    if "structural" in kwargs and kwargs["structural"]:
-                        target = outpath / fname_bin_stripped / "data_chan2.bin"
+                    if output_name:
+                        # Caller specified exact output name - write directly to outpath
+                        if kwargs.get("structural"):
+                            target = outpath / "data_chan2.bin"
+                        else:
+                            target = outpath / output_name
                     else:
-                        target = outpath / fname_bin_stripped / "data_raw.bin"
+                        # Create subdirectory structure for multi-plane output
+                        if roi is None:
+                            subdir = f"plane{plane + 1:02d}_stitched"
+                        else:
+                            subdir = f"plane{plane + 1:02d}_roi{roi}"
+                        if kwargs.get("structural"):
+                            target = outpath / subdir / "data_chan2.bin"
+                        else:
+                            target = outpath / subdir / "data_raw.bin"
                 else:
+                    if roi is None:
+                        fname = f"plane{plane + 1:02d}_stitched{ext}"
+                    else:
+                        fname = f"plane{plane + 1:02d}_roi{roi}{ext}"
                     target = outpath.joinpath(fname)
 
                 target.parent.mkdir(exist_ok=True)

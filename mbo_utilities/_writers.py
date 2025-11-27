@@ -89,24 +89,31 @@ def _write_plane(
         dshape = data.shape
 
     metadata = metadata or {}
-    metadata["shape"] = dshape
 
     if plane_index is not None:
         if not isinstance(plane_index, int):
             raise TypeError(f"plane_index must be an integer, got {type(plane_index)}")
         metadata["plane"] = plane_index + 1
 
-    # Get target frame count from kwargs, metadata, or data shape (in that priority)
-    nframes_target = kwargs.get("num_frames", metadata.get("num_frames"))
+    # Get target frame count (nframes is primary, num_frames is alias)
+    nframes_target = (
+        kwargs.get("nframes")
+        or kwargs.get("num_frames")
+        or metadata.get("nframes")
+        or metadata.get("num_frames")
+    )
 
-    # If nframes_target is 0 or None, use actual data shape
     if nframes_target is None or nframes_target == 0:
         nframes_target = data.shape[0]
 
-    # Update metadata with the actual target
-    if nframes_target is not None:
-        metadata["num_frames"] = int(nframes_target)
-        metadata["nframes"] = int(nframes_target)
+    nframes_target = int(nframes_target)
+    metadata["nframes"] = nframes_target
+    metadata["num_frames"] = nframes_target  # alias for backwards compatibility
+
+    # Update dshape to use the target frame count, not the original array shape
+    # This ensures metadata["shape"] matches metadata["nframes"]
+    dshape = (nframes_target, *dshape[1:])
+    metadata["shape"] = dshape
 
     H0, W0 = data.shape[-2], data.shape[-1]
     fname = filename
