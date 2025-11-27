@@ -219,24 +219,50 @@ class FileDialog:
 
                 imgui.push_font(None, base_font_size * font_scale)
 
-                indent_size = hello_imgui.em_size(1.0 * scale)
+                indent_size = hello_imgui.em_size(0.8 * scale)
                 imgui.indent(indent_size)
-                imgui.text_colored(COL_ACCENT, "Supported Formats")
-                imgui.dummy(sp(0.2))
-                imgui.text_colored(COL_TEXT_DIM, "• ScanImage multi-ROI TIFFs")
-                imgui.text_colored(COL_TEXT_DIM, "• TIFF, Zarr, HDF5, NumPy")
-                imgui.text_colored(COL_TEXT_DIM, "• Suite2p binary output")
 
-                imgui.dummy(sp(0.3))
-                imgui.separator()
+                imgui.text_colored(COL_ACCENT, "Supported Array Types")
+                imgui.same_line()
+                push_button_style(primary=False)
+                if imgui.small_button("docs"):
+                    import webbrowser
+                    webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/array_types.html")
+                pop_button_style()
                 imgui.dummy(sp(0.3))
 
-                imgui.text_colored(COL_ACCENT, "Features")
-                imgui.dummy(sp(0.2))
-                imgui.text_colored(COL_TEXT_DIM, "• Interactive 3D/4D visualization")
-                imgui.text_colored(COL_TEXT_DIM, "• ROI stitching & separation")
-                imgui.text_colored(COL_TEXT_DIM, "• Scan-phase correction")
-                imgui.text_colored(COL_TEXT_DIM, "• Format conversion")
+                # Table with array types and file extensions
+                table_flags = (
+                    imgui.TableFlags_.borders_inner_v
+                    | imgui.TableFlags_.row_bg
+                    | imgui.TableFlags_.sizing_stretch_same
+                )
+
+                if imgui.begin_table("##array_types", 2, table_flags):
+                    # Headers
+                    imgui.table_setup_column("Format")
+                    imgui.table_setup_column("Extensions")
+                    imgui.table_headers_row()
+
+                    # Array type data: (name, extensions)
+                    array_types = [
+                        ("ScanImage", ".tif, .tiff"),
+                        ("TIFF", ".tif, .tiff"),
+                        ("Zarr", ".zarr/"),
+                        ("HDF5", ".h5, .hdf5"),
+                        ("Suite2p", ".bin, ops.npy"),
+                        ("NumPy", ".npy"),
+                        ("NWB", ".nwb"),
+                    ]
+
+                    for name, ext in array_types:
+                        imgui.table_next_row()
+                        imgui.table_next_column()
+                        imgui.text(name)
+                        imgui.table_next_column()
+                        imgui.text_colored(COL_TEXT_DIM, ext)
+
+                    imgui.end_table()
 
                 imgui.dummy(sp(0.3))
                 imgui.separator()
