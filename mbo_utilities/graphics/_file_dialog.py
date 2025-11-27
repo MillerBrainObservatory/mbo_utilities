@@ -11,6 +11,13 @@ from imgui_bundle import (
     portable_file_dialogs as pfd,
 )
 from mbo_utilities.graphics._widgets import set_tooltip
+from mbo_utilities.preferences import (
+    get_default_open_dir,
+    set_last_open_dir,
+    add_recent_file,
+    get_gui_preference,
+    set_gui_preference,
+)
 
 
 def setup_imgui():
@@ -86,9 +93,12 @@ class FileDialog:
         self.selected_path = None
         self._open_multi = None
         self._select_folder = None
-        self._widget_enabled = True
-        self.metadata_only = False
-        self.split_rois = False
+        # Load saved GUI preferences
+        self._widget_enabled = get_gui_preference("widget_enabled", True)
+        self.metadata_only = get_gui_preference("metadata_only", False)
+        self.split_rois = get_gui_preference("split_rois", False)
+        # Get default directory for file dialogs
+        self._default_dir = str(get_default_open_dir())
 
     @property
     def widget_enabled(self):
@@ -97,6 +107,12 @@ class FileDialog:
     @widget_enabled.setter
     def widget_enabled(self, value):
         self._widget_enabled = value
+
+    def _save_gui_preferences(self):
+        """Save current GUI preferences to disk."""
+        set_gui_preference("widget_enabled", self._widget_enabled)
+        set_gui_preference("metadata_only", self.metadata_only)
+        set_gui_preference("split_rois", self.split_rois)
 
     def render(self):
         # global style - high contrast for visibility
@@ -168,7 +184,7 @@ class FileDialog:
             if imgui.button("Open File(s)", imgui.ImVec2(btn_w, btn_h)):
                 self._open_multi = pfd.open_file(
                     "Select files",
-                    "",
+                    self._default_dir,
                     ["Image Files", "*.tif *.tiff *.zarr *.npy *.bin",
                      "All Files", "*"],
                     pfd.opt.multiselect
@@ -181,7 +197,7 @@ class FileDialog:
             imgui.set_cursor_pos_x(btn_x)
             push_button_style(primary=True)
             if imgui.button("Select Folder", imgui.ImVec2(btn_w, btn_h)):
-                self._select_folder = pfd.select_folder("Select folder")
+                self._select_folder = pfd.select_folder("Select folder", self._default_dir)
             pop_button_style()
             set_tooltip("Select folder with image data")
 
@@ -288,11 +304,22 @@ class FileDialog:
             if self._open_multi and self._open_multi.ready():
                 self.selected_path = self._open_multi.result()
                 if self.selected_path:
+                    # Save to recent files and update last open directory
+                    for p in (self.selected_path if isinstance(self.selected_path, list) else [self.selected_path]):
+                        add_recent_file(p, file_type="file")
+                        set_last_open_dir(p)
+                    # Save GUI preferences
+                    self._save_gui_preferences()
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._open_multi = None
             if self._select_folder and self._select_folder.ready():
                 self.selected_path = self._select_folder.result()
                 if self.selected_path:
+                    # Save to recent files and update last open directory
+                    add_recent_file(self.selected_path, file_type="folder")
+                    set_last_open_dir(self.selected_path)
+                    # Save GUI preferences
+                    self._save_gui_preferences()
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._select_folder = None
 

@@ -35,6 +35,11 @@ from mbo_utilities.file_io import (
     get_last_savedir_path,
     load_last_savedir,
 )
+from mbo_utilities.preferences import (
+    get_last_save_dir,
+    set_last_save_dir,
+    add_recent_file,
+)
 from mbo_utilities.array_types import MboRawArray
 from mbo_utilities.graphics._imgui import (
     begin_popup_size,
@@ -152,8 +157,12 @@ def draw_menu(parent):
                 # Open File - iw-array API
                 if imgui.menu_item("Open File", "Ctrl+O", p_selected=False, enabled=True)[0]:
                     # Handle fpath being a list or a string
+                    from mbo_utilities.preferences import get_default_open_dir
                     fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
-                    start_dir = str(Path(fpath).parent) if fpath and Path(fpath).exists() else str(Path.home())
+                    if fpath and Path(fpath).exists():
+                        start_dir = str(Path(fpath).parent)
+                    else:
+                        start_dir = str(get_default_open_dir())
                     parent._file_dialog = pfd.open_file(
                         "Select Data File",
                         start_dir,
@@ -162,8 +171,12 @@ def draw_menu(parent):
                 # Open Folder - iw-array API
                 if imgui.menu_item("Open Folder", "", p_selected=False, enabled=True)[0]:
                     # Handle fpath being a list or a string
+                    from mbo_utilities.preferences import get_default_open_dir
                     fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
-                    start_dir = str(Path(fpath).parent) if fpath and Path(fpath).exists() else str(Path.home())
+                    if fpath and Path(fpath).exists():
+                        start_dir = str(Path(fpath).parent)
+                    else:
+                        start_dir = str(get_default_open_dir())
                     parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
                 imgui.separator()
                 # Check if current data supports imwrite
@@ -282,11 +295,13 @@ def draw_saveas_popup(parent):
 
         imgui.same_line()
         if imgui.button("Browse"):
-            res = pfd.select_folder(parent._saveas_outdir or str(Path.home()))
+            # Use last save dir as default, fall back to home
+            default_dir = parent._saveas_outdir or str(get_last_save_dir() or Path.home())
+            res = pfd.select_folder("Select output folder", default_dir)
             if res:
                 selected_str = str(res.result())
                 parent._saveas_outdir = selected_str
-                save_last_savedir(Path(selected_str))
+                set_last_save_dir(Path(selected_str))
 
         imgui.set_next_item_width(hello_imgui.em_size(25))
         _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_SUPPORTED_FTYPES)
@@ -530,8 +545,8 @@ def draw_saveas_popup(parent):
 
         if imgui.button("Save", imgui.ImVec2(100, 0)):
             if not parent._saveas_outdir:
-                last_dir = load_last_savedir(default=Path().home())
-                parent._saveas_outdir = last_dir
+                last_dir = get_last_save_dir() or Path().home()
+                parent._saveas_outdir = str(last_dir)
             try:
                 save_planes = [p + 1 for p in parent._selected_planes]
 
@@ -1212,10 +1227,14 @@ class PreviewDataWidget(EdgeWindow):
 
     def _check_file_dialogs(self):
         """Check if file/folder dialogs have results and load data if so."""
+        from mbo_utilities.preferences import add_recent_file, set_last_open_dir
         # Check file dialog
         if self._file_dialog is not None and self._file_dialog.ready():
             result = self._file_dialog.result()
             if result and len(result) > 0:
+                # Save to recent files and preferences
+                add_recent_file(result[0], file_type="file")
+                set_last_open_dir(result[0])
                 self._load_new_data(result[0])
             self._file_dialog = None
 
@@ -1223,6 +1242,9 @@ class PreviewDataWidget(EdgeWindow):
         if self._folder_dialog is not None and self._folder_dialog.ready():
             result = self._folder_dialog.result()
             if result:
+                # Save to recent files and preferences
+                add_recent_file(result, file_type="folder")
+                set_last_open_dir(result)
                 self._load_new_data(result)
             self._folder_dialog = None
 
