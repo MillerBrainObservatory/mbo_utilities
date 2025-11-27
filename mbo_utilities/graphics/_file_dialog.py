@@ -47,18 +47,18 @@ def setup_imgui():
 # setup_imgui()
 
 
-# colors - professional single-tone dark theme
-COL_BG = imgui.ImVec4(0.14, 0.14, 0.15, 1.0)
-COL_BG_CARD = imgui.ImVec4(0.18, 0.18, 0.19, 1.0)
-COL_ACCENT = imgui.ImVec4(0.26, 0.59, 0.98, 1.0)
-COL_ACCENT_HOVER = imgui.ImVec4(0.36, 0.69, 1.0, 1.0)
-COL_ACCENT_ACTIVE = imgui.ImVec4(0.16, 0.49, 0.88, 1.0)
-COL_TEXT = imgui.ImVec4(0.95, 0.95, 0.96, 1.0)
-COL_TEXT_DIM = imgui.ImVec4(0.65, 0.65, 0.67, 1.0)
-COL_BORDER = imgui.ImVec4(0.28, 0.28, 0.30, 0.6)
-COL_SECONDARY = imgui.ImVec4(0.28, 0.28, 0.30, 1.0)
-COL_SECONDARY_HOVER = imgui.ImVec4(0.35, 0.35, 0.37, 1.0)
-COL_SECONDARY_ACTIVE = imgui.ImVec4(0.22, 0.22, 0.24, 1.0)
+# colors - high contrast dark theme for better visibility
+COL_BG = imgui.ImVec4(0.11, 0.11, 0.12, 1.0)
+COL_BG_CARD = imgui.ImVec4(0.16, 0.16, 0.17, 1.0)
+COL_ACCENT = imgui.ImVec4(0.20, 0.50, 0.85, 1.0)  # Darker blue for better text contrast
+COL_ACCENT_HOVER = imgui.ImVec4(0.25, 0.55, 0.90, 1.0)
+COL_ACCENT_ACTIVE = imgui.ImVec4(0.15, 0.45, 0.80, 1.0)
+COL_TEXT = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)  # Pure white for maximum visibility
+COL_TEXT_DIM = imgui.ImVec4(0.75, 0.75, 0.77, 1.0)  # Lighter dim text
+COL_BORDER = imgui.ImVec4(0.35, 0.35, 0.37, 0.7)
+COL_SECONDARY = imgui.ImVec4(0.35, 0.35, 0.37, 1.0)  # Lighter secondary buttons
+COL_SECONDARY_HOVER = imgui.ImVec4(0.42, 0.42, 0.44, 1.0)
+COL_SECONDARY_ACTIVE = imgui.ImVec4(0.28, 0.28, 0.30, 1.0)
 
 
 def push_button_style(primary=True):
@@ -89,7 +89,6 @@ class FileDialog:
         self._widget_enabled = True
         self.metadata_only = False
         self.split_rois = False
-        self._show_array_docs = False
 
     @property
     def widget_enabled(self):
@@ -100,19 +99,19 @@ class FileDialog:
         self._widget_enabled = value
 
     def render(self):
-        # global style - professional single-tone
+        # global style - high contrast for visibility
         imgui.push_style_color(imgui.Col_.window_bg, COL_BG)
         imgui.push_style_color(imgui.Col_.child_bg, imgui.ImVec4(0, 0, 0, 0))
         imgui.push_style_color(imgui.Col_.text, COL_TEXT)
         imgui.push_style_color(imgui.Col_.border, COL_BORDER)
-        imgui.push_style_color(imgui.Col_.separator, imgui.ImVec4(0.28, 0.28, 0.30, 0.5))
-        imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.20, 0.20, 0.21, 1.0))
-        imgui.push_style_color(imgui.Col_.frame_bg_hovered, imgui.ImVec4(0.25, 0.25, 0.26, 1.0))
+        imgui.push_style_color(imgui.Col_.separator, imgui.ImVec4(0.35, 0.35, 0.37, 0.6))
+        imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.22, 0.22, 0.23, 1.0))
+        imgui.push_style_color(imgui.Col_.frame_bg_hovered, imgui.ImVec4(0.28, 0.28, 0.29, 1.0))
         imgui.push_style_color(imgui.Col_.check_mark, COL_ACCENT)
-        imgui.push_style_var(imgui.StyleVar_.window_padding, hello_imgui.em_to_vec2(2.5, 2.5))
-        imgui.push_style_var(imgui.StyleVar_.frame_padding, hello_imgui.em_to_vec2(0.8, 0.5))
-        imgui.push_style_var(imgui.StyleVar_.item_spacing, hello_imgui.em_to_vec2(1.0, 0.8))
-        imgui.push_style_var(imgui.StyleVar_.frame_rounding, 4.0)
+        imgui.push_style_var(imgui.StyleVar_.window_padding, hello_imgui.em_to_vec2(3.0, 3.0))
+        imgui.push_style_var(imgui.StyleVar_.frame_padding, hello_imgui.em_to_vec2(1.2, 0.8))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, hello_imgui.em_to_vec2(1.2, 1.0))
+        imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
 
         win_w = imgui.get_window_width()
 
@@ -122,34 +121,51 @@ class FileDialog:
         with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0), child_flags=child_flags, window_flags=window_flags):
             imgui.push_id("pfd")
 
-            # header
-            imgui.dummy(hello_imgui.em_to_vec2(0, 1.0))
+            # header with larger text
+            imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
+
+            # Use larger font for title
+            imgui.push_font(imgui.get_io().fonts.fonts[0])  # Default font but we'll scale it
+            old_scale = imgui.get_font().scale
+            imgui.get_font().scale = 1.8
+            imgui.push_font(imgui.get_font())
+
             title = "Miller Brain Observatory"
             title_sz = imgui.calc_text_size(title)
             imgui.set_cursor_pos_x((win_w - title_sz.x) * 0.5)
             imgui.text_colored(COL_ACCENT, title)
+
+            imgui.pop_font()
+            imgui.get_font().scale = old_scale
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.5))
+
+            # Larger subtitle
+            old_scale = imgui.get_font().scale
+            imgui.get_font().scale = 1.2
+            imgui.push_font(imgui.get_font())
 
             subtitle = "Data Preview & Utilities"
             sub_sz = imgui.calc_text_size(subtitle)
             imgui.set_cursor_pos_x((win_w - sub_sz.x) * 0.5)
             imgui.text_colored(COL_TEXT_DIM, subtitle)
 
+            imgui.pop_font()
+            imgui.get_font().scale = old_scale
+
             imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
             imgui.separator()
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.8))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
 
-            # description
-            desc = "Preview ScanImage, TIFF, Zarr, and Suite2p datasets"
-            desc_sz = imgui.calc_text_size(desc)
-            imgui.set_cursor_pos_x((win_w - desc_sz.x) * 0.5)
-            imgui.text_colored(COL_TEXT_DIM, desc)
-
-            imgui.dummy(hello_imgui.em_to_vec2(0, 1.8))
-
-            # action buttons
-            btn_w = hello_imgui.em_size(20)
-            btn_h = hello_imgui.em_size(2.8)
+            # action buttons - larger and more visible
+            btn_w = hello_imgui.em_size(24)
+            btn_h = hello_imgui.em_size(3.5)
             btn_x = (win_w - btn_w) * 0.5
+
+            # Scale up button text
+            old_scale = imgui.get_font().scale
+            imgui.get_font().scale = 1.3
+            imgui.push_font(imgui.get_font())
 
             # open files
             imgui.set_cursor_pos_x(btn_x)
@@ -165,7 +181,7 @@ class FileDialog:
             pop_button_style()
             set_tooltip("Select one or more image files")
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.6))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.8))
 
             # select folder
             imgui.set_cursor_pos_x(btn_x)
@@ -175,116 +191,69 @@ class FileDialog:
             pop_button_style()
             set_tooltip("Select folder with image data")
 
+            imgui.pop_font()
+            imgui.get_font().scale = old_scale
+
             imgui.dummy(hello_imgui.em_to_vec2(0, 2.0))
 
-            # options section
-            opts_w = hello_imgui.em_size(28)
-            opts_x = (win_w - opts_w) * 0.5
-            imgui.set_cursor_pos_x(opts_x)
+            # features section - larger text for better visibility
+            feat_w = hello_imgui.em_size(36)
+            feat_x = (win_w - feat_w) * 0.5
+            imgui.set_cursor_pos_x(feat_x)
 
             imgui.push_style_color(imgui.Col_.child_bg, COL_BG_CARD)
             imgui.push_style_var(imgui.StyleVar_.child_rounding, 8.0)
-            # auto-resize options section, no scrollbars
-            opts_child_flags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.borders
-            with imgui_ctx.begin_child("##options", size=imgui.ImVec2(opts_w, 0), child_flags=opts_child_flags):
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-                imgui.text_colored(COL_TEXT_DIM, "  Options")
-                imgui.separator()
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            feat_child_flags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.borders
+            with imgui_ctx.begin_child("##features", size=imgui.ImVec2(feat_w, 0), child_flags=feat_child_flags):
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.7))
 
-                imgui.indent(hello_imgui.em_size(0.8))
+                # Scale up feature text
+                old_scale = imgui.get_font().scale
+                imgui.get_font().scale = 1.15
+                imgui.push_font(imgui.get_font())
+
+                # Supported Formats
+                imgui.indent(hello_imgui.em_size(1.2))
+                imgui.text_colored(COL_ACCENT, "Supported Formats")
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.4))
+                imgui.text_colored(COL_TEXT_DIM, "• ScanImage multi-ROI TIFFs")
+                imgui.text_colored(COL_TEXT_DIM, "• TIFF, Zarr, HDF5, NumPy")
+                imgui.text_colored(COL_TEXT_DIM, "• Suite2p binary output")
+
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.6))
+                imgui.separator()
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.6))
+
+                # Features
+                imgui.text_colored(COL_ACCENT, "Features")
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.4))
+                imgui.text_colored(COL_TEXT_DIM, "• Interactive 3D/4D visualization")
+                imgui.text_colored(COL_TEXT_DIM, "• ROI stitching & separation")
+                imgui.text_colored(COL_TEXT_DIM, "• Scan-phase correction")
+                imgui.text_colored(COL_TEXT_DIM, "• Format conversion")
+
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.6))
+                imgui.separator()
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.6))
+
+                # Options
+                imgui.text_colored(COL_ACCENT, "Options")
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.4))
 
                 _, self._widget_enabled = imgui.checkbox("Enable preview widget", self._widget_enabled)
-                set_tooltip("Toggle interactive visualization")
-
                 _, self.split_rois = imgui.checkbox("Separate multi-ROIs", self.split_rois)
-                set_tooltip("Display each ScanImage ROI separately")
-
                 _, self.metadata_only = imgui.checkbox("Metadata only", self.metadata_only)
-                set_tooltip("Load metadata without full data")
 
-                imgui.unindent(hello_imgui.em_size(0.8))
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+                imgui.pop_font()
+                imgui.get_font().scale = old_scale
+
+                imgui.unindent(hello_imgui.em_size(1.2))
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.7))
 
             imgui.pop_style_var()
             imgui.pop_style_color()
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 1.0))
-
-            # array types documentation
-            imgui.separator()
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.5))
-
-            # collapsible header for documentation
-            arrow = "▼" if self._show_array_docs else "▶"
-            if imgui.selectable(f"{arrow} Array Types Reference", self._show_array_docs)[0]:
-                self._show_array_docs = not self._show_array_docs
-            set_tooltip("Click to show/hide supported array types")
-
-            if self._show_array_docs:
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-                docs_w = hello_imgui.em_size(50)
-                docs_x = (win_w - docs_w) * 0.5
-                imgui.set_cursor_pos_x(docs_x)
-
-                imgui.push_style_color(imgui.Col_.child_bg, COL_BG_CARD)
-                imgui.push_style_var(imgui.StyleVar_.child_rounding, 6.0)
-                docs_child_flags = imgui.ChildFlags_.borders
-                with imgui_ctx.begin_child("##array_docs", size=imgui.ImVec2(docs_w, hello_imgui.em_size(25)), child_flags=docs_child_flags):
-                    imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-                    imgui_md.render_unindented("""
-# Array Types
-
-`imread()` automatically returns the appropriate array type:
-
-| Input | Returns | Use Case |
-|-------|---------|----------|
-| `.tif` (raw ScanImage) | `MboRawArray` | Multi-ROI with phase correction |
-| `.tif` (processed) | `TiffArray` | Standard TIFF files |
-| Directory with `ops.npy` | `Suite2pArray` | Suite2p workflow |
-| `.bin` (direct path) | `BinArray` | Binary file access |
-| `.h5` / `.hdf5` | `H5Array` | HDF5 datasets |
-| `.zarr` | `ZarrArray` | Zarr stores |
-| `.npy` | `NpyArray` | NumPy arrays |
-
-**Key Features:**
-- **MboRawArray**: ROI stitching/splitting, phase correction, lazy loading
-- **Suite2pArray**: Access to both raw and registered data
-- **BinArray**: Direct binary file manipulation
-                    """)
-                    imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-                imgui.pop_style_var()
-                imgui.pop_style_color()
-
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.8))
-
-            # documentation links
-            imgui.separator()
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.6))
-
-            links_w = hello_imgui.em_size(24)
-            links_x = (win_w - links_w) * 0.5
-            imgui.set_cursor_pos_x(links_x)
-
-            link_btn_w = hello_imgui.em_size(7)
-            link_btn_h = hello_imgui.em_size(2.0)
-
-            push_button_style(primary=False)
-            if imgui.button("Docs", imgui.ImVec2(link_btn_w, link_btn_h)):
-                import webbrowser
-                webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/")
-            set_tooltip("Full documentation")
-            imgui.same_line()
-            if imgui.button("Assembly", imgui.ImVec2(link_btn_w, link_btn_h)):
-                import webbrowser
-                webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/assembly.html")
-            set_tooltip("TIFF assembly guide")
-            imgui.same_line()
-            if imgui.button("Examples", imgui.ImVec2(link_btn_w, link_btn_h)):
-                import webbrowser
-                webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/api/usage.html")
-            set_tooltip("Usage examples")
-            pop_button_style()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
 
             # file/folder completion
             if self._open_multi and self._open_multi.ready():
@@ -298,15 +267,23 @@ class FileDialog:
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._select_folder = None
 
-            # quit button
-            imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
-            qsz = imgui.ImVec2(hello_imgui.em_size(8), hello_imgui.em_size(2.0))
-            imgui.set_cursor_pos_x(win_w - qsz.x - hello_imgui.em_size(2))
+            # quit button - larger and more visible
+            imgui.dummy(hello_imgui.em_to_vec2(0, 2.0))
+
+            old_scale = imgui.get_font().scale
+            imgui.get_font().scale = 1.2
+            imgui.push_font(imgui.get_font())
+
+            qsz = imgui.ImVec2(hello_imgui.em_size(10), hello_imgui.em_size(2.5))
+            imgui.set_cursor_pos_x(win_w - qsz.x - hello_imgui.em_size(2.5))
             push_button_style(primary=False)
             if imgui.button("Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
                 self.selected_path = None
                 hello_imgui.get_runner_params().app_shall_exit = True
             pop_button_style()
+
+            imgui.pop_font()
+            imgui.get_font().scale = old_scale
 
             imgui.pop_id()
 
