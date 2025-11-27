@@ -146,7 +146,14 @@ class Suite2pPipelineWidget(PipelineWidget):
                 num_frames = len(self._F[0]) if len(self._F) > 0 else 0
 
                 imgui.spacing()
-                imgui.text(f"{num_cells} cells, {num_frames} frames")
+
+                # summary statistics section
+                if imgui.collapsing_header("Summary Statistics", imgui.TreeNodeFlags_.default_open):
+                    self._draw_summary_stats(num_cells, num_frames)
+
+                imgui.spacing()
+                imgui.separator()
+                imgui.spacing()
 
                 # cell selector
                 imgui.set_next_item_width(INPUT_WIDTH)
@@ -226,6 +233,133 @@ class Suite2pPipelineWidget(PipelineWidget):
         else:
             imgui.spacing()
             imgui.text_disabled("No results loaded")
+
+    def _draw_summary_stats(self, num_cells: int, num_frames: int) -> None:
+        """draw summary statistics and visualizations."""
+        # calculate SNR for all cells
+        snr_values = []
+        for i in range(len(self._F)):
+            f = self._F[i]
+            if len(f) > 0:
+                snr = np.mean(f) / (np.std(f) + 1e-10)
+                snr_values.append(snr)
+            else:
+                snr_values.append(0.0)
+        snr_values = np.array(snr_values)
+
+        # basic stats
+        n_neurons = np.sum(self._iscell) if self._iscell is not None else num_cells
+        n_non_neurons = num_cells - n_neurons if self._iscell is not None else 0
+
+        imgui.text(f"Total cells: {num_cells}")
+        imgui.text(f"Neurons: {n_neurons}")
+        if self._iscell is not None:
+            imgui.text(f"Non-neurons: {n_non_neurons}")
+        imgui.text(f"Frames: {num_frames}")
+        imgui.spacing()
+
+        # bar graph: neurons vs non-neurons
+        if self._iscell is not None and implot.begin_plot("Cell Classification", imgui.ImVec2(-1, 150)):
+            implot.setup_axes("", "Count")
+            implot.setup_axis_limits(implot.ImAxis_.x1, -0.5, 1.5)
+            implot.setup_axis_limits(implot.ImAxis_.y1, 0, max(n_neurons, n_non_neurons) * 1.1)
+
+            x_pos = np.array([0.0, 1.0], dtype=np.float64)
+            heights = np.array([float(n_neurons), float(n_non_neurons)], dtype=np.float64)
+            labels = ["Neurons", "Non-neurons"]
+
+            implot.setup_axis_ticks_custom(implot.ImAxis_.x1, x_pos, labels)
+            implot.plot_bars("Cells", x_pos, heights, 0.6)
+            implot.end_plot()
+
+        # SNR histogram
+        if len(snr_values) > 0 and implot.begin_plot("SNR Distribution", imgui.ImVec2(-1, 150)):
+            implot.setup_axes("SNR", "Count")
+
+            # create histogram bins
+            hist, bin_edges = np.histogram(snr_values, bins=30)
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+            implot.plot_bars("SNR", bin_centers.astype(np.float64), hist.astype(np.float64), bin_edges[1] - bin_edges[0])
+            implot.end_plot()
+
+        # top/bottom SNR cells
+        if len(snr_values) > 0:
+            imgui.spacing()
+            if imgui.collapsing_header("Top/Bottom SNR Cells"):
+                n_show = min(5, len(snr_values))
+                top_indices = np.argsort(snr_values)[-n_show:][::-1]
+                bottom_indices = np.argsort(snr_values)[:n_show]
+
+                imgui.text_colored(imgui.ImVec4(0.4, 0.8, 0.4, 1.0), f"Top {n_show} SNR Cells:")
+                for idx in top_indices:
+                    is_neuron = self._iscell[idx] if self._iscell is not None else True
+                    color = imgui.ImVec4(0.8, 0.8, 0.8, 1.0) if is_neuron else imgui.ImVec4(0.6, 0.6, 0.6, 1.0)
+                    imgui.bullet()
+                    imgui.same_line()
+                    imgui.text_colored(color, f"Cell {idx}: SNR={snr_values[idx]:.2f}")
+                    if imgui.is_item_hovered():
+                        if imgui.begin_tooltip():
+                            imgui.text(f"{'Neuron' if is_neuron else 'Non-neuron'}")
+                            if self._cellprob is not None and idx < len(self._cellprob):
+                                imgui.text(f"Probability: {self._cellprob[idx]:.3f}")
+                            imgui.end_tooltip()
+
+                imgui.spacing()
+                imgui.text_colored(imgui.ImVec4(0.8, 0.4, 0.4, 1.0), f"Bottom {n_show} SNR Cells:")
+                for idx in bottom_indices:
+                    is_neuron = self._iscell[idx] if self._iscell is not None else True
+                    color = imgui.ImVec4(0.8, 0.8, 0.8, 1.0) if is_neuron else imgui.ImVec4(0.6, 0.6, 0.6, 1.0)
+                    imgui.bullet()
+                    imgui.same_line()
+                    imgui.text_colored(color, f"Cell {idx}: SNR={snr_values[idx]:.2f}")
+                    if imgui.is_item_hovered():
+                        if imgui.begin_tooltip():
+                            imgui.text(f"{'Neuron' if is_neuron else 'Non-neuron'}")
+                            if self._cellprob is not None and idx < len(self._cellprob):
+                                imgui.text(f"Probability: {self._cellprob[idx]:.3f}")
+                            imgui.end_tooltip()
+
+        # scatter plots
+        if len(snr_values) > 0:
+            imgui.spacing()
+            if imgui.collapsing_header("Scatter Plots"):
+                # SNR vs cell probability
+                if self._cellprob is not None and implot.begin_plot("Cell Probability vs SNR", imgui.ImVec2(-1, 200)):
+                    implot.setup_axes("SNR", "Cell Probability")
+
+                    # separate neurons and non-neurons
+                    if self._iscell is not None:
+                        neuron_mask = self._iscell
+                        neuron_snr = snr_values[neuron_mask].astype(np.float64)
+                        neuron_prob = self._cellprob[neuron_mask].astype(np.float64)
+                        non_neuron_snr = snr_values[~neuron_mask].astype(np.float64)
+                        non_neuron_prob = self._cellprob[~neuron_mask].astype(np.float64)
+
+                        if len(neuron_snr) > 0:
+                            implot.plot_scatter("Neurons", neuron_snr, neuron_prob)
+                        if len(non_neuron_snr) > 0:
+                            implot.plot_scatter("Non-neurons", non_neuron_snr, non_neuron_prob)
+                    else:
+                        implot.plot_scatter("All Cells", snr_values.astype(np.float64), self._cellprob.astype(np.float64))
+
+                    implot.end_plot()
+
+                # F mean vs std
+                if implot.begin_plot("Fluorescence Mean vs Std", imgui.ImVec2(-1, 200)):
+                    implot.setup_axes("Mean F", "Std F")
+
+                    f_means = np.array([np.mean(self._F[i]) for i in range(len(self._F))], dtype=np.float64)
+                    f_stds = np.array([np.std(self._F[i]) for i in range(len(self._F))], dtype=np.float64)
+
+                    if self._iscell is not None:
+                        neuron_mask = self._iscell
+                        implot.plot_scatter("Neurons", f_means[neuron_mask], f_stds[neuron_mask])
+                        implot.plot_scatter("Non-neurons", f_means[~neuron_mask], f_stds[~neuron_mask])
+                    else:
+                        implot.plot_scatter("All Cells", f_means, f_stds)
+
+                    implot.end_plot()
 
     def _load_results(self, stat_path: str) -> None:
         """load suite2p results from stat.npy directory."""

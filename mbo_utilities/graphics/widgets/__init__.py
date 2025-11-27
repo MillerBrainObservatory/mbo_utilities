@@ -89,9 +89,13 @@ def draw_all_widgets(parent: "PreviewDataWidget", widgets: list[Widget]) -> None
             widget.draw()
         except Exception as e:
             # log error but don't crash the ui
+            import traceback
+            error_msg = f"Error in {widget.name}: {e}"
+            parent.logger.error(error_msg)
+            parent.logger.error(traceback.format_exc())
             imgui.text_colored(
                 imgui.ImVec4(1.0, 0.3, 0.3, 1.0),
-                f"Error in {widget.name}: {e}"
+                error_msg
             )
 
 

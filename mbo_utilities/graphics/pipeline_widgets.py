@@ -1128,9 +1128,13 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
             pass
 
     from mbo_utilities.lazy_array import imwrite
+
+    # Ensure plane_dir exists
+    plane_dir.mkdir(parents=True, exist_ok=True)
+
     imwrite(
         arr,  # Keep it lazy
-        base_out,  # _imwrite creates plane_dir structure: base_out/plane01_stitched/data_raw.bin
+        plane_dir,  # Write directly to plane directory
         ext=".bin",
         overwrite=True,
         register_z=False,
@@ -1145,6 +1149,10 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     from lbm_suite2p_python import run_plane
     raw_file = plane_dir / "data_raw.bin"
 
+    # Log detection settings for debugging
+    self.logger.info(f"Suite2p settings - roidetect: {defaults.get('roidetect')}, force_detect: {self.s2p.force_detect}")
+    self.logger.info(f"Detection params - diameter: {defaults.get('diameter')}, sparse_mode: {defaults.get('sparse_mode')}")
+
     try:
         result = run_plane(
             input_path=raw_file,
@@ -1158,6 +1166,13 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
             dff_percentile=self.s2p.dff_percentile,
         )
         self.logger.info(f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}")
+
+        # Check if detection outputs were created
+        stat_file = plane_dir / "stat.npy"
+        if stat_file.exists():
+            self.logger.info(f"Detection succeeded - stat.npy created")
+        else:
+            self.logger.warning(f"Detection did not run - stat.npy not found. Check Suite2p output logs.")
     except Exception as e:
         self.logger.error(f"Suite2p processing failed for plane {current_z}, roi {arr_idx}: {e}")
         import traceback

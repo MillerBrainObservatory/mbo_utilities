@@ -840,7 +840,7 @@ class PreviewDataWidget(EdgeWindow):
                 # Fallback: reassign the index to trigger update
                 self.image_widget.indices["t"] = current_t
 
-    def _set_processor_attr_fast(self, attr: str, value):
+    def _set_processor_attr(self, attr: str, value):
         """
         Set processor attribute without expensive histogram recomputation.
 
@@ -854,6 +854,10 @@ class PreviewDataWidget(EdgeWindow):
         value
             Value to set. Applied to all processors via ImageWidget API.
         """
+        if not self.processors:
+            self.logger.warning(f"No processors available to set {attr}")
+            return
+
         # Save original compute_histogram states and disable on all processors
         original_states = []
         for proc in self.processors:
@@ -864,6 +868,13 @@ class PreviewDataWidget(EdgeWindow):
             # Use proper ImageWidget API - this handles validation and index refresh
             # The histogram recomputation is skipped because _compute_histogram is False
             if attr == "window_funcs":
+                # ImageWidget.window_funcs expects a list with one tuple per processor
+                # Always wrap in a list, even for single processor
+                if isinstance(value, tuple):
+                    # Single tuple like (mean_wrapper, None) - wrap for all processors
+                    value = [value] * len(self.processors)
+                self.logger.debug(f"Setting window_funcs: {value}, n_processors={len(self.processors)}")
+                self.logger.debug(f"Processor n_slider_dims: {[p.n_slider_dims for p in self.processors]}")
                 self.image_widget.window_funcs = value
             elif attr == "window_sizes":
                 # ImageWidget expects a list with one entry per processor
@@ -878,13 +889,19 @@ class PreviewDataWidget(EdgeWindow):
                 for proc in self.processors:
                     setattr(proc, attr, value)
                 self._refresh_image_widget()
+        except Exception as e:
+            self.logger.error(f"Error setting {attr}: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
         finally:
             # Restore original compute_histogram states
             for proc, orig in zip(self.processors, original_states):
                 proc._compute_histogram = orig
 
-        # Reset vmin/vmax from current frame data (fast!)
-        self.image_widget.reset_vmin_vmax_frame()
+        try:
+            self.image_widget.reset_vmin_vmax_frame()
+        except Exception as e:
+            self.logger.warning(f"Could not reset vmin/vmax: {e}")
 
     def _refresh_widgets(self):
         """
@@ -1050,7 +1067,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # Set directly on processors with histogram computation disabled
         # to avoid expensive full-array histogram recomputation
-        self._set_processor_attr_fast("spatial_func", spatial_func)
+        self._set_processor_attr("spatial_func", spatial_func)
 
     @property
     def proj(self) -> str:
@@ -1093,12 +1110,27 @@ class PreviewDataWidget(EdgeWindow):
 
     def _update_window_funcs(self):
         """Update window_funcs on image widget based on current projection mode."""
+        if not self.processors:
+            self.logger.warning("No processors available to update window funcs")
+            return
+
+        # Wrapper functions that match fastplotlib's expected signature
+        # WindowFuncCallable must accept (array, axis, keepdims) parameters
+        def mean_wrapper(data, axis, keepdims):
+            return np.mean(data, axis=axis, keepdims=keepdims)
+
+        def max_wrapper(data, axis, keepdims):
+            return np.max(data, axis=axis, keepdims=keepdims)
+
+        def std_wrapper(data, axis, keepdims):
+            return np.std(data, axis=axis, keepdims=keepdims)
+
         proj_funcs = {
-            "mean": np.mean,
-            "max": np.max,
-            "std": np.std,
+            "mean": mean_wrapper,
+            "max": max_wrapper,
+            "std": std_wrapper,
         }
-        proj_func = proj_funcs.get(self._proj, np.mean)
+        proj_func = proj_funcs.get(self._proj, mean_wrapper)
 
         # build window_funcs tuple based on data dimensionality
         n_slider_dims = self.processors[0].n_slider_dims if self.processors else 1
@@ -1110,9 +1142,8 @@ class PreviewDataWidget(EdgeWindow):
         else:
             window_funcs = (proj_func,) + (None,) * (n_slider_dims - 1)
 
-        # Set directly on processors with histogram computation disabled
-        # to avoid expensive full-array histogram recomputation
-        self._set_processor_attr_fast("window_funcs", window_funcs)
+        self.logger.debug(f"Updating window_funcs to {self._proj} with {n_slider_dims} slider dims")
+        self._set_processor_attr("window_funcs", window_funcs)
 
     @property
     def window_size(self) -> int:
@@ -1128,6 +1159,10 @@ class PreviewDataWidget(EdgeWindow):
     def window_size(self, value: int):
         self._window_size = value
         self.logger.info(f"Window size set to {value}.")
+
+        if not self.processors:
+            self.logger.warning("No processors available to set window size")
+            return
 
         # Use fastplotlib's window_sizes API
         # ImageWidget.window_sizes expects a list with one entry per processor
@@ -1148,7 +1183,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # Set directly on processors with histogram computation disabled
         # to avoid expensive full-array histogram recomputation
-        self._set_processor_attr_fast("window_sizes", per_processor_sizes)
+        self._set_processor_attr("window_sizes", per_processor_sizes)
 
     @property
     def phase_upsample(self) -> int:
