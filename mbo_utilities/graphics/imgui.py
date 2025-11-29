@@ -513,7 +513,10 @@ def draw_saveas_popup(parent):
         if not parent._selected_planes:
             # Get current z index from image widget
             names = parent.image_widget._slider_dim_names or ()
-            current_z = parent.image_widget.indices["z"] if "z" in names else 0
+            try:
+                current_z = parent.image_widget.indices["z"] if "z" in names else 0
+            except (IndexError, KeyError):
+                current_z = 0
             parent._selected_planes = {current_z}
 
         if imgui.button("All"):
@@ -524,7 +527,10 @@ def draw_saveas_popup(parent):
         imgui.same_line()
         if imgui.button("Current"):
             names = parent.image_widget._slider_dim_names or ()
-            current_z = parent.image_widget.indices["z"] if "z" in names else 0
+            try:
+                current_z = parent.image_widget.indices["z"] if "z" in names else 0
+            except (IndexError, KeyError):
+                current_z = 0
             parent._selected_planes = {current_z}
 
         imgui.columns(2, borders=False)
@@ -1104,7 +1110,10 @@ class PreviewDataWidget(EdgeWindow):
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function (mean subtraction + gaussian blur)."""
         names = self.image_widget._slider_dim_names or ()
-        z_idx = self.image_widget.indices["z"] if "z" in names else 0
+        try:
+            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+        except (IndexError, KeyError):
+            z_idx = 0
 
         # Get gaussian sigma (shared across all processors)
         sigma = self.gaussian_sigma if self.gaussian_sigma > 0 else None
@@ -1261,7 +1270,10 @@ class PreviewDataWidget(EdgeWindow):
         # Update mean subtraction when z-plane changes
         if self._mean_subtraction:
             names = self.image_widget._slider_dim_names or ()
-            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+            try:
+                z_idx = self.image_widget.indices["z"] if "z" in names else 0
+            except (IndexError, KeyError):
+                z_idx = 0
             if z_idx != self._last_z_idx:
                 self._last_z_idx = z_idx
                 self._update_mean_subtraction()
@@ -1316,9 +1328,14 @@ class PreviewDataWidget(EdgeWindow):
             self.image_widget.data[0] = new_data
 
             # Reset indices
-            self.image_widget.indices["t"] = 0
-            if new_data.ndim >= 4:
-                self.image_widget.indices["z"] = 0
+            try:
+                names = self.image_widget._slider_dim_names or ()
+                if "t" in names:
+                    self.image_widget.indices["t"] = 0
+                if "z" in names and new_data.ndim >= 4:
+                    self.image_widget.indices["z"] = 0
+            except (IndexError, KeyError):
+                pass  # Indices not available yet
 
             # Update internal state
             self.fpath = path

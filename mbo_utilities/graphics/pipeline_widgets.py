@@ -266,7 +266,10 @@ def draw_section_suite2p(self):
     # Get current z index and total planes from image widget
     # iw-array API: use indices property with named dimension access
     names = self.image_widget._slider_dim_names or ()
-    current_z = self.image_widget.indices["z"] if "z" in names else 0
+    try:
+        current_z = self.image_widget.indices["z"] if "z" in names else 0
+    except (IndexError, KeyError):
+        current_z = 0
     current_plane = current_z + 1  # Convert 0-indexed to 1-indexed
 
     # Get number of planes from data shape
@@ -979,7 +982,10 @@ def run_process(self):
         if not selected_planes:
             # Fallback to current plane
             names = self.image_widget._slider_dim_names or ()
-            current_z = self.image_widget.indices["z"] if "z" in names else 0
+            try:
+                current_z = self.image_widget.indices["z"] if "z" in names else 0
+            except (IndexError, KeyError):
+                current_z = 0
             selected_planes = {current_z + 1}
 
         self.logger.info(f"Running Suite2p pipeline on {len(selected_planes)} plane(s)...")
@@ -1041,7 +1047,10 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
         current_z = z_plane
     else:
         names = self.image_widget._slider_dim_names or ()
-        current_z = self.image_widget.indices["z"] if "z" in names else 0
+        try:
+            current_z = self.image_widget.indices["z"] if "z" in names else 0
+        except (IndexError, KeyError):
+            current_z = 0
 
     base_out = Path(self._saveas_outdir) if getattr(self, "_saveas_outdir", None) else None
     if not base_out:
