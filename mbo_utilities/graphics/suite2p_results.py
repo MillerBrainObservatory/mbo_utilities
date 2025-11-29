@@ -47,8 +47,7 @@ class Suite2pResultsViewer:
         if imgui.button("Select ops.npy File"):
             result = pfd.open_file(
                 "Select ops.npy",
-                str(Path.home()),
-                ["Numpy Files", "*.npy"]
+                str(Path.home())
             )
             if result and result.result():
                 selected = result.result()[0]
@@ -94,9 +93,11 @@ class Suite2pResultsViewer:
                     ys = trace_data.astype(np.float64)
 
                     if implot.begin_plot(f"Cell {self.selected_cell} Trace", imgui.ImVec2(-1, 300)):
-                        implot.setup_axes("Frame", "Fluorescence")
-                        implot.plot_line("F", xs, ys)
-                        implot.end_plot()
+                        try:
+                            implot.setup_axes("Frame", "Fluorescence")
+                            implot.plot_line("F", xs, ys)
+                        finally:
+                            implot.end_plot()
         else:
             imgui.text("No file loaded")
 

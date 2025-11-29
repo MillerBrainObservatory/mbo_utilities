@@ -133,7 +133,7 @@ class Suite2pPipelineWidget(PipelineWidget):
                 else:
                     self.parent.logger.error("Please select stat.npy file")
 
-        if self._ops_path:
+        if self._ops_path and self._F is not None and len(self._F) > 0:
             imgui.same_line()
             imgui.text_colored(
                 imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
@@ -141,62 +141,60 @@ class Suite2pPipelineWidget(PipelineWidget):
             )
             set_tooltip(str(self._ops_path))
 
-            if self._F is not None and len(self._F) > 0:
-                num_cells = len(self._F)
-                num_frames = len(self._F[0]) if len(self._F) > 0 else 0
+            num_cells = len(self._F)
+            num_frames = len(self._F[0]) if len(self._F) > 0 else 0
 
-                imgui.spacing()
+            imgui.spacing()
 
-                # summary statistics section
-                if imgui.collapsing_header("Summary Statistics", imgui.TreeNodeFlags_.default_open):
+            # summary statistics section - wrap in try/except to prevent plot leaks
+            if imgui.collapsing_header("Summary Statistics", imgui.TreeNodeFlags_.default_open):
+                try:
                     self._draw_summary_stats(num_cells, num_frames)
+                except Exception as e:
+                    imgui.text_colored(imgui.ImVec4(1, 0.3, 0.3, 1), f"Error: {e}")
 
-                imgui.spacing()
-                imgui.separator()
-                imgui.spacing()
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
 
-                # cell selector
-                imgui.set_next_item_width(INPUT_WIDTH)
-                changed, self._selected_cell = imgui.slider_int(
-                    "Cell",
-                    self._selected_cell,
-                    0,
-                    num_cells - 1
-                )
+            # cell selector
+            imgui.set_next_item_width(INPUT_WIDTH)
+            changed, self._selected_cell = imgui.slider_int(
+                "Cell",
+                self._selected_cell,
+                0,
+                num_cells - 1
+            )
 
-                # cell probability
-                if self._cellprob is not None and self._selected_cell < len(self._cellprob):
-                    cell_prob = self._cellprob[self._selected_cell]
-                    imgui.same_line()
-                    imgui.text(f"(prob: {cell_prob:.2f})")
+            # cell probability
+            if self._cellprob is not None and self._selected_cell < len(self._cellprob):
+                cell_prob = self._cellprob[self._selected_cell]
+                imgui.same_line()
+                imgui.text(f"(prob: {cell_prob:.2f})")
 
-                # trace options
-                _, self._show_trace = imgui.checkbox("Show Trace", self._show_trace)
-                if self._show_trace:
-                    imgui.same_line()
-                    _, self._show_fneu = imgui.checkbox("Fneu", self._show_fneu)
-                    imgui.same_line()
-                    _, self._show_spks = imgui.checkbox("Spks", self._show_spks)
+            # trace options
+            _, self._show_trace = imgui.checkbox("Show Trace", self._show_trace)
+            if self._show_trace:
+                imgui.same_line()
+                _, self._show_fneu = imgui.checkbox("Fneu", self._show_fneu)
+                imgui.same_line()
+                _, self._show_spks = imgui.checkbox("Spks", self._show_spks)
 
-                # sync with viewer
-                _, self._sync_with_viewer = imgui.checkbox("Sync with viewer", self._sync_with_viewer)
-                set_tooltip("Sync current frame marker with the image viewer's time slider")
+            # sync with viewer
+            _, self._sync_with_viewer = imgui.checkbox("Sync with viewer", self._sync_with_viewer)
+            set_tooltip("Sync current frame marker with the image viewer's time slider")
 
-                # handle sync - update viewer frame when clicking on plot
-                if self._sync_with_viewer and changed:
-                    # could update z-plane based on which plane this cell is from
-                    pass
+            # trace plot
+            if self._show_trace and self._selected_cell < len(self._F):
+                trace_f = self._F[self._selected_cell]
+                xs = np.arange(len(trace_f), dtype=np.float64)
 
-                # trace plot
-                if self._show_trace:
-                    trace_f = self._F[self._selected_cell]
-                    xs = np.arange(len(trace_f), dtype=np.float64)
+                avail = imgui.get_content_region_avail()
+                plot_height = min(200, avail.y - 20) if avail.y > 50 else 150
 
-                    avail = imgui.get_content_region_avail()
-                    plot_height = min(200, avail.y - 20) if avail.y > 50 else 150
-
-                    plot_flags = implot.Flags_.crosshairs
-                    if implot.begin_plot(f"##trace_{self._selected_cell}", imgui.ImVec2(-1, plot_height), plot_flags):
+                plot_flags = implot.Flags_.crosshairs
+                if implot.begin_plot(f"##trace_{self._selected_cell}", imgui.ImVec2(-1, plot_height), plot_flags):
+                    try:
                         implot.setup_axes("Frame", "Fluorescence (a.u.)")
                         implot.setup_axis_limits(implot.ImAxis_.x1, 0, len(trace_f), implot.Cond_.once)
 
@@ -205,12 +203,12 @@ class Suite2pPipelineWidget(PipelineWidget):
                         implot.plot_line("F", xs, ys_f)
 
                         # plot Fneu if enabled
-                        if self._show_fneu and self._Fneu is not None:
+                        if self._show_fneu and self._Fneu is not None and self._selected_cell < len(self._Fneu):
                             ys_fneu = self._Fneu[self._selected_cell].astype(np.float64)
                             implot.plot_line("Fneu", xs, ys_fneu)
 
                         # plot spikes if enabled
-                        if self._show_spks and self._spks is not None:
+                        if self._show_spks and self._spks is not None and self._selected_cell < len(self._spks):
                             ys_spks = self._spks[self._selected_cell].astype(np.float64)
                             # scale spikes to be visible alongside F
                             if ys_spks.max() > 0:
@@ -228,7 +226,7 @@ class Suite2pPipelineWidget(PipelineWidget):
                                     implot.drag_line_x(0, current_t, imgui.ImVec4(1, 1, 0, 0.8))
                             except Exception:
                                 pass
-
+                    finally:
                         implot.end_plot()
         else:
             imgui.spacing()
@@ -259,29 +257,35 @@ class Suite2pPipelineWidget(PipelineWidget):
         imgui.spacing()
 
         # bar graph: neurons vs non-neurons
-        if self._iscell is not None and implot.begin_plot("Cell Classification", imgui.ImVec2(-1, 150)):
-            implot.setup_axes("", "Count")
-            implot.setup_axis_limits(implot.ImAxis_.x1, -0.5, 1.5)
-            implot.setup_axis_limits(implot.ImAxis_.y1, 0, max(n_neurons, n_non_neurons) * 1.1)
+        if self._iscell is not None:
+            if implot.begin_plot("Cell Classification", imgui.ImVec2(-1, 150)):
+                try:
+                    implot.setup_axes("", "Count")
+                    implot.setup_axis_limits(implot.ImAxis_.x1, -0.5, 1.5)
+                    implot.setup_axis_limits(implot.ImAxis_.y1, 0, max(n_neurons, n_non_neurons) * 1.1)
 
-            x_pos = np.array([0.0, 1.0], dtype=np.float64)
-            heights = np.array([float(n_neurons), float(n_non_neurons)], dtype=np.float64)
-            labels = ["Neurons", "Non-neurons"]
+                    x_pos = np.array([0.0, 1.0], dtype=np.float64)
+                    heights = np.array([float(n_neurons), float(n_non_neurons)], dtype=np.float64)
+                    labels = ["Neurons", "Non-neurons"]
 
-            implot.setup_axis_ticks_custom(implot.ImAxis_.x1, x_pos, labels)
-            implot.plot_bars("Cells", x_pos, heights, 0.6)
-            implot.end_plot()
+                    implot.setup_axis_ticks(implot.ImAxis_.x1, x_pos.tolist(), labels, False)
+                    implot.plot_bars("Cells", x_pos, heights, 0.6)
+                finally:
+                    implot.end_plot()
 
         # SNR histogram
-        if len(snr_values) > 0 and implot.begin_plot("SNR Distribution", imgui.ImVec2(-1, 150)):
-            implot.setup_axes("SNR", "Count")
+        if len(snr_values) > 0:
+            if implot.begin_plot("SNR Distribution", imgui.ImVec2(-1, 150)):
+                try:
+                    implot.setup_axes("SNR", "Count")
 
-            # create histogram bins
-            hist, bin_edges = np.histogram(snr_values, bins=30)
-            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+                    # create histogram bins
+                    hist, bin_edges = np.histogram(snr_values, bins=30)
+                    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
-            implot.plot_bars("SNR", bin_centers.astype(np.float64), hist.astype(np.float64), bin_edges[1] - bin_edges[0])
-            implot.end_plot()
+                    implot.plot_bars("SNR", bin_centers.astype(np.float64), hist.astype(np.float64), bin_edges[1] - bin_edges[0])
+                finally:
+                    implot.end_plot()
 
         # top/bottom SNR cells
         if len(snr_values) > 0:
@@ -325,41 +329,44 @@ class Suite2pPipelineWidget(PipelineWidget):
             imgui.spacing()
             if imgui.collapsing_header("Scatter Plots"):
                 # SNR vs cell probability
-                if self._cellprob is not None and implot.begin_plot("Cell Probability vs SNR", imgui.ImVec2(-1, 200)):
-                    implot.setup_axes("SNR", "Cell Probability")
+                if self._cellprob is not None:
+                    if implot.begin_plot("Cell Probability vs SNR", imgui.ImVec2(-1, 200)):
+                        try:
+                            implot.setup_axes("SNR", "Cell Probability")
 
-                    # separate neurons and non-neurons
-                    if self._iscell is not None:
-                        neuron_mask = self._iscell
-                        neuron_snr = snr_values[neuron_mask].astype(np.float64)
-                        neuron_prob = self._cellprob[neuron_mask].astype(np.float64)
-                        non_neuron_snr = snr_values[~neuron_mask].astype(np.float64)
-                        non_neuron_prob = self._cellprob[~neuron_mask].astype(np.float64)
+                            # separate neurons and non-neurons
+                            if self._iscell is not None:
+                                neuron_mask = self._iscell
+                                neuron_snr = snr_values[neuron_mask].astype(np.float64)
+                                neuron_prob = self._cellprob[neuron_mask].astype(np.float64)
+                                non_neuron_snr = snr_values[~neuron_mask].astype(np.float64)
+                                non_neuron_prob = self._cellprob[~neuron_mask].astype(np.float64)
 
-                        if len(neuron_snr) > 0:
-                            implot.plot_scatter("Neurons", neuron_snr, neuron_prob)
-                        if len(non_neuron_snr) > 0:
-                            implot.plot_scatter("Non-neurons", non_neuron_snr, non_neuron_prob)
-                    else:
-                        implot.plot_scatter("All Cells", snr_values.astype(np.float64), self._cellprob.astype(np.float64))
-
-                    implot.end_plot()
+                                if len(neuron_snr) > 0:
+                                    implot.plot_scatter("Neurons", neuron_snr, neuron_prob)
+                                if len(non_neuron_snr) > 0:
+                                    implot.plot_scatter("Non-neurons", non_neuron_snr, non_neuron_prob)
+                            else:
+                                implot.plot_scatter("All Cells", snr_values.astype(np.float64), self._cellprob.astype(np.float64))
+                        finally:
+                            implot.end_plot()
 
                 # F mean vs std
                 if implot.begin_plot("Fluorescence Mean vs Std", imgui.ImVec2(-1, 200)):
-                    implot.setup_axes("Mean F", "Std F")
+                    try:
+                        implot.setup_axes("Mean F", "Std F")
 
-                    f_means = np.array([np.mean(self._F[i]) for i in range(len(self._F))], dtype=np.float64)
-                    f_stds = np.array([np.std(self._F[i]) for i in range(len(self._F))], dtype=np.float64)
+                        f_means = np.array([np.mean(self._F[i]) for i in range(len(self._F))], dtype=np.float64)
+                        f_stds = np.array([np.std(self._F[i]) for i in range(len(self._F))], dtype=np.float64)
 
-                    if self._iscell is not None:
-                        neuron_mask = self._iscell
-                        implot.plot_scatter("Neurons", f_means[neuron_mask], f_stds[neuron_mask])
-                        implot.plot_scatter("Non-neurons", f_means[~neuron_mask], f_stds[~neuron_mask])
-                    else:
-                        implot.plot_scatter("All Cells", f_means, f_stds)
-
-                    implot.end_plot()
+                        if self._iscell is not None:
+                            neuron_mask = self._iscell
+                            implot.plot_scatter("Neurons", f_means[neuron_mask], f_stds[neuron_mask])
+                            implot.plot_scatter("Non-neurons", f_means[~neuron_mask], f_stds[~neuron_mask])
+                        else:
+                            implot.plot_scatter("All Cells", f_means, f_stds)
+                    finally:
+                        implot.end_plot()
 
     def _load_results(self, stat_path: str) -> None:
         """load suite2p results from stat.npy directory."""

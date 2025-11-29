@@ -328,7 +328,9 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "MBO Utilities – Data Selection"
-    params.app_window_params.window_geometry.size = (1400, 950)
+    params.app_window_params.window_geometry.size = (420, 480)
+    params.app_window_params.window_geometry.size_auto = False
+    params.app_window_params.resizable = True
     params.ini_filename = str(
         Path(get_mbo_dirs()["settings"], "fd_settings.ini").expanduser()
     )
@@ -429,7 +431,6 @@ def _create_image_widget(data_array, widget: bool = True):
             graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
     else:
-        # Use default NDImageProcessor - MboRawArray handles phase correction internally
         iw = fpl.ImageWidget(
             data=data_array,
             slider_dim_names=slider_dim_names,
