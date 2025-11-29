@@ -51,6 +51,9 @@ __all__ = [
     # Visualization
     "save_mp4",
     "save_png",
+    # CLI utilities
+    "download_file",
+    "download_notebook",
 ]
 
 
@@ -107,5 +110,10 @@ def __getattr__(name):
     if name in ("save_mp4", "save_png"):
         from . import plot_util
         return getattr(plot_util, name)
+
+    # CLI utilities (cli -> click, urllib only)
+    if name in ("download_file", "download_notebook"):
+        from . import cli
+        return getattr(cli, name)
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
