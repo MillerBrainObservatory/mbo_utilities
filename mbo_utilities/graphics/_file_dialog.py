@@ -124,60 +124,37 @@ class FileDialog:
         imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.22, 0.22, 0.23, 1.0))
         imgui.push_style_color(imgui.Col_.frame_bg_hovered, imgui.ImVec4(0.28, 0.28, 0.29, 1.0))
         imgui.push_style_color(imgui.Col_.check_mark, COL_ACCENT)
-        imgui.push_style_var(imgui.StyleVar_.window_padding, hello_imgui.em_to_vec2(3.0, 3.0))
-        imgui.push_style_var(imgui.StyleVar_.frame_padding, hello_imgui.em_to_vec2(1.2, 0.8))
-        imgui.push_style_var(imgui.StyleVar_.item_spacing, hello_imgui.em_to_vec2(1.2, 1.0))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, hello_imgui.em_to_vec2(1.0, 0.8))
+        imgui.push_style_var(imgui.StyleVar_.frame_padding, hello_imgui.em_to_vec2(0.6, 0.4))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, hello_imgui.em_to_vec2(0.6, 0.4))
         imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
 
         win_w = imgui.get_window_width()
         win_h = imgui.get_window_height()
 
-        # main container - no scrollbar, we'll manage layout ourselves
-        child_flags = imgui.ChildFlags_.none
-        window_flags = imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse
-        with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0), child_flags=child_flags, window_flags=window_flags):
+        with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0)):
             imgui.push_id("pfd")
 
-            base_font_size = imgui.get_font_size()
-
-            # Calculate fixed heights for header, buttons, and footer
-            header_height = hello_imgui.em_size(6.0)  # title + subtitle + spacing
-            buttons_height = hello_imgui.em_size(10.0)  # two buttons + spacing
-            footer_height = hello_imgui.em_size(5.0)  # quit button + padding
-            padding = hello_imgui.em_size(3.0)  # window padding
-
-            # Available height for features card
-            available_h = win_h - header_height - buttons_height - footer_height - padding
-            min_features_h = hello_imgui.em_size(8.0)  # minimum height for features
-            features_h = max(min_features_h, available_h)
-
-            imgui.dummy(hello_imgui.em_to_vec2(0, 1.0))
-
-            imgui.push_font(None, base_font_size * 1.8)
+            # header
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
             title = "Miller Brain Observatory"
             title_sz = imgui.calc_text_size(title)
             imgui.set_cursor_pos_x((win_w - title_sz.x) * 0.5)
             imgui.text_colored(COL_ACCENT, title)
-            imgui.pop_font()
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-
-            imgui.push_font(None, base_font_size * 1.2)
             subtitle = "Data Preview & Utilities"
             sub_sz = imgui.calc_text_size(subtitle)
             imgui.set_cursor_pos_x((win_w - sub_sz.x) * 0.5)
             imgui.text_colored(COL_TEXT_DIM, subtitle)
-            imgui.pop_font()
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 1.0))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
             imgui.separator()
-            imgui.dummy(hello_imgui.em_to_vec2(0, 1.0))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
 
-            btn_w = hello_imgui.em_size(24)
-            btn_h = hello_imgui.em_size(3.0)
+            # action buttons
+            btn_w = hello_imgui.em_size(16)
+            btn_h = hello_imgui.em_size(1.8)
             btn_x = (win_w - btn_w) * 0.5
-
-            imgui.push_font(None, base_font_size * 1.3)
 
             imgui.set_cursor_pos_x(btn_x)
             push_button_style(primary=True)
@@ -192,7 +169,7 @@ class FileDialog:
             pop_button_style()
             set_tooltip("Select one or more image files")
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.6))
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
             imgui.set_cursor_pos_x(btn_x)
             push_button_style(primary=True)
@@ -201,66 +178,57 @@ class FileDialog:
             pop_button_style()
             set_tooltip("Select folder with image data")
 
-            imgui.pop_font()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.4))
 
-            imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
+            # calculate dynamic card height based on available space
+            # fixed heights: header ~3em, buttons ~4.5em, quit ~2em, padding ~2em
+            fixed_height = hello_imgui.em_size(12)
+            available_for_card = win_h - fixed_height
+            # content needs ~14em to fit without scrollbar
+            content_height = hello_imgui.em_size(14)
+            # use available space, but cap at content height (no need to be bigger)
+            card_h = min(available_for_card, content_height)
+            # minimum height to show at least something useful
+            card_h = max(card_h, hello_imgui.em_size(6))
 
-            feat_w = min(hello_imgui.em_size(36), win_w - hello_imgui.em_size(4))
-            feat_x = (win_w - feat_w) * 0.5
-            imgui.set_cursor_pos_x(feat_x)
+            # formats section - dynamic width based on window
+            card_w = min(hello_imgui.em_size(24), win_w - hello_imgui.em_size(2))
+            card_x = (win_w - card_w) * 0.5
+            imgui.set_cursor_pos_x(card_x)
 
             imgui.push_style_color(imgui.Col_.child_bg, COL_BG_CARD)
-            imgui.push_style_var(imgui.StyleVar_.child_rounding, 8.0)
+            imgui.push_style_var(imgui.StyleVar_.child_rounding, 6.0)
 
-            # Calculate scale factor based on available height
-            ideal_content_h = hello_imgui.em_size(20.0)  # ideal height for content
-            scale = min(1.0, max(0.2, features_h / ideal_content_h))
+            # only show scrollbar if content doesn't fit
+            needs_scroll = card_h < content_height
+            child_flags = imgui.ChildFlags_.borders
+            window_flags = imgui.WindowFlags_.none if needs_scroll else (imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
 
-            # Scaled spacing helper
-            def sp(em_val):
-                return hello_imgui.em_to_vec2(0, em_val * scale)
+            with imgui_ctx.begin_child("##formats", size=imgui.ImVec2(card_w, card_h), child_flags=child_flags, window_flags=window_flags):
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+                imgui.indent(hello_imgui.em_size(0.4))
 
-            # Font scale for content
-            font_scale = 0.85 + 0.30 * scale  # 0.85 to 1.15
-
-            # Scale item spacing and frame padding globally for this section
-            imgui.push_style_var(imgui.StyleVar_.item_spacing, hello_imgui.em_to_vec2(1.0 * scale, 0.4 * scale))
-            imgui.push_style_var(imgui.StyleVar_.frame_padding, hello_imgui.em_to_vec2(0.8 * scale, 0.4 * scale))
-
-            # No scrollbar ever - use auto_resize_y and let content scale
-            feat_child_flags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.borders
-            feat_window_flags = imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse
-            with imgui_ctx.begin_child("##features", size=imgui.ImVec2(feat_w, 0), child_flags=feat_child_flags, window_flags=feat_window_flags):
-                imgui.dummy(sp(0.4))
-
-                imgui.push_font(None, base_font_size * font_scale)
-
-                indent_size = hello_imgui.em_size(0.8 * scale)
-                imgui.indent(indent_size)
-
-                imgui.text_colored(COL_ACCENT, "Supported Array Types")
+                imgui.text_colored(COL_ACCENT, "Supported Formats")
                 imgui.same_line()
                 push_button_style(primary=False)
                 if imgui.small_button("docs"):
                     import webbrowser
                     webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/array_types.html")
                 pop_button_style()
-                imgui.dummy(sp(0.3))
 
-                # Table with array types and file extensions
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
+
+                # table with array types
                 table_flags = (
                     imgui.TableFlags_.borders_inner_v
                     | imgui.TableFlags_.row_bg
                     | imgui.TableFlags_.sizing_stretch_same
                 )
-
                 if imgui.begin_table("##array_types", 2, table_flags):
-                    # Headers
                     imgui.table_setup_column("Format")
                     imgui.table_setup_column("Extensions")
                     imgui.table_headers_row()
 
-                    # Array type data: (name, extensions)
                     array_types = [
                         ("ScanImage", ".tif, .tiff"),
                         ("TIFF", ".tif, .tiff"),
@@ -270,70 +238,55 @@ class FileDialog:
                         ("NumPy", ".npy"),
                         ("NWB", ".nwb"),
                     ]
-
                     for name, ext in array_types:
                         imgui.table_next_row()
                         imgui.table_next_column()
                         imgui.text(name)
                         imgui.table_next_column()
                         imgui.text_colored(COL_TEXT_DIM, ext)
-
                     imgui.end_table()
 
-                imgui.dummy(sp(0.3))
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
                 imgui.separator()
-                imgui.dummy(sp(0.3))
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
                 imgui.text_colored(COL_ACCENT, "Options")
-                imgui.dummy(sp(0.2))
-
-                _, self._widget_enabled = imgui.checkbox("Enable preview widget", self._widget_enabled)
-                _, self.split_rois = imgui.checkbox("Separate multi-ROIs", self.split_rois)
+                _, self._widget_enabled = imgui.checkbox("Preview widget", self._widget_enabled)
+                _, self.split_rois = imgui.checkbox("Separate mROIs", self.split_rois)
                 _, self.metadata_only = imgui.checkbox("Metadata only", self.metadata_only)
 
-                imgui.pop_font()
-
-                imgui.unindent(indent_size)
-                imgui.dummy(sp(0.4))
-
-            imgui.pop_style_var(2)  # item_spacing, frame_padding
-            imgui.pop_style_var()   # child_rounding
+                imgui.unindent(hello_imgui.em_size(0.4))
+            imgui.pop_style_var()
             imgui.pop_style_color()
 
             # file/folder completion
             if self._open_multi and self._open_multi.ready():
                 self.selected_path = self._open_multi.result()
                 if self.selected_path:
-                    # Save to recent files and update last open directory
                     for p in (self.selected_path if isinstance(self.selected_path, list) else [self.selected_path]):
                         add_recent_file(p, file_type="file")
                         set_last_open_dir(p)
-                    # Save GUI preferences
                     self._save_gui_preferences()
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._open_multi = None
             if self._select_folder and self._select_folder.ready():
                 self.selected_path = self._select_folder.result()
                 if self.selected_path:
-                    # Save to recent files and update last open directory
                     add_recent_file(self.selected_path, file_type="folder")
                     set_last_open_dir(self.selected_path)
-                    # Save GUI preferences
                     self._save_gui_preferences()
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._select_folder = None
 
-            # Quit button - position at bottom right
-            imgui.push_font(None, base_font_size * 1.2)
-            qsz = imgui.ImVec2(hello_imgui.em_size(10), hello_imgui.em_size(2.5))
-            quit_y = win_h - qsz.y - hello_imgui.em_size(2.0)
-            imgui.set_cursor_pos(imgui.ImVec2(win_w - qsz.x - hello_imgui.em_size(2.5), quit_y))
+            # quit button - inline at bottom
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            qsz = imgui.ImVec2(hello_imgui.em_size(5), hello_imgui.em_size(1.5))
+            imgui.set_cursor_pos_x(win_w - qsz.x - hello_imgui.em_size(1.0))
             push_button_style(primary=False)
             if imgui.button("Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
                 self.selected_path = None
                 hello_imgui.get_runner_params().app_shall_exit = True
             pop_button_style()
-            imgui.pop_font()
 
             imgui.pop_id()
 

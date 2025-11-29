@@ -15,10 +15,6 @@ __all__ = [
     "PreviewDataWidget",
     "run_gui",
     "download_notebook",
-    "BaseImageProcessor",
-    "RasterScanProcessor",
-    "MboImageProcessor",  # Alias for backwards compatibility
-    "MultiSessionImageProcessor",
 ]
 
 # Track if wgpu has been configured (to avoid duplicate setup)
@@ -68,21 +64,4 @@ def __getattr__(name):
         _configure_wgpu_backend()  # Configure before GUI imports
         from .imgui import PreviewDataWidget
         return PreviewDataWidget
-    elif name == "BaseImageProcessor":
-        _configure_wgpu_backend()  # Configure before fastplotlib imports
-        from ._processors import BaseImageProcessor
-        return BaseImageProcessor
-    elif name == "RasterScanProcessor":
-        _configure_wgpu_backend()
-        from ._processors import RasterScanProcessor
-        return RasterScanProcessor
-    elif name == "MboImageProcessor":
-        # Backwards compatibility alias
-        _configure_wgpu_backend()
-        from ._processors import MboImageProcessor
-        return MboImageProcessor
-    elif name == "MultiSessionImageProcessor":
-        _configure_wgpu_backend()
-        from ._processors import MultiSessionImageProcessor
-        return MultiSessionImageProcessor
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

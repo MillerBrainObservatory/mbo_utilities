@@ -1050,6 +1050,7 @@ class MboRawArray:
         self.max_offset = max_offset
         self.upsample = upsample
         self._offset = 0.0
+        self._mean_subtraction = False
         self.pbar = None
         self.show_pbar = False
         self.logger = logger
@@ -1165,6 +1166,7 @@ class MboRawArray:
                 "nframes": self.num_frames,
                 "num_frames": self.num_frames,  # alias for backwards compatibility
                 "use_fft": self.use_fft,
+                "mean_subtraction": self.mean_subtraction,
             }
         )
         return self._metadata
@@ -1241,6 +1243,18 @@ class MboRawArray:
         if not isinstance(value, bool):
             raise ValueError("do_phasecorr must be a boolean value.")
         self._fix_phase = value
+
+    @property
+    def mean_subtraction(self):
+        """Get whether mean subtraction is enabled."""
+        return self._mean_subtraction
+
+    @mean_subtraction.setter
+    def mean_subtraction(self, value: bool):
+        """Set whether mean subtraction is enabled."""
+        if not isinstance(value, bool):
+            raise ValueError("mean_subtraction must be a boolean value.")
+        self._mean_subtraction = value
 
     @property
     def roi(self):

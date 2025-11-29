@@ -3,7 +3,6 @@ import webbrowser
 from pathlib import Path
 from typing import Literal
 import threading
-from functools import partial
 import os
 import importlib.util
 
@@ -98,6 +97,7 @@ def _save_as_worker(path, **imwrite_kwargs):
     use_fft = imwrite_kwargs.pop("use_fft", False)
     phase_upsample = imwrite_kwargs.pop("phase_upsample", 10)
     border = imwrite_kwargs.pop("border", 10)
+    mean_subtraction = imwrite_kwargs.pop("mean_subtraction", False)
 
     if hasattr(data, "fix_phase"):
         data.fix_phase = fix_phase
@@ -107,6 +107,8 @@ def _save_as_worker(path, **imwrite_kwargs):
         data.phase_upsample = phase_upsample
     if hasattr(data, "border"):
         data.border = border
+    if hasattr(data, "mean_subtraction"):
+        data.mean_subtraction = mean_subtraction
 
     imwrite(data, **imwrite_kwargs)
 
@@ -165,8 +167,7 @@ def draw_menu(parent):
                         start_dir = str(get_default_open_dir())
                     parent._file_dialog = pfd.open_file(
                         "Select Data File",
-                        start_dir,
-                        ["TIFF Files", "*.tif *.tiff", "Raw Files", "*.raw", "All Files", "*.*"]
+                        start_dir
                     )
                 # Open Folder - iw-array API
                 if imgui.menu_item("Open Folder", "", p_selected=False, enabled=True)[0]:
@@ -600,6 +601,7 @@ def draw_saveas_popup(parent):
                         "phase_upsample": parent.phase_upsample,
                         "border": parent.border,
                         "register_z": parent._register_z,
+                        "mean_subtraction": parent.mean_subtraction,
                         "progress_callback": lambda frac,
                         current_plane: parent.gui_progress_callback(frac, current_plane),
                     }
@@ -772,6 +774,7 @@ class PreviewDataWidget(EdgeWindow):
         self._auto_update = False
         self._proj = "mean"
         self._mean_subtraction = False
+        self._last_z_idx = 0  # track z-index for mean subtraction updates
 
         self._register_z = False
         self._register_z_progress = 0.0
@@ -840,20 +843,13 @@ class PreviewDataWidget(EdgeWindow):
         """
         Trigger a frame refresh on the ImageWidget.
 
-        Uses the internal _set_slider_index method to force a display update
-        without changing the actual index value.
+        Forces the widget to re-render the current frame by re-setting indices,
+        which causes the processor's get() method to be called again.
         """
-        # iw-array API: trigger refresh by re-setting the current t index
-        # This forces the widget to re-render the current frame
-        names = self.image_widget._slider_dim_names or ()
-        if "t" in names:
-            current_t = self.image_widget.indices["t"]
-            # Use internal method to trigger update without full re-index
-            if hasattr(self.image_widget, '_set_slider_index'):
-                self.image_widget._set_slider_index(0, current_t)
-            else:
-                # Fallback: reassign the index to trigger update
-                self.image_widget.indices["t"] = current_t
+        # Force refresh by re-assigning current indices
+        # This triggers the indices setter which calls processor.get() for each graphic
+        current_indices = list(self.image_widget.indices)
+        self.image_widget.indices = current_indices
 
     def _set_processor_attr(self, attr: str, value):
         """
@@ -1074,15 +1070,9 @@ class PreviewDataWidget(EdgeWindow):
     def gaussian_sigma(self, value: float):
         """Set gaussian blur using fastplotlib's spatial_func API."""
         self._gaussian_sigma = max(0.0, value)
-
-        if self._gaussian_sigma > 0:
-            spatial_func = partial(gaussian_filter, sigma=self._gaussian_sigma)
-        else:
-            spatial_func = None
-
-        # Set directly on processors with histogram computation disabled
-        # to avoid expensive full-array histogram recomputation
-        self._set_processor_attr("spatial_func", spatial_func)
+        # Rebuild spatial_func which combines mean subtraction and gaussian blur
+        self._rebuild_spatial_func()
+        self._refresh_image_widget()
 
     @property
     def proj(self) -> str:
@@ -1107,21 +1097,64 @@ class PreviewDataWidget(EdgeWindow):
             self._update_mean_subtraction()
 
     def _update_mean_subtraction(self):
-        """Update processor mean_image based on mean_subtraction setting."""
-        if self._mean_subtraction:
-            # Set mean image on each processor from z-stats
-            names = self.image_widget._slider_dim_names or ()
-            z_idx = self.image_widget.indices["z"] if "z" in names else 0
-            for i, proc in enumerate(self.processors):
-                if self._zstats_done[i] and self._zstats_mean_scalar[i] is not None:
-                    # Use the scalar mean for the current z-plane
-                    proc.mean_image = self._zstats_mean_scalar[i][z_idx]
-                else:
-                    proc.mean_image = None
-        else:
-            # Clear mean image
-            for proc in self.processors:
-                proc.mean_image = None
+        """Update spatial_func to apply mean subtraction."""
+        self._rebuild_spatial_func()
+        self._refresh_image_widget()
+
+    def _rebuild_spatial_func(self):
+        """Rebuild and apply the combined spatial function (mean subtraction + gaussian blur)."""
+        names = self.image_widget._slider_dim_names or ()
+        z_idx = self.image_widget.indices["z"] if "z" in names else 0
+
+        # Get gaussian sigma (shared across all processors)
+        sigma = self.gaussian_sigma if self.gaussian_sigma > 0 else None
+
+        # Check if any processing is needed
+        any_mean_sub = self._mean_subtraction and any(
+            self._zstats_done[i] and self._zstats_means[i] is not None
+            for i in range(self.num_graphics)
+        )
+
+        if not any_mean_sub and sigma is None:
+            # No processing needed - clear spatial_func by setting identity
+            # fastplotlib doesn't accept None, so we use a passthrough function
+            def identity(frame):
+                return frame
+            self.image_widget.spatial_func = identity
+            self.logger.info("Spatial functions cleared (no mean subtraction or gaussian)")
+            return
+
+        # Build spatial_func list for each processor
+        spatial_funcs = []
+        for i in range(self.num_graphics):
+            # Get mean image for this processor/z-plane if mean subtraction enabled
+            mean_img = None
+            if self._mean_subtraction and self._zstats_done[i] and self._zstats_means[i] is not None:
+                mean_img = self._zstats_means[i][z_idx].astype(np.float32)
+                self.logger.info(
+                    f"Mean subtraction enabled for graphic {i}, z={z_idx}, "
+                    f"mean_img shape={mean_img.shape}, mean value={mean_img.mean():.1f}"
+                )
+
+            # Build combined spatial function (always create one, fastplotlib doesn't accept None in list)
+            spatial_funcs.append(self._make_spatial_func(mean_img, sigma))
+
+        # Apply to image widget
+        self.image_widget.spatial_func = spatial_funcs
+
+    def _make_spatial_func(self, mean_img: np.ndarray | None, sigma: float | None):
+        """Create a spatial function that applies mean subtraction and/or gaussian blur."""
+        def spatial_func(frame):
+            result = frame
+            # Apply mean subtraction first
+            if mean_img is not None:
+                result = result.astype(np.float32) - mean_img
+            # Apply gaussian blur second
+            if sigma is not None and sigma > 0:
+                from scipy.ndimage import gaussian_filter
+                result = gaussian_filter(result, sigma=sigma)
+            return result
+        return spatial_func
 
     def _update_window_funcs(self):
         """Update window_funcs on image widget based on current projection mode."""
@@ -1224,6 +1257,14 @@ class PreviewDataWidget(EdgeWindow):
         draw_saveas_popup(self)
         draw_menu(self)
         draw_tabs(self)
+
+        # Update mean subtraction when z-plane changes
+        if self._mean_subtraction:
+            names = self.image_widget._slider_dim_names or ()
+            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+            if z_idx != self._last_z_idx:
+                self._last_z_idx = z_idx
+                self._update_mean_subtraction()
 
     def _check_file_dialogs(self):
         """Check if file/folder dialogs have results and load data if so."""
@@ -1434,49 +1475,50 @@ class PreviewDataWidget(EdgeWindow):
                 if graphic_means and implot.begin_plot(
                     "Signal Comparison", imgui.ImVec2(plot_width, 350)
                 ):
-                    style_seaborn_dark()
-                    implot.setup_axes(
-                        "Graphic",
-                        "Mean Fluorescence (a.u.)",
-                        implot.AxisFlags_.none.value,
-                        implot.AxisFlags_.auto_fit.value,
-                    )
+                    try:
+                        style_seaborn_dark()
+                        implot.setup_axes(
+                            "Graphic",
+                            "Mean Fluorescence (a.u.)",
+                            implot.AxisFlags_.none.value,
+                            implot.AxisFlags_.auto_fit.value,
+                        )
 
-                    x_pos = np.arange(len(graphic_means), dtype=np.float64)
-                    heights = np.array(graphic_means, dtype=np.float64)
+                        x_pos = np.arange(len(graphic_means), dtype=np.float64)
+                        heights = np.array(graphic_means, dtype=np.float64)
 
-                    labels = [f"{i + 1}" for i in range(len(graphic_means))]
-                    implot.setup_axis_limits(
-                        implot.ImAxis_.x1.value, -0.5, len(graphic_means) - 0.5
-                    )
-                    implot.setup_axis_ticks_custom(
-                        implot.ImAxis_.x1.value, x_pos, labels
-                    )
+                        labels = [f"{i + 1}" for i in range(len(graphic_means))]
+                        implot.setup_axis_limits(
+                            implot.ImAxis_.x1.value, -0.5, len(graphic_means) - 0.5
+                        )
+                        implot.setup_axis_ticks(
+                            implot.ImAxis_.x1.value, x_pos.tolist(), labels, False
+                        )
 
-                    implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                    implot.push_style_color(
-                        implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
-                    )
-                    implot.plot_bars(
-                        "Graphic Signal",
-                        x_pos,
-                        heights,
-                        0.6,
-                    )
-                    implot.pop_style_color()
-                    implot.pop_style_var()
+                        implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
+                        implot.push_style_color(
+                            implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                        )
+                        implot.plot_bars(
+                            "Graphic Signal",
+                            x_pos,
+                            heights,
+                            0.6,
+                        )
+                        implot.pop_style_color()
+                        implot.pop_style_var()
 
-                    # Add mean line
-                    mean_line = np.full_like(heights, mean_vals[0])
-                    implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
-                    implot.push_style_color(
-                        implot.Col_.line.value, (1.0, 0.4, 0.2, 0.8)
-                    )
-                    implot.plot_line("Average", x_pos, mean_line)
-                    implot.pop_style_color()
-                    implot.pop_style_var()
-
-                    implot.end_plot()
+                        # Add mean line
+                        mean_line = np.full_like(heights, mean_vals[0])
+                        implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
+                        implot.push_style_color(
+                            implot.Col_.line.value, (1.0, 0.4, 0.2, 0.8)
+                        )
+                        implot.plot_line("Average", x_pos, mean_line)
+                        implot.pop_style_color()
+                        implot.pop_style_var()
+                    finally:
+                        implot.end_plot()
 
             else:
                 # Multi-z-plane: show original table and combined plot
@@ -1535,40 +1577,41 @@ class PreviewDataWidget(EdgeWindow):
                 if implot.begin_plot(
                     "Z-Plane Plot (Combined)", imgui.ImVec2(plot_width, 300)
                 ):
-                    style_seaborn_dark()
-                    implot.setup_axes(
-                        "Z-Plane",
-                        "Mean Fluorescence",
-                        implot.AxisFlags_.none.value,
-                        implot.AxisFlags_.auto_fit.value,
-                    )
-
-                    implot.setup_axis_limits(
-                        implot.ImAxis_.x1.value, float(z[0]), float(z[-1])
-                    )
-                    implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
-
-                    for i, ys in enumerate(graphic_series):
-                        label = f"ROI {i + 1}##roi{i}"
-                        implot.push_style_var(implot.StyleVar_.line_weight.value, 1)
-                        implot.push_style_color(
-                            implot.Col_.line.value, (0.6, 0.6, 0.6, 0.35)
+                    try:
+                        style_seaborn_dark()
+                        implot.setup_axes(
+                            "Z-Plane",
+                            "Mean Fluorescence",
+                            implot.AxisFlags_.none.value,
+                            implot.AxisFlags_.auto_fit.value,
                         )
-                        implot.plot_line(label, z, ys)
+
+                        implot.setup_axis_limits(
+                            implot.ImAxis_.x1.value, float(z[0]), float(z[-1])
+                        )
+                        implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
+
+                        for i, ys in enumerate(graphic_series):
+                            label = f"ROI {i + 1}##roi{i}"
+                            implot.push_style_var(implot.StyleVar_.line_weight.value, 1)
+                            implot.push_style_color(
+                                implot.Col_.line.value, (0.6, 0.6, 0.6, 0.35)
+                            )
+                            implot.plot_line(label, z, ys)
+                            implot.pop_style_color()
+                            implot.pop_style_var()
+
+                        implot.push_style_color(
+                            implot.Col_.fill.value, (0.2, 0.4, 0.8, 0.25)
+                        )
+                        implot.plot_shaded("Mean ± Std##band", z, lower, upper)
                         implot.pop_style_color()
+
+                        implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
+                        implot.plot_line("Mean##line", z, mean_vals)
                         implot.pop_style_var()
-
-                    implot.push_style_color(
-                        implot.Col_.fill.value, (0.2, 0.4, 0.8, 0.25)
-                    )
-                    implot.plot_shaded("Mean ± Std##band", z, lower, upper)
-                    implot.pop_style_color()
-
-                    implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
-                    implot.plot_line("Mean##line", z, mean_vals)
-                    implot.pop_style_var()
-
-                    implot.end_plot()
+                    finally:
+                        implot.end_plot()
 
         else:
             array_idx = self._selected_array
@@ -1634,39 +1677,40 @@ class PreviewDataWidget(EdgeWindow):
                 if implot.begin_plot(
                     f"Signal Metrics {array_idx}", imgui.ImVec2(plot_width, 350)
                 ):
-                    implot.setup_axes(
-                        "Metric",
-                        "Value (normalized)",
-                        implot.AxisFlags_.none.value,
-                        implot.AxisFlags_.auto_fit.value,
-                    )
+                    try:
+                        implot.setup_axes(
+                            "Metric",
+                            "Value (normalized)",
+                            implot.AxisFlags_.none.value,
+                            implot.AxisFlags_.auto_fit.value,
+                        )
 
-                    # Normalize values for better visualization
-                    norm_mean = mean_vals[0]
-                    norm_std = std_vals[0]
-                    norm_snr = snr_vals[0] * (
-                        norm_mean / max(snr_vals[0], 1.0)
-                    )  # Scale SNR to be comparable
+                        # Normalize values for better visualization
+                        norm_mean = mean_vals[0]
+                        norm_std = std_vals[0]
+                        norm_snr = snr_vals[0] * (
+                            norm_mean / max(snr_vals[0], 1.0)
+                        )  # Scale SNR to be comparable
 
-                    x_pos = np.array([0.0, 1.0, 2.0], dtype=np.float64)
-                    heights = np.array(
-                        [norm_mean, norm_std, norm_snr], dtype=np.float64
-                    )
+                        x_pos = np.array([0.0, 1.0, 2.0], dtype=np.float64)
+                        heights = np.array(
+                            [norm_mean, norm_std, norm_snr], dtype=np.float64
+                        )
 
-                    implot.setup_axis_limits(implot.ImAxis_.x1.value, -0.5, 2.5)
-                    implot.setup_axis_ticks(
-                        implot.ImAxis_.x1.value, x_pos, ["Mean", "Std Dev", "SNR"], False
-                    )
+                        implot.setup_axis_limits(implot.ImAxis_.x1.value, -0.5, 2.5)
+                        implot.setup_axis_ticks(
+                            implot.ImAxis_.x1.value, x_pos, ["Mean", "Std Dev", "SNR"], False
+                        )
 
-                    implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                    implot.push_style_color(
-                        implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
-                    )
-                    implot.plot_bars("Signal Metrics", x_pos, heights, 0.6)
-                    implot.pop_style_color()
-                    implot.pop_style_var()
-
-                    implot.end_plot()
+                        implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
+                        implot.push_style_color(
+                            implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                        )
+                        implot.plot_bars("Signal Metrics", x_pos, heights, 0.6)
+                        implot.pop_style_color()
+                        implot.pop_style_var()
+                    finally:
+                        implot.end_plot()
 
             else:
                 # Multi-z-plane: show original table and line plot
@@ -1702,18 +1746,20 @@ class PreviewDataWidget(EdgeWindow):
                 if implot.begin_plot(
                     f"Z-Plane Signal {array_idx}", imgui.ImVec2(plot_width, 300)
                 ):
-                    implot.setup_axes(
-                        "Z-Plane",
-                        "Mean Fluorescence",
-                        implot.AxisFlags_.auto_fit.value,
-                        implot.AxisFlags_.auto_fit.value,
-                    )
-                    implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
-                    implot.plot_error_bars(
-                        f"Mean ± Std {array_idx}", z_vals, mean_vals, std_vals
-                    )
-                    implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals)
-                    implot.end_plot()
+                    try:
+                        implot.setup_axes(
+                            "Z-Plane",
+                            "Mean Fluorescence",
+                            implot.AxisFlags_.auto_fit.value,
+                            implot.AxisFlags_.auto_fit.value,
+                        )
+                        implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
+                        implot.plot_error_bars(
+                            f"Mean ± Std {array_idx}", z_vals, mean_vals, std_vals
+                        )
+                        implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals)
+                    finally:
+                        implot.end_plot()
 
     def draw_preview_section(self):
         """Draw preview section using modular UI sections based on data capabilities."""

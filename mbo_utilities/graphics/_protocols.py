@@ -98,20 +98,6 @@ class SupportsPhaseOffset(Protocol):
         ...
 
 
-@runtime_checkable
-class SupportsMeanSubtraction(Protocol):
-    """Protocol for processors that support mean subtraction."""
-
-    @property
-    def mean_image(self) -> np.ndarray | None:
-        """Mean image for subtraction."""
-        ...
-
-    @mean_image.setter
-    def mean_image(self, value: np.ndarray | None) -> None:
-        ...
-
-
 # Helper functions for capability detection
 
 
@@ -135,11 +121,6 @@ def supports_phase_offset(obj) -> bool:
     return isinstance(obj, SupportsPhaseOffset)
 
 
-def supports_mean_subtraction(obj) -> bool:
-    """Check if an object supports mean subtraction."""
-    return isinstance(obj, SupportsMeanSubtraction)
-
-
 def get_capabilities(obj) -> set[str]:
     """
     Get all capabilities of an object.
@@ -155,6 +136,4 @@ def get_capabilities(obj) -> set[str]:
         caps.add("roi")
     if supports_phase_offset(obj):
         caps.add("phase_offset")
-    if supports_mean_subtraction(obj):
-        caps.add("mean_subtraction")
     return caps
