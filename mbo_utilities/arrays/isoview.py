@@ -19,10 +19,6 @@ class IsoviewArray:
     - Single timepoint: (Z, Views, Y, X) - 4D
 
     Views are (camera, channel) combinations that exist in the data.
-
-    Conforms to LazyArrayProtocol:
-    - __getitem__, __len__, __array__
-    - Properties: min, max, ndim, shape, dtype, metadata
     """
 
     def __init__(self, path: str | Path):

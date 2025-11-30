@@ -1,0 +1,188 @@
+"""
+HDF5 array reader.
+
+This module provides H5Array for reading HDF5 datasets as lazy arrays.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import h5py
+import numpy as np
+
+from mbo_utilities import log
+from mbo_utilities.arrays._base import _imwrite_base
+
+logger = log.get("arrays.h5")
+
+
+class H5Array:
+    """
+    Lazy array reader for HDF5 datasets.
+
+    Wraps an h5py.Dataset to provide array-like access with lazy loading.
+    Auto-detects common dataset names ('mov', 'data', 'scan_corrections').
+
+    Parameters
+    ----------
+    filenames : Path or str
+        Path to HDF5 file.
+    dataset : str, optional
+        Dataset name to open. If None, auto-detects from common names.
+
+    Attributes
+    ----------
+    shape : tuple[int, ...]
+        Dataset shape.
+    dtype : np.dtype
+        Data type.
+    ndim : int
+        Number of dimensions.
+    dataset_name : str
+        Name of the opened dataset.
+
+    Examples
+    --------
+    >>> arr = H5Array("data.h5")
+    >>> arr.shape
+    (10000, 512, 512)
+    >>> frame = arr[0]  # Get first frame
+    """
+
+    def __init__(self, filenames: Path | str, dataset: str = None):
+        self.filenames = Path(filenames)
+        self._f = h5py.File(self.filenames, "r")
+
+        # Auto-detect dataset if not specified
+        if dataset is None:
+            if "mov" in self._f:
+                dataset = "mov"
+            elif "data" in self._f:
+                dataset = "data"
+            elif "scan_corrections" in self._f:
+                dataset = "scan_corrections"
+                logger.info(f"Detected pollen calibration file: {self.filenames.name}")
+            else:
+                available = list(self._f.keys())
+                if not available:
+                    raise ValueError(f"No datasets found in {self.filenames}")
+                dataset = available[0]
+                logger.warning(
+                    f"Using first available dataset '{dataset}' in {self.filenames.name}. "
+                    f"Available: {available}"
+                )
+
+        try:
+            self._d = self._f[dataset]
+        except KeyError:
+            available = list(self._f.keys())
+            raise KeyError(
+                f"Dataset '{dataset}' not found in {self.filenames}. "
+                f"Available datasets: {available}"
+            ) from None
+
+        self.dataset_name = dataset
+        self.shape = self._d.shape
+        self.dtype = self._d.dtype
+        self.ndim = self._d.ndim
+
+    @property
+    def num_planes(self) -> int:
+        """Number of Z-planes in the dataset."""
+        # Try to get from metadata first
+        metadata = self.metadata
+        if "num_planes" in metadata:
+            return int(metadata["num_planes"])
+
+        # Infer from shape based on data dimensionality
+        if self.ndim >= 4:  # (T, Z, Y, X) - volumetric time series
+            return int(self.shape[1])
+        elif self.ndim == 3:  # (T, Y, X) - single plane time series
+            return 1
+        elif self.ndim == 1:
+            # Special case: pollen scan_corrections (nc,)
+            if self.dataset_name == "scan_corrections":
+                return int(self.shape[0])
+            return 1
+        elif self.ndim == 2:  # (Y, X) - single frame
+            return 1
+
+        # Fallback
+        return 1
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+
+        # Expand ellipsis to match ndim
+        if Ellipsis in key:
+            idx = key.index(Ellipsis)
+            n_missing = self.ndim - (len(key) - 1)
+            key = key[:idx] + (slice(None),) * n_missing + key[idx + 1 :]
+
+        slices = []
+        result_shape = []
+        dim = 0
+        for k in key:
+            if k is None:
+                result_shape.append(1)
+            else:
+                slices.append(k)
+                dim += 1
+
+        data = self._d[tuple(slices)]
+
+        for i, k in enumerate(key):
+            if k is None:
+                data = np.expand_dims(data, axis=i)
+
+        return data
+
+    def min(self) -> float:
+        """Minimum value in first frame."""
+        return float(self._d[0].min())
+
+    def max(self) -> float:
+        """Maximum value in first frame."""
+        return float(self._d[0].max())
+
+    def __array__(self):
+        n = min(10, self.shape[0])
+        return self._d[:n]
+
+    def close(self):
+        """Close the HDF5 file."""
+        self._f.close()
+
+    @property
+    def metadata(self) -> dict:
+        """File-level attributes as metadata dictionary."""
+        return dict(self._f.attrs)
+
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
+        progress_callback=None,
+        debug=None,
+        planes=None,
+        **kwargs,
+    ):
+        """Write H5Array to disk in various formats."""
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
