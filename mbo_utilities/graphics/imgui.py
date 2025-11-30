@@ -792,6 +792,8 @@ class PreviewDataWidget(EdgeWindow):
         self.show_debug_panel = False
         self.show_scope_window = False
         self.show_metadata_viewer = False
+        self.show_diagnostics_window = False
+        self._diagnostics_widget = None  # Lazy-loaded diagnostics widget
 
         # Processing properties are now on the processor, not the widget
         # We just track UI state here
@@ -1379,6 +1381,9 @@ class PreviewDataWidget(EdgeWindow):
             # refresh widgets based on new data capabilities
             self._refresh_widgets()
 
+            # Automatically recompute z-stats for new data
+            self.refresh_zstats()
+
         except Exception as e:
             self.logger.error(f"Error loading data: {e}")
             self._load_status_msg = f"Error: {str(e)}"
@@ -1389,10 +1394,12 @@ class PreviewDataWidget(EdgeWindow):
             return
 
         stats_list = self._zstats
-        is_single_zplane = self.nz <= 2  # Bar graph for 1-2 planes, line for 3+
+        is_single_zplane = self.nz == 1  # Single bar for 1 plane
+        is_dual_zplane = self.nz == 2    # Grouped bars for 2 planes
+        is_multi_zplane = self.nz > 2    # Line graph for 3+ planes
 
         # Different title for single vs multi z-plane
-        if is_single_zplane:
+        if is_single_zplane or is_dual_zplane:
             imgui.text_colored(
                 imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Signal Quality Summary"
             )
@@ -1400,13 +1407,6 @@ class PreviewDataWidget(EdgeWindow):
             imgui.text_colored(
                 imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats"
             )
-
-        # Refresh button
-        imgui.same_line()
-        if imgui.small_button("Refresh"):
-            threading.Thread(target=self.refresh_zstats, daemon=True).start()
-
-        imgui.spacing()
 
         # ROI selector
         array_labels = [
@@ -1467,34 +1467,57 @@ class PreviewDataWidget(EdgeWindow):
             mean_vals = np.ascontiguousarray(mean_vals, dtype=np.float64)
             std_vals = np.ascontiguousarray(std_vals, dtype=np.float64)
 
-            # For single z-plane, show simplified combined view
-            if is_single_zplane:
-                # Show just the single plane combined stats
+            # For single/dual z-plane, show simplified combined view
+            if is_single_zplane or is_dual_zplane:
+                # Show stats table
+                n_cols = 4 if is_dual_zplane else 3
                 if imgui.begin_table(
                     f"Stats (averaged over {"graphic"}s)",
-                    3,
+                    n_cols,
                     imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
                 ):
-                    for col in ["Metric", "Value", "Unit"]:
-                        imgui.table_setup_column(
-                            col, imgui.TableColumnFlags_.width_stretch
-                        )
+                    if is_dual_zplane:
+                        for col in ["Metric", "Z1", "Z2", "Unit"]:
+                            imgui.table_setup_column(
+                                col, imgui.TableColumnFlags_.width_stretch
+                            )
+                    else:
+                        for col in ["Metric", "Value", "Unit"]:
+                            imgui.table_setup_column(
+                                col, imgui.TableColumnFlags_.width_stretch
+                            )
                     imgui.table_headers_row()
 
-                    metrics = [
-                        ("Mean Fluorescence", mean_vals[0], "a.u."),
-                        ("Std. Deviation", std_vals[0], "a.u."),
-                        ("Signal-to-Noise", snr_vals[0], "ratio"),
-                    ]
-
-                    for metric_name, value, unit in metrics:
-                        imgui.table_next_row()
-                        imgui.table_next_column()
-                        imgui.text(metric_name)
-                        imgui.table_next_column()
-                        imgui.text(f"{value:.2f}")
-                        imgui.table_next_column()
-                        imgui.text(unit)
+                    if is_dual_zplane:
+                        metrics = [
+                            ("Mean Fluorescence", mean_vals[0], mean_vals[1], "a.u."),
+                            ("Std. Deviation", std_vals[0], std_vals[1], "a.u."),
+                            ("Signal-to-Noise", snr_vals[0], snr_vals[1], "ratio"),
+                        ]
+                        for metric_name, val1, val2, unit in metrics:
+                            imgui.table_next_row()
+                            imgui.table_next_column()
+                            imgui.text(metric_name)
+                            imgui.table_next_column()
+                            imgui.text(f"{val1:.2f}")
+                            imgui.table_next_column()
+                            imgui.text(f"{val2:.2f}")
+                            imgui.table_next_column()
+                            imgui.text(unit)
+                    else:
+                        metrics = [
+                            ("Mean Fluorescence", mean_vals[0], "a.u."),
+                            ("Std. Deviation", std_vals[0], "a.u."),
+                            ("Signal-to-Noise", snr_vals[0], "ratio"),
+                        ]
+                        for metric_name, value, unit in metrics:
+                            imgui.table_next_row()
+                            imgui.table_next_column()
+                            imgui.text(metric_name)
+                            imgui.table_next_column()
+                            imgui.text(f"{value:.2f}")
+                            imgui.table_next_column()
+                            imgui.text(unit)
                     imgui.end_table()
 
                 imgui.spacing()
@@ -1503,65 +1526,130 @@ class PreviewDataWidget(EdgeWindow):
 
                 imgui.text("Signal Quality Comparison")
                 set_tooltip(
-                    f"Comparison of mean fluorescence across all {"graphic"}s",
+                    f"Comparison of mean fluorescence across all {"graphic"}s"
+                    + (" and z-planes" if is_dual_zplane else ""),
                     True,
                 )
 
-                # Get per-graphic mean values
-                graphic_means = [
-                    np.asarray(self._zstats[r]["mean"][0], float)
-                    for r in range(self.num_graphics)
-                    if self._zstats[r] and "mean" in self._zstats[r]
-                ]
-
                 plot_width = imgui.get_content_region_avail().x
-                if graphic_means and implot.begin_plot(
-                    "Signal Comparison", imgui.ImVec2(plot_width, 350)
-                ):
-                    try:
-                        style_seaborn_dark()
-                        implot.setup_axes(
-                            "Graphic",
-                            "Mean Fluorescence (a.u.)",
-                            implot.AxisFlags_.none.value,
-                            implot.AxisFlags_.auto_fit.value,
-                        )
 
-                        x_pos = np.arange(len(graphic_means), dtype=np.float64)
-                        heights = np.array(graphic_means, dtype=np.float64)
+                if is_dual_zplane:
+                    # Grouped bar chart for 2 z-planes
+                    # Get per-graphic, per-z-plane mean values
+                    graphic_means_z1 = [
+                        np.asarray(self._zstats[r]["mean"][0], float)
+                        for r in range(self.num_graphics)
+                        if self._zstats[r] and "mean" in self._zstats[r] and len(self._zstats[r]["mean"]) >= 1
+                    ]
+                    graphic_means_z2 = [
+                        np.asarray(self._zstats[r]["mean"][1], float)
+                        for r in range(self.num_graphics)
+                        if self._zstats[r] and "mean" in self._zstats[r] and len(self._zstats[r]["mean"]) >= 2
+                    ]
 
-                        labels = [f"{i + 1}" for i in range(len(graphic_means))]
-                        implot.setup_axis_limits(
-                            implot.ImAxis_.x1.value, -0.5, len(graphic_means) - 0.5
-                        )
-                        implot.setup_axis_ticks(
-                            implot.ImAxis_.x1.value, x_pos.tolist(), labels, False
-                        )
+                    if graphic_means_z1 and graphic_means_z2 and implot.begin_plot(
+                        "Signal Comparison", imgui.ImVec2(plot_width, 350)
+                    ):
+                        try:
+                            style_seaborn_dark()
+                            implot.setup_axes(
+                                "Graphic",
+                                "Mean Fluorescence (a.u.)",
+                                implot.AxisFlags_.none.value,
+                                implot.AxisFlags_.auto_fit.value,
+                            )
 
-                        implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                        implot.push_style_color(
-                            implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
-                        )
-                        implot.plot_bars(
-                            "Graphic Signal",
-                            x_pos,
-                            heights,
-                            0.6,
-                        )
-                        implot.pop_style_color()
-                        implot.pop_style_var()
+                            n_graphics = len(graphic_means_z1)
+                            bar_width = 0.35
+                            x_pos = np.arange(n_graphics, dtype=np.float64)
 
-                        # Add mean line
-                        mean_line = np.full_like(heights, mean_vals[0])
-                        implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
-                        implot.push_style_color(
-                            implot.Col_.line.value, (1.0, 0.4, 0.2, 0.8)
-                        )
-                        implot.plot_line("Average", x_pos, mean_line)
-                        implot.pop_style_color()
-                        implot.pop_style_var()
-                    finally:
-                        implot.end_plot()
+                            labels = [f"{i + 1}" for i in range(n_graphics)]
+                            implot.setup_axis_limits(
+                                implot.ImAxis_.x1.value, -0.5, n_graphics - 0.5
+                            )
+                            implot.setup_axis_ticks(
+                                implot.ImAxis_.x1.value, x_pos.tolist(), labels, False
+                            )
+
+                            # Z-plane 1 bars (offset left)
+                            x_z1 = x_pos - bar_width / 2
+                            heights_z1 = np.array(graphic_means_z1, dtype=np.float64)
+                            implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
+                            implot.push_style_color(
+                                implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                            )
+                            implot.plot_bars("Z-Plane 1", x_z1, heights_z1, bar_width)
+                            implot.pop_style_color()
+                            implot.pop_style_var()
+
+                            # Z-plane 2 bars (offset right)
+                            x_z2 = x_pos + bar_width / 2
+                            heights_z2 = np.array(graphic_means_z2, dtype=np.float64)
+                            implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
+                            implot.push_style_color(
+                                implot.Col_.fill.value, (0.9, 0.4, 0.2, 0.8)
+                            )
+                            implot.plot_bars("Z-Plane 2", x_z2, heights_z2, bar_width)
+                            implot.pop_style_color()
+                            implot.pop_style_var()
+
+                        finally:
+                            implot.end_plot()
+                else:
+                    # Single z-plane: simple bar chart
+                    graphic_means = [
+                        np.asarray(self._zstats[r]["mean"][0], float)
+                        for r in range(self.num_graphics)
+                        if self._zstats[r] and "mean" in self._zstats[r]
+                    ]
+
+                    if graphic_means and implot.begin_plot(
+                        "Signal Comparison", imgui.ImVec2(plot_width, 350)
+                    ):
+                        try:
+                            style_seaborn_dark()
+                            implot.setup_axes(
+                                "Graphic",
+                                "Mean Fluorescence (a.u.)",
+                                implot.AxisFlags_.none.value,
+                                implot.AxisFlags_.auto_fit.value,
+                            )
+
+                            x_pos = np.arange(len(graphic_means), dtype=np.float64)
+                            heights = np.array(graphic_means, dtype=np.float64)
+
+                            labels = [f"{i + 1}" for i in range(len(graphic_means))]
+                            implot.setup_axis_limits(
+                                implot.ImAxis_.x1.value, -0.5, len(graphic_means) - 0.5
+                            )
+                            implot.setup_axis_ticks(
+                                implot.ImAxis_.x1.value, x_pos.tolist(), labels, False
+                            )
+
+                            implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
+                            implot.push_style_color(
+                                implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                            )
+                            implot.plot_bars(
+                                "Graphic Signal",
+                                x_pos,
+                                heights,
+                                0.6,
+                            )
+                            implot.pop_style_color()
+                            implot.pop_style_var()
+
+                            # Add mean line
+                            mean_line = np.full_like(heights, mean_vals[0])
+                            implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
+                            implot.push_style_color(
+                                implot.Col_.line.value, (1.0, 0.4, 0.2, 0.8)
+                            )
+                            implot.plot_line("Average", x_pos, mean_line)
+                            implot.pop_style_color()
+                            implot.pop_style_var()
+                        finally:
+                            implot.end_plot()
 
             else:
                 # Multi-z-plane: show original table and combined plot
@@ -1675,34 +1763,57 @@ class PreviewDataWidget(EdgeWindow):
 
             imgui.text(f"Stats for {"graphic"} {array_idx + 1}")
 
-            # For single z-plane, show simplified table and visualization
-            if is_single_zplane:
-                # Show just the single plane stats in a nice format
+            # For single/dual z-plane, show simplified table and visualization
+            if is_single_zplane or is_dual_zplane:
+                # Show stats table with appropriate columns
+                n_cols = 4 if is_dual_zplane else 3
                 if imgui.begin_table(
                     f"stats{array_idx}",
-                    3,
+                    n_cols,
                     imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
                 ):
-                    for col in ["Metric", "Value", "Unit"]:
-                        imgui.table_setup_column(
-                            col, imgui.TableColumnFlags_.width_stretch
-                        )
+                    if is_dual_zplane:
+                        for col in ["Metric", "Z1", "Z2", "Unit"]:
+                            imgui.table_setup_column(
+                                col, imgui.TableColumnFlags_.width_stretch
+                            )
+                    else:
+                        for col in ["Metric", "Value", "Unit"]:
+                            imgui.table_setup_column(
+                                col, imgui.TableColumnFlags_.width_stretch
+                            )
                     imgui.table_headers_row()
 
-                    metrics = [
-                        ("Mean Fluorescence", mean_vals[0], "a.u."),
-                        ("Std. Deviation", std_vals[0], "a.u."),
-                        ("Signal-to-Noise", snr_vals[0], "ratio"),
-                    ]
-
-                    for metric_name, value, unit in metrics:
-                        imgui.table_next_row()
-                        imgui.table_next_column()
-                        imgui.text(metric_name)
-                        imgui.table_next_column()
-                        imgui.text(f"{value:.2f}")
-                        imgui.table_next_column()
-                        imgui.text(unit)
+                    if is_dual_zplane:
+                        metrics = [
+                            ("Mean Fluorescence", mean_vals[0], mean_vals[1], "a.u."),
+                            ("Std. Deviation", std_vals[0], std_vals[1], "a.u."),
+                            ("Signal-to-Noise", snr_vals[0], snr_vals[1], "ratio"),
+                        ]
+                        for metric_name, val1, val2, unit in metrics:
+                            imgui.table_next_row()
+                            imgui.table_next_column()
+                            imgui.text(metric_name)
+                            imgui.table_next_column()
+                            imgui.text(f"{val1:.2f}")
+                            imgui.table_next_column()
+                            imgui.text(f"{val2:.2f}")
+                            imgui.table_next_column()
+                            imgui.text(unit)
+                    else:
+                        metrics = [
+                            ("Mean Fluorescence", mean_vals[0], "a.u."),
+                            ("Std. Deviation", std_vals[0], "a.u."),
+                            ("Signal-to-Noise", snr_vals[0], "ratio"),
+                        ]
+                        for metric_name, value, unit in metrics:
+                            imgui.table_next_row()
+                            imgui.table_next_column()
+                            imgui.text(metric_name)
+                            imgui.table_next_column()
+                            imgui.text(f"{value:.2f}")
+                            imgui.table_next_column()
+                            imgui.text(unit)
                     imgui.end_table()
 
                 imgui.spacing()
@@ -1712,7 +1823,8 @@ class PreviewDataWidget(EdgeWindow):
                 style_seaborn_dark()
                 imgui.text("Signal Quality Metrics")
                 set_tooltip(
-                    "Bar chart showing mean fluorescence, standard deviation, and SNR",
+                    "Bar chart showing mean fluorescence, standard deviation, and SNR"
+                    + (" for each z-plane" if is_dual_zplane else ""),
                     True,
                 )
 
@@ -1723,35 +1835,52 @@ class PreviewDataWidget(EdgeWindow):
                     try:
                         implot.setup_axes(
                             "Metric",
-                            "Value (normalized)",
+                            "Value",
                             implot.AxisFlags_.none.value,
                             implot.AxisFlags_.auto_fit.value,
                         )
 
-                        # Normalize values for better visualization
-                        norm_mean = mean_vals[0]
-                        norm_std = std_vals[0]
-                        norm_snr = snr_vals[0] * (
-                            norm_mean / max(snr_vals[0], 1.0)
-                        )  # Scale SNR to be comparable
-
                         x_pos = np.array([0.0, 1.0, 2.0], dtype=np.float64)
-                        heights = np.array(
-                            [norm_mean, norm_std, norm_snr], dtype=np.float64
-                        )
-
                         implot.setup_axis_limits(implot.ImAxis_.x1.value, -0.5, 2.5)
                         implot.setup_axis_ticks(
-                            implot.ImAxis_.x1.value, x_pos, ["Mean", "Std Dev", "SNR"], False
+                            implot.ImAxis_.x1.value, x_pos.tolist(), ["Mean", "Std Dev", "SNR"], False
                         )
 
-                        implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                        implot.push_style_color(
-                            implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
-                        )
-                        implot.plot_bars("Signal Metrics", x_pos, heights, 0.6)
-                        implot.pop_style_color()
-                        implot.pop_style_var()
+                        if is_dual_zplane:
+                            # Grouped bars for Z1 and Z2
+                            bar_width = 0.35
+                            x_z1 = x_pos - bar_width / 2
+                            x_z2 = x_pos + bar_width / 2
+
+                            heights_z1 = np.array([mean_vals[0], std_vals[0], snr_vals[0]], dtype=np.float64)
+                            heights_z2 = np.array([mean_vals[1], std_vals[1], snr_vals[1]], dtype=np.float64)
+
+                            implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
+                            implot.push_style_color(
+                                implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                            )
+                            implot.plot_bars("Z-Plane 1", x_z1, heights_z1, bar_width)
+                            implot.pop_style_color()
+                            implot.pop_style_var()
+
+                            implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
+                            implot.push_style_color(
+                                implot.Col_.fill.value, (0.9, 0.4, 0.2, 0.8)
+                            )
+                            implot.plot_bars("Z-Plane 2", x_z2, heights_z2, bar_width)
+                            implot.pop_style_color()
+                            implot.pop_style_var()
+                        else:
+                            # Single bars for single z-plane
+                            heights = np.array([mean_vals[0], std_vals[0], snr_vals[0]], dtype=np.float64)
+
+                            implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
+                            implot.push_style_color(
+                                implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                            )
+                            implot.plot_bars("Signal Metrics", x_pos, heights, 0.6)
+                            implot.pop_style_color()
+                            implot.pop_style_var()
                     finally:
                         implot.end_plot()
 
@@ -1940,11 +2069,13 @@ class PreviewDataWidget(EdgeWindow):
         This is useful after loading new data or when z-stats need to be
         recalculated (e.g., after changing the number of z-planes).
         """
-        if not self.image_widget or not self.image_widget.data:
+        if not self.image_widget:
             return
 
+        # Use num_graphics which matches len(iw.graphics)
+        n = self.num_graphics
+
         # Reset z-stats state
-        n = len(self.image_widget.data)
         self._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(n)]
         self._zstats_means = [None] * n
         self._zstats_mean_scalar = [0.0] * n
@@ -1952,15 +2083,13 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_progress = [0.0] * n
         self._zstats_current_z = [0] * n
 
-        # Update nz based on current data
-        if hasattr(self.image_widget, "data") and self.image_widget.data:
-            first_arr = self.image_widget.data[0]
-            if first_arr.ndim >= 4:
-                self.nz = first_arr.shape[1]
-            elif first_arr.ndim == 3:
-                self.nz = 1
-            else:
-                self.nz = 1
+        # Update nz based on current data shape
+        if len(self.shape) >= 4:
+            self.nz = self.shape[1]
+        elif len(self.shape) == 3:
+            self.nz = 1
+        else:
+            self.nz = 1
 
         self.logger.info(f"Refreshing z-stats for {n} arrays, nz={self.nz}")
 
