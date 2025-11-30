@@ -365,13 +365,30 @@ def draw_saveas_popup(parent):
         parent._overwrite = checkbox_with_tooltip(
             "Overwrite", parent._overwrite, "Replace any existing output files."
         )
-        # Only show Suite3D registration option if suite3d is installed
-        if HAS_SUITE3D:
-            parent._register_z = checkbox_with_tooltip(
-                "Register Z-Planes Axially",
-                parent._register_z,
-                "Register adjacent z-planes to each other using Suite3D.",
-            )
+        # suite3d z-plane registration - show disabled with reason if unavailable
+        can_register_z = HAS_SUITE3D and parent.nz > 1
+        if not can_register_z:
+            imgui.begin_disabled()
+        _changed, _reg_value = imgui.checkbox(
+            "Register Z-Planes Axially", parent._register_z if can_register_z else False
+        )
+        if can_register_z and _changed:
+            parent._register_z = _reg_value
+        imgui.same_line()
+        imgui.text_disabled("(?)")
+        if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+            imgui.begin_tooltip()
+            imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+            if not HAS_SUITE3D:
+                imgui.text_unformatted("suite3d is not installed. Install with: pip install suite3d")
+            elif parent.nz <= 1:
+                imgui.text_unformatted("Requires multi-plane (4D) data with more than one z-plane.")
+            else:
+                imgui.text_unformatted("Register adjacent z-planes to each other using Suite3D.")
+            imgui.pop_text_wrap_pos()
+            imgui.end_tooltip()
+        if not can_register_z:
+            imgui.end_disabled()
         fix_phase_changed, fix_phase_value = imgui.checkbox(
             "Fix Scan Phase", parent.fix_phase
         )
@@ -744,6 +761,7 @@ class PreviewDataWidget(EdgeWindow):
         self.is_mbo_scan = (
             True if isinstance(self.image_widget.data[0], MboRawArray) else False
         )
+        self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
         # Only set if not already configured - the ImageWidget/processor handles defaults
         # We just need to track the window size for our UI
@@ -992,7 +1010,10 @@ class PreviewDataWidget(EdgeWindow):
     @property
     def has_raster_scan_support(self) -> bool:
         """Check if any data array supports raster scan phase correction."""
-        for arr in self._get_data_arrays():
+        arrays = self._get_data_arrays()
+        self.logger.debug(f"Checking raster scan support for {len(arrays)} arrays")
+        for arr in arrays:
+            self.logger.debug(f"  Array type: {type(arr).__name__}, has fix_phase: {hasattr(arr, 'fix_phase')}, has use_fft: {hasattr(arr, 'use_fft')}")
             if hasattr(arr, 'fix_phase') and hasattr(arr, 'use_fft'):
                 return True
         return False
@@ -1368,7 +1389,7 @@ class PreviewDataWidget(EdgeWindow):
             return
 
         stats_list = self._zstats
-        is_single_zplane = self.nz == 1
+        is_single_zplane = self.nz <= 2  # Bar graph for 1-2 planes, line for 3+
 
         # Different title for single vs multi z-plane
         if is_single_zplane:
@@ -1379,6 +1400,11 @@ class PreviewDataWidget(EdgeWindow):
             imgui.text_colored(
                 imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats"
             )
+
+        # Refresh button
+        imgui.same_line()
+        if imgui.small_button("Refresh"):
+            threading.Thread(target=self.refresh_zstats, daemon=True).start()
 
         imgui.spacing()
 
@@ -1833,6 +1859,31 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_done[roi - 1] = True
 
     def _compute_zstats_single_array(self, idx, arr):
+        # Check for pre-computed z-stats in zarr metadata (instant loading)
+        if hasattr(arr, "zstats") and arr.zstats is not None:
+            stats = arr.zstats
+            self._zstats[idx - 1] = stats
+            # Still need to compute mean images for visualization
+            means = []
+            self._tiff_lock = threading.Lock()
+            for z in [0] if arr.ndim == 3 else range(self.nz):
+                with self._tiff_lock:
+                    stack = (
+                        arr[::10].astype(np.float32)
+                        if arr.ndim == 3
+                        else arr[::10, z].astype(np.float32)
+                    )
+                    mean_img = np.mean(stack, axis=0)
+                    means.append(mean_img)
+                    self._zstats_progress[idx - 1] = (z + 1) / self.nz
+                    self._zstats_current_z[idx - 1] = z
+            means_stack = np.stack(means)
+            self._zstats_means[idx - 1] = means_stack
+            self._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
+            self._zstats_done[idx - 1] = True
+            self.logger.info(f"Loaded pre-computed z-stats from zarr metadata for array {idx}")
+            return
+
         stats, means = {"mean": [], "std": [], "snr": []}, []
         self._tiff_lock = threading.Lock()
 
@@ -1862,6 +1913,14 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
         self._zstats_done[idx - 1] = True
 
+        # Save z-stats to array metadata for persistence (zarr files)
+        if hasattr(arr, "zstats"):
+            try:
+                arr.zstats = stats
+                self.logger.info(f"Saved z-stats to array {idx} metadata")
+            except Exception as e:
+                self.logger.debug(f"Could not save z-stats to array metadata: {e}")
+
     def compute_zstats(self):
         if not self.image_widget or not self.image_widget.data:
             return
@@ -1873,3 +1932,37 @@ class PreviewDataWidget(EdgeWindow):
                 args=(idx, arr),
                 daemon=True,
             ).start()
+
+    def refresh_zstats(self):
+        """
+        Reset and recompute z-stats for all arrays.
+
+        This is useful after loading new data or when z-stats need to be
+        recalculated (e.g., after changing the number of z-planes).
+        """
+        if not self.image_widget or not self.image_widget.data:
+            return
+
+        # Reset z-stats state
+        n = len(self.image_widget.data)
+        self._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(n)]
+        self._zstats_means = [None] * n
+        self._zstats_mean_scalar = [0.0] * n
+        self._zstats_done = [False] * n
+        self._zstats_progress = [0.0] * n
+        self._zstats_current_z = [0] * n
+
+        # Update nz based on current data
+        if hasattr(self.image_widget, "data") and self.image_widget.data:
+            first_arr = self.image_widget.data[0]
+            if first_arr.ndim >= 4:
+                self.nz = first_arr.shape[1]
+            elif first_arr.ndim == 3:
+                self.nz = 1
+            else:
+                self.nz = 1
+
+        self.logger.info(f"Refreshing z-stats for {n} arrays, nz={self.nz}")
+
+        # Recompute z-stats
+        self.compute_zstats()
