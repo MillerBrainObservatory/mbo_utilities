@@ -15,8 +15,6 @@ from .file_io import write_ops
 from ._parsing import _make_json_serializable
 from .metadata import save_metadata_html
 
-from ._binary import BinaryFile
-
 from tqdm.auto import tqdm
 
 logger = log.get("writers")
@@ -58,6 +56,21 @@ def _close_all_tiff_writers():
         _write_tiff._writers.clear()
         if hasattr(_write_tiff, "_first_write"):
             _write_tiff._first_write.clear()
+
+
+def _close_specific_npy_writer(filepath):
+    """Close a specific .npy memory-mapped writer by filepath (thread-safe)."""
+    if hasattr(_write_npy, "_arrays"):
+        key = str(Path(filepath).with_suffix(".npy"))
+        if key in _write_npy._arrays:
+            mmap = _write_npy._arrays[key]
+            # Flush and close the memmap
+            if hasattr(mmap, "flush"):
+                mmap.flush()
+            if hasattr(mmap, "_mmap") and mmap._mmap is not None:
+                mmap._mmap.close()
+            _write_npy._arrays.pop(key, None)
+            _write_npy._offsets.pop(key, None)
 
 
 def compute_pad_from_shifts(plane_shifts):
@@ -311,6 +324,8 @@ def _write_plane(
         _close_specific_tiff_writer(fname)
     elif fname.suffix in [".bin"]:
         _close_specific_bin_writer(fname)
+    elif fname.suffix in [".npy"]:
+        _close_specific_npy_writer(fname)
 
     if "cleaned_scanimage_metadata" in metadata:
         meta_path = filename.parent.joinpath("metadata.html")
@@ -340,11 +355,19 @@ def _get_file_writer(ext, overwrite):
             _write_bin,
             overwrite=overwrite,
         )
+    elif ext == "npy":
+        return functools.partial(
+            _write_npy,
+            overwrite=overwrite,
+        )
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
 def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
+    # Import here to avoid circular import
+    from .array_types import BinArray
+
     if metadata is None:
         metadata = {}
 
@@ -375,8 +398,10 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
         if nframes is None:
             raise ValueError("Metadata must contain 'nframes' or 'num_frames'.")
 
-        _write_bin._writers[key] = BinaryFile(
-            Ly, Lx, key, n_frames=metadata["num_frames"], dtype=np.int16
+        _write_bin._writers[key] = BinArray(
+            filename=key,
+            shape=(nframes, Ly, Lx),
+            dtype=np.int16,
         )
         _write_bin._offsets[key] = 0
         first_write = True
@@ -390,11 +415,88 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
         data = data.squeeze(axis=1)
 
     bf[off : off + data.shape[0]] = data
-    bf.file.flush()
+    bf.flush()
     _write_bin._offsets[key] = off + data.shape[0]
 
     if first_write:
         write_ops(metadata, fname, **kwargs)
+
+
+def _write_npy(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
+    """
+    Write data to a .npy file with chunked/streaming support.
+
+    Uses memory-mapped file for efficient chunked writing.
+    Metadata is saved to a companion .json file.
+    """
+    if metadata is None:
+        metadata = {}
+
+    if not hasattr(_write_npy, "_arrays"):
+        _write_npy._arrays = {}
+        _write_npy._offsets = {}
+
+    fname = Path(path).with_suffix(".npy")
+    fname.parent.mkdir(parents=True, exist_ok=True)
+
+    key = str(fname)
+
+    # Drop cached array if file was deleted externally
+    if key in _write_npy._arrays and not fname.exists():
+        _write_npy._arrays.pop(key, None)
+        _write_npy._offsets.pop(key, None)
+
+    # Only overwrite if this is a brand new write session
+    if overwrite and key not in _write_npy._arrays and fname.exists():
+        fname.unlink()
+
+    if key not in _write_npy._arrays:
+        # Get target shape from metadata
+        nframes = metadata.get("nframes") or metadata.get("num_frames")
+        if nframes is None:
+            raise ValueError("Metadata must contain 'nframes' or 'num_frames'.")
+
+        h, w = data.shape[-2], data.shape[-1]
+        shape = (int(nframes), h, w)
+
+        # Create memory-mapped array
+        mmap = np.lib.format.open_memmap(
+            fname,
+            mode="w+",
+            dtype=data.dtype,
+            shape=shape,
+        )
+        _write_npy._arrays[key] = mmap
+        _write_npy._offsets[key] = 0
+
+        # Save metadata to companion JSON file
+        import json
+        meta_path = fname.with_suffix(".json")
+        serializable_meta = _make_json_serializable(metadata)
+        with open(meta_path, "w") as f:
+            json.dump(serializable_meta, f, indent=2)
+
+    mmap = _write_npy._arrays[key]
+    off = _write_npy._offsets[key]
+
+    # Squeeze singleton Z dimension if present
+    if len(data.shape) == 4 and data.shape[1] == 1:
+        data = data.squeeze(axis=1)
+
+    # Write chunk
+    mmap[off : off + data.shape[0]] = data
+    mmap.flush()
+    _write_npy._offsets[key] = off + data.shape[0]
+
+
+def _close_npy_writers():
+    """Close all open .npy memory-mapped writers."""
+    if hasattr(_write_npy, "_arrays"):
+        for mmap in _write_npy._arrays.values():
+            if hasattr(mmap, "_mmap") and mmap._mmap is not None:
+                mmap._mmap.close()
+        _write_npy._arrays.clear()
+        _write_npy._offsets.clear()
 
 
 def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):

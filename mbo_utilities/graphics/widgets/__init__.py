@@ -74,8 +74,11 @@ def get_supported_widgets(parent: "PreviewDataWidget") -> list[Widget]:
         try:
             if widget_cls.is_supported(parent):
                 supported.append(widget_cls(parent))
-        except Exception:
-            pass  # skip widgets that fail support check
+        except Exception as e:
+            # Log the error for debugging
+            import traceback
+            print(f"Warning: Widget {widget_cls.__name__} support check failed: {e}")
+            traceback.print_exc()
 
     # sort by priority (lower = first)
     supported.sort(key=lambda w: w.priority)

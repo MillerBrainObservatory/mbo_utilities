@@ -710,6 +710,12 @@ def get_last_savedir_path() -> Path:
     .. deprecated::
         Use :func:`mbo_utilities.preferences.get_last_save_dir` instead.
     """
+    import warnings
+    warnings.warn(
+        "get_last_savedir_path() is deprecated. Use mbo_utilities.preferences.get_last_save_dir() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return Path.home().joinpath("mbo", "settings", "last_savedir.json")
 
 
@@ -719,7 +725,12 @@ def load_last_savedir(default=None) -> Path:
     .. deprecated::
         Use :func:`mbo_utilities.preferences.get_last_save_dir` instead.
     """
-    # Use new preferences module
+    import warnings
+    warnings.warn(
+        "load_last_savedir() is deprecated. Use mbo_utilities.preferences.get_last_save_dir() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     from mbo_utilities.preferences import get_last_save_dir
     result = get_last_save_dir()
     if result:
@@ -733,7 +744,12 @@ def save_last_savedir(path: Path):
     .. deprecated::
         Use :func:`mbo_utilities.preferences.set_last_save_dir` instead.
     """
-    # Use new preferences module
+    import warnings
+    warnings.warn(
+        "save_last_savedir() is deprecated. Use mbo_utilities.preferences.set_last_save_dir() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     from mbo_utilities.preferences import set_last_save_dir
     set_last_save_dir(path)
 

@@ -16,6 +16,7 @@ from dask import array as da
 from tifffile import TiffFile
 
 from mbo_utilities import log
+from mbo_utilities._protocols import get_dims, get_num_planes
 from mbo_utilities._writers import _write_plane
 from mbo_utilities.file_io import (
     _convert_range_to_slice,
@@ -30,6 +31,312 @@ logger = log.get("array_types")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
+
+
+def supports_roi(obj):
+    return hasattr(obj, "roi") and hasattr(obj, "num_rois")
+
+
+def normalize_roi(value):
+    """Return ROI as None, int, or list[int] with consistent semantics."""
+    if value in (None, (), [], False):
+        return None
+    if value is True:
+        return 0  # “split ROIs” GUI flag
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return value
+
+
+def iter_rois(obj):
+    """Yield ROI indices based on MBO semantics.
+
+    - roi=None → yield None (stitched full-FOV image)
+    - roi=0 → yield each ROI index from 1..num_rois (split all)
+    - roi=int > 0 → yield that ROI only
+    - roi=list/tuple → yield each element (as given)
+    """
+    if not supports_roi(obj):
+        yield None
+        return
+
+    roi = getattr(obj, "roi", None)
+    num_rois = getattr(obj, "num_rois", 1)
+
+    if roi is None:
+        yield None
+    elif roi == 0:
+        yield from range(1, num_rois + 1)
+    elif isinstance(roi, int):
+        yield roi
+    elif isinstance(roi, (list, tuple)):
+        for r in roi:
+            if r == 0:
+                yield from range(1, num_rois + 1)
+            else:
+                yield r
+
+
+def _normalize_planes(planes, num_planes: int) -> list[int]:
+    """
+    Normalize planes argument to 0-indexed list.
+
+    Parameters
+    ----------
+    planes : int | list | tuple | None
+        Planes to write (1-based indexing from user).
+    num_planes : int
+        Total number of planes available.
+
+    Returns
+    -------
+    list[int]
+        0-indexed plane indices.
+    """
+    if planes is None:
+        return list(range(num_planes))
+    if isinstance(planes, int):
+        return [planes - 1]  # 1-based to 0-based
+    return [p - 1 for p in planes]
+
+
+def _build_output_path(
+    outpath: Path,
+    plane_idx: int,
+    roi: int | None,
+    ext: str,
+    output_name: str | None = None,
+    structural: bool = False,
+    has_multiple_rois: bool = False,
+    **kwargs,
+) -> Path:
+    """
+    Build output file path for a single plane.
+
+    Parameters
+    ----------
+    outpath : Path
+        Base output directory.
+    plane_idx : int
+        0-indexed plane number.
+    roi : int | None
+        ROI index (1-based) or None for stitched/single ROI.
+    ext : str
+        File extension (without dot).
+    output_name : str | None
+        Override output filename (for .bin files).
+    structural : bool
+        If True, use data_chan2.bin naming for structural channel.
+    has_multiple_rois : bool
+        If True and roi is None, use "_stitched" suffix.
+
+    Returns
+    -------
+    Path
+        Full output file path.
+    """
+    plane_num = plane_idx + 1  # Convert to 1-based for filenames
+
+    # Determine suffix based on ROI
+    if roi is None:
+        roi_suffix = "_stitched" if has_multiple_rois else ""
+    else:
+        roi_suffix = f"_roi{roi}"
+
+    if ext == "bin":
+        if output_name:
+            # Caller specified exact output - use it directly
+            if structural:
+                return outpath / "data_chan2.bin"
+            return outpath / output_name
+
+        # Build subdirectory structure
+        subdir = f"plane{plane_num:02d}{roi_suffix}"
+        plane_dir = outpath / subdir
+        plane_dir.mkdir(parents=True, exist_ok=True)
+
+        if structural:
+            return plane_dir / "data_chan2.bin"
+        return plane_dir / "data_raw.bin"
+    else:
+        # Non-binary formats: single file per plane
+        return outpath / f"plane{plane_num:02d}{roi_suffix}.{ext}"
+
+
+def _imwrite_base(
+    arr,
+    outpath: Path | str,
+    planes: int | list | tuple | None = None,
+    ext: str = ".tiff",
+    overwrite: bool = False,
+    target_chunk_mb: int = 50,
+    progress_callback=None,
+    debug: bool = False,
+    roi_iterator=None,
+    **kwargs,
+) -> Path:
+    """
+    Common implementation for array _imwrite() methods.
+
+    This function handles the common pattern of:
+    1. Normalizing planes argument (1-based to 0-based)
+    2. Iterating over ROIs (if applicable)
+    3. Building output paths
+    4. Calling _write_plane() for each plane
+
+    Parameters
+    ----------
+    arr : LazyArrayProtocol
+        Array to write. Must have shape, metadata, and support indexing.
+    outpath : Path | str
+        Output directory.
+    planes : int | list | tuple | None
+        Planes to write (1-based indexing). None means all planes.
+    ext : str
+        Output format extension (e.g., '.tiff', '.bin', '.zarr').
+    overwrite : bool
+        Whether to overwrite existing files.
+    target_chunk_mb : int
+        Target chunk size in MB for streaming writes.
+    progress_callback : callable | None
+        Progress callback function.
+    debug : bool
+        Enable debug output.
+    roi_iterator : iterator | None
+        Custom ROI iterator for arrays with ROI support.
+        If None, uses iter_rois(arr) which yields [None] for arrays without ROIs.
+    **kwargs
+        Additional arguments passed to _write_plane().
+
+    Returns
+    -------
+    Path
+        Output directory path.
+    """
+    outpath = Path(outpath)
+    outpath.mkdir(parents=True, exist_ok=True)
+
+    ext_clean = ext.lower().lstrip(".")
+
+    # Get metadata
+    md = dict(arr.metadata) if arr.metadata else {}
+
+    # Get dimensions using protocol helpers
+    dims = get_dims(arr)
+    num_planes = get_num_planes(arr)
+
+    # Extract shape info
+    nframes = arr.shape[0] if "T" in dims else 1
+    Ly, Lx = arr.shape[-2], arr.shape[-1]
+
+    # Update metadata
+    md["Ly"] = Ly
+    md["Lx"] = Lx
+    md["nframes"] = nframes
+    md["num_frames"] = nframes  # alias for backwards compatibility
+
+    # Normalize planes to 0-indexed list
+    planes_list = _normalize_planes(planes, num_planes)
+
+    # Use provided ROI iterator or default
+    roi_iter = roi_iterator if roi_iterator is not None else iter_rois(arr)
+
+    # Check if array has multiple ROIs (for "_stitched" suffix)
+    has_multiple_rois = getattr(arr, "num_rois", 1) > 1
+
+    for roi in roi_iter:
+        # Update array's ROI if it supports it
+        if roi is not None and hasattr(arr, "roi"):
+            arr.roi = roi
+
+        for plane_idx in planes_list:
+            target = _build_output_path(
+                outpath, plane_idx, roi, ext_clean,
+                output_name=kwargs.get("output_name"),
+                structural=kwargs.get("structural", False),
+                has_multiple_rois=has_multiple_rois,
+            )
+
+            if target.exists() and not overwrite:
+                logger.warning(f"File {target} already exists. Skipping write.")
+                continue
+
+            # Build plane-specific metadata
+            plane_md = md.copy()
+            plane_md["plane"] = plane_idx + 1  # 1-based in metadata
+            if roi is not None:
+                plane_md["roi"] = roi
+                plane_md["mroi"] = roi  # alias
+
+            _write_plane(
+                arr,
+                target,
+                overwrite=overwrite,
+                target_chunk_mb=target_chunk_mb,
+                metadata=plane_md,
+                progress_callback=progress_callback,
+                debug=debug,
+                dshape=(nframes, Ly, Lx),
+                plane_index=plane_idx,
+                **kwargs,
+            )
+
+    return outpath
+
+
+def _to_tzyx(a: da.Array, axes: str) -> da.Array:
+    order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
+    perm = [axes.index(ax) for ax in order]
+    a = da.transpose(a, axes=perm)
+    have_T = "T" in order
+    pos = {ax: i for i, ax in enumerate(order)}
+    tdim = a.shape[pos["T"]] if have_T else 1
+    merge_dims = [d for d, ax in enumerate(order) if ax in ("Z", "C", "S")]
+    if merge_dims:
+        front = []
+        if have_T:
+            front.append(pos["T"])
+        rest = [d for d in range(a.ndim) if d not in front]
+        a = da.transpose(a, axes=front + rest)
+        newshape = [
+            tdim if have_T else 1,
+            int(np.prod([a.shape[i] for i in rest[:-2]])),
+            a.shape[-2],
+            a.shape[-1],
+        ]
+        a = a.reshape(newshape)
+    else:
+        if have_T:
+            if a.ndim == 3:
+                a = da.expand_dims(a, 1)
+        else:
+            a = da.expand_dims(a, 0)
+            a = da.expand_dims(a, 1)
+        if order[-2:] != ["Y", "X"]:
+            yx_pos = [order.index("Y"), order.index("X")]
+            keep = [i for i in range(len(order)) if i not in yx_pos]
+            a = da.transpose(a, axes=keep + yx_pos)
+    return a
+
+
+def _axes_or_guess(arr_ndim: int) -> str:
+    if arr_ndim == 2:
+        return "YX"
+    elif arr_ndim == 3:
+        return "ZYX"
+    elif arr_ndim == 4:
+        return "TZYX"
+    else:
+        return "Unknown"
+
+
+def _safe_get_metadata(path: Path) -> dict:
+    try:
+        return get_metadata(path)
+    except Exception:
+        return {}
 
 
 def validate_s3d_registration(s3d_job_dir: Path, num_planes: int = None) -> bool:
@@ -323,41 +630,17 @@ class Suite2pArray:
         **kwargs,
     ):
         """Write Suite2pArray to disk in various formats."""
-        outpath = Path(outpath)
-        outpath.mkdir(parents=True, exist_ok=True)
-
-        # Suite2pArray is always 3D (T, Y, X), so planes parameter is ignored
-        # but we still support it for API consistency
-        ext_clean = ext.lower().lstrip(".")
-
-        # Build metadata for output
-        md = dict(self.metadata) if self.metadata else {}
-        md["Ly"] = self.Ly
-        md["Lx"] = self.Lx
-        md["nframes"] = self.nframes
-        md["num_frames"] = self.nframes
-
-        if ext_clean == "bin":
-            fname = kwargs.get("output_name") or "data_raw.bin"
-            target = outpath / fname
-        else:
-            fname = f"plane01.{ext_clean}"
-            target = outpath / fname
-
-        _write_plane(
+        return _imwrite_base(
             self,
-            target,
+            outpath,
+            planes=planes,
+            ext=ext,
             overwrite=overwrite,
             target_chunk_mb=target_chunk_mb,
-            metadata=md,
             progress_callback=progress_callback,
             debug=debug,
-            dshape=self.shape,
-            plane_index=None,
             **kwargs,
         )
-
-        return outpath
 
     def imshow(self, **kwargs):
         arrays = []
@@ -533,75 +816,17 @@ class H5Array:
         **kwargs,
     ):
         """Write H5Array to disk in various formats."""
-        outpath = Path(outpath)
-        outpath.mkdir(parents=True, exist_ok=True)
-
-        ext_clean = ext.lower().lstrip(".")
-        md = dict(self.metadata) if self.metadata else {}
-
-        # Determine dimensions
-        nframes = self.shape[0]
-        num_planes = self.shape[1] if self.ndim == 4 else 1
-        Ly, Lx = self.shape[-2], self.shape[-1]
-
-        md["Ly"] = Ly
-        md["Lx"] = Lx
-        md["nframes"] = nframes
-        md["num_frames"] = nframes
-
-        # Handle planes parameter
-        if num_planes > 1:
-            if planes is None:
-                planes = list(range(num_planes))
-            elif isinstance(planes, int):
-                planes = [planes - 1]
-            else:
-                planes = [p - 1 for p in planes]
-
-            for plane_idx in planes:
-                if ext_clean == "bin":
-                    plane_dir = outpath / f"plane{plane_idx + 1:02d}"
-                    plane_dir.mkdir(parents=True, exist_ok=True)
-                    target = plane_dir / (kwargs.get("output_name") or "data_raw.bin")
-                else:
-                    target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
-
-                plane_md = md.copy()
-                plane_md["plane"] = plane_idx + 1
-
-                _write_plane(
-                    self,
-                    target,
-                    overwrite=overwrite,
-                    target_chunk_mb=target_chunk_mb,
-                    metadata=plane_md,
-                    progress_callback=progress_callback,
-                    debug=debug,
-                    dshape=(nframes, Ly, Lx),
-                    plane_index=plane_idx,
-                    **kwargs,
-                )
-        else:
-            # Single plane data
-            if ext_clean == "bin":
-                target = outpath / (kwargs.get("output_name") or "data_raw.bin")
-            else:
-                target = outpath / f"plane01.{ext_clean}"
-
-            _write_plane(
-                self,
-                target,
-                overwrite=overwrite,
-                target_chunk_mb=target_chunk_mb,
-                metadata=md,
-                progress_callback=progress_callback,
-                debug=debug,
-                dshape=(nframes, Ly, Lx),
-                plane_index=None,
-                **kwargs,
-            )
-
-        return outpath
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
 
 
 @dataclass
@@ -741,183 +966,222 @@ class MBOTiffArray:
         **kwargs,
     ):
         """Write MBOTiffArray to disk in various formats."""
-        outpath = Path(outpath)
-        outpath.mkdir(parents=True, exist_ok=True)
-
-        ext_clean = ext.lower().lstrip(".")
-        md = self.metadata.copy()
-
-        # Determine number of planes from shape
-        nframes = self.shape[0]
-        num_planes = self.shape[1] if len(self.shape) == 4 else 1
-        Ly, Lx = self.shape[-2], self.shape[-1]
-
-        md["Ly"] = Ly
-        md["Lx"] = Lx
-        md["nframes"] = nframes
-        md["num_frames"] = nframes
-
-        # Handle planes parameter
-        if num_planes > 1:
-            if planes is None:
-                planes = list(range(num_planes))
-            elif isinstance(planes, int):
-                planes = [planes - 1]
-            else:
-                planes = [p - 1 for p in planes]
-
-            for plane_idx in planes:
-                if ext_clean == "bin":
-                    plane_dir = outpath / f"plane{plane_idx + 1:02d}"
-                    plane_dir.mkdir(parents=True, exist_ok=True)
-                    target = plane_dir / (kwargs.get("output_name") or "data_raw.bin")
-                else:
-                    target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
-
-                plane_md = md.copy()
-                plane_md["plane"] = plane_idx + 1
-
-                _write_plane(
-                    self,
-                    target,
-                    overwrite=overwrite,
-                    target_chunk_mb=target_chunk_mb,
-                    metadata=plane_md,
-                    progress_callback=progress_callback,
-                    debug=debug,
-                    dshape=(nframes, Ly, Lx),
-                    plane_index=plane_idx,
-                    **kwargs,
-                )
-        else:
-            # Single plane data
-            if ext_clean == "bin":
-                target = outpath / (kwargs.get("output_name") or "data_raw.bin")
-            else:
-                target = outpath / f"plane01.{ext_clean}"
-
-            _write_plane(
-                self,
-                target,
-                overwrite=overwrite,
-                target_chunk_mb=target_chunk_mb,
-                metadata=md,
-                progress_callback=progress_callback,
-                debug=debug,
-                dshape=(nframes, Ly, Lx),
-                plane_index=None,
-                **kwargs,
-            )
-
-        return outpath
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
 
 
-@dataclass
-class NpyArray:
-    filenames: list[Path]
-
-    def __post_init__(self):
-        if not self.filenames:
-            raise ValueError("No filenames provided.")
-        if len(self.filenames) > 1:
-            raise ValueError("NpyArray only supports a single .npy file.")
-        self.filenames = [Path(p) for p in self.filenames]
-        self._file = np.load(self.filenames[0], mmap_mode="r")
-        self.shape = self._file.shape
-        self.dtype = self._file.dtype
-        self.ndim = self._file.ndim
-
-
-@dataclass
 class TiffArray:
-    filenames: List[Path] | List[str] | Path | str
-    _chunks: Any = None
-    _dask_array: da.Array = field(default=None, init=False, repr=False)
-    _metadata: dict = field(default_factory=dict, init=False, repr=False)
+    """
+    Lazy TIFF array reader using TiffFile handles and asarray() on __getitem__.
 
-    def __post_init__(self):
-        if not isinstance(self.filenames, list):
-            self.filenames = expand_paths(self.filenames)
+    Similar pattern to MboRawArray but for generic TIFFs without ScanImage metadata.
+    Opens TiffFile handles on init (no data read), extracts shape from metadata/first page,
+    and reads data lazily via tf.asarray(key=frames) when indexed.
+    """
+
+    def __init__(self, files: str | Path | List[str] | List[Path]):
+        import json
+        from mbo_utilities.metadata import query_tiff_pages
+
+        # Normalize to list of Paths
+        if isinstance(files, (str, Path)):
+            self.filenames = expand_paths(files)
+        else:
+            self.filenames = [Path(f) for f in files]
         self.filenames = [Path(p) for p in self.filenames]
-        self._metadata = _safe_get_metadata(self.filenames[0])
-        self.num_rois = self._metadata.get("num_rois", 1)
 
-    @property
-    def chunks(self):
-        return self._chunks or CHUNKS_4D
+        # Open TiffFile handles (no data read yet)
+        self.tiff_files = [TiffFile(f) for f in self.filenames]
+        self._tiff_lock = threading.Lock()
 
-    @chunks.setter
-    def chunks(self, value):
-        self._chunks = value
+        # Extract info from first file's first page (no seeks)
+        tf = self.tiff_files[0]
+        page0 = tf.pages.first
+        self._page_shape = page0.shape  # (Y, X) for 2D page
+        self._dtype = page0.dtype
 
-    def _open_one(self, path: Path) -> da.Array:
-        try:
-            with tifffile.TiffFile(path) as tf:
-                z = tf.aszarr()
-                a = da.from_zarr(z, chunks=self.chunks)
-                axes = tf.series[0].axes
-        except Exception:
-            try:
-                mm = tifffile.memmap(path, mode="r")
-                a = da.from_array(mm, chunks=self.chunks)
-                axes = _axes_or_guess(mm.ndim)
-            except Exception:
-                arr = tifffile.imread(path)
-                a = da.from_array(arr, chunks=self.chunks)
-                axes = _axes_or_guess(arr.ndim)
-        a = _to_tzyx(a, axes)
-        if a.ndim == 3:
-            a = da.expand_dims(a, 0)
-        return a
+        # Try to get frame count from metadata without seeking
+        # Fallback chain: shaped_description -> IFD estimate -> len(pages)
+        self._frames_per_file = []
+        self._num_frames = 0
 
-    def _build_dask(self) -> da.Array:
-        parts = [self._open_one(p) for p in self.filenames]
-        if len(parts) == 1:
-            return parts[0]
-        return da.concatenate(parts, axis=0)
+        for i, (tfile, fpath) in enumerate(zip(self.tiff_files, self.filenames)):
+            nframes = None
 
-    @property
-    def dask(self) -> da.Array:
-        if self._dask_array is None:
-            self._dask_array = self._build_dask()
-        return self._dask_array
+            # Method 1: ImageDescription JSON (tifffile shaped writes)
+            if i == 0:
+                desc = page0.description
+            else:
+                desc = tfile.pages.first.description
+
+            if desc:
+                try:
+                    meta = json.loads(desc)
+                    if "shape" in meta and isinstance(meta["shape"], list):
+                        # First dimension is frames for 3D+ arrays
+                        if len(meta["shape"]) >= 3:
+                            nframes = meta["shape"][0]
+                except (json.JSONDecodeError, TypeError, KeyError):
+                    pass
+
+            # Method 2: IFD offset estimation (fast for uniform pages)
+            # Only trust if result > 1 (IFD estimate can fail on non-uniform TIFFs)
+            if nframes is None:
+                try:
+                    est = query_tiff_pages(fpath)
+                    if est > 1:
+                        nframes = est
+                except Exception:
+                    pass
+
+            # Method 3: Fallback to len(pages) - triggers seek but guaranteed correct
+            if nframes is None:
+                nframes = len(tfile.pages)
+
+            self._frames_per_file.append(nframes)
+            self._num_frames += nframes
+
+        # Build metadata dict
+        self._metadata = {
+            "shape": self.shape,
+            "dtype": str(self._dtype),
+            "nframes": self._num_frames,
+            "num_frames": self._num_frames,
+            "frames_per_file": self._frames_per_file,
+            "file_paths": [str(p) for p in self.filenames],
+            "num_files": len(self.filenames),
+        }
+
+        self.num_rois = 1
+        self._target_dtype = None
 
     @property
     def shape(self) -> tuple[int, ...]:
-        return tuple(self.dask.shape)
+        # Return TZYX format: (frames, 1, Y, X)
+        return (self._num_frames, 1, self._page_shape[0], self._page_shape[1])
 
     @property
     def dtype(self):
-        return self.dask.dtype
+        return self._target_dtype if self._target_dtype is not None else self._dtype
 
     @property
-    def ndim(self):
-        return self.dask.ndim
+    def ndim(self) -> int:
+        return 4
 
     @property
     def metadata(self) -> dict:
         return self._metadata
 
     def __getitem__(self, key):
-        return self.dask[key]
+        """Read frames lazily using tf.asarray(key=frame_indices)."""
+        if not isinstance(key, tuple):
+            key = (key,)
 
-    def __getattr__(self, attr):
-        if attr.startswith('_'):
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
-        try:
-            return getattr(self.dask, attr)
-        except AttributeError:
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
+        # Parse the key into frame indices
+        t_key = key[0] if len(key) > 0 else slice(None)
+        z_key = key[1] if len(key) > 1 else slice(None)
+        y_key = key[2] if len(key) > 2 else slice(None)
+        x_key = key[3] if len(key) > 3 else slice(None)
+
+        # Convert to list of frame indices
+        frames = listify_index(t_key, self._num_frames)
+        if not frames:
+            return np.empty((0, 1) + self._page_shape, dtype=self.dtype)
+
+        # Read the requested frames
+        out = self._read_frames(frames)
+
+        # Apply spatial slicing if needed
+        if y_key != slice(None) or x_key != slice(None):
+            out = out[:, :, y_key, x_key]
+
+        # Handle z dimension (always 1 for generic TIFFs)
+        z_indices = listify_index(z_key, 1)
+        if z_indices != [0]:
+            out = out[:, z_indices, :, :]
+
+        # Squeeze dimensions for integer indices
+        squeeze_axes = []
+        if isinstance(t_key, int):
+            squeeze_axes.append(0)
+        if isinstance(z_key, int):
+            squeeze_axes.append(1 - len([a for a in squeeze_axes if a < 1]))
+        if squeeze_axes:
+            out = np.squeeze(out, axis=tuple(squeeze_axes))
+
+        # Apply dtype conversion if astype() was called
+        if self._target_dtype is not None:
+            out = out.astype(self._target_dtype)
+
+        return out
+
+    def _read_frames(self, frames: list[int]) -> np.ndarray:
+        """Read specific frame indices across all files."""
+        buf = np.empty((len(frames), 1, self._page_shape[0], self._page_shape[1]), dtype=self._dtype)
+
+        start = 0
+        frame_set = set(frames)
+        frame_to_buf_idx = {f: i for i, f in enumerate(frames)}
+
+        for tf, nframes in zip(self.tiff_files, self._frames_per_file):
+            end = start + nframes
+            # Find which requested frames are in this file
+            file_frames = [f for f in frames if start <= f < end]
+            if not file_frames:
+                start = end
+                continue
+
+            # Convert global frame indices to local file indices
+            local_indices = [f - start for f in file_frames]
+
+            with self._tiff_lock:
+                try:
+                    chunk = tf.asarray(key=local_indices)
+                except Exception as e:
+                    raise IOError(
+                        f"TiffArray: Failed to read frames {local_indices} from {tf.filename}\n"
+                        f"File may be corrupted or incomplete.\n"
+                        f": {type(e).__name__}: {e}"
+                    ) from e
+
+            # Handle single frame case where asarray returns 2D
+            if chunk.ndim == 2:
+                chunk = chunk[np.newaxis, ...]
+
+            # Copy to output buffer
+            for local_idx, global_frame in zip(local_indices, file_frames):
+                buf_idx = frame_to_buf_idx[global_frame]
+                chunk_idx = local_indices.index(local_idx)
+                buf[buf_idx, 0] = chunk[chunk_idx]
+
+            start = end
+
+        return buf
+
+    def astype(self, dtype, copy=True):
+        """Set target dtype for lazy conversion on data access."""
+        self._target_dtype = np.dtype(dtype)
+        return self
 
     def __array__(self):
-        n = min(10, self.dask.shape[0])
-        return self.dask[:n].compute()
+        """Return first 10 frames as numpy array."""
+        n = min(10, self._num_frames)
+        return self[:n]
 
     def min(self) -> float:
-        return float(self.dask[0].min().compute())
+        return float(np.min(self[0]))
 
     def max(self) -> float:
-        return float(self.dask[0].max().compute())
+        return float(np.max(self[0]))
 
     def imshow(self, **kwargs):
         import fastplotlib as fpl
@@ -926,7 +1190,7 @@ class TiffArray:
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
         window_funcs = kwargs.get("window_funcs", None)
         return fpl.ImageWidget(
-            data=self.dask,
+            data=self,
             histogram_widget=histogram_widget,
             figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": -300, "vmax": 4000},
@@ -945,75 +1209,17 @@ class TiffArray:
         **kwargs,
     ):
         """Write TiffArray to disk in various formats."""
-        outpath = Path(outpath)
-        outpath.mkdir(parents=True, exist_ok=True)
-
-        ext_clean = ext.lower().lstrip(".")
-        md = dict(self.metadata) if isinstance(self.metadata, dict) else {}
-
-        # Determine dimensions
-        nframes = self.shape[0]
-        num_planes = self.shape[1] if len(self.shape) == 4 else 1
-        Ly, Lx = self.shape[-2], self.shape[-1]
-
-        md["Ly"] = Ly
-        md["Lx"] = Lx
-        md["nframes"] = nframes
-        md["num_frames"] = nframes
-
-        # Handle planes parameter
-        if num_planes > 1:
-            if planes is None:
-                planes = list(range(num_planes))
-            elif isinstance(planes, int):
-                planes = [planes - 1]
-            else:
-                planes = [p - 1 for p in planes]
-
-            for plane_idx in planes:
-                if ext_clean == "bin":
-                    plane_dir = outpath / f"plane{plane_idx + 1:02d}"
-                    plane_dir.mkdir(parents=True, exist_ok=True)
-                    target = plane_dir / (kwargs.get("output_name") or "data_raw.bin")
-                else:
-                    target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
-
-                plane_md = md.copy()
-                plane_md["plane"] = plane_idx + 1
-
-                _write_plane(
-                    self,
-                    target,
-                    overwrite=overwrite,
-                    target_chunk_mb=target_chunk_mb,
-                    metadata=plane_md,
-                    progress_callback=progress_callback,
-                    debug=debug,
-                    dshape=(nframes, Ly, Lx),
-                    plane_index=plane_idx,
-                    **kwargs,
-                )
-        else:
-            # Single plane data
-            if ext_clean == "bin":
-                target = outpath / (kwargs.get("output_name") or "data_raw.bin")
-            else:
-                target = outpath / f"plane01.{ext_clean}"
-
-            _write_plane(
-                self,
-                target,
-                overwrite=overwrite,
-                target_chunk_mb=target_chunk_mb,
-                metadata=md,
-                progress_callback=progress_callback,
-                debug=debug,
-                dshape=(nframes, Ly, Lx),
-                plane_index=None,
-                **kwargs,
-            )
-
-        return outpath
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
 
 
 class MboRawArray:
@@ -1446,8 +1652,9 @@ class MboRawArray:
             xslice=slice(None),  # or slice(0, roi['width'])
         )
 
+    @property
     def num_planes(self):
-        """LBM alias for num_channels."""
+        """Alias for num_channels (ScanImage terminology)."""
         return self.num_channels
 
     def min(self):
@@ -1547,74 +1754,19 @@ class MboRawArray:
         planes=None,
         **kwargs,
     ):
-        # convert to 0 based indexing
-        if isinstance(planes, int):
-            planes = [planes - 1]
-        elif planes is None:
-            planes = list(range(self.num_channels))
-        elif isinstance(planes, (list, tuple)):
-            planes = [p - 1 for p in planes]
-        else:
-            raise RuntimeError(
-                f"Invalid values for requested z-plane type: {type(planes)}"
-            )
-        output_name = kwargs.get("output_name")
-
-        for roi in iter_rois(self):
-            for plane in planes:
-                if not isinstance(plane, int):
-                    raise ValueError(f"Plane must be an integer, got {type(plane)}")
-                self.roi = roi
-
-                if ext in [".bin", ".binary"]:
-                    if output_name:
-                        # Caller specified exact output name - write directly to outpath
-                        if kwargs.get("structural"):
-                            target = outpath / "data_chan2.bin"
-                        else:
-                            target = outpath / output_name
-                    else:
-                        # Create subdirectory structure for multi-plane output
-                        if roi is None:
-                            subdir = f"plane{plane + 1:02d}_stitched"
-                        else:
-                            subdir = f"plane{plane + 1:02d}_roi{roi}"
-                        if kwargs.get("structural"):
-                            target = outpath / subdir / "data_chan2.bin"
-                        else:
-                            target = outpath / subdir / "data_raw.bin"
-                else:
-                    if roi is None:
-                        fname = f"plane{plane + 1:02d}_stitched{ext}"
-                    else:
-                        fname = f"plane{plane + 1:02d}_roi{roi}{ext}"
-                    target = outpath.joinpath(fname)
-
-                target.parent.mkdir(exist_ok=True)
-                if target.exists() and not overwrite:
-                    logger.warning(f"File {target} already exists. Skipping write.")
-                    continue
-
-                md = self.metadata.copy()
-                md["plane"] = plane + 1  # back to 1-based indexing
-                md["mroi"] = roi
-                md["roi"] = roi  # alias
-
-                # Determine actual number of frames to write
-                num_frames = kwargs.get("num_frames", self.shape[0])
-
-                _write_plane(
-                    self,
-                    target,
-                    overwrite=overwrite,
-                    target_chunk_mb=target_chunk_mb,
-                    metadata=md,
-                    progress_callback=progress_callback,
-                    debug=debug,
-                    dshape=(num_frames, self.shape[-2], self.shape[-1]),  # (T, Y, X)
-                    plane_index=plane,
-                    **kwargs,
-                )
+        """Write MboRawArray to disk in various formats."""
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            roi_iterator=iter_rois(self),
+            **kwargs,
+        )
 
     def imshow(self, **kwargs):
         arrays = []
@@ -1653,6 +1805,40 @@ class MboRawArray:
 
 
 class NumpyArray:
+    """
+    Lazy array wrapper for NumPy arrays and .npy files.
+
+    Conforms to LazyArrayProtocol for compatibility with mbo_utilities I/O
+    and processing pipelines. Supports 2D (image), 3D (time series), and
+    4D (volumetric) data.
+
+    Parameters
+    ----------
+    array : np.ndarray, str, or Path
+        Either a numpy array (will be saved to temp file for memory mapping)
+        or a path to a .npy file.
+    metadata : dict, optional
+        Metadata dictionary. If not provided, basic metadata is inferred
+        from array shape.
+
+    Examples
+    --------
+    >>> # From .npy file
+    >>> arr = NumpyArray("data.npy")
+    >>> arr.shape
+    (100, 512, 512)
+
+    >>> # From in-memory array (creates temp file)
+    >>> data = np.random.randn(100, 512, 512).astype(np.float32)
+    >>> arr = NumpyArray(data)
+    >>> arr[0:10]  # Lazy slicing
+
+    >>> # 4D volumetric data
+    >>> vol = NumpyArray("volume.npy")  # shape: (T, Z, Y, X)
+    >>> vol.ndim
+    4
+    """
+
     def __init__(self, array: np.ndarray | str | Path, metadata: dict | None = None):
         if isinstance(array, (str, Path)):
             self.path = Path(array)
@@ -1661,7 +1847,7 @@ class NumpyArray:
             self.data = np.load(self.path, mmap_mode="r")
             self._tempfile = None
         elif isinstance(array, np.ndarray):
-            logger.info(f"Creating temporary .npy file for array.")
+            logger.info("Creating temporary .npy file for array.")
             tmp = tempfile.NamedTemporaryFile(suffix=".npy", delete=False)
             np.save(tmp, array)  # type: ignore
             tmp.close()
@@ -1676,9 +1862,15 @@ class NumpyArray:
         self.dtype = self.data.dtype
         self.ndim = self.data.ndim
         self._metadata = metadata or {}
+        self._min: float | None = None
+        self._max: float | None = None
 
     def __getitem__(self, item):
         return self.data[item]
+
+    def __len__(self) -> int:
+        """Return length of first dimension (number of frames for 3D/4D)."""
+        return self.shape[0]
 
     def __array__(self):
         return np.asarray(self.data)
@@ -1688,8 +1880,18 @@ class NumpyArray:
         return [self.path]
 
     @property
-    def metadata(self):
-        return self._metadata
+    def metadata(self) -> dict:
+        # Ensure basic metadata is always present
+        md = dict(self._metadata)
+        if "nframes" not in md:
+            md["nframes"] = self.shape[0] if self.ndim >= 1 else 1
+        if "num_frames" not in md:
+            md["num_frames"] = md["nframes"]
+        if "Ly" not in md and self.ndim >= 2:
+            md["Ly"] = self.shape[-2]
+        if "Lx" not in md and self.ndim >= 2:
+            md["Lx"] = self.shape[-1]
+        return md
 
     @metadata.setter
     def metadata(self, value: dict):
@@ -1697,7 +1899,22 @@ class NumpyArray:
             raise TypeError("metadata must be a dict")
         self._metadata = value
 
+    @property
+    def min(self) -> float:
+        """Minimum value in array (computed from first frame, cached)."""
+        if self._min is None:
+            self._min = float(self.data[0].min()) if self.ndim >= 1 else float(self.data.min())
+        return self._min
+
+    @property
+    def max(self) -> float:
+        """Maximum value in array (computed from first frame, cached)."""
+        if self._max is None:
+            self._max = float(self.data[0].max()) if self.ndim >= 1 else float(self.data.max())
+        return self._max
+
     def close(self):
+        """Release resources and clean up temporary files."""
         if self._tempfile:
             try:
                 Path(self._tempfile.name).unlink(missing_ok=True)
@@ -1720,89 +1937,51 @@ class NumpyArray:
         **kwargs,
     ):
         """Write NumpyArray to disk in various formats."""
-        outpath = Path(outpath)
-        outpath.mkdir(parents=True, exist_ok=True)
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
 
-        ext_clean = ext.lower().lstrip(".")
+    def imshow(self, **kwargs):
+        """Display array using fastplotlib ImageWidget."""
+        import fastplotlib as fpl
+        import numpy as np
 
-        # Build metadata for output - infer from shape
-        md = dict(self._metadata) if self._metadata else {}
+        histogram_widget = kwargs.pop("histogram_widget", True)
+        figure_kwargs = kwargs.pop("figure_kwargs", {"size": (800, 800)})
+        graphic_kwargs = kwargs.pop("graphic_kwargs", {"vmin": self.min, "vmax": self.max})
 
-        # Handle different dimensionalities
-        if self.ndim == 2:
-            # Single frame (Y, X)
-            nframes = 1
-            Ly, Lx = self.shape
-        elif self.ndim == 3:
-            # Time series (T, Y, X)
-            nframes, Ly, Lx = self.shape
-        elif self.ndim == 4:
-            # Volumetric (T, Z, Y, X)
-            nframes = self.shape[0]
-            Ly, Lx = self.shape[-2], self.shape[-1]
-        else:
-            raise ValueError(f"Unsupported NumpyArray dimensionality: {self.ndim}")
-
-        md["Ly"] = Ly
-        md["Lx"] = Lx
-        md["nframes"] = nframes
-        md["num_frames"] = nframes
-
-        if ext_clean == "bin":
-            fname = kwargs.get("output_name") or "data_raw.bin"
-            target = outpath / fname
-        else:
-            fname = f"plane01.{ext_clean}"
-            target = outpath / fname
-
-        # For 4D data, handle plane iteration
+        # Set up slider dimensions based on array dimensionality
         if self.ndim == 4:
-            num_planes = self.shape[1]
-            if planes is None:
-                planes = list(range(num_planes))
-            elif isinstance(planes, int):
-                planes = [planes - 1]
-            else:
-                planes = [p - 1 for p in planes]
-
-            for plane_idx in planes:
-                if ext_clean == "bin":
-                    plane_dir = outpath / f"plane{plane_idx + 1:02d}"
-                    plane_dir.mkdir(parents=True, exist_ok=True)
-                    target = plane_dir / (kwargs.get("output_name") or "data_raw.bin")
-                else:
-                    target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
-
-                plane_md = md.copy()
-                plane_md["plane"] = plane_idx + 1
-
-                _write_plane(
-                    self,
-                    target,
-                    overwrite=overwrite,
-                    target_chunk_mb=target_chunk_mb,
-                    metadata=plane_md,
-                    progress_callback=progress_callback,
-                    debug=debug,
-                    dshape=(nframes, Ly, Lx),
-                    plane_index=plane_idx,
-                    **kwargs,
-                )
+            slider_dim_names = ("t", "z")
+            window_funcs = kwargs.pop("window_funcs", (np.mean, None))
+            window_sizes = kwargs.pop("window_sizes", (1, None))
+        elif self.ndim == 3:
+            slider_dim_names = ("t",)
+            window_funcs = kwargs.pop("window_funcs", (np.mean,))
+            window_sizes = kwargs.pop("window_sizes", (1,))
         else:
-            _write_plane(
-                self,
-                target,
-                overwrite=overwrite,
-                target_chunk_mb=target_chunk_mb,
-                metadata=md,
-                progress_callback=progress_callback,
-                debug=debug,
-                dshape=(nframes, Ly, Lx) if self.ndim >= 3 else (1, Ly, Lx),
-                plane_index=None,
-                **kwargs,
-            )
+            slider_dim_names = None
+            window_funcs = None
+            window_sizes = None
 
-        return outpath
+        return fpl.ImageWidget(
+            data=self.data,
+            slider_dim_names=slider_dim_names,
+            window_funcs=window_funcs,
+            window_sizes=window_sizes,
+            histogram_widget=histogram_widget,
+            figure_kwargs=figure_kwargs,
+            graphic_kwargs=graphic_kwargs,
+            **kwargs,
+        )
 
 
 class NWBArray:
@@ -1851,86 +2030,17 @@ class NWBArray:
         **kwargs,
     ):
         """Write NWBArray to disk in various formats."""
-        outpath = Path(outpath)
-        outpath.mkdir(parents=True, exist_ok=True)
-
-        ext_clean = ext.lower().lstrip(".")
-
-        # Build metadata for output - infer from shape
-        md = dict(self._metadata) if self._metadata else {}
-
-        # Handle different dimensionalities
-        if self.ndim == 2:
-            nframes = 1
-            Ly, Lx = self.shape
-        elif self.ndim == 3:
-            nframes, Ly, Lx = self.shape
-        elif self.ndim == 4:
-            nframes = self.shape[0]
-            Ly, Lx = self.shape[-2], self.shape[-1]
-        else:
-            raise ValueError(f"Unsupported NWBArray dimensionality: {self.ndim}")
-
-        md["Ly"] = Ly
-        md["Lx"] = Lx
-        md["nframes"] = nframes
-        md["num_frames"] = nframes
-
-        if ext_clean == "bin":
-            fname = kwargs.get("output_name") or "data_raw.bin"
-            target = outpath / fname
-        else:
-            fname = f"plane01.{ext_clean}"
-            target = outpath / fname
-
-        # For 4D data, handle plane iteration
-        if self.ndim == 4:
-            num_planes = self.shape[1]
-            if planes is None:
-                planes = list(range(num_planes))
-            elif isinstance(planes, int):
-                planes = [planes - 1]
-            else:
-                planes = [p - 1 for p in planes]
-
-            for plane_idx in planes:
-                if ext_clean == "bin":
-                    plane_dir = outpath / f"plane{plane_idx + 1:02d}"
-                    plane_dir.mkdir(parents=True, exist_ok=True)
-                    target = plane_dir / (kwargs.get("output_name") or "data_raw.bin")
-                else:
-                    target = outpath / f"plane{plane_idx + 1:02d}.{ext_clean}"
-
-                plane_md = md.copy()
-                plane_md["plane"] = plane_idx + 1
-
-                _write_plane(
-                    self,
-                    target,
-                    overwrite=overwrite,
-                    target_chunk_mb=target_chunk_mb,
-                    metadata=plane_md,
-                    progress_callback=progress_callback,
-                    debug=debug,
-                    dshape=(nframes, Ly, Lx),
-                    plane_index=plane_idx,
-                    **kwargs,
-                )
-        else:
-            _write_plane(
-                self,
-                target,
-                overwrite=overwrite,
-                target_chunk_mb=target_chunk_mb,
-                metadata=md,
-                progress_callback=progress_callback,
-                debug=debug,
-                dshape=(nframes, Ly, Lx) if self.ndim >= 3 else (1, Ly, Lx),
-                plane_index=None,
-                **kwargs,
-            )
-
-        return outpath
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
 
 
 class ZarrArray:
@@ -2021,6 +2131,45 @@ class ZarrArray:
                 md["num_frames"] = int(self.zs[0].shape[0])
 
         return md
+
+    @property
+    def zstats(self) -> dict | None:
+        """
+        Return pre-computed z-statistics from metadata if available.
+
+        Returns
+        -------
+        dict | None
+            Dictionary with keys 'mean', 'std', 'snr' (each a list of floats),
+            or None if not available.
+        """
+        md = self.metadata
+        if "zstats" in md:
+            return md["zstats"]
+        return None
+
+    @zstats.setter
+    def zstats(self, value: dict):
+        """
+        Store z-statistics in metadata for persistence.
+
+        Parameters
+        ----------
+        value : dict
+            Dictionary with keys 'mean', 'std', 'snr' (each a list of floats).
+        """
+        if not isinstance(value, dict):
+            raise TypeError(f"zstats must be a dict, got {type(value)}")
+        if not all(k in value for k in ("mean", "std", "snr")):
+            raise ValueError("zstats must contain 'mean', 'std', and 'snr' keys")
+
+        # Update internal metadata
+        if not self._metadata:
+            self._metadata = [{}]
+        self._metadata[0]["zstats"] = value
+
+        # Also persist to zarr attrs if we have write access
+        # (This will be saved when the zarr is written via _write_zarr)
 
     @metadata.setter
     def metadata(self, value: dict):
@@ -2163,458 +2312,18 @@ class ZarrArray:
         planes: list[int] | int | None = None,
         **kwargs,
     ):
-        outpath = Path(outpath)
-
-        # Normalize planes to 0-based indexing
-        if isinstance(planes, int):
-            planes = [planes - 1]
-        elif planes is None:
-            planes = list(range(self.shape[1]))  # all z-planes
-        else:
-            planes = [p - 1 for p in planes]
-
-        for plane in planes:
-            fname = f"plane{plane + 1:02d}{ext}"
-
-            if ext in [".bin", ".binary"]:
-                # Suite2p expects data_raw.bin under a folder
-                # fname_bin_stripped = Path(fname).stem
-                target = outpath / "data_raw.bin"
-            else:
-                target = outpath.joinpath(fname)
-
-            target.parent.mkdir(parents=True, exist_ok=True)
-
-            if target.exists() and not overwrite:
-                logger.warning(f"File {target} already exists. Skipping write.")
-                continue
-
-            # Metadata per plane
-            if isinstance(self.metadata, list):
-                md = self.metadata[plane].copy()
-            else:
-                md = dict(self.metadata)
-            md["plane"] = plane + 1  # back to 1-based
-            md["z"] = plane
-
-            _write_plane(
-                self,
-                target,
-                overwrite=overwrite,
-                target_chunk_mb=target_chunk_mb,
-                metadata=md,
-                progress_callback=progress_callback,
-                debug=debug,
-                dshape=(self.shape[0], self.shape[-2], self.shape[-1]),  # (T, Y, X) - Fixed Y/X order
-                plane_index=plane,
-                **kwargs,
-            )
-
-
-def supports_roi(obj):
-    return hasattr(obj, "roi") and hasattr(obj, "num_rois")
-
-
-def normalize_roi(value):
-    """Return ROI as None, int, or list[int] with consistent semantics."""
-    if value in (None, (), [], False):
-        return None
-    if value is True:
-        return 0  # “split ROIs” GUI flag
-    if isinstance(value, int):
-        return value
-    if isinstance(value, (list, tuple)):
-        return list(value)
-    return value
-
-
-# class IsoviewArray:
-#     """
-#     Reader for Isoview lightsheet microscopy data stored as zarr arrays.
-
-#     Expects a directory structure like:
-#         base_dir/
-#             TM000000/
-#                 SPM00_TM000000_CM00_CHN01.zarr  (Z, Y, X)
-#                 SPM00_TM000000_CM01_CHN01.zarr
-#                 SPM00_TM000000_CM02_CHN00.zarr
-#                 SPM00_TM000000_CM03_CHN00.zarr
-#             TM000001/
-#                 ...
-
-#     Or a single TM folder:
-#         TM000010/
-#             SPM00_TM000010_CM00_CHN01.zarr
-#             ...
-
-#     Each .zarr file is 3D (Z, Y, X) for a single camera/channel at one timepoint.
-
-#     Note: Not all camera/channel combinations may exist. The array tracks which
-#     combinations are available and provides access by sequential index.
-
-#     Shape depends on input:
-#     - Multiple TM folders: (T, Z, Views, Y, X) - 5D
-#     - Single TM folder: (Z, Views, Y, X) - 4D
-
-#     Parameters
-#     ----------
-#     path : str or Path
-#         Path to the base directory containing TM* folders, or a single TM folder
-
-#     Examples
-#     --------
-#     >>> arr = IsoviewArray("path/to/zarr_output")  # Multiple timepoints
-#     >>> print(arr.shape)  # (T, Z, NumViews, Y, X)
-#     >>> arr = IsoviewArray("path/to/TM000010")  # Single timepoint
-#     >>> print(arr.shape)  # (Z, NumViews, Y, X)
-#     >>> print(arr.views)  # [(0, 1), (1, 1), (2, 0), (3, 0)] - (camera, channel) pairs
-#     """
-
-#     def __init__(self, path: str | Path):
-#         try:
-#             import zarr
-#         except ImportError:
-#             raise ImportError("zarr is required. Install with `pip install zarr>=3.0`")
-
-#         self.base_path = Path(path)
-#         if not self.base_path.exists():
-#             raise FileNotFoundError(f"Path does not exist: {self.base_path}")
-
-#         # Check if the input IS a TM folder (single timepoint)
-#         self._single_timepoint = False
-#         if self.base_path.name.startswith("TM"):
-#             # Single TM folder provided
-#             zarr_files_in_path = list(self.base_path.glob("*.zarr"))
-#             if zarr_files_in_path:
-#                 self._single_timepoint = True
-#                 self.tm_folders = [self.base_path]
-#             else:
-#                 raise ValueError(f"TM folder {self.base_path} contains no .zarr files")
-#         else:
-#             # Find all TM folders and sort them
-#             self.tm_folders = sorted(
-#                 [d for d in self.base_path.iterdir() if d.is_dir() and d.name.startswith("TM")],
-#                 key=lambda x: int(x.name[2:])  # Sort by TM number
-#             )
-
-#             if not self.tm_folders:
-#                 raise ValueError(f"No TM* folders found in {self.base_path}")
-
-#         # Parse the first TM folder to discover camera/channel combinations
-#         first_tm = self.tm_folders[0]
-#         zarr_files = sorted(first_tm.glob("*.zarr"))
-
-#         if not zarr_files:
-#             raise ValueError(f"No .zarr files found in {first_tm}")
-
-#         # Parse filenames to extract camera/channel info
-#         # Expected format: SPM00_TM000000_CM{camera:02d}_CHN{channel:02d}.zarr
-#         # Store as list of (camera, channel) tuples - "views"
-#         self._views = []  # List of (camera, channel) tuples
-
-#         for zf in sorted(zarr_files):
-#             name = zf.stem  # e.g., SPM00_TM000000_CM00_CHN01
-#             parts = name.split("_")
-
-#             # Find CM and CHN parts
-#             cm_idx = None
-#             chn_idx = None
-#             for part in parts:
-#                 if part.startswith("CM"):
-#                     cm_idx = int(part[2:])
-#                 elif part.startswith("CHN"):
-#                     chn_idx = int(part[3:])
-
-#             if cm_idx is not None and chn_idx is not None:
-#                 self._views.append((cm_idx, chn_idx))
-
-#         if not self._views:
-#             raise ValueError(f"No valid camera/channel combinations found in {first_tm}")
-
-#         logger.info(
-#             f"IsoviewArray: {len(self.tm_folders)} timepoints, "
-#             f"{len(self._views)} views: {self._views}"
-#         )
-
-#         # Open first zarr to get Z, Y, X dimensions and metadata
-#         first_zarr_path = zarr_files[0]
-#         first_zarr = zarr.open(first_zarr_path, mode="r")
-
-#         # Handle OME-Zarr groups
-#         if isinstance(first_zarr, zarr.Group):
-#             if "0" in first_zarr:
-#                 first_arr = first_zarr["0"]
-#             else:
-#                 raise ValueError(f"OME-Zarr group missing '0' array: {first_zarr_path}")
-#             # Store group attrs as metadata
-#             self._zarr_attrs = dict(first_zarr.attrs)
-#         else:
-#             first_arr = first_zarr
-#             self._zarr_attrs = dict(first_arr.attrs) if hasattr(first_arr, 'attrs') else {}
-
-#         self._single_shape = first_arr.shape  # (Z, Y, X)
-#         self._dtype = first_arr.dtype
-
-#         # Cache for opened zarr arrays: (t_idx, view_idx) -> zarr array
-#         self._zarr_cache = {}
-
-#     def _get_zarr(self, t_idx: int, view_idx: int):
-#         """Get or open a zarr array for the given timepoint and view index."""
-#         import zarr
-
-#         cache_key = (t_idx, view_idx)
-#         if cache_key in self._zarr_cache:
-#             return self._zarr_cache[cache_key]
-
-#         camera, channel = self._views[view_idx]
-#         tm_folder = self.tm_folders[t_idx]
-
-#         # Find matching zarr file
-#         pattern = f"*_CM{camera:02d}_CHN{channel:02d}.zarr"
-#         matches = list(tm_folder.glob(pattern))
-
-#         if not matches:
-#             raise FileNotFoundError(
-#                 f"No zarr file matching {pattern} in {tm_folder}"
-#             )
-
-#         zarr_path = matches[0]
-#         z = zarr.open(zarr_path, mode="r")
-
-#         # Handle OME-Zarr groups
-#         if isinstance(z, zarr.Group):
-#             if "0" in z:
-#                 z = z["0"]
-#             else:
-#                 raise ValueError(f"OME-Zarr group missing '0' array: {zarr_path}")
-
-#         self._zarr_cache[cache_key] = z
-#         return z
-
-#     @property
-#     def shape(self) -> tuple[int, ...]:
-#         """
-#         Shape depends on input:
-#         - Multiple TM folders: (T, Z, Views, Y, X) - 5D
-#         - Single TM folder: (Z, Views, Y, X) - 4D
-#         """
-#         z, y, x = self._single_shape
-#         if self._single_timepoint:
-#             return (z, len(self._views), y, x)
-#         else:
-#             t = len(self.tm_folders)
-#             return (t, z, len(self._views), y, x)
-
-#     @property
-#     def dtype(self):
-#         return self._dtype
-
-#     @property
-#     def ndim(self):
-#         return 4 if self._single_timepoint else 5
-
-#     @property
-#     def size(self):
-#         return np.prod(self.shape)
-
-#     @property
-#     def views(self) -> list[tuple[int, int]]:
-#         """List of (camera, channel) tuples for each view index."""
-#         return self._views
-
-#     @property
-#     def num_views(self) -> int:
-#         """Number of camera/channel views."""
-#         return len(self._views)
-
-#     @property
-#     def num_timepoints(self) -> int:
-#         """Number of timepoints."""
-#         return len(self.tm_folders)
-
-#     @property
-#     def metadata(self) -> dict:
-#         """
-#         Metadata extracted from zarr attributes.
-
-#         Returns a dict with keys like:
-#         - timestamp, time_point, camera_type, wavelength, exposure_time
-#         - dimensions, z_step, planes, detection_objective
-#         - pixel_resolution, dz, frame_rate, num_frames
-#         - Plus computed fields: num_timepoints, views, shape
-#         """
-#         # Start with zarr attrs
-#         meta = dict(self._zarr_attrs)
-
-#         # Remove nested OME metadata (keep it accessible separately)
-#         ome = meta.pop("ome", None)
-
-#         # Add computed fields
-#         meta["num_timepoints"] = len(self.tm_folders)
-#         meta["views"] = self._views
-#         meta["shape"] = self.shape
-#         meta["single_timepoint"] = self._single_timepoint
-
-#         # Extract useful info from OME if present
-#         if ome and "multiscales" in ome:
-#             multiscales = ome["multiscales"]
-#             if multiscales and len(multiscales) > 0:
-#                 ms = multiscales[0]
-#                 if "axes" in ms:
-#                     meta["axes"] = ms["axes"]
-#                 if "datasets" in ms and len(ms["datasets"]) > 0:
-#                     ds = ms["datasets"][0]
-#                     if "coordinateTransformations" in ds:
-#                         for ct in ds["coordinateTransformations"]:
-#                             if ct.get("type") == "scale":
-#                                 meta["scale"] = ct.get("scale")
-
-#         return meta
-
-#     @property
-#     def ome_metadata(self) -> dict | None:
-#         """Raw OME-Zarr metadata if available."""
-#         return self._zarr_attrs.get("ome")
-
-#     def __len__(self):
-#         return self.shape[0]
-
-#     def view_index(self, camera: int, channel: int) -> int:
-#         """Get view index for a specific camera/channel combination."""
-#         try:
-#             return self._views.index((camera, channel))
-#         except ValueError:
-#             raise ValueError(
-#                 f"No view for camera={camera}, channel={channel}. "
-#                 f"Available views: {self._views}"
-#             )
-
-#     def __getitem__(self, key):
-#         """
-#         Index the array.
-
-#         Shape depends on input:
-#         - Multiple TM folders: (T, Z, Views, Y, X) - 5D
-#         - Single TM folder: (Z, Views, Y, X) - 4D
-
-#         Supports integer indexing, slices, and combinations.
-#         """
-#         if not isinstance(key, tuple):
-#             key = (key,)
-
-#         # Normalize indices helper
-#         def to_indices(k, max_val):
-#             """Convert key to list of indices."""
-#             if isinstance(k, int):
-#                 if k < 0:
-#                     k = max_val + k
-#                 return [k]
-#             elif isinstance(k, slice):
-#                 return list(range(*k.indices(max_val)))
-#             elif isinstance(k, (list, np.ndarray)):
-#                 return list(k)
-#             else:
-#                 return list(range(max_val))
-
-#         if self._single_timepoint:
-#             # 4D indexing: (Z, Views, Y, X)
-#             key = key + (slice(None),) * (4 - len(key))
-#             z_key, view_key, y_key, x_key = key
-#             t_indices = [0]  # Only one timepoint
-#             t_key = 0  # For squeeze tracking
-#         else:
-#             # 5D indexing: (T, Z, Views, Y, X)
-#             key = key + (slice(None),) * (5 - len(key))
-#             t_key, z_key, view_key, y_key, x_key = key
-#             t_indices = to_indices(t_key, len(self.tm_folders))
-
-#         z_indices = to_indices(z_key, self._single_shape[0])
-#         view_indices = to_indices(view_key, len(self._views))
-
-#         # Build output array (always 5D internally for simplicity)
-#         out_shape = (
-#             len(t_indices),
-#             len(z_indices),
-#             len(view_indices),
-#             *self._single_shape[1:],  # Y, X
-#         )
-
-#         # Handle Y, X slicing
-#         if isinstance(y_key, int):
-#             out_shape = out_shape[:3] + (1,) + out_shape[4:]
-#         elif isinstance(y_key, slice):
-#             y_size = len(range(*y_key.indices(self._single_shape[1])))
-#             out_shape = out_shape[:3] + (y_size,) + out_shape[4:]
-
-#         if isinstance(x_key, int):
-#             out_shape = out_shape[:4] + (1,)
-#         elif isinstance(x_key, slice):
-#             x_size = len(range(*x_key.indices(self._single_shape[2])))
-#             out_shape = out_shape[:4] + (x_size,)
-
-#         result = np.empty(out_shape, dtype=self._dtype)
-
-#         for ti, t_idx in enumerate(t_indices):
-#             for vi, view_idx in enumerate(view_indices):
-#                 zarr_arr = self._get_zarr(t_idx, view_idx)
-
-#                 # Index the zarr array (Z, Y, X)
-#                 data = zarr_arr[z_key, y_key, x_key]
-
-#                 # Handle dimension reduction from integer indexing
-#                 if isinstance(z_key, int):
-#                     data = data[np.newaxis, ...]
-#                 if isinstance(y_key, int):
-#                     data = data[:, np.newaxis, :]
-#                 if isinstance(x_key, int):
-#                     data = data[:, :, np.newaxis]
-
-#                 result[ti, :, vi, ...] = data
-
-#         # Squeeze out singleton dimensions from integer indexing
-#         if self._single_timepoint:
-#             # 4D: always squeeze out the T dimension, then check Z, Views, Y, X
-#             result = np.squeeze(result, axis=0)
-#             int_indexed = [
-#                 isinstance(z_key, int),
-#                 isinstance(view_key, int),
-#                 isinstance(y_key, int),
-#                 isinstance(x_key, int),
-#             ]
-#             # Squeeze in reverse order to preserve axis indices
-#             for ax in range(3, -1, -1):
-#                 if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
-#                     result = np.squeeze(result, axis=ax)
-#         else:
-#             # 5D: check T, Z, Views, Y, X
-#             int_indexed = [
-#                 isinstance(t_key, int),
-#                 isinstance(z_key, int),
-#                 isinstance(view_key, int),
-#                 isinstance(y_key, int),
-#                 isinstance(x_key, int),
-#             ]
-#             # Squeeze in reverse order to preserve axis indices
-#             for ax in range(4, -1, -1):
-#                 if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
-#                     result = np.squeeze(result, axis=ax)
-
-#         return result
-
-#     def __array__(self):
-#         """Materialize full array into memory."""
-#         return self[:]
-
-#     @property
-#     def filenames(self) -> list[str]:
-#         """Return list of TM folder paths as strings (for GUI compatibility)."""
-#         return [str(f) for f in self.tm_folders]
-
-#     def __repr__(self):
-#         return (
-#             f"IsoviewArray(shape={self.shape}, dtype={self.dtype}, "
-#             f"views={self._views})"
-#         )
+        """Write ZarrArray to disk in various formats."""
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
 
 
 @dataclass
@@ -2749,6 +2458,15 @@ class BinArray:
     def Lx(self):
         return self.shape[2]
 
+    @property
+    def file(self):
+        """Alias for _file, for backwards compatibility with BinaryFile API."""
+        return self._file
+
+    def flush(self):
+        """Flush the memmap to disk."""
+        self._file.flush()
+
     def close(self):
         """Close the memmap file."""
         if hasattr(self._file, "_mmap"):
@@ -2778,16 +2496,15 @@ class BinArray:
 
         ext_clean = ext.lower().lstrip(".")
 
-        # Build metadata
-        md = dict(self.metadata) if self.metadata else {}
-        md["Ly"] = self.Ly
-        md["Lx"] = self.Lx
-        md["nframes"] = self.nframes
-        md["num_frames"] = self.nframes
-
         # BinArray is always 3D (T, Y, X) - single plane
+        # For binary output, use direct memmap copy (faster)
         if ext_clean == "bin":
-            # Direct binary copy for .bin output
+            md = dict(self.metadata) if self.metadata else {}
+            md["Ly"] = self.Ly
+            md["Lx"] = self.Lx
+            md["nframes"] = self.nframes
+            md["num_frames"] = self.nframes
+
             if output_name is None:
                 output_name = "data_raw.bin"
             outfile = outpath / output_name
@@ -2805,103 +2522,19 @@ class BinArray:
             ops_file = outpath / "ops.npy"
             np.save(ops_file, md)
             logger.info(f"Wrote ops.npy to {ops_file}")
-        else:
-            # Use _write_plane for other formats (tiff, zarr, h5)
-            target = outpath / f"plane01.{ext_clean}"
+            return outpath
 
-            _write_plane(
-                self,
-                target,
-                overwrite=overwrite,
-                target_chunk_mb=target_chunk_mb,
-                metadata=md,
-                progress_callback=progress_callback,
-                debug=debug,
-                dshape=self.shape,
-                plane_index=None,
-                **kwargs,
-            )
+        # For other formats, use common implementation
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            output_name=output_name,
+            **kwargs,
+        )
 
-        return outpath
-
-
-def iter_rois(obj):
-    """Yield ROI indices based on MBO semantics.
-
-    - roi=None → yield None (stitched full-FOV image)
-    - roi=0 → yield each ROI index from 1..num_rois (split all)
-    - roi=int > 0 → yield that ROI only
-    - roi=list/tuple → yield each element (as given)
-    """
-    if not supports_roi(obj):
-        yield None
-        return
-
-    roi = getattr(obj, "roi", None)
-    num_rois = getattr(obj, "num_rois", 1)
-
-    if roi is None:
-        yield None
-    elif roi == 0:
-        yield from range(1, num_rois + 1)
-    elif isinstance(roi, int):
-        yield roi
-    elif isinstance(roi, (list, tuple)):
-        for r in roi:
-            if r == 0:
-                yield from range(1, num_rois + 1)
-            else:
-                yield r
-
-
-def _to_tzyx(a: da.Array, axes: str) -> da.Array:
-    order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
-    perm = [axes.index(ax) for ax in order]
-    a = da.transpose(a, axes=perm)
-    have_T = "T" in order
-    pos = {ax: i for i, ax in enumerate(order)}
-    tdim = a.shape[pos["T"]] if have_T else 1
-    merge_dims = [d for d, ax in enumerate(order) if ax in ("Z", "C", "S")]
-    if merge_dims:
-        front = []
-        if have_T:
-            front.append(pos["T"])
-        rest = [d for d in range(a.ndim) if d not in front]
-        a = da.transpose(a, axes=front + rest)
-        newshape = [
-            tdim if have_T else 1,
-            int(np.prod([a.shape[i] for i in rest[:-2]])),
-            a.shape[-2],
-            a.shape[-1],
-        ]
-        a = a.reshape(newshape)
-    else:
-        if have_T:
-            if a.ndim == 3:
-                a = da.expand_dims(a, 1)
-        else:
-            a = da.expand_dims(a, 0)
-            a = da.expand_dims(a, 1)
-        if order[-2:] != ["Y", "X"]:
-            yx_pos = [order.index("Y"), order.index("X")]
-            keep = [i for i in range(len(order)) if i not in yx_pos]
-            a = da.transpose(a, axes=keep + yx_pos)
-    return a
-
-
-def _axes_or_guess(arr_ndim: int) -> str:
-    if arr_ndim == 2:
-        return "YX"
-    elif arr_ndim == 3:
-        return "ZYX"
-    elif arr_ndim == 4:
-        return "TZYX"
-    else:
-        return "Unknown"
-
-
-def _safe_get_metadata(path: Path) -> dict:
-    try:
-        return get_metadata(path)
-    except Exception:
-        return {}

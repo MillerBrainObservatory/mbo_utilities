@@ -15,7 +15,7 @@ from .array_types import (
     MBOTiffArray,
     TiffArray,
     MboRawArray,
-    NpyArray,
+    NumpyArray,
     ZarrArray,
     # IsoviewArray,
     register_zplanes_s3d,
@@ -45,7 +45,7 @@ _ARRAY_TYPE_KWARGS = {
     BinArray: {"shape"},  # can provide shape if not inferrable
     H5Array: {"dataset"},
     TiffArray: set(),
-    NpyArray: set(),
+    NumpyArray: {"metadata"},  # can provide metadata dict
     # DemixingResultsArray: set(),
 }
 
@@ -688,8 +688,6 @@ def imread(
             # return DemixingResultsArray(first.parent)
 
         # Regular .npy file - load as NumpyArray
-        from mbo_utilities.array_types import NumpyArray
-
         logger.debug(f"Loading .npy file as NumpyArray: {first}")
         return NumpyArray(first)
 
