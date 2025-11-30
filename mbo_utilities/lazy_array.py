@@ -15,8 +15,9 @@ from .array_types import (
     MBOTiffArray,
     TiffArray,
     MboRawArray,
-    NpyArray,
+    NumpyArray,
     ZarrArray,
+    # IsoviewArray,
     register_zplanes_s3d,
     validate_s3d_registration,
     supports_roi,
@@ -44,7 +45,7 @@ _ARRAY_TYPE_KWARGS = {
     BinArray: {"shape"},  # can provide shape if not inferrable
     H5Array: {"dataset"},
     TiffArray: set(),
-    NpyArray: set(),
+    NumpyArray: {"metadata"},  # can provide metadata dict
     # DemixingResultsArray: set(),
 }
 
@@ -331,10 +332,13 @@ def imwrite(
 
     if roi is not None:
         if not supports_roi(lazy_array):
-            raise ValueError(
-                f"{type(lazy_array)} does not support ROIs, but `roi` was provided."
+            # Don't raise error - just log and ignore ROI for unsupported types
+            logger.debug(
+                f"{type(lazy_array).__name__} does not support ROIs. "
+                f"Ignoring roi={roi}, defaulting to single ROI behavior."
             )
-        lazy_array.roi = roi
+        else:
+            lazy_array.roi = roi
 
     if order is not None:
         if len(order) != len(planes):
@@ -360,9 +364,14 @@ def imwrite(
         file_metadata["num_frames"] = int(num_frames)
         file_metadata["nframes"] = int(num_frames)
 
-    # Only assign back if object supports metadata
+    # Only assign back if object supports writable metadata
+    # Some arrays (H5Array, ZarrArray) have read-only metadata properties
     if hasattr(lazy_array, "metadata"):
-        lazy_array.metadata = file_metadata
+        try:
+            lazy_array.metadata = file_metadata
+        except AttributeError:
+            # Read-only metadata property, skip assignment
+            pass
 
     s3d_job_dir = None
     if register_z:
@@ -439,13 +448,19 @@ def imwrite(
 
         # Update lazy_array metadata if it has the attribute
         if hasattr(lazy_array, "metadata"):
-            lazy_array.metadata = file_metadata
+            try:
+                lazy_array.metadata = file_metadata
+            except AttributeError:
+                pass
     else:
         # Registration not requested
         file_metadata["apply_shift"] = False
         # Update lazy_array metadata if it has the attribute
         if hasattr(lazy_array, "metadata"):
-            lazy_array.metadata = file_metadata
+            try:
+                lazy_array.metadata = file_metadata
+            except AttributeError:
+                pass
 
     if hasattr(lazy_array, "_imwrite"):
         # Pass num_frames explicitly if set
@@ -518,6 +533,11 @@ def imread(
     if isinstance(inputs, MboRawArray):
         return inputs
 
+    if "isoview" in kwargs.items():
+        print("Isoview!")
+        from .arrays.isoview import IsoviewArray
+        return IsoviewArray(inputs)
+
     if isinstance(inputs, (str, Path)):
         p = Path(inputs)
         if not p.exists():
@@ -527,6 +547,21 @@ def imread(
             paths = [p]
         elif p.is_dir():
             logger.debug(f"Input is a directory, searching for supported files in {p}")
+
+            # Check for Isoview structure: TM* subfolders with .zarr files
+            tm_folders = [d for d in p.iterdir() if d.is_dir() and d.name.startswith("TM")]
+            if tm_folders:
+                # Multi-timepoint Isoview data
+                logger.info(f"Detected Isoview structure with {len(tm_folders)} TM folders, loading as IsoviewArray.")
+                return IsoviewArray(p)
+
+            # Check if this IS a TM folder (single timepoint)
+            if p.name.startswith("TM"):
+                zarrs = list(p.glob("*.zarr"))
+                if zarrs:
+                    logger.info(f"Detected single TM folder with {len(zarrs)} zarr files, loading as IsoviewArray.")
+                    return IsoviewArray(p)
+
             zarrs = list(p.glob("*.zarr"))
             if zarrs:
                 logger.debug(
@@ -653,8 +688,6 @@ def imread(
             # return DemixingResultsArray(first.parent)
 
         # Regular .npy file - load as NumpyArray
-        from mbo_utilities.array_types import NumpyArray
-
         logger.debug(f"Loading .npy file as NumpyArray: {first}")
         return NumpyArray(first)
 

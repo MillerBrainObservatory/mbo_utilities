@@ -1,15 +1,22 @@
-import os, shutil
-import urllib.request
+import shutil
 from pathlib import Path
+
 import imgui_bundle
+
 import mbo_utilities as mbo
-from mbo_utilities.graphics._widgets import set_tooltip
 from imgui_bundle import (
-    imgui,
-    imgui_md,
     hello_imgui,
+    imgui,
     imgui_ctx,
     portable_file_dialogs as pfd,
+)
+from mbo_utilities.graphics._widgets import set_tooltip
+from mbo_utilities.preferences import (
+    get_default_open_dir,
+    set_last_open_dir,
+    add_recent_file,
+    get_gui_preference,
+    set_gui_preference,
 )
 
 
@@ -47,14 +54,51 @@ def setup_imgui():
 # setup_imgui()
 
 
+# colors - high contrast dark theme for better visibility
+COL_BG = imgui.ImVec4(0.11, 0.11, 0.12, 1.0)
+COL_BG_CARD = imgui.ImVec4(0.16, 0.16, 0.17, 1.0)
+COL_ACCENT = imgui.ImVec4(0.20, 0.50, 0.85, 1.0)  # Darker blue for better text contrast
+COL_ACCENT_HOVER = imgui.ImVec4(0.25, 0.55, 0.90, 1.0)
+COL_ACCENT_ACTIVE = imgui.ImVec4(0.15, 0.45, 0.80, 1.0)
+COL_TEXT = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)  # Pure white for maximum visibility
+COL_TEXT_DIM = imgui.ImVec4(0.75, 0.75, 0.77, 1.0)  # Lighter dim text
+COL_BORDER = imgui.ImVec4(0.35, 0.35, 0.37, 0.7)
+COL_SECONDARY = imgui.ImVec4(0.35, 0.35, 0.37, 1.0)  # Lighter secondary buttons
+COL_SECONDARY_HOVER = imgui.ImVec4(0.42, 0.42, 0.44, 1.0)
+COL_SECONDARY_ACTIVE = imgui.ImVec4(0.28, 0.28, 0.30, 1.0)
+
+
+def push_button_style(primary=True):
+    if primary:
+        imgui.push_style_color(imgui.Col_.button, COL_ACCENT)
+        imgui.push_style_color(imgui.Col_.button_hovered, COL_ACCENT_HOVER)
+        imgui.push_style_color(imgui.Col_.button_active, COL_ACCENT_ACTIVE)
+        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 1.0, 1.0, 1.0))
+    else:
+        imgui.push_style_color(imgui.Col_.button, COL_SECONDARY)
+        imgui.push_style_color(imgui.Col_.button_hovered, COL_SECONDARY_HOVER)
+        imgui.push_style_color(imgui.Col_.button_active, COL_SECONDARY_ACTIVE)
+        imgui.push_style_color(imgui.Col_.text, COL_TEXT)
+    imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
+    imgui.push_style_var(imgui.StyleVar_.frame_border_size, 0.0)
+
+
+def pop_button_style():
+    imgui.pop_style_var(2)
+    imgui.pop_style_color(4)
+
+
 class FileDialog:
     def __init__(self):
         self.selected_path = None
         self._open_multi = None
         self._select_folder = None
-        self._widget_enabled = True
-        self.metadata_only = False
-        self.split_rois = False
+        # Load saved GUI preferences
+        self._widget_enabled = get_gui_preference("widget_enabled", True)
+        self.metadata_only = get_gui_preference("metadata_only", False)
+        self.split_rois = get_gui_preference("split_rois", False)
+        # Get default directory for file dialogs
+        self._default_dir = str(get_default_open_dir())
 
     @property
     def widget_enabled(self):
@@ -64,147 +108,190 @@ class FileDialog:
     def widget_enabled(self, value):
         self._widget_enabled = value
 
+    def _save_gui_preferences(self):
+        """Save current GUI preferences to disk."""
+        set_gui_preference("widget_enabled", self._widget_enabled)
+        set_gui_preference("metadata_only", self.metadata_only)
+        set_gui_preference("split_rois", self.split_rois)
+
     def render(self):
-        pad = hello_imgui.em_to_vec2(3, 1)
-        imgui.push_style_var(
-            imgui.StyleVar_.window_padding, hello_imgui.em_to_vec2(2, 2)
-        )
-        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(0.9, 0.9, 0.9, 1.0))
-        imgui.push_style_color(imgui.Col_.separator, imgui.ImVec4(0.7, 0.7, 0.7, 0.25))
+        # global style - high contrast for visibility
+        imgui.push_style_color(imgui.Col_.window_bg, COL_BG)
+        imgui.push_style_color(imgui.Col_.child_bg, imgui.ImVec4(0, 0, 0, 0))
+        imgui.push_style_color(imgui.Col_.text, COL_TEXT)
+        imgui.push_style_color(imgui.Col_.border, COL_BORDER)
+        imgui.push_style_color(imgui.Col_.separator, imgui.ImVec4(0.35, 0.35, 0.37, 0.6))
+        imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.22, 0.22, 0.23, 1.0))
+        imgui.push_style_color(imgui.Col_.frame_bg_hovered, imgui.ImVec4(0.28, 0.28, 0.29, 1.0))
+        imgui.push_style_color(imgui.Col_.check_mark, COL_ACCENT)
+        imgui.push_style_var(imgui.StyleVar_.window_padding, hello_imgui.em_to_vec2(1.0, 0.8))
+        imgui.push_style_var(imgui.StyleVar_.frame_padding, hello_imgui.em_to_vec2(0.6, 0.4))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, hello_imgui.em_to_vec2(0.6, 0.4))
+        imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
 
-        with imgui_ctx.begin_child("#outer", size=imgui.ImVec2(-pad.x * 2, 0)):
-            with imgui_ctx.begin_child("#fd", size=imgui.ImVec2(-pad.x, 0)):
-                imgui.push_id("pfd")
+        win_w = imgui.get_window_width()
+        win_h = imgui.get_window_height()
 
-                # header --------------------------------------------------
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.8))
+        with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0)):
+            imgui.push_id("pfd")
+
+            # header
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            title = "Miller Brain Observatory"
+            title_sz = imgui.calc_text_size(title)
+            imgui.set_cursor_pos_x((win_w - title_sz.x) * 0.5)
+            imgui.text_colored(COL_ACCENT, title)
+
+            subtitle = "Data Preview & Utilities"
+            sub_sz = imgui.calc_text_size(subtitle)
+            imgui.set_cursor_pos_x((win_w - sub_sz.x) * 0.5)
+            imgui.text_colored(COL_TEXT_DIM, subtitle)
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+
+            # action buttons
+            btn_w = hello_imgui.em_size(16)
+            btn_h = hello_imgui.em_size(1.8)
+            btn_x = (win_w - btn_w) * 0.5
+
+            imgui.set_cursor_pos_x(btn_x)
+            push_button_style(primary=True)
+            if imgui.button("Open File(s)", imgui.ImVec2(btn_w, btn_h)):
+                self._open_multi = pfd.open_file(
+                    "Select files",
+                    self._default_dir,
+                    ["Image Files", "*.tif *.tiff *.zarr *.npy *.bin",
+                     "All Files", "*"],
+                    pfd.opt.multiselect
+                )
+            pop_button_style()
+            set_tooltip("Select one or more image files")
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+            imgui.set_cursor_pos_x(btn_x)
+            push_button_style(primary=True)
+            if imgui.button("Select Folder", imgui.ImVec2(btn_w, btn_h)):
+                self._select_folder = pfd.select_folder("Select folder", self._default_dir)
+            pop_button_style()
+            set_tooltip("Select folder with image data")
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.4))
+
+            # calculate dynamic card height based on available space
+            # fixed heights: header ~3em, buttons ~4.5em, quit ~2em, padding ~2em
+            fixed_height = hello_imgui.em_size(12)
+            available_for_card = win_h - fixed_height
+            # content needs ~14em to fit without scrollbar
+            content_height = hello_imgui.em_size(14)
+            # use available space, but cap at content height (no need to be bigger)
+            card_h = min(available_for_card, content_height)
+            # minimum height to show at least something useful
+            card_h = max(card_h, hello_imgui.em_size(6))
+
+            # formats section - dynamic width based on window
+            card_w = min(hello_imgui.em_size(24), win_w - hello_imgui.em_size(2))
+            card_x = (win_w - card_w) * 0.5
+            imgui.set_cursor_pos_x(card_x)
+
+            imgui.push_style_color(imgui.Col_.child_bg, COL_BG_CARD)
+            imgui.push_style_var(imgui.StyleVar_.child_rounding, 6.0)
+
+            # only show scrollbar if content doesn't fit
+            needs_scroll = card_h < content_height
+            child_flags = imgui.ChildFlags_.borders
+            window_flags = imgui.WindowFlags_.none if needs_scroll else (imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
+
+            with imgui_ctx.begin_child("##formats", size=imgui.ImVec2(card_w, card_h), child_flags=child_flags, window_flags=window_flags):
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+                imgui.indent(hello_imgui.em_size(0.4))
+
+                imgui.text_colored(COL_ACCENT, "Supported Formats")
+                imgui.same_line()
+                push_button_style(primary=False)
+                if imgui.small_button("docs"):
+                    import webbrowser
+                    webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/array_types.html")
+                pop_button_style()
+
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
+
+                # table with array types
+                table_flags = (
+                    imgui.TableFlags_.borders_inner_v
+                    | imgui.TableFlags_.row_bg
+                    | imgui.TableFlags_.sizing_stretch_same
+                )
+                if imgui.begin_table("##array_types", 2, table_flags):
+                    imgui.table_setup_column("Format")
+                    imgui.table_setup_column("Extensions")
+                    imgui.table_headers_row()
+
+                    array_types = [
+                        ("ScanImage", ".tif, .tiff"),
+                        ("TIFF", ".tif, .tiff"),
+                        ("Zarr", ".zarr/"),
+                        ("HDF5", ".h5, .hdf5"),
+                        ("Suite2p", ".bin, ops.npy"),
+                        ("NumPy", ".npy"),
+                        ("NWB", ".nwb"),
+                    ]
+                    for name, ext in array_types:
+                        imgui.table_next_row()
+                        imgui.table_next_column()
+                        imgui.text(name)
+                        imgui.table_next_column()
+                        imgui.text_colored(COL_TEXT_DIM, ext)
+                    imgui.end_table()
+
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
                 imgui.separator()
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.8))
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
-                imgui_md.render_unindented("""
-                # General Python and shell utilities developed for the Miller Brain Observatory (MBO) workflows.
+                imgui.text_colored(COL_ACCENT, "Options")
+                _, self._widget_enabled = imgui.checkbox("Preview widget", self._widget_enabled)
+                _, self.split_rois = imgui.checkbox("Separate mROIs", self.split_rois)
+                _, self.metadata_only = imgui.checkbox("Metadata only", self.metadata_only)
 
-                ## Preview raw ScanImage TIFFs, 3D (planar)/4D (volumetric) TIFF/Zarr stacks, and Suite2p raw/registered outputs.
+                imgui.unindent(hello_imgui.em_size(0.4))
+            imgui.pop_style_var()
+            imgui.pop_style_color()
 
-                Load a directory of raw ScanImage files to run the data-preview widget, which allows visualization of projections, mean-subtraction, and preview scan-phase correction.
-
-                [Docs Overview](https://millerbrainobservatory.github.io/mbo_utilities/) |
-                [Assembly Guide](https://millerbrainobservatory.github.io/mbo_utilities/assembly.html) |
-                [Function Examples](https://millerbrainobservatory.github.io/mbo_utilities/api/usage.html)
-                """)
-
-                imgui.dummy(hello_imgui.em_to_vec2(0, 4))
-
-                # prompt --------------------------------------------------
-                txt = "Select a file, multiple files, or a folder to preview:"
-                imgui.set_cursor_pos_x(
-                    (imgui.get_window_width() - imgui.calc_text_size(txt).x) * 0.5
-                )
-                imgui.text_colored(imgui.ImVec4(1.0, 0.85, 0.3, 1.0), txt)
-                imgui.dummy(hello_imgui.em_to_vec2(0, 1))
-
-                # open files button --------------------------------------
-                bsz_file = hello_imgui.em_to_vec2(18, 2.4)
-                x_file = (imgui.get_window_width() - bsz_file.x) * 0.5
-                imgui.set_cursor_pos_x(x_file)
-                if imgui.button("Open File(s)", bsz_file):
-                    self._open_multi = pfd.open_file(
-                        "Select files", options=pfd.opt.multiselect
-                    )
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Open one or multiple supported files.")
-
-                imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
-
-                # select folder button -----------------------------------
-                bsz_folder = hello_imgui.em_to_vec2(12, 2.0)
-                x_folder = (imgui.get_window_width() - bsz_folder.x) * 0.5
-                imgui.set_cursor_pos_x(x_folder)
-                if imgui.button("Select Folder", bsz_folder):
-                    self._select_folder = pfd.select_folder("Select folder")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Select a folder containing image data.")
-
-                imgui.dummy(hello_imgui.em_to_vec2(0, 1.5))
-
-                # download notebook button -------------------------------
-                bsz_notebook = hello_imgui.em_to_vec2(18, 2.0)
-                x_notebook = (imgui.get_window_width() - bsz_notebook.x) * 0.5
-                imgui.set_cursor_pos_x(x_notebook)
-                if imgui.button("Download User Guide Notebook", bsz_notebook):
-                    url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
-
-                    # Open folder selection dialog
-                    folder_dialog = pfd.select_folder("Select download location", str(Path.home()))
-                    if folder_dialog:
-                        selected_folder = folder_dialog.result()
-                        if selected_folder:
-                            output_path = Path(selected_folder) / "mbo_user_guide.ipynb"
-                            try:
-                                urllib.request.urlretrieve(url, output_path)
-                                print(f"✓ Downloaded user guide to: {output_path}")
-                            except Exception as e:
-                                print(f"✗ Failed to download notebook: {e}")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Download the mbo_utilities user guide Jupyter notebook (select destination folder).")
-
-                # load options -------------------------------------------
-                imgui.dummy(hello_imgui.em_to_vec2(0, 2.0))
-                imgui.text_colored(imgui.ImVec4(0.9, 0.75, 0.2, 1), "Load Options")
-                imgui.separator()
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.6))
-
-                imgui.begin_group()
-                _, self.split_rois = imgui.checkbox(
-                    "(Raw ScanImage tiffs only) Separate ScanImage mROIs",
-                    self.split_rois,
-                )
-                set_tooltip(
-                    "Display each ScanImage mROI separately in the preview widget. "
-                    "Does not affect files on disk."
-                )
-
-                _, self.widget_enabled = imgui.checkbox(
-                    "Enable 'Data Preview' widget", self._widget_enabled
-                )
-                set_tooltip(
-                    "Enable or disable the interactive 'Data Preview' visualization widget."
-                )
-
-                _, self.metadata_only = imgui.checkbox(
-                    "Metadata Preview Only", self.metadata_only
-                )
-                set_tooltip("Load only metadata for selected files (experimental).")
-                imgui.end_group()
-
-                # file/folder completion ---------------------------------
-                if self._open_multi and self._open_multi.ready():
-                    self.selected_path = self._open_multi.result()
-                    if self.selected_path:
-                        hello_imgui.get_runner_params().app_shall_exit = True
-                    self._open_multi = None
-                if self._select_folder and self._select_folder.ready():
-                    self.selected_path = self._select_folder.result()
-                    if self.selected_path:
-                        hello_imgui.get_runner_params().app_shall_exit = True
-                    self._select_folder = None
-
-                # quit button --------------------------------------------
-                qsz = hello_imgui.em_to_vec2(10, 1.8)
-                imgui.set_cursor_pos(
-                    imgui.ImVec2(
-                        imgui.get_window_width() - qsz.x - hello_imgui.em_size(1.5),
-                        imgui.get_window_height() - qsz.y - hello_imgui.em_size(1.5),
-                    )
-                )
-                if imgui.button("Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
-                    self.selected_path = None
+            # file/folder completion
+            if self._open_multi and self._open_multi.ready():
+                self.selected_path = self._open_multi.result()
+                if self.selected_path:
+                    for p in (self.selected_path if isinstance(self.selected_path, list) else [self.selected_path]):
+                        add_recent_file(p, file_type="file")
+                        set_last_open_dir(p)
+                    self._save_gui_preferences()
                     hello_imgui.get_runner_params().app_shall_exit = True
+                self._open_multi = None
+            if self._select_folder and self._select_folder.ready():
+                self.selected_path = self._select_folder.result()
+                if self.selected_path:
+                    add_recent_file(self.selected_path, file_type="folder")
+                    set_last_open_dir(self.selected_path)
+                    self._save_gui_preferences()
+                    hello_imgui.get_runner_params().app_shall_exit = True
+                self._select_folder = None
 
-                imgui.pop_id()
+            # quit button - inline at bottom
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            qsz = imgui.ImVec2(hello_imgui.em_size(5), hello_imgui.em_size(1.5))
+            imgui.set_cursor_pos_x(win_w - qsz.x - hello_imgui.em_size(1.0))
+            push_button_style(primary=False)
+            if imgui.button("Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
+                self.selected_path = None
+                hello_imgui.get_runner_params().app_shall_exit = True
+            pop_button_style()
 
-        imgui.pop_style_color(2)
-        imgui.pop_style_var()
+            imgui.pop_id()
+
+        imgui.pop_style_var(4)
+        imgui.pop_style_color(8)
 
 
 if __name__ == "__main__":

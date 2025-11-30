@@ -39,6 +39,24 @@ def set_tooltip(_tooltip, _show_mark=True):
         imgui.end_tooltip()
 
 
+def compact_header(label: str, default_open: bool = False) -> bool:
+    """
+    draw a compact collapsing header with reduced padding.
+
+    returns True if the header is open, False if collapsed.
+    use as: if compact_header("Section"): draw_content()
+    """
+    # reduce vertical spacing
+    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 2))
+    imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 2))
+
+    flags = imgui.TreeNodeFlags_.default_open if default_open else 0
+    is_open = imgui.collapsing_header(label, flags)
+
+    imgui.pop_style_var(2)
+    return is_open
+
+
 def draw_metadata_inspector(metadata: dict):
     with imgui_ctx.begin_child("Metadata Viewer"):
         # Use text instead of imgui_md.render to avoid "Markdown was not initialized" warning

@@ -58,7 +58,14 @@ def write_ops(metadata, raw_filename, **kwargs):
     chan = 2 if structural or "data_chan2.bin" in str(filename) else 1
     logger.debug(f"Detected channel {chan}")
 
-    root = filename.parent if filename.is_file() else filename
+    # Always use parent directory - raw_filename should be a file path like data_raw.bin
+    # The old check `filename.is_file()` failed when file was just created but not yet flushed
+    if filename.suffix:
+        # Has a file extension, use parent as root
+        root = filename.parent
+    else:
+        # No extension, assume it's a directory path (backward compatibility)
+        root = filename if filename.is_dir() else filename.parent
     ops_path = root / "ops.npy"
     logger.info(f"Writing ops file to {ops_path}")
 
@@ -698,29 +705,53 @@ def get_mbo_dirs() -> dict:
 
 
 def get_last_savedir_path() -> Path:
-    """Return path to settings file tracking last saved folder."""
+    """Return path to settings file tracking last saved folder.
+
+    .. deprecated::
+        Use :func:`mbo_utilities.preferences.get_last_save_dir` instead.
+    """
+    import warnings
+    warnings.warn(
+        "get_last_savedir_path() is deprecated. Use mbo_utilities.preferences.get_last_save_dir() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return Path.home().joinpath("mbo", "settings", "last_savedir.json")
 
 
 def load_last_savedir(default=None) -> Path:
-    """Load last saved directory path if it exists."""
-    f = get_last_savedir_path()
-    if f.is_file():
-        try:
-            path = Path(json.loads(f.read_text()).get("last_savedir", ""))
-            if path.exists():
-                return path
-        except Exception as e:
-            logger.debug(f"Failed to load last savedir from {f}: {e}")
-            pass
+    """Load last saved directory path if it exists.
+
+    .. deprecated::
+        Use :func:`mbo_utilities.preferences.get_last_save_dir` instead.
+    """
+    import warnings
+    warnings.warn(
+        "load_last_savedir() is deprecated. Use mbo_utilities.preferences.get_last_save_dir() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mbo_utilities.preferences import get_last_save_dir
+    result = get_last_save_dir()
+    if result:
+        return result
     return Path(default or Path().cwd())
 
 
 def save_last_savedir(path: Path):
-    """Persist the most recent save directory path."""
-    f = get_last_savedir_path()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"last_savedir": str(path)}))
+    """Persist the most recent save directory path.
+
+    .. deprecated::
+        Use :func:`mbo_utilities.preferences.set_last_save_dir` instead.
+    """
+    import warnings
+    warnings.warn(
+        "save_last_savedir() is deprecated. Use mbo_utilities.preferences.set_last_save_dir() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mbo_utilities.preferences import set_last_save_dir
+    set_last_save_dir(path)
 
 
 def _convert_range_to_slice(k):

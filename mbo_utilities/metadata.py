@@ -19,8 +19,12 @@ def has_mbo_metadata(file: os.PathLike | str) -> bool:
     """
     Check if a TIFF file has metadata from the Miller Brain Observatory.
 
-    Specifically, this checks for tiff_file.shaped_metadata, which is used to store system and user
-    supplied metadata.
+    This checks for MBO-specific keys in the shaped_metadata, not just its presence.
+    Generic TIFFs written by tifffile may have shaped_metadata with only a 'shape' key,
+    which is not sufficient to identify them as MBO files.
+
+    MBO-specific keys include: num_planes, num_rois, frame_rate, pixel_resolution,
+    fov, Ly, Lx, etc.
 
     Parameters
     ----------
@@ -32,25 +36,28 @@ def has_mbo_metadata(file: os.PathLike | str) -> bool:
     bool
         True if the TIFF file has MBO metadata; False otherwise.
     """
+    # Keys that indicate MBO origin (beyond just 'shape' which is generic tifffile)
+    MBO_MARKER_KEYS = {"num_planes", "num_rois", "frame_rate", "Ly", "Lx", "fov", "pixel_resolution"}
+
     if not file or not isinstance(file, (str, os.PathLike)):
         raise ValueError(
             "Invalid file path provided: must be a string or os.PathLike object."
             f"Got: {file} of type {type(file)}"
         )
-    # Tiffs
-    if Path(file).suffix in [".tif", ".tiff"]:
-        try:
-            tiff_file = tifffile.TiffFile(file)
-            if (
-                hasattr(tiff_file, "shaped_metadata")
-                and tiff_file.shaped_metadata is not None
-            ):
-                return True
-            else:
+    if Path(file).suffix not in [".tif", ".tiff"]:
+        return False
+    try:
+        with tifffile.TiffFile(file) as tiff_file:
+            if not hasattr(tiff_file, "shaped_metadata") or tiff_file.shaped_metadata is None:
                 return False
-        except Exception:
-            return False
-    return False
+            # shaped_metadata is a tuple of dicts, check the first one
+            meta = tiff_file.shaped_metadata[0] if tiff_file.shaped_metadata else {}
+            if not isinstance(meta, dict):
+                return False
+            # Check if any MBO-specific keys are present
+            return bool(MBO_MARKER_KEYS & meta.keys())
+    except Exception:
+        return False
 
 
 def is_raw_scanimage(file: os.PathLike | str) -> bool:
@@ -163,7 +170,7 @@ def get_metadata(file, z_step=None, verbose=False):
         tiff_files = get_files(file_path, "tif", sort_ascending=True)
         if not tiff_files:
             raise ValueError(f"No TIFF files found in directory: {file_path}")
-        return get_metadata_batch(tiff_files, z_step=z_step, verbose=verbose)
+        return get_metadata_batch(tiff_files)
 
     elif file_path.is_file():
         return get_metadata_single(file_path)
@@ -172,13 +179,13 @@ def get_metadata(file, z_step=None, verbose=False):
         raise ValueError(f"Path does not exist or is not accessible: {file_path}")
 
 
-def get_metadata_single(file: os.PathLike | str):
+def get_metadata_single(file: Path):
     """
     Extract metadata from a single TIFF file produced by ScanImage or processed via the save_as function.
 
     Parameters
     ----------
-    file : os.PathLike or str
+    file : Path
         The full path to the TIFF file from which metadata is to be extracted.
     verbose : bool, optional
         If True, returns an extended metadata dictionary that includes all available ScanImage attributes.
@@ -397,7 +404,7 @@ def get_metadata_batch(file_paths: list | tuple):
 
     # Get metadata from first file only
     metadata = get_metadata_single(file_paths[0])
-    n_planes = metadata["num_planes"]
+    n_planes = metadata.get("num_planes", 1)
 
     # Count frames for all files
     frames_per_file = [
@@ -405,9 +412,10 @@ def get_metadata_batch(file_paths: list | tuple):
         for fp in tqdm(file_paths, desc="Counting frames")
     ]
 
-    # Return metadata with batch info (dict.update() returns None, so use | operator)
+    total_frames = sum(frames_per_file)
     return metadata | {
-        "num_frames": sum(frames_per_file),
+        "nframes": total_frames,
+        "num_frames": total_frames,  # alias for backwards compatibility
         "frames_per_file": frames_per_file,
         "file_paths": [str(fp) for fp in file_paths],
         "num_files": len(file_paths),
