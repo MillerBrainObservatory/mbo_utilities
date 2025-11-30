@@ -19,8 +19,12 @@ def has_mbo_metadata(file: os.PathLike | str) -> bool:
     """
     Check if a TIFF file has metadata from the Miller Brain Observatory.
 
-    Specifically, this checks for tiff_file.shaped_metadata, which is used to store system and user
-    supplied metadata.
+    This checks for MBO-specific keys in the shaped_metadata, not just its presence.
+    Generic TIFFs written by tifffile may have shaped_metadata with only a 'shape' key,
+    which is not sufficient to identify them as MBO files.
+
+    MBO-specific keys include: num_planes, num_rois, frame_rate, pixel_resolution,
+    fov, Ly, Lx, etc.
 
     Parameters
     ----------
@@ -32,25 +36,28 @@ def has_mbo_metadata(file: os.PathLike | str) -> bool:
     bool
         True if the TIFF file has MBO metadata; False otherwise.
     """
+    # Keys that indicate MBO origin (beyond just 'shape' which is generic tifffile)
+    MBO_MARKER_KEYS = {"num_planes", "num_rois", "frame_rate", "Ly", "Lx", "fov", "pixel_resolution"}
+
     if not file or not isinstance(file, (str, os.PathLike)):
         raise ValueError(
             "Invalid file path provided: must be a string or os.PathLike object."
             f"Got: {file} of type {type(file)}"
         )
-    # Tiffs
-    if Path(file).suffix in [".tif", ".tiff"]:
-        try:
-            tiff_file = tifffile.TiffFile(file)
-            if (
-                hasattr(tiff_file, "shaped_metadata")
-                and tiff_file.shaped_metadata is not None
-            ):
-                return True
-            else:
+    if Path(file).suffix not in [".tif", ".tiff"]:
+        return False
+    try:
+        with tifffile.TiffFile(file) as tiff_file:
+            if not hasattr(tiff_file, "shaped_metadata") or tiff_file.shaped_metadata is None:
                 return False
-        except Exception:
-            return False
-    return False
+            # shaped_metadata is a tuple of dicts, check the first one
+            meta = tiff_file.shaped_metadata[0] if tiff_file.shaped_metadata else {}
+            if not isinstance(meta, dict):
+                return False
+            # Check if any MBO-specific keys are present
+            return bool(MBO_MARKER_KEYS & meta.keys())
+    except Exception:
+        return False
 
 
 def is_raw_scanimage(file: os.PathLike | str) -> bool:
