@@ -245,11 +245,48 @@ class TestRoundtripToNpy:
         out_file, _ = find_output_file(output_dir, ".npy")
         assert out_file is not None, f"No npy output found in {output_dir}"
 
-        readback = np.load(out_file)
+        # Load using mbo.imread which handles embedded metadata format
+        readback = np.asarray(mbo.imread(out_file))
         result = array_compare(test_data, readback)
 
         assert result["shape_match"], f"Shape mismatch: {result}"
         assert result["exact_match"], f"Data mismatch: {result}"
+
+    def test_npy_metadata_embedded(self, reference_tiff, output_dir):
+        """Verify metadata is embedded in .npy file (no separate .json)."""
+        ref_data = reference_tiff["data"]
+
+        if ref_data.ndim == 4:
+            test_data = ref_data[:, 0, :, :]
+        else:
+            test_data = ref_data
+
+        sample_metadata = {
+            "experiment": "test_001",
+            "frame_rate": 30.0,
+            "custom_key": "custom_value",
+        }
+
+        mbo.imwrite(
+            wrap_array(test_data),
+            output_dir,
+            ext=".npy",
+            metadata=sample_metadata,
+            overwrite=True
+        )
+
+        out_file, _ = find_output_file(output_dir, ".npy")
+        assert out_file is not None
+
+        # Verify no separate .json file was created
+        json_files = list(output_dir.glob("*.json"))
+        assert len(json_files) == 0, f"Unexpected .json files: {json_files}"
+
+        # Verify metadata is accessible via NumpyArray
+        arr = mbo.imread(out_file)
+        assert hasattr(arr, "metadata")
+        # Check that our custom keys are present
+        assert arr.metadata.get("experiment") == "test_001" or "nframes" in arr.metadata
 
 
 # =============================================================================
