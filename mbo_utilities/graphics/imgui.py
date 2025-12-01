@@ -472,6 +472,188 @@ def draw_saveas_popup(parent):
         imgui.spacing()
         imgui.separator()
 
+        # Metadata Section (collapsible)
+        imgui.spacing()
+        if imgui.collapsing_header("Metadata Overrides"):
+            imgui.dummy(imgui.ImVec2(0, 5))
+
+            # Get current metadata from data for showing auto-detected values
+            try:
+                current_meta = parent.image_widget.data[0].metadata or {}
+            except (IndexError, AttributeError):
+                current_meta = {}
+
+            # Frame Rate
+            auto_fs = current_meta.get("frame_rate") or current_meta.get("fs") or ""
+            imgui.text("Frame Rate (Hz)")
+            imgui.same_line()
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.begin_tooltip()
+                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+                imgui.text_unformatted(
+                    f"Acquisition frame rate in Hz.\n"
+                    f"Auto-detected: {auto_fs if auto_fs else 'Not found'}\n"
+                    f"Aliases: fs, frame_rate"
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.end_tooltip()
+            imgui.set_next_item_width(hello_imgui.em_size(12))
+            _, parent._saveas_fs = imgui.input_text(
+                "##fs_input",
+                parent._saveas_fs,
+                flags=imgui.InputTextFlags_.chars_decimal,
+            )
+            imgui.same_line()
+            imgui.text_disabled(f"(auto: {auto_fs})" if auto_fs else "(not detected)")
+
+            # Pixel Resolution X
+            auto_dx = ""
+            pixel_res = current_meta.get("pixel_resolution")
+            if pixel_res and isinstance(pixel_res, (list, tuple)) and len(pixel_res) >= 1:
+                auto_dx = pixel_res[0]
+            elif current_meta.get("dx"):
+                auto_dx = current_meta.get("dx")
+            imgui.text("Pixel Size X (µm)")
+            imgui.same_line()
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.begin_tooltip()
+                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+                imgui.text_unformatted(
+                    f"X pixel size in micrometers.\n"
+                    f"Auto-detected: {auto_dx if auto_dx else 'Not found'}\n"
+                    f"Aliases: dx, umPerPixX, PhysicalSizeX, pixel_resolution[0]"
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.end_tooltip()
+            imgui.set_next_item_width(hello_imgui.em_size(12))
+            _, parent._saveas_dx = imgui.input_text(
+                "##dx_input",
+                parent._saveas_dx,
+                flags=imgui.InputTextFlags_.chars_decimal,
+            )
+            imgui.same_line()
+            imgui.text_disabled(f"(auto: {auto_dx})" if auto_dx else "(not detected)")
+
+            # Pixel Resolution Y
+            auto_dy = ""
+            if pixel_res and isinstance(pixel_res, (list, tuple)) and len(pixel_res) >= 2:
+                auto_dy = pixel_res[1]
+            elif current_meta.get("dy"):
+                auto_dy = current_meta.get("dy")
+            imgui.text("Pixel Size Y (µm)")
+            imgui.same_line()
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.begin_tooltip()
+                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+                imgui.text_unformatted(
+                    f"Y pixel size in micrometers.\n"
+                    f"Auto-detected: {auto_dy if auto_dy else 'Not found'}\n"
+                    f"Aliases: dy, umPerPixY, PhysicalSizeY, pixel_resolution[1]"
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.end_tooltip()
+            imgui.set_next_item_width(hello_imgui.em_size(12))
+            _, parent._saveas_dy = imgui.input_text(
+                "##dy_input",
+                parent._saveas_dy,
+                flags=imgui.InputTextFlags_.chars_decimal,
+            )
+            imgui.same_line()
+            imgui.text_disabled(f"(auto: {auto_dy})" if auto_dy else "(not detected)")
+
+            # Z Step
+            auto_dz = current_meta.get("dz") or current_meta.get("z_step") or ""
+            imgui.text("Z Step (µm)")
+            imgui.same_line()
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.begin_tooltip()
+                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+                imgui.text_unformatted(
+                    f"Distance between z-planes in micrometers.\n"
+                    f"Auto-detected: {auto_dz if auto_dz else 'Not found'}\n"
+                    f"Aliases: dz, z_step, umPerPixZ, PhysicalSizeZ, spacing"
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.end_tooltip()
+            imgui.set_next_item_width(hello_imgui.em_size(12))
+            _, parent._saveas_dz = imgui.input_text(
+                "##dz_input",
+                parent._saveas_dz,
+                flags=imgui.InputTextFlags_.chars_decimal,
+            )
+            imgui.same_line()
+            imgui.text_disabled(f"(auto: {auto_dz})" if auto_dz else "(not detected)")
+
+            imgui.spacing()
+            imgui.separator()
+
+            # Custom metadata key-value pairs
+            imgui.text("Custom Metadata")
+            imgui.same_line()
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.begin_tooltip()
+                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+                imgui.text_unformatted(
+                    "Add custom key-value pairs to the output metadata.\n"
+                    "Values will be stored as strings unless they parse as numbers."
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.end_tooltip()
+
+            imgui.dummy(imgui.ImVec2(0, 3))
+
+            # Show existing custom metadata entries
+            to_remove = None
+            for key, value in list(parent._saveas_custom_metadata.items()):
+                imgui.push_id(f"custom_{key}")
+                imgui.text(f"  {key}:")
+                imgui.same_line()
+                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), str(value))
+                imgui.same_line()
+                if imgui.small_button("X"):
+                    to_remove = key
+                imgui.pop_id()
+            if to_remove:
+                del parent._saveas_custom_metadata[to_remove]
+
+            # Add new key-value pair
+            imgui.set_next_item_width(hello_imgui.em_size(8))
+            _, parent._saveas_custom_key = imgui.input_text(
+                "##custom_key", parent._saveas_custom_key
+            )
+            imgui.same_line()
+            imgui.text("=")
+            imgui.same_line()
+            imgui.set_next_item_width(hello_imgui.em_size(10))
+            _, parent._saveas_custom_value = imgui.input_text(
+                "##custom_value", parent._saveas_custom_value
+            )
+            imgui.same_line()
+            if imgui.button("Add"):
+                if parent._saveas_custom_key.strip():
+                    # Try to parse value as number
+                    val = parent._saveas_custom_value
+                    try:
+                        if "." in val:
+                            val = float(val)
+                        else:
+                            val = int(val)
+                    except ValueError:
+                        pass  # Keep as string
+                    parent._saveas_custom_metadata[parent._saveas_custom_key.strip()] = val
+                    parent._saveas_custom_key = ""
+                    parent._saveas_custom_value = ""
+
+            imgui.spacing()
+
+        imgui.spacing()
+        imgui.separator()
+
         # Num frames slider
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Frames")
         imgui.dummy(imgui.ImVec2(0, 5))
@@ -608,6 +790,32 @@ def draw_saveas_popup(parent):
                     except (IndexError, AttributeError):
                         pass
 
+                    # Build metadata overrides dict
+                    metadata_overrides = dict(parent._saveas_custom_metadata)
+                    # Add resolution overrides if provided (non-empty strings)
+                    if parent._saveas_fs.strip():
+                        try:
+                            fs_val = float(parent._saveas_fs)
+                            metadata_overrides["fs"] = fs_val
+                            metadata_overrides["frame_rate"] = fs_val
+                        except ValueError:
+                            pass
+                    if parent._saveas_dx.strip():
+                        try:
+                            metadata_overrides["dx"] = float(parent._saveas_dx)
+                        except ValueError:
+                            pass
+                    if parent._saveas_dy.strip():
+                        try:
+                            metadata_overrides["dy"] = float(parent._saveas_dy)
+                        except ValueError:
+                            pass
+                    if parent._saveas_dz.strip():
+                        try:
+                            metadata_overrides["dz"] = float(parent._saveas_dz)
+                        except ValueError:
+                            pass
+
                     save_kwargs = {
                         "path": parent.fpath,
                         "outpath": parent._saveas_outdir,
@@ -627,6 +835,8 @@ def draw_saveas_popup(parent):
                         "mean_subtraction": parent.mean_subtraction,
                         "progress_callback": lambda frac,
                         current_plane: parent.gui_progress_callback(frac, current_plane),
+                        # metadata overrides
+                        "metadata": metadata_overrides if metadata_overrides else None,
                     }
                     # Add zarr-specific options if saving to zarr
                     if parent._ext == ".zarr":
@@ -840,6 +1050,17 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_selected_roi = set()  # -1 means all ROIs
         self._saveas_rois = False
         self._saveas_selected_roi_mode = "All"
+
+        # Metadata override state for save dialog
+        self._saveas_metadata_expanded = False
+        self._saveas_custom_metadata = {}  # user-added key-value pairs
+        self._saveas_custom_key = ""  # temp input for new key
+        self._saveas_custom_value = ""  # temp input for new value
+        # Resolution overrides (empty string = use auto-detected value)
+        self._saveas_fs = ""  # frame rate override
+        self._saveas_dx = ""  # x pixel resolution override
+        self._saveas_dy = ""  # y pixel resolution override
+        self._saveas_dz = ""  # z step override
 
         # File/folder dialog state for loading new data (iw-array API)
         self._file_dialog = None
