@@ -30,14 +30,12 @@ from imgui_bundle import (
 from mbo_utilities.file_io import (
     MBO_SUPPORTED_FTYPES,
     get_mbo_dirs,
-    save_last_savedir,
-    get_last_savedir_path,
-    load_last_savedir,
 )
 from mbo_utilities.preferences import (
     get_last_save_dir,
     set_last_save_dir,
     add_recent_file,
+    get_last_open_dir,
 )
 from mbo_utilities.array_types import MboRawArray
 from mbo_utilities.graphics._imgui import (
@@ -298,11 +296,15 @@ def draw_saveas_popup(parent):
         if imgui.button("Browse"):
             # Use last save dir as default, fall back to home
             default_dir = parent._saveas_outdir or str(get_last_save_dir() or Path.home())
-            res = pfd.select_folder("Select output folder", default_dir)
-            if res:
-                selected_str = str(res.result())
-                parent._saveas_outdir = selected_str
-                set_last_save_dir(Path(selected_str))
+            parent._saveas_folder_dialog = pfd.select_folder("Select output folder", default_dir)
+
+        # Check if async folder dialog has a result
+        if parent._saveas_folder_dialog is not None and parent._saveas_folder_dialog.ready():
+            result = parent._saveas_folder_dialog.result()
+            if result:
+                parent._saveas_outdir = str(result)
+                set_last_save_dir(Path(result))
+            parent._saveas_folder_dialog = None
 
         imgui.set_next_item_width(hello_imgui.em_size(25))
         _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_SUPPORTED_FTYPES)
@@ -1041,10 +1043,11 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_progress = 0.0
         self._saveas_current_index = 0
         # Pre-fill with last saved directory if available
-        last_dir = load_last_savedir(default=None)
+        last_dir = get_last_save_dir()
         self._saveas_outdir = (
             str(last_dir) if last_dir else str(getattr(self, "_save_dir", ""))
         )
+        self._saveas_folder_dialog = None  # Async folder dialog for Browse button
         self._saveas_total = 0
 
         self._saveas_selected_roi = set()  # -1 means all ROIs

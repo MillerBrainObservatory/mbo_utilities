@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.2.2"
+version = "2.3"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -36,6 +36,7 @@ dependencies = [
 	"llvmlite>=0.43.0",
 	"mkl_fft>=2.0.0",
 	"fastplotlib",
+	"imgui-bundle>=1.92.5",
 ]
 
 [project.scripts]
@@ -55,7 +56,7 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 suite2p = [
     "numba>=0.60.0",
     "lbm_suite2p_python",
-    "suite2p_mbo>=1.1.2",
+    "suite2p_mbo>=2.0.0",
 ]
 # Suite3D volumetric registration (requires CUDA GPU)
 suite3d = [
