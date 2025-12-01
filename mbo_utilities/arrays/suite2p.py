@@ -14,13 +14,13 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base
+from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 
 logger = log.get("arrays.suite2p")
 
 
 @dataclass
-class Suite2pArray:
+class Suite2pArray(ReductionMixin):
     """
     Lazy array reader for Suite2p binary output files.
 
@@ -164,14 +164,6 @@ class Suite2pArray:
     @property
     def ndim(self):
         return len(self.shape)
-
-    @property
-    def min(self):
-        return float(self._file[0].min())
-
-    @property
-    def max(self):
-        return float(self._file[0].max())
 
     def close(self):
         """Close the memory-mapped file."""

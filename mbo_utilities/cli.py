@@ -483,7 +483,7 @@ def list_formats():
     click.echo("  .zarr        - Zarr v3 with optional OME-NGFF metadata")
     click.echo("  .bin         - Suite2p binary format")
     click.echo("  .h5          - HDF5 format")
-    click.echo("  .npy         - NumPy array (with .json metadata)")
+    click.echo("  .npy         - NumPy array")
 
 
 if __name__ == "__main__":

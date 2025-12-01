@@ -12,12 +12,12 @@ import h5py
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base
+from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 
 logger = log.get("arrays.h5")
 
 
-class H5Array:
+class H5Array(ReductionMixin):
     """
     Lazy array reader for HDF5 datasets.
 
@@ -141,14 +141,6 @@ class H5Array:
                 data = np.expand_dims(data, axis=i)
 
         return data
-
-    def min(self) -> float:
-        """Minimum value in first frame."""
-        return float(self._d[0].min())
-
-    def max(self) -> float:
-        """Maximum value in first frame."""
-        return float(self._d[0].max())
 
     def __array__(self):
         n = min(10, self.shape[0])

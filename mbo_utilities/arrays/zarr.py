@@ -13,12 +13,12 @@ from typing import Sequence
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base
+from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 
 logger = log.get("arrays.zarr")
 
 
-class ZarrArray:
+class ZarrArray(ReductionMixin):
     """
     Reader for Zarr stores (including OME-Zarr).
 
@@ -188,13 +188,6 @@ class ZarrArray:
         arrs = [z[:] for z in self.zs]
         return np.stack(arrs, axis=1)
 
-    @property
-    def min(self):
-        return float(self.zs[0][:].min())
-
-    @property
-    def max(self):
-        return float(self.zs[0][:].max())
 
     @property
     def ndim(self):

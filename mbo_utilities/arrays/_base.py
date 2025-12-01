@@ -343,3 +343,247 @@ def _safe_get_metadata(path: Path) -> dict:
         return get_metadata(path)
     except Exception:
         return {}
+
+
+class ReductionMixin:
+    """
+    Mixin providing numpy-like reduction methods for lazy arrays.
+
+    Adds mean, max, min, std, sum methods that work efficiently with lazy arrays
+    by processing data in chunks. For 4D arrays (T, Z, Y, X), reduces over time
+    to produce 3D volumes (Z, Y, X) by default.
+
+    Usage
+    -----
+    class MyArray(ReductionMixin):
+        # ... array implementation ...
+        pass
+
+    arr = MyArray(path)
+    volume = arr.mean(axis=0)  # Mean over time -> (Z, Y, X)
+    """
+
+    def _chunked_reduce(
+        self,
+        func: str,
+        axis: int | None = None,
+        chunk_size: int = 100,
+        dtype: np.dtype | None = None,
+    ) -> np.ndarray:
+        """
+        Apply reduction function over axis, processing in chunks.
+
+        Parameters
+        ----------
+        func : str
+            Reduction function name: 'mean', 'max', 'min', 'std', 'sum'
+        axis : int | None
+            Axis to reduce over. If None and ndim > 2, defaults to 0 (time).
+            For 2D arrays, reduces over entire array.
+        chunk_size : int
+            Number of frames to process at once along the reduction axis.
+        dtype : np.dtype | None
+            Output dtype. If None, uses float64 for mean/std, input dtype otherwise.
+
+        Returns
+        -------
+        np.ndarray
+            Reduced array.
+        """
+        from tqdm.auto import tqdm
+
+        # Default axis to 0 for time series data
+        if axis is None:
+            if self.ndim > 2:
+                axis = 0
+            else:
+                # For 2D, reduce over everything
+                return getattr(np.asarray(self), func)()
+
+        # Validate axis
+        if axis < 0:
+            axis = self.ndim + axis
+        if axis < 0 or axis >= self.ndim:
+            raise ValueError(f"axis {axis} out of bounds for {self.ndim}D array")
+
+        n = self.shape[axis]
+
+        # Determine output shape (remove the reduction axis)
+        out_shape = list(self.shape)
+        out_shape.pop(axis)
+        out_shape = tuple(out_shape)
+
+        # Determine dtype
+        if dtype is None:
+            if func in ('mean', 'std'):
+                dtype = np.float64
+            else:
+                dtype = self.dtype
+
+        # For small arrays, just compute directly
+        if n <= chunk_size * 2:
+            data = np.asarray(self)
+            return getattr(np, func)(data, axis=axis).astype(dtype)
+
+        # Chunked reduction
+        if func == 'mean':
+            # Running mean: accumulate sum and count
+            accumulator = np.zeros(out_shape, dtype=np.float64)
+            for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                end = min(start + chunk_size, n)
+                # Build slice for the reduction axis
+                slices = [slice(None)] * self.ndim
+                slices[axis] = slice(start, end)
+                chunk = np.asarray(self[tuple(slices)])
+                accumulator += np.sum(chunk, axis=axis, dtype=np.float64)
+            return (accumulator / n).astype(dtype)
+
+        elif func == 'sum':
+            accumulator = np.zeros(out_shape, dtype=dtype)
+            for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                end = min(start + chunk_size, n)
+                slices = [slice(None)] * self.ndim
+                slices[axis] = slice(start, end)
+                chunk = np.asarray(self[tuple(slices)])
+                accumulator += np.sum(chunk, axis=axis)
+            return accumulator
+
+        elif func == 'max':
+            # Initialize with first chunk
+            slices = [slice(None)] * self.ndim
+            slices[axis] = slice(0, min(chunk_size, n))
+            accumulator = np.max(np.asarray(self[tuple(slices)]), axis=axis)
+            for start in tqdm(range(chunk_size, n, chunk_size), desc=f"Computing {func}"):
+                end = min(start + chunk_size, n)
+                slices[axis] = slice(start, end)
+                chunk = np.asarray(self[tuple(slices)])
+                accumulator = np.maximum(accumulator, np.max(chunk, axis=axis))
+            return accumulator.astype(dtype)
+
+        elif func == 'min':
+            slices = [slice(None)] * self.ndim
+            slices[axis] = slice(0, min(chunk_size, n))
+            accumulator = np.min(np.asarray(self[tuple(slices)]), axis=axis)
+            for start in tqdm(range(chunk_size, n, chunk_size), desc=f"Computing {func}"):
+                end = min(start + chunk_size, n)
+                slices[axis] = slice(start, end)
+                chunk = np.asarray(self[tuple(slices)])
+                accumulator = np.minimum(accumulator, np.min(chunk, axis=axis))
+            return accumulator.astype(dtype)
+
+        elif func == 'std':
+            # Two-pass: first compute mean, then variance
+            mean_val = self._chunked_reduce('mean', axis=axis, chunk_size=chunk_size)
+            variance = np.zeros(out_shape, dtype=np.float64)
+            for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                end = min(start + chunk_size, n)
+                slices = [slice(None)] * self.ndim
+                slices[axis] = slice(start, end)
+                chunk = np.asarray(self[tuple(slices)]).astype(np.float64)
+                # Expand mean for broadcasting
+                mean_expanded = np.expand_dims(mean_val, axis=axis)
+                variance += np.sum((chunk - mean_expanded) ** 2, axis=axis)
+            return np.sqrt(variance / n).astype(dtype)
+
+        else:
+            raise ValueError(f"Unknown reduction function: {func}")
+
+    def mean(self, axis: int | None = None, dtype: np.dtype | None = None) -> np.ndarray:
+        """
+        Compute mean along axis.
+
+        For 4D arrays (T, Z, Y, X), defaults to axis=0 to produce a 3D volume.
+
+        Parameters
+        ----------
+        axis : int | None
+            Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
+        dtype : np.dtype | None
+            Output dtype. Defaults to float64.
+
+        Returns
+        -------
+        np.ndarray
+            Mean projection.
+        """
+        return self._chunked_reduce('mean', axis=axis, dtype=dtype)
+
+    def max(self, axis: int | None = None, dtype: np.dtype | None = None) -> np.ndarray:
+        """
+        Compute maximum along axis.
+
+        For 4D arrays (T, Z, Y, X), defaults to axis=0 to produce a 3D volume.
+
+        Parameters
+        ----------
+        axis : int | None
+            Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
+        dtype : np.dtype | None
+            Output dtype. Defaults to input dtype.
+
+        Returns
+        -------
+        np.ndarray
+            Max projection.
+        """
+        return self._chunked_reduce('max', axis=axis, dtype=dtype)
+
+    def min(self, axis: int | None = None, dtype: np.dtype | None = None) -> np.ndarray:
+        """
+        Compute minimum along axis.
+
+        For 4D arrays (T, Z, Y, X), defaults to axis=0 to produce a 3D volume.
+
+        Parameters
+        ----------
+        axis : int | None
+            Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
+        dtype : np.dtype | None
+            Output dtype. Defaults to input dtype.
+
+        Returns
+        -------
+        np.ndarray
+            Min projection.
+        """
+        return self._chunked_reduce('min', axis=axis, dtype=dtype)
+
+    def std(self, axis: int | None = None, dtype: np.dtype | None = None) -> np.ndarray:
+        """
+        Compute standard deviation along axis.
+
+        For 4D arrays (T, Z, Y, X), defaults to axis=0 to produce a 3D volume.
+
+        Parameters
+        ----------
+        axis : int | None
+            Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
+        dtype : np.dtype | None
+            Output dtype. Defaults to float64.
+
+        Returns
+        -------
+        np.ndarray
+            Standard deviation.
+        """
+        return self._chunked_reduce('std', axis=axis, dtype=dtype)
+
+    def sum(self, axis: int | None = None, dtype: np.dtype | None = None) -> np.ndarray:
+        """
+        Compute sum along axis.
+
+        For 4D arrays (T, Z, Y, X), defaults to axis=0 to produce a 3D volume.
+
+        Parameters
+        ----------
+        axis : int | None
+            Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
+        dtype : np.dtype | None
+            Output dtype. Defaults to input dtype.
+
+        Returns
+        -------
+        np.ndarray
+            Sum.
+        """
+        return self._chunked_reduce('sum', axis=axis, dtype=dtype)

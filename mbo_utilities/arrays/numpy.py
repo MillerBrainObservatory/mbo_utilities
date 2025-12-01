@@ -13,12 +13,12 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base
+from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 
 logger = log.get("arrays.numpy")
 
 
-class NumpyArray:
+class NumpyArray(ReductionMixin):
     """
     Lazy array wrapper for NumPy arrays and .npy files.
 
@@ -58,7 +58,30 @@ class NumpyArray:
             self.path = Path(array)
             if not self.path.exists():
                 raise FileNotFoundError(f"Numpy file not found: {self.path}")
-            self.data = np.load(self.path, mmap_mode="r")
+
+            # Try loading - could be pure .npy or npz with embedded metadata
+            loaded = np.load(self.path, mmap_mode="r", allow_pickle=True)
+
+            if isinstance(loaded, np.lib.npyio.NpzFile):
+                # NPZ format with embedded data and metadata
+                self.data = loaded["data"]
+                if "metadata" in loaded.files:
+                    # Extract metadata dict from numpy array
+                    meta_arr = loaded["metadata"]
+                    if meta_arr.ndim == 0:
+                        # Scalar array containing dict
+                        self._metadata = meta_arr.item()
+                    else:
+                        self._metadata = {}
+                else:
+                    self._metadata = {}
+                self._npz_file = loaded  # Keep reference to prevent closing
+            else:
+                # Pure .npy file
+                self.data = loaded
+                self._metadata = {}
+                self._npz_file = None
+
             self._tempfile = None
         elif isinstance(array, np.ndarray):
             logger.info("Creating temporary .npy file for array.")
@@ -68,16 +91,19 @@ class NumpyArray:
             self.path = Path(tmp.name)
             self.data = np.load(self.path, mmap_mode="r")
             self._tempfile = tmp
+            self._npz_file = None
+            self._metadata = {}
             logger.debug(f"Temporary file created at {self.path}")
         else:
             raise TypeError(f"Expected np.ndarray or path, got {type(array)}")
 
+        # Override with explicit metadata if provided
+        if metadata is not None:
+            self._metadata = metadata
+
         self.shape = self.data.shape
         self.dtype = self.data.dtype
         self.ndim = self.data.ndim
-        self._metadata = metadata or {}
-        self._min: float | None = None
-        self._max: float | None = None
 
     def __getitem__(self, item):
         return self.data[item]
@@ -113,26 +139,15 @@ class NumpyArray:
             raise TypeError("metadata must be a dict")
         self._metadata = value
 
-    @property
-    def min(self) -> float:
-        """Minimum value in array (computed from first frame, cached)."""
-        if self._min is None:
-            self._min = (
-                float(self.data[0].min()) if self.ndim >= 1 else float(self.data.min())
-            )
-        return self._min
-
-    @property
-    def max(self) -> float:
-        """Maximum value in array (computed from first frame, cached)."""
-        if self._max is None:
-            self._max = (
-                float(self.data[0].max()) if self.ndim >= 1 else float(self.data.max())
-            )
-        return self._max
 
     def close(self):
         """Release resources and clean up temporary files."""
+        if self._npz_file is not None:
+            try:
+                self._npz_file.close()
+            except Exception:
+                pass
+            self._npz_file = None
         if self._tempfile:
             try:
                 Path(self._tempfile.name).unlink(missing_ok=True)
@@ -173,8 +188,10 @@ class NumpyArray:
 
         histogram_widget = kwargs.pop("histogram_widget", True)
         figure_kwargs = kwargs.pop("figure_kwargs", {"size": (800, 800)})
+        # Get min/max from first frame for contrast scaling
+        first_frame = self.data[0] if self.ndim >= 1 else self.data
         graphic_kwargs = kwargs.pop(
-            "graphic_kwargs", {"vmin": self.min, "vmax": self.max}
+            "graphic_kwargs", {"vmin": float(first_frame.min()), "vmax": float(first_frame.max())}
         )
 
         # Set up slider dimensions based on array dimensionality

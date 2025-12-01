@@ -26,6 +26,7 @@ from mbo_utilities.arrays._base import (
     CHUNKS_4D,
     _imwrite_base,
     iter_rois,
+    ReductionMixin,
 )
 from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
 from mbo_utilities.metadata import get_metadata
@@ -224,7 +225,7 @@ class MBOTiffArray:
         )
 
 
-class TiffArray:
+class TiffArray(ReductionMixin):
     """
     Lazy TIFF array reader using TiffFile handles.
 
@@ -432,12 +433,6 @@ class TiffArray:
         n = min(10, self._num_frames)
         return self[:n]
 
-    def min(self) -> float:
-        return float(np.min(self[0]))
-
-    def max(self) -> float:
-        return float(np.max(self[0]))
-
     def imshow(self, **kwargs):
         import fastplotlib as fpl
 
@@ -477,7 +472,7 @@ class TiffArray:
         )
 
 
-class MboRawArray:
+class MboRawArray(ReductionMixin):
     """
     Raw ScanImage TIFF reader with phase correction support.
 
@@ -908,14 +903,6 @@ class MboRawArray:
     def num_planes(self):
         """Alias for num_channels (ScanImage terminology)."""
         return self.num_channels
-
-    def min(self):
-        page = self.tiff_files[0].pages[0]
-        return np.min(page.asarray())
-
-    def max(self):
-        page = self.tiff_files[0].pages[0]
-        return np.max(page.asarray())
 
     @property
     def shape(self):
