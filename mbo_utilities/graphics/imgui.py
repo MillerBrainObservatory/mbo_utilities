@@ -49,9 +49,9 @@ from mbo_utilities.graphics._widgets import (
     draw_scope,
 )
 from mbo_utilities.graphics.progress_bar import (
-    draw_zstats_progress,
-    draw_saveas_progress,
-    draw_register_z_progress,
+    draw_status_indicator,
+    reset_progress_state,
+    start_output_capture,
 )
 from mbo_utilities.graphics.widgets import get_supported_widgets, draw_all_widgets
 from mbo_utilities.graphics._availability import HAS_SUITE2P, HAS_SUITE3D
@@ -220,9 +220,20 @@ def draw_menu(parent):
                 _, parent.show_scope_window = imgui.menu_item(
                     "Scope Inspector", "", parent.show_scope_window, True
                 )
+                imgui.spacing()
+                imgui.separator()
+                imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Display")
+                imgui.separator()
+                imgui.spacing()
+                _, parent._show_progress_overlay = imgui.menu_item(
+                    "Status Indicator", "", parent._show_progress_overlay, True
+                )
                 imgui.end_menu()
         imgui.end_menu_bar()
-    pass
+
+        # Draw status indicator below menu bar (in same child window)
+        if parent._show_progress_overlay:
+            draw_status_indicator(parent)
 
 
 def draw_tabs(parent):
@@ -314,44 +325,49 @@ def draw_saveas_popup(parent):
         imgui.separator()
         imgui.spacing()
 
-        # Options Section
-        parent._saveas_rois = checkbox_with_tooltip(
-            "Save ScanImage multi-ROI Separately",
-            parent._saveas_rois,
-            "Enable to save each mROI individually."
-            " mROI's are saved to subfolders: plane1_roi1, plane1_roi2, etc."
-            " These subfolders can be merged later using mbo_utilities.merge_rois()."
-            " This can be helpful as often mROI's are non-contiguous and can drift in orthogonal directions over time.",
-        )
-        if parent._saveas_rois:
-            try:
-                num_rois = parent.image_widget.data[0].num_rois
-            except Exception as e:
-                num_rois = 1
+        # Options Section - Multi-ROI only for raw ScanImage data with multiple ROIs
+        try:
+            num_rois = parent.image_widget.data[0].num_rois
+        except (AttributeError, Exception):
+            num_rois = 1
 
-            imgui.spacing()
-            imgui.separator()
-            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose mROI(s):")
-            imgui.dummy(imgui.ImVec2(0, 5))
+        # Only show multi-ROI option if data actually has multiple ROIs
+        if num_rois > 1:
+            parent._saveas_rois = checkbox_with_tooltip(
+                "Save ScanImage multi-ROI Separately",
+                parent._saveas_rois,
+                "Enable to save each mROI individually."
+                " mROI's are saved to subfolders: plane1_roi1, plane1_roi2, etc."
+                " These subfolders can be merged later using mbo_utilities.merge_rois()."
+                " This can be helpful as often mROI's are non-contiguous and can drift in orthogonal directions over time.",
+            )
+            if parent._saveas_rois:
+                imgui.spacing()
+                imgui.separator()
+                imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose mROI(s):")
+                imgui.dummy(imgui.ImVec2(0, 5))
 
-            if imgui.button("All##roi"):
-                parent._saveas_selected_roi = set(range(num_rois))
-            imgui.same_line()
-            if imgui.button("None##roi"):
-                parent._saveas_selected_roi = set()
+                if imgui.button("All##roi"):
+                    parent._saveas_selected_roi = set(range(num_rois))
+                imgui.same_line()
+                if imgui.button("None##roi"):
+                    parent._saveas_selected_roi = set()
 
-            imgui.columns(2, borders=False)
-            for i in range(num_rois):
-                imgui.push_id(f"roi_{i}")
-                selected = i in parent._saveas_selected_roi
-                _, selected = imgui.checkbox(f"mROI {i + 1}", selected)
-                if selected:
-                    parent._saveas_selected_roi.add(i)
-                else:
-                    parent._saveas_selected_roi.discard(i)
-                imgui.pop_id()
-                imgui.next_column()
-            imgui.columns(1)
+                imgui.columns(2, borders=False)
+                for i in range(num_rois):
+                    imgui.push_id(f"roi_{i}")
+                    selected = i in parent._saveas_selected_roi
+                    _, selected = imgui.checkbox(f"mROI {i + 1}", selected)
+                    if selected:
+                        parent._saveas_selected_roi.add(i)
+                    else:
+                        parent._saveas_selected_roi.discard(i)
+                    imgui.pop_id()
+                    imgui.next_column()
+                imgui.columns(1)
+        else:
+            # Reset multi-ROI state when not applicable
+            parent._saveas_rois = False
 
         imgui.spacing()
         imgui.separator()
@@ -702,7 +718,17 @@ def draw_saveas_popup(parent):
         imgui.dummy(imgui.ImVec2(0, 5))
 
         try:
-            num_planes = parent.image_widget.data[0].num_channels  # noqa
+            data = parent.image_widget.data[0]
+            # Try various attributes for plane count
+            if hasattr(data, "num_planes"):
+                num_planes = data.num_planes
+            elif hasattr(data, "num_channels"):
+                num_planes = data.num_channels
+            elif len(data.shape) == 4:
+                # 4D array: shape is (T, Z, Y, X)
+                num_planes = data.shape[1]
+            else:
+                num_planes = 1
         except Exception as e:
             num_planes = 1
             hello_imgui.log(
@@ -850,6 +876,16 @@ def draw_saveas_popup(parent):
                     parent.logger.info(
                         f"Saving to {parent._saveas_outdir} as {parent._ext}"
                     )
+                    # Reset progress state to allow new progress display
+                    reset_progress_state("saveas")
+                    parent._saveas_progress = 0.0
+                    parent._saveas_done = False
+                    # Also reset register_z progress if enabled
+                    if parent._register_z:
+                        reset_progress_state("register_z")
+                        parent._register_z_progress = 0.0
+                        parent._register_z_done = False
+                        parent._register_z_current_msg = ""
                     threading.Thread(
                         target=_save_as_worker, kwargs=save_kwargs, daemon=True
                     ).start()
@@ -923,6 +959,9 @@ class PreviewDataWidget(EdgeWindow):
 
         self.logger.info("Logger initialized.")
 
+        # Start capturing stdout/stderr for the console output popup
+        start_output_capture()
+
         # Only initialize Suite2p settings if suite2p is installed
         if HAS_SUITE2P:
             from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings
@@ -933,6 +972,7 @@ class PreviewDataWidget(EdgeWindow):
         self._s2p_savepath_flash_start = None  # Track when flash animation starts
         self._s2p_savepath_flash_count = 0  # Number of flashes
         self._s2p_show_savepath_popup = False  # Show popup when save path is missing
+        self._s2p_folder_dialog = None  # Async folder dialog for Run tab Browse button
         self.kwargs = kwargs
 
         if implot.get_current_context() is None:
@@ -1006,6 +1046,7 @@ class PreviewDataWidget(EdgeWindow):
         self.show_metadata_viewer = False
         self.show_diagnostics_window = False
         self._diagnostics_widget = None  # Lazy-loaded diagnostics widget
+        self._show_progress_overlay = True  # Global progress overlay (bottom-right)
 
         # Processing properties are now on the processor, not the widget
         # We just track UI state here
@@ -1597,6 +1638,10 @@ class PreviewDataWidget(EdgeWindow):
             else:
                 self.nz = 1
 
+            # Reset save dialog state for new data
+            self._saveas_selected_roi = set()
+            self._saveas_rois = False
+
             self._load_status_msg = f"Loaded: {path_obj.name}"
             self._load_status_color = imgui.ImVec4(0.3, 1.0, 0.3, 1.0)
             self.logger.info(f"Loaded successfully, shape: {new_data.shape}")
@@ -2165,12 +2210,6 @@ class PreviewDataWidget(EdgeWindow):
             # draw all supported widgets
             draw_all_widgets(self, self._widgets)
 
-        imgui.separator()
-
-        draw_zstats_progress(self)
-        draw_register_z_progress(self)
-        draw_saveas_progress(self)
-
     def get_raw_frame(self) -> tuple[ndarray, ...]:
         # iw-array API: use indices property for named dimension access
         idx = self.image_widget.indices
@@ -2306,6 +2345,10 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_done = [False] * n
         self._zstats_progress = [0.0] * n
         self._zstats_current_z = [0] * n
+
+        # Reset progress state for each graphic to allow new progress display
+        for i in range(n):
+            reset_progress_state(f"zstats_{i}")
 
         # Update nz based on current data shape
         if len(self.shape) >= 4:

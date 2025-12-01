@@ -1,10 +1,185 @@
+import sys
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 
 from imgui_bundle import (
     imgui,
     hello_imgui,
 )
+
+
+class OutputCapture:
+    """Capture stdout/stderr to a buffer while still printing to console."""
+
+    _instance = None
+    _max_lines = 200
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._lines = deque(maxlen=cls._max_lines)
+            cls._instance._original_stdout = None
+            cls._instance._original_stderr = None
+            cls._instance._capturing = False
+        return cls._instance
+
+    def start(self):
+        """Start capturing stdout/stderr."""
+        if self._capturing:
+            return
+        self._original_stdout = sys.stdout
+        self._original_stderr = sys.stderr
+        sys.stdout = _TeeWriter(self._original_stdout, self._lines, "stdout")
+        sys.stderr = _TeeWriter(self._original_stderr, self._lines, "stderr")
+        self._capturing = True
+
+    def stop(self):
+        """Stop capturing and restore original streams."""
+        if not self._capturing:
+            return
+        sys.stdout = self._original_stdout
+        sys.stderr = self._original_stderr
+        self._capturing = False
+
+    @property
+    def lines(self) -> list[tuple[str, str, str]]:
+        """Return captured lines as list of (timestamp, stream, text)."""
+        # Convert 4-tuples to 3-tuples (drop the tqdm key)
+        result = []
+        for entry in self._lines:
+            if len(entry) >= 3:
+                result.append((entry[0], entry[1], entry[2]))
+        return result
+
+    def clear(self):
+        """Clear captured lines."""
+        self._lines.clear()
+
+
+class _TeeWriter:
+    """Write to both the original stream and a capture buffer."""
+
+    def __init__(self, original, buffer: deque, stream_name: str):
+        self._original = original
+        self._buffer = buffer
+        self._stream_name = stream_name
+        self._last_tqdm_key = None  # Track last tqdm line to update in-place
+
+    def _clean_tqdm_output(self, text: str) -> str | None:
+        """
+        Clean tqdm progress bar output for display in imgui.
+
+        Returns cleaned text, or None if the line should be skipped.
+        """
+        import re
+
+        # Remove ANSI escape codes (colors, cursor movement)
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07')
+        text = ansi_escape.sub('', text)
+
+        # Remove carriage return (tqdm uses \r to update in place)
+        text = text.replace('\r', '')
+
+        # Skip empty lines after cleaning
+        if not text.strip():
+            return None
+
+        # Clean up tqdm progress bar characters
+        # Replace box drawing characters with simpler alternatives
+        replacements = {
+            '█': '#',
+            '▏': '|',
+            '▎': '|',
+            '▍': '|',
+            '▌': '|',
+            '▋': '|',
+            '▊': '|',
+            '▉': '|',
+            '░': '-',
+            '▒': '=',
+            '▓': '#',
+            '━': '-',
+            '┃': '|',
+            '╸': '>',
+            '╺': '<',
+        }
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+
+        return text.strip()
+
+    def _is_tqdm_line(self, text: str) -> tuple[bool, str | None]:
+        """
+        Check if this is a tqdm progress line and extract a key for deduplication.
+
+        Returns (is_tqdm, key) where key can be used to identify the same progress bar.
+        """
+        import re
+
+        # tqdm lines typically have patterns like "  0%|" or "100%|" or contain "it/s"
+        # They also often have the format: "description:  XX%|###..."
+        tqdm_patterns = [
+            r'\d+%\|',  # "50%|"
+            r'it/s',     # iterations per second
+            r'[0-9]+/[0-9]+\s*\[',  # "10/100 ["
+        ]
+
+        for pattern in tqdm_patterns:
+            if re.search(pattern, text):
+                # Extract a key from the description (text before the percentage)
+                match = re.match(r'^([^:]+):', text)
+                key = match.group(1).strip() if match else "tqdm"
+                return True, key
+
+        return False, None
+
+    def write(self, text):
+        # Always write to original stream
+        if self._original:
+            self._original.write(text)
+
+        if not text:
+            return
+
+        # Clean and filter the text for our buffer
+        cleaned = self._clean_tqdm_output(text)
+        if cleaned is None:
+            return
+
+        timestamp = time.strftime("%H:%M:%S")
+
+        # Check if this is a tqdm progress update
+        is_tqdm, tqdm_key = self._is_tqdm_line(cleaned)
+
+        if is_tqdm and tqdm_key:
+            # For tqdm lines, update the last entry with the same key instead of appending
+            # This prevents the log from filling up with hundreds of progress updates
+            full_key = f"tqdm_{tqdm_key}"
+
+            # Look for existing entry with this key and update it
+            for i in range(len(self._buffer) - 1, -1, -1):
+                entry = self._buffer[i]
+                if len(entry) >= 4 and entry[3] == full_key:
+                    # Replace this entry with updated progress
+                    self._buffer[i] = (timestamp, self._stream_name, cleaned, full_key)
+                    return
+
+            # No existing entry, append new one with key
+            self._buffer.append((timestamp, self._stream_name, cleaned, full_key))
+        else:
+            # Regular line, just append (with empty key)
+            self._buffer.append((timestamp, self._stream_name, cleaned, ""))
+
+    def flush(self):
+        if self._original:
+            self._original.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+
+# Global output capture instance
+_output_capture = OutputCapture()
 
 _progress_state = defaultdict(
     lambda: {
@@ -14,6 +189,17 @@ _progress_state = defaultdict(
         "done_cleared": False,
     }
 )
+
+
+def reset_progress_state(key: str):
+    """Reset progress state for a given key to allow re-display."""
+    if key in _progress_state:
+        _progress_state[key] = {
+            "hide_time": None,
+            "is_showing_done": False,
+            "done_shown_once": False,
+            "done_cleared": False,
+        }
 
 
 def draw_progress(
@@ -176,3 +362,322 @@ def draw_register_z_progress(self):
             running_text="Z-Registration",
             custom_text=f"Z-Registration: {msg} [{int(progress * 100)}%]",
         )
+
+
+def _get_active_progress_items(self) -> list[dict]:
+    """
+    Collect all active progress operations from the widget state.
+
+    Checks widget attributes directly for active operations, not relying on
+    _progress_state which requires draw_progress() to be called.
+
+    Returns list of dicts with: key, text, progress, done
+    """
+    items = []
+
+    # Check saveas progress - directly from widget attributes
+    saveas_progress = getattr(self, '_saveas_progress', 0.0)
+    saveas_current = getattr(self, '_saveas_current_index', 0)
+    # Only show if actively saving (progress between 0 and 1, exclusive)
+    if 0.0 < saveas_progress < 1.0:
+        items.append({
+            "key": "saveas",
+            "text": f"Saving z-plane {saveas_current}",
+            "progress": saveas_progress,
+            "done": False,
+        })
+
+    # Check zstats progress for each graphic
+    num_graphics = getattr(self, 'num_graphics', 1)
+    zstats_progress = getattr(self, '_zstats_progress', [])
+    zstats_current_z = getattr(self, '_zstats_current_z', [])
+    nz = getattr(self, 'nz', 1)
+
+    for i in range(num_graphics):
+        progress = zstats_progress[i] if isinstance(zstats_progress, list) and i < len(zstats_progress) else 0.0
+        current_z = zstats_current_z[i] if isinstance(zstats_current_z, list) and i < len(zstats_current_z) else 0
+
+        # Only show if actively computing (progress between 0 and 1, exclusive)
+        if 0.0 < progress < 1.0:
+            items.append({
+                "key": f"zstats_{i}",
+                "text": f"Z-stats: plane {current_z + 1}/{nz}",
+                "progress": progress,
+                "done": False,
+            })
+
+    # Check register_z progress
+    register_progress = getattr(self, '_register_z_progress', 0.0)
+    register_msg = getattr(self, '_register_z_current_msg', None)
+
+    # Only show if actively registering (progress between 0 and 1, exclusive)
+    if 0.0 < register_progress < 1.0:
+        msg = register_msg or "Processing"
+        items.append({
+            "key": "register_z",
+            "text": f"Z-Reg: {msg}",
+            "progress": register_progress,
+            "done": False,
+        })
+
+    return items
+
+
+def draw_status_bar(self):
+    """
+    Draw a compact status bar showing active operations.
+
+    Displays a thin colored bar that turns green when operations are running.
+    Hover over it to see detailed progress information in a tooltip.
+
+    DEPRECATED: Use draw_status_indicator() instead for a compact text-based indicator.
+    """
+    items = _get_active_progress_items(self)
+
+    if not items:
+        return False  # Nothing active
+
+    # Calculate overall progress (average of all items)
+    total_progress = sum(item["progress"] for item in items) / len(items)
+    all_done = all(item["done"] for item in items)
+
+    # Bar color: green if all done, blue if in progress
+    if all_done:
+        bar_color = imgui.ImVec4(0.2, 0.8, 0.2, 1.0)  # Green
+    else:
+        bar_color = imgui.ImVec4(0.2, 0.6, 0.9, 1.0)  # Blue
+
+    # Draw a thin progress bar spanning available width
+    avail_width = imgui.get_content_region_avail().x
+    bar_height = 4
+
+    imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)
+    imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.15, 0.15, 0.15, 1.0))
+    imgui.progress_bar(total_progress, imgui.ImVec2(avail_width, bar_height), "")
+    imgui.pop_style_color(2)
+
+    # Tooltip on hover with detailed progress info
+    if imgui.is_item_hovered():
+        imgui.begin_tooltip()
+        imgui.text_colored(imgui.ImVec4(0.7, 0.9, 1.0, 1.0), f"Active Operations ({len(items)})")
+        imgui.separator()
+
+        for item in items:
+            pct = int(item["progress"] * 100)
+            if item["done"]:
+                color = imgui.ImVec4(0.4, 1.0, 0.4, 1.0)  # Green
+                status = "Done"
+            else:
+                color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)  # White
+                status = f"{pct}%"
+
+            # Show progress bar for each item
+            imgui.push_style_color(imgui.Col_.plot_histogram,
+                imgui.ImVec4(0.2, 0.8, 0.2, 1.0) if item["done"] else imgui.ImVec4(0.2, 0.5, 0.9, 1.0))
+            imgui.progress_bar(item["progress"], imgui.ImVec2(200, 14), "")
+            imgui.pop_style_color()
+
+            imgui.same_line()
+            imgui.text_colored(color, f"{item['text']} [{status}]")
+
+        imgui.end_tooltip()
+
+    return True  # Something is active
+
+
+def start_output_capture():
+    """Start capturing stdout/stderr for display in the status indicator."""
+    _output_capture.start()
+
+
+def stop_output_capture():
+    """Stop capturing stdout/stderr."""
+    _output_capture.stop()
+
+
+def draw_status_indicator(self):
+    """
+    Draw a compact colored status indicator with a button to show logs.
+
+    Shows colored text:
+    - Green "Background tasks" when idle (no active operations)
+    - Orange "Background tasks (N running)" when operations are running
+
+    Click the (?) button to open a popup with stdout/stderr log output.
+    """
+    items = _get_active_progress_items(self)
+
+    # Determine status color and text
+    if items:
+        # In progress - orange with count
+        text_color = imgui.ImVec4(1.0, 0.6, 0.2, 1.0)  # Orange
+        # Calculate average progress
+        avg_progress = sum(item["progress"] for item in items) / len(items)
+        status_text = f"Background tasks ({len(items)} running, {int(avg_progress * 100)}%)"
+    else:
+        # Idle - green
+        text_color = imgui.ImVec4(0.4, 0.8, 0.4, 1.0)  # Green
+        status_text = "Background tasks"
+
+    # Draw the status text
+    imgui.text_colored(text_color, status_text)
+
+    # Draw (?) button on same line with transparent style
+    imgui.same_line()
+    # Make button background transparent
+    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0, 0, 0, 0))
+    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.3, 0.3, 0.5))
+    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.2, 0.2, 0.2, 0.5))
+    if imgui.small_button("(?)"):
+        imgui.open_popup("##LogOutputPopup")
+    imgui.pop_style_color(3)
+
+    # Tooltip for the button
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Click to view console output")
+
+    # Log output popup
+    if imgui.begin_popup("##LogOutputPopup"):
+        imgui.text_colored(imgui.ImVec4(0.7, 0.9, 1.0, 1.0), "Console Output")
+        imgui.same_line()
+        imgui.text_disabled(f"({len(_output_capture.lines)} lines)")
+        imgui.separator()
+
+        # Show active operations if any
+        if items:
+            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), f"Active Operations ({len(items)})")
+            for item in items:
+                pct = int(item["progress"] * 100)
+                color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
+                imgui.text_colored(color, f"  {item['text']} [{pct}%]")
+            imgui.separator()
+
+        # Scrollable output area - show ALL lines, not just last 100
+        if imgui.begin_child("##LogScroll", imgui.ImVec2(550, 400), imgui.ChildFlags_.borders):
+            # Get captured stdout/stderr - show all lines (up to max_lines in deque)
+            captured_lines = _output_capture.lines
+            if captured_lines:
+                # Show in chronological order (oldest first, scroll to see newest)
+                for timestamp, stream, text in captured_lines:
+                    if stream == "stderr":
+                        col = imgui.ImVec4(1.0, 0.4, 0.4, 1.0)  # Red for stderr
+                    else:
+                        col = imgui.ImVec4(0.4, 0.9, 0.4, 1.0)  # Green for stdout
+                    # Truncate very long lines
+                    display_text = text[:150] + "..." if len(text) > 150 else text
+                    imgui.text_colored(col, f"[{timestamp}] {display_text}")
+                # Auto-scroll to bottom on first open
+                if imgui.get_scroll_y() >= imgui.get_scroll_max_y() - 20:
+                    imgui.set_scroll_here_y(1.0)
+            else:
+                imgui.text_disabled("No console output captured yet.")
+                imgui.text_disabled("Output will appear here when operations run.")
+        imgui.end_child()
+
+        # Buttons row
+        if imgui.button("Save to File"):
+            _save_log_to_file()
+        imgui.same_line()
+        if imgui.button("Clear"):
+            _output_capture.clear()
+        imgui.same_line()
+        if imgui.button("Close"):
+            imgui.close_current_popup()
+
+        imgui.end_popup()
+
+    return len(items) > 0
+
+
+def _save_log_to_file():
+    """Save captured log output to a file."""
+    from pathlib import Path
+    import datetime
+
+    # Create log filename with timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = Path.home() / ".mbo" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"console_output_{timestamp}.log"
+
+    # Write all captured lines
+    lines = _output_capture.lines
+    if not lines:
+        print(f"No log output to save.")
+        return
+
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write(f"MBO Console Output Log\n")
+        f.write(f"Saved: {datetime.datetime.now().isoformat()}\n")
+        f.write(f"{'=' * 60}\n\n")
+        for timestamp, stream, text in lines:
+            stream_label = "ERR" if stream == "stderr" else "OUT"
+            f.write(f"[{timestamp}] [{stream_label}] {text}\n")
+
+    print(f"Log saved to: {log_file}")
+
+
+def draw_progress_overlay(self):
+    """
+    Draw a floating progress overlay in the bottom-right corner.
+
+    This overlay is always visible regardless of which tab is active,
+    showing all active progress operations in a compact format.
+
+    DEPRECATED: Use draw_status_bar() instead for a less intrusive UI.
+    """
+    items = _get_active_progress_items(self)
+
+    if not items:
+        return
+
+    # Calculate overlay position (bottom-right corner with padding)
+    viewport = imgui.get_main_viewport()
+    padding = 16
+    overlay_width = 280
+    overlay_height = len(items) * 38 + 32  # 38px per item + header
+
+    pos_x = viewport.work_pos.x + viewport.work_size.x - overlay_width - padding
+    pos_y = viewport.work_pos.y + viewport.work_size.y - overlay_height - padding
+
+    imgui.set_next_window_pos(imgui.ImVec2(pos_x, pos_y), imgui.Cond_.always)
+    imgui.set_next_window_size(imgui.ImVec2(overlay_width, 0))
+    imgui.set_next_window_bg_alpha(0.85)
+
+    window_flags = (
+        imgui.WindowFlags_.no_move
+        | imgui.WindowFlags_.no_resize
+        | imgui.WindowFlags_.no_saved_settings
+        | imgui.WindowFlags_.no_focus_on_appearing
+        | imgui.WindowFlags_.no_nav
+        | imgui.WindowFlags_.always_auto_resize
+    )
+
+    if imgui.begin("##progress_overlay", flags=window_flags):
+        # Header
+        imgui.text_colored(imgui.ImVec4(0.7, 0.9, 1.0, 1.0), "Progress")
+        imgui.same_line()
+        imgui.text_disabled(f"({len(items)} active)")
+        imgui.separator()
+
+        for item in items:
+            # Color based on done status
+            if item["done"]:
+                bar_color = imgui.ImVec4(0.2, 0.8, 0.2, 1.0)  # Green
+                text_color = imgui.ImVec4(0.6, 1.0, 0.6, 1.0)
+            else:
+                bar_color = imgui.ImVec4(0.2, 0.5, 0.9, 1.0)  # Blue
+                text_color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
+
+            # Progress bar
+            imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)
+            imgui.progress_bar(item["progress"], imgui.ImVec2(-1, 16), "")
+            imgui.pop_style_color()
+
+            # Text label
+            pct = int(item["progress"] * 100)
+            imgui.text_colored(text_color, f"{item['text']} [{pct}%]")
+
+            imgui.spacing()
+
+    imgui.end()

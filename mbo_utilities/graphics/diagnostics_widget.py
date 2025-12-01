@@ -58,7 +58,13 @@ class DiagnosticsWidget:
         self.iscell = results.get("iscell")
         self.F = results.get("F")
         self.Fneu = results.get("Fneu")
-        self.ops = load_ops(plane_dir)
+
+        # load_ops expects the path to ops.npy file, not the directory
+        ops_path = plane_dir / "ops.npy"
+        if ops_path.exists():
+            self.ops = load_ops(ops_path)
+        else:
+            self.ops = None
         self.loaded_path = plane_dir
 
         # Compute metrics
@@ -112,7 +118,9 @@ class DiagnosticsWidget:
         """Indices of ROIs classified as cells."""
         if self.iscell is None:
             return np.arange(self.n_rois)
-        return np.where(self.iscell[:, 0] > 0.5)[0]
+        if self.iscell.ndim == 2:
+            return np.where(self.iscell[:, 0] > 0.5)[0]
+        return np.where(self.iscell[:] > 0.5)[0]
 
     @property
     def visible_indices(self):
@@ -132,31 +140,32 @@ class DiagnosticsWidget:
         left_width = min(400, avail.x * 0.4)
 
         # Left panel
-        with imgui.begin_child("DiagLeft", imgui.ImVec2(left_width, 0), imgui.ChildFlags_.border):
+        if imgui.begin_child("DiagLeft", imgui.ImVec2(left_width, 0), imgui.ChildFlags_.borders):
             self._draw_controls()
             imgui.separator()
             self._draw_fov()
+        imgui.end_child()
 
         imgui.same_line()
 
         # Right panel
-        with imgui.begin_child("DiagRight", imgui.ImVec2(0, 0), imgui.ChildFlags_.border):
+        if imgui.begin_child("DiagRight", imgui.ImVec2(0, 0), imgui.ChildFlags_.borders):
             self._draw_trace_plot()
             imgui.separator()
             self._draw_scatter_plots()
+        imgui.end_child()
 
     def _draw_load_ui(self):
         """Draw UI for loading results."""
-        imgui.text("No suite2p results loaded")
-        imgui.spacing()
-
-        if imgui.button("Load Results Folder"):
+        if imgui.button("Load trace quality statistics"):
             result = pfd.select_folder("Select plane folder with suite2p results", str(Path.home()))
             if result and result.result():
                 try:
                     self.load_results(Path(result.result()))
                 except Exception as e:
                     imgui.text_colored(imgui.ImVec4(1, 0, 0, 1), f"Error: {e}")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Load suite2p results (F.npy, stat.npy, iscell.npy) to view\nROI traces, dF/F, SNR, compactness, and other quality metrics.")
 
     def _draw_controls(self):
         """Draw ROI navigation controls."""
@@ -223,6 +232,12 @@ class DiagnosticsWidget:
             imgui.text(f"SNR: {self._snr[roi_idx]:.2f}")
         if self._compactness is not None:
             imgui.text(f"Compactness: {self._compactness[roi_idx]:.2f}")
+        if self._skewness is not None:
+            imgui.text(f"Skewness: {self._skewness[roi_idx]:.2f}")
+        if self._activity is not None:
+            imgui.text(f"Activity: {self._activity[roi_idx]:.2%}")
+        if self._shot_noise is not None:
+            imgui.text(f"Shot Noise: {self._shot_noise[roi_idx]:.1f}")
 
         # Draw zoomed view placeholder
         imgui.spacing()
@@ -277,6 +292,14 @@ class DiagnosticsWidget:
             return
 
         imgui.text("Quality Metrics (visible ROIs)")
+        imgui.same_line()
+        imgui.text_disabled("(?)")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Scatter plots showing relationships between ROI quality metrics.\n"
+                "The selected ROI is highlighted with a larger marker.\n"
+                "Click and drag to pan, scroll to zoom."
+            )
         imgui.spacing()
 
         # Get visible metrics
@@ -284,38 +307,68 @@ class DiagnosticsWidget:
         compact = self._compactness[visible].astype(np.float64)
         skew = self._skewness[visible].astype(np.float64)
         activity = self._activity[visible].astype(np.float64)
+        shot_noise = self._shot_noise[visible].astype(np.float64)
 
-        plot_size = imgui.ImVec2(200, 150)
+        # Full width plots, stacked vertically
+        plot_size = imgui.ImVec2(-1, 180)
+
+        # Helper to draw a scatter plot with title and tooltip
+        def draw_metric_plot(title: str, tooltip: str, plot_id: str,
+                             x_data: np.ndarray, y_data: np.ndarray,
+                             x_label: str, y_label: str,
+                             sel_x: float, sel_y: float):
+            imgui.text(title)
+            imgui.same_line()
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(tooltip)
+            if implot.begin_plot(plot_id, plot_size):
+                implot.setup_axes(x_label, y_label)
+                implot.plot_scatter("##data", x_data, y_data)
+                sel_x_arr = np.array([sel_x], dtype=np.float64)
+                sel_y_arr = np.array([sel_y], dtype=np.float64)
+                implot.set_next_marker_style(implot.Marker_.circle, 10)
+                implot.plot_scatter("Selected", sel_x_arr, sel_y_arr)
+                implot.end_plot()
+
+        roi_idx = visible[self.selected_roi]
 
         # SNR vs Compactness
-        if implot.begin_plot("SNR vs Compact", plot_size):
-            implot.setup_axes("SNR", "Compactness")
-            implot.plot_scatter("##sc1", snr, compact)
-            # Highlight selected
-            sel_snr = np.array([self._snr[visible[self.selected_roi]]], dtype=np.float64)
-            sel_comp = np.array([self._compactness[visible[self.selected_roi]]], dtype=np.float64)
-            implot.set_next_marker_style(implot.Marker_.circle, 8)
-            implot.plot_scatter("Selected", sel_snr, sel_comp)
-            implot.end_plot()
-
-        imgui.same_line()
+        draw_metric_plot(
+            "SNR vs Compactness",
+            "Signal-to-Noise Ratio vs Compactness.\n"
+            "SNR: ratio of signal range to noise (higher = cleaner signal).\n"
+            "Compactness: how circular the ROI is (higher = more cell-like).",
+            "##snr_compact", snr, compact, "SNR", "Compactness",
+            self._snr[roi_idx], self._compactness[roi_idx]
+        )
 
         # SNR vs Skewness
-        if implot.begin_plot("SNR vs Skew", plot_size):
-            implot.setup_axes("SNR", "Skewness")
-            implot.plot_scatter("##sc2", snr, skew)
-            sel_snr = np.array([self._snr[visible[self.selected_roi]]], dtype=np.float64)
-            sel_skew = np.array([self._skewness[visible[self.selected_roi]]], dtype=np.float64)
-            implot.set_next_marker_style(implot.Marker_.circle, 8)
-            implot.plot_scatter("Selected", sel_snr, sel_skew)
-            implot.end_plot()
+        draw_metric_plot(
+            "SNR vs Skewness",
+            "Signal-to-Noise Ratio vs Skewness.\n"
+            "Skewness: asymmetry of fluorescence distribution.\n"
+            "Positive = calcium transients (expected for neurons).",
+            "##snr_skew", snr, skew, "SNR", "Skewness",
+            self._snr[roi_idx], self._skewness[roi_idx]
+        )
 
         # SNR vs Activity
-        if implot.begin_plot("SNR vs Activity", plot_size):
-            implot.setup_axes("SNR", "Activity")
-            implot.plot_scatter("##sc3", snr, activity)
-            sel_snr = np.array([self._snr[visible[self.selected_roi]]], dtype=np.float64)
-            sel_act = np.array([self._activity[visible[self.selected_roi]]], dtype=np.float64)
-            implot.set_next_marker_style(implot.Marker_.circle, 8)
-            implot.plot_scatter("Selected", sel_snr, sel_act)
-            implot.end_plot()
+        draw_metric_plot(
+            "SNR vs Activity",
+            "Signal-to-Noise Ratio vs Activity.\n"
+            "Activity: fraction of frames with dF/F > 0.5.\n"
+            "Higher = more frequent calcium events.",
+            "##snr_activity", snr, activity, "SNR", "Activity",
+            self._snr[roi_idx], self._activity[roi_idx]
+        )
+
+        # SNR vs Shot Noise
+        draw_metric_plot(
+            "SNR vs Shot Noise",
+            "Signal-to-Noise Ratio vs Shot Noise.\n"
+            "Shot Noise: std of raw fluorescence (from stat.npy).\n"
+            "Related to photon counting statistics.",
+            "##snr_shotnoise", snr, shot_noise, "SNR", "Shot Noise",
+            self._snr[roi_idx], self._shot_noise[roi_idx]
+        )

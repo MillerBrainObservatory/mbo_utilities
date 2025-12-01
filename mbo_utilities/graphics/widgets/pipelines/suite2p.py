@@ -1,8 +1,8 @@
 """
 suite2p pipeline widget.
 
-combines processing configuration and results viewing in one widget
-with a toggle to switch between modes.
+combines processing configuration with a button to view trace quality statistics
+in a separate popup window.
 """
 
 from typing import TYPE_CHECKING
@@ -46,7 +46,8 @@ class Suite2pPipelineWidget(PipelineWidget):
         self.settings = Suite2pSettings()
 
         # config state
-        self._saveas_outdir = ""
+        self._saveas_outdir = ""  # for save_as dialog
+        self._s2p_outdir = ""  # for suite2p run/load (separate from save_as)
         self._install_error = False
         self._frames_initialized = False
         self._last_max_frames = 1000
@@ -57,16 +58,26 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._savepath_flash_start = None
         self._show_savepath_popup = False
 
-        # results state - use DiagnosticsWidget for comprehensive ROI analysis
+        # diagnostics popup state
         self._diagnostics_widget = DiagnosticsWidget()
+        self._show_diagnostics_popup = False
+        self._diagnostics_popup_open = False
+        self._folder_dialog = None
 
     def draw_config(self) -> None:
         """draw suite2p configuration ui."""
         # import the existing draw function
         from mbo_utilities.graphics.pipeline_widgets import draw_section_suite2p
 
+        # Draw the "Load trace quality statistics" button at the top
+        self._draw_diagnostics_button()
+        imgui.separator()
+        imgui.spacing()
+
         # temporarily set attributes on parent for compatibility
         self.parent._saveas_outdir = self._saveas_outdir
+        # s2p_outdir: use its own value, or default to saveas_outdir
+        self.parent._s2p_outdir = self._s2p_outdir or self._saveas_outdir
         self.parent._install_error = self._install_error
         self.parent._frames_initialized = self._frames_initialized
         self.parent._last_max_frames = self._last_max_frames
@@ -83,6 +94,10 @@ class Suite2pPipelineWidget(PipelineWidget):
 
         # sync back
         self._saveas_outdir = self.parent._saveas_outdir
+        self._s2p_outdir = getattr(self.parent, '_s2p_outdir', '')
+        # if saveas was set but s2p wasn't, default s2p to saveas
+        if self._saveas_outdir and not self._s2p_outdir:
+            self._s2p_outdir = self._saveas_outdir
         self._install_error = self.parent._install_error
         self._frames_initialized = getattr(self.parent, '_frames_initialized', False)
         self._last_max_frames = getattr(self.parent, '_last_max_frames', 1000)
@@ -93,11 +108,69 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._savepath_flash_start = getattr(self.parent, '_s2p_savepath_flash_start', None)
         self._show_savepath_popup = getattr(self.parent, '_s2p_show_savepath_popup', False)
 
-    def draw_results(self) -> None:
-        """Draw suite2p results viewer using DiagnosticsWidget."""
-        try:
-            self._diagnostics_widget.draw()
-        except Exception as e:
-            imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), f"Error: {e}")
-            import traceback
-            traceback.print_exc()
+        # Draw diagnostics popup window (managed separately from config)
+        self._draw_diagnostics_popup()
+
+    def _draw_diagnostics_button(self):
+        """Draw the button to open trace quality statistics popup."""
+        if imgui.button("Load trace quality statistics"):
+            self._folder_dialog = pfd.select_folder(
+                "Select plane folder with suite2p results",
+                str(Path.home())
+            )
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Load suite2p results (F.npy, stat.npy, iscell.npy) to view\n"
+                "ROI traces, dF/F, SNR, compactness, and other quality metrics."
+            )
+
+    def _draw_diagnostics_popup(self):
+        """Draw the diagnostics popup window if open."""
+        # Check if folder dialog has a result
+        if self._folder_dialog is not None and self._folder_dialog.ready():
+            result = self._folder_dialog.result()
+            if result:
+                try:
+                    self._diagnostics_widget.load_results(Path(result))
+                    self._show_diagnostics_popup = True
+                except Exception as e:
+                    print(f"Error loading results: {e}")
+            self._folder_dialog = None
+
+        if self._show_diagnostics_popup:
+            self._diagnostics_popup_open = True
+            imgui.open_popup("Trace Quality Statistics")
+            self._show_diagnostics_popup = False
+
+        # Set popup size
+        viewport = imgui.get_main_viewport()
+        popup_width = min(1200, viewport.size.x * 0.9)
+        popup_height = min(800, viewport.size.y * 0.85)
+        imgui.set_next_window_size(imgui.ImVec2(popup_width, popup_height), imgui.Cond_.first_use_ever)
+
+        opened, visible = imgui.begin_popup_modal(
+            "Trace Quality Statistics",
+            p_open=True if self._diagnostics_popup_open else None,
+            flags=imgui.WindowFlags_.no_saved_settings
+        )
+
+        if opened:
+            if not visible:
+                # User closed the popup via X button
+                self._diagnostics_popup_open = False
+                imgui.close_current_popup()
+            else:
+                # Draw the diagnostics content
+                try:
+                    self._diagnostics_widget.draw()
+                except Exception as e:
+                    imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), f"Error: {e}")
+
+                # Close button at bottom
+                imgui.spacing()
+                imgui.separator()
+                if imgui.button("Close", imgui.ImVec2(100, 0)):
+                    self._diagnostics_popup_open = False
+                    imgui.close_current_popup()
+
+            imgui.end_popup()

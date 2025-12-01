@@ -186,13 +186,16 @@ def draw_section_suite2p(self):
     imgui.separator_text("Processing Controls")
     imgui.spacing()
 
-    # Save path display with proper text wrapping
-    imgui.text("Save path:")
+    # Suite2p output path (separate from save_as dialog path)
+    # Use _s2p_outdir, defaulting to _saveas_outdir if not set
+    s2p_path = getattr(self, '_s2p_outdir', '') or getattr(self, '_saveas_outdir', '')
+
+    imgui.text("Output path:")
     imgui.same_line()
 
     # Flash animation logic for "(not set)" text
     text_color = imgui.ImVec4(0.6, 0.8, 1.0, 1.0)  # Default cyan color
-    if not self._saveas_outdir and self._s2p_savepath_flash_start is not None:
+    if not s2p_path and self._s2p_savepath_flash_start is not None:
         elapsed = time.time() - self._s2p_savepath_flash_start
         flash_duration = 0.3  # Duration of each flash in seconds
         total_flashes = 4
@@ -207,18 +210,23 @@ def draw_section_suite2p(self):
             self._s2p_savepath_flash_start = None
 
     # Display path with wrapping to prevent clipping
-    display_path = self._saveas_outdir if self._saveas_outdir else "(not set)"
+    display_path = s2p_path if s2p_path else "(not set)"
     imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
     imgui.text_colored(text_color, display_path)
     imgui.pop_text_wrap_pos()
 
     # Browse button
-    if imgui.button("Browse##savepath"):
-        default_dir = str(get_last_save_dir() or pathlib.Path().home())
-        res = pfd.select_folder("Select output folder", default_dir)
-        if res:
-            self._saveas_outdir = res.result()
-            set_last_save_dir(Path(self._saveas_outdir))
+    if imgui.button("Browse##s2p_outpath"):
+        default_dir = s2p_path or str(get_last_save_dir() or pathlib.Path().home())
+        self._s2p_folder_dialog = pfd.select_folder("Select Suite2p output folder", default_dir)
+
+    # Check if async folder dialog has a result
+    if self._s2p_folder_dialog is not None and self._s2p_folder_dialog.ready():
+        result = self._s2p_folder_dialog.result()
+        if result:
+            self._s2p_outdir = str(result)
+            set_last_save_dir(Path(result))
+        self._s2p_folder_dialog = None
 
     # Get max frames from data
     # iw-array API: data is an ImageWidgetProperty indexer, access with data[0]
@@ -423,8 +431,9 @@ def draw_section_suite2p(self):
 
     imgui.spacing()
 
-    # Green Run button - disabled if no save path
-    has_save_path = bool(self._saveas_outdir)
+    # Green Run button - disabled if no output path
+    s2p_path = getattr(self, '_s2p_outdir', '') or getattr(self, '_saveas_outdir', '')
+    has_save_path = bool(s2p_path)
 
     # Green button color
     imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
@@ -444,7 +453,7 @@ def draw_section_suite2p(self):
     # Show tooltip on button hover when disabled
     if not has_save_path and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
         imgui.begin_tooltip()
-        imgui.text("Set a save path first (see 'Save path:' above)")
+        imgui.text("Set an output path first (see 'Output path:' above)")
         imgui.end_tooltip()
 
     if button_clicked and has_save_path:
@@ -1052,7 +1061,9 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
         except (IndexError, KeyError):
             current_z = 0
 
-    base_out = Path(self._saveas_outdir) if getattr(self, "_saveas_outdir", None) else None
+    # Use _s2p_outdir for suite2p, fallback to _saveas_outdir
+    s2p_path = getattr(self, '_s2p_outdir', '') or getattr(self, '_saveas_outdir', '')
+    base_out = Path(s2p_path) if s2p_path else None
     if not base_out:
         from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
         # find last saved dir
