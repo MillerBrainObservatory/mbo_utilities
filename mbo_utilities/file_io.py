@@ -26,7 +26,7 @@ except ImportError:
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5"]
+MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".npy"]
 PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
 
@@ -107,7 +107,26 @@ def write_ops(metadata, raw_filename, **kwargs):
             logger.warning("No frame rate found; defaulting fs=10")
             metadata["fs"] = 10
 
-    dx, dy = metadata.get("pixel_resolution", [2, 2])
+    # Extract resolution values with fallbacks
+    # dx, dy from pixel_resolution tuple or individual keys
+    pixel_res = metadata.get("pixel_resolution", [2, 2])
+    if isinstance(pixel_res, (list, tuple)) and len(pixel_res) >= 2:
+        dx = metadata.get("dx", pixel_res[0])
+        dy = metadata.get("dy", pixel_res[1])
+    else:
+        dx = metadata.get("dx", 2)
+        dy = metadata.get("dy", 2)
+
+    # dz from multiple possible sources (z_step, dz, umPerPixZ, PhysicalSizeZ)
+    dz = metadata.get("dz")
+    if dz is None:
+        dz = metadata.get("z_step")
+    if dz is None:
+        dz = metadata.get("umPerPixZ")
+    if dz is None:
+        dz = metadata.get("PhysicalSizeZ")
+    if dz is None:
+        dz = 1.0  # default z-step
 
     # Load or initialize ops
     if ops_path.exists():
@@ -125,6 +144,10 @@ def write_ops(metadata, raw_filename, **kwargs):
             "fs": metadata["fs"],
             "dx": dx,
             "dy": dy,
+            "dz": dz,
+            "umPerPixX": dx,
+            "umPerPixY": dy,
+            "umPerPixZ": dz,
             "ops_path": str(ops_path),
         }
     )
