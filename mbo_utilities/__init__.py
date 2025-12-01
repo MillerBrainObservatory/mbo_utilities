@@ -35,6 +35,9 @@ __all__ = [
     # Metadata
     "is_raw_scanimage",
     "get_metadata",
+    "get_voxel_size",
+    "normalize_resolution",
+    "VoxelSize",
     # Preferences
     "get_recent_files",
     "add_recent_file",
@@ -79,7 +82,7 @@ def __getattr__(name):
         return getattr(file_io, name)
 
     # Metadata (metadata -> tifffile)
-    if name in ("is_raw_scanimage", "get_metadata"):
+    if name in ("is_raw_scanimage", "get_metadata", "get_voxel_size", "normalize_resolution", "VoxelSize"):
         from . import metadata
         return getattr(metadata, name)
 
