@@ -59,18 +59,44 @@ def _close_all_tiff_writers():
 
 
 def _close_specific_npy_writer(filepath):
-    """Close a specific .npy memory-mapped writer by filepath (thread-safe)."""
+    """Close a specific .npy memory-mapped writer by filepath (thread-safe).
+
+    Packages the data with metadata into a single .npy file using np.savez format.
+    """
     if hasattr(_write_npy, "_arrays"):
         key = str(Path(filepath).with_suffix(".npy"))
         if key in _write_npy._arrays:
             mmap = _write_npy._arrays[key]
+            metadata = _write_npy._metadata.get(key, {})
+
+            # Read data from memmap before closing
+            data = np.array(mmap)
+
             # Flush and close the memmap
             if hasattr(mmap, "flush"):
                 mmap.flush()
             if hasattr(mmap, "_mmap") and mmap._mmap is not None:
                 mmap._mmap.close()
+
+            # Remove temp file
+            temp_path = Path(key).with_suffix(".npy.tmp")
+            if temp_path.exists():
+                temp_path.unlink()
+
+            # Save as npz with data and metadata, but use .npy extension
+            final_path = Path(key)
+            # np.savez saves as .npz, so we save to .npz then rename
+            npz_path = final_path.with_suffix(".npz")
+            np.savez(npz_path, data=data, metadata=np.array(metadata, dtype=object))
+
+            # Rename .npz to .npy (unconventional but works with np.load)
+            if final_path.exists():
+                final_path.unlink()
+            npz_path.rename(final_path)
+
             _write_npy._arrays.pop(key, None)
             _write_npy._offsets.pop(key, None)
+            _write_npy._metadata.pop(key, None)
 
 
 def compute_pad_from_shifts(plane_shifts):
@@ -427,7 +453,7 @@ def _write_npy(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     Write data to a .npy file with chunked/streaming support.
 
     Uses memory-mapped file for efficient chunked writing.
-    Metadata is saved to a companion .json file.
+    Metadata is embedded in the file using np.savez format (stored as .npy).
     """
     if metadata is None:
         metadata = {}
@@ -435,6 +461,7 @@ def _write_npy(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     if not hasattr(_write_npy, "_arrays"):
         _write_npy._arrays = {}
         _write_npy._offsets = {}
+        _write_npy._metadata = {}
 
     fname = Path(path).with_suffix(".npy")
     fname.parent.mkdir(parents=True, exist_ok=True)
@@ -445,6 +472,7 @@ def _write_npy(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     if key in _write_npy._arrays and not fname.exists():
         _write_npy._arrays.pop(key, None)
         _write_npy._offsets.pop(key, None)
+        _write_npy._metadata.pop(key, None)
 
     # Only overwrite if this is a brand new write session
     if overwrite and key not in _write_npy._arrays and fname.exists():
@@ -459,22 +487,19 @@ def _write_npy(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
         h, w = data.shape[-2], data.shape[-1]
         shape = (int(nframes), h, w)
 
-        # Create memory-mapped array
+        # Use a temporary file for chunked writing, then package with metadata at close
+        temp_fname = fname.with_suffix(".npy.tmp")
+
+        # Create memory-mapped array for chunked writing
         mmap = np.lib.format.open_memmap(
-            fname,
+            temp_fname,
             mode="w+",
             dtype=data.dtype,
             shape=shape,
         )
         _write_npy._arrays[key] = mmap
         _write_npy._offsets[key] = 0
-
-        # Save metadata to companion JSON file
-        import json
-        meta_path = fname.with_suffix(".json")
-        serializable_meta = _make_json_serializable(metadata)
-        with open(meta_path, "w") as f:
-            json.dump(serializable_meta, f, indent=2)
+        _write_npy._metadata[key] = _make_json_serializable(metadata)
 
     mmap = _write_npy._arrays[key]
     off = _write_npy._offsets[key]
@@ -492,11 +517,10 @@ def _write_npy(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
 def _close_npy_writers():
     """Close all open .npy memory-mapped writers."""
     if hasattr(_write_npy, "_arrays"):
-        for mmap in _write_npy._arrays.values():
-            if hasattr(mmap, "_mmap") and mmap._mmap is not None:
-                mmap._mmap.close()
-        _write_npy._arrays.clear()
-        _write_npy._offsets.clear()
+        # Close each writer properly to package data with metadata
+        keys = list(_write_npy._arrays.keys())
+        for key in keys:
+            _close_specific_npy_writer(key)
 
 
 def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
@@ -610,25 +634,22 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
         - dx, dy : float, pixel sizes in micrometers
         - dz : float, z-step in micrometers (for 4D data)
         - z_step : float, alias for dz
+        - voxel_size : tuple (dx, dy, dz) in micrometers
 
     Returns
     -------
     dict
         OME-Zarr NGFF v0.5 metadata dictionary ready for zarr.attrs.update()
     """
+    from mbo_utilities.metadata import get_voxel_size
+
     ndim = len(shape)
 
-    # Extract spatial scales from metadata
-    pixel_resolution = metadata.get("pixel_resolution", None)
-    if pixel_resolution is not None:
-        if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
-            pixel_x = float(pixel_resolution[0])
-            pixel_y = float(pixel_resolution[1])
-        else:
-            pixel_x = pixel_y = 1.0
-    else:
-        pixel_x = metadata.get("dx", 1.0)
-        pixel_y = metadata.get("dy", 1.0)
+    # Extract spatial scales using standardized resolution getter
+    vs = get_voxel_size(metadata)
+    pixel_x = vs.dx
+    pixel_y = vs.dy
+    z_scale = vs.dz
 
     # Extract temporal scale
     frame_rate = metadata.get("frame_rate") or metadata.get("fs")
@@ -636,9 +657,6 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
         time_scale = 1.0 / float(frame_rate)  # seconds per frame
     else:
         time_scale = 1.0
-
-    # Extract z-scale (if 4D)
-    z_scale = metadata.get("z_step") or metadata.get("dz", 1.0)
 
     # Build axes definition
     # Order: time (if present) -> channel (if present) -> spatial (z, y, x)
