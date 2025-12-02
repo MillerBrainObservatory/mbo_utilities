@@ -306,9 +306,15 @@ def _write_plane(
             # No plane_index: standard slicing
             chunk = data[start:end]
 
-        # Convert dask arrays to numpy - dask can hang during implicit compute in writers
+        # Convert lazy/disk-backed arrays to contiguous numpy arrays
+        # This is critical for performance - memmap slices pass isinstance(np.ndarray)
+        # but are extremely slow when passed to writers (220x+ slower)
         if hasattr(chunk, 'compute'):
+            # Dask arrays - can hang during implicit compute in writers
             chunk = chunk.compute()
+        elif isinstance(chunk, np.memmap):
+            # Memmap slices are disk-backed - force copy to memory for fast writes
+            chunk = np.array(chunk)
         elif not isinstance(chunk, np.ndarray):
             chunk = np.asarray(chunk)
 
