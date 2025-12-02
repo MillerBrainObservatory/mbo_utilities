@@ -26,7 +26,7 @@ except ImportError:
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 
-MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5"]
+MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".npy"]
 PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
 
@@ -58,7 +58,14 @@ def write_ops(metadata, raw_filename, **kwargs):
     chan = 2 if structural or "data_chan2.bin" in str(filename) else 1
     logger.debug(f"Detected channel {chan}")
 
-    root = filename.parent if filename.is_file() else filename
+    # Always use parent directory - raw_filename should be a file path like data_raw.bin
+    # The old check `filename.is_file()` failed when file was just created but not yet flushed
+    if filename.suffix:
+        # Has a file extension, use parent as root
+        root = filename.parent
+    else:
+        # No extension, assume it's a directory path (backward compatibility)
+        root = filename if filename.is_dir() else filename.parent
     ops_path = root / "ops.npy"
     logger.info(f"Writing ops file to {ops_path}")
 
@@ -100,7 +107,26 @@ def write_ops(metadata, raw_filename, **kwargs):
             logger.warning("No frame rate found; defaulting fs=10")
             metadata["fs"] = 10
 
-    dx, dy = metadata.get("pixel_resolution", [2, 2])
+    # Extract resolution values with fallbacks
+    # dx, dy from pixel_resolution tuple or individual keys
+    pixel_res = metadata.get("pixel_resolution", [2, 2])
+    if isinstance(pixel_res, (list, tuple)) and len(pixel_res) >= 2:
+        dx = metadata.get("dx", pixel_res[0])
+        dy = metadata.get("dy", pixel_res[1])
+    else:
+        dx = metadata.get("dx", 2)
+        dy = metadata.get("dy", 2)
+
+    # dz from multiple possible sources (z_step, dz, umPerPixZ, PhysicalSizeZ)
+    dz = metadata.get("dz")
+    if dz is None:
+        dz = metadata.get("z_step")
+    if dz is None:
+        dz = metadata.get("umPerPixZ")
+    if dz is None:
+        dz = metadata.get("PhysicalSizeZ")
+    if dz is None:
+        dz = 1.0  # default z-step
 
     # Load or initialize ops
     if ops_path.exists():
@@ -118,6 +144,10 @@ def write_ops(metadata, raw_filename, **kwargs):
             "fs": metadata["fs"],
             "dx": dx,
             "dy": dy,
+            "dz": dz,
+            "umPerPixX": dx,
+            "umPerPixY": dy,
+            "umPerPixZ": dz,
             "ops_path": str(ops_path),
         }
     )
@@ -698,29 +728,53 @@ def get_mbo_dirs() -> dict:
 
 
 def get_last_savedir_path() -> Path:
-    """Return path to settings file tracking last saved folder."""
+    """Return path to settings file tracking last saved folder.
+
+    .. deprecated::
+        Use :func:`mbo_utilities.preferences.get_last_save_dir` instead.
+    """
+    import warnings
+    warnings.warn(
+        "get_last_savedir_path() is deprecated. Use mbo_utilities.preferences.get_last_save_dir() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return Path.home().joinpath("mbo", "settings", "last_savedir.json")
 
 
 def load_last_savedir(default=None) -> Path:
-    """Load last saved directory path if it exists."""
-    f = get_last_savedir_path()
-    if f.is_file():
-        try:
-            path = Path(json.loads(f.read_text()).get("last_savedir", ""))
-            if path.exists():
-                return path
-        except Exception as e:
-            logger.debug(f"Failed to load last savedir from {f}: {e}")
-            pass
+    """Load last saved directory path if it exists.
+
+    .. deprecated::
+        Use :func:`mbo_utilities.preferences.get_last_save_dir` instead.
+    """
+    import warnings
+    warnings.warn(
+        "load_last_savedir() is deprecated. Use mbo_utilities.preferences.get_last_save_dir() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mbo_utilities.preferences import get_last_save_dir
+    result = get_last_save_dir()
+    if result:
+        return result
     return Path(default or Path().cwd())
 
 
 def save_last_savedir(path: Path):
-    """Persist the most recent save directory path."""
-    f = get_last_savedir_path()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"last_savedir": str(path)}))
+    """Persist the most recent save directory path.
+
+    .. deprecated::
+        Use :func:`mbo_utilities.preferences.set_last_save_dir` instead.
+    """
+    import warnings
+    warnings.warn(
+        "save_last_savedir() is deprecated. Use mbo_utilities.preferences.set_last_save_dir() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mbo_utilities.preferences import set_last_save_dir
+    set_last_save_dir(path)
 
 
 def _convert_range_to_slice(k):

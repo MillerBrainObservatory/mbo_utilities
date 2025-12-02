@@ -15,8 +15,6 @@ from .file_io import write_ops
 from ._parsing import _make_json_serializable
 from .metadata import save_metadata_html
 
-from ._binary import BinaryFile
-
 from tqdm.auto import tqdm
 
 logger = log.get("writers")
@@ -60,6 +58,47 @@ def _close_all_tiff_writers():
             _write_tiff._first_write.clear()
 
 
+def _close_specific_npy_writer(filepath):
+    """Close a specific .npy memory-mapped writer by filepath (thread-safe).
+
+    Packages the data with metadata into a single .npy file using np.savez format.
+    """
+    if hasattr(_write_npy, "_arrays"):
+        key = str(Path(filepath).with_suffix(".npy"))
+        if key in _write_npy._arrays:
+            mmap = _write_npy._arrays[key]
+            metadata = _write_npy._metadata.get(key, {})
+
+            # Read data from memmap before closing
+            data = np.array(mmap)
+
+            # Flush and close the memmap
+            if hasattr(mmap, "flush"):
+                mmap.flush()
+            if hasattr(mmap, "_mmap") and mmap._mmap is not None:
+                mmap._mmap.close()
+
+            # Remove temp file
+            temp_path = Path(key).with_suffix(".npy.tmp")
+            if temp_path.exists():
+                temp_path.unlink()
+
+            # Save as npz with data and metadata, but use .npy extension
+            final_path = Path(key)
+            # np.savez saves as .npz, so we save to .npz then rename
+            npz_path = final_path.with_suffix(".npz")
+            np.savez(npz_path, data=data, metadata=np.array(metadata, dtype=object))
+
+            # Rename .npz to .npy (unconventional but works with np.load)
+            if final_path.exists():
+                final_path.unlink()
+            npz_path.rename(final_path)
+
+            _write_npy._arrays.pop(key, None)
+            _write_npy._offsets.pop(key, None)
+            _write_npy._metadata.pop(key, None)
+
+
 def compute_pad_from_shifts(plane_shifts):
     shifts = np.asarray(plane_shifts, dtype=int)
     dy_min, dx_min = shifts.min(axis=0)
@@ -89,24 +128,31 @@ def _write_plane(
         dshape = data.shape
 
     metadata = metadata or {}
-    metadata["shape"] = dshape
 
     if plane_index is not None:
         if not isinstance(plane_index, int):
             raise TypeError(f"plane_index must be an integer, got {type(plane_index)}")
         metadata["plane"] = plane_index + 1
 
-    # Get target frame count from kwargs, metadata, or data shape (in that priority)
-    nframes_target = kwargs.get("num_frames", metadata.get("num_frames"))
+    # Get target frame count (nframes is primary, num_frames is alias)
+    nframes_target = (
+        kwargs.get("nframes")
+        or kwargs.get("num_frames")
+        or metadata.get("nframes")
+        or metadata.get("num_frames")
+    )
 
-    # If nframes_target is 0 or None, use actual data shape
     if nframes_target is None or nframes_target == 0:
         nframes_target = data.shape[0]
 
-    # Update metadata with the actual target
-    if nframes_target is not None:
-        metadata["num_frames"] = int(nframes_target)
-        metadata["nframes"] = int(nframes_target)
+    nframes_target = int(nframes_target)
+    metadata["nframes"] = nframes_target
+    metadata["num_frames"] = nframes_target  # alias for backwards compatibility
+
+    # Update dshape to use the target frame count, not the original array shape
+    # This ensures metadata["shape"] matches metadata["nframes"]
+    dshape = (nframes_target, *dshape[1:])
+    metadata["shape"] = dshape
 
     H0, W0 = data.shape[-2], data.shape[-1]
     fname = filename
@@ -260,6 +306,18 @@ def _write_plane(
             # No plane_index: standard slicing
             chunk = data[start:end]
 
+        # Convert lazy/disk-backed arrays to contiguous numpy arrays
+        # This is critical for performance - memmap slices pass isinstance(np.ndarray)
+        # but are extremely slow when passed to writers (220x+ slower)
+        if hasattr(chunk, 'compute'):
+            # Dask arrays - can hang during implicit compute in writers
+            chunk = chunk.compute()
+        elif isinstance(chunk, np.memmap):
+            # Memmap slices are disk-backed - force copy to memory for fast writes
+            chunk = np.array(chunk)
+        elif not isinstance(chunk, np.ndarray):
+            chunk = np.asarray(chunk)
+
         # Ensure chunk is 3D (T, Y, X) - squeeze any remaining singleton dimensions
         # This handles cases where plane_index is None but Z dimension is singleton
         if len(chunk.shape) == 4 and chunk.shape[1] == 1:
@@ -298,6 +356,8 @@ def _write_plane(
         _close_specific_tiff_writer(fname)
     elif fname.suffix in [".bin"]:
         _close_specific_bin_writer(fname)
+    elif fname.suffix in [".npy"]:
+        _close_specific_npy_writer(fname)
 
     if "cleaned_scanimage_metadata" in metadata:
         meta_path = filename.parent.joinpath("metadata.html")
@@ -327,11 +387,19 @@ def _get_file_writer(ext, overwrite):
             _write_bin,
             overwrite=overwrite,
         )
+    elif ext == "npy":
+        return functools.partial(
+            _write_npy,
+            overwrite=overwrite,
+        )
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
 def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
+    # Import here to avoid circular import
+    from .array_types import BinArray
+
     if metadata is None:
         metadata = {}
 
@@ -362,8 +430,10 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
         if nframes is None:
             raise ValueError("Metadata must contain 'nframes' or 'num_frames'.")
 
-        _write_bin._writers[key] = BinaryFile(
-            Ly, Lx, key, n_frames=metadata["num_frames"], dtype=np.int16
+        _write_bin._writers[key] = BinArray(
+            filename=key,
+            shape=(nframes, Ly, Lx),
+            dtype=np.int16,
         )
         _write_bin._offsets[key] = 0
         first_write = True
@@ -377,11 +447,86 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
         data = data.squeeze(axis=1)
 
     bf[off : off + data.shape[0]] = data
-    bf.file.flush()
+    bf.flush()
     _write_bin._offsets[key] = off + data.shape[0]
 
     if first_write:
         write_ops(metadata, fname, **kwargs)
+
+
+def _write_npy(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
+    """
+    Write data to a .npy file with chunked/streaming support.
+
+    Uses memory-mapped file for efficient chunked writing.
+    Metadata is embedded in the file using np.savez format (stored as .npy).
+    """
+    if metadata is None:
+        metadata = {}
+
+    if not hasattr(_write_npy, "_arrays"):
+        _write_npy._arrays = {}
+        _write_npy._offsets = {}
+        _write_npy._metadata = {}
+
+    fname = Path(path).with_suffix(".npy")
+    fname.parent.mkdir(parents=True, exist_ok=True)
+
+    key = str(fname)
+
+    # Drop cached array if file was deleted externally
+    if key in _write_npy._arrays and not fname.exists():
+        _write_npy._arrays.pop(key, None)
+        _write_npy._offsets.pop(key, None)
+        _write_npy._metadata.pop(key, None)
+
+    # Only overwrite if this is a brand new write session
+    if overwrite and key not in _write_npy._arrays and fname.exists():
+        fname.unlink()
+
+    if key not in _write_npy._arrays:
+        # Get target shape from metadata
+        nframes = metadata.get("nframes") or metadata.get("num_frames")
+        if nframes is None:
+            raise ValueError("Metadata must contain 'nframes' or 'num_frames'.")
+
+        h, w = data.shape[-2], data.shape[-1]
+        shape = (int(nframes), h, w)
+
+        # Use a temporary file for chunked writing, then package with metadata at close
+        temp_fname = fname.with_suffix(".npy.tmp")
+
+        # Create memory-mapped array for chunked writing
+        mmap = np.lib.format.open_memmap(
+            temp_fname,
+            mode="w+",
+            dtype=data.dtype,
+            shape=shape,
+        )
+        _write_npy._arrays[key] = mmap
+        _write_npy._offsets[key] = 0
+        _write_npy._metadata[key] = _make_json_serializable(metadata)
+
+    mmap = _write_npy._arrays[key]
+    off = _write_npy._offsets[key]
+
+    # Squeeze singleton Z dimension if present
+    if len(data.shape) == 4 and data.shape[1] == 1:
+        data = data.squeeze(axis=1)
+
+    # Write chunk
+    mmap[off : off + data.shape[0]] = data
+    mmap.flush()
+    _write_npy._offsets[key] = off + data.shape[0]
+
+
+def _close_npy_writers():
+    """Close all open .npy memory-mapped writers."""
+    if hasattr(_write_npy, "_arrays"):
+        # Close each writer properly to package data with metadata
+        keys = list(_write_npy._arrays.keys())
+        for key in keys:
+            _close_specific_npy_writer(key)
 
 
 def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
@@ -495,25 +640,22 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
         - dx, dy : float, pixel sizes in micrometers
         - dz : float, z-step in micrometers (for 4D data)
         - z_step : float, alias for dz
+        - voxel_size : tuple (dx, dy, dz) in micrometers
 
     Returns
     -------
     dict
         OME-Zarr NGFF v0.5 metadata dictionary ready for zarr.attrs.update()
     """
+    from mbo_utilities.metadata import get_voxel_size
+
     ndim = len(shape)
 
-    # Extract spatial scales from metadata
-    pixel_resolution = metadata.get("pixel_resolution", None)
-    if pixel_resolution is not None:
-        if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
-            pixel_x = float(pixel_resolution[0])
-            pixel_y = float(pixel_resolution[1])
-        else:
-            pixel_x = pixel_y = 1.0
-    else:
-        pixel_x = metadata.get("dx", 1.0)
-        pixel_y = metadata.get("dy", 1.0)
+    # Extract spatial scales using standardized resolution getter
+    vs = get_voxel_size(metadata)
+    pixel_x = vs.dx
+    pixel_y = vs.dy
+    z_scale = vs.dz
 
     # Extract temporal scale
     frame_rate = metadata.get("frame_rate") or metadata.get("fs")
@@ -521,9 +663,6 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
         time_scale = 1.0 / float(frame_rate)  # seconds per frame
     else:
         time_scale = 1.0
-
-    # Extract z-scale (if 4D)
-    z_scale = metadata.get("z_step") or metadata.get("dz", 1.0)
 
     # Build axes definition
     # Order: time (if present) -> channel (if present) -> spatial (z, y, x)
@@ -766,5 +905,22 @@ def _try_generic_writers(
             if metadata:
                 for k, v in metadata.items():
                     f.attrs[k] = v if np.isscalar(v) else str(v)
+    elif outpath.suffix.lower() == ".bin":
+        # Suite2p binary format - write data + ops.npy
+        arr = np.asarray(data)
+        if arr.dtype != np.int16:
+            arr = arr.astype(np.int16)
+
+        # Write binary data
+        with open(outpath, "wb") as f:
+            arr.tofile(f)
+
+        # Write ops.npy alongside
+        if metadata:
+            ops = metadata.copy()
+            ops["Ly"] = arr.shape[-2] if arr.ndim >= 2 else 1
+            ops["Lx"] = arr.shape[-1] if arr.ndim >= 1 else 1
+            ops["nframes"] = arr.shape[0] if arr.ndim >= 1 else 1
+            np.save(outpath.parent / "ops.npy", ops)
     else:
         raise ValueError(f"Unsupported file extension: {outpath.suffix}")

@@ -349,11 +349,11 @@ class TestPhaseCorrection:
         from tests.test_utils import run_gui_with_screenshot
 
         def check_controls(gui, iw):
-            # Check phase correction attributes
-            assert hasattr(gui, "_fix_phase")
-            assert hasattr(gui, "_use_fft")
-            assert hasattr(gui, "_max_offset")
-            assert hasattr(gui, "_phase_upsample")
+            # phase correction properties (not underscore-prefixed)
+            assert hasattr(gui, "fix_phase")
+            assert hasattr(gui, "use_fft")
+            assert hasattr(gui, "max_offset")
+            assert hasattr(gui, "border")
 
         run_gui_with_screenshot(
             test_data,

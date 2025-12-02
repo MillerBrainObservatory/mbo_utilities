@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 import struct
+from typing import NamedTuple
 from tqdm.auto import tqdm
 
 import numpy as np
@@ -14,13 +16,269 @@ from mbo_utilities._parsing import _make_json_serializable
 
 logger = log.get("metadata")
 
+class VoxelSize(NamedTuple):
+    """
+    Voxel size in micrometers (dx, dy, dz).
+
+    This class represents the physical size of a voxel in 3D space.
+    All values are in micrometers.
+
+    Attributes
+    ----------
+    dx : float
+        Pixel size in X dimension (micrometers per pixel).
+    dy : float
+        Pixel size in Y dimension (micrometers per pixel).
+    dz : float
+        Pixel/voxel size in Z dimension (micrometers per z-step).
+
+    Examples
+    --------
+    >>> vs = VoxelSize(0.5, 0.5, 5.0)
+    >>> vs.dx
+    0.5
+    >>> vs.dz
+    5.0
+    >>> tuple(vs)
+    (0.5, 0.5, 5.0)
+    """
+
+    dx: float
+    dy: float
+    dz: float
+
+    @property
+    def pixel_resolution(self) -> tuple[float, float]:
+        """Return (dx, dy) tuple for backward compatibility."""
+        return (self.dx, self.dy)
+
+    @property
+    def voxel_size(self) -> tuple[float, float, float]:
+        """Return (dx, dy, dz) tuple."""
+        return (self.dx, self.dy, self.dz)
+
+    def to_dict(self, include_aliases: bool = True) -> dict:
+        """
+        Convert to dictionary with optional aliases.
+
+        Parameters
+        ----------
+        include_aliases : bool
+            If True, includes all standard aliases (Suite2p, OME, ImageJ).
+
+        Returns
+        -------
+        dict
+            Dictionary with resolution values and aliases.
+        """
+        result = {
+            "dx": self.dx,
+            "dy": self.dy,
+            "dz": self.dz,
+            "pixel_resolution": self.pixel_resolution,
+            "voxel_size": self.voxel_size,
+        }
+
+        if include_aliases:
+            # Suite2p format
+            result["umPerPixX"] = self.dx
+            result["umPerPixY"] = self.dy
+            result["umPerPixZ"] = self.dz
+
+            # OME format
+            result["PhysicalSizeX"] = self.dx
+            result["PhysicalSizeY"] = self.dy
+            result["PhysicalSizeZ"] = self.dz
+            result["PhysicalSizeXUnit"] = "micrometer"
+            result["PhysicalSizeYUnit"] = "micrometer"
+            result["PhysicalSizeZUnit"] = "micrometer"
+
+            # Additional aliases
+            result["z_step"] = self.dz  # backward compat
+
+        return result
+
+
+def get_voxel_size(
+    metadata: dict | None = None,
+    dx: float | None = None,
+    dy: float | None = None,
+    dz: float | None = None,
+) -> VoxelSize:
+    """
+    Extract voxel size from metadata with optional user overrides.
+
+    Resolution values are resolved in priority order:
+    1. User-provided parameter (highest priority)
+    2. Canonical keys (dx, dy, dz)
+    3. pixel_resolution tuple
+    4. Suite2p keys (umPerPixX, umPerPixY, umPerPixZ)
+    5. OME keys (PhysicalSizeX, PhysicalSizeY, PhysicalSizeZ)
+    6. ScanImage SI keys
+    7. Default: 1.0 micrometers
+
+    Parameters
+    ----------
+    metadata : dict, optional
+        Metadata dictionary to extract resolution from.
+    dx : float, optional
+        Override X resolution (micrometers per pixel).
+    dy : float, optional
+        Override Y resolution (micrometers per pixel).
+    dz : float, optional
+        Override Z resolution (micrometers per z-step).
+
+    Returns
+    -------
+    VoxelSize
+        Named tuple with (dx, dy, dz) in micrometers.
+
+    Examples
+    --------
+    >>> meta = {"pixel_resolution": (0.5, 0.5)}
+    >>> vs = get_voxel_size(meta, dz=5.0)
+    >>> vs.dz
+    5.0
+
+    >>> vs = get_voxel_size({"dx": 0.3, "dy": 0.3, "dz": 2.0})
+    >>> vs.pixel_resolution
+    (0.3, 0.3)
+    """
+    if metadata is None:
+        metadata = {}
+
+    # Helper to get first non-None value from a list of keys
+    def _get_first(keys: list[str], default: float = 1.0) -> float:
+        for key in keys:
+            val = metadata.get(key)
+            if val is not None:
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    continue
+        return default
+
+    # Extract pixel_resolution tuple if present
+    pixel_res = metadata.get("pixel_resolution")
+    px_x, px_y = None, None
+    if pixel_res is not None:
+        if isinstance(pixel_res, (list, tuple)) and len(pixel_res) >= 2:
+            try:
+                px_x = float(pixel_res[0])
+                px_y = float(pixel_res[1])
+            except (TypeError, ValueError):
+                pass
+        elif isinstance(pixel_res, (int, float)):
+            # Single value: use for both X and Y
+            px_x = px_y = float(pixel_res)
+
+    # Try to extract dz from ScanImage nested structure
+    si_dz = None
+    si = metadata.get("si", {})
+    if isinstance(si, dict):
+        # Try hStackManager.actualStackZStepSize
+        h_stack = si.get("hStackManager", {})
+        if isinstance(h_stack, dict):
+            si_dz = h_stack.get("actualStackZStepSize")
+            if si_dz is None:
+                si_dz = h_stack.get("stackZStepSize")
+
+    # Resolve dx
+    resolved_dx = dx
+    if resolved_dx is None:
+        resolved_dx = _get_first(["dx", "umPerPixX", "PhysicalSizeX"], default=None)
+    if resolved_dx is None and px_x is not None:
+        resolved_dx = px_x
+    if resolved_dx is None:
+        resolved_dx = 1.0
+
+    # Resolve dy
+    resolved_dy = dy
+    if resolved_dy is None:
+        resolved_dy = _get_first(["dy", "umPerPixY", "PhysicalSizeY"], default=None)
+    if resolved_dy is None and px_y is not None:
+        resolved_dy = px_y
+    if resolved_dy is None:
+        resolved_dy = 1.0
+
+    # Resolve dz (more aliases for z-step)
+    resolved_dz = dz
+    if resolved_dz is None:
+        resolved_dz = _get_first(
+            ["dz", "z_step", "umPerPixZ", "PhysicalSizeZ", "spacing"],
+            default=None,
+        )
+    if resolved_dz is None and si_dz is not None:
+        try:
+            resolved_dz = float(si_dz)
+        except (TypeError, ValueError):
+            pass
+    if resolved_dz is None:
+        resolved_dz = 1.0
+
+    return VoxelSize(dx=resolved_dx, dy=resolved_dy, dz=resolved_dz)
+
+
+def normalize_resolution(
+    metadata: dict,
+    dx: float | None = None,
+    dy: float | None = None,
+    dz: float | None = None,
+) -> dict:
+    """
+    Normalize resolution metadata by adding all standard aliases.
+
+    This function ensures that resolution information is available under
+    all commonly-used keys for different tools and formats:
+
+    - Canonical: dx, dy, dz
+    - Legacy: pixel_resolution (tuple), z_step
+    - Suite2p: umPerPixX, umPerPixY, umPerPixZ
+    - OME: PhysicalSizeX/Y/Z with units
+    - Convenience: voxel_size (3-tuple)
+
+    Parameters
+    ----------
+    metadata : dict
+        Metadata dictionary to normalize. Modified in-place AND returned.
+    dx : float, optional
+        Override X resolution (micrometers per pixel).
+    dy : float, optional
+        Override Y resolution (micrometers per pixel).
+    dz : float, optional
+        Override Z resolution (micrometers per z-step).
+
+    Returns
+    -------
+    dict
+        The same metadata dict with resolution aliases added.
+
+    Examples
+    --------
+    >>> meta = {"pixel_resolution": (0.5, 0.5)}
+    >>> normalize_resolution(meta, dz=5.0)
+    >>> meta["dz"]
+    5.0
+    >>> meta["voxel_size"]
+    (0.5, 0.5, 5.0)
+    >>> meta["PhysicalSizeZ"]
+    5.0
+    """
+    vs = get_voxel_size(metadata, dx=dx, dy=dy, dz=dz)
+    metadata.update(vs.to_dict(include_aliases=True))
+    return metadata
+
 
 def has_mbo_metadata(file: os.PathLike | str) -> bool:
     """
     Check if a TIFF file has metadata from the Miller Brain Observatory.
 
-    Specifically, this checks for tiff_file.shaped_metadata, which is used to store system and user
-    supplied metadata.
+    This checks for MBO-specific keys in the shaped_metadata, not just its presence.
+    Generic TIFFs written by tifffile may have shaped_metadata with only a 'shape' key,
+    which is not sufficient to identify them as MBO files.
+
+    MBO-specific keys include: num_planes, num_rois, frame_rate, pixel_resolution,
+    fov, Ly, Lx, etc.
 
     Parameters
     ----------
@@ -32,25 +290,28 @@ def has_mbo_metadata(file: os.PathLike | str) -> bool:
     bool
         True if the TIFF file has MBO metadata; False otherwise.
     """
+    # Keys that indicate MBO origin (beyond just 'shape' which is generic tifffile)
+    MBO_MARKER_KEYS = {"num_planes", "num_rois", "frame_rate", "Ly", "Lx", "fov", "pixel_resolution"}
+
     if not file or not isinstance(file, (str, os.PathLike)):
         raise ValueError(
             "Invalid file path provided: must be a string or os.PathLike object."
             f"Got: {file} of type {type(file)}"
         )
-    # Tiffs
-    if Path(file).suffix in [".tif", ".tiff"]:
-        try:
-            tiff_file = tifffile.TiffFile(file)
-            if (
-                hasattr(tiff_file, "shaped_metadata")
-                and tiff_file.shaped_metadata is not None
-            ):
-                return True
-            else:
+    if Path(file).suffix not in [".tif", ".tiff"]:
+        return False
+    try:
+        with tifffile.TiffFile(file) as tiff_file:
+            if not hasattr(tiff_file, "shaped_metadata") or tiff_file.shaped_metadata is None:
                 return False
-        except Exception:
-            return False
-    return False
+            # shaped_metadata is a tuple of dicts, check the first one
+            meta = tiff_file.shaped_metadata[0] if tiff_file.shaped_metadata else {}
+            if not isinstance(meta, dict):
+                return False
+            # Check if any MBO-specific keys are present
+            return bool(MBO_MARKER_KEYS & meta.keys())
+    except Exception:
+        return False
 
 
 def is_raw_scanimage(file: os.PathLike | str) -> bool:
@@ -92,7 +353,15 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
         return False
 
 
-def get_metadata(file, z_step=None, verbose=False):
+def get_metadata(
+    file,
+    dx: float | None = None,
+    dy: float | None = None,
+    dz: float | None = None,
+    verbose: bool = False,
+    # Backward compatibility alias
+    z_step: float | None = None,
+):
     """
     Extract metadata from a TIFF file or directory of TIFF files produced by ScanImage.
 
@@ -106,15 +375,29 @@ def get_metadata(file, z_step=None, verbose=False):
         - Single file path: processes that file
         - Directory path: processes all TIFF files in the directory
         - List of file paths: processes all files in the list
-    z_step : float, optional
-        The z-step size in microns. If provided, it will be included in the returned metadata.
+    dx : float, optional
+        X pixel resolution in micrometers. Overrides extracted value.
+    dy : float, optional
+        Y pixel resolution in micrometers. Overrides extracted value.
+    dz : float, optional
+        Z step size in micrometers. Overrides extracted value.
+        Also available as ``z_step`` for backward compatibility.
     verbose : bool, optional
         If True, returns extended metadata including all ScanImage attributes. Default is False.
+    z_step : float, optional
+        Alias for ``dz`` (backward compatibility).
 
     Returns
     -------
     dict
-        A dictionary containing extracted metadata. For multiple files, includes:
+        A dictionary containing extracted metadata with normalized resolution aliases:
+        - dx, dy, dz: canonical resolution values in micrometers
+        - pixel_resolution: (dx, dy) tuple
+        - voxel_size: (dx, dy, dz) tuple
+        - umPerPixX, umPerPixY, umPerPixZ: Suite2p format
+        - PhysicalSizeX, PhysicalSizeY, PhysicalSizeZ: OME format
+
+        For multiple files, also includes:
         - 'frames_per_file': list of frame counts per file (accounting for z-planes)
         - 'total_frames': total frames across all files
         - 'file_paths': list of processed file paths
@@ -127,9 +410,9 @@ def get_metadata(file, z_step=None, verbose=False):
 
     Examples
     --------
-    >>> # Single file
-    >>> meta = get_metadata("path/to/rawscan_00001.tif")
-    >>> print(f"Frames: {meta['num_frames']}")
+    >>> # Single file with z-resolution
+    >>> meta = get_metadata("path/to/rawscan_00001.tif", dz=5.0)
+    >>> print(f"Voxel size: {meta['voxel_size']}")
 
     >>> # Directory of files
     >>> meta = get_metadata("path/to/scan_directory/")
@@ -138,11 +421,16 @@ def get_metadata(file, z_step=None, verbose=False):
 
     >>> # List of specific files
     >>> files = ["scan_00001.tif", "scan_00002.tif", "scan_00003.tif"]
-    >>> meta = get_metadata(files)
+    >>> meta = get_metadata(files, dz=5.0)
     """
+    # Handle z_step alias for backward compatibility
+    if dz is None and z_step is not None:
+        dz = z_step
+
     # Convert input to Path object and handle different input types
     if hasattr(file, "metadata"):
-        return file.metadata
+        metadata = dict(file.metadata) if file.metadata else {}
+        return normalize_resolution(metadata, dx=dx, dy=dy, dz=dz)
 
     if isinstance(file, (list, tuple)):
         # make sure all values in the list are strings or paths
@@ -152,33 +440,37 @@ def get_metadata(file, z_step=None, verbose=False):
                 f"Got: {file} of type {type(file)}"
             )
         file_paths = [Path(f) for f in file]
-        return get_metadata_batch(file_paths)
+        metadata = get_metadata_batch(file_paths)
+        return normalize_resolution(metadata, dx=dx, dy=dy, dz=dz)
 
     file_path = Path(file)
 
     if file_path.is_dir():
         # check for .zarr , get_files doesn't work on nested zarr files
         if file_path.suffix in [".zarr"]:
-            return get_metadata_single(file_path)
+            metadata = get_metadata_single(file_path)
+            return normalize_resolution(metadata, dx=dx, dy=dy, dz=dz)
         tiff_files = get_files(file_path, "tif", sort_ascending=True)
         if not tiff_files:
             raise ValueError(f"No TIFF files found in directory: {file_path}")
-        return get_metadata_batch(tiff_files, z_step=z_step, verbose=verbose)
+        metadata = get_metadata_batch(tiff_files)
+        return normalize_resolution(metadata, dx=dx, dy=dy, dz=dz)
 
     elif file_path.is_file():
-        return get_metadata_single(file_path)
+        metadata = get_metadata_single(file_path)
+        return normalize_resolution(metadata, dx=dx, dy=dy, dz=dz)
 
     else:
         raise ValueError(f"Path does not exist or is not accessible: {file_path}")
 
 
-def get_metadata_single(file: os.PathLike | str):
+def get_metadata_single(file: Path):
     """
     Extract metadata from a single TIFF file produced by ScanImage or processed via the save_as function.
 
     Parameters
     ----------
-    file : os.PathLike or str
+    file : Path
         The full path to the TIFF file from which metadata is to be extracted.
     verbose : bool, optional
         If True, returns an extended metadata dictionary that includes all available ScanImage attributes.
@@ -397,7 +689,7 @@ def get_metadata_batch(file_paths: list | tuple):
 
     # Get metadata from first file only
     metadata = get_metadata_single(file_paths[0])
-    n_planes = metadata["num_planes"]
+    n_planes = metadata.get("num_planes", 1)
 
     # Count frames for all files
     frames_per_file = [
@@ -405,9 +697,10 @@ def get_metadata_batch(file_paths: list | tuple):
         for fp in tqdm(file_paths, desc="Counting frames")
     ]
 
-    # Return metadata with batch info (dict.update() returns None, so use | operator)
+    total_frames = sum(frames_per_file)
     return metadata | {
-        "num_frames": sum(frames_per_file),
+        "nframes": total_frames,
+        "num_frames": total_frames,  # alias for backwards compatibility
         "frames_per_file": frames_per_file,
         "file_paths": [str(fp) for fp in file_paths],
         "num_files": len(file_paths),

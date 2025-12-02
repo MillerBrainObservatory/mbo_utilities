@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.2.2"
+version = "2.3.0"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -12,7 +12,6 @@ requires-python = ">=3.12.7,<3.13"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
 	"numpy>=2.2.5,<3.0",
-	"numba>=0.60.0",
 	"pandas",
 	"scipy",
 	"tifffile>=2025.3.30",
@@ -26,26 +25,23 @@ dependencies = [
 	"opencv-python-headless",
 	"h5py",
 	"tqdm",
-	"jupyterlab>=4.2.6,<5",
+	# "jupyterlab>=4.2.6,<5",
+	"jupyterlab",
 	"ipykernel",
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
-	"cupy-cuda12x",
-	"torch",
-	"torchvision",
-	"glfw",
-	"wgpu[imgui]",
-	"pygfx>=0.14.0",
+	"glfw ; sys_platform != 'linux'",
+	"PySide6 ; sys_platform == 'linux'",
+	"pygfx>=0.15.2",
 	"jupyter_rfb>=0.5.1",
-	"suite2p_mbo>=1.1.2",
-	"mbo-suite3d>=0.0.6",
-	"mbo-fpl",
 	"llvmlite>=0.43.0",
 	"mkl_fft>=2.0.0",
+	"fastplotlib",
+	"imgui-bundle>=1.92.5",
 ]
 
 [project.scripts]
-mbo = "mbo_utilities.graphics.run_gui:_cli_entry"  # alias
+mbo = "mbo_utilities.cli:main"
 pollen = "pollen.pollen_calibration_mbo:main"
 docs = "scripts.build_docs:main"
 transfer = "mbo_utilities.transfer:main"
@@ -57,32 +53,53 @@ Repository = "https://github.com/millerbrainobservatory/mbo_utilities"
 Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
-all = [
+# Suite2p cell extraction pipeline
+suite2p = [
+    "numba>=0.60.0",
+    "lbm_suite2p_python",
+    "suite2p_mbo>=2.0.0",
 ]
+# Suite3D volumetric registration (requires CUDA GPU)
+suite3d = [
+    "mbo-suite3d>=0.0.6",
+    "cupy-cuda12x",
+]
+# Rastermap dimensionality reduction
+rastermap = [
+    "rastermap",
+]
+# PyTorch for neural network operations
+torch = [
+    "torch",
+    "torchvision",
+]
+# All processing pipelines
+processing = [
+    "mbo_utilities[suite2p,suite3d,rastermap,torch]",
+]
+# Documentation build
 docs = [
-	"sphinx>=6.1.3",
-	"docutils>=0.19",
-	"nbsphinx",
-	"numpydoc",
-	"ipykernel",
-	"sphinx-autodoc2",
-	"sphinx_tippy",
-	"sphinx_gallery",
-	"sphinx-togglebutton",
-	"sphinx-copybutton",
-	"sphinx_book_theme",
-	"sphinx_design",
-	"sphinxcontrib-images",
-	"sphinxcontrib-video",
-	"sphinxcontrib-bibtex",
-	"jupytext",
-	"myst_nb",
-	"scipy",
-	"scikit-image",
-	"suite2p_mbo",
-	"cellpose",
-	"pygfx>=0.14.0",
+    "sphinx>=6.1.3",
+    "docutils>=0.19",
+    "nbsphinx",
+    "numpydoc",
+    "ipykernel",
+    "sphinx-autodoc2",
+    "sphinx_tippy",
+    "sphinx_gallery",
+    "sphinx-togglebutton",
+    "sphinx-copybutton",
+    "sphinx_book_theme",
+    "sphinx_design",
+    "sphinxcontrib-images",
+    "sphinxcontrib-video",
+    "sphinxcontrib-bibtex",
+    "jupytext",
+    "myst_nb",
+    "pygfx>=0.14.0",
 ]
+# Everything
+all = ["mbo_utilities[processing,docs]"]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
@@ -90,14 +107,13 @@ url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [tool.uv.sources]
-# mbo-fpl = { git = "https://github.com/MillerBrainObservatory/mbo_fastplotlib.git", branch = "main"}
-# mbo-suite3d = { git = "https://github.com/MillerBrainObservatory/suite3d.git", branch = "main"}
 torch = [
   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 torchvision = [
   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib.git", rev = "iw-check-subclass-bugfix" }
 
 [tool.ruff]
 line-length = 88
@@ -142,6 +158,8 @@ exclude_lines = [
 
 [dependency-groups]
 dev = [
+    "graphviz>=0.21",
+    "pyautogui>=0.9.54",
     "pytest>=8.4.2",
 ]
 

@@ -35,7 +35,7 @@ def test_imwrite_with_validation(validate_on_write, test_data_dir, baselines_dir
 
     # Write baseline
     baseline_path = baselines_dir / "example_baseline.tif"
-    mbo.imwrite(baseline_path, source_data, overwrite=True)
+    mbo.imwrite(source_data, str(baseline_path), overwrite=True)
 
     # Validate (automatically checks correlation, shape, dtype)
     # Will fail test if validation fails
@@ -68,7 +68,7 @@ def test_imwrite_with_context_manager(baseline_validator, test_data_dir, baselin
         source_data = validator.source_data
 
         # Write baseline
-        mbo.imwrite(baseline_path, source_data, overwrite=True)
+        mbo.imwrite(source_data, str(baseline_path), overwrite=True)
 
         # Validation happens automatically when exiting context
         # Test will fail if validation fails
@@ -91,7 +91,7 @@ def test_multiplane_baseline(baseline_validator, test_data_dir, baselines_dir):
         source_data = validator.source_data
 
         # Write as zarr with all planes
-        mbo.imwrite(baseline_path, source_data, overwrite=True)
+        mbo.imwrite(source_data, str(baseline_path), overwrite=True)
 
         # Validation will check correlation for all z-planes
 
@@ -115,8 +115,8 @@ def test_imwrite_options(baseline_validator, test_data_dir, baselines_dir):
 
         # Write with specific options
         mbo.imwrite(
-            baseline_path,
             source_data,
+            str(baseline_path),
             compression='lzw',
-            overwrite=True
+            overwrite=True,
         )
