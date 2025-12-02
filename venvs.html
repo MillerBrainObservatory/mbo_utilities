@@ -1,0 +1,860 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Virtual Environments &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/togglebutton.css?v=13237357" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=581e03ae" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="_static/togglebutton.js?v=4a39c7ea"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="_static/tippy/venvs.0dab28f5-b4cc-477f-b8c7-e6e21b96b8c2.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'venvs';</script>
+    <link rel="icon" href="_static/utilities.png"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Image gallery" href="image_gallery.html" />
+    <link rel="prev" title="2. Vizualization" href="api/visualization.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="array_types.html">Array Types</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Virtual Environments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="image_gallery.html">Image gallery</a></li>
+<li class="toctree-l1"><a class="reference internal" href="glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/venvs.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/venvs.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Fvenvs.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/venvs.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Virtual Environments</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#managing-environments-uv">Managing environments: <code class="docutils literal notranslate"><span class="pre">UV</span></code></a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#create-an-environment">Create an environment</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#activate-the-environment-optional-good-practice">Activate the environment (optional, good practice)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-python-packages">Install python packages</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#managing-environments-conda">Managing environments: <code class="docutils literal notranslate"><span class="pre">conda</span></code></a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">Create an environment</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#activate-the-environment">Activate the environment</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">Install python packages</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#virtual-environment-options">Virtual environment options</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#why-not-conda">Why not <code class="docutils literal notranslate"><span class="pre">conda</span></code>?</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#mixing-conda-and-uv">Mixing <code class="docutils literal notranslate"><span class="pre">conda</span></code> and <code class="docutils literal notranslate"><span class="pre">uv</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#debugging-environments">Debugging environments</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="virtual-environments">
+<h1>Virtual Environments<a class="headerlink" href="#virtual-environments" title="Link to this heading">#</a></h1>
+<p>This guide covers managing python environments with <a class="reference external" href="https://docs.astral.sh/uv/">UV</a> and <a class="reference external" href="https://docs.conda.io/projects/conda/en/stable/user-guide/getting-started.html">conda</a>.</p>
+<div class="dropdown admonition">
+<p class="admonition-title">TLDR</p>
+<p>Install and learn about <code class="docutils literal notranslate"><span class="pre">uv</span></code> and substitute <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">&lt;PACKAGE&gt;</span></code> with <code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">pip</span> <span class="pre">install</span> <span class="pre">&lt;PACKAGE&gt;</span></code> for a drop-in <code class="docutils literal notranslate"><span class="pre">pip</span></code> replacement.</p>
+<p>Keep all code in a single directory. This is where your environemnt lives.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>uv<span class="w"> </span>venv<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12.9
+uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>&lt;package&gt;
+</pre></div>
+</div>
+</div>
+<div class="pst-scrollable-table-container"><table class="table" id="id3">
+<caption><span class="caption-text">UV vs Conda: Common Environment Commands</span><a class="headerlink" href="#id3" title="Link to this table">#</a></caption>
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 40.0%" />
+<col style="width: 40.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p><strong>Action</strong></p></th>
+<th class="head"><p><strong>UV</strong></p></th>
+<th class="head"><p><strong>Conda</strong></p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Create environment</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">venv</span> <span class="pre">myenv</span> <span class="pre">--python=3.11</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">conda</span> <span class="pre">create</span> <span class="pre">-n</span> <span class="pre">myenv</span> <span class="pre">-c</span> <span class="pre">conda-forge</span> <span class="pre">python=3.11</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Activate</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">.venv/bin/activate</span></code><br />
+<code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">.venv/Scripts/activate</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">conda</span> <span class="pre">activate</span> <span class="pre">myenv</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Install package</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">pip</span> <span class="pre">install</span> <span class="pre">&lt;package&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">conda</span> <span class="pre">install</span> <span class="pre">&lt;package&gt;</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Add/remove package</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">add</span> <span class="pre">&lt;package&gt;</span></code> / <code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">remove</span> <span class="pre">&lt;package&gt;</span></code></p></td>
+<td><p>(edit <code class="docutils literal notranslate"><span class="pre">environment.yml</span></code> or reinstall)</p></td>
+</tr>
+<tr class="row-even"><td><p>Sync with pyproject.toml</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">sync</span> <span class="pre">--all-extras</span></code></p></td>
+<td><p>✖️ Not supported</p></td>
+</tr>
+<tr class="row-odd"><td><p>Upgrade packages</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">lock</span> <span class="pre">--upgrade</span></code><br />
+<code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">sync</span> <span class="pre">--upgrade-package</span> <span class="pre">&lt;pkg&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">conda</span> <span class="pre">update</span> <span class="pre">&lt;package&gt;</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="managing-environments-uv">
+<span id="managing-uv"></span><h2>Managing environments: <code class="docutils literal notranslate"><span class="pre">UV</span></code><a class="headerlink" href="#managing-environments-uv" title="Link to this heading">#</a></h2>
+<p><a class="reference external" href="https://docs.astral.sh/uv/">uv</a> is a complete drop-in replacement for <code class="docutils literal notranslate"><span class="pre">pip</span></code>.<br />
+If you know <code class="docutils literal notranslate"><span class="pre">pip</span></code>, you already know <code class="docutils literal notranslate"><span class="pre">uv</span></code>.</p>
+<p>You just prefix commands:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>.<span class="w">   </span><span class="c1"># old</span>
+uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>.<span class="w"> </span><span class="c1"># new</span>
+</pre></div>
+</div>
+<p>Using <code class="docutils literal notranslate"><span class="pre">uv</span></code> has a key advantage: packages are cached globally, so you can quickly recreate them without worrying about contaminating your base environment.</p>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>With UV, re-creating your environment is much faster than with <code class="docutils literal notranslate"><span class="pre">conda</span></code> thanks to it’s <a class="reference external" href="https://docs.astral.sh/uv/concepts/cache/#dependency-caching">dependency caching</a>.</p>
+<p>This makes deleting your environment an appropriate solution if you run into environemnt conflicts.</p>
+</div>
+<section id="create-an-environment">
+<h3>Create an environment<a class="headerlink" href="#create-an-environment" title="Link to this heading">#</a></h3>
+<p>By default, <code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">venv</span></code> will create a folder <code class="docutils literal notranslate"><span class="pre">.venv</span></code> which is used as your environemnt.</p>
+<p>This folder will be placed in your current working directory:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>USER@SERVER<span class="w"> </span>~/repos/mypackage
+$<span class="w"> </span>uv<span class="w"> </span>venv
+Using<span class="w"> </span>CPython<span class="w"> </span><span class="m">3</span>.11.12
+Creating<span class="w"> </span>virtual<span class="w"> </span>environment<span class="w"> </span>at:<span class="w"> </span>.venv
+</pre></div>
+</div>
+<p>You can specify a name for the environment:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>USER@SERVER<span class="w"> </span>~/repos/mypackage
+$<span class="w"> </span>uv<span class="w"> </span>venv<span class="w"> </span>myenv
+Using<span class="w"> </span>CPython<span class="w"> </span><span class="m">3</span>.11.12
+Creating<span class="w"> </span>virtual<span class="w"> </span>environment<span class="w"> </span>at:<span class="w"> </span>myenv
+</pre></div>
+</div>
+<p>You can also indicate which python to use:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>USER@SERVER<span class="w"> </span>~/repos/mypackage
+$<span class="w"> </span>uv<span class="w"> </span>venv<span class="w"> </span>myenv<span class="w"> </span>--python<span class="o">=</span><span class="m">39</span><span class="w">  </span><span class="c1"># or 310, 311, 312, 313</span>
+Using<span class="w"> </span>CPython<span class="w"> </span><span class="m">3</span>.9.22
+Creating<span class="w"> </span>virtual<span class="w"> </span>environment<span class="w"> </span>at:<span class="w"> </span>myenv
+</pre></div>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">venv</span></code> will create a folder in your current directory named <code class="docutils literal notranslate"><span class="pre">.venv</span></code>, which is a python standard and will be automatically chosen by many development environments e.g. <code class="docutils literal notranslate"><span class="pre">VSCode</span></code>.</p>
+<p>To distinguish between environments, name the environment by substituting <VENV-NAME> with the name you wish to assign to that virtual environment.</p>
+<p>Some IDE’s may struggle to locate named environments (e.g. some versions of Pycharm).</p>
+</div>
+</section>
+<section id="activate-the-environment-optional-good-practice">
+<h3>Activate the environment (optional, good practice)<a class="headerlink" href="#activate-the-environment-optional-good-practice" title="Link to this heading">#</a></h3>
+<p>If you named your environment, replace <code class="docutils literal notranslate"><span class="pre">.venv</span></code> below with the name of your environment:</p>
+<div class="sd-tab-set docutils">
+<input checked="checked" id="sd-tab-item-0" name="sd-tab-set-0" type="radio">
+<label class="sd-tab-label" for="sd-tab-item-0">
+Linux/macOS</label><div class="sd-tab-content docutils">
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">source</span><span class="w"> </span>.venv/bin/activate
+</pre></div>
+</div>
+</div>
+<input id="sd-tab-item-1" name="sd-tab-set-0" type="radio">
+<label class="sd-tab-label" for="sd-tab-item-1">
+Windows</label><div class="sd-tab-content docutils">
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">source</span><span class="w"> </span>.venv/Scripts/activate
+</pre></div>
+</div>
+</div>
+</div>
+<p>If you don’t activate the environment, but you are running code from a directory that has a <code class="docutils literal notranslate"><span class="pre">.venv</span></code> folder, it will still be used automatically in most cases.</p>
+</section>
+<section id="install-python-packages">
+<h3>Install python packages<a class="headerlink" href="#install-python-packages" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>&lt;PACKAGE&gt;
+</pre></div>
+</div>
+<p>This works just like pip.</p>
+<p>You can install packages from the filesystem just as you can with <code class="docutils literal notranslate"><span class="pre">pip</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>.
+</pre></div>
+</div>
+<p>Or use higher-level <code class="docutils literal notranslate"><span class="pre">uv</span></code> features like <code class="docutils literal notranslate"><span class="pre">sync</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">--all-extras</span></code> get’s all extra dependencies, like [notebook, gui], if the repository has any.</p>
+<div class="pst-scrollable-table-container"><span id="uv-cheatsheet"></span><table class="table" id="uv-commands">
+<caption><span class="caption-text">Most helpful UV Commands</span><a class="headerlink" href="#uv-commands" title="Link to this table">#</a></caption>
+<thead>
+<tr class="row-odd"><th class="head"><p><strong>Command</strong></p></th>
+<th class="head"><p><strong>Description</strong></p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">venv</span></code>, <code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">venv</span> <span class="pre">.myvenv</span></code></p></td>
+<td><p>Create an env, optionally name it myenv (not recommended)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">sync</span></code> / <code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">lock</span> <span class="pre">--upgrade</span></code></p></td>
+<td><p>Update your environment based on the current most up to date packages</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">add</span> <span class="pre">&lt;package&gt;</span></code> / <code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">remove</span> <span class="pre">&lt;package&gt;</span></code></p></td>
+<td><p>Add/remove packages (updates <code class="docutils literal notranslate"><span class="pre">pyproject.toml</span></code>, <code class="docutils literal notranslate"><span class="pre">uv.lock</span></code>, and your env)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">sync</span> <span class="pre">--upgrade-package</span> <span class="pre">&lt;pkg&gt;</span></code> / <code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">lock</span> <span class="pre">--upgrade</span></code></p></td>
+<td><p>Upgrade single/all packages</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="managing-environments-conda">
+<h2>Managing environments: <code class="docutils literal notranslate"><span class="pre">conda</span></code><a class="headerlink" href="#managing-environments-conda" title="Link to this heading">#</a></h2>
+<section id="id1">
+<h3>Create an environment<a class="headerlink" href="#id1" title="Link to this heading">#</a></h3>
+<p>For more ways to create an environment (such as from a <code class="docutils literal notranslate"><span class="pre">environment.yml</span></code> file), see <a class="reference external" href="https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-with-commands">Creating an Environment with Commands</a>.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>myenv<span class="w"> </span>-c<span class="w"> </span>conda-forge<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.xx
+</pre></div>
+</div>
+</section>
+<section id="activate-the-environment">
+<h3>Activate the environment<a class="headerlink" href="#activate-the-environment" title="Link to this heading">#</a></h3>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Don’t forget to activate your environment!</p>
+<p>If you do, it will be installed in the <a class="reference external" href="https://www.anaconda.com/docs/tools/working-with-conda/environments#why-shouldn%E2%80%99t-i-work-in-the-base-environment%3F">base conda environment</a>.</p>
+</div>
+<p>Unlike <a class="reference internal" href="#managing-uv"><span class="std std-ref">uv</span></a>,
+which will look for a folder in your current directory,
+<code class="docutils literal notranslate"><span class="pre">conda</span></code> will default to installing packages into the base environment which is shared across all user environments and often leads to package conflicts.</p>
+<p>The only fix is to reinstall <code class="docutils literal notranslate"><span class="pre">conda</span></code>.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>activate<span class="w"> </span>myenv
+</pre></div>
+</div>
+</section>
+<section id="id2">
+<h3>Install python packages<a class="headerlink" href="#id2" title="Link to this heading">#</a></h3>
+<p>For details about installing python packages with conda, see conda docs on <a class="reference external" href="https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-pkgs.html#managing-packages">Managing Packages</a>.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>install<span class="w"> </span>&lt;package1&gt;<span class="w"> </span>&lt;package2&gt;
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="virtual-environment-options">
+<h2>Virtual environment options<a class="headerlink" href="#virtual-environment-options" title="Link to this heading">#</a></h2>
+<p>You could learn the in’s and out’s for all of the virtual environments below.
+Don’t do this (use <a class="reference external" href="https://docs.astral.sh/uv/getting-started/">UV</a>, the community is finally settling on a standard).</p>
+<p>There are generally three camps:</p>
+<ol class="arabic simple">
+<li><p>Tools that handle only Python packages (venv, pyenv)</p></li>
+<li><p>Tools that handle python packages AND system dependencies like ffmpeg, opencv, cuda (mamba, conda)</p></li>
+<li><p>Tools built on top of the above to make them easier to use, faster, etc. (UV, pixi, which uses UV under the hood).</p></li>
+</ol>
+<div class="sd-container-fluid sd-sphinx-override sd-mb-4 docutils">
+<div class="sd-row docutils">
+<div class="sd-col sd-d-flex-row docutils">
+<div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm docutils">
+<div class="sd-card-body docutils">
+<div class="sd-card-title sd-font-weight-bold docutils">
+System + Python</div>
+<p class="sd-card-text">conda,
+miniconda,
+miniforge,
+anaconda,
+mamba,
+micromamba,
+pixi</p>
+</div>
+</div>
+</div>
+<div class="sd-col sd-d-flex-row docutils">
+<div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm docutils">
+<div class="sd-card-body docutils">
+<div class="sd-card-title sd-font-weight-bold docutils">
+Python-only</div>
+<p class="sd-card-text">pip,
+pip-tools,
+pipx,
+venv / pyvenv,
+virtualenv,
+pipenv,
+poetry,
+twine,
+hatch,
+asdf,
+uv</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<hr class="docutils" />
+<section id="why-not-conda">
+<h2>Why not <code class="docutils literal notranslate"><span class="pre">conda</span></code>?<a class="headerlink" href="#why-not-conda" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">pip</span></code> (and UV) can build most system packages you need from source.</p></li>
+<li><p>Most Python libraries now ship prebuilt wheels (binaries).</p></li>
+<li><p>The main selling point for <code class="docutils literal notranslate"><span class="pre">conda</span></code> (handling system binaries) is much less relevant today.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">conda</span></code> maintainers have moved toward venv-based setups (pixi and uv).</p></li>
+</ul>
+<p>If you <strong>must</strong> use conda, <strong>only</strong> use <code class="docutils literal notranslate"><span class="pre">miniforge3</span></code>.
+Many recommended setup steps for miniconda/anaconda are mimicking the defaults of <code class="docutils literal notranslate"><span class="pre">miniforge3</span></code>.</p>
+<p>If you already know conda, that’s fine — just <strong>avoid mixing</strong> <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> and <code class="docutils literal notranslate"><span class="pre">conda</span> <span class="pre">install</span></code> after your initial setup unless you have to.</p>
+</section>
+<hr class="docutils" />
+<section id="mixing-conda-and-uv">
+<h2>Mixing <code class="docutils literal notranslate"><span class="pre">conda</span></code> and <code class="docutils literal notranslate"><span class="pre">uv</span></code><a class="headerlink" href="#mixing-conda-and-uv" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">uv</span></code> will automatically fallback to using a conda environment if no <code class="docutils literal notranslate"><span class="pre">.venv</span></code> folder is found:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>USER<span class="w"> </span>at<span class="w"> </span>pop-os<span class="w"> </span><span class="k">in</span><span class="w"> </span>~/repos/work/mbo_utilities<span class="w"> </span><span class="o">(</span>master●<span class="o">)</span>
+$<span class="w"> </span>uv<span class="w"> </span>pip<span class="w"> </span>list<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>imgui
+Using<span class="w"> </span>Python<span class="w"> </span><span class="m">3</span>.12.6<span class="w"> </span>environment<span class="w"> </span>at:<span class="w"> </span>/home/USER/miniforge3
+imgui-bundle<span class="w">              </span><span class="m">1</span>.6.2
+</pre></div>
+</div>
+<p>So even if you’re using conda, <code class="docutils literal notranslate"><span class="pre">uv</span></code> will work all the same.</p>
+<p>We recommend turning off automatic environment activation for <code class="docutils literal notranslate"><span class="pre">conda</span></code> in this case:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>config<span class="w"> </span>--set<span class="w"> </span>auto_activate_base<span class="w"> </span><span class="nb">false</span>
+</pre></div>
+</div>
+<p>You can still call <code class="docutils literal notranslate"><span class="pre">conda</span> <span class="pre">activate</span> <span class="pre">myenv</span></code>, but only if <code class="docutils literal notranslate"><span class="pre">conda</span></code> is called explicitly.</p>
+</section>
+<section id="debugging-environments">
+<h2>Debugging environments<a class="headerlink" href="#debugging-environments" title="Link to this heading">#</a></h2>
+<p>Most bugs and frustration in Python come from mismanaging virtual environments.</p>
+<p>No matter what command you’re running, check the terminal outputs for a filepath that points to python.</p>
+<p>For jupyterlab:</p>
+<figure class="align-default">
+<img alt="_images/venv_jlab.png" src="_images/venv_jlab.png" />
+</figure>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="api/visualization.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title"><span class="section-number">2. </span>Vizualization</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="image_gallery.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Image gallery</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#managing-environments-uv">Managing environments: <code class="docutils literal notranslate"><span class="pre">UV</span></code></a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#create-an-environment">Create an environment</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#activate-the-environment-optional-good-practice">Activate the environment (optional, good practice)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-python-packages">Install python packages</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#managing-environments-conda">Managing environments: <code class="docutils literal notranslate"><span class="pre">conda</span></code></a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">Create an environment</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#activate-the-environment">Activate the environment</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">Install python packages</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#virtual-environment-options">Virtual environment options</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#why-not-conda">Why not <code class="docutils literal notranslate"><span class="pre">conda</span></code>?</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#mixing-conda-and-uv">Mixing <code class="docutils literal notranslate"><span class="pre">conda</span></code> and <code class="docutils literal notranslate"><span class="pre">uv</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#debugging-environments">Debugging environments</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
