@@ -40,13 +40,18 @@ from mbo_utilities.arrays.h5 import H5Array
 from mbo_utilities.arrays.isoview import IsoviewArray
 from mbo_utilities.arrays.numpy import NumpyArray
 from mbo_utilities.arrays.nwb import NWBArray
-from mbo_utilities.arrays.suite2p import Suite2pArray
+from mbo_utilities.arrays.suite2p import (
+    Suite2pArray,
+    Suite2pVolumeArray,
+    find_suite2p_plane_dirs,
+)
 from mbo_utilities.arrays.tiff import MBOTiffArray, MboRawArray, TiffArray
 from mbo_utilities.arrays.zarr import ZarrArray
 
 __all__ = [
     # Array classes
     "Suite2pArray",
+    "Suite2pVolumeArray",
     "H5Array",
     "TiffArray",
     "MBOTiffArray",
@@ -56,6 +61,8 @@ __all__ = [
     "ZarrArray",
     "BinArray",
     "IsoviewArray",
+    # Suite2p helpers
+    "find_suite2p_plane_dirs",
     # Registration
     "validate_s3d_registration",
     "register_zplanes_s3d",

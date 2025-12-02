@@ -7,7 +7,6 @@ various file formats as lazy arrays.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Sequence
 
@@ -22,10 +21,11 @@ from mbo_utilities.arrays import (
     MboRawArray,
     NumpyArray,
     Suite2pArray,
+    Suite2pVolumeArray,
     TiffArray,
     ZarrArray,
+    find_suite2p_plane_dirs,
 )
-from mbo_utilities.file_io import derive_tag_from_filename
 from mbo_utilities.metadata import has_mbo_metadata, is_raw_scanimage
 
 logger = log.get("reader")
@@ -139,6 +139,14 @@ def imread(
                 )
                 paths = zarrs
             else:
+                # Check for Suite2p volume structure (subdirs with ops.npy)
+                plane_dirs = find_suite2p_plane_dirs(p)
+                if plane_dirs:
+                    logger.info(
+                        f"Detected Suite2p volume with {len(plane_dirs)} planes in {p}"
+                    )
+                    return Suite2pVolumeArray(p, plane_dirs=plane_dirs)
+
                 paths = [Path(f) for f in p.glob("*") if f.is_file()]
                 logger.debug(f"Found {len(paths)} files in {p}")
         else:

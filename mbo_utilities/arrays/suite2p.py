@@ -3,13 +3,18 @@ Suite2p binary array reader.
 
 This module provides Suite2pArray for reading Suite2p binary output files
 (data.bin, data_raw.bin) with their associated ops.npy metadata.
+
+Also provides Suite2pVolumeArray for reading directories containing multiple
+Suite2p plane outputs as a 4D volume (T, Z, H, W).
 """
 
 from __future__ import annotations
 
+import re
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 
@@ -239,4 +244,244 @@ class Suite2pArray(ReductionMixin):
             figure_shape=(1, len(arrays)),
             graphic_kwargs={"vmin": -300, "vmax": 4000},
             window_funcs=window_funcs,
+        )
+
+
+def _extract_plane_number(name: str) -> int | None:
+    """Extract plane number from directory name like 'plane01_stitched' or 'plane14'."""
+    match = re.search(r"plane(\d+)", name, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def find_suite2p_plane_dirs(directory: Path) -> list[Path]:
+    """
+    Find Suite2p plane directories in a parent directory.
+
+    Looks for subdirectories containing ops.npy files, sorted by plane number.
+
+    Parameters
+    ----------
+    directory : Path
+        Parent directory to search.
+
+    Returns
+    -------
+    list[Path]
+        List of plane directories sorted by plane number.
+    """
+    plane_dirs = []
+    for subdir in directory.iterdir():
+        if subdir.is_dir():
+            ops_file = subdir / "ops.npy"
+            if ops_file.exists():
+                plane_dirs.append(subdir)
+
+    # Sort by plane number extracted from directory name
+    def sort_key(p):
+        num = _extract_plane_number(p.name)
+        return num if num is not None else float("inf")
+
+    return sorted(plane_dirs, key=sort_key)
+
+
+class Suite2pVolumeArray(ReductionMixin):
+    """
+    Reader for Suite2p output directories containing multiple planes.
+
+    Presents data as (T, Z, H, W) by stacking individual plane arrays along
+    the Z dimension. Each plane is loaded lazily via Suite2pArray.
+
+    Parameters
+    ----------
+    directory : str or Path
+        Path to directory containing plane subdirectories (e.g., plane01_stitched/).
+    plane_dirs : list[Path], optional
+        Explicit list of plane directories to use. If not provided, auto-detected.
+    use_raw : bool, optional
+        If True, prefer data_raw.bin over data.bin. Default False.
+
+    Attributes
+    ----------
+    shape : tuple[int, int, int, int]
+        Shape as (T, Z, H, W).
+    dtype : np.dtype
+        Data type (int16 for Suite2p).
+    planes : list[Suite2pArray]
+        Individual plane arrays.
+
+    Examples
+    --------
+    >>> arr = Suite2pVolumeArray("suite2p_output/")
+    >>> arr.shape
+    (10000, 14, 512, 512)
+    >>> frame = arr[0]  # Get first frame across all planes
+    >>> plane7 = arr[:, 6]  # Get all frames from plane 7 (0-indexed)
+    """
+
+    def __init__(
+        self,
+        directory: str | Path,
+        plane_dirs: Sequence[Path] | None = None,
+        use_raw: bool = False,
+    ):
+        self.directory = Path(directory)
+        if not self.directory.exists():
+            raise FileNotFoundError(f"Directory not found: {self.directory}")
+
+        # Find plane directories
+        if plane_dirs is None:
+            plane_dirs = find_suite2p_plane_dirs(self.directory)
+
+        if not plane_dirs:
+            raise ValueError(
+                f"No Suite2p plane directories found in {self.directory}. "
+                "Expected subdirectories containing ops.npy files."
+            )
+
+        # Load each plane as Suite2pArray
+        self.planes: list[Suite2pArray] = []
+        self.filenames = []
+        for pdir in plane_dirs:
+            ops_file = pdir / "ops.npy"
+            arr = Suite2pArray(ops_file)
+            if use_raw and arr.raw_file.exists():
+                arr.switch_channel(use_raw=True)
+            self.planes.append(arr)
+            self.filenames.append(arr.active_file)
+
+        # Validate consistent shapes across planes
+        shapes = [(p.shape[1], p.shape[2]) for p in self.planes]  # (Ly, Lx)
+        if len(set(shapes)) != 1:
+            raise ValueError(f"Inconsistent spatial shapes across planes: {shapes}")
+
+        nframes = [p.shape[0] for p in self.planes]
+        if len(set(nframes)) != 1:
+            logger.warning(
+                f"Inconsistent frame counts across planes: {nframes}. "
+                f"Using minimum: {min(nframes)}"
+            )
+
+        self._nframes = min(nframes)
+        self._nz = len(self.planes)
+        self._ly, self._lx = shapes[0]
+        self.dtype = self.planes[0].dtype
+
+        # Aggregate metadata from first plane
+        self._metadata = dict(self.planes[0].metadata)
+        self._metadata["num_planes"] = self._nz
+        self._metadata["plane_dirs"] = [str(p) for p in plane_dirs]
+
+        logger.info(
+            f"Loaded Suite2p volume: {self._nframes} frames, {self._nz} planes, "
+            f"{self._ly}x{self._lx} px"
+        )
+
+    @property
+    def shape(self) -> tuple[int, int, int, int]:
+        return (self._nframes, self._nz, self._ly, self._lx)
+
+    @property
+    def metadata(self) -> dict:
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
+
+    @property
+    def ndim(self) -> int:
+        return 4
+
+    @property
+    def size(self) -> int:
+        return int(np.prod(self.shape))
+
+    @property
+    def num_planes(self) -> int:
+        return self._nz
+
+    def __len__(self) -> int:
+        return self._nframes
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+        key = key + (slice(None),) * (4 - len(key))
+        t_key, z_key, y_key, x_key = key
+
+        # Normalize t_key to respect _nframes limit
+        if isinstance(t_key, slice):
+            # Clamp slice to valid frame range
+            start, stop, step = t_key.indices(self._nframes)
+            t_key = slice(start, stop, step)
+        elif isinstance(t_key, int):
+            if t_key < 0:
+                t_key = self._nframes + t_key
+            if t_key >= self._nframes:
+                raise IndexError(
+                    f"Time index {t_key} out of bounds for {self._nframes} frames"
+                )
+
+        # Handle single z index
+        if isinstance(z_key, int):
+            if z_key < 0:
+                z_key = self._nz + z_key
+            if z_key < 0 or z_key >= self._nz:
+                raise IndexError(f"Z index {z_key} out of bounds for {self._nz} planes")
+            return self.planes[z_key][t_key, y_key, x_key]
+
+        # Handle z slice or full z
+        if isinstance(z_key, slice):
+            z_indices = range(self._nz)[z_key]
+        elif isinstance(z_key, (list, np.ndarray)):
+            z_indices = z_key
+        else:
+            z_indices = range(self._nz)
+
+        # Stack data from selected planes
+        arrs = [self.planes[i][t_key, y_key, x_key] for i in z_indices]
+        return np.stack(arrs, axis=1)
+
+    def __array__(self) -> np.ndarray:
+        """Materialize full array into memory: (T, Z, H, W)."""
+        arrs = [p[: self._nframes] for p in self.planes]
+        return np.stack(arrs, axis=1)
+
+    def switch_channel(self, use_raw: bool = False):
+        """Switch all planes between raw and registered data."""
+        for plane in self.planes:
+            plane.switch_channel(use_raw=use_raw)
+        self.filenames = [p.active_file for p in self.planes]
+
+    def close(self):
+        """Close all memory-mapped files."""
+        for plane in self.planes:
+            plane.close()
+
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite: bool = False,
+        target_chunk_mb: int = 50,
+        ext: str = ".tiff",
+        progress_callback=None,
+        debug: bool = False,
+        planes: list[int] | int | None = None,
+        **kwargs,
+    ):
+        """Write Suite2pVolumeArray to disk in various formats."""
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
         )
