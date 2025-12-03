@@ -299,9 +299,23 @@ def draw_saveas_popup(parent):
             if parent._saveas_outdir
             else ""
         )
-        changed, new_str = imgui.input_text("Save Dir", current_dir_str)
+
+        # Track last known value to detect external changes (e.g., from Browse dialog)
+        if not hasattr(parent, '_saveas_input_last_value'):
+            parent._saveas_input_last_value = current_dir_str
+
+        # Check if value changed externally (e.g., Browse dialog selected a new folder)
+        # If so, we need to force imgui to update its internal buffer
+        value_changed_externally = (parent._saveas_input_last_value != current_dir_str)
+        if value_changed_externally:
+            parent._saveas_input_last_value = current_dir_str
+
+        # Use unique ID that changes when value updates externally to reset imgui's buffer
+        input_id = f"Save Dir##{hash(current_dir_str) if value_changed_externally else 'stable'}"
+        changed, new_str = imgui.input_text(input_id, current_dir_str)
         if changed:
             parent._saveas_outdir = new_str
+            parent._saveas_input_last_value = new_str
 
         imgui.same_line()
         if imgui.button("Browse"):
@@ -1083,12 +1097,13 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_done = False
         self._saveas_progress = 0.0
         self._saveas_current_index = 0
-        # Pre-fill with last saved directory if available
+        # pre-fill with last saved directory if available
         last_dir = get_last_save_dir()
         self._saveas_outdir = (
             str(last_dir) if last_dir else str(getattr(self, "_save_dir", ""))
         )
-        self._saveas_folder_dialog = None  # Async folder dialog for Browse button
+        self._s2p_outdir = ""  # suite2p output path (separate from save-as)
+        self._saveas_folder_dialog = None  # async folder dialog for browse button
         self._saveas_total = 0
 
         self._saveas_selected_roi = set()  # -1 means all ROIs

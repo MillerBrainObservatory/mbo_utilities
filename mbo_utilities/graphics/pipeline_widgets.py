@@ -109,7 +109,6 @@ class Suite2pSettings:
     cellprob_threshold: float = -6.0  # More permissive detection threshold
     flow_threshold: float = 0.0  # Standard Cellpose flow threshold
     spatial_hp_cp: float = 0.5  # High-pass filtering strength for Cellpose
-    pretrained_model: str = "cpsam"  # Cellpose model path or type
 
     # signal extraction settings
     neuropil_extract: bool = True  # extract neuropil signal
@@ -526,7 +525,14 @@ def draw_section_suite2p(self):
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
         set_tooltip(
-            "Sensor decay timescale: GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
+            "Calcium indicator decay timescale in seconds. Used to determine bin size "
+            "for activity-based detection (bin_size = tau * fs).\n"
+            "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
+        )
+        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
+        set_tooltip(
+            "Denoise binned movie before cell detection. Applied BEFORE the detection "
+            "branch (anatomical or functional). Recommended for noisy recordings."
         )
 
     if compact_header("Registration Settings"):
@@ -698,61 +704,78 @@ def draw_section_suite2p(self):
 
         imgui.end_disabled()  # End registration disabled block
 
-    if compact_header("ROI Detection Settings"):
+    # Determine if using anatomical detection (greys out functional-only settings)
+    use_anatomical = self.s2p.anatomical_only > 0
+
+    if compact_header("ROI Detection Settings (Functional)"):
         _, self.s2p.roidetect = imgui.checkbox(
             "Enable ROI Detection", self.s2p.roidetect
         )
         set_tooltip("Run ROI detection and extraction.")
 
-        imgui.begin_disabled(not self.s2p.roidetect)
+        # Disable functional detection settings when using anatomical detection
+        imgui.begin_disabled(not self.s2p.roidetect or use_anatomical)
+
+        if use_anatomical:
+            imgui.text_colored(
+                imgui.ImVec4(0.7, 0.7, 0.7, 1.0),
+                "(Skipped when anatomical_only > 0)"
+            )
 
         _, self.s2p.sparse_mode = imgui.checkbox(
             "Sparse Mode", self.s2p.sparse_mode
         )
-        set_tooltip("Use sparse detection (recommended for soma).")
+        set_tooltip("Use sparse detection (recommended for soma). Only used for functional detection.")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.spatial_scale = imgui.input_int(
             "Spatial Scale", self.s2p.spatial_scale
         )
         set_tooltip(
-            "ROI size scale: 0=auto, 1=6-pixel cells (LBM default), 2=medium, 3=large, 4=very large"
+            "ROI size scale: 0=auto, 1=6-pixel cells (LBM default), 2=medium, 3=large, 4=very large.\n"
+            "Only used for functional detection."
         )
         _, self.s2p.connected = imgui.checkbox("Connected ROIs", self.s2p.connected)
-        set_tooltip("Require ROIs to be connected regions.")
+        set_tooltip("Require ROIs to be connected regions. Only used for functional detection.")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.threshold_scaling = imgui.input_float(
             "Threshold Scaling", self.s2p.threshold_scaling
         )
-        set_tooltip("Scale ROI detection threshold; higher = fewer ROIs.")
+        set_tooltip("Scale ROI detection threshold; higher = fewer ROIs. Only used for functional detection.")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.spatial_hp_detect = imgui.input_int(
             "Spatial HP Detect", self.s2p.spatial_hp_detect
         )
-        set_tooltip("Spatial high-pass filter size before ROI detection.")
+        set_tooltip("Spatial high-pass filter size for neuropil subtraction. Only used for functional detection.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.max_iterations = imgui.input_int(
+            "Max Iterations", self.s2p.max_iterations
+        )
+        set_tooltip("Maximum number of cell-detection iterations. Only used for functional detection.")
+
+        imgui.end_disabled()
+
+        # These settings are used by BOTH anatomical and functional detection
+        imgui.begin_disabled(not self.s2p.roidetect)
+
+        imgui.spacing()
+        imgui.text("Shared Settings:")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.max_overlap = imgui.input_float(
             "Max Overlap", self.s2p.max_overlap
         )
-        set_tooltip("Maximum allowed fraction of overlapping ROI pixels.")
+        set_tooltip("Maximum allowed fraction of overlapping ROI pixels. Used by both detection methods.")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.high_pass = imgui.input_int(
             "High-Pass Window", self.s2p.high_pass
         )
-        set_tooltip("Running mean subtraction window (frames).")
+        set_tooltip("Running mean subtraction window for temporal high-pass filtering of binned movie (frames).")
         _, self.s2p.smooth_masks = imgui.checkbox(
             "Smooth Masks", self.s2p.smooth_masks
         )
         set_tooltip("Smooth masks in the final ROI detection pass.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.max_iterations = imgui.input_int(
-            "Max Iterations", self.s2p.max_iterations
-        )
-        set_tooltip("Maximum number of cell-detection iterations.")
-        imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.nbinned = imgui.input_int("Max Binned Frames", self.s2p.nbinned)
-        set_tooltip("Number of frames binned for ROI detection.")
-        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
-        set_tooltip("Denoise binned movie before ROI detection.")
+        set_tooltip("Maximum number of binned frames for ROI detection.")
 
         imgui.end_disabled()
 
@@ -762,33 +785,62 @@ def draw_section_suite2p(self):
             "Anatomical Only", self.s2p.anatomical_only
         )
         set_tooltip(
-            "0=disabled; 1=max/mean, 2=mean, 3=enhanced mean (LBM default), 4=max projection"
+            "0=disabled (use functional detection)\n"
+            "1=max_proj / mean_img combined\n"
+            "2=mean_img only\n"
+            "3=enhanced mean_img (LBM default, recommended)\n"
+            "4=max_proj only"
         )
+
+        # Grey out Cellpose settings when anatomical_only = 0
+        imgui.begin_disabled(not use_anatomical)
+
+        if not use_anatomical:
+            imgui.text_colored(
+                imgui.ImVec4(0.7, 0.7, 0.7, 1.0),
+                "(Enable anatomical_only to use Cellpose)"
+            )
+
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.diameter = imgui.input_int("Cell Diameter", self.s2p.diameter)
-        set_tooltip("Expected cell diameter in pixels (6 = LBM default for ~6μm cells)")
+        set_tooltip("Expected cell diameter in pixels (6 = LBM default for ~6μm cells). Passed to Cellpose.")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.cellprob_threshold = imgui.input_float(
             "CellProb Threshold", self.s2p.cellprob_threshold
         )
-        set_tooltip("Cellpose detection threshold (-6 = LBM default for permissive detection)")
+        set_tooltip(
+            "Cell probability threshold for Cellpose. Default: 0.0\n\n"
+            "DECREASE this threshold if:\n"
+            "  - Cellpose is not returning as many masks as expected\n"
+            "  - Masks are too small\n\n"
+            "INCREASE this threshold if:\n"
+            "  - Cellpose is returning too many masks\n"
+            "  - Getting false positives from dull/dim areas\n\n"
+            "LBM default: -6 (very permissive)"
+        )
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.flow_threshold = imgui.input_float(
             "Flow Threshold", self.s2p.flow_threshold
         )
-        set_tooltip("Cellpose flow field threshold (0 = standard)")
+        set_tooltip(
+            "Maximum allowed error of flows for each mask. Default: 0.4\n\n"
+            "INCREASE this threshold if:\n"
+            "  - Cellpose is not returning as many masks as expected\n"
+            "  - Set to 0.0 to turn off flow checking completely\n\n"
+            "DECREASE this threshold if:\n"
+            "  - Cellpose is returning too many ill-shaped masks\n\n"
+            "LBM default: 0 (flow checking disabled)"
+        )
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.spatial_hp_cp = imgui.input_float(
             "Spatial HP (Cellpose)", self.s2p.spatial_hp_cp
         )
-        set_tooltip("High-pass filtering strength (0.5 = LBM default)")
-        imgui.text("Pretrained Model:")
-        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
-        imgui.text(
-            self.s2p.pretrained_model if self.s2p.pretrained_model else "cyto"
+        set_tooltip(
+            "Spatial high-pass filtering before Cellpose, as a multiple of diameter.\n"
+            "0.5 = LBM default"
         )
-        imgui.pop_text_wrap_pos()
-        set_tooltip("Cellpose model name or custom path (e.g., 'cyto').")
+
+        imgui.end_disabled()
 
     if compact_header("Classification Settings"):
         _, self.s2p.soma_crop = imgui.checkbox("Soma Crop", self.s2p.soma_crop)

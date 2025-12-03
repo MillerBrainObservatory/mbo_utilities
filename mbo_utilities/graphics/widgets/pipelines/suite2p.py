@@ -66,18 +66,19 @@ class Suite2pPipelineWidget(PipelineWidget):
 
     def draw_config(self) -> None:
         """draw suite2p configuration ui."""
-        # import the existing draw function
         from mbo_utilities.graphics.pipeline_widgets import draw_section_suite2p
 
-        # Draw the "Load trace quality statistics" button at the top
         self._draw_diagnostics_button()
         imgui.separator()
         imgui.spacing()
 
-        # temporarily set attributes on parent for compatibility
-        self.parent._saveas_outdir = self._saveas_outdir
-        # s2p_outdir: use its own value, or default to saveas_outdir
-        self.parent._s2p_outdir = self._s2p_outdir or self._saveas_outdir
+        # sync widget state to parent before drawing
+        # ONLY set parent values if parent doesn't already have a value set
+        # This prevents overwriting values set by the Browse dialog
+        if self._saveas_outdir and not getattr(self.parent, '_saveas_outdir', ''):
+            self.parent._saveas_outdir = self._saveas_outdir
+        if self._s2p_outdir and not getattr(self.parent, '_s2p_outdir', ''):
+            self.parent._s2p_outdir = self._s2p_outdir
         self.parent._install_error = self._install_error
         self.parent._frames_initialized = self._frames_initialized
         self.parent._last_max_frames = self._last_max_frames
@@ -89,15 +90,16 @@ class Suite2pPipelineWidget(PipelineWidget):
         self.parent._s2p_show_savepath_popup = self._show_savepath_popup
         self.parent._current_pipeline = "suite2p"
 
-        # draw the config
         draw_section_suite2p(self.parent)
 
-        # sync back
-        self._saveas_outdir = self.parent._saveas_outdir
-        self._s2p_outdir = getattr(self.parent, '_s2p_outdir', '')
-        # if saveas was set but s2p wasn't, default s2p to saveas
-        if self._saveas_outdir and not self._s2p_outdir:
-            self._s2p_outdir = self._saveas_outdir
+        # sync back from parent - always read latest values
+        # use parent value if set, otherwise keep widget value
+        parent_saveas = getattr(self.parent, '_saveas_outdir', '')
+        parent_s2p = getattr(self.parent, '_s2p_outdir', '')
+        if parent_saveas:
+            self._saveas_outdir = parent_saveas
+        if parent_s2p:
+            self._s2p_outdir = parent_s2p
         self._install_error = self.parent._install_error
         self._frames_initialized = getattr(self.parent, '_frames_initialized', False)
         self._last_max_frames = getattr(self.parent, '_last_max_frames', 1000)

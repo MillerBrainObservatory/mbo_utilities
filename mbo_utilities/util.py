@@ -358,25 +358,47 @@ def subsample_array(
     if np.prod(arr.shape, dtype=np.int64) <= max_size:
         return arr[:]  # no need to subsample if already below the threshold
 
-    # get factor by which to divide all dims
-    f = np.power((np.prod(arr.shape, dtype=np.int64) / max_size), 1.0 / arr.ndim)
+    shape = np.array(arr.shape, dtype=np.int64)
 
-    # new shape for subsampled array
-    ns = np.floor(np.array(arr.shape, np.int64) / f).clip(min=1)
-
-    # get the step size for the slices
-    slices = list(
-        slice(None, None, int(s)) for s in np.floor(arr.shape / ns).astype(int)
-    )
-
-    # ignore dims e.g. RGB, which we don't want to downsample
+    # Determine which dimensions to subsample
     if ignore_dims is not None:
-        for dim in ignore_dims:
-            slices[dim] = slice(None)
+        ignore_set = set(ignore_dims)
+        subsample_dims = [i for i in range(arr.ndim) if i not in ignore_set]
+    else:
+        subsample_dims = list(range(arr.ndim))
+        ignore_set = set()
 
-    slices = tuple(slices)
+    if not subsample_dims:
+        # All dims ignored, return full array
+        return np.asarray(arr[:])
 
-    return np.asarray(arr[slices])
+    # Calculate product of dimensions we're subsampling
+    subsample_shape = np.array([shape[i] for i in subsample_dims])
+    ignored_shape = np.array([shape[i] for i in range(arr.ndim) if i in ignore_set])
+    ignored_product = np.prod(ignored_shape, dtype=np.int64) if len(ignored_shape) > 0 else 1
+
+    # Target size for subsampled dimensions only
+    target_subsample_size = max_size / ignored_product
+    current_subsample_size = np.prod(subsample_shape, dtype=np.int64)
+
+    if current_subsample_size <= target_subsample_size:
+        return np.asarray(arr[:])
+
+    # Calculate factor for subsampled dimensions only
+    n_subsample = len(subsample_dims)
+    f = np.power(current_subsample_size / target_subsample_size, 1.0 / n_subsample)
+
+    # Build slices - only subsample non-ignored dimensions
+    slices = []
+    for i in range(arr.ndim):
+        if i in ignore_set:
+            slices.append(slice(None))
+        else:
+            new_size = max(1, int(np.floor(shape[i] / f)))
+            step = max(1, int(np.floor(shape[i] / new_size)))
+            slices.append(slice(None, None, step))
+
+    return np.asarray(arr[tuple(slices)])
 
 
 def _process_slice_str(slice_str):

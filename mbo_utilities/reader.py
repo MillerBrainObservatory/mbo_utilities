@@ -23,8 +23,10 @@ from mbo_utilities.arrays import (
     Suite2pArray,
     Suite2pVolumeArray,
     TiffArray,
+    TiffVolumeArray,
     ZarrArray,
     find_suite2p_plane_dirs,
+    find_tiff_plane_files,
 )
 from mbo_utilities.metadata import has_mbo_metadata, is_raw_scanimage
 
@@ -146,6 +148,14 @@ def imread(
                         f"Detected Suite2p volume with {len(plane_dirs)} planes in {p}"
                     )
                     return Suite2pVolumeArray(p, plane_dirs=plane_dirs)
+
+                # Check for TIFF volume structure (planeXX.tiff files)
+                tiff_plane_files = find_tiff_plane_files(p)
+                if tiff_plane_files:
+                    logger.info(
+                        f"Detected TIFF volume with {len(tiff_plane_files)} planes in {p}"
+                    )
+                    return TiffVolumeArray(p, plane_files=tiff_plane_files)
 
                 paths = [Path(f) for f in p.glob("*") if f.is_file()]
                 logger.debug(f"Found {len(paths)} files in {p}")

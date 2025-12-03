@@ -361,6 +361,10 @@ class ReductionMixin:
 
     arr = MyArray(path)
     volume = arr.mean(axis=0)  # Mean over time -> (Z, Y, X)
+
+    # Fast approximate reductions using subsampling
+    quick_max = arr.max(axis=0, subsample=True)  # ~1M element sample
+    quick_std = arr.std(axis=0, subsample=int(5e5))  # ~500k element sample
     """
 
     def _chunked_reduce(
@@ -369,6 +373,7 @@ class ReductionMixin:
         axis: int | None = None,
         chunk_size: int = 100,
         dtype: np.dtype | None = None,
+        subsample: bool | int = False,
     ) -> np.ndarray:
         """
         Apply reduction function over axis, processing in chunks.
@@ -384,6 +389,10 @@ class ReductionMixin:
             Number of frames to process at once along the reduction axis.
         dtype : np.dtype | None
             Output dtype. If None, uses float64 for mean/std, input dtype otherwise.
+        subsample : bool | int
+            If True, subsample the array to ~1M elements for fast approximate reduction.
+            If an int, use that as the max_size for subsampling.
+            The reduction axis is preserved (not subsampled).
 
         Returns
         -------
@@ -392,12 +401,18 @@ class ReductionMixin:
         """
         from tqdm.auto import tqdm
 
+        from mbo_utilities.util import subsample_array
+
         # Default axis to 0 for time series data
         if axis is None:
             if self.ndim > 2:
                 axis = 0
             else:
                 # For 2D, reduce over everything
+                if subsample:
+                    max_size = subsample if isinstance(subsample, int) else int(1e6)
+                    data = subsample_array(self, max_size=max_size)
+                    return getattr(np, func)(data)
                 return getattr(np.asarray(self), func)()
 
         # Validate axis
@@ -405,6 +420,15 @@ class ReductionMixin:
             axis = self.ndim + axis
         if axis < 0 or axis >= self.ndim:
             raise ValueError(f"axis {axis} out of bounds for {self.ndim}D array")
+
+        # Handle subsampled fast mode
+        if subsample:
+            max_size = subsample if isinstance(subsample, int) else int(1e6)
+            # Subsample all dimensions uniformly - gives approximate result with full-res output shape
+            data = subsample_array(self, max_size=max_size)
+            return getattr(np, func)(data, axis=axis).astype(
+                np.float64 if func in ('mean', 'std') else self.dtype if dtype is None else dtype
+            )
 
         n = self.shape[axis]
 
@@ -488,7 +512,13 @@ class ReductionMixin:
         else:
             raise ValueError(f"Unknown reduction function: {func}")
 
-    def mean(self, axis: int | None = None, dtype: np.dtype | None = None) -> np.ndarray:
+    def mean(
+        self,
+        axis: int | None = None,
+        dtype: np.dtype | None = None,
+        subsample: bool | int = False,
+        **kwargs,
+    ) -> np.ndarray:
         """
         Compute mean along axis.
 
@@ -500,15 +530,27 @@ class ReductionMixin:
             Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
         dtype : np.dtype | None
             Output dtype. Defaults to float64.
+        subsample : bool | int
+            If True, subsample to ~1M elements for fast approximate result.
+            If int, use as max_size for subsampling.
+        **kwargs
+            Accepts additional numpy kwargs (e.g., out, keepdims) for compatibility
+            with np.mean() delegation, but they are ignored.
 
         Returns
         -------
         np.ndarray
             Mean projection.
         """
-        return self._chunked_reduce('mean', axis=axis, dtype=dtype)
+        return self._chunked_reduce('mean', axis=axis, dtype=dtype, subsample=subsample)
 
-    def max(self, axis: int | None = None, dtype: np.dtype | None = None) -> np.ndarray:
+    def max(
+        self,
+        axis: int | None = None,
+        dtype: np.dtype | None = None,
+        subsample: bool | int = False,
+        **kwargs,
+    ) -> np.ndarray:
         """
         Compute maximum along axis.
 
@@ -520,15 +562,27 @@ class ReductionMixin:
             Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
         dtype : np.dtype | None
             Output dtype. Defaults to input dtype.
+        subsample : bool | int
+            If True, subsample to ~1M elements for fast approximate result.
+            If int, use as max_size for subsampling.
+        **kwargs
+            Accepts additional numpy kwargs (e.g., out, keepdims) for compatibility
+            with np.max() delegation, but they are ignored.
 
         Returns
         -------
         np.ndarray
             Max projection.
         """
-        return self._chunked_reduce('max', axis=axis, dtype=dtype)
+        return self._chunked_reduce('max', axis=axis, dtype=dtype, subsample=subsample)
 
-    def min(self, axis: int | None = None, dtype: np.dtype | None = None) -> np.ndarray:
+    def min(
+        self,
+        axis: int | None = None,
+        dtype: np.dtype | None = None,
+        subsample: bool | int = False,
+        **kwargs,
+    ) -> np.ndarray:
         """
         Compute minimum along axis.
 
@@ -540,15 +594,27 @@ class ReductionMixin:
             Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
         dtype : np.dtype | None
             Output dtype. Defaults to input dtype.
+        subsample : bool | int
+            If True, subsample to ~1M elements for fast approximate result.
+            If int, use as max_size for subsampling.
+        **kwargs
+            Accepts additional numpy kwargs (e.g., out, keepdims) for compatibility
+            with np.min() delegation, but they are ignored.
 
         Returns
         -------
         np.ndarray
             Min projection.
         """
-        return self._chunked_reduce('min', axis=axis, dtype=dtype)
+        return self._chunked_reduce('min', axis=axis, dtype=dtype, subsample=subsample)
 
-    def std(self, axis: int | None = None, dtype: np.dtype | None = None) -> np.ndarray:
+    def std(
+        self,
+        axis: int | None = None,
+        dtype: np.dtype | None = None,
+        subsample: bool | int = False,
+        **kwargs,
+    ) -> np.ndarray:
         """
         Compute standard deviation along axis.
 
@@ -560,15 +626,27 @@ class ReductionMixin:
             Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
         dtype : np.dtype | None
             Output dtype. Defaults to float64.
+        subsample : bool | int
+            If True, subsample to ~1M elements for fast approximate result.
+            If int, use as max_size for subsampling.
+        **kwargs
+            Accepts additional numpy kwargs (e.g., out, keepdims) for compatibility
+            with np.std() delegation, but they are ignored.
 
         Returns
         -------
         np.ndarray
             Standard deviation.
         """
-        return self._chunked_reduce('std', axis=axis, dtype=dtype)
+        return self._chunked_reduce('std', axis=axis, dtype=dtype, subsample=subsample)
 
-    def sum(self, axis: int | None = None, dtype: np.dtype | None = None) -> np.ndarray:
+    def sum(
+        self,
+        axis: int | None = None,
+        dtype: np.dtype | None = None,
+        subsample: bool | int = False,
+        **kwargs,
+    ) -> np.ndarray:
         """
         Compute sum along axis.
 
@@ -580,10 +658,17 @@ class ReductionMixin:
             Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
         dtype : np.dtype | None
             Output dtype. Defaults to input dtype.
+        subsample : bool | int
+            If True, subsample to ~1M elements for fast approximate result.
+            If int, use as max_size for subsampling.
+            Note: For sum, the result is scaled by the subsampling factor.
+        **kwargs
+            Accepts additional numpy kwargs (e.g., out, keepdims) for compatibility
+            with np.sum() delegation, but they are ignored.
 
         Returns
         -------
         np.ndarray
             Sum.
         """
-        return self._chunked_reduce('sum', axis=axis, dtype=dtype)
+        return self._chunked_reduce('sum', axis=axis, dtype=dtype, subsample=subsample)

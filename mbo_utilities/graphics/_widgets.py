@@ -7,10 +7,19 @@ from imgui_bundle import (
 from imgui_bundle import imgui_md
 
 _NAME_COLORS = (
-    imgui.ImVec4(0.95, 0.80, 0.30, 1.0),
-    imgui.ImVec4(0.60, 0.95, 0.40, 1.0),
+    imgui.ImVec4(0.95, 0.80, 0.30, 1.0),  # gold/yellow for names
+    imgui.ImVec4(0.60, 0.95, 0.40, 1.0),  # green for indices
 )
 _VALUE_COLOR = imgui.ImVec4(0.85, 0.85, 0.85, 1.0)
+_TREE_NODE_COLOR = imgui.ImVec4(0.40, 0.80, 0.95, 1.0)  # cyan for tree nodes
+
+
+def _colored_tree_node(label: str) -> bool:
+    """Create a tree node with colored text."""
+    imgui.push_style_color(imgui.Col_.text, _TREE_NODE_COLOR)
+    result = imgui.tree_node(label)
+    imgui.pop_style_color()
+    return result
 
 
 def checkbox_with_tooltip(_label, _value, _tooltip):
@@ -90,7 +99,7 @@ def draw_scope():
             imgui.pop_style_var()
 
 
-def _render_item(name, val, prefix=""):
+def _render_item(name, val, prefix="", depth=0):
     full_name = f"{prefix}{name}"
     if isinstance(val, Mapping):
         # filter out all-underscore keys and callables
@@ -100,25 +109,43 @@ def _render_item(name, val, prefix=""):
             if not (k.startswith("__") and k.endswith("__")) and not callable(v)
         ]
         if children:
-            if imgui.tree_node(full_name):
+            if _colored_tree_node(full_name):
                 for k, v in children:
-                    _render_item(str(k), v, prefix=full_name + ".")
+                    _render_item(str(k), v, prefix=full_name + ".", depth=depth + 1)
                 imgui.tree_pop()
         else:
             imgui.text_colored(_NAME_COLORS[0], full_name)
             imgui.same_line(spacing=16)
             imgui.text_colored(_VALUE_COLOR, _fmt(val))
     elif isinstance(val, Sequence) and not isinstance(val, (str, bytes, bytearray)):
-        if len(val) <= 8 and all(isinstance(v, (int, float, str, bool)) for v in val):
+        # Check if this is a list of file paths (strings that look like paths)
+        is_path_list = (
+            len(val) > 0
+            and all(isinstance(v, str) for v in val)
+            and any("\\" in v or "/" in v for v in val[:min(3, len(val))])
+        )
+        if is_path_list:
+            # Display path lists as a collapsible tree with compact formatting
+            if _colored_tree_node(f"{full_name} ({len(val)} paths)"):
+                for i, path in enumerate(val):
+                    imgui.text_colored(_NAME_COLORS[1], f"[{i}]")
+                    imgui.same_line(spacing=8)
+                    # Truncate long paths from the left, showing the end
+                    display_path = path if len(path) <= 60 else "..." + path[-57:]
+                    imgui.text_colored(_VALUE_COLOR, display_path)
+                    if imgui.is_item_hovered() and len(path) > 60:
+                        imgui.set_tooltip(path)
+                imgui.tree_pop()
+        elif len(val) <= 8 and all(isinstance(v, (int, float, str, bool)) for v in val):
             imgui.text_colored(_NAME_COLORS[0], full_name)
             imgui.same_line(spacing=16)
             imgui.text_colored(_VALUE_COLOR, repr(val))
         else:
             children = [(i, v) for i, v in enumerate(val) if not callable(v)]
             if children:
-                if imgui.tree_node(f"{full_name} [{type(val).__name__}]"):
+                if _colored_tree_node(f"{full_name} ({len(val)} items)"):
                     for i, v in children:
-                        _render_item(f"{i}", v, prefix=full_name + "[")
+                        _render_item(f"[{i}]", v, prefix=full_name, depth=depth + 1)
                     imgui.tree_pop()
             else:
                 imgui.text_colored(_NAME_COLORS[0], full_name)
@@ -139,17 +166,17 @@ def _render_item(name, val, prefix=""):
             }
         # if there are any fields or properties, show a tree node
         if fields or prop_names:
-            if imgui.tree_node(f"{full_name} ({cls.__name__})"):
+            if _colored_tree_node(f"{full_name} ({cls.__name__})"):
                 # render instance attributes
                 for k, v in fields.items():
-                    _render_item(k, v, prefix=full_name + ".")
+                    _render_item(k, v, prefix=full_name + ".", depth=depth + 1)
                 # render properties by retrieving their current value
                 for prop in prop_names:
                     try:
                         prop_val = getattr(val, prop)
                     except Exception:
                         continue
-                    _render_item(prop, prop_val, prefix=full_name + ".")
+                    _render_item(prop, prop_val, prefix=full_name + ".", depth=depth + 1)
                 imgui.tree_pop()
         else:
             # leaf node: display name and formatted value
