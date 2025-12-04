@@ -57,6 +57,9 @@ class GridSearchViewer:
         # stats cache
         self._stats_cache = {}
 
+        # error message state (for showing in UI)
+        self._error_message = None
+
     def load_results(self, path: Path):
         """Load grid search results from directory.
 
@@ -108,6 +111,20 @@ class GridSearchViewer:
                 return candidate
         return None
 
+    def _check_suite2p_complete(self, plane_dir: Path) -> tuple[bool, list[str]]:
+        """Check if a plane directory has all files needed for suite2p GUI.
+
+        Returns
+        -------
+        tuple[bool, list[str]]
+            (is_complete, missing_files)
+        """
+        import os
+        required_files = ["stat.npy", "ops.npy"]
+        # Use os.path.exists for consistent behavior with UNC paths
+        missing = [f for f in required_files if not os.path.exists(os.path.join(str(plane_dir), f))]
+        return len(missing) == 0, missing
+
     def _get_stats(self, idx: int) -> dict:
         """Get cached stats for a parameter combination."""
         if idx not in self._stats_cache:
@@ -119,7 +136,7 @@ class GridSearchViewer:
                 self._stats_cache[idx] = {"n_cells": 0, "n_not_cells": 0, "mean_snr": 0.0}
         return self._stats_cache[idx]
 
-    def _open_suite2p(self, idx: int, position: str = "left"):
+    def _open_suite2p(self, idx: int, position: str = "left") -> str | None:
         """Open suite2p GUI for a parameter combination.
 
         Parameters
@@ -128,18 +145,38 @@ class GridSearchViewer:
             Index of the parameter combination
         position : str
             "left" or "right" - determines window positioning
+
+        Returns
+        -------
+        str | None
+            Error message if failed, None if successful
         """
         combo_dir = self.param_combos[idx]
         plane_dir = self._find_plane_dir(combo_dir)
 
         if plane_dir is None:
-            print(f"No suite2p results found in {combo_dir.name}")
-            return
+            return f"No suite2p results found in {combo_dir.name}"
 
         stat_path = plane_dir / "stat.npy"
         if not stat_path.exists():
-            print(f"No stat.npy found in {plane_dir}")
-            return
+            return f"No stat.npy found in {plane_dir}"
+
+        # Check for required files BEFORE importing suite2p GUI
+        # (suite2p prints errors during import/init that we can't suppress)
+        import os
+
+        # Use os.path for all checks - more reliable with various path types
+        plane_dir_str = str(plane_dir)
+        ops_check_path = os.path.join(plane_dir_str, "ops.npy")
+        stat_check_path = os.path.join(plane_dir_str, "stat.npy")
+
+        # Debug: print what we're checking
+        print(f"DEBUG: Checking plane_dir: {plane_dir_str}")
+        print(f"DEBUG: ops exists: {os.path.isfile(ops_check_path)} at {ops_check_path}")
+        print(f"DEBUG: stat exists: {os.path.isfile(stat_check_path)} at {stat_check_path}")
+
+        if not os.path.isfile(ops_check_path):
+            return f"ops.npy not found at: {ops_check_path}\nSuite2p GUI requires ops.npy in the same folder as stat.npy.\nGrid search may have saved minimal results only."
 
         try:
             from suite2p.gui.gui2p import MainWindow as Suite2pMainWindow
@@ -158,8 +195,10 @@ class GridSearchViewer:
                 except (RuntimeError, AttributeError):
                     pass
 
-            # create new window
-            window = Suite2pMainWindow(statfile=str(stat_path))
+            # Normalize paths for suite2p - it has issues with UNC paths
+            import os
+            normalized_stat_path = os.path.normpath(str(stat_path))
+            window = Suite2pMainWindow(statfile=normalized_stat_path)
             window.setWindowTitle(f"Suite2p - {combo_dir.name}")
 
             # position windows side-by-side with proper margins for window decorations
@@ -185,11 +224,12 @@ class GridSearchViewer:
             window.show()
             # Ensure window has normal state (not maximized/fullscreen)
             window.showNormal()
+            return None  # Success
 
         except ImportError as e:
-            print(f"Could not open suite2p GUI: {e}")
+            return f"Could not open suite2p GUI: {e}"
         except Exception as e:
-            print(f"Error opening suite2p GUI: {e}")
+            return f"Error opening suite2p GUI: {e}"
 
     def draw(self):
         """Draw the grid search viewer UI."""
@@ -231,6 +271,15 @@ class GridSearchViewer:
         """Draw the comparison UI with two columns."""
         n_combos = len(self.param_combos)
         imgui.text(f"Results: {self.results_path.name} ({n_combos} combinations)")
+
+        # Show error message if any
+        if self._error_message:
+            imgui.spacing()
+            imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), self._error_message)
+            imgui.same_line()
+            if imgui.small_button("Dismiss"):
+                self._error_message = None
+
         imgui.separator()
         imgui.spacing()
 
@@ -252,7 +301,9 @@ class GridSearchViewer:
 
         imgui.same_line()
         if imgui.button("Open##left"):
-            self._open_suite2p(self._left_idx, "left")
+            err = self._open_suite2p(self._left_idx, "left")
+            if err:
+                self._error_message = err
 
         # show stats for left
         stats_l = self._get_stats(self._left_idx)
@@ -277,7 +328,9 @@ class GridSearchViewer:
 
         imgui.same_line()
         if imgui.button("Open##right"):
-            self._open_suite2p(self._right_idx, "right")
+            err = self._open_suite2p(self._right_idx, "right")
+            if err:
+                self._error_message = err
 
         # show stats for right
         stats_r = self._get_stats(self._right_idx)
@@ -290,8 +343,13 @@ class GridSearchViewer:
 
         # open both button
         if imgui.button("Open Both Side-by-Side"):
-            self._open_suite2p(self._left_idx, "left")
-            self._open_suite2p(self._right_idx, "right")
+            err_left = self._open_suite2p(self._left_idx, "left")
+            err_right = self._open_suite2p(self._right_idx, "right")
+            # Show first error encountered
+            if err_left:
+                self._error_message = err_left
+            elif err_right:
+                self._error_message = err_right
 
         if imgui.is_item_hovered():
             imgui.set_tooltip("Open both selected combinations in suite2p GUIs side-by-side")

@@ -6,7 +6,7 @@ import fastplotlib as fpl
 from mbo_utilities import subsample_array
 
 # Initial data path
-data_path = r"E:\tests\lbm\mbo_utilities\big_raw"
+data_path = r"D:/"
 data = imread(data_path)
 print(f"Initial data shape: {data.shape}")
 
