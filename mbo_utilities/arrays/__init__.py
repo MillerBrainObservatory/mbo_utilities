@@ -26,6 +26,7 @@ from mbo_utilities.arrays._base import (
     _imwrite_base,
     _normalize_planes,
     _safe_get_metadata,
+    _sanitize_suffix,
     _to_tzyx,
     iter_rois,
     normalize_roi,
@@ -85,6 +86,7 @@ __all__ = [
     "_to_tzyx",
     "_axes_or_guess",
     "_safe_get_metadata",
+    "_sanitize_suffix",
     "CHUNKS_3D",
     "CHUNKS_4D",
 ]

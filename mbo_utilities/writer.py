@@ -42,6 +42,7 @@ def imwrite(
     debug: bool = False,
     shift_vectors: np.ndarray | None = None,
     output_name: str | None = None,
+    output_suffix: str | None = None,
     **kwargs,
 ):
     """
@@ -119,6 +120,13 @@ def imwrite(
 
     output_name : str, optional
         Filename for binary output when ext=".bin".
+
+    output_suffix : str, optional
+        Custom suffix to append to output filenames. If None (default), files are
+        named with "_stitched" for multi-ROI data when roi is None, or "_roiN"
+        for specific ROIs. Examples: "_stitched", "_processed", "_session1".
+        The suffix is automatically sanitized (illegal characters removed, double
+        extensions prevented, underscore prefix added if missing).
 
     **kwargs
         Additional format-specific options passed to writer backends.
@@ -301,6 +309,7 @@ def imwrite(
             planes=planes,
             debug=debug,
             output_name=output_name,
+            output_suffix=output_suffix,
             **write_kwargs,
         )
     else:

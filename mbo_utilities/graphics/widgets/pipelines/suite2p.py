@@ -5,8 +5,9 @@ combines processing configuration with a button to view trace quality statistics
 in a separate popup window.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from pathlib import Path
+import time
 
 import numpy as np
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui, implot
@@ -15,9 +16,19 @@ from mbo_utilities.graphics.widgets.pipelines._base import PipelineWidget
 from mbo_utilities.graphics._widgets import set_tooltip
 from mbo_utilities.graphics._availability import HAS_SUITE2P
 from mbo_utilities.graphics.diagnostics_widget import DiagnosticsWidget
+from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 if TYPE_CHECKING:
     from mbo_utilities.graphics.imgui import PreviewDataWidget
+
+# Apply PySide6 compatibility fix for suite2p GUI BEFORE any suite2p imports
+# suite2p's RangeSlider uses self.NoTicks which doesn't exist in PySide6
+try:
+    from PySide6.QtWidgets import QSlider
+    if not hasattr(QSlider, 'NoTicks'):
+        QSlider.NoTicks = QSlider.TickPosition.NoTicks
+except ImportError:
+    pass  # PySide6 not available
 
 # check if lbm_suite2p_python is available
 try:
@@ -62,7 +73,13 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._diagnostics_widget = DiagnosticsWidget()
         self._show_diagnostics_popup = False
         self._diagnostics_popup_open = False
-        self._folder_dialog = None
+        self._file_dialog = None
+
+        # suite2p GUI integration
+        self._suite2p_window = None
+        self._last_suite2p_ichosen = None
+        self._last_poll_time = 0.0
+        self._poll_interval = 0.1  # 100ms polling interval
 
     def draw_config(self) -> None:
         """draw suite2p configuration ui."""
@@ -110,34 +127,91 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._savepath_flash_start = getattr(self.parent, '_s2p_savepath_flash_start', None)
         self._show_savepath_popup = getattr(self.parent, '_s2p_show_savepath_popup', False)
 
+        # Poll suite2p for selection changes
+        self._poll_suite2p_selection()
+
         # Draw diagnostics popup window (managed separately from config)
         self._draw_diagnostics_popup()
 
     def _draw_diagnostics_button(self):
-        """Draw the button to open trace quality statistics popup."""
-        if imgui.button("Load trace quality statistics"):
-            self._folder_dialog = pfd.select_folder(
-                "Select plane folder with suite2p results",
-                str(Path.home())
+        """Draw the button to load stat.npy and open diagnostics popup."""
+        if imgui.button("Load stat.npy"):
+            default_dir = str(get_last_dir("suite2p_stat") or Path.home())
+            self._file_dialog = pfd.open_file(
+                "Select stat.npy file",
+                default_dir,
+                ["stat.npy files", "stat.npy"],
             )
         if imgui.is_item_hovered():
             imgui.set_tooltip(
-                "Load suite2p results (F.npy, stat.npy, iscell.npy) to view\n"
-                "ROI traces, dF/F, SNR, compactness, and other quality metrics."
+                "Load a stat.npy file to view ROI diagnostics.\n"
+                "Opens suite2p GUI synced with the diagnostics popup.\n"
+                "Click cells in suite2p to update the diagnostics view."
             )
+
+    def _poll_suite2p_selection(self):
+        """Poll suite2p window for selection changes."""
+        current_time = time.time()
+        if current_time - self._last_poll_time < self._poll_interval:
+            return
+        self._last_poll_time = current_time
+
+        if self._suite2p_window is None:
+            return
+        if not hasattr(self._suite2p_window, 'loaded') or not self._suite2p_window.loaded:
+            return
+
+        # Get current selection from suite2p
+        ichosen = getattr(self._suite2p_window, 'ichosen', None)
+
+        # Check if selection changed
+        if ichosen != self._last_suite2p_ichosen:
+            self._last_suite2p_ichosen = ichosen
+            self._on_suite2p_cell_selected(ichosen)
+
+    def _on_suite2p_cell_selected(self, cell_idx: int):
+        """Handle cell selection in suite2p GUI.
+
+        Parameters
+        ----------
+        cell_idx : int
+            Index of the selected cell in suite2p
+        """
+        if cell_idx is None:
+            return
+
+        # Update diagnostics widget selection
+        # Map the global cell index to visible index if showing only cells
+        visible = self._diagnostics_widget.visible_indices
+        if len(visible) > 0:
+            # Find where cell_idx is in visible indices
+            matches = np.where(visible == cell_idx)[0]
+            if len(matches) > 0:
+                self._diagnostics_widget.selected_roi = int(matches[0])
 
     def _draw_diagnostics_popup(self):
         """Draw the diagnostics popup window if open."""
-        # Check if folder dialog has a result
-        if self._folder_dialog is not None and self._folder_dialog.ready():
-            result = self._folder_dialog.result()
-            if result:
-                try:
-                    self._diagnostics_widget.load_results(Path(result))
-                    self._show_diagnostics_popup = True
-                except Exception as e:
-                    print(f"Error loading results: {e}")
-            self._folder_dialog = None
+        # Check if file dialog has a result
+        if self._file_dialog is not None and self._file_dialog.ready():
+            result = self._file_dialog.result()
+            if result and len(result) > 0:
+                stat_path = Path(result[0])
+                # Save the directory for next time
+                set_last_dir("suite2p_stat", stat_path)
+                if stat_path.name == "stat.npy" and stat_path.exists():
+                    try:
+                        # Load results from the directory containing stat.npy
+                        plane_dir = stat_path.parent
+                        self._diagnostics_widget.load_results(plane_dir)
+                        self._show_diagnostics_popup = True
+
+                        # Open suite2p GUI with this stat file
+                        self._open_suite2p_gui(stat_path)
+                    except Exception as e:
+                        print(f"Error loading results: {e}")
+                else:
+                    print(f"Please select a stat.npy file, got: {stat_path.name}")
+            self._file_dialog = None
 
         if self._show_diagnostics_popup:
             self._diagnostics_popup_open = True
@@ -176,3 +250,59 @@ class Suite2pPipelineWidget(PipelineWidget):
                     imgui.close_current_popup()
 
             imgui.end_popup()
+
+    def _open_suite2p_gui(self, statfile: Path):
+        """Open suite2p GUI with the given stat.npy file.
+
+        Positions both the MBO GUI and suite2p side-by-side, each taking
+        half the screen width and full available height.
+
+        Parameters
+        ----------
+        statfile : Path
+            Path to stat.npy file
+        """
+        try:
+            from suite2p.gui.gui2p import MainWindow as Suite2pMainWindow
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import QRect
+
+            # Create suite2p window
+            self._suite2p_window = Suite2pMainWindow(statfile=str(statfile))
+
+            # Get screen geometry for side-by-side layout
+            screen = QApplication.primaryScreen()
+            if screen:
+                screen_geom = screen.availableGeometry()
+                screen_x = screen_geom.x()
+                screen_y = screen_geom.y()
+                screen_w = screen_geom.width()
+                screen_h = screen_geom.height()
+
+                # Split screen in half - each window gets 50% width
+                half_width = screen_w // 2
+
+                # Suite2p goes on the RIGHT half
+                s2p_x = screen_x + half_width
+                s2p_y = screen_y
+                s2p_width = half_width
+                s2p_height = screen_h
+
+                # Set suite2p geometry and ensure it's resizable
+                self._suite2p_window.setGeometry(QRect(s2p_x, s2p_y, s2p_width, s2p_height))
+
+                # Set minimum size to allow shrinking (suite2p default min size is too large)
+                self._suite2p_window.setMinimumSize(400, 300)
+
+            self._suite2p_window.show()
+            self._last_suite2p_ichosen = None
+
+        except ImportError as e:
+            print(f"Could not open suite2p GUI: {e}")
+        except Exception as e:
+            print(f"Error opening suite2p GUI: {e}")
+
+    @property
+    def suite2p_window(self):
+        """Access to the suite2p GUI window if open."""
+        return self._suite2p_window

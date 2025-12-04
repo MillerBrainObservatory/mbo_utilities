@@ -100,6 +100,47 @@ def _normalize_planes(planes, num_planes: int) -> list[int]:
     return [p - 1 for p in planes]
 
 
+def _sanitize_suffix(suffix: str) -> str:
+    """
+    Sanitize a filename suffix to prevent invalid filenames.
+
+    Parameters
+    ----------
+    suffix : str
+        Raw suffix string from user input.
+
+    Returns
+    -------
+    str
+        Sanitized suffix safe for use in filenames.
+    """
+    if not suffix:
+        return ""
+
+    # Remove illegal characters for Windows/Unix filenames
+    illegal_chars = '<>:"/\\|?*'
+    for char in illegal_chars:
+        suffix = suffix.replace(char, "")
+
+    # Remove any file extension patterns (e.g., ".bin", ".tiff")
+    # This prevents issues like "plane01_stitched.bin.bin"
+    import re
+    suffix = re.sub(r'\.[a-zA-Z0-9]+$', '', suffix)
+
+    # Ensure suffix starts with underscore if not empty and doesn't already
+    if suffix and not suffix.startswith("_"):
+        suffix = "_" + suffix
+
+    # Remove any double underscores
+    while "__" in suffix:
+        suffix = suffix.replace("__", "_")
+
+    # Strip trailing underscores
+    suffix = suffix.rstrip("_")
+
+    return suffix
+
+
 def _build_output_path(
     outpath: Path,
     plane_idx: int,
@@ -108,6 +149,7 @@ def _build_output_path(
     output_name: str | None = None,
     structural: bool = False,
     has_multiple_rois: bool = False,
+    output_suffix: str | None = None,
     **kwargs,
 ) -> Path:
     """
@@ -128,7 +170,12 @@ def _build_output_path(
     structural : bool
         If True, use data_chan2.bin naming for structural channel.
     has_multiple_rois : bool
-        If True and roi is None, use "_stitched" suffix.
+        If True and roi is None, use "_stitched" suffix by default.
+    output_suffix : str | None
+        Custom suffix to append to filenames. If None, uses "_stitched" for
+        multi-ROI data when roi is None, or "_roiN" for specific ROIs.
+        The suffix is sanitized to remove illegal characters and prevent
+        double extensions.
 
     Returns
     -------
@@ -137,9 +184,16 @@ def _build_output_path(
     """
     plane_num = plane_idx + 1  # Convert to 1-based for filenames
 
-    # Determine suffix based on ROI
+    # Determine suffix based on ROI and custom output_suffix
     if roi is None:
-        roi_suffix = "_stitched" if has_multiple_rois else ""
+        if output_suffix is not None:
+            # Use custom suffix (sanitized)
+            roi_suffix = _sanitize_suffix(output_suffix)
+        elif has_multiple_rois:
+            # Default to "_stitched" for multi-ROI data
+            roi_suffix = "_stitched"
+        else:
+            roi_suffix = ""
     else:
         roi_suffix = f"_roi{roi}"
 
@@ -173,6 +227,7 @@ def _imwrite_base(
     progress_callback: "Callable | None" = None,
     debug: bool = False,
     roi_iterator=None,
+    output_suffix: str | None = None,
     **kwargs,
 ) -> Path:
     """
@@ -205,6 +260,10 @@ def _imwrite_base(
     roi_iterator : iterator | None
         Custom ROI iterator for arrays with ROI support.
         If None, uses iter_rois(arr) which yields [None] for arrays without ROIs.
+    output_suffix : str | None
+        Custom suffix to append to output filenames. If None, defaults to
+        "_stitched" for multi-ROI data when roi is None.
+        Examples: "_stitched", "_processed", "_mydata"
     **kwargs
         Additional arguments passed to _write_plane().
 
@@ -258,6 +317,7 @@ def _imwrite_base(
                 output_name=kwargs.get("output_name"),
                 structural=kwargs.get("structural", False),
                 has_multiple_rois=has_multiple_rois,
+                output_suffix=output_suffix,
             )
 
             if target.exists() and not overwrite:
