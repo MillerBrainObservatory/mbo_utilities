@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities import log
+from mbo_utilities.util import load_npy
 
 logger = log.get("arrays._registration")
 
@@ -44,7 +45,7 @@ def validate_s3d_registration(s3d_job_dir: Path, num_planes: int = None) -> bool
         return False
 
     try:
-        summary = np.load(summary_path, allow_pickle=True).item()
+        summary = load_npy(summary_path).item()
 
         if not isinstance(summary, dict):
             logger.warning(f"Suite3D summary is not a dict: {type(summary)}")
