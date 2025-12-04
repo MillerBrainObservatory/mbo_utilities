@@ -2444,3 +2444,25 @@ class PreviewDataWidget(EdgeWindow):
 
         # Recompute z-stats
         self.compute_zstats()
+
+    def cleanup(self):
+        """Clean up resources when the GUI is closing.
+
+        Should be called before the application exits to properly release
+        resources like open windows, file handles, and pending operations.
+        """
+        # Clean up pipeline instances (suite2p window, etc)
+        from mbo_utilities.graphics.widgets.pipelines import cleanup_pipelines
+        cleanup_pipelines(self)
+
+        # Clean up all widgets
+        from mbo_utilities.graphics.widgets import cleanup_all_widgets
+        cleanup_all_widgets(self._widgets)
+
+        # Clear file dialogs
+        self._file_dialog = None
+        self._folder_dialog = None
+        if hasattr(self, '_s2p_folder_dialog'):
+            self._s2p_folder_dialog = None
+
+        self.logger.info("GUI cleanup complete")

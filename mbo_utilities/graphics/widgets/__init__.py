@@ -102,8 +102,22 @@ def draw_all_widgets(parent: "PreviewDataWidget", widgets: list[Widget]) -> None
             )
 
 
+def cleanup_all_widgets(widgets: list[Widget]) -> None:
+    """clean up all widgets when the gui is closing.
+
+    calls cleanup() on each widget to release resources.
+    """
+    for widget in widgets:
+        try:
+            widget.cleanup()
+        except Exception as e:
+            # log but don't crash during cleanup
+            print(f"Warning: cleanup failed for {widget.name}: {e}")
+
+
 __all__ = [
     "Widget",
     "get_supported_widgets",
     "draw_all_widgets",
+    "cleanup_all_widgets",
 ]
