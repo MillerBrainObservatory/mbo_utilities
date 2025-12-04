@@ -13,6 +13,12 @@ if importlib.util.find_spec("PySide6") is not None:
     os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
     import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
 
+    # Fix suite2p PySide6 compatibility - must happen before any suite2p GUI imports
+    # suite2p's RangeSlider uses self.NoTicks which doesn't exist in PySide6
+    from PySide6.QtWidgets import QSlider
+    if not hasattr(QSlider, "NoTicks"):
+        QSlider.NoTicks = QSlider.TickPosition.NoTicks
+
 import imgui_bundle
 import numpy as np
 from numpy import ndarray
@@ -32,10 +38,9 @@ from mbo_utilities.file_io import (
     get_mbo_dirs,
 )
 from mbo_utilities.preferences import (
-    get_last_save_dir,
-    set_last_save_dir,
+    get_last_dir,
+    set_last_dir,
     add_recent_file,
-    get_last_open_dir,
 )
 from mbo_utilities.array_types import MboRawArray
 from mbo_utilities.graphics._imgui import (
@@ -56,6 +61,7 @@ from mbo_utilities.graphics.progress_bar import (
 from mbo_utilities.graphics.widgets import get_supported_widgets, draw_all_widgets
 from mbo_utilities.graphics._availability import HAS_SUITE2P, HAS_SUITE3D
 from mbo_utilities.lazy_array import imread, imwrite
+from mbo_utilities.arrays import _sanitize_suffix
 from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler
 from mbo_utilities import log
 
@@ -157,12 +163,12 @@ def draw_menu(parent):
                 # Open File - iw-array API
                 if imgui.menu_item("Open File", "Ctrl+O", p_selected=False, enabled=True)[0]:
                     # Handle fpath being a list or a string
-                    from mbo_utilities.preferences import get_default_open_dir
                     fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
                     if fpath and Path(fpath).exists():
                         start_dir = str(Path(fpath).parent)
                     else:
-                        start_dir = str(get_default_open_dir())
+                        # Use open_file context-specific preference
+                        start_dir = str(get_last_dir("open_file") or Path.home())
                     parent._file_dialog = pfd.open_file(
                         "Select Data File",
                         start_dir
@@ -170,12 +176,12 @@ def draw_menu(parent):
                 # Open Folder - iw-array API
                 if imgui.menu_item("Open Folder", "", p_selected=False, enabled=True)[0]:
                     # Handle fpath being a list or a string
-                    from mbo_utilities.preferences import get_default_open_dir
                     fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
                     if fpath and Path(fpath).exists():
                         start_dir = str(Path(fpath).parent)
                     else:
-                        start_dir = str(get_default_open_dir())
+                        # Use open_folder context-specific preference
+                        start_dir = str(get_last_dir("open_folder") or Path.home())
                     parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
                 imgui.separator()
                 # Check if current data supports imwrite
@@ -319,8 +325,8 @@ def draw_saveas_popup(parent):
 
         imgui.same_line()
         if imgui.button("Browse"):
-            # Use last save dir as default, fall back to home
-            default_dir = parent._saveas_outdir or str(get_last_save_dir() or Path.home())
+            # Use save_as context-specific directory, fall back to home
+            default_dir = parent._saveas_outdir or str(get_last_dir("save_as") or Path.home())
             parent._saveas_folder_dialog = pfd.select_folder("Select output folder", default_dir)
 
         # Check if async folder dialog has a result
@@ -328,7 +334,7 @@ def draw_saveas_popup(parent):
             result = parent._saveas_folder_dialog.result()
             if result:
                 parent._saveas_outdir = str(result)
-                set_last_save_dir(Path(result))
+                set_last_dir("save_as", result)
             parent._saveas_folder_dialog = None
 
         imgui.set_next_item_width(hello_imgui.em_size(25))
@@ -471,6 +477,42 @@ def draw_saveas_popup(parent):
             v_min=1,
             v_max=1024,
         )
+
+        # Output suffix section (only show for multi-ROI data when stitching)
+        if num_rois > 1 and not parent._saveas_rois:
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            imgui.text("Filename Suffix")
+            imgui.same_line()
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.begin_tooltip()
+                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+                imgui.text_unformatted(
+                    "Custom suffix appended to output filenames.\n"
+                    "Default: '_stitched' for stitched multi-ROI data.\n"
+                    "Examples: '_stitched', '_processed', '_session1'\n\n"
+                    "Illegal characters (<>:\"/\\|?*) are removed.\n"
+                    "Underscore prefix is added if missing."
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.end_tooltip()
+
+            imgui.set_next_item_width(hello_imgui.em_size(15))
+            changed, new_suffix = imgui.input_text(
+                "##output_suffix",
+                parent._saveas_output_suffix,
+            )
+            if changed:
+                parent._saveas_output_suffix = new_suffix
+
+            # Live filename preview
+            sanitized = _sanitize_suffix(parent._saveas_output_suffix)
+            preview_ext = parent._ext.lstrip(".")
+            preview_name = f"plane01{sanitized}.{preview_ext}"
+            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"Preview: {preview_name}")
 
         # Format-specific options
         if parent._ext in (".zarr",):
@@ -793,7 +835,7 @@ def draw_saveas_popup(parent):
 
         if imgui.button("Save", imgui.ImVec2(100, 0)):
             if not parent._saveas_outdir:
-                last_dir = get_last_save_dir() or Path().home()
+                last_dir = get_last_dir("save_as") or Path().home()
                 parent._saveas_outdir = str(last_dir)
             try:
                 save_planes = [p + 1 for p in parent._selected_planes]
@@ -858,6 +900,12 @@ def draw_saveas_popup(parent):
                         except ValueError:
                             pass
 
+                    # Determine output_suffix: only use custom suffix for multi-ROI stitched data
+                    output_suffix = None
+                    if rois is None:
+                        # Stitching all ROIs - use custom suffix (or default "_stitched")
+                        output_suffix = parent._saveas_output_suffix
+
                     save_kwargs = {
                         "path": parent.fpath,
                         "outpath": parent._saveas_outdir,
@@ -879,6 +927,8 @@ def draw_saveas_popup(parent):
                         current_plane: parent.gui_progress_callback(frac, current_plane),
                         # metadata overrides
                         "metadata": metadata_overrides if metadata_overrides else None,
+                        # filename suffix
+                        "output_suffix": output_suffix,
                     }
                     # Add zarr-specific options if saving to zarr
                     if parent._ext == ".zarr":
@@ -1097,12 +1147,14 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_done = False
         self._saveas_progress = 0.0
         self._saveas_current_index = 0
-        # pre-fill with last saved directory if available
-        last_dir = get_last_save_dir()
+        # pre-fill with context-specific saved directory if available
+        save_as_dir = get_last_dir("save_as")
         self._saveas_outdir = (
-            str(last_dir) if last_dir else str(getattr(self, "_save_dir", ""))
+            str(save_as_dir) if save_as_dir else str(getattr(self, "_save_dir", ""))
         )
-        self._s2p_outdir = ""  # suite2p output path (separate from save-as)
+        # suite2p output path (separate from save-as)
+        s2p_output_dir = get_last_dir("suite2p_output")
+        self._s2p_outdir = str(s2p_output_dir) if s2p_output_dir else ""
         self._saveas_folder_dialog = None  # async folder dialog for browse button
         self._saveas_total = 0
 
@@ -1120,6 +1172,9 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_dx = ""  # x pixel resolution override
         self._saveas_dy = ""  # y pixel resolution override
         self._saveas_dz = ""  # z step override
+
+        # Output suffix for filename customization (default: "_stitched" for multi-ROI)
+        self._saveas_output_suffix = "_stitched"
 
         # File/folder dialog state for loading new data (iw-array API)
         self._file_dialog = None
@@ -1583,14 +1638,13 @@ class PreviewDataWidget(EdgeWindow):
 
     def _check_file_dialogs(self):
         """Check if file/folder dialogs have results and load data if so."""
-        from mbo_utilities.preferences import add_recent_file, set_last_open_dir
         # Check file dialog
         if self._file_dialog is not None and self._file_dialog.ready():
             result = self._file_dialog.result()
             if result and len(result) > 0:
-                # Save to recent files and preferences
+                # Save to recent files and context-specific preferences
                 add_recent_file(result[0], file_type="file")
-                set_last_open_dir(result[0])
+                set_last_dir("open_file", result[0])
                 self._load_new_data(result[0])
             self._file_dialog = None
 
@@ -1598,9 +1652,9 @@ class PreviewDataWidget(EdgeWindow):
         if self._folder_dialog is not None and self._folder_dialog.ready():
             result = self._folder_dialog.result()
             if result:
-                # Save to recent files and preferences
+                # Save to recent files and context-specific preferences
                 add_recent_file(result, file_type="folder")
-                set_last_open_dir(result)
+                set_last_dir("open_folder", result)
                 self._load_new_data(result)
             self._folder_dialog = None
 
@@ -1625,6 +1679,19 @@ class PreviewDataWidget(EdgeWindow):
             self._load_status_color = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
 
             new_data = imread(path)
+
+            # Check if dimensionality is changing - if so, reset window functions
+            # to avoid IndexError in fastplotlib's _apply_window_function
+            old_ndim = len(self.shape) if hasattr(self, 'shape') and self.shape else 0
+            new_ndim = new_data.ndim
+
+            # Reset window functions on processors if dimensionality changes
+            # This prevents tuple index out of range errors when going 3D->4D or vice versa
+            if old_ndim != new_ndim:
+                for proc in self.image_widget._image_processors:
+                    proc.window_funcs = None
+                    proc.window_sizes = None
+                    proc.window_order = None
 
             # iw-array API: use data indexer for replacing data
             # iw.data[0] = new_array handles shape changes automatically

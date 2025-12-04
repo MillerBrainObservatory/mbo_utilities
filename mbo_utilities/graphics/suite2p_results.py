@@ -3,6 +3,8 @@ from pathlib import Path
 import numpy as np
 from imgui_bundle import imgui, portable_file_dialogs as pfd, implot
 
+from mbo_utilities.preferences import get_last_dir, set_last_dir
+
 
 class Suite2pResultsViewer:
     def __init__(self):
@@ -45,12 +47,14 @@ class Suite2pResultsViewer:
         imgui.spacing()
 
         if imgui.button("Select ops.npy File"):
+            default_dir = str(get_last_dir("suite2p_ops") or Path.home())
             result = pfd.open_file(
                 "Select ops.npy",
-                str(Path.home())
+                default_dir
             )
             if result and result.result():
                 selected = result.result()[0]
+                set_last_dir("suite2p_ops", selected)
                 try:
                     self.load_ops_file(selected)
                 except Exception as e:
