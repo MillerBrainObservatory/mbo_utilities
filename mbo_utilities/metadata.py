@@ -11,8 +11,9 @@ from tqdm.auto import tqdm
 import numpy as np
 import tifffile
 from mbo_utilities import log
-from mbo_utilities.file_io import get_files
+from mbo_utilities.file_io import get_files, logger
 from mbo_utilities._parsing import _make_json_serializable
+from mbo_utilities.util import load_npy
 
 logger = log.get("metadata")
 
@@ -529,7 +530,7 @@ def get_metadata_single(file: Path):
                 ops_path = parent / "ops.npy"
                 if ops_path.exists():
                     try:
-                        ops = np.load(ops_path, allow_pickle=True).item()
+                        ops = load_npy(ops_path).item()
                         return {
                             "num_planes": int(ops.get("nplanes", 1) or 1),
                             "fov_px": (
@@ -630,7 +631,7 @@ def get_metadata_single(file: Path):
                 ops_path = parent / "ops.npy"
                 if ops_path.exists():
                     try:
-                        ops = np.load(ops_path, allow_pickle=True).item()
+                        ops = load_npy(ops_path).item()
                         num_planes = int(ops.get("nplanes") or 1)
                         # single-plane suite2p folder → force to 1
                         if "plane0" in str(ops_path.parent).lower():
@@ -655,7 +656,7 @@ def get_metadata_single(file: Path):
         if ops_path.exists():
             logger.info(f"Found ops.npy at {ops_path}, attempting to load.")
             try:
-                ops = np.load(ops_path, allow_pickle=True).item()
+                ops = load_npy(ops_path).item()
                 return {
                     "num_planes": ops.get("nplanes", 1),
                     "fov_px": (ops.get("Lx"), ops.get("Ly")),
@@ -1323,3 +1324,297 @@ footer { color:var(--muted); font-size:12px; padding:12px 16px; border-top:1px s
     out_html = Path(out_html)
     out_html.parent.mkdir(parents=True, exist_ok=True)
     out_html.write_text(html, encoding="utf-8")
+
+
+def _build_ome_metadata(
+    shape: tuple,
+    dtype,
+    metadata: dict,
+) -> dict:
+    """
+    Build comprehensive OME-NGFF v0.5 metadata from ScanImage and other metadata.
+
+    Creates OMERO rendering settings, custom metadata fields, and proper
+    coordinate transformations based on available metadata.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the array (T, Z, Y, X)
+    dtype : np.dtype
+        Data type of the array
+    metadata : dict
+        Metadata dictionary with optional keys
+
+    Returns
+    -------
+    dict
+        Complete OME-NGFF v0.5 metadata attributes
+    """
+    T, Z, Y, X = shape
+
+    pixel_resolution = metadata.get("pixel_resolution", [1.0, 1.0])
+    frame_rate = metadata.get("frame_rate", metadata.get("fs", 1.0))
+    dz = metadata.get("dz", metadata.get("z_step", 1.0))
+
+    if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
+        pixel_x, pixel_y = float(pixel_resolution[0]), float(pixel_resolution[1])
+    else:
+        pixel_x = pixel_y = 1.0
+
+    time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
+
+    # Build OME-NGFF v0.5 multiscales
+    axes = [
+        {"name": "t", "type": "time", "unit": "second"},
+        {"name": "z", "type": "space", "unit": "micrometer"},
+        {"name": "y", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"},
+    ]
+
+    scale_values = [time_scale, float(dz), pixel_y, pixel_x]
+
+    datasets = [
+        {
+            "path": "0",
+            "coordinateTransformations": [{"type": "scale", "scale": scale_values}],
+        }
+    ]
+
+    multiscales = [
+        {
+            "version": "0.5",
+            "name": metadata.get("name", "volume"),
+            "axes": axes,
+            "datasets": datasets,
+        }
+    ]
+
+    # Build OME content
+    ome_content = {
+        "version": "0.5",
+        "multiscales": multiscales,
+    }
+
+    # Add OMERO rendering metadata
+    omero_metadata = _build_omero_metadata(
+        shape=shape,
+        dtype=dtype,
+        metadata=metadata,
+    )
+    if omero_metadata:
+        ome_content["omero"] = omero_metadata
+
+    result = {"ome": ome_content}
+
+    # Add custom metadata fields (ScanImage, acquisition info, etc.)
+    custom_meta = {}
+
+    # Add ScanImage metadata
+    if "si" in metadata:
+        si = metadata["si"]
+        custom_meta["scanimage"] = {
+            "version": f"{si.get('VERSION_MAJOR', 'unknown')}.{si.get('VERSION_MINOR', 0)}",
+            "imaging_system": si.get("imagingSystem", "unknown"),
+            "objective_resolution": si.get(
+                "objectiveResolution", metadata.get("objective_resolution")
+            ),
+            "scan_mode": si.get("hScan2D", {}).get("scanMode", "unknown"),
+        }
+
+        # Add beam/laser info
+        if "hBeams" in si:
+            custom_meta["scanimage"]["laser_power"] = si["hBeams"].get("powers", 0)
+            custom_meta["scanimage"]["power_fraction"] = si["hBeams"].get(
+                "powerFractions", 0
+            )
+
+        # Add ROI info
+        if "hRoiManager" in si:
+            roi_mgr = si["hRoiManager"]
+            custom_meta["scanimage"]["roi"] = {
+                "scan_zoom": roi_mgr.get("scanZoomFactor", metadata.get("zoom_factor")),
+                "lines_per_frame": roi_mgr.get("linesPerFrame"),
+                "pixels_per_line": roi_mgr.get("pixelsPerLine"),
+                "line_period": roi_mgr.get("linePeriod"),
+                "bidirectional": si.get("hScan2D", {}).get("bidirectional", True),
+            }
+
+    # Add ROI groups information
+    if "roi_groups" in metadata:
+        custom_meta["roi_groups"] = metadata["roi_groups"]
+
+    # Add acquisition metadata
+    acq_meta = {}
+    for key in ["acquisition_date", "experimenter", "description", "specimen"]:
+        if key in metadata:
+            acq_meta[key] = metadata[key]
+
+    if acq_meta:
+        custom_meta["acquisition"] = acq_meta
+
+    # Add microscope metadata
+    microscope_meta = {}
+    for key in [
+        "objective",
+        "emission_wavelength",
+        "excitation_wavelength",
+        "numerical_aperture",
+    ]:
+        if key in metadata:
+            microscope_meta[key] = metadata[key]
+
+    if microscope_meta:
+        custom_meta["microscope"] = microscope_meta
+
+    # Add processing metadata
+    processing_meta = {}
+    for key in ["fix_phase", "phasecorr_method", "use_fft", "register_z"]:
+        if key in metadata:
+            processing_meta[key] = metadata[key]
+
+    if processing_meta:
+        custom_meta["processing"] = processing_meta
+
+    # Add file info
+    if "file_paths" in metadata or "num_files" in metadata:
+        custom_meta["source_files"] = {
+            "num_files": metadata.get("num_files"),
+            "num_frames": metadata.get("num_frames"),
+            "frames_per_file": metadata.get("frames_per_file"),
+        }
+
+    # Add all serializable custom metadata
+    for key, value in custom_meta.items():
+        try:
+            json.dumps(value)
+            result[key] = value
+        except (TypeError, ValueError):
+            logger.debug(f"Skipping non-serializable metadata key: {key}")
+
+    # Add any other simple metadata fields
+    for key, value in metadata.items():
+        if (
+            key
+            not in [
+                "pixel_resolution",
+                "frame_rate",
+                "fs",
+                "dz",
+                "z_step",
+                "name",
+                "si",
+                "roi_groups",
+                "acquisition_date",
+                "experimenter",
+                "description",
+                "specimen",
+                "objective",
+                "emission_wavelength",
+                "excitation_wavelength",
+                "numerical_aperture",
+                "fix_phase",
+                "phasecorr_method",
+                "use_fft",
+                "register_z",
+                "file_paths",
+                "num_files",
+                "num_frames",
+                "frames_per_file",
+            ]
+            and key not in result
+        ):
+            try:
+                json.dumps(value)
+                result[key] = value
+            except (TypeError, ValueError):
+                pass
+
+    return result
+
+
+def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
+    """
+    Build OMERO rendering metadata for OME-NGFF.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the array (T, Z, Y, X)
+    dtype : np.dtype
+        Data type of the array
+    metadata : dict
+        Metadata dictionary
+
+    Returns
+    -------
+    dict
+        OMERO metadata or empty dict if not enough info
+    """
+    import numpy as np
+
+    T, Z, Y, X = shape
+
+    # Determine data range for window settings
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        data_min, data_max = info.min, info.max
+    else:
+        data_min, data_max = 0.0, 1.0
+
+    # Build channel metadata
+    channels = []
+
+    # Get channel names from metadata
+    channel_names = metadata.get("channel_names")
+    num_channels = metadata.get("num_planes", 1)
+
+    if channel_names is None:
+        # Generate default channel names
+        if num_channels == 1:
+            channel_names = ["Channel 1"]
+        else:
+            channel_names = [f"Z-plane {i + 1}" for i in range(num_channels)]
+
+    # Default colors (cycle through common microscopy colors)
+    default_colors = [
+        "00FF00",  # Green
+        "FF0000",  # Red
+        "0000FF",  # Blue
+        "FFFF00",  # Yellow
+        "FF00FF",  # Magenta
+        "00FFFF",  # Cyan
+        "FFFFFF",  # White
+    ]
+
+    for i, name in enumerate(channel_names[:num_channels]):
+        channel = {
+            "active": True,
+            "coefficient": 1.0,
+            "color": default_colors[i % len(default_colors)],
+            "family": "linear",
+            "inverted": False,
+            "label": name,
+            "window": {
+                "end": float(data_max),
+                "max": float(data_max),
+                "min": float(data_min),
+                "start": float(data_min),
+            },
+        }
+        channels.append(channel)
+
+    if not channels:
+        return {}
+
+    omero = {
+        "channels": channels,
+        "rdefs": {
+            "defaultT": 0,
+            "defaultZ": Z // 2,  # Middle z-plane
+            "model": "greyscale",
+        },
+        "version": "0.5",
+    }
+
+    return omero
