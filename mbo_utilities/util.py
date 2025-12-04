@@ -458,8 +458,9 @@ def listify_index(index, dim_size):
     return index_as_list
 
 
-def load_npy_crossplatform(path):
-    """Load a .npy file with cross-platform path compatibility.
+def load_npy(path):
+    """
+    Load .npy file across Windows, Mac, and Linux.
 
     Handles the case where .npy files containing pickled Path objects
     were created on Linux (PosixPath) but opened on Windows, or vice versa.
@@ -476,7 +477,7 @@ def load_npy_crossplatform(path):
 
     Examples
     --------
-    >>> ops = load_npy_crossplatform("ops.npy")
+    >>> ops = load_npy("ops.npy")
     >>> if ops.ndim == 0:
     ...     ops = ops.item()  # Convert 0-d array to dict
     """

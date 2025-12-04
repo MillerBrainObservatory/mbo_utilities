@@ -14,6 +14,9 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.file_io import HAS_ZARR, logger
+from mbo_utilities.arrays.suite2p import _add_suite2p_labels
+from mbo_utilities.metadata import _build_ome_metadata
 
 logger = log.get("arrays.zarr")
 
@@ -272,3 +275,255 @@ class ZarrArray(ReductionMixin):
             debug=debug,
             **kwargs,
         )
+
+
+def merge_zarr_zplanes(
+    zarr_paths: list[str | Path],
+    output_path: str | Path,
+    *,
+    suite2p_dirs: list[str | Path] | None = None,
+    metadata: dict | None = None,
+    overwrite: bool = True,
+    compression_level: int = 1,
+) -> Path:
+    """
+    Merge multiple single z-plane Zarr files into a single OME-Zarr volume.
+
+    Creates an OME-NGFF v0.5 compliant Zarr store with shape (T, Z, Y, X) by
+    stacking individual z-plane Zarr files. Optionally includes Suite2p segmentation
+    masks as OME-Zarr labels.
+
+    Parameters
+    ----------
+    zarr_paths : list of str or Path
+        List of paths to single-plane Zarr stores. Should be ordered by z-plane.
+        Each Zarr should have shape (T, Y, X).
+    output_path : str or Path
+        Path for the output merged Zarr store.
+    suite2p_dirs : list of str or Path, optional
+        List of Suite2p output directories corresponding to each z-plane.
+        If provided, ROI masks will be added as OME-Zarr labels.
+        Must match length of zarr_paths.
+    metadata : dict, optional
+        Comprehensive metadata dictionary. Coordinate-related keys are used for
+        OME-NGFF transformations, while additional keys are preserved as custom
+        metadata. Supported keys:
+
+        **Coordinate transformations:**
+        - pixel_resolution : tuple (x, y) in micrometers
+        - frame_rate : float, Hz (or 'fs')
+        - dz : float, z-step in micrometers (or 'z_step')
+        - name : str, volume name
+
+        **ScanImage metadata:**
+        - si : dict, complete ScanImage metadata structure
+        - roi_groups : list, ROI definitions with scanfield info
+        - objective_resolution : float, objective NA
+        - zoom_factor : float
+
+        **Acquisition metadata:**
+        - acquisition_date : str, ISO format
+        - experimenter : str
+        - description : str
+        - specimen : str
+
+        **Microscope metadata:**
+        - objective : str, objective name
+        - emission_wavelength : float, nm
+        - excitation_wavelength : float, nm
+        - numerical_aperture : float
+
+        **Processing metadata:**
+        - fix_phase : bool
+        - phasecorr_method : str
+        - use_fft : bool
+        - register_z : bool
+
+        **OMERO rendering:**
+        - channel_names : list of str
+        - num_planes : int, number of channels/planes
+
+        All metadata is organized into structured groups (scanimage, acquisition,
+        microscope, processing) in the output OME-Zarr attributes.
+    overwrite : bool, default=True
+        If True, overwrite existing output Zarr store.
+    compression_level : int, default=1
+        Gzip compression level (0-9). Higher = better compression, slower.
+
+    Returns
+    -------
+    Path
+        Path to the created OME-Zarr store.
+
+    Raises
+    ------
+    ValueError
+        If zarr_paths is empty or shapes are incompatible.
+    FileNotFoundError
+        If any input Zarr or Suite2p directory doesn't exist.
+
+    Examples
+    --------
+    Merge z-plane Zarr files into a volume:
+
+    >>> zarr_files = [
+    ...     "session1/plane01.zarr",
+    ...     "session1/plane02.zarr",
+    ...     "session1/plane03.zarr",
+    ... ]
+    >>> merge_zarr_zplanes(zarr_files, "session1/volume.zarr")
+
+    Include Suite2p segmentation masks:
+
+    >>> s2p_dirs = [
+    ...     "session1/plane01_suite2p",
+    ...     "session1/plane02_suite2p",
+    ...     "session1/plane03_suite2p",
+    ... ]
+    >>> merge_zarr_zplanes(
+    ...     zarr_files,
+    ...     "session1/volume.zarr",
+    ...     suite2p_dirs=s2p_dirs,
+    ...     metadata={"pixel_resolution": (0.5, 0.5), "frame_rate": 30.0, "dz": 5.0}
+    ... )
+
+    See Also
+    --------
+    imwrite : Write imaging data to various formats including OME-Zarr
+    """
+    if not HAS_ZARR:
+        raise ImportError("zarr package required. Install with: pip install zarr")
+
+    import zarr
+    from zarr.codecs import BytesCodec, GzipCodec
+
+    zarr_paths = [Path(p) for p in zarr_paths]
+    output_path = Path(output_path)
+
+    if not zarr_paths:
+        raise ValueError("zarr_paths cannot be empty")
+
+    # Validate all input Zarrs exist
+    for zp in zarr_paths:
+        if not zp.exists():
+            raise FileNotFoundError(f"Zarr store not found: {zp}")
+
+    # Validate suite2p_dirs if provided
+    if suite2p_dirs is not None:
+        suite2p_dirs = [Path(p) for p in suite2p_dirs]
+        if len(suite2p_dirs) != len(zarr_paths):
+            raise ValueError(
+                f"suite2p_dirs length ({len(suite2p_dirs)}) must match "
+                f"zarr_paths length ({len(zarr_paths)})"
+            )
+        for s2p_dir in suite2p_dirs:
+            if not s2p_dir.exists():
+                raise FileNotFoundError(f"Suite2p directory not found: {s2p_dir}")
+
+    # Read first Zarr to get dimensions
+    logger.info(f"Reading first Zarr to determine dimensions: {zarr_paths[0]}")
+    z0 = zarr.open(str(zarr_paths[0]), mode="r")
+    logger.debug(f"Zarr type: {type(z0)}")
+
+    if hasattr(z0, "shape"):
+        # Direct array
+        T, Y, X = z0.shape
+        dtype = z0.dtype
+        logger.debug(f"Detected direct array with shape {(T, Y, X)}, dtype {dtype}")
+    else:
+        # Group - look for "0" array (OME-Zarr)
+        logger.debug(f"Detected group with keys: {list(z0.keys())}")
+        if "0" in z0:
+            arr = z0["0"]
+            T, Y, X = arr.shape
+            dtype = arr.dtype
+            logger.debug(f"Using '0' subarray with shape {(T, Y, X)}, dtype {dtype}")
+        else:
+            raise ValueError(
+                f"Cannot determine shape of {zarr_paths[0]}. "
+                f"Expected direct array or group with '0' subarray. "
+                f"Got group with keys: {list(z0.keys())}"
+            )
+
+    Z = len(zarr_paths)
+    logger.info(f"Creating merged Zarr volume with shape (T={T}, Z={Z}, Y={Y}, X={X})")
+
+    if output_path.exists() and overwrite:
+        import shutil
+
+        shutil.rmtree(output_path)
+
+    root = zarr.open_group(str(output_path), mode="w", zarr_format=3)
+    image_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+    image = zarr.create(
+        store=root.store,
+        path="0",
+        shape=(T, Z, Y, X),
+        chunks=(1, 1, Y, X),  # Chunk by frame and z-plane
+        dtype=dtype,
+        codecs=image_codecs,
+        overwrite=True,
+    )
+
+    logger.info("Copying z-plane data...")
+    for zi, zpath in enumerate(zarr_paths):
+        logger.debug(f"Reading z-plane {zi + 1}/{Z} from {zpath}")
+        z_arr = zarr.open(str(zpath), mode="r")
+
+        # Handle both direct arrays and OME-Zarr groups
+        if hasattr(z_arr, "shape"):
+            plane_data = z_arr[:]
+            logger.debug(f"  Read direct array with shape {plane_data.shape}")
+        elif "0" in z_arr:
+            plane_data = z_arr["0"][:]
+            logger.debug(f"  Read '0' subarray with shape {plane_data.shape}")
+        else:
+            raise ValueError(
+                f"Cannot read data from {zpath}. "
+                f"Got group with keys: {list(z_arr.keys()) if hasattr(z_arr, 'keys') else 'N/A'}"
+            )
+
+        if plane_data.shape != (T, Y, X):
+            raise ValueError(
+                f"Shape mismatch at z={zi} (file: {zpath.name}): "
+                f"expected {(T, Y, X)}, got {plane_data.shape}"
+            )
+
+        logger.debug(f"  Writing to output volume at z={zi}")
+        image[:, zi, :, :] = plane_data
+        logger.info(f"Copied z-plane {zi + 1}/{Z} from {zpath.name}")
+
+    # Add Suite2p labels if provided
+    if suite2p_dirs is not None:
+        logger.info("Adding Suite2p segmentation masks as labels...")
+        _add_suite2p_labels(root, suite2p_dirs, T, Z, Y, X, dtype, compression_level)
+
+    metadata = metadata or {}
+    ome_attrs = _build_ome_metadata(
+        shape=(T, Z, Y, X),
+        dtype=dtype,
+        metadata=metadata,
+    )
+
+    for key, value in ome_attrs.items():
+        root.attrs[key] = value
+
+    # Add napari-specific scale metadata to the array for proper volumetric viewing
+    pixel_resolution = metadata.get("pixel_resolution", [1.0, 1.0])
+    frame_rate = metadata.get("frame_rate", metadata.get("fs", 1.0))
+    dz = metadata.get("dz", metadata.get("z_step", 1.0))
+
+    if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
+        pixel_x, pixel_y = float(pixel_resolution[0]), float(pixel_resolution[1])
+    else:
+        pixel_x = pixel_y = 1.0
+
+    time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
+
+    # napari reads scale from array attributes for volumetric viewing
+    # Scale order: (T, Z, Y, X) in physical units
+    image.attrs["scale"] = [time_scale, float(dz), pixel_y, pixel_x]
+
+    logger.info(f"Successfully created merged OME-Zarr at {output_path}")
+    logger.info(f"Napari scale (t,z,y,x): {image.attrs['scale']}")
+    return output_path

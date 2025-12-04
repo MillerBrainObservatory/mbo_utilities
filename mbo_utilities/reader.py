@@ -32,8 +32,8 @@ from mbo_utilities.metadata import has_mbo_metadata, is_raw_scanimage
 
 logger = log.get("reader")
 
-
-SUPPORTED_FTYPES = (".npy", ".tif", ".tiff", ".bin", ".h5", ".zarr", ".json")
+MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".npy"]
+PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
 _ARRAY_TYPE_KWARGS = {
     MboRawArray: {
@@ -183,11 +183,11 @@ def imread(
     if not paths:
         raise ValueError("No input files found.")
 
-    filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
+    filtered = [p for p in paths if p.suffix.lower() in MBO_SUPPORTED_FTYPES]
     if not filtered:
         raise ValueError(
             f"No supported files in {inputs}. \n"
-            f"Supported file types are: {SUPPORTED_FTYPES}"
+            f"Supported file types are: {MBO_SUPPORTED_FTYPES}"
         )
     paths = filtered
 
@@ -272,3 +272,5 @@ def imread(
         return NumpyArray(first)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
+
+

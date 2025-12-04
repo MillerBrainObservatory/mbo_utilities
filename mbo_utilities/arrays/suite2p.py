@@ -20,6 +20,8 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.file_io import logger
+from mbo_utilities.util import load_npy
 
 logger = log.get("arrays.suite2p")
 
@@ -82,7 +84,7 @@ class Suite2pArray(ReductionMixin):
         else:
             raise ValueError(f"Unsupported input: {path}")
 
-        self.metadata = np.load(ops_path, allow_pickle=True).item()
+        self.metadata = load_npy(ops_path).item()
         self.num_rois = self.metadata.get("num_rois", 1)
 
         # resolve both possible bins - always look in the same directory as ops.npy
@@ -485,3 +487,268 @@ class Suite2pVolumeArray(ReductionMixin):
             debug=debug,
             **kwargs,
         )
+
+
+def _add_suite2p_labels(
+    root_group,
+    suite2p_dirs: list[Path],
+    T: int,
+    Z: int,
+    Y: int,
+    X: int,
+    dtype,
+    compression_level: int,
+):
+    """
+    Add Suite2p segmentation masks as OME-Zarr labels.
+
+    Creates a 'labels' subgroup with ROI masks from Suite2p stat.npy files.
+    Follows OME-NGFF v0.5 labels specification.
+
+    Parameters
+    ----------
+    root_group : zarr.Group
+        Root Zarr group to add labels to.
+    suite2p_dirs : list of Path
+        Suite2p output directories for each z-plane.
+    T, Z, Y, X : int
+        Dimensions of the volume.
+    dtype : np.dtype
+        Data type for label array.
+    compression_level : int
+        Gzip compression level.
+    """
+    import zarr
+    from zarr.codecs import BytesCodec, GzipCodec
+
+    logger.info("Creating labels array from Suite2p masks...")
+
+    # Create labels subgroup
+    labels_group = root_group.create_group("labels", overwrite=True)
+
+    # Create ROI masks array (static across time, just Z, Y, X)
+    label_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+    masks = zarr.create(
+        store=labels_group.store,
+        path="labels/0",
+        shape=(Z, Y, X),
+        chunks=(1, Y, X),
+        dtype=np.uint32,  # uint32 for up to 4 billion ROIs
+        codecs=label_codecs,
+        overwrite=True,
+    )
+
+    # Process each z-plane
+    roi_id = 1  # Start ROI IDs at 1 (0 = background)
+
+    for zi, s2p_dir in enumerate(suite2p_dirs):
+        stat_path = s2p_dir / "stat.npy"
+        iscell_path = s2p_dir / "iscell.npy"
+
+        if not stat_path.exists():
+            logger.warning(f"stat.npy not found in {s2p_dir}, skipping z={zi}")
+            continue
+
+        # Load Suite2p data
+        stat = load_npy(stat_path)
+
+        # Load iscell if available to filter
+        if iscell_path.exists():
+            iscell = load_npy(iscell_path)[:, 0].astype(bool)
+        else:
+            iscell = np.ones(len(stat), dtype=bool)
+
+        # Create mask for this z-plane
+        plane_mask = np.zeros((Y, X), dtype=np.uint32)
+
+        for roi_idx, (roi_stat, is_cell) in enumerate(zip(stat, iscell)):
+            if not is_cell:
+                continue
+
+            # Get pixel coordinates for this ROI
+            ypix = roi_stat.get("ypix", [])
+            xpix = roi_stat.get("xpix", [])
+
+            if len(ypix) == 0 or len(xpix) == 0:
+                continue
+
+            # Ensure coordinates are within bounds
+            ypix = np.clip(ypix, 0, Y - 1)
+            xpix = np.clip(xpix, 0, X - 1)
+
+            # Assign unique ROI ID
+            plane_mask[ypix, xpix] = roi_id
+            roi_id += 1
+
+        # Write to Zarr
+        masks[zi, :, :] = plane_mask
+        logger.debug(
+            f"Added {(plane_mask > 0).sum()} labeled pixels for z-plane {zi + 1}/{Z}"
+        )
+
+    # Add OME-NGFF labels metadata
+    labels_metadata = {
+        "version": "0.5",
+        "labels": ["0"],  # Path to the label array
+    }
+
+    # Add metadata for label array
+    label_array_meta = {
+        "version": "0.5",
+        "image-label": {
+            "version": "0.5",
+            "colors": [],  # Can add color LUT here if desired
+            "source": {"image": "../../0"},  # Reference to main image
+        },
+    }
+
+    labels_group.attrs.update(labels_metadata)
+    labels_group["0"].attrs.update(label_array_meta)
+
+    logger.info(f"Added {roi_id - 1} total ROIs across {Z} z-planes")
+
+
+def load_ops(ops_input: str | Path | list[str | Path]):
+    """Simple utility load a suite2p npy file"""
+    if isinstance(ops_input, (str, Path)):
+        return load_npy(ops_input).item()
+    elif isinstance(ops_input, dict):
+        return ops_input
+    logger.warning("No valid ops file provided, returning empty dict.")
+    return {}
+
+
+def write_ops(metadata, raw_filename, **kwargs):
+    """
+    Write metadata to an ops file alongside the given filename.
+    metadata must contain
+    'shape', 'pixel_resolution', 'frame_rate' keys.
+    """
+    logger.debug(f"Writing ops file for {raw_filename} with metadata: {metadata}")
+    if not isinstance(raw_filename, (str, Path)):
+        raise TypeError(f"raw_filename must be str or Path, got {type(raw_filename)}")
+    filename = Path(raw_filename).expanduser().resolve()
+
+    structural = kwargs.get("structural", False)
+    chan = 2 if structural or "data_chan2.bin" in str(filename) else 1
+    logger.debug(f"Detected channel {chan}")
+
+    # Always use parent directory - raw_filename should be a file path like data_raw.bin
+    # The old check `filename.is_file()` failed when file was just created but not yet flushed
+    if filename.suffix:
+        # Has a file extension, use parent as root
+        root = filename.parent
+    else:
+        # No extension, assume it's a directory path (backward compatibility)
+        root = filename if filename.is_dir() else filename.parent
+    ops_path = root / "ops.npy"
+    logger.info(f"Writing ops file to {ops_path}")
+
+    shape = metadata["shape"]
+    nt, Ly, Lx = shape[0], shape[-2], shape[-1]  # Fixed: shape is (T, Y, X), so [-2]=Ly, [-1]=Lx
+
+    # Check if num_frames was explicitly set (takes precedence over shape)
+    if "num_frames" in metadata:
+        nt_metadata = int(metadata["num_frames"])
+        if nt_metadata != shape[0]:
+            raise ValueError(
+                f"Inconsistent frame count in metadata!\n"
+                f"metadata['num_frames'] = {nt_metadata}\n"
+                f"metadata['shape'][0] = {shape[0]}\n"
+                f"These must match. Check your data and metadata."
+            )
+        nt = nt_metadata
+        logger.debug(f"Using explicit num_frames={nt} from metadata")
+    elif "nframes" in metadata:
+        nt_metadata = int(metadata["nframes"])
+        if nt_metadata != shape[0]:
+            raise ValueError(
+                f"Inconsistent frame count in metadata!\n"
+                f"metadata['nframes'] = {nt_metadata}\n"
+                f"metadata['shape'][0] = {shape[0]}\n"
+                f"These must match. Check your data and metadata."
+            )
+        nt = nt_metadata
+        logger.debug(f"Using explicit nframes={nt} from metadata")
+
+    if "pixel_resolution" not in metadata:
+        logger.warning("No pixel resolution found in metadata, using default [2, 2].")
+    if "fs" not in metadata:
+        if "frame_rate" in metadata:
+            metadata["fs"] = metadata["frame_rate"]
+        elif "framerate" in metadata:
+            metadata["fs"] = metadata["framerate"]
+        else:
+            logger.warning("No frame rate found; defaulting fs=10")
+            metadata["fs"] = 10
+
+    # Extract resolution values with fallbacks
+    # dx, dy from pixel_resolution tuple or individual keys
+    pixel_res = metadata.get("pixel_resolution", [2, 2])
+    if isinstance(pixel_res, (list, tuple)) and len(pixel_res) >= 2:
+        dx = metadata.get("dx", pixel_res[0])
+        dy = metadata.get("dy", pixel_res[1])
+    else:
+        dx = metadata.get("dx", 2)
+        dy = metadata.get("dy", 2)
+
+    # dz from multiple possible sources (z_step, dz, umPerPixZ, PhysicalSizeZ)
+    dz = metadata.get("dz")
+    if dz is None:
+        dz = metadata.get("z_step")
+    if dz is None:
+        dz = metadata.get("umPerPixZ")
+    if dz is None:
+        dz = metadata.get("PhysicalSizeZ")
+    if dz is None:
+        dz = 1.0  # default z-step
+
+    # Load or initialize ops
+    if ops_path.exists():
+        ops = load_npy(ops_path).item()
+    else:
+        from .metadata import default_ops
+
+        ops = default_ops()
+
+    # Update shared core fields
+    ops.update(
+        {
+            "Ly": Ly,
+            "Lx": Lx,
+            "fs": metadata["fs"],
+            "dx": dx,
+            "dy": dy,
+            "dz": dz,
+            "umPerPixX": dx,
+            "umPerPixY": dy,
+            "umPerPixZ": dz,
+            "ops_path": str(ops_path),
+        }
+    )
+
+    # Channel-specific entries
+    # Use the potentially overridden nt (from num_frames or nframes)
+    if chan == 1:
+        ops["nframes_chan1"] = nt
+        ops["raw_file"] = str(filename)
+    else:
+        ops["nframes_chan2"] = nt
+        ops["chan2_file"] = str(filename)
+
+    ops["align_by_chan"] = chan
+
+    # Set top-level nframes to match the written channel
+    # This ensures consistency between nframes and nframes_chan1/chan2
+    ops["nframes"] = nt
+
+    # Merge extra metadata, but DON'T overwrite nframes fields
+    # This prevents inconsistency between nframes and nframes_chan1
+    for key, value in metadata.items():
+        if key not in ["nframes", "nframes_chan1", "nframes_chan2", "num_frames"]:
+            ops[key] = value
+
+    np.save(ops_path, ops)
+    logger.debug(
+        f"Ops file written to {ops_path} with nframes={ops['nframes']}, nframes_chan1={ops.get('nframes_chan1')}"
+    )

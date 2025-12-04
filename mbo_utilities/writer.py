@@ -22,6 +22,7 @@ from mbo_utilities.arrays import (
     supports_roi,
     validate_s3d_registration,
 )
+from mbo_utilities.util import load_npy
 
 logger = log.get("writer")
 
@@ -249,7 +250,7 @@ def imwrite(
             if existing_s3d_dir:
                 s3d_job_dir = existing_s3d_dir
                 if s3d_job_dir.joinpath("dirs.npy").is_file():
-                    dirs = np.load(s3d_job_dir / "dirs.npy", allow_pickle=True).item()
+                    dirs = load_npy(s3d_job_dir / "dirs.npy").item()
                     for k, v in dirs.items():
                         if Path(v).is_dir():
                             file_metadata[k] = v
