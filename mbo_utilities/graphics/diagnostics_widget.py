@@ -13,6 +13,7 @@ from pathlib import Path
 from imgui_bundle import imgui, implot, portable_file_dialogs as pfd
 
 from mbo_utilities.graphics._availability import HAS_SUITE2P
+from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 
 class DiagnosticsWidget:
@@ -158,9 +159,11 @@ class DiagnosticsWidget:
     def _draw_load_ui(self):
         """Draw UI for loading results."""
         if imgui.button("Load trace quality statistics"):
-            result = pfd.select_folder("Select plane folder with suite2p results", str(Path.home()))
+            default_dir = str(get_last_dir("suite2p_diagnostics") or Path.home())
+            result = pfd.select_folder("Select plane folder with suite2p results", default_dir)
             if result and result.result():
                 try:
+                    set_last_dir("suite2p_diagnostics", result.result())
                     self.load_results(Path(result.result()))
                 except Exception as e:
                     imgui.text_colored(imgui.ImVec4(1, 0, 0, 1), f"Error: {e}")

@@ -146,6 +146,78 @@ def remove_recent_file(path: str | Path) -> None:
 # Directory Preferences
 # -----------------------------------------------------------------------------
 
+# Keys for different dialog contexts - each dialog type has its own cached path
+_DIR_KEYS = {
+    # General file/folder opening
+    "open_file": "last_open_file_dir",      # File > Open File
+    "open_folder": "last_open_folder_dir",  # File > Open Folder
+    # Save dialogs
+    "save_as": "last_save_as_dir",          # Save As dialog
+    # Suite2p pipeline
+    "suite2p_output": "last_suite2p_output_dir",  # Run tab > Browse for output
+    "suite2p_chan2": "last_suite2p_chan2_dir",    # Registration > Channel 2 file
+    "suite2p_stat": "last_suite2p_stat_dir",      # Load stat.npy for diagnostics
+    "suite2p_ops": "last_suite2p_ops_dir",        # Load ops.npy for results viewer
+    "suite2p_diagnostics": "last_suite2p_diagnostics_dir",  # Load plane folder for diagnostics
+    # Grid search
+    "grid_search": "last_grid_search_dir",  # Grid search results folder
+}
+
+
+def get_last_dir(context: str) -> Path | None:
+    """
+    Get the last directory used for a specific dialog context.
+
+    Parameters
+    ----------
+    context : str
+        One of: 'open_file', 'open_folder', 'save_as', 'suite2p_output',
+        'suite2p_chan2', 'suite2p_stat', 'suite2p_ops', 'suite2p_diagnostics'
+
+    Returns
+    -------
+    Path or None
+        The last directory for this context if it exists, otherwise None.
+    """
+    key = _DIR_KEYS.get(context)
+    if not key:
+        logger.warning(f"Unknown directory context: {context}")
+        return None
+
+    prefs = _load_preferences()
+    path_str = prefs.get(key)
+    if path_str:
+        path = Path(path_str)
+        if path.exists():
+            return path
+    return None
+
+
+def set_last_dir(context: str, path: str | Path) -> None:
+    """
+    Set the last directory used for a specific dialog context.
+
+    Parameters
+    ----------
+    context : str
+        One of: 'open_file', 'open_folder', 'save_as', 'suite2p_output',
+        'suite2p_chan2', 'suite2p_stat', 'suite2p_ops', 'suite2p_diagnostics'
+    path : str or Path
+        Path to directory (if file is given, parent directory is used).
+    """
+    key = _DIR_KEYS.get(context)
+    if not key:
+        logger.warning(f"Unknown directory context: {context}")
+        return
+
+    path = Path(path).resolve()
+    if path.is_file():
+        path = path.parent
+    if path.is_dir():
+        prefs = _load_preferences()
+        prefs[key] = str(path)
+        _save_preferences(prefs)
+
 
 def get_last_open_dir() -> Path | None:
     """
@@ -155,7 +227,19 @@ def get_last_open_dir() -> Path | None:
     -------
     Path or None
         The last open directory if it exists, otherwise None.
+
+    Notes
+    -----
+    This is a legacy function. Prefer using get_last_dir('open_file') or
+    get_last_dir('open_folder') for context-specific directories.
     """
+    # Try the new context-specific keys first
+    for context in ("open_file", "open_folder"):
+        result = get_last_dir(context)
+        if result:
+            return result
+
+    # Fall back to legacy key
     prefs = _load_preferences()
     path_str = prefs.get("last_open_dir")
     if path_str:
@@ -173,6 +257,11 @@ def set_last_open_dir(path: str | Path) -> None:
     ----------
     path : str or Path
         Path to directory (if file is given, parent directory is used).
+
+    Notes
+    -----
+    This is a legacy function that updates both open_file and legacy key.
+    Prefer using set_last_dir('open_file', path) for new code.
     """
     path = Path(path).resolve()
     if path.is_file():
@@ -180,6 +269,8 @@ def set_last_open_dir(path: str | Path) -> None:
     if path.is_dir():
         prefs = _load_preferences()
         prefs["last_open_dir"] = str(path)
+        # Also update new context-specific key
+        prefs[_DIR_KEYS["open_file"]] = str(path)
         _save_preferences(prefs)
 
 
@@ -194,10 +285,15 @@ def get_last_save_dir() -> Path | None:
 
     Notes
     -----
-    This is the new unified API. For backwards compatibility,
-    the legacy load_last_savedir() function in file_io.py will
-    also check this preference.
+    This is a legacy function. Prefer using get_last_dir('save_as') for
+    the Save As dialog specifically.
     """
+    # Try the new context-specific key first
+    result = get_last_dir("save_as")
+    if result:
+        return result
+
+    # Fall back to legacy key
     prefs = _load_preferences()
     path_str = prefs.get("last_save_dir")
     if path_str:
@@ -225,6 +321,11 @@ def set_last_save_dir(path: str | Path) -> None:
     ----------
     path : str or Path
         Path to directory (if file is given, parent directory is used).
+
+    Notes
+    -----
+    This is a legacy function. Prefer using set_last_dir('save_as', path)
+    for new code.
     """
     path = Path(path).resolve()
     if path.is_file():
@@ -232,6 +333,8 @@ def set_last_save_dir(path: str | Path) -> None:
     if path.is_dir():
         prefs = _load_preferences()
         prefs["last_save_dir"] = str(path)
+        # Also update new context-specific key
+        prefs[_DIR_KEYS["save_as"]] = str(path)
         _save_preferences(prefs)
         # Also update legacy location for backwards compatibility
         legacy_path = _get_settings_dir() / "last_savedir.json"

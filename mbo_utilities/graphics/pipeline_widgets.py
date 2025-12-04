@@ -9,7 +9,7 @@ import numpy as np
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui
 
 from mbo_utilities.graphics._widgets import set_tooltip, compact_header
-from mbo_utilities.preferences import get_last_save_dir, set_last_save_dir
+from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 try:
     from lbm_suite2p_python.run_lsp import run_plane, run_plane_bin
@@ -216,7 +216,7 @@ def draw_section_suite2p(self):
 
     # Browse button
     if imgui.button("Browse##s2p_outpath"):
-        default_dir = s2p_path or str(get_last_save_dir() or pathlib.Path().home())
+        default_dir = s2p_path or str(get_last_dir("suite2p_output") or pathlib.Path().home())
         self._s2p_folder_dialog = pfd.select_folder("Select Suite2p output folder", default_dir)
 
     # Check if async folder dialog has a result
@@ -224,7 +224,7 @@ def draw_section_suite2p(self):
         result = self._s2p_folder_dialog.result()
         if result:
             self._s2p_outdir = str(result)
-            set_last_save_dir(Path(result))
+            set_last_dir("suite2p_output", result)
         self._s2p_folder_dialog = None
 
     # Get max frames from data
@@ -616,10 +616,11 @@ def draw_section_suite2p(self):
         imgui.text(self.s2p.chan2_file if self.s2p.chan2_file else "(none)")
         imgui.pop_text_wrap_pos()
         if imgui.button("Browse##chan2"):
-            default_dir = str(get_last_save_dir() or pathlib.Path().home())
+            default_dir = str(get_last_dir("suite2p_chan2") or pathlib.Path().home())
             res = pfd.open_file("Select channel 2 file", default_dir)
             if res and res.result():
                 self.s2p.chan2_file = res.result()[0]
+                set_last_dir("suite2p_chan2", res.result()[0])
         set_tooltip("Path to channel 2 binary file for cross-channel registration.")
 
         # --- 1P Registration Collapsible Subsection ---
