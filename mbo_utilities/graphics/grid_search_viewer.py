@@ -1,156 +1,195 @@
-"""Grid search results viewer for Suite2p parameter tuning."""
+"""Grid search results viewer for Suite2p parameter tuning.
+
+Opens two suite2p GUI windows side-by-side for comparing parameter combinations.
+"""
 
 import numpy as np
 from pathlib import Path
 from imgui_bundle import imgui, portable_file_dialogs as pfd
-from OpenGL import GL
 
 from mbo_utilities.preferences import get_last_dir, set_last_dir
+from mbo_utilities.util import load_npy_crossplatform
+
+
+def _load_stats(plane_dir: Path) -> dict:
+    """Load basic stats from a suite2p plane directory."""
+    stats = {"n_cells": 0, "n_not_cells": 0, "mean_snr": 0.0}
+
+    iscell_path = plane_dir / "iscell.npy"
+    if iscell_path.exists():
+        iscell = load_npy_crossplatform(iscell_path)
+        if iscell.ndim == 2:
+            stats["n_cells"] = int(np.sum(iscell[:, 0] > 0.5))
+        else:
+            stats["n_cells"] = int(np.sum(iscell > 0.5))
+        stats["n_not_cells"] = len(iscell) - stats["n_cells"]
+
+        # calculate SNR if F.npy exists
+        f_path = plane_dir / "F.npy"
+        if f_path.exists():
+            F = load_npy_crossplatform(f_path)
+            cell_mask = iscell[:, 0] > 0.5 if iscell.ndim == 2 else iscell > 0.5
+            if np.any(cell_mask):
+                F_cells = F[cell_mask]
+                noise = np.std(F_cells, axis=1)
+                signal = np.max(F_cells, axis=1) - np.min(F_cells, axis=1)
+                snr = np.where(noise > 0, signal / noise, 0)
+                stats["mean_snr"] = float(np.mean(snr))
+
+    return stats
 
 
 class GridSearchViewer:
-    """Viewer for comparing grid search parameter combinations."""
+    """Viewer for comparing grid search parameter combinations using suite2p GUIs."""
 
     def __init__(self):
         self.results_path = None
         self.param_combos = []
-        self.current_idx = 0
-        self.images = {}
-        self.textures = {}
         self.loaded = False
         self._file_dialog = None
 
+        # two suite2p windows for side-by-side comparison
+        self._suite2p_left = None
+        self._suite2p_right = None
+        self._left_idx = 0
+        self._right_idx = 1
+
+        # stats cache
+        self._stats_cache = {}
+
     def load_results(self, path: Path):
-        """Load grid search results from directory."""
+        """Load grid search results from directory.
+
+        Can handle two cases:
+        1. Parent folder containing multiple parameter combination subfolders
+        2. Single parameter combination folder (will use parent to find siblings)
+        """
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Path does not exist: {path}")
 
-        self.results_path = path
-        self.param_combos = sorted([d for d in path.iterdir() if d.is_dir()])
+        # Check if this is a single param combo folder (has suite2p results inside)
+        # or the parent grid_search folder
+        plane_dir = self._find_plane_dir(path)
+        if plane_dir is not None:
+            # User selected a single parameter combination folder
+            # Use its parent as the results path to find sibling combinations
+            self.results_path = path.parent
+            self.param_combos = sorted([d for d in self.results_path.iterdir() if d.is_dir()])
+            # Find the index of the selected folder
+            try:
+                selected_idx = next(i for i, c in enumerate(self.param_combos) if c.name == path.name)
+            except StopIteration:
+                selected_idx = 0
+            self._left_idx = selected_idx
+            self._right_idx = min(selected_idx + 1, len(self.param_combos) - 1) if len(self.param_combos) > 1 else 0
+        else:
+            # User selected the parent folder containing param combinations
+            self.results_path = path
+            self.param_combos = sorted([d for d in path.iterdir() if d.is_dir()])
+            self._left_idx = 0
+            self._right_idx = min(1, len(self.param_combos) - 1)
 
         if not self.param_combos:
             raise ValueError(f"No parameter combination folders found in {path}")
 
-        self._cleanup_textures()
-        self.images = {}
-        self.textures = {}
-        self.current_idx = 0
+        self._stats_cache = {}
         self.loaded = True
 
-        self._load_current_images()
+    def _find_plane_dir(self, combo_dir: Path) -> Path | None:
+        """Find the plane directory containing suite2p results."""
+        candidates = [
+            combo_dir / "suite2p" / "plane0",
+            combo_dir / "plane0",
+            combo_dir,
+        ]
+        for candidate in candidates:
+            if (candidate / "stat.npy").exists():
+                return candidate
+        return None
 
-    def _cleanup_textures(self):
-        """Delete OpenGL textures."""
-        for tex_id in self.textures.values():
-            if tex_id:
-                GL.glDeleteTextures(1, [tex_id])
-        self.textures = {}
+    def _get_stats(self, idx: int) -> dict:
+        """Get cached stats for a parameter combination."""
+        if idx not in self._stats_cache:
+            combo_dir = self.param_combos[idx]
+            plane_dir = self._find_plane_dir(combo_dir)
+            if plane_dir:
+                self._stats_cache[idx] = _load_stats(plane_dir)
+            else:
+                self._stats_cache[idx] = {"n_cells": 0, "n_not_cells": 0, "mean_snr": 0.0}
+        return self._stats_cache[idx]
 
-    def _load_current_images(self):
-        """Load images for current parameter combination."""
-        if not self.loaded or self.current_idx >= len(self.param_combos):
+    def _open_suite2p(self, idx: int, position: str = "left"):
+        """Open suite2p GUI for a parameter combination.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the parameter combination
+        position : str
+            "left" or "right" - determines window positioning
+        """
+        combo_dir = self.param_combos[idx]
+        plane_dir = self._find_plane_dir(combo_dir)
+
+        if plane_dir is None:
+            print(f"No suite2p results found in {combo_dir.name}")
             return
 
-        combo_dir = self.param_combos[self.current_idx]
-        plane_dir = combo_dir / "suite2p" / "plane0"
-
-        if not plane_dir.exists():
-            self.images = {}
-            return
-
-        self.images = {}
-
-        # load ops for meanImg
-        ops_path = plane_dir / "ops.npy"
-        if ops_path.exists():
-            ops = np.load(ops_path, allow_pickle=True).item()
-            if "meanImg" in ops:
-                self.images["mean"] = self._normalize_image(ops["meanImg"])
-
-        # load stat for ROI visualization
         stat_path = plane_dir / "stat.npy"
-        iscell_path = plane_dir / "iscell.npy"
+        if not stat_path.exists():
+            print(f"No stat.npy found in {plane_dir}")
+            return
 
-        if stat_path.exists():
-            stat = np.load(stat_path, allow_pickle=True)
-            iscell = None
-            if iscell_path.exists():
-                iscell = np.load(iscell_path)
+        try:
+            from suite2p.gui.gui2p import MainWindow as Suite2pMainWindow
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import QRect
 
-            if "mean" in self.images:
-                h, w = self.images["mean"].shape[:2]
-                self.images["rois"] = self._create_roi_image(stat, iscell, h, w)
+            # close existing window for this position
+            if position == "left" and self._suite2p_left is not None:
+                try:
+                    self._suite2p_left.close()
+                except (RuntimeError, AttributeError):
+                    pass
+            elif position == "right" and self._suite2p_right is not None:
+                try:
+                    self._suite2p_right.close()
+                except (RuntimeError, AttributeError):
+                    pass
 
-        self._create_textures()
+            # create new window
+            window = Suite2pMainWindow(statfile=str(stat_path))
+            window.setWindowTitle(f"Suite2p - {combo_dir.name}")
 
-    def _normalize_image(self, img: np.ndarray) -> np.ndarray:
-        """Normalize image to 0-255 uint8."""
-        img = img.astype(np.float32)
-        img_min, img_max = img.min(), img.max()
-        if img_max > img_min:
-            img = (img - img_min) / (img_max - img_min) * 255
-        return img.astype(np.uint8)
+            # position windows side-by-side with proper margins for window decorations
+            screen = QApplication.primaryScreen()
+            if screen:
+                geom = screen.availableGeometry()
+                half_w = geom.width() // 2
+                # Leave margin for title bar and taskbar
+                margin_top = 30
+                margin_bottom = 10
+                win_height = geom.height() - margin_top - margin_bottom
 
-    def _create_roi_image(
-        self, stat: np.ndarray, iscell: np.ndarray | None, h: int, w: int
-    ) -> np.ndarray:
-        """Create RGB image with ROIs overlaid."""
-        rgb = np.zeros((h, w, 3), dtype=np.uint8)
-
-        for i, s in enumerate(stat):
-            is_cell = True
-            if iscell is not None:
-                if iscell.ndim == 2:
-                    is_cell = iscell[i, 0] > 0.5
+                if position == "left":
+                    window.setGeometry(QRect(geom.x(), geom.y() + margin_top, half_w, win_height))
+                    self._suite2p_left = window
+                    self._left_idx = idx
                 else:
-                    is_cell = iscell[i] > 0.5
+                    window.setGeometry(QRect(geom.x() + half_w, geom.y() + margin_top, half_w, win_height))
+                    self._suite2p_right = window
+                    self._right_idx = idx
 
-            ypix = s.get("ypix", [])
-            xpix = s.get("xpix", [])
+            window.setMinimumSize(400, 300)
+            window.show()
+            # Ensure window has normal state (not maximized/fullscreen)
+            window.showNormal()
 
-            if len(ypix) == 0:
-                continue
-
-            # clip to bounds
-            mask = (ypix >= 0) & (ypix < h) & (xpix >= 0) & (xpix < w)
-            ypix = ypix[mask]
-            xpix = xpix[mask]
-
-            if is_cell:
-                rgb[ypix, xpix, 1] = 200  # green for cells
-            else:
-                rgb[ypix, xpix, 0] = 200  # red for non-cells
-
-        return rgb
-
-    def _create_textures(self):
-        """Create OpenGL textures from loaded images."""
-        self._cleanup_textures()
-
-        for name, img in self.images.items():
-            if img is None:
-                continue
-
-            tex_id = GL.glGenTextures(1)
-            GL.glBindTexture(GL.GL_TEXTURE_2D, tex_id)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
-
-            if img.ndim == 2:
-                GL.glTexImage2D(
-                    GL.GL_TEXTURE_2D, 0, GL.GL_RED,
-                    img.shape[1], img.shape[0], 0,
-                    GL.GL_RED, GL.GL_UNSIGNED_BYTE, img
-                )
-            else:
-                GL.glTexImage2D(
-                    GL.GL_TEXTURE_2D, 0, GL.GL_RGB,
-                    img.shape[1], img.shape[0], 0,
-                    GL.GL_RGB, GL.GL_UNSIGNED_BYTE, img
-                )
-
-            self.textures[name] = tex_id
+        except ImportError as e:
+            print(f"Could not open suite2p GUI: {e}")
+        except Exception as e:
+            print(f"Error opening suite2p GUI: {e}")
 
     def draw(self):
         """Draw the grid search viewer UI."""
@@ -169,12 +208,12 @@ class GridSearchViewer:
             self._draw_load_ui()
             return
 
-        self._draw_navigation()
-        imgui.separator()
-        self._draw_images()
+        self._draw_comparison_ui()
 
     def _draw_load_ui(self):
         """Draw UI for loading results."""
+        imgui.text("No grid search results loaded.")
+        imgui.spacing()
         if imgui.button("Load Grid Search Results"):
             default_dir = str(get_last_dir("grid_search") or Path.home())
             self._file_dialog = pfd.select_folder(
@@ -188,71 +227,116 @@ class GridSearchViewer:
                 "with suite2p/plane0/ containing the results."
             )
 
-    def _draw_navigation(self):
-        """Draw navigation controls."""
+    def _draw_comparison_ui(self):
+        """Draw the comparison UI with two columns."""
         n_combos = len(self.param_combos)
-        combo_name = self.param_combos[self.current_idx].name if n_combos > 0 else "None"
+        imgui.text(f"Results: {self.results_path.name} ({n_combos} combinations)")
+        imgui.separator()
+        imgui.spacing()
 
-        imgui.text(f"Results: {self.results_path.name if self.results_path else 'None'}")
-        imgui.text(f"Combination {self.current_idx + 1}/{n_combos}: {combo_name}")
-
-        if imgui.button("< Prev") and self.current_idx > 0:
-            self.current_idx -= 1
-            self._load_current_images()
-
-        imgui.same_line()
-
-        if imgui.button("Next >") and self.current_idx < n_combos - 1:
-            self.current_idx += 1
-            self._load_current_images()
-
-        imgui.same_line()
-
-        imgui.set_next_item_width(200)
-        changed, new_val = imgui.slider_int(
-            "##combo_slider", self.current_idx, 0, max(0, n_combos - 1)
-        )
-        if changed and new_val != self.current_idx:
-            self.current_idx = new_val
-            self._load_current_images()
-
-        imgui.same_line()
-
-        if imgui.button("Load Different"):
-            default_dir = str(get_last_dir("grid_search") or Path.home())
-            self._file_dialog = pfd.select_folder(
-                "Select grid search results folder", default_dir
-            )
-
-    def _draw_images(self):
-        """Draw the images side by side."""
-        if not self.images:
-            imgui.text("No images found for this parameter combination")
-            return
-
+        # two-column layout
         avail = imgui.get_content_region_avail()
-        img_width = avail.x / 2 - 10
+        col_width = (avail.x - 20) / 2
 
-        # mean image
-        if "mean" in self.textures:
-            img = self.images["mean"]
-            aspect = img.shape[0] / img.shape[1]
-            display_h = img_width * aspect
-
-            imgui.text("Mean Image")
-            imgui.image(self.textures["mean"], imgui.ImVec2(img_width, display_h))
+        # left column
+        imgui.begin_group()
+        imgui.text("Left Window")
+        imgui.set_next_item_width(col_width - 100)
+        changed_l, new_left = imgui.combo(
+            "##left_combo",
+            self._left_idx,
+            [c.name for c in self.param_combos]
+        )
+        if changed_l:
+            self._left_idx = new_left
 
         imgui.same_line()
+        if imgui.button("Open##left"):
+            self._open_suite2p(self._left_idx, "left")
 
-        # ROI overlay
-        if "rois" in self.textures:
-            img = self.images["rois"]
-            aspect = img.shape[0] / img.shape[1]
-            display_h = img_width * aspect
+        # show stats for left
+        stats_l = self._get_stats(self._left_idx)
+        imgui.text(f"Cells: {stats_l['n_cells']}  Non-cells: {stats_l['n_not_cells']}  SNR: {stats_l['mean_snr']:.2f}")
+        imgui.end_group()
 
-            imgui.text("ROIs (green=cell, red=non-cell)")
-            imgui.image(self.textures["rois"], imgui.ImVec2(img_width, display_h))
+        imgui.same_line()
+        imgui.dummy(imgui.ImVec2(20, 0))
+        imgui.same_line()
+
+        # right column
+        imgui.begin_group()
+        imgui.text("Right Window")
+        imgui.set_next_item_width(col_width - 100)
+        changed_r, new_right = imgui.combo(
+            "##right_combo",
+            self._right_idx,
+            [c.name for c in self.param_combos]
+        )
+        if changed_r:
+            self._right_idx = new_right
+
+        imgui.same_line()
+        if imgui.button("Open##right"):
+            self._open_suite2p(self._right_idx, "right")
+
+        # show stats for right
+        stats_r = self._get_stats(self._right_idx)
+        imgui.text(f"Cells: {stats_r['n_cells']}  Non-cells: {stats_r['n_not_cells']}  SNR: {stats_r['mean_snr']:.2f}")
+        imgui.end_group()
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # open both button
+        if imgui.button("Open Both Side-by-Side"):
+            self._open_suite2p(self._left_idx, "left")
+            self._open_suite2p(self._right_idx, "right")
+
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Open both selected combinations in suite2p GUIs side-by-side")
+
+        # quick stats comparison table
+        imgui.spacing()
+        imgui.separator()
+        imgui.text("Quick Stats Comparison:")
+
+        if imgui.begin_table("stats_table", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):
+            imgui.table_setup_column("Combination")
+            imgui.table_setup_column("Cells")
+            imgui.table_setup_column("Non-cells")
+            imgui.table_setup_column("Mean SNR")
+            imgui.table_headers_row()
+
+            for i, combo in enumerate(self.param_combos):
+                stats = self._get_stats(i)
+                imgui.table_next_row()
+
+                imgui.table_next_column()
+                # highlight selected rows
+                if i == self._left_idx or i == self._right_idx:
+                    imgui.text_colored(imgui.ImVec4(0.3, 0.8, 0.3, 1.0), combo.name)
+                else:
+                    imgui.text(combo.name)
+
+                imgui.table_next_column()
+                imgui.text(str(stats["n_cells"]))
+
+                imgui.table_next_column()
+                imgui.text(str(stats["n_not_cells"]))
+
+                imgui.table_next_column()
+                imgui.text(f"{stats['mean_snr']:.2f}")
+
+            imgui.end_table()
 
     def cleanup(self):
-        """Clean up OpenGL resources."""
-        self._cleanup_textures()
+        """Clean up suite2p windows."""
+        for window in [self._suite2p_left, self._suite2p_right]:
+            if window is not None:
+                try:
+                    window.close()
+                except (RuntimeError, AttributeError):
+                    pass
+        self._suite2p_left = None
+        self._suite2p_right = None

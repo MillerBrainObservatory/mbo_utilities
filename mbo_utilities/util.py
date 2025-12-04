@@ -456,3 +456,51 @@ def listify_index(index, dim_size):
         raise TypeError(error_msg)
 
     return index_as_list
+
+
+def load_npy_crossplatform(path):
+    """Load a .npy file with cross-platform path compatibility.
+
+    Handles the case where .npy files containing pickled Path objects
+    were created on Linux (PosixPath) but opened on Windows, or vice versa.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to the .npy file.
+
+    Returns
+    -------
+    np.ndarray
+        Loaded array data.
+
+    Examples
+    --------
+    >>> ops = load_npy_crossplatform("ops.npy")
+    >>> if ops.ndim == 0:
+    ...     ops = ops.item()  # Convert 0-d array to dict
+    """
+    import pathlib
+    import sys
+
+    # Temporarily patch pathlib to handle cross-platform paths
+    # On Windows, PosixPath doesn't exist, so we redirect it to Path
+    # On Linux, WindowsPath doesn't exist, so we redirect it to Path
+    _original_posix = getattr(pathlib, 'PosixPath', None)
+    _original_windows = getattr(pathlib, 'WindowsPath', None)
+
+    try:
+        if sys.platform == 'win32':
+            # On Windows, redirect PosixPath to WindowsPath
+            pathlib.PosixPath = pathlib.WindowsPath
+        else:
+            # On Linux/Mac, redirect WindowsPath to PosixPath
+            pathlib.WindowsPath = pathlib.PosixPath
+
+        return np.load(path, allow_pickle=True)
+    finally:
+        # Restore original classes
+        if _original_posix is not None:
+            pathlib.PosixPath = _original_posix
+        if _original_windows is not None:
+            pathlib.WindowsPath = _original_windows

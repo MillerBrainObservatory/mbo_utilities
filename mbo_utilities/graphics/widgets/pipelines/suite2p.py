@@ -16,6 +16,7 @@ from mbo_utilities.graphics.widgets.pipelines._base import PipelineWidget
 from mbo_utilities.graphics._widgets import set_tooltip
 from mbo_utilities.graphics._availability import HAS_SUITE2P
 from mbo_utilities.graphics.diagnostics_widget import DiagnosticsWidget
+from mbo_utilities.graphics.grid_search_viewer import GridSearchViewer
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 if TYPE_CHECKING:
@@ -75,6 +76,12 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._diagnostics_popup_open = False
         self._file_dialog = None
 
+        # grid search viewer state
+        self._grid_search_widget = GridSearchViewer()
+        self._show_grid_search_popup = False
+        self._grid_search_popup_open = False
+        self._grid_search_dialog = None
+
         # suite2p GUI integration
         self._suite2p_window = None
         self._last_suite2p_ichosen = None
@@ -130,11 +137,12 @@ class Suite2pPipelineWidget(PipelineWidget):
         # Poll suite2p for selection changes
         self._poll_suite2p_selection()
 
-        # Draw diagnostics popup window (managed separately from config)
+        # Draw popup windows (managed separately from config)
         self._draw_diagnostics_popup()
+        self._draw_grid_search_popup()
 
     def _draw_diagnostics_button(self):
-        """Draw the button to load stat.npy and open diagnostics popup."""
+        """Draw buttons to load diagnostics and grid search results."""
         if imgui.button("Load stat.npy"):
             default_dir = str(get_last_dir("suite2p_stat") or Path.home())
             self._file_dialog = pfd.open_file(
@@ -149,6 +157,33 @@ class Suite2pPipelineWidget(PipelineWidget):
                 "Click cells in suite2p to update the diagnostics view."
             )
 
+        imgui.same_line()
+
+        # disable button if dialog is already open
+        dialog_pending = self._grid_search_dialog is not None
+        if dialog_pending:
+            imgui.begin_disabled()
+
+        if imgui.button("Grid Search..."):
+            if self._grid_search_dialog is None:
+                default_dir = str(get_last_dir("grid_search") or Path.home())
+                self._grid_search_dialog = pfd.select_folder(
+                    "Select grid search results folder", default_dir
+                )
+
+        if dialog_pending:
+            imgui.end_disabled()
+
+        if imgui.is_item_hovered():
+            if dialog_pending:
+                imgui.set_tooltip("Waiting for folder selection...")
+            else:
+                imgui.set_tooltip(
+                    "Load grid search results to compare parameter combinations.\n"
+                    "Select a folder containing subfolders for each parameter set,\n"
+                    "each with suite2p/plane0/ containing the results."
+                )
+
     def _poll_suite2p_selection(self):
         """Poll suite2p window for selection changes."""
         current_time = time.time()
@@ -158,6 +193,19 @@ class Suite2pPipelineWidget(PipelineWidget):
 
         if self._suite2p_window is None:
             return
+
+        # Check if window was closed by user - isVisible() returns False after close
+        try:
+            if not self._suite2p_window.isVisible():
+                self._suite2p_window = None
+                self._last_suite2p_ichosen = None
+                return
+        except RuntimeError:
+            # Window was deleted (Qt object wrapped C++ deleted)
+            self._suite2p_window = None
+            self._last_suite2p_ichosen = None
+            return
+
         if not hasattr(self._suite2p_window, 'loaded') or not self._suite2p_window.loaded:
             return
 
@@ -282,19 +330,28 @@ class Suite2pPipelineWidget(PipelineWidget):
                 # Split screen in half - each window gets 50% width
                 half_width = screen_w // 2
 
+                # Leave margin for title bar and taskbar
+                margin_top = 30
+                margin_bottom = 10
+                win_height = screen_h - margin_top - margin_bottom
+
                 # Suite2p goes on the RIGHT half
                 s2p_x = screen_x + half_width
-                s2p_y = screen_y
+                s2p_y = screen_y + margin_top
                 s2p_width = half_width
-                s2p_height = screen_h
 
                 # Set suite2p geometry and ensure it's resizable
-                self._suite2p_window.setGeometry(QRect(s2p_x, s2p_y, s2p_width, s2p_height))
+                self._suite2p_window.setGeometry(QRect(s2p_x, s2p_y, s2p_width, win_height))
 
                 # Set minimum size to allow shrinking (suite2p default min size is too large)
                 self._suite2p_window.setMinimumSize(400, 300)
 
+                # Try to reposition the MBO imgui window to the LEFT half
+                self._reposition_mbo_window(screen_x, screen_y + margin_top, half_width, win_height)
+
             self._suite2p_window.show()
+            # Ensure window has normal state (not maximized/fullscreen)
+            self._suite2p_window.showNormal()
             self._last_suite2p_ichosen = None
 
         except ImportError as e:
@@ -302,7 +359,113 @@ class Suite2pPipelineWidget(PipelineWidget):
         except Exception as e:
             print(f"Error opening suite2p GUI: {e}")
 
+    def _reposition_mbo_window(self, x: int, y: int, width: int, height: int):
+        """Reposition the MBO window to the specified geometry.
+
+        Uses the Qt canvas from fastplotlib's ImageWidget to find and
+        reposition the parent window.
+
+        Parameters
+        ----------
+        x, y : int
+            Window position
+        width, height : int
+            Window size
+        """
+        try:
+            from PySide6.QtCore import QRect
+
+            # Access the canvas through the parent widget hierarchy
+            # parent -> PreviewDataWidget -> image_widget -> figure -> canvas
+            if hasattr(self.parent, 'image_widget'):
+                canvas = self.parent.image_widget.figure.canvas
+                # Get the top-level window containing the canvas
+                if hasattr(canvas, 'window'):
+                    # rendercanvas provides window() method
+                    window = canvas.window()
+                    if window:
+                        window.setGeometry(QRect(x, y, width, height))
+                        return
+                # Fallback: traverse Qt parent hierarchy to find top-level window
+                widget = canvas
+                while widget is not None:
+                    if widget.isWindow():
+                        widget.setGeometry(QRect(x, y, width, height))
+                        return
+                    widget = widget.parent()
+        except Exception as e:
+            # Silently fail - window positioning is not critical
+            print(f"Could not reposition MBO window: {e}")
+
     @property
     def suite2p_window(self):
         """Access to the suite2p GUI window if open."""
         return self._suite2p_window
+
+    def _draw_grid_search_popup(self):
+        """Draw the grid search viewer popup window if open."""
+        # Check if folder dialog has a result
+        if self._grid_search_dialog is not None and self._grid_search_dialog.ready():
+            result = self._grid_search_dialog.result()
+            if result:
+                try:
+                    set_last_dir("grid_search", result)
+                    self._grid_search_widget.load_results(Path(result))
+                    self._show_grid_search_popup = True
+                except Exception as e:
+                    print(f"Error loading grid search results: {e}")
+            self._grid_search_dialog = None
+
+        if self._show_grid_search_popup:
+            self._grid_search_popup_open = True
+            imgui.open_popup("Grid Search Results")
+            self._show_grid_search_popup = False
+
+        # Set popup size
+        viewport = imgui.get_main_viewport()
+        popup_width = min(1200, viewport.size.x * 0.9)
+        popup_height = min(800, viewport.size.y * 0.85)
+        imgui.set_next_window_size(imgui.ImVec2(popup_width, popup_height), imgui.Cond_.first_use_ever)
+
+        opened, visible = imgui.begin_popup_modal(
+            "Grid Search Results",
+            p_open=True if self._grid_search_popup_open else None,
+            flags=imgui.WindowFlags_.no_saved_settings
+        )
+
+        if opened:
+            if not visible:
+                self._grid_search_popup_open = False
+                imgui.close_current_popup()
+            else:
+                try:
+                    self._grid_search_widget.draw()
+                except Exception as e:
+                    imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), f"Error: {e}")
+
+                imgui.spacing()
+                imgui.separator()
+                if imgui.button("Close", imgui.ImVec2(100, 0)):
+                    self._grid_search_popup_open = False
+                    imgui.close_current_popup()
+
+            imgui.end_popup()
+
+    def cleanup(self):
+        """Clean up resources when widget is destroyed.
+
+        Should be called when the parent GUI is closing to ensure
+        proper cleanup of Qt windows and other resources.
+        """
+        # Close suite2p window if open
+        if self._suite2p_window is not None:
+            try:
+                self._suite2p_window.close()
+            except (RuntimeError, AttributeError):
+                pass  # Window already deleted
+            self._suite2p_window = None
+            self._last_suite2p_ichosen = None
+
+        # Clear file dialogs (they are async and may be pending)
+        self._file_dialog = None
+        self._grid_search_dialog = None
