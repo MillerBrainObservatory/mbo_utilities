@@ -34,9 +34,9 @@ from imgui_bundle import (
 )
 
 from mbo_utilities.file_io import (
-    MBO_SUPPORTED_FTYPES,
     get_mbo_dirs,
 )
+from mbo_utilities.reader import MBO_SUPPORTED_FTYPES
 from mbo_utilities.preferences import (
     get_last_dir,
     set_last_dir,

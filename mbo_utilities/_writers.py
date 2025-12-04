@@ -11,9 +11,10 @@ from tifffile import TiffWriter, imwrite
 import h5py
 
 from . import log
-from .file_io import write_ops
+from .arrays.suite2p import write_ops
 from ._parsing import _make_json_serializable
 from .metadata import save_metadata_html
+from .util import load_npy
 
 from tqdm.auto import tqdm
 
@@ -230,7 +231,7 @@ def _write_plane(
             )
 
         try:
-            summary = np.load(Path(summary_path), allow_pickle=True).item()
+            summary = load_npy(summary_path).item()
         except Exception as e:
             raise RuntimeError(
                 f"Failed to load summary file: {summary_path}\nError: {e}"

@@ -63,7 +63,7 @@ __all__ = [
 def __getattr__(name):
     """Lazy import attributes to avoid loading heavy dependencies at startup."""
     # Core I/O (lazy_array -> array_types -> numpy, dask, tifffile)
-    if name in ("imread", "imwrite", "SUPPORTED_FTYPES"):
+    if name in ("imread", "imwrite", "MBO_SUPPORTED_FTYPES"):
         from . import lazy_array
         return getattr(lazy_array, name)
 

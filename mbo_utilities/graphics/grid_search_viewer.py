@@ -8,7 +8,7 @@ from pathlib import Path
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from mbo_utilities.preferences import get_last_dir, set_last_dir
-from mbo_utilities.util import load_npy_crossplatform
+from mbo_utilities.util import load_npy
 
 
 def _load_stats(plane_dir: Path) -> dict:
@@ -17,7 +17,7 @@ def _load_stats(plane_dir: Path) -> dict:
 
     iscell_path = plane_dir / "iscell.npy"
     if iscell_path.exists():
-        iscell = load_npy_crossplatform(iscell_path)
+        iscell = load_npy(iscell_path)
         if iscell.ndim == 2:
             stats["n_cells"] = int(np.sum(iscell[:, 0] > 0.5))
         else:
@@ -27,7 +27,7 @@ def _load_stats(plane_dir: Path) -> dict:
         # calculate SNR if F.npy exists
         f_path = plane_dir / "F.npy"
         if f_path.exists():
-            F = load_npy_crossplatform(f_path)
+            F = load_npy(f_path)
             cell_mask = iscell[:, 0] > 0.5 if iscell.ndim == 2 else iscell > 0.5
             if np.any(cell_mask):
                 F_cells = F[cell_mask]

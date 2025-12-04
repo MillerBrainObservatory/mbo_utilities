@@ -14,6 +14,7 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.util import load_npy
 
 logger = log.get("arrays.bin")
 
@@ -66,7 +67,7 @@ class BinArray(ReductionMixin):
             ops_file = self.filename.parent / "ops.npy"
             if ops_file.exists():
                 try:
-                    ops = np.load(ops_file, allow_pickle=True).item()
+                    ops = load_npy(ops_file).item()
                     Ly = ops.get("Ly")
                     Lx = ops.get("Lx")
                     nframes = ops.get("nframes", ops.get("n_frames"))
