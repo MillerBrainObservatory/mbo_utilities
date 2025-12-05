@@ -10,6 +10,7 @@ from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_i
 
 from mbo_utilities.graphics._widgets import set_tooltip, compact_header
 from mbo_utilities.preferences import get_last_dir, set_last_dir
+from mbo_utilities._parsing import _convert_paths_to_strings
 
 try:
     from lbm_suite2p_python.run_lsp import run_plane, run_plane_bin
@@ -146,8 +147,9 @@ class Suite2pSettings:
         }
 
     def to_file(self, filepath):
-        """Save settings to a JSON file."""
-        np.save(filepath, self.to_dict(), allow_pickle=True)
+        """Save settings to a .npy file."""
+        # Convert Path objects to strings for cross-platform compatibility
+        np.save(filepath, _convert_paths_to_strings(self.to_dict()), allow_pickle=True)
 
 
 def draw_tab_process(self):

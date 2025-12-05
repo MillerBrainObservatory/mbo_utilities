@@ -15,6 +15,7 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 from mbo_utilities.util import load_npy
+from mbo_utilities._parsing import _convert_paths_to_strings
 
 logger = log.get("arrays.bin")
 
@@ -204,9 +205,9 @@ class BinArray(ReductionMixin):
             else:
                 logger.info(f"Binary file already exists: {outfile}")
 
-            # Write ops.npy
+            # Write ops.npy (convert Path objects to strings for cross-platform compatibility)
             ops_file = outpath / "ops.npy"
-            np.save(ops_file, md)
+            np.save(ops_file, _convert_paths_to_strings(md))
             logger.info(f"Wrote ops.npy to {ops_file}")
             return outpath
 

@@ -483,25 +483,52 @@ def load_npy(path):
     """
     import pathlib
     import sys
+    import pickle
 
-    # Temporarily patch pathlib to handle cross-platform paths
-    # On Windows, PosixPath doesn't exist, so we redirect it to Path
-    # On Linux, WindowsPath doesn't exist, so we redirect it to Path
-    _original_posix = getattr(pathlib, 'PosixPath', None)
-    _original_windows = getattr(pathlib, 'WindowsPath', None)
+    # Create a custom unpickler that handles cross-platform Path objects
+    class CrossPlatformUnpickler(pickle.Unpickler):
+        def find_class(self, module, name):
+            # Redirect PosixPath/WindowsPath to the current platform's Path
+            if module == 'pathlib':
+                if name in ('PosixPath', 'WindowsPath', 'PurePosixPath', 'PureWindowsPath'):
+                    # Return Path which auto-selects the right type for current platform
+                    return pathlib.Path
+            return super().find_class(module, name)
 
+    # Try loading with cross-platform unpickler first
     try:
-        if sys.platform == 'win32':
-            # On Windows, redirect PosixPath to WindowsPath
-            pathlib.PosixPath = pathlib.WindowsPath
-        else:
-            # On Linux/Mac, redirect WindowsPath to PosixPath
-            pathlib.WindowsPath = pathlib.PosixPath
+        with open(path, 'rb') as f:
+            # Read numpy header to get to the pickle data
+            version = np.lib.format.read_magic(f)
+            shape, fortran_order, dtype = np.lib.format._read_array_header(f, version)
 
-        return np.load(path, allow_pickle=True)
-    finally:
-        # Restore original classes
-        if _original_posix is not None:
-            pathlib.PosixPath = _original_posix
-        if _original_windows is not None:
-            pathlib.WindowsPath = _original_windows
+            if dtype.hasobject:
+                # Contains Python objects - use our custom unpickler
+                # Reset file position and let numpy handle the header again
+                f.seek(0)
+                np.lib.format.read_magic(f)
+                np.lib.format._read_array_header(f, version)
+
+                # Now unpickle the data
+                return CrossPlatformUnpickler(f).load()
+            else:
+                # No objects, can use standard numpy load
+                f.seek(0)
+                return np.load(f, allow_pickle=True)
+    except Exception:
+        # Fallback: try the old patching method
+        _original_posix = getattr(pathlib, 'PosixPath', None)
+        _original_windows = getattr(pathlib, 'WindowsPath', None)
+
+        try:
+            if sys.platform == 'win32':
+                pathlib.PosixPath = pathlib.WindowsPath
+            else:
+                pathlib.WindowsPath = pathlib.PosixPath
+
+            return np.load(path, allow_pickle=True)
+        finally:
+            if _original_posix is not None:
+                pathlib.PosixPath = _original_posix
+            if _original_windows is not None:
+                pathlib.WindowsPath = _original_windows
