@@ -5,26 +5,9 @@ from mbo_utilities import imread
 import fastplotlib as fpl
 from mbo_utilities import subsample_array
 
-# Initial data path
-data_path = r"D:/"
+# Initial data
+data_path = r"D:\cj\2025-11-21\results\grid_search\ana4_dia2_cel0.00_flo0.00_spa0.50"
 data = imread(data_path)
-print(f"Initial data shape: {data.shape}")
-
-# start = time.time()
-# ss_arr = subsample_array(data, ignore_dims=(1, 2, 3))
-# end = time.time()
-# print(end - start)
-# print(ss_arr.shape)
-#
-# del ss_arr
-#
-# start = time.time()
-# ss_arr = data[::10, 0]
-# end = time.time()
-# print(end - start)
-# print(ss_arr.shape)
-
-# Create ImageWidget
 pdw = run_gui(data)
 x = 5
 # iw = fpl.ImageWidget(

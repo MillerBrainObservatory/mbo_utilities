@@ -57,6 +57,9 @@ class GridSearchViewer:
         # stats cache
         self._stats_cache = {}
 
+        # completeness cache (files required for suite2p GUI)
+        self._complete_cache = {}
+
         # error message state (for showing in UI)
         self._error_message = None
 
@@ -97,6 +100,7 @@ class GridSearchViewer:
             raise ValueError(f"No parameter combination folders found in {path}")
 
         self._stats_cache = {}
+        self._complete_cache = {}
         self.loaded = True
 
     def _find_plane_dir(self, combo_dir: Path) -> Path | None:
@@ -120,10 +124,25 @@ class GridSearchViewer:
             (is_complete, missing_files)
         """
         import os
-        required_files = ["stat.npy", "ops.npy"]
+        # All files required by suite2p GUI's load_files function
+        required_files = ["stat.npy", "ops.npy", "F.npy", "Fneu.npy", "spks.npy"]
         # Use os.path.exists for consistent behavior with UNC paths
         missing = [f for f in required_files if not os.path.exists(os.path.join(str(plane_dir), f))]
         return len(missing) == 0, missing
+
+    def _is_combo_complete(self, idx: int) -> tuple[bool, list[str]]:
+        """Check if a parameter combination has all required files for suite2p GUI.
+
+        Returns cached result to avoid repeated filesystem checks.
+        """
+        if idx not in self._complete_cache:
+            combo_dir = self.param_combos[idx]
+            plane_dir = self._find_plane_dir(combo_dir)
+            if plane_dir is None:
+                self._complete_cache[idx] = (False, ["no suite2p results found"])
+            else:
+                self._complete_cache[idx] = self._check_suite2p_complete(plane_dir)
+        return self._complete_cache[idx]
 
     def _get_stats(self, idx: int) -> dict:
         """Get cached stats for a parameter combination."""
@@ -162,18 +181,11 @@ class GridSearchViewer:
             return f"No stat.npy found in {plane_dir}"
 
         # Check for required files BEFORE importing suite2p GUI
-        # (suite2p prints errors during import/init that we can't suppress)
         import os
 
         # Use os.path for all checks - more reliable with various path types
         plane_dir_str = str(plane_dir)
         ops_check_path = os.path.join(plane_dir_str, "ops.npy")
-        stat_check_path = os.path.join(plane_dir_str, "stat.npy")
-
-        # Debug: print what we're checking
-        print(f"DEBUG: Checking plane_dir: {plane_dir_str}")
-        print(f"DEBUG: ops exists: {os.path.isfile(ops_check_path)} at {ops_check_path}")
-        print(f"DEBUG: stat exists: {os.path.isfile(stat_check_path)} at {stat_check_path}")
 
         if not os.path.isfile(ops_check_path):
             return f"ops.npy not found at: {ops_check_path}\nSuite2p GUI requires ops.npy in the same folder as stat.npy.\nGrid search may have saved minimal results only."
@@ -287,6 +299,10 @@ class GridSearchViewer:
         avail = imgui.get_content_region_avail()
         col_width = (avail.x - 20) / 2
 
+        # Check completeness for both selected combos
+        left_complete, left_missing = self._is_combo_complete(self._left_idx)
+        right_complete, right_missing = self._is_combo_complete(self._right_idx)
+
         # left column
         imgui.begin_group()
         imgui.text("Left Window")
@@ -300,14 +316,25 @@ class GridSearchViewer:
             self._left_idx = new_left
 
         imgui.same_line()
+        if not left_complete:
+            imgui.begin_disabled()
         if imgui.button("Open##left"):
             err = self._open_suite2p(self._left_idx, "left")
             if err:
                 self._error_message = err
+        if not left_complete:
+            imgui.end_disabled()
+            if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                imgui.set_tooltip(f"Missing: {', '.join(left_missing)}")
 
         # show stats for left
         stats_l = self._get_stats(self._left_idx)
-        imgui.text(f"Cells: {stats_l['n_cells']}  Non-cells: {stats_l['n_not_cells']}  SNR: {stats_l['mean_snr']:.2f}")
+        if not left_complete:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.2, 1.0), f"Incomplete - missing: {', '.join(left_missing)}")
+        elif stats_l['n_cells'] == 0:
+            imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "No detected cells")
+        else:
+            imgui.text(f"Cells: {stats_l['n_cells']}  Non-cells: {stats_l['n_not_cells']}  SNR: {stats_l['mean_snr']:.2f}")
         imgui.end_group()
 
         imgui.same_line()
@@ -327,21 +354,35 @@ class GridSearchViewer:
             self._right_idx = new_right
 
         imgui.same_line()
+        if not right_complete:
+            imgui.begin_disabled()
         if imgui.button("Open##right"):
             err = self._open_suite2p(self._right_idx, "right")
             if err:
                 self._error_message = err
+        if not right_complete:
+            imgui.end_disabled()
+            if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                imgui.set_tooltip(f"Missing: {', '.join(right_missing)}")
 
         # show stats for right
         stats_r = self._get_stats(self._right_idx)
-        imgui.text(f"Cells: {stats_r['n_cells']}  Non-cells: {stats_r['n_not_cells']}  SNR: {stats_r['mean_snr']:.2f}")
+        if not right_complete:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.2, 1.0), f"Incomplete - missing: {', '.join(right_missing)}")
+        elif stats_r['n_cells'] == 0:
+            imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "No detected cells")
+        else:
+            imgui.text(f"Cells: {stats_r['n_cells']}  Non-cells: {stats_r['n_not_cells']}  SNR: {stats_r['mean_snr']:.2f}")
         imgui.end_group()
 
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
 
-        # open both button
+        # open both button - disable if either is incomplete
+        both_complete = left_complete and right_complete
+        if not both_complete:
+            imgui.begin_disabled()
         if imgui.button("Open Both Side-by-Side"):
             err_left = self._open_suite2p(self._left_idx, "left")
             err_right = self._open_suite2p(self._right_idx, "right")
@@ -350,6 +391,10 @@ class GridSearchViewer:
                 self._error_message = err_left
             elif err_right:
                 self._error_message = err_right
+        if not both_complete:
+            imgui.end_disabled()
+            if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                imgui.set_tooltip("One or both selections are missing required suite2p files")
 
         if imgui.is_item_hovered():
             imgui.set_tooltip("Open both selected combinations in suite2p GUIs side-by-side")
@@ -359,8 +404,9 @@ class GridSearchViewer:
         imgui.separator()
         imgui.text("Quick Stats Comparison:")
 
-        if imgui.begin_table("stats_table", 4, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):
+        if imgui.begin_table("stats_table", 5, imgui.TableFlags_.borders | imgui.TableFlags_.row_bg):
             imgui.table_setup_column("Combination")
+            imgui.table_setup_column("Status")
             imgui.table_setup_column("Cells")
             imgui.table_setup_column("Non-cells")
             imgui.table_setup_column("Mean SNR")
@@ -368,6 +414,7 @@ class GridSearchViewer:
 
             for i, combo in enumerate(self.param_combos):
                 stats = self._get_stats(i)
+                is_complete, missing = self._is_combo_complete(i)
                 imgui.table_next_row()
 
                 imgui.table_next_column()
@@ -376,6 +423,16 @@ class GridSearchViewer:
                     imgui.text_colored(imgui.ImVec4(0.3, 0.8, 0.3, 1.0), combo.name)
                 else:
                     imgui.text(combo.name)
+
+                imgui.table_next_column()
+                if not is_complete:
+                    imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.2, 1.0), "Incomplete")
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip(f"Missing: {', '.join(missing)}")
+                elif stats["n_cells"] == 0:
+                    imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "No cells")
+                else:
+                    imgui.text_colored(imgui.ImVec4(0.3, 0.8, 0.3, 1.0), "Ready")
 
                 imgui.table_next_column()
                 imgui.text(str(stats["n_cells"]))

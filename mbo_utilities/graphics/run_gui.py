@@ -473,6 +473,7 @@ def _run_gui_impl(
     roi: Optional[Union[int, tuple[int, ...]]] = None,
     widget: bool = True,
     metadata_only: bool = False,
+    select_only: bool = False,
 ):
     """Internal implementation of run_gui with all heavy imports."""
     # Set up Qt backend before any GUI imports
@@ -493,6 +494,10 @@ def _run_gui_impl(
         # Use ROI from dialog if not specified in function call
         if roi is None:
             roi = roi_from_dialog
+
+    # If select_only, just return the path without loading data or opening viewer
+    if select_only:
+        return data_in
 
     # Normalize ROI to standard format
     roi = normalize_roi(roi)
@@ -528,6 +533,7 @@ def run_gui(
     roi: Optional[Union[int, tuple[int, ...]]] = None,
     widget: bool = True,
     metadata_only: bool = False,
+    select_only: bool = False,
 ):
     """
     Open a GUI to preview data of any supported type.
@@ -546,12 +552,16 @@ def run_gui(
         Enable PreviewDataWidget for raw ScanImage tiffs.
     metadata_only : bool, default False
         If True, only show metadata inspector (no image viewer).
+    select_only : bool, default False
+        If True, only show file selection dialog and return the selected path.
+        Does not load data or open the image viewer.
 
     Returns
     -------
-    ImageWidget or None
+    ImageWidget, Path, or None
         In Jupyter: returns the ImageWidget (already shown via iw.show()).
         In standalone: returns None (runs event loop until closed).
+        With select_only=True: returns the selected path (str or Path).
 
     Examples
     --------
@@ -562,17 +572,22 @@ def run_gui(
     >>> # Option 2: Get reference to manipulate it
     >>> iw = run_gui("path/to/data.tif", roi=1, widget=False)
     >>> iw.cmap = "viridis"  # Change colormap
+    >>> # Option 3: Just get file path from dialog
+    >>> path = run_gui(select_only=True)
+    >>> print(f"Selected: {path}")
 
     From command line:
     $ mbo path/to/data.tif
     $ mbo path/to/data.tif --roi 1 --no-widget
     $ mbo path/to/data.tif --metadata-only
+    $ mbo --select-only  # Just open file dialog
     """
     return _run_gui_impl(
         data_in=data_in,
         roi=roi,
         widget=widget,
         metadata_only=metadata_only,
+        select_only=select_only,
     )
 
 
@@ -596,6 +611,11 @@ def run_gui(
     help="If enabled, only show extracted metadata.",
 )
 @click.option(
+    "--select-only",
+    is_flag=True,
+    help="Only show file selection dialog and print selected path. Does not open viewer.",
+)
+@click.option(
     "--download-notebook",
     is_flag=True,
     help="Download a Jupyter notebook and exit. Uses --notebook-url if provided, else downloads user guide.",
@@ -612,7 +632,7 @@ def run_gui(
     help="Verify the installation of mbo_utilities and dependencies.",
 )
 @click.argument("data_in", required=False)
-def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, download_notebook=False, notebook_url=None, check_install=False):
+def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, select_only=False, download_notebook=False, notebook_url=None, check_install=False):
     """CLI entry point for mbo-gui command."""
     # Handle installation check first (light operation)
     if check_install:
@@ -628,12 +648,17 @@ def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, downloa
         return
 
     # Run the GUI (heavy imports happen here)
-    run_gui(
+    result = run_gui(
         data_in=data_in,
         roi=roi if roi else None,
         widget=widget,
         metadata_only=metadata_only,
+        select_only=select_only,
     )
+
+    # If select_only, print the selected path
+    if select_only and result:
+        click.echo(result)
 
 
 if __name__ == "__main__":

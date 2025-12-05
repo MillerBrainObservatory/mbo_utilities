@@ -10,10 +10,9 @@ from pathlib import Path
 import time
 
 import numpy as np
-from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui, implot
+from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from mbo_utilities.graphics.widgets.pipelines._base import PipelineWidget
-from mbo_utilities.graphics._widgets import set_tooltip
 from mbo_utilities.graphics._availability import HAS_SUITE2P
 from mbo_utilities.graphics.diagnostics_widget import DiagnosticsWidget
 from mbo_utilities.graphics.grid_search_viewer import GridSearchViewer
@@ -29,17 +28,16 @@ try:
     if not hasattr(QSlider, 'NoTicks'):
         QSlider.NoTicks = QSlider.TickPosition.NoTicks
 except ImportError:
+    QSlider = None
     pass  # PySide6 not available
 
 # check if lbm_suite2p_python is available
 try:
-    from lbm_suite2p_python.run_lsp import run_plane, run_plane_bin
     from lbm_suite2p_python import load_planar_results
     HAS_LSP = True
 except ImportError:
     HAS_LSP = False
     run_plane = None
-    run_plane_bin = None
     load_planar_results = None
 
 
@@ -48,7 +46,7 @@ class Suite2pPipelineWidget(PipelineWidget):
 
     name = "Suite2p"
     is_available = HAS_SUITE2P and HAS_LSP
-    install_command = "uv pip install mbo_utilities[suite2p]"
+    install_command = "uv pip install mbo_utilities[all]"
 
     def __init__(self, parent: "PreviewDataWidget"):
         super().__init__(parent)

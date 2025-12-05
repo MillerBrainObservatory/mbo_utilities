@@ -11,7 +11,6 @@ import numpy as np
 from pathlib import Path
 from imgui_bundle import imgui, implot, portable_file_dialogs as pfd
 
-from mbo_utilities.graphics._availability import HAS_SUITE2P
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 
@@ -71,26 +70,53 @@ class DiagnosticsWidget:
 
     def load_results(self, plane_dir: Path):
         """Load suite2p results from a plane directory."""
-        if not HAS_SUITE2P:
-            raise ImportError("suite2p or lbm_suite2p_python not available")
-
-        from lbm_suite2p_python import load_planar_results, load_ops
+        from mbo_utilities.util import load_npy
 
         plane_dir = Path(plane_dir)
-        results = load_planar_results(plane_dir)
 
-        self.stat = results.get("stat")
-        self.iscell = results.get("iscell")
-        if self.iscell is not None:
-            self.iscell_original = self.iscell.copy()
-        self.F = results.get("F")
-        self.Fneu = results.get("Fneu")
-
+        # Load ops.npy first to get save_path (may differ from plane_dir)
         ops_path = plane_dir / "ops.npy"
         if ops_path.exists():
-            self.ops = load_ops(ops_path)
+            ops_arr = load_npy(ops_path)
+            self.ops = ops_arr.item() if ops_arr.ndim == 0 else ops_arr
+            # Use save_path from ops if available, otherwise use plane_dir
+            save_path = Path(self.ops.get("save_path", plane_dir))
+            # Handle cross-platform path issues - if save_path doesn't exist, use plane_dir
+            if not save_path.exists():
+                save_path = plane_dir
         else:
             self.ops = None
+            save_path = plane_dir
+
+        # Load required files using cross-platform loader
+        stat_path = save_path / "stat.npy"
+        iscell_path = save_path / "iscell.npy"
+        f_path = save_path / "F.npy"
+        fneu_path = save_path / "Fneu.npy"
+
+        if stat_path.exists():
+            self.stat = load_npy(stat_path)
+        else:
+            self.stat = None
+
+        if iscell_path.exists():
+            self.iscell = load_npy(iscell_path)
+            if self.iscell is not None:
+                self.iscell_original = self.iscell.copy()
+        else:
+            self.iscell = None
+            self.iscell_original = None
+
+        if f_path.exists():
+            self.F = load_npy(f_path)
+        else:
+            self.F = None
+
+        if fneu_path.exists():
+            self.Fneu = load_npy(fneu_path)
+        else:
+            self.Fneu = None
+
         self.loaded_path = plane_dir
 
         self._compute_metrics()
