@@ -11,8 +11,7 @@ from tifffile import TiffWriter, imwrite
 import h5py
 
 from . import log
-from .arrays.suite2p import write_ops
-from ._parsing import _make_json_serializable
+from ._parsing import _make_json_serializable, _convert_paths_to_strings
 from .metadata import save_metadata_html
 from .util import load_npy
 
@@ -891,7 +890,8 @@ def _try_generic_writers(
         if metadata is None:
             np.save(outpath, data)
         else:
-            np.savez(outpath, data=data, metadata=metadata)
+            # Convert Path objects to strings for cross-platform compatibility
+            np.savez(outpath, data=data, metadata=_convert_paths_to_strings(metadata))
     elif outpath.suffix.lower() in {".tif", ".tiff"}:
         imwrite(
             outpath,
@@ -922,6 +922,149 @@ def _try_generic_writers(
             ops["Ly"] = arr.shape[-2] if arr.ndim >= 2 else 1
             ops["Lx"] = arr.shape[-1] if arr.ndim >= 1 else 1
             ops["nframes"] = arr.shape[0] if arr.ndim >= 1 else 1
-            np.save(outpath.parent / "ops.npy", ops)
+            # Convert Path objects to strings for cross-platform compatibility
+            np.save(outpath.parent / "ops.npy", _convert_paths_to_strings(ops))
     else:
         raise ValueError(f"Unsupported file extension: {outpath.suffix}")
+
+
+def write_ops(metadata, raw_filename, **kwargs):
+    """
+    Write metadata to an ops file alongside the given filename.
+
+    This creates a Suite2p-compatible ops.npy file from the provided metadata.
+    The ops file is used by Suite2p for processing configuration.
+
+    Parameters
+    ----------
+    metadata : dict
+        Must contain 'shape' key with (T, Y, X) dimensions.
+        Optional keys: 'pixel_resolution', 'frame_rate', 'fs', 'dx', 'dy', 'dz'.
+    raw_filename : str or Path
+        Path to the data file (e.g., data_raw.bin). The ops.npy will be
+        written to the same directory.
+    **kwargs
+        Additional arguments. 'structural=True' indicates channel 2 data.
+    """
+    logger.debug(f"Writing ops file for {raw_filename} with metadata: {metadata}")
+    if not isinstance(raw_filename, (str, Path)):
+        raise TypeError(f"raw_filename must be str or Path, got {type(raw_filename)}")
+    filename = Path(raw_filename).expanduser().resolve()
+
+    structural = kwargs.get("structural", False)
+    chan = 2 if structural or "data_chan2.bin" in str(filename) else 1
+    logger.debug(f"Detected channel {chan}")
+
+    # Always use parent directory - raw_filename should be a file path like data_raw.bin
+    # The old check `filename.is_file()` failed when file was just created but not yet flushed
+    if filename.suffix:
+        # Has a file extension, use parent as root
+        root = filename.parent
+    else:
+        # No extension, assume it's a directory path (backward compatibility)
+        root = filename if filename.is_dir() else filename.parent
+    ops_path = root / "ops.npy"
+    logger.info(f"Writing ops file to {ops_path}")
+
+    shape = metadata["shape"]
+    nt, Ly, Lx = shape[0], shape[-2], shape[-1]  # shape is (T, Y, X), so [-2]=Ly, [-1]=Lx
+
+    # Check if num_frames was explicitly set (takes precedence over shape)
+    if "num_frames" in metadata:
+        nt_metadata = int(metadata["num_frames"])
+        if nt_metadata != shape[0]:
+            raise ValueError(
+                f"Inconsistent frame count in metadata!\n"
+                f"metadata['num_frames'] = {nt_metadata}\n"
+                f"metadata['shape'][0] = {shape[0]}\n"
+                f"These must match. Check your data and metadata."
+            )
+        nt = nt_metadata
+        logger.debug(f"Using explicit num_frames={nt} from metadata")
+    elif "nframes" in metadata:
+        nt_metadata = int(metadata["nframes"])
+        if nt_metadata != shape[0]:
+            raise ValueError(
+                f"Inconsistent frame count in metadata!\n"
+                f"metadata['nframes'] = {nt_metadata}\n"
+                f"metadata['shape'][0] = {shape[0]}\n"
+                f"These must match. Check your data and metadata."
+            )
+        nt = nt_metadata
+        logger.debug(f"Using explicit nframes={nt} from metadata")
+
+    if "fs" not in metadata:
+        if "frame_rate" in metadata:
+            metadata["fs"] = metadata["frame_rate"]
+        elif "framerate" in metadata:
+            metadata["fs"] = metadata["framerate"]
+        else:
+            logger.warning("No frame rate found; defaulting fs=10")
+            metadata["fs"] = 10
+
+    # Use get_voxel_size for consistent resolution handling across all aliases
+    from mbo_utilities.metadata import get_voxel_size
+    voxel_size = get_voxel_size(metadata)
+    dx, dy, dz = voxel_size.dx, voxel_size.dy, voxel_size.dz
+
+    # Load or initialize ops
+    if ops_path.exists():
+        ops = load_npy(ops_path).item()
+    else:
+        from mbo_utilities.metadata import default_ops
+        ops = default_ops()
+
+    # Update shared core fields - ensure all resolution aliases are consistent
+    ops.update(
+        {
+            "Ly": Ly,
+            "Lx": Lx,
+            "fs": metadata["fs"],
+            # Canonical resolution keys
+            "dx": dx,
+            "dy": dy,
+            "dz": dz,
+            # Suite2p aliases (must match canonical)
+            "umPerPixX": dx,
+            "umPerPixY": dy,
+            "umPerPixZ": dz,
+            # Tuple format for legacy compatibility
+            "pixel_resolution": (dx, dy),
+            "z_step": dz,
+            "ops_path": str(ops_path),
+        }
+    )
+
+    # Channel-specific entries
+    # Use the potentially overridden nt (from num_frames or nframes)
+    if chan == 1:
+        ops["nframes_chan1"] = nt
+        ops["raw_file"] = str(filename)
+    else:
+        ops["nframes_chan2"] = nt
+        ops["chan2_file"] = str(filename)
+
+    ops["align_by_chan"] = chan
+
+    # Set top-level nframes to match the written channel
+    # This ensures consistency between nframes and nframes_chan1/chan2
+    ops["nframes"] = nt
+
+    # Merge extra metadata, but DON'T overwrite fields we've already set consistently
+    # This prevents inconsistency between resolution aliases and frame counts
+    protected_keys = {
+        # Frame count fields
+        "nframes", "nframes_chan1", "nframes_chan2", "num_frames",
+        # Resolution fields (we've already set these consistently)
+        "dx", "dy", "dz", "umPerPixX", "umPerPixY", "umPerPixZ",
+        "pixel_resolution", "z_step",
+    }
+    for key, value in metadata.items():
+        if key not in protected_keys:
+            ops[key] = value
+
+    # Convert Path objects to strings for cross-platform compatibility
+    np.save(ops_path, _convert_paths_to_strings(ops))
+    logger.debug(
+        f"Ops file written to {ops_path} with nframes={ops['nframes']}, nframes_chan1={ops.get('nframes_chan1')}"
+    )

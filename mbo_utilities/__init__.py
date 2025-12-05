@@ -30,7 +30,6 @@ __all__ = [
     "expand_paths",
     "load_ops",
     "write_ops",
-    "get_plane_from_filename",
     "merge_zarr_zplanes",
     # Metadata
     "is_raw_scanimage",
@@ -75,7 +74,6 @@ def __getattr__(name):
         "expand_paths",
         "load_ops",
         "write_ops",
-        "get_plane_from_filename",
         "merge_zarr_zplanes",
     ):
         from . import file_io

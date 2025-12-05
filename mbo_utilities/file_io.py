@@ -9,7 +9,9 @@ import dask.array as da
 from tifffile import tifffile
 
 from . import log
-from .reader import PIPELINE_TAGS
+
+# Tags used to identify plane/roi outputs in filenames
+PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
 
 try:
     from zarr import open as zarr_open
@@ -147,6 +149,64 @@ def sort_by_si_filename(filename):
     return int(numbers[-1]) if numbers else 0
 
 
+def _is_leaf_zarr(path: Path) -> bool:
+    """Check if a .zarr directory is a leaf (no nested .zarr subdirs).
+
+    A leaf zarr store contains chunk data (numbered directories like 0/, 1/)
+    and metadata files, but no nested .zarr directories.
+    """
+    if not path.is_dir() or not path.suffix == ".zarr":
+        return False
+    # Check if any immediate subdirectory is also a .zarr
+    try:
+        for child in path.iterdir():
+            if child.is_dir() and child.suffix == ".zarr":
+                return False  # Has nested zarr, not a leaf
+    except (PermissionError, OSError):
+        pass
+    return True
+
+
+def _walk_with_zarr_filter(base_path: Path, max_depth: int, exclude_dirs: list):
+    """Walk directory tree, stopping at leaf .zarr directories.
+
+    Yields files found during traversal. Does not recurse into:
+    - Leaf .zarr directories (those without nested .zarr subdirs)
+    - Excluded directories
+    - Directories beyond max_depth
+    """
+    base_depth = len(base_path.parts)
+
+    def _walk(current: Path, depth: int):
+        if depth > max_depth:
+            return
+
+        try:
+            entries = list(current.iterdir())
+        except (PermissionError, OSError):
+            return
+
+        for entry in entries:
+            # Skip excluded directories
+            if entry.name in exclude_dirs:
+                continue
+
+            if entry.is_file():
+                yield entry
+            elif entry.is_dir():
+                # If this is a leaf .zarr store, yield it as a "file" (the store itself)
+                # and don't recurse into its chunk directories
+                if _is_leaf_zarr(entry):
+                    # Yield the zarr directory itself as if it were a file
+                    # (zarr stores are treated as single units)
+                    yield entry
+                else:
+                    # Recurse into non-leaf directories
+                    yield from _walk(entry, depth + 1)
+
+    yield from _walk(base_path, 0)
+
+
 def get_files(
     base_dir, str_contains="", max_depth=1, sort_ascending=True, exclude_dirs=None
 ) -> list | Path:
@@ -154,6 +214,10 @@ def get_files(
     Recursively search for files in a specified directory whose names contain a given substring,
     limiting the search to a maximum subdirectory depth. Optionally, the resulting list of file paths
     is sorted in ascending order using numeric parts of the filenames when available.
+
+    This function intelligently handles zarr stores: it stops recursing into leaf .zarr
+    directories (those that don't contain nested .zarr subdirs) to avoid traversing
+    thousands of internal chunk directories.
 
     Parameters
     ----------
@@ -195,7 +259,12 @@ def get_files(
     >>> # Get only files containing "tif" in the current directory (max_depth=1):
     >>> tif_files = mbo.get_files("path/to/files", "tif")
     """
-    base_path = Path(base_dir).expanduser().resolve()
+    # Handle UNC paths carefully - resolve() can break them on Windows
+    base_path = Path(base_dir).expanduser()
+    # Only resolve non-UNC paths (UNC paths start with \\)
+    path_str = str(base_path)
+    if not path_str.startswith('\\\\'):
+        base_path = base_path.resolve()
     if not base_path.exists():
         raise FileNotFoundError(f"Directory '{base_path}' does not exist.")
     if not base_path.is_dir():
@@ -203,19 +272,16 @@ def get_files(
     if max_depth == 0:
         max_depth = 1
 
-    base_depth = len(base_path.parts)
-    pattern = f"*{str_contains}*" if str_contains else "*"
-
     if exclude_dirs is None:
         exclude_dirs = [".venv", ".git", "__pycache__"]
 
-    files = [
-        file
-        for file in base_path.rglob(pattern)
-        if len(file.parts) - base_depth <= max_depth
-        and file.is_file()
-        and not any(excl in file.parts for excl in exclude_dirs)
-    ]
+    # Use custom walk that handles zarr stores properly
+    files = []
+    for entry in _walk_with_zarr_filter(base_path, max_depth, exclude_dirs):
+        # Filter by str_contains if specified
+        if str_contains and str_contains not in entry.name:
+            continue
+        files.append(entry)
 
     if sort_ascending:
         files.sort(key=sort_by_si_filename)
