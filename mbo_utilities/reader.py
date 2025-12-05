@@ -32,8 +32,10 @@ from mbo_utilities.metadata import has_mbo_metadata, is_raw_scanimage
 
 logger = log.get("reader")
 
-MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".npy"]
-PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
+MBO_SUPPORTED_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy"]
+
+# Re-export PIPELINE_TAGS for backward compatibility (canonical location is file_io.py)
+from mbo_utilities.file_io import PIPELINE_TAGS
 
 _ARRAY_TYPE_KWARGS = {
     MboRawArray: {
@@ -96,9 +98,11 @@ def imread(
     >>> arr = imread("data.tiff")  # single file
     >>> arr = imread(["file1.tiff", "file2.tiff"])  # multiple files
     """
+    # Pass through already-loaded arrays (ndarray, lazy arrays, etc.)
     if isinstance(inputs, np.ndarray):
         return inputs
-    if isinstance(inputs, MboRawArray):
+    # Check for lazy array types by duck typing (has shape and dtype)
+    if hasattr(inputs, "shape") and hasattr(inputs, "dtype") and not isinstance(inputs, (str, Path)):
         return inputs
 
     if "isoview" in kwargs.items():
