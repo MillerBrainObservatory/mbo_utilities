@@ -34,12 +34,9 @@ class Suite2pSettings:
     """
 
     # main settings
-    functional_chan: int = 1  # channel for functional ROI extraction (1-based)
     tau: float = 1.3  # Timescale of sensor (LBM default for GCaMP6m-like)
     frames_include: int = -1
     target_frames: int = -1
-    # multiplane_parallel: bool = False  # Run pipeline on server
-    # ignore_flyback: list = field(default_factory=list)  # Planes to ignore
 
     # processing control
     keep_raw: bool = False  # keep raw binary (data_raw.bin) after processing
@@ -48,12 +45,12 @@ class Suite2pSettings:
     force_detect: bool = False  # Force ROI detection even if stat.npy exists
     dff_window_size: int = 300  # Frames for rolling percentile baseline in ΔF/F
     dff_percentile: int = 20  # Percentile for baseline F₀ estimation
+    dff_smooth_window: int = 0  # Smooth ΔF/F trace (0 = disabled)
 
     # output settings
     preclassify: float = 0.0  # apply classifier before extraction (0.0 = keep all)
     save_nwb: bool = False  # Save output as NWB file
     save_mat: bool = False  # Save results in Fall.mat
-    save_json: bool = False  # Save ops as JSON in addition to .npy
     combined: bool = True  # Combine results across planes
     aspect: float = 1.0  # Ratio of um/pixels X to Y (for GUI only)
     report_time: bool = True  # Return timing dictionary
@@ -90,7 +87,8 @@ class Suite2pSettings:
     snr_thresh: float = 1.2  # Phase correlation peak threshold (1.5 for 1P)
     maxregshiftNR: float = 5.0  # Max block shift relative to rigid shift
 
-    # roi detection settings
+    # roi detection settings (functional)
+    functional_chan: int = 1  # channel for functional ROI extraction (1-based)
     roidetect: bool = True  # run ROI detection and extraction
     sparse_mode: bool = True  # Use sparse_mode cell detection
     spatial_scale: int = 1  # Optimal recording scale (1=6-pixel cells, LBM default)
@@ -489,53 +487,56 @@ def draw_section_suite2p(self):
                 except Exception as e:
                     self.logger.log("error", f"Installation failed: {e}")
 
-    if compact_header("LBM-Suite2p Options"):
-        _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
-        set_tooltip("Keep data_raw.bin after processing (uses disk space)")
+    # Tau setting (main processing parameter)
+    imgui.set_next_item_width(INPUT_WIDTH)
+    _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
+    set_tooltip(
+        "Calcium indicator decay timescale in seconds. Used to determine bin size "
+        "for activity-based detection (bin_size = tau * fs).\n"
+        "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
+    )
 
-        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
-        set_tooltip("Keep data.bin after processing (useful for QC)")
+    _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
+    set_tooltip(
+        "Denoise binned movie before cell detection. Applied BEFORE the detection "
+        "branch (anatomical or functional). Recommended for noisy recordings."
+    )
 
-        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
-        set_tooltip("Force re-registration even if already processed")
+    imgui.spacing()
 
-        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
-        set_tooltip("Force ROI detection even if stat.npy exists")
+    # Processing control options
+    _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
+    set_tooltip("Keep data_raw.bin after processing (uses disk space)")
 
-        imgui.spacing()
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_window_size = imgui.input_int(
-            "ΔF/F Window", self.s2p.dff_window_size
-        )
-        set_tooltip("Frames for rolling percentile baseline in ΔF/F (default: 300)")
+    _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
+    set_tooltip("Keep data.bin after processing (useful for QC)")
 
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_percentile = imgui.input_int(
-            "ΔF/F Percentile", self.s2p.dff_percentile
-        )
-        set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
+    _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
+    set_tooltip("Force re-registration even if already processed")
 
-        _, self.s2p.save_json = imgui.checkbox("Save JSON ops", self.s2p.save_json)
-        set_tooltip("Save ops as JSON in addition to .npy")
+    _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
+    set_tooltip("Force ROI detection even if stat.npy exists")
 
-    if compact_header("Main Settings"):
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.functional_chan = imgui.input_int(
-            "Functional Channel", self.s2p.functional_chan
-        )
-        set_tooltip("Channel used for functional ROI extraction (1-based).")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
-        set_tooltip(
-            "Calcium indicator decay timescale in seconds. Used to determine bin size "
-            "for activity-based detection (bin_size = tau * fs).\n"
-            "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
-        )
-        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
-        set_tooltip(
-            "Denoise binned movie before cell detection. Applied BEFORE the detection "
-            "branch (anatomical or functional). Recommended for noisy recordings."
-        )
+    imgui.spacing()
+
+    # ΔF/F settings
+    imgui.set_next_item_width(INPUT_WIDTH)
+    _, self.s2p.dff_window_size = imgui.input_int(
+        "ΔF/F Window", self.s2p.dff_window_size
+    )
+    set_tooltip("Frames for rolling percentile baseline in ΔF/F (default: 300)")
+
+    imgui.set_next_item_width(INPUT_WIDTH)
+    _, self.s2p.dff_percentile = imgui.input_int(
+        "ΔF/F Percentile", self.s2p.dff_percentile
+    )
+    set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
+
+    imgui.set_next_item_width(INPUT_WIDTH)
+    _, self.s2p.dff_smooth_window = imgui.input_int(
+        "ΔF/F Smooth", self.s2p.dff_smooth_window
+    )
+    set_tooltip("Smooth ΔF/F trace with rolling window (0 = disabled)")
 
     if compact_header("Registration Settings"):
         # Main registration toggle
@@ -710,11 +711,83 @@ def draw_section_suite2p(self):
     # Determine if using anatomical detection (greys out functional-only settings)
     use_anatomical = self.s2p.anatomical_only > 0
 
+    # Cellpose / Anatomical Detection comes FIRST
+    if compact_header("Cellpose / Anatomical Detection"):
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.anatomical_only = imgui.input_int(
+            "Anatomical Only", self.s2p.anatomical_only
+        )
+        set_tooltip(
+            "0=disabled (use functional detection)\n"
+            "1=max_proj / mean_img combined\n"
+            "2=mean_img only\n"
+            "3=enhanced mean_img (LBM default, recommended)\n"
+            "4=max_proj only"
+        )
+
+        # Grey out Cellpose settings when anatomical_only = 0
+        imgui.begin_disabled(not use_anatomical)
+
+        if not use_anatomical:
+            imgui.text_colored(
+                imgui.ImVec4(0.7, 0.7, 0.7, 1.0),
+                "(Enable anatomical_only to use Cellpose)"
+            )
+
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.diameter = imgui.input_int("Cell Diameter", self.s2p.diameter)
+        set_tooltip("Expected cell diameter in pixels (6 = LBM default for ~6μm cells). Passed to Cellpose.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.cellprob_threshold = imgui.input_float(
+            "CellProb Threshold", self.s2p.cellprob_threshold
+        )
+        set_tooltip(
+            "Cell probability threshold for Cellpose. Default: 0.0\n\n"
+            "DECREASE this threshold if:\n"
+            "  - Cellpose is not returning as many masks as expected\n"
+            "  - Masks are too small\n\n"
+            "INCREASE this threshold if:\n"
+            "  - Cellpose is returning too many masks\n"
+            "  - Getting false positives from dull/dim areas\n\n"
+            "LBM default: -6 (very permissive)"
+        )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.flow_threshold = imgui.input_float(
+            "Flow Threshold", self.s2p.flow_threshold
+        )
+        set_tooltip(
+            "Maximum allowed error of flows for each mask. Default: 0.4\n\n"
+            "INCREASE this threshold if:\n"
+            "  - Cellpose is not returning as many masks as expected\n"
+            "  - Set to 0.0 to turn off flow checking completely\n\n"
+            "DECREASE this threshold if:\n"
+            "  - Cellpose is returning too many ill-shaped masks\n\n"
+            "LBM default: 0 (flow checking disabled)"
+        )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.spatial_hp_cp = imgui.input_float(
+            "Spatial HP (Cellpose)", self.s2p.spatial_hp_cp
+        )
+        set_tooltip(
+            "Spatial high-pass filtering before Cellpose, as a multiple of diameter.\n"
+            "0.5 = LBM default"
+        )
+
+        imgui.end_disabled()
+
+    # Functional ROI Detection comes SECOND
     if compact_header("ROI Detection Settings (Functional)"):
         _, self.s2p.roidetect = imgui.checkbox(
             "Enable ROI Detection", self.s2p.roidetect
         )
         set_tooltip("Run ROI detection and extraction.")
+
+        # Functional channel setting (moved here from Main Settings)
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.functional_chan = imgui.input_int(
+            "Functional Channel", self.s2p.functional_chan
+        )
+        set_tooltip("Channel used for functional ROI extraction (1-based).")
 
         # Disable functional detection settings when using anatomical detection
         imgui.begin_disabled(not self.s2p.roidetect or use_anatomical)
@@ -779,69 +852,6 @@ def draw_section_suite2p(self):
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.nbinned = imgui.input_int("Max Binned Frames", self.s2p.nbinned)
         set_tooltip("Maximum number of binned frames for ROI detection.")
-
-        imgui.end_disabled()
-
-    if compact_header("Cellpose / Anatomical Detection"):
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.anatomical_only = imgui.input_int(
-            "Anatomical Only", self.s2p.anatomical_only
-        )
-        set_tooltip(
-            "0=disabled (use functional detection)\n"
-            "1=max_proj / mean_img combined\n"
-            "2=mean_img only\n"
-            "3=enhanced mean_img (LBM default, recommended)\n"
-            "4=max_proj only"
-        )
-
-        # Grey out Cellpose settings when anatomical_only = 0
-        imgui.begin_disabled(not use_anatomical)
-
-        if not use_anatomical:
-            imgui.text_colored(
-                imgui.ImVec4(0.7, 0.7, 0.7, 1.0),
-                "(Enable anatomical_only to use Cellpose)"
-            )
-
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.diameter = imgui.input_int("Cell Diameter", self.s2p.diameter)
-        set_tooltip("Expected cell diameter in pixels (6 = LBM default for ~6μm cells). Passed to Cellpose.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.cellprob_threshold = imgui.input_float(
-            "CellProb Threshold", self.s2p.cellprob_threshold
-        )
-        set_tooltip(
-            "Cell probability threshold for Cellpose. Default: 0.0\n\n"
-            "DECREASE this threshold if:\n"
-            "  - Cellpose is not returning as many masks as expected\n"
-            "  - Masks are too small\n\n"
-            "INCREASE this threshold if:\n"
-            "  - Cellpose is returning too many masks\n"
-            "  - Getting false positives from dull/dim areas\n\n"
-            "LBM default: -6 (very permissive)"
-        )
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.flow_threshold = imgui.input_float(
-            "Flow Threshold", self.s2p.flow_threshold
-        )
-        set_tooltip(
-            "Maximum allowed error of flows for each mask. Default: 0.4\n\n"
-            "INCREASE this threshold if:\n"
-            "  - Cellpose is not returning as many masks as expected\n"
-            "  - Set to 0.0 to turn off flow checking completely\n\n"
-            "DECREASE this threshold if:\n"
-            "  - Cellpose is returning too many ill-shaped masks\n\n"
-            "LBM default: 0 (flow checking disabled)"
-        )
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.spatial_hp_cp = imgui.input_float(
-            "Spatial HP (Cellpose)", self.s2p.spatial_hp_cp
-        )
-        set_tooltip(
-            "Spatial high-pass filtering before Cellpose, as a multiple of diameter.\n"
-            "0.5 = LBM default"
-        )
 
         imgui.end_disabled()
 
@@ -1241,6 +1251,7 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
             force_detect=self.s2p.force_detect,
             dff_window_size=self.s2p.dff_window_size,
             dff_percentile=self.s2p.dff_percentile,
+            dff_smooth_window=self.s2p.dff_smooth_window if self.s2p.dff_smooth_window > 0 else None,
         )
         self.logger.info(f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}")
 

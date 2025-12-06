@@ -1068,3 +1068,220 @@ def write_ops(metadata, raw_filename, **kwargs):
     logger.debug(
         f"Ops file written to {ops_path} with nframes={ops['nframes']}, nframes_chan1={ops.get('nframes_chan1')}"
     )
+
+
+def to_video(
+    data,
+    output_path,
+    fps: int = 30,
+    speed_factor: float = 1.0,
+    plane: int = None,
+    vmin: float = None,
+    vmax: float = None,
+    vmin_percentile: float = 1.0,
+    vmax_percentile: float = 99.5,
+    temporal_smooth: int = 0,
+    spatial_smooth: float = 0,
+    gamma: float = 1.0,
+    cmap: str = None,
+    quality: int = 9,
+    codec: str = "libx264",
+    max_frames: int = None,
+):
+    """
+    Export array data to video file (mp4/avi).
+
+    Works with 3D (T, Y, X) or 4D (T, Z, Y, X) arrays, including lazy arrays.
+    Optimized for high-quality output suitable for presentations and websites.
+
+    Parameters
+    ----------
+    data : array-like
+        3D array (T, Y, X) or 4D array (T, Z, Y, X). Supports lazy arrays.
+    output_path : str or Path
+        Output video path. Extension determines format (.mp4, .avi, .mov).
+    fps : int, default 30
+        Base frame rate of the recording.
+    speed_factor : float, default 1.0
+        Playback speed multiplier. speed_factor=10 plays 10x faster (all frames
+        included, just faster playback). Use this to show cell stability quickly.
+    plane : int, optional
+        For 4D arrays, which z-plane to export (0-indexed). If None, exports plane 0.
+    vmin : float, optional
+        Min value for intensity scaling. If None, uses vmin_percentile.
+    vmax : float, optional
+        Max value for intensity scaling. If None, uses vmax_percentile.
+    vmin_percentile : float, default 1.0
+        Percentile for auto vmin calculation. Lower = darker blacks.
+    vmax_percentile : float, default 99.5
+        Percentile for auto vmax calculation. Lower = brighter highlights.
+    temporal_smooth : int, default 0
+        Rolling average window size (frames). Reduces flicker/noise.
+        0 = disabled, 3-7 = subtle smoothing, 10+ = heavy smoothing.
+    spatial_smooth : float, default 0
+        Gaussian blur sigma (pixels). Reduces pixel noise.
+        0 = disabled, 0.5-1.0 = subtle, 2+ = heavy blur.
+    gamma : float, default 1.0
+        Gamma correction. <1 = brighter midtones, >1 = darker midtones.
+        0.7-0.8 often looks good for calcium imaging.
+    cmap : str, optional
+        Matplotlib colormap name (e.g., "viridis", "gray", "hot").
+        If None, outputs grayscale.
+    quality : int, default 9
+        Video quality (1-10, higher is better). 9-10 recommended for web.
+    codec : str, default "libx264"
+        Video codec. "libx264" for mp4 (best compatibility).
+    max_frames : int, optional
+        Limit number of frames to export. If None, exports all frames.
+
+    Returns
+    -------
+    Path
+        Path to the created video file.
+
+    Examples
+    --------
+    >>> from mbo_utilities import imread, to_video
+    >>> arr = imread("data.tif")
+
+    >>> # Quick preview at 10x speed (good for checking stability)
+    >>> to_video(arr, "preview.mp4", speed_factor=10)
+
+    >>> # High-quality export for website
+    >>> to_video(arr, "movie.mp4", fps=30, speed_factor=5,
+    ...          temporal_smooth=3, gamma=0.8, quality=10)
+
+    >>> # Export specific z-plane from 4D data
+    >>> to_video(arr, "plane3.mp4", plane=3, speed_factor=10)
+
+    >>> # With colormap and custom intensity range
+    >>> to_video(arr, "movie.mp4", cmap="viridis", vmin=100, vmax=2000)
+    """
+    import imageio
+    from scipy.ndimage import gaussian_filter
+
+    output_path = Path(output_path)
+
+    # Get array info
+    arr = data
+    ndim = arr.ndim
+    shape = arr.shape
+
+    if ndim == 4:
+        # (T, Z, Y, X) - select plane
+        plane_idx = plane if plane is not None else 0
+        if plane_idx >= shape[1]:
+            raise ValueError(f"plane={plane_idx} but array only has {shape[1]} planes")
+        n_frames = shape[0]
+        height, width = shape[2], shape[3]
+        logger.info(f"Exporting 4D array plane {plane_idx}: {n_frames} frames, {height}x{width}")
+    elif ndim == 3:
+        # (T, Y, X)
+        plane_idx = None
+        n_frames = shape[0]
+        height, width = shape[1], shape[2]
+        logger.info(f"Exporting 3D array: {n_frames} frames, {height}x{width}")
+    else:
+        raise ValueError(f"Expected 3D or 4D array, got {ndim}D")
+
+    # Limit frames if requested
+    if max_frames is not None:
+        n_frames = min(n_frames, max_frames)
+
+    # Calculate output fps based on speed factor
+    output_fps = int(fps * speed_factor)
+    duration = n_frames / output_fps
+
+    logger.info(
+        f"Writing {n_frames} frames at {output_fps} fps "
+        f"(speed_factor={speed_factor}x, duration={duration:.1f}s)"
+    )
+
+    # Determine intensity range from sample frames
+    if vmin is None or vmax is None:
+        # Sample frames across the video for percentile estimation
+        n_samples = min(50, n_frames)
+        sample_indices = np.linspace(0, n_frames - 1, n_samples, dtype=int)
+        samples = []
+        for i in sample_indices:
+            if ndim == 4:
+                frame = np.asarray(arr[i, plane_idx])
+            else:
+                frame = np.asarray(arr[i])
+            samples.append(frame)
+        sample_stack = np.stack(samples)
+
+        if vmin is None:
+            vmin = float(np.percentile(sample_stack, vmin_percentile))
+        if vmax is None:
+            vmax = float(np.percentile(sample_stack, vmax_percentile))
+
+    logger.info(f"Intensity range: [{vmin:.1f}, {vmax:.1f}]")
+
+    # Setup colormap if requested
+    if cmap is not None:
+        try:
+            import matplotlib.pyplot as plt
+            colormap = plt.get_cmap(cmap)
+        except ImportError:
+            logger.warning("matplotlib not available, using grayscale")
+            colormap = None
+    else:
+        colormap = None
+
+    # Map quality (1-10) to crf (28-18, lower crf = better quality)
+    crf = int(28 - (quality - 1) * (28 - 18) / 9)
+
+    # Buffer for temporal smoothing
+    frame_buffer = [] if temporal_smooth > 0 else None
+
+    # Write video using imageio-ffmpeg
+    writer = imageio.get_writer(
+        str(output_path),
+        fps=output_fps,
+        codec=codec,
+        output_params=["-crf", str(crf), "-pix_fmt", "yuv420p"],  # yuv420p for browser compatibility
+    )
+
+    try:
+        for i in tqdm(range(n_frames), desc="Writing video", unit="frames"):
+            # Get frame
+            if ndim == 4:
+                frame = np.asarray(arr[i, plane_idx], dtype=np.float32)
+            else:
+                frame = np.asarray(arr[i], dtype=np.float32)
+
+            # Temporal smoothing (rolling average)
+            if temporal_smooth > 0:
+                frame_buffer.append(frame)
+                if len(frame_buffer) > temporal_smooth:
+                    frame_buffer.pop(0)
+                frame = np.mean(frame_buffer, axis=0)
+
+            # Spatial smoothing (Gaussian blur)
+            if spatial_smooth > 0:
+                frame = gaussian_filter(frame, sigma=spatial_smooth)
+
+            # Normalize to 0-1
+            frame = np.clip((frame - vmin) / (vmax - vmin), 0, 1)
+
+            # Gamma correction
+            if gamma != 1.0:
+                frame = np.power(frame, gamma)
+
+            # Convert to RGB
+            if colormap is not None:
+                # Apply colormap (returns RGBA)
+                frame_rgb = (colormap(frame)[:, :, :3] * 255).astype(np.uint8)
+            else:
+                # Grayscale -> RGB
+                frame_uint8 = (frame * 255).astype(np.uint8)
+                frame_rgb = np.stack([frame_uint8] * 3, axis=-1)
+
+            writer.append_data(frame_rgb)
+    finally:
+        writer.close()
+
+    file_size_mb = output_path.stat().st_size / 1024 / 1024
+    logger.info(f"Video saved to {output_path} ({file_size_mb:.1f} MB)")
+    return output_path

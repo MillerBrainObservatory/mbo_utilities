@@ -1,7 +1,15 @@
+"""Lazy array loader for isoview lightsheet microscopy data."""
+
 from __future__ import annotations
+
 from pathlib import Path
-import numpy as np
+from typing import TYPE_CHECKING
 import logging
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from numpy.typing import DTypeLike
 
 logger = logging.getLogger(__name__)
 
@@ -9,6 +17,9 @@ logger = logging.getLogger(__name__)
 class IsoviewArray:
     """
     Lazy loader for isoview lightsheet microscopy data.
+
+    Conforms to LazyArrayProtocol for compatibility with mbo_utilities imread/imwrite
+    and downstream processing pipelines.
 
     Supports both structures:
     - Consolidated (new): data_TM000000_SPM00.zarr/camera_0/0/
@@ -19,6 +30,20 @@ class IsoviewArray:
     - Single timepoint: (Z, Views, Y, X) - 4D
 
     Views are (camera, channel) combinations that exist in the data.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to output directory containing TM* folders or single TM folder.
+
+    Examples
+    --------
+    >>> arr = IsoviewArray("path/to/output")
+    >>> arr.shape
+    (10, 543, 4, 2048, 2048)  # (T, Z, Views, Y, X)
+    >>> arr.views
+    [(0, 0), (1, 0), (2, 1), (3, 1)]
+    >>> frame = arr[0, 100, 0]  # timepoint 0, z=100, view 0
     """
 
     def __init__(self, path: str | Path):
@@ -291,20 +316,32 @@ class IsoviewArray:
     @property
     def metadata(self) -> dict:
         """
-        Metadata dictionary.
+        Metadata dictionary for LazyArrayProtocol.
 
-        Contains:
-        - Common metadata from root zarr attrs
-        - Computed fields: num_timepoints, views, shape, structure
+        Contains standard keys for Suite2p compatibility:
+        - nframes: number of frames (timepoints)
+        - num_frames: alias for nframes
+        - Ly: height in pixels
+        - Lx: width in pixels
+
+        Plus isoview-specific fields:
+        - num_timepoints, views, shape, structure
         """
         meta = dict(self._zarr_attrs)
 
-        # Add computed fields
+        # LazyArrayProtocol required fields
+        meta['nframes'] = len(self.tm_folders)
+        meta['num_frames'] = len(self.tm_folders)
+        meta['Ly'] = self._single_shape[1]
+        meta['Lx'] = self._single_shape[2]
+
+        # Isoview-specific fields
         meta['num_timepoints'] = len(self.tm_folders)
         meta['views'] = self._views
         meta['shape'] = self.shape
         meta['structure'] = self._structure
         meta['single_timepoint'] = self._single_timepoint
+        meta['num_planes'] = self._single_shape[0]
 
         return meta
 
@@ -543,9 +580,48 @@ class IsoviewArray:
         return z[f'camera_{camera}/projections/{proj_type}/0'][:]
 
     @property
-    def filenames(self) -> list[str]:
-        """Return list of TM folder paths as strings (for GUI compatibility)."""
-        return [str(f) for f in self.tm_folders]
+    def filenames(self) -> list[Path]:
+        """
+        Source file paths for LazyArrayProtocol.
+
+        Returns
+        -------
+        list[Path]
+            List of TM folder paths.
+        """
+        return list(self.tm_folders)
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        """
+        Dimension labels for LazyArrayProtocol.
+
+        Returns
+        -------
+        tuple[str, ...]
+            ('Z', 'V', 'Y', 'X') for single timepoint
+            ('T', 'Z', 'V', 'Y', 'X') for multi-timepoint
+            V = Views (camera/channel combinations)
+        """
+        if self._single_timepoint:
+            return ('Z', 'V', 'Y', 'X')
+        return ('T', 'Z', 'V', 'Y', 'X')
+
+    @property
+    def num_planes(self) -> int:
+        """
+        Number of Z-planes for LazyArrayProtocol.
+
+        Returns
+        -------
+        int
+            Number of Z slices in each volume.
+        """
+        return self._single_shape[0]
+
+    def close(self) -> None:
+        """Release resources (clear zarr cache)."""
+        self._zarr_cache.clear()
 
     def __repr__(self):
         return (
