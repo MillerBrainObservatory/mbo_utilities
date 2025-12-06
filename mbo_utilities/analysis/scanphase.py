@@ -226,7 +226,7 @@ class ScanPhaseAnalysis:
         upsample: int = 4,
         border: int = 4,
         max_offset: int = 10,
-        use_gradient: bool = True,
+        use_gradient: bool = False,
         sample_frames: Optional[int] = None,
         plane_idx: int = 0,
         progress_callback=None,
@@ -247,7 +247,7 @@ class ScanPhaseAnalysis:
         max_offset : int
             Maximum offset to search for.
         use_gradient : bool
-            Use gradient enhancement for better edge detection.
+            Use gradient enhancement for edge detection. Default False for better accuracy.
         sample_frames : int, optional
             If set, sample this many frames evenly spaced. None = all frames.
         plane_idx : int
@@ -303,7 +303,7 @@ class ScanPhaseAnalysis:
         upsample: int = 4,
         border: int = 4,
         max_offset: int = 10,
-        use_gradient: bool = True,
+        use_gradient: bool = False,
         frames_per_plane: int = 10,
         progress_callback=None,
     ) -> np.ndarray:
@@ -454,7 +454,7 @@ class ScanPhaseAnalysis:
                         max_offset=max_offset,
                         use_fft=use_fft,
                         fft_method=fft_method,
-                        use_gradient=True,
+                        use_gradient=False,
                     )
 
                     x_positions.append(x + window_size // 2)
@@ -492,7 +492,7 @@ class ScanPhaseAnalysis:
         upsample: int = 4,
         border: int = 4,
         max_offset: int = 10,
-        use_gradient: bool = True,
+        use_gradient: bool = False,
         plane_idx: int = 0,
         compare_methods: bool = True,
         progress_callback=None,
@@ -581,7 +581,7 @@ class ScanPhaseAnalysis:
         upsample: int = 4,
         border: int = 4,
         max_offset: int = 10,
-        use_gradient: bool = True,
+        use_gradient: bool = False,
         sample_frames: Optional[int] = 100,
         spatial_window_size: int = 64,
         spatial_stride: int = 32,
@@ -1322,6 +1322,7 @@ def analyze_scanphase(
     use_fft: bool = True,
     fft_method: str = "1d",
     sample_frames: Optional[int] = 100,
+    use_gradient: bool = False,
     image_format: str = "png",
     save_data: bool = True,
     show_plots: bool = False,
@@ -1341,6 +1342,8 @@ def analyze_scanphase(
         FFT method: '1d' (fast) or '2d' (more accurate).
     sample_frames : int, optional
         Number of frames to sample for temporal analysis.
+    use_gradient : bool
+        Use gradient enhancement for edge detection. Default False.
     image_format : str
         Format for saved images: 'png', 'pdf', 'svg', 'tiff'.
     save_data : bool
@@ -1366,6 +1369,7 @@ def analyze_scanphase(
         use_fft=use_fft,
         fft_method=fft_method,
         sample_frames=sample_frames,
+        use_gradient=use_gradient,
     )
 
     if output_dir:
@@ -1443,7 +1447,8 @@ def run_scanphase_analysis(
             output_dir = Path.cwd() / "scanphase_analysis"
 
     print(f"Loading data from: {data_path}")
-    data = imread(data_path)
+    # Load with fix_phase=False to analyze the uncorrected data
+    data = imread(data_path, fix_phase=False)
     print(f"Data shape: {data.shape}, dtype: {data.dtype}")
 
     print(f"Output directory: {output_dir}")
