@@ -51,6 +51,7 @@ __all__ = [
     "is_imgui_installed",
     "subsample_array",
     # Visualization
+    "to_video",
     "save_mp4",
     "save_png",
     # CLI utilities
@@ -111,6 +112,11 @@ def __getattr__(name):
     if name in ("save_mp4", "save_png"):
         from . import plot_util
         return getattr(plot_util, name)
+
+    # Video export (_writers -> imageio)
+    if name == "to_video":
+        from ._writers import to_video
+        return to_video
 
     # CLI utilities (cli -> click, urllib only)
     if name in ("download_file", "download_notebook"):
