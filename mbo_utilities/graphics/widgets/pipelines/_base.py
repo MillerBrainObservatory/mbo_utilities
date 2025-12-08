@@ -34,3 +34,11 @@ class PipelineWidget(ABC):
     def draw_config(self) -> None:
         """draw the configuration/processing ui."""
         ...
+
+    def cleanup(self) -> None:
+        """clean up resources when widget is destroyed.
+
+        override in subclasses to release resources like open windows,
+        background threads, file handles, etc.
+        """
+        pass

@@ -119,10 +119,29 @@ def draw_run_tab(parent: "PreviewDataWidget") -> None:
         )
 
 
+def cleanup_pipelines(parent: "PreviewDataWidget") -> None:
+    """clean up all pipeline instances when gui is closing.
+
+    calls cleanup() on each pipeline to release resources like
+    open windows, background threads, etc.
+    """
+    if not hasattr(parent, '_pipeline_instances'):
+        return
+
+    for name, pipeline in parent._pipeline_instances.items():
+        try:
+            pipeline.cleanup()
+        except Exception as e:
+            print(f"Warning: cleanup failed for pipeline {name}: {e}")
+
+    parent._pipeline_instances.clear()
+
+
 __all__ = [
     "PipelineWidget",
     "get_available_pipelines",
     "get_pipeline_names",
     "any_pipeline_available",
     "draw_run_tab",
+    "cleanup_pipelines",
 ]

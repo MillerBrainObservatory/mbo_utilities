@@ -26,6 +26,7 @@ from mbo_utilities.arrays._base import (
     _imwrite_base,
     _normalize_planes,
     _safe_get_metadata,
+    _sanitize_suffix,
     _to_tzyx,
     iter_rois,
     normalize_roi,
@@ -45,7 +46,13 @@ from mbo_utilities.arrays.suite2p import (
     Suite2pVolumeArray,
     find_suite2p_plane_dirs,
 )
-from mbo_utilities.arrays.tiff import MBOTiffArray, MboRawArray, TiffArray
+from mbo_utilities.arrays.tiff import (
+    MBOTiffArray,
+    MboRawArray,
+    TiffArray,
+    TiffVolumeArray,
+    find_tiff_plane_files,
+)
 from mbo_utilities.arrays.zarr import ZarrArray
 
 __all__ = [
@@ -54,6 +61,7 @@ __all__ = [
     "Suite2pVolumeArray",
     "H5Array",
     "TiffArray",
+    "TiffVolumeArray",
     "MBOTiffArray",
     "MboRawArray",
     "NumpyArray",
@@ -63,6 +71,8 @@ __all__ = [
     "IsoviewArray",
     # Suite2p helpers
     "find_suite2p_plane_dirs",
+    # TIFF helpers
+    "find_tiff_plane_files",
     # Registration
     "validate_s3d_registration",
     "register_zplanes_s3d",
@@ -76,6 +86,7 @@ __all__ = [
     "_to_tzyx",
     "_axes_or_guess",
     "_safe_get_metadata",
+    "_sanitize_suffix",
     "CHUNKS_3D",
     "CHUNKS_4D",
 ]

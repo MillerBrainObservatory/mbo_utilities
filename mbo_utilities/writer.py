@@ -22,6 +22,7 @@ from mbo_utilities.arrays import (
     supports_roi,
     validate_s3d_registration,
 )
+from mbo_utilities.util import load_npy
 
 logger = log.get("writer")
 
@@ -42,6 +43,7 @@ def imwrite(
     debug: bool = False,
     shift_vectors: np.ndarray | None = None,
     output_name: str | None = None,
+    output_suffix: str | None = None,
     **kwargs,
 ):
     """
@@ -119,6 +121,13 @@ def imwrite(
 
     output_name : str, optional
         Filename for binary output when ext=".bin".
+
+    output_suffix : str, optional
+        Custom suffix to append to output filenames. If None (default), files are
+        named with "_stitched" for multi-ROI data when roi is None, or "_roiN"
+        for specific ROIs. Examples: "_stitched", "_processed", "_session1".
+        The suffix is automatically sanitized (illegal characters removed, double
+        extensions prevented, underscore prefix added if missing).
 
     **kwargs
         Additional format-specific options passed to writer backends.
@@ -241,7 +250,7 @@ def imwrite(
             if existing_s3d_dir:
                 s3d_job_dir = existing_s3d_dir
                 if s3d_job_dir.joinpath("dirs.npy").is_file():
-                    dirs = np.load(s3d_job_dir / "dirs.npy", allow_pickle=True).item()
+                    dirs = load_npy(s3d_job_dir / "dirs.npy").item()
                     for k, v in dirs.items():
                         if Path(v).is_dir():
                             file_metadata[k] = v
@@ -301,6 +310,7 @@ def imwrite(
             planes=planes,
             debug=debug,
             output_name=output_name,
+            output_suffix=output_suffix,
             **write_kwargs,
         )
     else:

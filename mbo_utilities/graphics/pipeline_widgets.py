@@ -9,7 +9,8 @@ import numpy as np
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui
 
 from mbo_utilities.graphics._widgets import set_tooltip, compact_header
-from mbo_utilities.preferences import get_last_save_dir, set_last_save_dir
+from mbo_utilities.preferences import get_last_dir, set_last_dir
+from mbo_utilities._parsing import _convert_paths_to_strings
 
 try:
     from lbm_suite2p_python.run_lsp import run_plane, run_plane_bin
@@ -33,12 +34,9 @@ class Suite2pSettings:
     """
 
     # main settings
-    functional_chan: int = 1  # channel for functional ROI extraction (1-based)
     tau: float = 1.3  # Timescale of sensor (LBM default for GCaMP6m-like)
     frames_include: int = -1
     target_frames: int = -1
-    # multiplane_parallel: bool = False  # Run pipeline on server
-    # ignore_flyback: list = field(default_factory=list)  # Planes to ignore
 
     # processing control
     keep_raw: bool = False  # keep raw binary (data_raw.bin) after processing
@@ -47,12 +45,12 @@ class Suite2pSettings:
     force_detect: bool = False  # Force ROI detection even if stat.npy exists
     dff_window_size: int = 300  # Frames for rolling percentile baseline in ΔF/F
     dff_percentile: int = 20  # Percentile for baseline F₀ estimation
+    dff_smooth_window: int = 0  # Smooth ΔF/F trace (0 = disabled)
 
     # output settings
     preclassify: float = 0.0  # apply classifier before extraction (0.0 = keep all)
     save_nwb: bool = False  # Save output as NWB file
     save_mat: bool = False  # Save results in Fall.mat
-    save_json: bool = False  # Save ops as JSON in addition to .npy
     combined: bool = True  # Combine results across planes
     aspect: float = 1.0  # Ratio of um/pixels X to Y (for GUI only)
     report_time: bool = True  # Return timing dictionary
@@ -89,7 +87,8 @@ class Suite2pSettings:
     snr_thresh: float = 1.2  # Phase correlation peak threshold (1.5 for 1P)
     maxregshiftNR: float = 5.0  # Max block shift relative to rigid shift
 
-    # roi detection settings
+    # roi detection settings (functional)
+    functional_chan: int = 1  # channel for functional ROI extraction (1-based)
     roidetect: bool = True  # run ROI detection and extraction
     sparse_mode: bool = True  # Use sparse_mode cell detection
     spatial_scale: int = 1  # Optimal recording scale (1=6-pixel cells, LBM default)
@@ -109,7 +108,6 @@ class Suite2pSettings:
     cellprob_threshold: float = -6.0  # More permissive detection threshold
     flow_threshold: float = 0.0  # Standard Cellpose flow threshold
     spatial_hp_cp: float = 0.5  # High-pass filtering strength for Cellpose
-    pretrained_model: str = "cpsam"  # Cellpose model path or type
 
     # signal extraction settings
     neuropil_extract: bool = True  # extract neuropil signal
@@ -147,8 +145,9 @@ class Suite2pSettings:
         }
 
     def to_file(self, filepath):
-        """Save settings to a JSON file."""
-        np.save(filepath, self.to_dict(), allow_pickle=True)
+        """Save settings to a .npy file."""
+        # Convert Path objects to strings for cross-platform compatibility
+        np.save(filepath, _convert_paths_to_strings(self.to_dict()), allow_pickle=True)
 
 
 def draw_tab_process(self):
@@ -217,7 +216,7 @@ def draw_section_suite2p(self):
 
     # Browse button
     if imgui.button("Browse##s2p_outpath"):
-        default_dir = s2p_path or str(get_last_save_dir() or pathlib.Path().home())
+        default_dir = s2p_path or str(get_last_dir("suite2p_output") or pathlib.Path().home())
         self._s2p_folder_dialog = pfd.select_folder("Select Suite2p output folder", default_dir)
 
     # Check if async folder dialog has a result
@@ -225,7 +224,7 @@ def draw_section_suite2p(self):
         result = self._s2p_folder_dialog.result()
         if result:
             self._s2p_outdir = str(result)
-            set_last_save_dir(Path(result))
+            set_last_dir("suite2p_output", result)
         self._s2p_folder_dialog = None
 
     # Get max frames from data
@@ -488,34 +487,131 @@ def draw_section_suite2p(self):
                 except Exception as e:
                     self.logger.log("error", f"Installation failed: {e}")
 
-    if compact_header("LBM-Suite2p Options"):
-        _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
-        set_tooltip("Keep data_raw.bin after processing (uses disk space)")
+    # Tau setting (main processing parameter)
+    imgui.set_next_item_width(INPUT_WIDTH)
+    _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
+    set_tooltip(
+        "Calcium indicator decay timescale in seconds. Used to determine bin size "
+        "for activity-based detection (bin_size = tau * fs).\n"
+        "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
+    )
 
-        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
-        set_tooltip("Keep data.bin after processing (useful for QC)")
+    _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
+    set_tooltip(
+        "Denoise binned movie before cell detection. Applied BEFORE the detection "
+        "branch (anatomical or functional). Recommended for noisy recordings."
+    )
 
-        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
-        set_tooltip("Force re-registration even if already processed")
+    imgui.spacing()
 
-        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
-        set_tooltip("Force ROI detection even if stat.npy exists")
+    # Processing control options
+    _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
+    set_tooltip("Keep data_raw.bin after processing (uses disk space)")
 
-        imgui.spacing()
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_window_size = imgui.input_int(
-            "ΔF/F Window", self.s2p.dff_window_size
+    _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
+    set_tooltip("Keep data.bin after processing (useful for QC)")
+
+    _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
+    set_tooltip("Force re-registration even if already processed")
+
+    _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
+    set_tooltip("Force ROI detection even if stat.npy exists")
+
+    imgui.spacing()
+
+    # ΔF/F settings
+    imgui.set_next_item_width(INPUT_WIDTH)
+    _, self.s2p.dff_window_size = imgui.input_int(
+        "ΔF/F Window", self.s2p.dff_window_size
+    )
+    set_tooltip("Frames for rolling percentile baseline in ΔF/F (default: 300)")
+
+    imgui.set_next_item_width(INPUT_WIDTH)
+    _, self.s2p.dff_percentile = imgui.input_int(
+        "ΔF/F Percentile", self.s2p.dff_percentile
+    )
+    set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
+
+    imgui.set_next_item_width(INPUT_WIDTH)
+    _, self.s2p.dff_smooth_window = imgui.input_int(
+        "ΔF/F Smooth", self.s2p.dff_smooth_window
+    )
+    set_tooltip("Smooth ΔF/F trace with rolling window (0 = disabled)")
+
+    if compact_header("Registration Settings"):
+        # Main registration toggle
+        _, self.s2p.do_registration = imgui.checkbox(
+            "Enable Registration", self.s2p.do_registration
         )
-        set_tooltip("Frames for rolling percentile baseline in ΔF/F (default: 300)")
+        set_tooltip("Run motion registration on the movie.")
+
+        # Disable all registration settings if do_registration is False
+        imgui.begin_disabled(not self.s2p.do_registration)
 
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_percentile = imgui.input_int(
-            "ΔF/F Percentile", self.s2p.dff_percentile
+        _, self.s2p.align_by_chan = imgui.input_int(
+            "Align by Channel", self.s2p.align_by_chan
         )
-        set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
-
-        _, self.s2p.save_json = imgui.checkbox("Save JSON ops", self.s2p.save_json)
-        set_tooltip("Save ops as JSON in addition to .npy")
+        set_tooltip("Channel index used for alignment (1-based).")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.nimg_init = imgui.input_int(
+            "Initial Frames", self.s2p.nimg_init
+        )
+        set_tooltip("Number of frames used to build the reference image.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.batch_size = imgui.input_int("Batch Size", self.s2p.batch_size)
+        set_tooltip("Number of frames processed per registration batch.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.maxregshift = imgui.input_float(
+            "Max Shift Fraction", self.s2p.maxregshift
+        )
+        set_tooltip("Maximum allowed shift as a fraction of the image size.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.smooth_sigma = imgui.input_float(
+            "Smooth Sigma", self.s2p.smooth_sigma
+        )
+        set_tooltip("Gaussian smoothing sigma (pixels) before registration.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.smooth_sigma_time = imgui.input_float(
+            "Smooth Sigma Time", self.s2p.smooth_sigma_time
+        )
+        set_tooltip("Temporal smoothing sigma (frames) before registration.")
+        _, self.s2p.keep_movie_raw = imgui.checkbox(
+            "Keep Raw Movie", self.s2p.keep_movie_raw
+        )
+        set_tooltip("Keep unregistered binary movie after processing.")
+        _, self.s2p.two_step_registration = imgui.checkbox(
+            "Two-Step Registration", self.s2p.two_step_registration
+        )
+        set_tooltip("Perform registration twice for low-SNR data.")
+        _, self.s2p.reg_tif = imgui.checkbox(
+            "Export Registered TIFF", self.s2p.reg_tif
+        )
+        set_tooltip("Export registered movie as TIFF files.")
+        _, self.s2p.reg_tif_chan2 = imgui.checkbox(
+            "Export Chan2 TIFF", self.s2p.reg_tif_chan2
+        )
+        set_tooltip("Export registered TIFFs for channel 2.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.subpixel = imgui.input_int(
+            "Subpixel Precision", self.s2p.subpixel
+        )
+        set_tooltip("Subpixel precision level (1/subpixel step).")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.th_badframes = imgui.input_float(
+            "Bad Frame Threshold", self.s2p.th_badframes
+        )
+        set_tooltip("Threshold for excluding low-quality frames.")
+        _, self.s2p.norm_frames = imgui.checkbox(
+            "Normalize Frames", self.s2p.norm_frames
+        )
+        set_tooltip("Normalize frames during registration.")
+        _, self.s2p.force_refImg = imgui.checkbox(
+            "Force refImg", self.s2p.force_refImg
+        )
+        set_tooltip("Use stored reference image instead of recomputing.")
+        _, self.s2p.pad_fft = imgui.checkbox("Pad FFT", self.s2p.pad_fft)
+        set_tooltip("Pad image for FFT registration to reduce edge artifacts.")
 
     if compact_header("Main Settings"):
         imgui.set_next_item_width(INPUT_WIDTH)
@@ -610,10 +706,11 @@ def draw_section_suite2p(self):
         imgui.text(self.s2p.chan2_file if self.s2p.chan2_file else "(none)")
         imgui.pop_text_wrap_pos()
         if imgui.button("Browse##chan2"):
-            default_dir = str(get_last_save_dir() or pathlib.Path().home())
+            default_dir = str(get_last_dir("suite2p_chan2") or pathlib.Path().home())
             res = pfd.open_file("Select channel 2 file", default_dir)
             if res and res.result():
                 self.s2p.chan2_file = res.result()[0]
+                set_last_dir("suite2p_chan2", res.result()[0])
         set_tooltip("Path to channel 2 binary file for cross-channel registration.")
 
         # --- 1P Registration Collapsible Subsection ---
@@ -698,97 +795,152 @@ def draw_section_suite2p(self):
 
         imgui.end_disabled()  # End registration disabled block
 
-    if compact_header("ROI Detection Settings"):
-        _, self.s2p.roidetect = imgui.checkbox(
-            "Enable ROI Detection", self.s2p.roidetect
-        )
-        set_tooltip("Run ROI detection and extraction.")
+    # Determine if using anatomical detection (greys out functional-only settings)
+    use_anatomical = self.s2p.anatomical_only > 0
 
-        imgui.begin_disabled(not self.s2p.roidetect)
-
-        _, self.s2p.sparse_mode = imgui.checkbox(
-            "Sparse Mode", self.s2p.sparse_mode
-        )
-        set_tooltip("Use sparse detection (recommended for soma).")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.spatial_scale = imgui.input_int(
-            "Spatial Scale", self.s2p.spatial_scale
-        )
-        set_tooltip(
-            "ROI size scale: 0=auto, 1=6-pixel cells (LBM default), 2=medium, 3=large, 4=very large"
-        )
-        _, self.s2p.connected = imgui.checkbox("Connected ROIs", self.s2p.connected)
-        set_tooltip("Require ROIs to be connected regions.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.threshold_scaling = imgui.input_float(
-            "Threshold Scaling", self.s2p.threshold_scaling
-        )
-        set_tooltip("Scale ROI detection threshold; higher = fewer ROIs.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.spatial_hp_detect = imgui.input_int(
-            "Spatial HP Detect", self.s2p.spatial_hp_detect
-        )
-        set_tooltip("Spatial high-pass filter size before ROI detection.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.max_overlap = imgui.input_float(
-            "Max Overlap", self.s2p.max_overlap
-        )
-        set_tooltip("Maximum allowed fraction of overlapping ROI pixels.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.high_pass = imgui.input_int(
-            "High-Pass Window", self.s2p.high_pass
-        )
-        set_tooltip("Running mean subtraction window (frames).")
-        _, self.s2p.smooth_masks = imgui.checkbox(
-            "Smooth Masks", self.s2p.smooth_masks
-        )
-        set_tooltip("Smooth masks in the final ROI detection pass.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.max_iterations = imgui.input_int(
-            "Max Iterations", self.s2p.max_iterations
-        )
-        set_tooltip("Maximum number of cell-detection iterations.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.nbinned = imgui.input_int("Max Binned Frames", self.s2p.nbinned)
-        set_tooltip("Number of frames binned for ROI detection.")
-        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
-        set_tooltip("Denoise binned movie before ROI detection.")
-
-        imgui.end_disabled()
-
+    # Cellpose / Anatomical Detection comes FIRST
     if compact_header("Cellpose / Anatomical Detection"):
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.anatomical_only = imgui.input_int(
             "Anatomical Only", self.s2p.anatomical_only
         )
         set_tooltip(
-            "0=disabled; 1=max/mean, 2=mean, 3=enhanced mean (LBM default), 4=max projection"
+            "0=disabled (use functional detection)\n"
+            "1=max_proj / mean_img combined\n"
+            "2=mean_img only\n"
+            "3=enhanced mean_img (LBM default, recommended)\n"
+            "4=max_proj only"
         )
+
+        # Grey out Cellpose settings when anatomical_only = 0
+        imgui.begin_disabled(not use_anatomical)
+
+        if not use_anatomical:
+            imgui.text_colored(
+                imgui.ImVec4(0.7, 0.7, 0.7, 1.0),
+                "(Enable anatomical_only to use Cellpose)"
+            )
+
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.diameter = imgui.input_int("Cell Diameter", self.s2p.diameter)
-        set_tooltip("Expected cell diameter in pixels (6 = LBM default for ~6μm cells)")
+        set_tooltip("Expected cell diameter in pixels (6 = LBM default for ~6μm cells). Passed to Cellpose.")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.cellprob_threshold = imgui.input_float(
             "CellProb Threshold", self.s2p.cellprob_threshold
         )
-        set_tooltip("Cellpose detection threshold (-6 = LBM default for permissive detection)")
+        set_tooltip(
+            "Cell probability threshold for Cellpose. Default: 0.0\n\n"
+            "DECREASE this threshold if:\n"
+            "  - Cellpose is not returning as many masks as expected\n"
+            "  - Masks are too small\n\n"
+            "INCREASE this threshold if:\n"
+            "  - Cellpose is returning too many masks\n"
+            "  - Getting false positives from dull/dim areas\n\n"
+            "LBM default: -6 (very permissive)"
+        )
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.flow_threshold = imgui.input_float(
             "Flow Threshold", self.s2p.flow_threshold
         )
-        set_tooltip("Cellpose flow field threshold (0 = standard)")
+        set_tooltip(
+            "Maximum allowed error of flows for each mask. Default: 0.4\n\n"
+            "INCREASE this threshold if:\n"
+            "  - Cellpose is not returning as many masks as expected\n"
+            "  - Set to 0.0 to turn off flow checking completely\n\n"
+            "DECREASE this threshold if:\n"
+            "  - Cellpose is returning too many ill-shaped masks\n\n"
+            "LBM default: 0 (flow checking disabled)"
+        )
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.spatial_hp_cp = imgui.input_float(
             "Spatial HP (Cellpose)", self.s2p.spatial_hp_cp
         )
-        set_tooltip("High-pass filtering strength (0.5 = LBM default)")
-        imgui.text("Pretrained Model:")
-        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
-        imgui.text(
-            self.s2p.pretrained_model if self.s2p.pretrained_model else "cyto"
+        set_tooltip(
+            "Spatial high-pass filtering before Cellpose, as a multiple of diameter.\n"
+            "0.5 = LBM default"
         )
-        imgui.pop_text_wrap_pos()
-        set_tooltip("Cellpose model name or custom path (e.g., 'cyto').")
+
+        imgui.end_disabled()
+
+    # Functional ROI Detection comes SECOND
+    if compact_header("ROI Detection Settings (Functional)"):
+        _, self.s2p.roidetect = imgui.checkbox(
+            "Enable ROI Detection", self.s2p.roidetect
+        )
+        set_tooltip("Run ROI detection and extraction.")
+
+        # Functional channel setting (moved here from Main Settings)
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.functional_chan = imgui.input_int(
+            "Functional Channel", self.s2p.functional_chan
+        )
+        set_tooltip("Channel used for functional ROI extraction (1-based).")
+
+        # Disable functional detection settings when using anatomical detection
+        imgui.begin_disabled(not self.s2p.roidetect or use_anatomical)
+
+        if use_anatomical:
+            imgui.text_colored(
+                imgui.ImVec4(0.7, 0.7, 0.7, 1.0),
+                "(Skipped when anatomical_only > 0)"
+            )
+
+        _, self.s2p.sparse_mode = imgui.checkbox(
+            "Sparse Mode", self.s2p.sparse_mode
+        )
+        set_tooltip("Use sparse detection (recommended for soma). Only used for functional detection.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.spatial_scale = imgui.input_int(
+            "Spatial Scale", self.s2p.spatial_scale
+        )
+        set_tooltip(
+            "ROI size scale: 0=auto, 1=6-pixel cells (LBM default), 2=medium, 3=large, 4=very large.\n"
+            "Only used for functional detection."
+        )
+        _, self.s2p.connected = imgui.checkbox("Connected ROIs", self.s2p.connected)
+        set_tooltip("Require ROIs to be connected regions. Only used for functional detection.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.threshold_scaling = imgui.input_float(
+            "Threshold Scaling", self.s2p.threshold_scaling
+        )
+        set_tooltip("Scale ROI detection threshold; higher = fewer ROIs. Only used for functional detection.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.spatial_hp_detect = imgui.input_int(
+            "Spatial HP Detect", self.s2p.spatial_hp_detect
+        )
+        set_tooltip("Spatial high-pass filter size for neuropil subtraction. Only used for functional detection.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.max_iterations = imgui.input_int(
+            "Max Iterations", self.s2p.max_iterations
+        )
+        set_tooltip("Maximum number of cell-detection iterations. Only used for functional detection.")
+
+        imgui.end_disabled()
+
+        # These settings are used by BOTH anatomical and functional detection
+        imgui.begin_disabled(not self.s2p.roidetect)
+
+        imgui.spacing()
+        imgui.text("Shared Settings:")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.max_overlap = imgui.input_float(
+            "Max Overlap", self.s2p.max_overlap
+        )
+        set_tooltip("Maximum allowed fraction of overlapping ROI pixels. Used by both detection methods.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.high_pass = imgui.input_int(
+            "High-Pass Window", self.s2p.high_pass
+        )
+        set_tooltip("Running mean subtraction window for temporal high-pass filtering of binned movie (frames).")
+        _, self.s2p.smooth_masks = imgui.checkbox(
+            "Smooth Masks", self.s2p.smooth_masks
+        )
+        set_tooltip("Smooth masks in the final ROI detection pass.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.nbinned = imgui.input_int("Max Binned Frames", self.s2p.nbinned)
+        set_tooltip("Maximum number of binned frames for ROI detection.")
+
+        imgui.end_disabled()
 
     if compact_header("Classification Settings"):
         _, self.s2p.soma_crop = imgui.checkbox("Soma Crop", self.s2p.soma_crop)
@@ -1186,6 +1338,7 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
             force_detect=self.s2p.force_detect,
             dff_window_size=self.s2p.dff_window_size,
             dff_percentile=self.s2p.dff_percentile,
+            dff_smooth_window=self.s2p.dff_smooth_window if self.s2p.dff_smooth_window > 0 else None,
         )
         self.logger.info(f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}")
 

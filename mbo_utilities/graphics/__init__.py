@@ -15,6 +15,7 @@ __all__ = [
     "PreviewDataWidget",
     "run_gui",
     "download_notebook",
+    "GridSearchViewer",
 ]
 
 # Track if wgpu has been configured (to avoid duplicate setup)
@@ -64,4 +65,7 @@ def __getattr__(name):
         _configure_wgpu_backend()  # Configure before GUI imports
         from .imgui import PreviewDataWidget
         return PreviewDataWidget
+    elif name == "GridSearchViewer":
+        from .grid_search_viewer import GridSearchViewer
+        return GridSearchViewer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

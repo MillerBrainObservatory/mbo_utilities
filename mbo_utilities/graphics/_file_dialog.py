@@ -13,7 +13,8 @@ from imgui_bundle import (
 from mbo_utilities.graphics._widgets import set_tooltip
 from mbo_utilities.preferences import (
     get_default_open_dir,
-    set_last_open_dir,
+    get_last_dir,
+    set_last_dir,
     add_recent_file,
     get_gui_preference,
     set_gui_preference,
@@ -265,7 +266,7 @@ class FileDialog:
                 if self.selected_path:
                     for p in (self.selected_path if isinstance(self.selected_path, list) else [self.selected_path]):
                         add_recent_file(p, file_type="file")
-                        set_last_open_dir(p)
+                        set_last_dir("open_file", p)
                     self._save_gui_preferences()
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._open_multi = None
@@ -273,7 +274,7 @@ class FileDialog:
                 self.selected_path = self._select_folder.result()
                 if self.selected_path:
                     add_recent_file(self.selected_path, file_type="folder")
-                    set_last_open_dir(self.selected_path)
+                    set_last_dir("open_folder", self.selected_path)
                     self._save_gui_preferences()
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._select_folder = None

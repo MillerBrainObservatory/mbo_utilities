@@ -3,6 +3,7 @@ TIFF array readers.
 
 This module provides array readers for TIFF files:
 - TiffArray: Generic TIFF reader using TiffFile handles
+- TiffVolumeArray: Reader for directories with plane TIFF files (4D volumes)
 - MBOTiffArray: Dask-backed reader for MBO processed TIFFs
 - MboRawArray: Raw ScanImage TIFF reader with phase correction
 """
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,6 +46,49 @@ def _convert_range_to_slice(k):
     if isinstance(k, range):
         return slice(k.start, k.stop, k.step)
     return k
+
+
+def _extract_tiff_plane_number(name: str) -> int | None:
+    """Extract plane number from filename like 'plane01.tiff' or 'plane14_stitched.tif'."""
+    match = re.search(r"plane(\d+)", name, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def find_tiff_plane_files(directory: Path) -> list[Path]:
+    """
+    Find TIFF plane files in a directory.
+
+    Looks for files matching the pattern 'planeXX.tiff' or 'planeXX.tif',
+    sorted by plane number.
+
+    Parameters
+    ----------
+    directory : Path
+        Directory to search.
+
+    Returns
+    -------
+    list[Path]
+        List of TIFF files sorted by plane number, or empty list if not found.
+    """
+    plane_files = []
+    for f in directory.iterdir():
+        if f.is_file() and f.suffix.lower() in (".tif", ".tiff"):
+            plane_num = _extract_tiff_plane_number(f.stem)
+            if plane_num is not None:
+                plane_files.append(f)
+
+    if not plane_files:
+        return []
+
+    # Sort by plane number
+    def sort_key(p):
+        num = _extract_tiff_plane_number(p.stem)
+        return num if num is not None else float("inf")
+
+    return sorted(plane_files, key=sort_key)
 
 
 @dataclass
@@ -459,6 +504,199 @@ class TiffArray(ReductionMixin):
         **kwargs,
     ):
         """Write TiffArray to disk in various formats."""
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
+
+
+class TiffVolumeArray(ReductionMixin):
+    """
+    Reader for directories containing plane TIFF files as a 4D volume.
+
+    Presents data as (T, Z, Y, X) by stacking individual plane TIFFs along
+    the Z dimension. Each plane is loaded lazily via TiffArray.
+
+    Parameters
+    ----------
+    directory : str or Path
+        Path to directory containing plane TIFF files (e.g., plane01.tiff).
+    plane_files : list[Path], optional
+        Explicit list of plane files to use. If not provided, auto-detected.
+
+    Attributes
+    ----------
+    shape : tuple[int, int, int, int]
+        Shape as (T, Z, Y, X).
+    dtype : np.dtype
+        Data type.
+    planes : list[TiffArray]
+        Individual plane arrays.
+
+    Examples
+    --------
+    >>> arr = TiffVolumeArray("tiff_output/")
+    >>> arr.shape
+    (10000, 14, 512, 512)
+    >>> frame = arr[0]  # Get first frame across all planes
+    >>> plane7 = arr[:, 6]  # Get all frames from plane 7 (0-indexed)
+    """
+
+    def __init__(
+        self,
+        directory: str | Path,
+        plane_files: Sequence[Path] | None = None,
+    ):
+        self.directory = Path(directory)
+        if not self.directory.exists():
+            raise FileNotFoundError(f"Directory not found: {self.directory}")
+
+        # Find plane files
+        if plane_files is None:
+            plane_files = find_tiff_plane_files(self.directory)
+
+        if not plane_files:
+            raise ValueError(
+                f"No TIFF plane files found in {self.directory}. "
+                "Expected files matching pattern 'planeXX.tiff'."
+            )
+
+        # Load each plane as TiffArray
+        self.planes: list[TiffArray] = []
+        self.filenames = []
+        for pfile in plane_files:
+            arr = TiffArray(pfile)
+            self.planes.append(arr)
+            self.filenames.append(pfile)
+
+        # Validate consistent shapes across planes
+        # TiffArray shape is (T, 1, Y, X) - we check Y, X dimensions
+        shapes = [(p.shape[2], p.shape[3]) for p in self.planes]
+        if len(set(shapes)) != 1:
+            raise ValueError(f"Inconsistent spatial shapes across planes: {shapes}")
+
+        nframes = [p.shape[0] for p in self.planes]
+        if len(set(nframes)) != 1:
+            logger.warning(
+                f"Inconsistent frame counts across planes: {nframes}. "
+                f"Using minimum: {min(nframes)}"
+            )
+
+        self._nframes = min(nframes)
+        self._nz = len(self.planes)
+        self._ly, self._lx = shapes[0]
+        self.dtype = self.planes[0].dtype
+
+        # Aggregate metadata from first plane
+        self._metadata = dict(self.planes[0].metadata)
+        self._metadata["num_planes"] = self._nz
+        self._metadata["plane_files"] = [str(p) for p in plane_files]
+
+        logger.info(
+            f"Loaded TIFF volume: {self._nframes} frames, {self._nz} planes, "
+            f"{self._ly}x{self._lx} px"
+        )
+
+    @property
+    def shape(self) -> tuple[int, int, int, int]:
+        return (self._nframes, self._nz, self._ly, self._lx)
+
+    @property
+    def metadata(self) -> dict:
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
+
+    @property
+    def ndim(self) -> int:
+        return 4
+
+    @property
+    def size(self) -> int:
+        return int(np.prod(self.shape))
+
+    @property
+    def num_planes(self) -> int:
+        return self._nz
+
+    def __len__(self) -> int:
+        return self._nframes
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+        key = key + (slice(None),) * (4 - len(key))
+        t_key, z_key, y_key, x_key = key
+
+        # Normalize t_key to respect _nframes limit
+        if isinstance(t_key, slice):
+            start, stop, step = t_key.indices(self._nframes)
+            t_key = slice(start, stop, step)
+        elif isinstance(t_key, int):
+            if t_key < 0:
+                t_key = self._nframes + t_key
+            if t_key >= self._nframes:
+                raise IndexError(
+                    f"Time index {t_key} out of bounds for {self._nframes} frames"
+                )
+
+        # Handle single z index
+        if isinstance(z_key, int):
+            if z_key < 0:
+                z_key = self._nz + z_key
+            if z_key < 0 or z_key >= self._nz:
+                raise IndexError(f"Z index {z_key} out of bounds for {self._nz} planes")
+            # TiffArray returns (T, 1, Y, X), squeeze out the singleton Z
+            result = self.planes[z_key][t_key, 0, y_key, x_key]
+            return result
+
+        # Handle z slice or full z
+        if isinstance(z_key, slice):
+            z_indices = range(self._nz)[z_key]
+        elif isinstance(z_key, (list, np.ndarray)):
+            z_indices = z_key
+        else:
+            z_indices = range(self._nz)
+
+        # Stack data from selected planes
+        # TiffArray returns (T, 1, Y, X), squeeze out the singleton Z before stacking
+        arrs = [self.planes[i][t_key, 0, y_key, x_key] for i in z_indices]
+        return np.stack(arrs, axis=1)
+
+    def __array__(self) -> np.ndarray:
+        """Materialize full array into memory: (T, Z, Y, X)."""
+        arrs = [p[: self._nframes, 0] for p in self.planes]
+        return np.stack(arrs, axis=1)
+
+    def close(self):
+        """Close all TIFF file handles."""
+        for plane in self.planes:
+            for tf in plane.tiff_files:
+                tf.close()
+
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite: bool = False,
+        target_chunk_mb: int = 50,
+        ext: str = ".tiff",
+        progress_callback=None,
+        debug: bool = False,
+        planes: list[int] | int | None = None,
+        **kwargs,
+    ):
+        """Write TiffVolumeArray to disk in various formats."""
         return _imwrite_base(
             self,
             outpath,

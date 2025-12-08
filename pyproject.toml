@@ -38,6 +38,7 @@ dependencies = [
 	"mkl_fft>=2.0.0",
 	"fastplotlib",
 	"imgui-bundle>=1.92.5",
+	"pyside6>=6.10.1",
 ]
 
 [project.scripts]

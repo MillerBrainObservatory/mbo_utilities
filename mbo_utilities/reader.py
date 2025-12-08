@@ -23,15 +23,19 @@ from mbo_utilities.arrays import (
     Suite2pArray,
     Suite2pVolumeArray,
     TiffArray,
+    TiffVolumeArray,
     ZarrArray,
     find_suite2p_plane_dirs,
+    find_tiff_plane_files,
 )
 from mbo_utilities.metadata import has_mbo_metadata, is_raw_scanimage
 
 logger = log.get("reader")
 
+MBO_SUPPORTED_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy"]
 
-SUPPORTED_FTYPES = (".npy", ".tif", ".tiff", ".bin", ".h5", ".zarr", ".json")
+# Re-export PIPELINE_TAGS for backward compatibility (canonical location is file_io.py)
+from mbo_utilities.file_io import PIPELINE_TAGS
 
 _ARRAY_TYPE_KWARGS = {
     MboRawArray: {
@@ -58,7 +62,7 @@ def _filter_kwargs(cls, kwargs):
 
 
 def imread(
-    inputs: str | Path | Sequence[str | Path],
+    inputs: str | Path | np.ndarray | Sequence[str | Path],
     **kwargs,
 ):
     """
@@ -70,14 +74,16 @@ def imread(
     - .h5: HDF5 files
     - .zarr: Zarr v3
     - .npy: NumPy arrays
+    - np.ndarray: In-memory numpy arrays (wrapped as NumpyArray)
 
     Parameters
     ----------
-    inputs : str, Path, ndarray, MboRawArray, or sequence of str/Path
+    inputs : str, Path, ndarray, or sequence of str/Path
         Input source. Can be:
         - Path to a file or directory
         - List/tuple of file paths
-        - An existing lazy array
+        - A numpy array (will be wrapped as NumpyArray for full imwrite support)
+        - An existing lazy array (passed through unchanged)
     **kwargs
         Extra keyword arguments passed to specific array readers.
 
@@ -85,18 +91,26 @@ def imread(
     -------
     array_like
         One of Suite2pArray, TiffArray, MboRawArray, MBOTiffArray, H5Array,
-        ZarrArray, NumpyArray, IsoviewArray, or the input ndarray.
+        ZarrArray, NumpyArray, or IsoviewArray.
 
     Examples
     --------
-    >>> from mbo_utilities import imread
+    >>> from mbo_utilities import imread, imwrite
     >>> arr = imread("/data/raw")  # directory with supported files
     >>> arr = imread("data.tiff")  # single file
     >>> arr = imread(["file1.tiff", "file2.tiff"])  # multiple files
+
+    >>> # Wrap numpy array for imwrite compatibility
+    >>> data = np.random.randn(100, 512, 512)
+    >>> arr = imread(data)  # Returns NumpyArray
+    >>> imwrite(arr, "output", ext=".zarr")  # Full write support
     """
+    # Wrap numpy arrays in NumpyArray for full imwrite/protocol support
     if isinstance(inputs, np.ndarray):
-        return inputs
-    if isinstance(inputs, MboRawArray):
+        logger.debug(f"Wrapping numpy array with shape {inputs.shape} as NumpyArray")
+        return NumpyArray(inputs)
+    # Pass through already-loaded lazy arrays (has _imwrite method)
+    if hasattr(inputs, "_imwrite") and hasattr(inputs, "shape"):
         return inputs
 
     if "isoview" in kwargs.items():
@@ -147,6 +161,14 @@ def imread(
                     )
                     return Suite2pVolumeArray(p, plane_dirs=plane_dirs)
 
+                # Check for TIFF volume structure (planeXX.tiff files)
+                tiff_plane_files = find_tiff_plane_files(p)
+                if tiff_plane_files:
+                    logger.info(
+                        f"Detected TIFF volume with {len(tiff_plane_files)} planes in {p}"
+                    )
+                    return TiffVolumeArray(p, plane_files=tiff_plane_files)
+
                 paths = [Path(f) for f in p.glob("*") if f.is_file()]
                 logger.debug(f"Found {len(paths)} files in {p}")
         else:
@@ -173,11 +195,11 @@ def imread(
     if not paths:
         raise ValueError("No input files found.")
 
-    filtered = [p for p in paths if p.suffix.lower() in SUPPORTED_FTYPES]
+    filtered = [p for p in paths if p.suffix.lower() in MBO_SUPPORTED_FTYPES]
     if not filtered:
         raise ValueError(
             f"No supported files in {inputs}. \n"
-            f"Supported file types are: {SUPPORTED_FTYPES}"
+            f"Supported file types are: {MBO_SUPPORTED_FTYPES}"
         )
     paths = filtered
 
@@ -262,3 +284,5 @@ def imread(
         return NumpyArray(first)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
+
+

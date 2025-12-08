@@ -20,6 +20,7 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.util import load_npy
 
 logger = log.get("arrays.suite2p")
 
@@ -82,7 +83,7 @@ class Suite2pArray(ReductionMixin):
         else:
             raise ValueError(f"Unsupported input: {path}")
 
-        self.metadata = np.load(ops_path, allow_pickle=True).item()
+        self.metadata = load_npy(ops_path).item()
         self.num_rois = self.metadata.get("num_rois", 1)
 
         # resolve both possible bins - always look in the same directory as ops.npy
@@ -485,3 +486,136 @@ class Suite2pVolumeArray(ReductionMixin):
             debug=debug,
             **kwargs,
         )
+
+
+def _add_suite2p_labels(
+    root_group,
+    suite2p_dirs: list[Path],
+    T: int,
+    Z: int,
+    Y: int,
+    X: int,
+    dtype,
+    compression_level: int,
+):
+    """
+    Add Suite2p segmentation masks as OME-Zarr labels.
+
+    Creates a 'labels' subgroup with ROI masks from Suite2p stat.npy files.
+    Follows OME-NGFF v0.5 labels specification.
+
+    Parameters
+    ----------
+    root_group : zarr.Group
+        Root Zarr group to add labels to.
+    suite2p_dirs : list of Path
+        Suite2p output directories for each z-plane.
+    T, Z, Y, X : int
+        Dimensions of the volume.
+    dtype : np.dtype
+        Data type for label array.
+    compression_level : int
+        Gzip compression level.
+    """
+    import zarr
+    from zarr.codecs import BytesCodec, GzipCodec
+
+    logger.info("Creating labels array from Suite2p masks...")
+
+    # Create labels subgroup
+    labels_group = root_group.create_group("labels", overwrite=True)
+
+    # Create ROI masks array (static across time, just Z, Y, X)
+    label_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+    masks = zarr.create(
+        store=labels_group.store,
+        path="labels/0",
+        shape=(Z, Y, X),
+        chunks=(1, Y, X),
+        dtype=np.uint32,  # uint32 for up to 4 billion ROIs
+        codecs=label_codecs,
+        overwrite=True,
+    )
+
+    # Process each z-plane
+    roi_id = 1  # Start ROI IDs at 1 (0 = background)
+
+    for zi, s2p_dir in enumerate(suite2p_dirs):
+        stat_path = s2p_dir / "stat.npy"
+        iscell_path = s2p_dir / "iscell.npy"
+
+        if not stat_path.exists():
+            logger.warning(f"stat.npy not found in {s2p_dir}, skipping z={zi}")
+            continue
+
+        # Load Suite2p data
+        stat = load_npy(stat_path)
+
+        # Load iscell if available to filter
+        if iscell_path.exists():
+            iscell = load_npy(iscell_path)[:, 0].astype(bool)
+        else:
+            iscell = np.ones(len(stat), dtype=bool)
+
+        # Create mask for this z-plane
+        plane_mask = np.zeros((Y, X), dtype=np.uint32)
+
+        for roi_idx, (roi_stat, is_cell) in enumerate(zip(stat, iscell)):
+            if not is_cell:
+                continue
+
+            # Get pixel coordinates for this ROI
+            ypix = roi_stat.get("ypix", [])
+            xpix = roi_stat.get("xpix", [])
+
+            if len(ypix) == 0 or len(xpix) == 0:
+                continue
+
+            # Ensure coordinates are within bounds
+            ypix = np.clip(ypix, 0, Y - 1)
+            xpix = np.clip(xpix, 0, X - 1)
+
+            # Assign unique ROI ID
+            plane_mask[ypix, xpix] = roi_id
+            roi_id += 1
+
+        # Write to Zarr
+        masks[zi, :, :] = plane_mask
+        logger.debug(
+            f"Added {(plane_mask > 0).sum()} labeled pixels for z-plane {zi + 1}/{Z}"
+        )
+
+    # Add OME-NGFF labels metadata
+    labels_metadata = {
+        "version": "0.5",
+        "labels": ["0"],  # Path to the label array
+    }
+
+    # Add metadata for label array
+    label_array_meta = {
+        "version": "0.5",
+        "image-label": {
+            "version": "0.5",
+            "colors": [],  # Can add color LUT here if desired
+            "source": {"image": "../../0"},  # Reference to main image
+        },
+    }
+
+    labels_group.attrs.update(labels_metadata)
+    labels_group["0"].attrs.update(label_array_meta)
+
+    logger.info(f"Added {roi_id - 1} total ROIs across {Z} z-planes")
+
+
+def load_ops(ops_input: str | Path | list[str | Path]):
+    """Simple utility load a suite2p npy file"""
+    if isinstance(ops_input, (str, Path)):
+        return load_npy(ops_input).item()
+    elif isinstance(ops_input, dict):
+        return ops_input
+    logger.warning("No valid ops file provided, returning empty dict.")
+    return {}
+
+
+# Re-export write_ops for backward compatibility (moved to _writers.py to avoid circular imports)
+from mbo_utilities._writers import write_ops

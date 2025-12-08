@@ -7,7 +7,6 @@ as lazy arrays conforming to LazyArrayProtocol.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -29,31 +28,40 @@ class NumpyArray(ReductionMixin):
     Parameters
     ----------
     array : np.ndarray, str, or Path
-        Either a numpy array (will be saved to temp file for memory mapping)
-        or a path to a .npy file.
+        Either a numpy array (kept in memory, no temp file created)
+        or a path to a .npy file (memory-mapped for lazy loading).
     metadata : dict, optional
         Metadata dictionary. If not provided, basic metadata is inferred
         from array shape.
 
     Examples
     --------
-    >>> # From .npy file
+    >>> # From .npy file (memory-mapped, lazy)
     >>> arr = NumpyArray("data.npy")
     >>> arr.shape
     (100, 512, 512)
 
-    >>> # From in-memory array (creates temp file)
+    >>> # From in-memory array (wraps directly, no temp file)
     >>> data = np.random.randn(100, 512, 512).astype(np.float32)
     >>> arr = NumpyArray(data)
-    >>> arr[0:10]  # Lazy slicing
+    >>> arr[0:10]  # Slicing
 
     >>> # 4D volumetric data
     >>> vol = NumpyArray("volume.npy")  # shape: (T, Z, Y, X)
     >>> vol.ndim
     4
+
+    >>> # Use with imwrite
+    >>> from mbo_utilities import imread, imwrite
+    >>> arr = imread(my_numpy_array)  # Returns NumpyArray
+    >>> imwrite(arr, "output", ext=".zarr")  # Full write support
     """
 
     def __init__(self, array: np.ndarray | str | Path, metadata: dict | None = None):
+        self._tempfile = None
+        self._npz_file = None
+        self._is_in_memory = False
+
         if isinstance(array, (str, Path)):
             self.path = Path(array)
             if not self.path.exists():
@@ -80,20 +88,15 @@ class NumpyArray(ReductionMixin):
                 # Pure .npy file
                 self.data = loaded
                 self._metadata = {}
-                self._npz_file = None
 
-            self._tempfile = None
         elif isinstance(array, np.ndarray):
-            logger.info("Creating temporary .npy file for array.")
-            tmp = tempfile.NamedTemporaryFile(suffix=".npy", delete=False)
-            np.save(tmp, array)  # type: ignore
-            tmp.close()
-            self.path = Path(tmp.name)
-            self.data = np.load(self.path, mmap_mode="r")
-            self._tempfile = tmp
-            self._npz_file = None
+            # Keep array in memory - no temp file needed
+            # This is more efficient and avoids disk I/O
+            self.data = array
+            self.path = None
             self._metadata = {}
-            logger.debug(f"Temporary file created at {self.path}")
+            self._is_in_memory = True
+            logger.debug(f"Wrapping in-memory array with shape {array.shape}")
         else:
             raise TypeError(f"Expected np.ndarray or path, got {type(array)}")
 
@@ -105,6 +108,22 @@ class NumpyArray(ReductionMixin):
         self.dtype = self.data.dtype
         self.ndim = self.data.ndim
 
+        # Set dimension labels based on array shape
+        self._dims = self._infer_dims()
+
+    def _infer_dims(self) -> str:
+        """Infer dimension labels from array shape."""
+        if self.ndim == 2:
+            return "YX"
+        elif self.ndim == 3:
+            return "TYX"
+        elif self.ndim == 4:
+            return "TZYX"
+        elif self.ndim == 5:
+            return "TCZYX"
+        else:
+            return "".join([f"D{i}" for i in range(self.ndim)])
+
     def __getitem__(self, item):
         return self.data[item]
 
@@ -115,9 +134,35 @@ class NumpyArray(ReductionMixin):
     def __array__(self):
         return np.asarray(self.data)
 
+    def __repr__(self) -> str:
+        mem_str = " (in-memory)" if self._is_in_memory else ""
+        return f"NumpyArray(shape={self.shape}, dtype={self.dtype}, dims='{self.dims}'{mem_str})"
+
+    @property
+    def dims(self) -> str:
+        """Return dimension labels (e.g., 'TYX', 'TZYX')."""
+        return self._dims
+
+    @dims.setter
+    def dims(self, value: str):
+        """Set dimension labels."""
+        if len(value) != self.ndim:
+            raise ValueError(f"dims length {len(value)} doesn't match ndim {self.ndim}")
+        self._dims = value
+
+    @property
+    def num_planes(self) -> int:
+        """Return number of Z-planes (1 for 3D data, Z dimension for 4D)."""
+        if self.ndim == 4:
+            return self.shape[1]  # TZYX -> Z is index 1
+        return 1
+
     @property
     def filenames(self) -> list[Path]:
-        return [self.path]
+        """Return list of source files (empty for in-memory arrays)."""
+        if self.path is not None:
+            return [self.path]
+        return []
 
     @property
     def metadata(self) -> dict:
@@ -148,12 +193,6 @@ class NumpyArray(ReductionMixin):
             except Exception:
                 pass
             self._npz_file = None
-        if self._tempfile:
-            try:
-                Path(self._tempfile.name).unlink(missing_ok=True)
-            except Exception:
-                pass
-            self._tempfile = None
 
     def __del__(self):
         self.close()

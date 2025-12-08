@@ -43,3 +43,11 @@ class Widget(ABC):
     def draw(self) -> None:
         """draw the imgui ui for this widget."""
         ...
+
+    def cleanup(self) -> None:
+        """clean up resources when widget is destroyed.
+
+        override in subclasses to release resources like open windows,
+        background threads, file handles, etc.
+        """
+        pass
