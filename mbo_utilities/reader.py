@@ -62,7 +62,7 @@ def _filter_kwargs(cls, kwargs):
 
 
 def imread(
-    inputs: str | Path | Sequence[str | Path],
+    inputs: str | Path | np.ndarray | Sequence[str | Path],
     **kwargs,
 ):
     """
@@ -74,14 +74,16 @@ def imread(
     - .h5: HDF5 files
     - .zarr: Zarr v3
     - .npy: NumPy arrays
+    - np.ndarray: In-memory numpy arrays (wrapped as NumpyArray)
 
     Parameters
     ----------
-    inputs : str, Path, ndarray, MboRawArray, or sequence of str/Path
+    inputs : str, Path, ndarray, or sequence of str/Path
         Input source. Can be:
         - Path to a file or directory
         - List/tuple of file paths
-        - An existing lazy array
+        - A numpy array (will be wrapped as NumpyArray for full imwrite support)
+        - An existing lazy array (passed through unchanged)
     **kwargs
         Extra keyword arguments passed to specific array readers.
 
@@ -89,20 +91,26 @@ def imread(
     -------
     array_like
         One of Suite2pArray, TiffArray, MboRawArray, MBOTiffArray, H5Array,
-        ZarrArray, NumpyArray, IsoviewArray, or the input ndarray.
+        ZarrArray, NumpyArray, or IsoviewArray.
 
     Examples
     --------
-    >>> from mbo_utilities import imread
+    >>> from mbo_utilities import imread, imwrite
     >>> arr = imread("/data/raw")  # directory with supported files
     >>> arr = imread("data.tiff")  # single file
     >>> arr = imread(["file1.tiff", "file2.tiff"])  # multiple files
+
+    >>> # Wrap numpy array for imwrite compatibility
+    >>> data = np.random.randn(100, 512, 512)
+    >>> arr = imread(data)  # Returns NumpyArray
+    >>> imwrite(arr, "output", ext=".zarr")  # Full write support
     """
-    # Pass through already-loaded arrays (ndarray, lazy arrays, etc.)
+    # Wrap numpy arrays in NumpyArray for full imwrite/protocol support
     if isinstance(inputs, np.ndarray):
-        return inputs
-    # Check for lazy array types by duck typing (has shape and dtype)
-    if hasattr(inputs, "shape") and hasattr(inputs, "dtype") and not isinstance(inputs, (str, Path)):
+        logger.debug(f"Wrapping numpy array with shape {inputs.shape} as NumpyArray")
+        return NumpyArray(inputs)
+    # Pass through already-loaded lazy arrays (has _imwrite method)
+    if hasattr(inputs, "_imwrite") and hasattr(inputs, "shape"):
         return inputs
 
     if "isoview" in kwargs.items():
