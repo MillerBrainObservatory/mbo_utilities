@@ -8,7 +8,6 @@ This repository contains python functions to pre/post process datasets recording
 ---
 maxdepth: 1
 ---
-Installation <install>
 User Guide <user_guide>
 Array Types <array_types>
 API <api/index>
