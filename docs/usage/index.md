@@ -9,6 +9,7 @@ maxdepth: 3
 numbered: 2
 ---
 
+cli
 save_as
 run_gui
 save_mp4
