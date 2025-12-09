@@ -9,13 +9,14 @@ chunked streaming, and format conversion.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Callable, Sequence
 
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities._writers import _try_generic_writers
+from mbo_utilities._writers import _try_generic_writers, add_processing_step
 from mbo_utilities.arrays import (
     iter_rois,
     register_zplanes_s3d,
@@ -296,12 +297,31 @@ def imwrite(
             except AttributeError:
                 pass
 
+    # Collect input files for processing history
+    input_files = getattr(lazy_array, "filenames", None)
+    if input_files:
+        input_files = [str(f) for f in input_files]
+
+    # Extract scan-phase correction parameters if available (MboRawArray)
+    scan_phase_params = {}
+    if hasattr(lazy_array, "fix_phase"):
+        scan_phase_params["fix_phase"] = getattr(lazy_array, "fix_phase", False)
+    if hasattr(lazy_array, "use_fft"):
+        scan_phase_params["use_fft"] = getattr(lazy_array, "use_fft", False)
+    if hasattr(lazy_array, "phasecorr_method"):
+        scan_phase_params["phasecorr_method"] = getattr(
+            lazy_array, "phasecorr_method", None
+        )
+
+    # Start timing for processing history
+    write_start_time = time.time()
+
     if hasattr(lazy_array, "_imwrite"):
         write_kwargs = kwargs.copy()
         if num_frames is not None:
             write_kwargs["num_frames"] = num_frames
 
-        return lazy_array._imwrite(
+        result = lazy_array._imwrite(
             outpath,
             overwrite=overwrite,
             target_chunk_mb=target_chunk_mb,
@@ -320,4 +340,70 @@ def imwrite(
             outpath,
             overwrite=overwrite,
         )
-        return outpath
+        result = outpath
+
+    # Record processing step in metadata
+    write_duration = time.time() - write_start_time
+
+    # Build extra info for processing history
+    processing_extra = {
+        "input_format": type(lazy_array).__name__,
+        "output_format": ext,
+        "num_frames": file_metadata.get("num_frames") or file_metadata.get("nframes"),
+        "shape": list(lazy_array.shape) if hasattr(lazy_array, "shape") else None,
+    }
+
+    # Add scan-phase correction info if present
+    if scan_phase_params:
+        processing_extra["scan_phase_correction"] = scan_phase_params
+
+    # Add z-registration info if used
+    if register_z:
+        processing_extra["z_registration"] = {
+            "enabled": True,
+            "s3d_job_dir": str(s3d_job_dir) if s3d_job_dir else None,
+            "apply_shift": file_metadata.get("apply_shift", False),
+        }
+        if shift_vectors is not None:
+            processing_extra["z_registration"]["shift_vectors_provided"] = True
+
+    # Add ROI info if specified
+    if roi is not None:
+        processing_extra["roi"] = roi
+
+    # Add planes info if specified
+    if planes is not None:
+        processing_extra["planes"] = list(planes) if hasattr(planes, "__iter__") else planes
+
+    # Collect output files
+    output_files = None
+    if result and isinstance(result, Path):
+        if result.is_dir():
+            # List files in output directory
+            out_files = list(result.glob(f"*{ext}"))
+            if out_files:
+                output_files = [str(f) for f in out_files[:20]]  # Limit to first 20
+        else:
+            output_files = [str(result)]
+
+    add_processing_step(
+        file_metadata,
+        step_name="imwrite",
+        input_files=input_files,
+        output_files=output_files,
+        duration_seconds=write_duration,
+        extra=processing_extra,
+    )
+
+    # Update lazy_array metadata with processing history if possible
+    if hasattr(lazy_array, "metadata"):
+        try:
+            lazy_array.metadata = file_metadata
+        except AttributeError:
+            pass
+
+    logger.debug(
+        f"Processing step recorded: imwrite to {ext} in {write_duration:.2f}s"
+    )
+
+    return result

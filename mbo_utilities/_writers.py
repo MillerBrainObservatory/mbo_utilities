@@ -1,6 +1,7 @@
 import functools
 import math
 import warnings
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -23,6 +24,94 @@ warnings.filterwarnings("ignore")
 
 ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
 CHUNKS = {0: "auto", 1: -1, 2: -1}
+
+
+def _get_mbo_version():
+    """Get mbo_utilities version string."""
+    try:
+        from . import __version__
+        return __version__
+    except Exception:
+        return "unknown"
+
+
+def add_processing_step(
+    metadata: dict,
+    step_name: str,
+    input_files: list | str | None = None,
+    output_files: list | str | None = None,
+    duration_seconds: float | None = None,
+    extra: dict | None = None,
+) -> dict:
+    """
+    Add a processing step to metadata["processing_history"].
+
+    Each step is appended to the history list, preserving previous runs.
+    This allows tracking of re-runs and incremental processing across
+    both mbo_utilities and downstream tools like lbm_suite2p_python.
+
+    Parameters
+    ----------
+    metadata : dict
+        The metadata dictionary to update.
+    step_name : str
+        Name of the processing step (e.g., "imwrite", "scan_phase_correction",
+        "format_conversion", "z_registration").
+    input_files : list of str or str, optional
+        List of input file paths for this step.
+    output_files : list of str or str, optional
+        List of output file paths for this step.
+    duration_seconds : float, optional
+        How long this step took.
+    extra : dict, optional
+        Additional metadata for this step (e.g., scan-phase parameters,
+        output format, compression settings).
+
+    Returns
+    -------
+    dict
+        The updated metadata dictionary.
+
+    Examples
+    --------
+    >>> metadata = {}
+    >>> add_processing_step(
+    ...     metadata,
+    ...     "imwrite",
+    ...     input_files=["raw.tif"],
+    ...     output_files=["output.zarr"],
+    ...     extra={"output_format": ".zarr", "fix_phase": True, "use_fft": True}
+    ... )
+    """
+    if "processing_history" not in metadata:
+        metadata["processing_history"] = []
+
+    step_record = {
+        "step": step_name,
+        "timestamp": datetime.now().isoformat(),
+        "mbo_utilities_version": _get_mbo_version(),
+    }
+
+    if input_files is not None:
+        if isinstance(input_files, (str, Path)):
+            step_record["input_files"] = [str(input_files)]
+        else:
+            step_record["input_files"] = [str(f) for f in input_files]
+
+    if output_files is not None:
+        if isinstance(output_files, (str, Path)):
+            step_record["output_files"] = [str(output_files)]
+        else:
+            step_record["output_files"] = [str(f) for f in output_files]
+
+    if duration_seconds is not None:
+        step_record["duration_seconds"] = round(duration_seconds, 2)
+
+    if extra is not None:
+        step_record.update(extra)
+
+    metadata["processing_history"].append(step_record)
+    return metadata
 
 
 

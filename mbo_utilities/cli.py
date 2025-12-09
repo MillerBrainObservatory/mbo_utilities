@@ -166,11 +166,11 @@ def main(
     Commands:
       mbo convert INPUT OUTPUT       Convert between formats
       mbo info INPUT                 Show array information (CLI)
+      mbo download URL               Download file from GitHub
       mbo formats                    List supported formats
 
     \b
     Utilities:
-      mbo --download-file URL -o /path/   Download file from GitHub
       mbo --download-notebook             Download user guide notebook
       mbo --check-install                 Verify installation
     """
@@ -467,6 +467,27 @@ def info(input_path, metadata):
                 click.echo(f"  ... and {len(other_keys)} more keys")
 
 
+@main.command()
+@click.argument("url", type=str)
+@click.option(
+    "-o", "--output",
+    "output_path",
+    type=click.Path(),
+    default=None,
+    help="Output directory or file path. Default: current directory.",
+)
+def download(url, output_path):
+    """
+    Download a file from a URL (supports GitHub).
+
+    \b
+    Examples:
+      mbo download https://github.com/user/repo/blob/main/notebook.ipynb
+      mbo download https://github.com/user/repo/blob/main/data.npy -o ./data/
+    """
+    download_file(url, output_path)
+
+
 @main.command("formats")
 def list_formats():
     """List supported file formats."""
@@ -496,21 +517,10 @@ def list_formats():
     help="Output directory for results. Default: <input>_scanphase_analysis/",
 )
 @click.option(
-    "--use-fft/--no-fft",
-    default=True,
-    help="Use FFT-based phase correlation (subpixel precision).",
-)
-@click.option(
     "--fft-method",
     type=click.Choice(["1d", "2d"]),
     default="1d",
     help="FFT method: '1d' (fast, recommended) or '2d' (more accurate).",
-)
-@click.option(
-    "--sample-frames",
-    type=int,
-    default=100,
-    help="Number of frames to sample for temporal analysis. Use 0 for all frames.",
 )
 @click.option(
     "--format",
@@ -524,80 +534,41 @@ def list_formats():
     default=False,
     help="Display plots interactively after analysis.",
 )
-def scanphase(input_path, output_dir, use_fft, fft_method, sample_frames, image_format, show):
+def scanphase(input_path, output_dir, fft_method, image_format, show):
     """
-    Analyze bidirectional scan-phase correction parameters.
+    Scan-phase analysis for bidirectional scanning data.
 
-    This command performs comprehensive analysis of phase offset variation to help
-    you choose optimal correction parameters. It analyzes:
-
-    \b
-    1. TEMPORAL VARIATION: How offset changes over time (frames)
-       - Stable offset -> use method='mean'
-       - Varying offset -> consider method='frame'
-
-    2. Z-PLANE VARIATION: How offset differs between planes
-       - Helps identify if per-plane correction is needed
-
-    3. SPATIAL VARIATION: How offset varies across X and Y
-       - Uniform -> global correction works well
-       - Gradient -> may indicate scanner calibration issues
-
-    4. WINDOW SIZE EFFECTS: How temporal averaging affects estimates
-       - Helps choose optimal number of frames to average
-
-    5. FFT vs INTEGER: Compares subpixel vs integer-only methods
-       - FFT: slower but subpixel precision (use_fft=True)
-       - Integer: faster but only integer pixel shifts (use_fft=False)
+    Analyzes phase offset characteristics across temporal and spatial domains.
 
     \b
-    OUTPUTS:
-      - scanphase_summary.png    : Comprehensive overview figure
-      - scanphase_temporal.png   : Offset vs time analysis
-      - scanphase_spatial.png    : Spatial uniformity analysis
-      - scanphase_windows.png    : Window size comparison
-      - scanphase_zplanes.png    : Per-plane analysis (if multi-plane)
-      - scanphase_results.npz    : Numerical results for further analysis
-
-    \b
-    INTERPRETING RESULTS:
-      - If offset_std < 0.1: Very stable, use method='mean'
-      - If offset_std > 0.3: Consider method='frame' for per-frame correction
-      - If spatial_std > 0.5: Scanner may need recalibration
-      - If FFT and integer differ by >0.2: Subpixel correction helps
-
-    \b
-    ADJUSTING PARAMETERS:
-      Based on analysis results, adjust MboRawArray parameters:
-        arr = imread(path, fix_phase=True)
-        arr.use_fft = True          # For subpixel precision
-        arr.phasecorr_method = 'mean'  # Use mean of frames
-        arr.upsample = 5            # FFT upsampling factor
-        arr.border = 4              # Edge pixels to exclude
-        arr.max_offset = 4          # Maximum offset to search
+    OUTPUT:
+      temporal.png           - time series, histogram, window size effects
+      spatial.png            - grid heatmap, X/Y profiles
+      zplanes.png            - per-plane analysis (if multi-plane)
+      scanphase_results.npz  - all numerical data
 
     \b
     Examples:
-      mbo scanphase                          # Open file dialog
-      mbo scanphase /path/to/data.tiff       # Analyze specific file
-      mbo scanphase data.tiff -o ./results/  # Custom output directory
-      mbo scanphase data.tiff --show         # Show plots interactively
-      mbo scanphase data.tiff --no-fft       # Use integer-only method
-      mbo scanphase data.tiff --format pdf   # Save as PDF
+      mbo scanphase                          # open file dialog
+      mbo scanphase /path/to/data.tiff       # analyze specific file
+      mbo scanphase data.tiff -o ./results/  # custom output directory
+      mbo scanphase data.tiff --show         # show plots interactively
     """
+    from pathlib import Path
     from mbo_utilities.analysis.scanphase import run_scanphase_analysis
 
-    # Handle sample_frames=0 as "all frames"
-    if sample_frames == 0:
-        sample_frames = None
-
     try:
+        # Determine output directory for display
+        if input_path is not None:
+            input_path_obj = Path(input_path)
+            actual_output_dir = output_dir if output_dir else input_path_obj.parent / f"{input_path_obj.stem}_scanphase_analysis"
+        else:
+            actual_output_dir = output_dir
+
         results = run_scanphase_analysis(
             data_path=input_path,
             output_dir=output_dir,
-            use_fft=use_fft,
             fft_method=fft_method,
-            sample_frames=sample_frames,
             image_format=image_format,
             show_plots=show,
         )
@@ -605,38 +576,52 @@ def scanphase(input_path, output_dir, use_fft, fft_method, sample_frames, image_
         if results is None:
             return  # User cancelled file selection
 
-        # Print summary
-        stats = results.get_summary_stats()
+        # Print summary statistics
+        summary = results.get_summary()
+        meta = summary.get('metadata', {})
 
-        click.echo("\n" + "=" * 60)
-        click.secho("PHASE CORRECTION RECOMMENDATIONS", fg="cyan", bold=True)
-        click.echo("=" * 60)
+        click.echo("")
+        click.secho("SCAN-PHASE ANALYSIS COMPLETE", fg="cyan", bold=True)
+        click.echo("")
+        click.echo(f"Data: {meta.get('num_frames', 0)} frames, "
+                   f"{meta.get('num_planes', 1)} planes, "
+                   f"{meta.get('frame_shape', (0, 0))[1]}x{meta.get('frame_shape', (0, 0))[0]} px")
+        click.echo(f"Analysis time: {meta.get('analysis_time_seconds', 0):.1f} seconds")
+        click.echo(f"Output saved to: {actual_output_dir}")
 
-        # Stability assessment
-        if 'offset_std' in stats:
-            std = stats['offset_std']
-            if std < 0.1:
-                click.secho("Temporal stability: EXCELLENT", fg="green")
-                click.echo("  -> Use phasecorr_method='mean' for best results")
-            elif std < 0.3:
-                click.secho("Temporal stability: GOOD", fg="green")
-                click.echo("  -> phasecorr_method='mean' should work well")
-            else:
-                click.secho("Temporal stability: VARIABLE", fg="yellow")
-                click.echo("  -> Consider phasecorr_method='frame' for per-frame correction")
+        # Temporal stats
+        if 'temporal_fft' in summary:
+            stats = summary['temporal_fft']
+            click.echo("")
+            click.secho("TEMPORAL STATISTICS (FFT)", fg="yellow", bold=True)
+            click.echo(f"  Mean:   {stats.get('mean', 0):+.4f} px")
+            click.echo(f"  Median: {stats.get('median', 0):+.4f} px")
+            click.echo(f"  Std:    {stats.get('std', 0):.4f} px")
+            click.echo(f"  Range:  [{stats.get('min', 0):.3f}, {stats.get('max', 0):.3f}] px")
+            click.echo(f"  IQR:    {stats.get('iqr', 0):.4f} px")
+            click.echo(f"  MAD:    {stats.get('mad', 0):.4f} px")
 
-        # Subpixel recommendation
-        if 'offset_mean' in stats:
-            offset = stats['offset_mean']
-            fractional = abs(offset - round(offset))
-            if fractional > 0.2:
-                click.secho(f"Subpixel offset detected: {offset:.3f} px", fg="cyan")
-                click.echo("  -> use_fft=True recommended for subpixel precision")
-            else:
-                click.secho(f"Near-integer offset: {offset:.3f} px", fg="green")
-                click.echo("  -> use_fft=False is sufficient (faster)")
+        if 'temporal_int' in summary:
+            stats = summary['temporal_int']
+            click.echo("")
+            click.secho("TEMPORAL STATISTICS (Integer)", fg="yellow", bold=True)
+            click.echo(f"  Mean:   {stats.get('mean', 0):+.4f} px")
+            click.echo(f"  Median: {stats.get('median', 0):+.4f} px")
+            click.echo(f"  Std:    {stats.get('std', 0):.4f} px")
 
-        click.echo("=" * 60)
+        # Spatial stats
+        spatial_keys = [k for k in summary.keys() if k.startswith('spatial_')]
+        if spatial_keys:
+            click.echo("")
+            click.secho("SPATIAL STATISTICS (by patch size)", fg="yellow", bold=True)
+            for key in sorted(spatial_keys):
+                stats = summary[key]
+                patch_size = key.replace('spatial_', '')
+                click.echo(f"  {patch_size}: mean={stats.get('mean', 0):+.4f}, "
+                           f"std={stats.get('std', 0):.4f}, "
+                           f"n={stats.get('n_patches', 0)}/{stats.get('n_total', 0)} patches")
+
+        click.echo("")
 
     except Exception as e:
         click.secho(f"Error: {e}", fg="red")
