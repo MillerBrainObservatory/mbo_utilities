@@ -5,9 +5,11 @@ Provides ROI filtering and visualization:
 - dF/F trace with adjustable baseline (median or percentile)
 - Metric histograms with threshold sliders for filtering
 - Updates iscell based on filter thresholds
+- Bi-directional sync with Suite2p GUI via file watching
 """
 
 import numpy as np
+import time
 from pathlib import Path
 from imgui_bundle import imgui, implot, portable_file_dialogs as pfd
 
@@ -15,7 +17,12 @@ from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 
 class DiagnosticsWidget:
-    """ROI diagnostics viewer for suite2p results."""
+    """ROI diagnostics viewer for suite2p results.
+
+    Supports bi-directional synchronization with Suite2p GUI:
+    - Changes here auto-save to iscell.npy
+    - External changes to iscell.npy are detected and reloaded
+    """
 
     def __init__(self):
         # Data
@@ -68,6 +75,17 @@ class DiagnosticsWidget:
         self._show_stats_popup = False
         self._stats_popup_open = False
 
+        # Bi-directional sync settings
+        self._auto_save = True  # Auto-save iscell.npy when filters change
+        self._watch_for_changes = True  # Watch for external changes
+        self._last_iscell_mtime = None  # Track file modification time
+        self._last_check_time = 0  # Throttle file checks
+        self._check_interval = 1.0  # Check for changes every N seconds
+        self._last_save_time = 0  # Prevent reload immediately after our own save
+        self._save_cooldown = 0.5  # Seconds to wait after save before checking for changes
+        self._save_status_msg = ""  # Status message to display
+        self._save_status_time = 0  # When status was set
+
     def load_results(self, plane_dir: Path):
         """Load suite2p results from a plane directory."""
         from mbo_utilities.util import load_npy
@@ -118,6 +136,14 @@ class DiagnosticsWidget:
             self.Fneu = None
 
         self.loaded_path = plane_dir
+        self._save_path = save_path  # Store the actual save path for iscell.npy
+
+        # Track iscell.npy modification time for bi-directional sync
+        iscell_path = save_path / "iscell.npy"
+        if iscell_path.exists():
+            self._last_iscell_mtime = iscell_path.stat().st_mtime
+        else:
+            self._last_iscell_mtime = None
 
         self._compute_metrics()
         self._update_filter_ranges()
@@ -190,6 +216,7 @@ class DiagnosticsWidget:
             return
 
         n_rois = len(self.stat)
+        changed = False
         for i in range(n_rois):
             passes = True
             if self._snr is not None and self._snr[i] < self._filter_snr_min:
@@ -205,9 +232,68 @@ class DiagnosticsWidget:
             orig_prob = self.iscell_original[i, 0] if self.iscell_original.ndim > 1 else self.iscell_original[i]
             if orig_prob > 0.5:
                 if self.iscell.ndim > 1:
-                    self.iscell[i, 0] = orig_prob if passes else 0.0
+                    new_val = orig_prob if passes else 0.0
+                    if self.iscell[i, 0] != new_val:
+                        self.iscell[i, 0] = new_val
+                        changed = True
                 else:
-                    self.iscell[i] = orig_prob if passes else 0.0
+                    new_val = orig_prob if passes else 0.0
+                    if self.iscell[i] != new_val:
+                        self.iscell[i] = new_val
+                        changed = True
+
+        # Auto-save if enabled and changes were made
+        if changed and self._auto_save:
+            self._save_iscell()
+
+    def _check_for_external_changes(self):
+        """Check if iscell.npy was modified externally (e.g., by Suite2p GUI)."""
+        if not self._watch_for_changes or not hasattr(self, '_save_path'):
+            return
+
+        current_time = time.time()
+
+        # Throttle checks
+        if current_time - self._last_check_time < self._check_interval:
+            return
+        self._last_check_time = current_time
+
+        # Don't check immediately after we saved (to avoid reloading our own changes)
+        if current_time - self._last_save_time < self._save_cooldown:
+            return
+
+        iscell_path = self._save_path / "iscell.npy"
+        if not iscell_path.exists():
+            return
+
+        try:
+            current_mtime = iscell_path.stat().st_mtime
+            if self._last_iscell_mtime is not None and current_mtime > self._last_iscell_mtime:
+                # File was modified externally - reload it
+                self._reload_iscell()
+        except OSError:
+            pass  # File might be locked by another process
+
+    def _reload_iscell(self):
+        """Reload iscell.npy from disk (called when external changes detected)."""
+        if not hasattr(self, '_save_path'):
+            return
+
+        from mbo_utilities.util import load_npy
+
+        iscell_path = self._save_path / "iscell.npy"
+        if not iscell_path.exists():
+            return
+
+        try:
+            new_iscell = load_npy(iscell_path)
+            if new_iscell is not None:
+                self.iscell = new_iscell
+                # Update modification time
+                self._last_iscell_mtime = iscell_path.stat().st_mtime
+                print(f"Reloaded iscell.npy from {iscell_path} (external change detected)")
+        except Exception as e:
+            print(f"Error reloading iscell.npy: {e}")
 
     @property
     def n_rois(self):
@@ -236,6 +322,9 @@ class DiagnosticsWidget:
             self._draw_load_ui()
             return
 
+        # Check for external changes to iscell.npy (bi-directional sync)
+        self._check_for_external_changes()
+
         avail = imgui.get_content_region_avail()
         left_width = min(280, avail.x * 0.28)
 
@@ -244,6 +333,8 @@ class DiagnosticsWidget:
             self._draw_controls()
             imgui.separator()
             self._draw_baseline_settings()
+            imgui.separator()
+            self._draw_sync_settings()
         imgui.end_child()
 
         imgui.same_line()
@@ -352,6 +443,38 @@ class DiagnosticsWidget:
                     self._activity[i] = np.sum(self._dff[i] > 0.5) / len(self._dff[i])
                 self._update_filter_ranges()
 
+    def _draw_sync_settings(self):
+        """Draw Suite2p GUI synchronization settings."""
+        imgui.text("Suite2p Sync")
+
+        _, self._auto_save = imgui.checkbox("Auto-save", self._auto_save)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Auto-save iscell.npy when filters change")
+
+        _, self._watch_for_changes = imgui.checkbox("Watch file", self._watch_for_changes)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Reload when iscell.npy is modified externally (e.g., by Suite2p GUI)")
+
+        # Show save status message (fades after 3 seconds)
+        if self._save_status_msg and time.time() - self._save_status_time < 3.0:
+            if "error" in self._save_status_msg.lower():
+                imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), self._save_status_msg)
+            else:
+                imgui.text_colored(imgui.ImVec4(0.3, 1.0, 0.3, 1.0), self._save_status_msg)
+        elif self._auto_save:
+            imgui.text_colored(imgui.ImVec4(0.5, 0.7, 0.5, 1.0), "Auto-save ON")
+
+        # Guidance for Suite2p GUI
+        imgui.text_wrapped("Suite2p: File > Load to refresh")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "iscell.npy is saved when filters change.\n\n"
+                "To see changes in Suite2p GUI:\n"
+                "  1. File > Load results (or drag stat.npy)\n"
+                "  2. Or press 'r' to reload in some versions\n\n"
+                "Suite2p GUI doesn't auto-refresh from disk."
+            )
+
     def _draw_right_panel(self):
         """Draw right panel with trace and histograms."""
         avail = imgui.get_content_region_avail()
@@ -410,7 +533,8 @@ class DiagnosticsWidget:
         imgui.text("Filter Thresholds (adjust to modify cell classification)")
 
         avail = imgui.get_content_region_avail()
-        hist_height = max(60, (avail.y - 40) / 4)
+        # Calculate height for each histogram (4 histograms + spacing)
+        hist_height = max(80, (avail.y - 60) / 4)
 
         filters_changed = False
 
@@ -472,9 +596,17 @@ class DiagnosticsWidget:
         counts, edges = np.histogram(hist_data, bins=n_bins, range=(hist_min, hist_max))
         bin_centers = (edges[:-1] + edges[1:]) / 2
 
+        # Use full available width - imgui handles slider grabber internally
+        avail_width = imgui.get_content_region_avail().x
+        content_width = max(200, avail_width - 8)  # Small margin for safety
+
+        # Draw label and value above the histogram
+        filter_type = "Min" if is_min_filter else "Max"
+        imgui.text(f"{label} ({filter_type}: {current_val:.2f})")
+
         # Draw plot with histogram and threshold line
-        if implot.begin_plot(f"##{label}", imgui.ImVec2(-1, height), implot.Flags_.no_legend):
-            implot.setup_axes(label, "Count", implot.AxisFlags_.auto_fit, implot.AxisFlags_.auto_fit)
+        if implot.begin_plot(f"##{label}", imgui.ImVec2(content_width, height - 25), implot.Flags_.no_legend):
+            implot.setup_axes("", "", implot.AxisFlags_.auto_fit | implot.AxisFlags_.no_tick_labels, implot.AxisFlags_.auto_fit)
 
             # Draw histogram bars
             bar_width = (hist_max - hist_min) / n_bins * 0.9
@@ -501,9 +633,9 @@ class DiagnosticsWidget:
 
             implot.end_plot()
 
-        # Slider for threshold
-        imgui.set_next_item_width(-1)
-        slider_label = f"Min##{label}" if is_min_filter else f"Max##{label}"
+        # Slider for threshold - use same width as plot, format includes value on right
+        imgui.set_next_item_width(content_width)
+        slider_label = f"##{label}_slider"
         changed, new_val = imgui.slider_float(slider_label, current_val, hist_min, hist_max, "%.2f")
 
         if changed:
@@ -512,18 +644,31 @@ class DiagnosticsWidget:
             setattr(self, filter_attr, new_val)
             return True
 
+        imgui.spacing()
         return False
 
     def _save_iscell(self):
         """Save modified iscell.npy to disk."""
-        if self.iscell is None or self.loaded_path is None:
+        if self.iscell is None:
             return
 
-        iscell_path = self.loaded_path / "iscell.npy"
+        # Use _save_path if available (the actual suite2p output path), else loaded_path
+        save_path = getattr(self, '_save_path', self.loaded_path)
+        if save_path is None:
+            return
+
+        iscell_path = save_path / "iscell.npy"
         try:
             np.save(iscell_path, self.iscell)
+            # Update tracking for bi-directional sync
+            self._last_save_time = time.time()
+            self._last_iscell_mtime = iscell_path.stat().st_mtime
+            self._save_status_msg = "Saved! Reload in Suite2p"
+            self._save_status_time = time.time()
             print(f"Saved iscell to {iscell_path}")
         except Exception as e:
+            self._save_status_msg = f"Save error: {e}"
+            self._save_status_time = time.time()
             print(f"Error saving iscell: {e}")
 
     def _draw_stats_popup(self):
