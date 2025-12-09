@@ -73,6 +73,56 @@ uv run mbo --check-install
 uv run pollen
 ```
 
+### CLI Tools
+
+**Download files from GitHub:**
+
+```bash
+# download a notebook from github
+mbo download https://github.com/user/repo/blob/main/notebook.ipynb
+
+# download to specific location
+mbo download https://github.com/user/repo/blob/main/data.npy -o ./data/
+```
+
+**Scan-phase analysis:**
+
+```bash
+# open file dialog
+mbo scanphase
+
+# analyze specific file
+mbo scanphase /path/to/data.tiff
+
+# use first 5 tiffs from a folder
+mbo scanphase ./folder/ -n 5
+
+# custom output directory
+mbo scanphase data.tiff -o ./results/
+```
+
+**File format conversion:**
+
+```bash
+# convert tiff to zarr
+mbo convert input.tiff output.zarr
+
+# convert to suite2p binary
+mbo convert input.tiff output.bin
+```
+
+**Show file info:**
+
+```bash
+mbo info /path/to/data.tiff
+```
+
+**List supported formats:**
+
+```bash
+mbo formats
+```
+
 ## Installation Troubleshooting
 
 ### Git LFS Download Errors (when installing directly from Github)

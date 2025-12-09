@@ -517,6 +517,13 @@ def list_formats():
     help="Output directory for results. Default: <input>_scanphase_analysis/",
 )
 @click.option(
+    "-n", "--num-tifs",
+    "num_tifs",
+    type=int,
+    default=None,
+    help="If input is a folder, only use the first N tiff files.",
+)
+@click.option(
     "--fft-method",
     type=click.Choice(["1d", "2d"]),
     default="1d",
@@ -534,23 +541,24 @@ def list_formats():
     default=False,
     help="Display plots interactively after analysis.",
 )
-def scanphase(input_path, output_dir, fft_method, image_format, show):
+def scanphase(input_path, output_dir, num_tifs, fft_method, image_format, show):
     """
     Scan-phase analysis for bidirectional scanning data.
 
-    Analyzes phase offset characteristics across temporal and spatial domains.
+    Analyzes phase offset to determine optimal correction parameters.
 
     \b
     OUTPUT:
-      temporal.png           - time series, histogram, window size effects
-      spatial.png            - grid heatmap, X/Y profiles
-      zplanes.png            - per-plane analysis (if multi-plane)
+      temporal.png           - per-frame offset time series and histogram
+      window_convergence.png - offset vs window size (key diagnostic)
+      spatial.png            - spatial variation across FOV
       scanphase_results.npz  - all numerical data
 
     \b
     Examples:
       mbo scanphase                          # open file dialog
       mbo scanphase /path/to/data.tiff       # analyze specific file
+      mbo scanphase ./folder/ -n 5           # use first 5 tiffs in folder
       mbo scanphase data.tiff -o ./results/  # custom output directory
       mbo scanphase data.tiff --show         # show plots interactively
     """
@@ -558,7 +566,21 @@ def scanphase(input_path, output_dir, fft_method, image_format, show):
     from mbo_utilities.analysis.scanphase import run_scanphase_analysis
 
     try:
-        # Determine output directory for display
+        # handle num_tifs for folder input
+        actual_input = input_path
+        if input_path is not None:
+            input_path_obj = Path(input_path)
+            if input_path_obj.is_dir() and num_tifs is not None:
+                # get sorted list of tiff files
+                tiffs = sorted(input_path_obj.glob("*.tif")) + sorted(input_path_obj.glob("*.tiff"))
+                if not tiffs:
+                    click.secho(f"No tiff files found in {input_path}", fg="red")
+                    raise click.Abort()
+                tiffs = tiffs[:num_tifs]
+                click.echo(f"Using {len(tiffs)} tiff files from {input_path}")
+                actual_input = tiffs
+
+        # determine output directory for display
         if input_path is not None:
             input_path_obj = Path(input_path)
             actual_output_dir = output_dir if output_dir else input_path_obj.parent / f"{input_path_obj.stem}_scanphase_analysis"
@@ -566,7 +588,7 @@ def scanphase(input_path, output_dir, fft_method, image_format, show):
             actual_output_dir = output_dir
 
         results = run_scanphase_analysis(
-            data_path=input_path,
+            data_path=actual_input,
             output_dir=output_dir,
             fft_method=fft_method,
             image_format=image_format,
@@ -574,52 +596,38 @@ def scanphase(input_path, output_dir, fft_method, image_format, show):
         )
 
         if results is None:
-            return  # User cancelled file selection
+            return  # user cancelled file selection
 
-        # Print summary statistics
+        # print summary
         summary = results.get_summary()
         meta = summary.get('metadata', {})
 
         click.echo("")
-        click.secho("SCAN-PHASE ANALYSIS COMPLETE", fg="cyan", bold=True)
+        click.secho("scan-phase analysis complete", fg="cyan", bold=True)
         click.echo("")
-        click.echo(f"Data: {meta.get('num_frames', 0)} frames, "
-                   f"{meta.get('num_planes', 1)} planes, "
+        click.echo(f"data: {meta.get('num_frames', 0)} frames, "
+                   f"{meta.get('num_rois', 1)} ROIs, "
                    f"{meta.get('frame_shape', (0, 0))[1]}x{meta.get('frame_shape', (0, 0))[0]} px")
-        click.echo(f"Analysis time: {meta.get('analysis_time_seconds', 0):.1f} seconds")
-        click.echo(f"Output saved to: {actual_output_dir}")
+        click.echo(f"analysis time: {meta.get('analysis_time', 0):.1f}s")
+        click.echo(f"output: {actual_output_dir}")
 
-        # Temporal stats
-        if 'temporal_fft' in summary:
-            stats = summary['temporal_fft']
+        # fft stats
+        if 'fft' in summary:
+            stats = summary['fft']
             click.echo("")
-            click.secho("TEMPORAL STATISTICS (FFT)", fg="yellow", bold=True)
-            click.echo(f"  Mean:   {stats.get('mean', 0):+.4f} px")
-            click.echo(f"  Median: {stats.get('median', 0):+.4f} px")
-            click.echo(f"  Std:    {stats.get('std', 0):.4f} px")
-            click.echo(f"  Range:  [{stats.get('min', 0):.3f}, {stats.get('max', 0):.3f}] px")
-            click.echo(f"  IQR:    {stats.get('iqr', 0):.4f} px")
-            click.echo(f"  MAD:    {stats.get('mad', 0):.4f} px")
+            click.secho("offset (FFT)", fg="yellow", bold=True)
+            click.echo(f"  mean:   {stats.get('mean', 0):+.3f} px")
+            click.echo(f"  median: {stats.get('median', 0):+.3f} px")
+            click.echo(f"  std:    {stats.get('std', 0):.3f} px")
+            click.echo(f"  range:  [{stats.get('min', 0):.2f}, {stats.get('max', 0):.2f}] px")
 
-        if 'temporal_int' in summary:
-            stats = summary['temporal_int']
+        # int stats
+        if 'int' in summary:
+            stats = summary['int']
             click.echo("")
-            click.secho("TEMPORAL STATISTICS (Integer)", fg="yellow", bold=True)
-            click.echo(f"  Mean:   {stats.get('mean', 0):+.4f} px")
-            click.echo(f"  Median: {stats.get('median', 0):+.4f} px")
-            click.echo(f"  Std:    {stats.get('std', 0):.4f} px")
-
-        # Spatial stats
-        spatial_keys = [k for k in summary.keys() if k.startswith('spatial_')]
-        if spatial_keys:
-            click.echo("")
-            click.secho("SPATIAL STATISTICS (by patch size)", fg="yellow", bold=True)
-            for key in sorted(spatial_keys):
-                stats = summary[key]
-                patch_size = key.replace('spatial_', '')
-                click.echo(f"  {patch_size}: mean={stats.get('mean', 0):+.4f}, "
-                           f"std={stats.get('std', 0):.4f}, "
-                           f"n={stats.get('n_patches', 0)}/{stats.get('n_total', 0)} patches")
+            click.secho("offset (integer)", fg="yellow", bold=True)
+            click.echo(f"  mean:   {stats.get('mean', 0):+.3f} px")
+            click.echo(f"  std:    {stats.get('std', 0):.3f} px")
 
         click.echo("")
 
