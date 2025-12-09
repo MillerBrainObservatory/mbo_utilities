@@ -84,7 +84,7 @@ def _phase_corr_1d_fft(a, b, upsample=10):
     return float(shift)
 
 
-def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False, fft_method="1d", use_gradient=True):
+def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False, fft_method="1d"):
     """
     Estimate horizontal shift between even and odd rows of a 2D frame.
 
@@ -105,9 +105,6 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False, fft
         FFT method to use if use_fft=True:
         - '1d': Fast 1D correlation (horizontal only, ~10x faster)
         - '2d': Full 2D correlation (scikit-image, more accurate)
-    use_gradient : bool
-        If True, use gradient-based edge features for more robust correlation.
-        This is particularly helpful for single-frame datasets with low SNR.
     """
     if frame.ndim != 2:
         raise ValueError("Expected 2D frame, got shape {}".format(frame.shape))
@@ -133,35 +130,15 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False, fft
 
     if use_fft:
         if fft_method == "1d":
-            # Apply gradient enhancement for better edge detection
-            if use_gradient:
-                # Compute horizontal gradient to emphasize edges
-                a_grad = np.abs(np.diff(a, axis=1, prepend=a[:, :1]))
-                b_grad = np.abs(np.diff(b_, axis=1, prepend=b_[:, :1]))
-                dx = _phase_corr_1d_fft(a_grad, b_grad, upsample=upsample)
-            else:
-                dx = _phase_corr_1d_fft(a, b_, upsample=upsample)
+            dx = _phase_corr_1d_fft(a, b_, upsample=upsample)
             logger.debug(f"1D FFT phase correlation shift: {dx:.2f}")
         else:  # fft_method == "2d"
-            if use_gradient:
-                # Compute horizontal gradient
-                a_grad = np.abs(np.diff(a, axis=1, prepend=a[:, :1]))
-                b_grad = np.abs(np.diff(b_, axis=1, prepend=b_[:, :1]))
-                _shift, *_ = phase_cross_correlation(a_grad, b_grad, upsample_factor=upsample)
-            else:
-                _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
+            _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
             dx = float(_shift[1])
             logger.debug(f"2D FFT phase correlation shift: {dx:.2f}")
     else:
-        # Use gradient for integer method too
-        if use_gradient:
-            a_grad = np.abs(np.diff(a, axis=1, prepend=a[:, :1]))
-            b_grad = np.abs(np.diff(b_, axis=1, prepend=b_[:, :1]))
-            a_mean = a_grad.mean(axis=0) - np.mean(a_grad)
-            b_mean = b_grad.mean(axis=0) - np.mean(b_grad)
-        else:
-            a_mean = a.mean(axis=0) - np.mean(a)
-            b_mean = b_.mean(axis=0) - np.mean(b_)
+        a_mean = a.mean(axis=0) - np.mean(a)
+        b_mean = b_.mean(axis=0) - np.mean(b_)
 
         offsets = np.arange(-4, 4, 1)
         scores = np.empty_like(offsets, dtype=float)
@@ -241,7 +218,7 @@ def _apply_offset(img, offset, use_fft=False, fft_method="1d"):
 
 def bidir_phasecorr(
     arr, *, method="mean", use_fft=False, upsample=4, max_offset=10, border=4, fft_method="2d",
-    z_aware=False, num_z_planes=None, use_gradient=False, min_window_size=None
+    z_aware=False, num_z_planes=None, min_window_size=None
 ):
     """
     Correct for bi-directional scanning offsets in 2D or 3D array.
@@ -270,14 +247,11 @@ def bidir_phasecorr(
         Deprecated - no longer used. Phase correction is applied consistently regardless of z-planes.
     num_z_planes : int, optional
         Deprecated - no longer used.
-    use_gradient : bool, optional
-        If True, use gradient-based edge features for more robust correlation.
-        This is particularly helpful for single-frame datasets with low SNR.
     min_window_size : int, optional
         Deprecated - no longer enforced. Phase correction is always applied.
     """
     if arr.ndim == 2:
-        _offsets = _phase_corr_2d(arr, upsample, border, max_offset, use_fft, fft_method, use_gradient)
+        _offsets = _phase_corr_2d(arr, upsample, border, max_offset, use_fft, fft_method)
     else:
         flat = arr.reshape(arr.shape[0], *arr.shape[-2:])
 
@@ -293,7 +267,6 @@ def bidir_phasecorr(
                         max_offset=max_offset,
                         use_fft=use_fft,
                         fft_method=fft_method,
-                        use_gradient=use_gradient,
                     )
                     for f in flat
                 ]
@@ -309,7 +282,6 @@ def bidir_phasecorr(
                 max_offset=max_offset,
                 use_fft=use_fft,
                 fft_method=fft_method,
-                use_gradient=use_gradient,
             )
 
     if np.ndim(_offsets) == 0:  # scalar
