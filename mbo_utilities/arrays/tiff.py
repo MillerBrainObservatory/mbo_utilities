@@ -203,6 +203,25 @@ class MBOTiffArray(ReductionMixin):
     def dtype(self):
         return self._target_dtype if self._target_dtype is not None else self._dtype
 
+    def _compute_frame_minmax(self):
+        """Compute min/max from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_min'):
+            frame = np.asarray(self[0, 0])
+            self._cached_min = float(frame.min())
+            self._cached_max = float(frame.max())
+
+    @property
+    def min(self) -> float:
+        """Min from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_min
+
+    @property
+    def max(self) -> float:
+        """Max from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_max
+
     @property
     def ndim(self) -> int:
         return 4
@@ -465,6 +484,25 @@ class TiffArray(ReductionMixin):
     def ndim(self) -> int:
         return 4
 
+    def _compute_frame_minmax(self):
+        """Compute min/max from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_min'):
+            frame = np.asarray(self[0, 0])
+            self._cached_min = float(frame.min())
+            self._cached_max = float(frame.max())
+
+    @property
+    def min(self) -> float:
+        """Min from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_min
+
+    @property
+    def max(self) -> float:
+        """Max from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_max
+
     @property
     def metadata(self) -> dict:
         return self._metadata
@@ -718,6 +756,25 @@ class TiffVolumeArray(ReductionMixin):
     def num_planes(self) -> int:
         return self._nz
 
+    def _compute_frame_minmax(self):
+        """Compute min/max from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_min'):
+            frame = np.asarray(self[0, 0])
+            self._cached_min = float(frame.min())
+            self._cached_max = float(frame.max())
+
+    @property
+    def min(self) -> float:
+        """Min from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_min
+
+    @property
+    def max(self) -> float:
+        """Max from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_max
+
     def __len__(self) -> int:
         return self._nframes
 
@@ -825,10 +882,13 @@ class MboRawArray(ReductionMixin):
         Upsampling factor for subpixel phase estimation.
     max_offset : int, default 4
         Maximum phase offset to search.
-    use_fft : bool, default False
-        Use FFT-based phase correction.
+    use_fft : bool, default True
+        Use FFT-based phase correction (more accurate).
     fft_method : str, default "2d"
         FFT method ("1d" or "2d").
+    phase_window : int, default 50
+        Number of frames to average for phase estimation. Using a mean of
+        multiple frames improves phase detection accuracy.
 
     Attributes
     ----------
@@ -851,8 +911,9 @@ class MboRawArray(ReductionMixin):
         border: int | tuple[int, int, int, int] = 3,
         upsample: int = 5,
         max_offset: int = 4,
-        use_fft: bool = False,
+        use_fft: bool = True,
         fft_method: str = "2d",
+        phase_window: int = 50,
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
@@ -874,7 +935,9 @@ class MboRawArray(ReductionMixin):
         self.border = border
         self.max_offset = max_offset
         self.upsample = upsample
+        self._phase_window = phase_window
         self._offset = 0.0
+        self._cached_offset = None  # Cached offset from phase_window estimation
         self._mean_subtraction = False
         self.pbar = None
         self.show_pbar = False
@@ -966,6 +1029,25 @@ class MboRawArray(ReductionMixin):
             self._target_dtype if self._target_dtype is not None else self._source_dtype
         )
 
+    def _compute_frame_minmax(self):
+        """Compute min/max from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_min'):
+            frame = np.asarray(self[0, 0])
+            self._cached_min = float(frame.min())
+            self._cached_max = float(frame.max())
+
+    @property
+    def min(self) -> float:
+        """Min from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_min
+
+    @property
+    def max(self) -> float:
+        """Max from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_max
+
     @property
     def metadata(self):
         self._metadata.update(
@@ -979,6 +1061,8 @@ class MboRawArray(ReductionMixin):
                 "nframes": self.num_frames,
                 "num_frames": self.num_frames,
                 "use_fft": self.use_fft,
+                "fft_method": self._fft_method,
+                "phase_window": self.phase_window,
                 "mean_subtraction": self.mean_subtraction,
             }
         )
@@ -1049,6 +1133,18 @@ class MboRawArray(ReductionMixin):
         self._mean_subtraction = value
 
     @property
+    def phase_window(self):
+        """Number of frames to average for phase estimation."""
+        return self._phase_window
+
+    @phase_window.setter
+    def phase_window(self, value: int):
+        if not isinstance(value, int) or value < 1:
+            raise ValueError("phase_window must be a positive integer.")
+        self._phase_window = value
+        self._cached_offset = None  # Reset cached offset when window changes
+
+    @property
     def roi(self):
         return self._roi
 
@@ -1093,11 +1189,62 @@ class MboRawArray(ReductionMixin):
     def xslices(self):
         return [slice(0, roi["width"]) for roi in self._rois]
 
+    def _compute_phase_offset(self):
+        """
+        Compute phase offset using mean of phase_window frames.
+
+        Uses randomly sampled frames across the recording for robust estimation.
+        Result is cached until phase_window or phase correction params change.
+        """
+        if self._cached_offset is not None:
+            return self._cached_offset
+
+        # Sample frames across the recording
+        n_sample = min(self._phase_window, self.num_frames)
+        if n_sample < self.num_frames:
+            # Random sampling for better representation
+            rng = np.random.default_rng(42)  # Fixed seed for reproducibility
+            sample_frames = sorted(rng.choice(self.num_frames, n_sample, replace=False).tolist())
+        else:
+            sample_frames = list(range(self.num_frames))
+
+        # Read sample frames without phase correction
+        old_fix_phase = self._fix_phase
+        self._fix_phase = False
+        try:
+            # Read first channel only for phase estimation
+            sample_data = self._read_pages(sample_frames, [0])
+        finally:
+            self._fix_phase = old_fix_phase
+
+        # Compute mean frame
+        mean_frame = np.mean(sample_data[:, 0], axis=0)
+
+        # Compute offset from mean frame
+        _, offset = bidir_phasecorr(
+            mean_frame[np.newaxis, ...],
+            method=self.phasecorr_method,
+            upsample=self.upsample,
+            max_offset=self.max_offset,
+            border=self.border,
+            use_fft=self.use_fft,
+            fft_method=self._fft_method,
+        )
+
+        self._cached_offset = offset
+        logger.debug(f"Computed phase offset from {n_sample} frames: {offset:.3f} px")
+        return offset
+
     def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **_):
         pages = [f * self.num_channels + z for f in frames for z in chans]
         tiff_width_px = len(listify_index(xslice, self._page_width))
         tiff_height_px = len(listify_index(yslice, self._page_height))
         buf = np.empty((len(pages), tiff_height_px, tiff_width_px), dtype=self.dtype)
+
+        # Get cached phase offset if phase correction is enabled
+        if self.fix_phase:
+            cached_offset = self._compute_phase_offset()
+            self._offset = cached_offset
 
         start = 0
         tiff_iterator = (
@@ -1130,7 +1277,8 @@ class MboRawArray(ReductionMixin):
             chunk = chunk[..., yslice, xslice]
 
             if self.fix_phase:
-                corrected, offset = bidir_phasecorr(
+                # Apply phase correction using cached offset
+                corrected, _ = bidir_phasecorr(
                     chunk,
                     method=self.phasecorr_method,
                     upsample=self.upsample,
@@ -1138,12 +1286,12 @@ class MboRawArray(ReductionMixin):
                     border=self.border,
                     use_fft=self.use_fft,
                     fft_method=self._fft_method,
+                    offset=cached_offset,  # Use precomputed offset
                 )
                 buf[idxs] = corrected
-                self.offset = offset
             else:
                 buf[idxs] = chunk
-                self.offset = 0.0
+                self._offset = 0.0
             start = end
 
         return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
@@ -1272,8 +1420,27 @@ class MboRawArray(ReductionMixin):
     def _page_width(self):
         return self._metadata["page_width"]
 
-    def __array__(self):
-        return subsample_array(self, ignore_dims=[-1, -2, -3])
+    def __array__(self, max_frames: int = 100):
+        """
+        Return array representation using random frame subsampling.
+
+        For large arrays, randomly samples frames to avoid loading entire dataset.
+        This is more representative than strided subsampling for min/max estimation.
+
+        Parameters
+        ----------
+        max_frames : int, default 100
+            Maximum number of frames to sample. If array has more frames,
+            random sampling is used.
+        """
+        if self.num_frames <= max_frames:
+            # Small enough to load entirely
+            return np.asarray(self[:])
+
+        # Random sampling for large arrays
+        rng = np.random.default_rng(42)  # Fixed seed for reproducibility
+        sample_frames = sorted(rng.choice(self.num_frames, max_frames, replace=False).tolist())
+        return np.asarray(self[sample_frames])
 
     def _imwrite(
         self,
@@ -1318,12 +1485,16 @@ class MboRawArray(ReductionMixin):
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (600, 600)})
         window_funcs = kwargs.get("window_funcs", None)
 
+        # Fast vmin/vmax from single frame (no phase correction overhead)
+        sample_frame = arrays[0][0]
+        vmin, vmax = float(sample_frame.min()), float(sample_frame.max())
+
         return fpl.ImageWidget(
             data=arrays,
             names=names,
             histogram_widget=histogram_widget,
             figure_kwargs=figure_kwargs,
             figure_shape=figure_shape,
-            graphic_kwargs={"vmin": arrays[0].min(), "vmax": arrays[0].max()},
+            graphic_kwargs={"vmin": vmin, "vmax": vmax},
             window_funcs=window_funcs,
         )

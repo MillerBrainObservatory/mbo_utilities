@@ -171,6 +171,25 @@ class Suite2pArray(ReductionMixin):
     def ndim(self):
         return len(self.shape)
 
+    def _compute_frame_minmax(self):
+        """Compute min/max from first frame."""
+        if not hasattr(self, '_cached_min'):
+            frame = np.asarray(self[0])
+            self._cached_min = float(frame.min())
+            self._cached_max = float(frame.max())
+
+    @property
+    def min(self) -> float:
+        """Min from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_min
+
+    @property
+    def max(self) -> float:
+        """Max from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_max
+
     def close(self):
         """Close the memory-mapped file."""
         self._file._mmap.close()  # type: ignore
@@ -404,6 +423,25 @@ class Suite2pVolumeArray(ReductionMixin):
     @property
     def num_planes(self) -> int:
         return self._nz
+
+    def _compute_frame_minmax(self):
+        """Compute min/max from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_min'):
+            frame = np.asarray(self[0, 0])
+            self._cached_min = float(frame.min())
+            self._cached_max = float(frame.max())
+
+    @property
+    def min(self) -> float:
+        """Min from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_min
+
+    @property
+    def max(self) -> float:
+        """Max from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_max
 
     def __len__(self) -> int:
         return self._nframes

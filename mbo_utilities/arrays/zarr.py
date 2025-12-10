@@ -180,6 +180,26 @@ class ZarrArray(ReductionMixin):
     def dtype(self):
         return self.zs[0].dtype
 
+    def _compute_frame_minmax(self):
+        """Compute min/max from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_min'):
+            frame = self[0, 0] if self.ndim == 4 else self[0]
+            frame = np.asarray(frame)
+            self._cached_min = float(frame.min())
+            self._cached_max = float(frame.max())
+
+    @property
+    def min(self) -> float:
+        """Min from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_min
+
+    @property
+    def max(self) -> float:
+        """Max from first frame (avoids full data read)."""
+        self._compute_frame_minmax()
+        return self._cached_max
+
     @property
     def size(self):
         return np.prod(self.shape)
