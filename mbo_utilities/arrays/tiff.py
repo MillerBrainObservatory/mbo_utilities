@@ -367,7 +367,7 @@ class TiffArray(ReductionMixin):
     @property
     def shape(self) -> tuple[int, ...]:
         # Return TZYX format: (frames, 1, Y, X)
-        return (self._num_frames, 1, self._page_shape[0], self._page_shape[1])
+        return self._num_frames, 1, self._page_shape[0], self._page_shape[1]
 
     @property
     def dtype(self):

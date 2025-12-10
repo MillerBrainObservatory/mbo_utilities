@@ -1,12 +1,11 @@
 """
 Scan-phase analysis for bidirectional scanning correction.
 
-Analyzes phase offset characteristics to determine optimal correction parameters.
+Measures phase offset to determine optimal correction parameters.
 """
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
 import time
 
 import numpy as np
@@ -14,45 +13,44 @@ from tqdm.auto import tqdm
 
 from mbo_utilities import log
 from mbo_utilities.phasecorr import _phase_corr_2d
+from mbo_utilities.metadata import get_param
 
 logger = log.get("analysis.scanphase")
-
-# smaller patches for finer spatial resolution
-DEFAULT_PATCH_SIZES = [8, 16, 32, 64]
 
 
 @dataclass
 class ScanPhaseResults:
-    """Results from scan-phase analysis."""
+    """results from scan-phase analysis"""
 
     # per-frame offsets
     offsets_fft: np.ndarray = field(default_factory=lambda: np.array([]))
-    offsets_int: np.ndarray = field(default_factory=lambda: np.array([]))
 
     # window size analysis
     window_sizes: np.ndarray = field(default_factory=lambda: np.array([]))
-    window_offsets_fft: np.ndarray = field(default_factory=lambda: np.array([]))
-    window_offsets_int: np.ndarray = field(default_factory=lambda: np.array([]))
-    window_std_fft: np.ndarray = field(default_factory=lambda: np.array([]))
-    window_std_int: np.ndarray = field(default_factory=lambda: np.array([]))
+    window_offsets: np.ndarray = field(default_factory=lambda: np.array([]))
+    window_stds: np.ndarray = field(default_factory=lambda: np.array([]))
 
-    # spatial grid (per ROI if applicable)
-    grid_offsets: dict = field(default_factory=dict)  # {patch_size: 2D array}
+    # spatial grid offsets {patch_size: 2D array}
+    grid_offsets: dict = field(default_factory=dict)
     grid_valid: dict = field(default_factory=dict)
 
-    # per-roi offsets (if multiple ROIs)
-    roi_offsets_fft: np.ndarray = field(default_factory=lambda: np.array([]))
-    roi_offsets_int: np.ndarray = field(default_factory=lambda: np.array([]))
+    # z-plane offsets
+    plane_offsets: np.ndarray = field(default_factory=lambda: np.array([]))
+    plane_depths_um: np.ndarray = field(default_factory=lambda: np.array([]))
+
+    # parameter sweep (offset vs signal intensity)
+    intensity_bins: np.ndarray = field(default_factory=lambda: np.array([]))
+    offset_by_intensity: np.ndarray = field(default_factory=lambda: np.array([]))
+    offset_std_by_intensity: np.ndarray = field(default_factory=lambda: np.array([]))
 
     # metadata
     num_frames: int = 0
-    num_rois: int = 1
+    num_planes: int = 1
     frame_shape: tuple = ()
-    roi_yslices: list = field(default_factory=list)
+    pixel_resolution_um: float = 0.0
     analysis_time: float = 0.0
 
     def compute_stats(self, arr):
-        """Compute basic statistics for an array."""
         arr = np.asarray(arr)
         valid = arr[~np.isnan(arr)]
         if len(valid) == 0:
@@ -66,146 +64,158 @@ class ScanPhaseResults:
         }
 
     def get_summary(self):
-        """Get summary dict for CLI output."""
         summary = {
             'metadata': {
                 'num_frames': self.num_frames,
-                'num_rois': self.num_rois,
+                'num_planes': self.num_planes,
                 'frame_shape': self.frame_shape,
                 'analysis_time': self.analysis_time,
             }
         }
         if len(self.offsets_fft) > 0:
             summary['fft'] = self.compute_stats(self.offsets_fft)
-        if len(self.offsets_int) > 0:
-            summary['int'] = self.compute_stats(self.offsets_int)
         return summary
+
+
+def _setup_dark_style():
+    """setup dark theme for matplotlib figures"""
+    import matplotlib.pyplot as plt
+    plt.style.use('dark_background')
+
+
+def _dark_fig(*args, **kwargs):
+    """create figure with dark background"""
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(*args, **kwargs)
+    fig.patch.set_facecolor('#1a1a2e')
+    if hasattr(axes, '__iter__'):
+        for ax in np.array(axes).flat:
+            ax.set_facecolor('#1a1a2e')
+    else:
+        axes.set_facecolor('#1a1a2e')
+    return fig, axes
 
 
 class ScanPhaseAnalyzer:
     """
-    Analyzer for scan-phase offset characteristics.
+    Analyzer for scan-phase offset.
 
-    Handles both single-ROI and multi-ROI (vertically tiled) data.
+    Measures per-frame offset, window size effects, spatial variation, and z-plane dependence.
     """
 
     def __init__(self, data, roi_yslices=None):
         """
-        Initialize analyzer.
-
         Parameters
         ----------
         data : array-like
-            Input data, shape (T, Y, X) or (T, Z, Y, X).
-            For multi-ROI data, Y dimension contains vertically stacked ROIs.
+            input data, shape (T, Y, X) or (T, Z, Y, X)
         roi_yslices : list of slice, optional
-            Y slices for each ROI if data contains multiple vertically stacked ROIs.
-            If None, treats entire Y dimension as single ROI.
+            y slices for vertically stacked ROIs
         """
         self.data = data
         self.shape = data.shape
         self.ndim = len(self.shape)
 
-        # determine frame count
+        # frame count
         if hasattr(data, 'num_frames'):
             self.num_frames = data.num_frames
         else:
             self.num_frames = self.shape[0]
 
-        # handle ROI structure
+        # z-planes
+        if hasattr(data, 'num_planes'):
+            self.num_planes = data.num_planes
+        elif self.ndim == 4:
+            self.num_planes = self.shape[1]
+        else:
+            self.num_planes = 1
+
+        # roi structure
         if roi_yslices is not None:
             self.roi_yslices = roi_yslices
             self.num_rois = len(roi_yslices)
         else:
-            # single ROI = full frame
             self.roi_yslices = [slice(None)]
             self.num_rois = 1
 
-        # frame dimensions (full tiled frame)
+        # frame dimensions
         self.frame_height = self.shape[-2]
         self.frame_width = self.shape[-1]
 
+        # pixel resolution if available
+        md = getattr(data, 'metadata', None)
+        self.pixel_resolution_um = get_param(md, "dx", default=0.0)
+
         self.results = ScanPhaseResults(
             num_frames=self.num_frames,
-            num_rois=self.num_rois,
+            num_planes=self.num_planes,
             frame_shape=(self.frame_height, self.frame_width),
-            roi_yslices=self.roi_yslices,
+            pixel_resolution_um=self.pixel_resolution_um,
         )
 
-        logger.info(f"ScanPhaseAnalyzer: {self.num_frames} frames, {self.num_rois} ROIs, shape={self.shape}")
+        logger.info(f"ScanPhaseAnalyzer: {self.num_frames} frames, {self.num_planes} planes, shape={self.shape}")
 
-    def _get_frame(self, idx):
-        """Get a single 2D frame."""
+    def _get_frame(self, idx, plane=0):
+        """get a single 2D frame"""
         if self.ndim == 2:
-            return np.asarray(self.data)
+            frame = np.asarray(self.data)
         elif self.ndim == 3:
-            return np.asarray(self.data[idx])
+            frame = np.asarray(self.data[idx])
         elif self.ndim == 4:
-            # assume (T, Z, Y, X), take first z-plane
-            return np.asarray(self.data[idx, 0])
+            frame = np.asarray(self.data[idx, plane])
         else:
-            raise ValueError(f"Unsupported ndim: {self.ndim}")
+            raise ValueError(f"unsupported ndim: {self.ndim}")
+
+        while frame.ndim > 2:
+            frame = frame[0]
+        return frame
 
     def _get_roi_frame(self, frame, roi_idx):
-        """Extract a single ROI from a frame using y-slice."""
+        """extract single ROI from frame"""
+        while frame.ndim > 2:
+            frame = frame[0]
         yslice = self.roi_yslices[roi_idx]
         return frame[yslice, :]
 
-    def analyze_per_frame(self, use_fft=True, fft_method="1d", upsample=10, border=4, max_offset=10):
-        """
-        Analyze offset for each frame, averaging across ROIs if multiple.
+    def _compute_offset(self, frame, fft_method="1d", upsample=10, border=4, max_offset=10):
+        """compute offset for a 2D frame, averaging across rois"""
+        roi_offsets = []
+        for roi_idx in range(self.num_rois):
+            roi_frame = self._get_roi_frame(frame, roi_idx)
+            try:
+                offset = _phase_corr_2d(
+                    roi_frame, upsample=upsample, border=border,
+                    max_offset=max_offset, use_fft=True, fft_method=fft_method
+                )
+                roi_offsets.append(offset)
+            except Exception:
+                pass
+        return np.mean(roi_offsets) if roi_offsets else np.nan
 
-        Returns array of offsets, one per frame.
+    def analyze_per_frame(self, fft_method="1d", upsample=10, border=4, max_offset=10):
+        """
+        compute offset for each frame.
+
+        primary measurement - shows temporal stability of the offset.
         """
         offsets = []
-        desc = "frames (FFT)" if use_fft else "frames (int)"
-
-        for i in tqdm(range(self.num_frames), desc=desc, leave=False):
+        for i in tqdm(range(self.num_frames), desc="per-frame", leave=False):
             frame = self._get_frame(i)
+            offsets.append(self._compute_offset(frame, fft_method, upsample, border, max_offset))
 
-            # analyze each ROI separately and average
-            roi_offsets = []
-            for roi_idx in range(self.num_rois):
-                roi_frame = self._get_roi_frame(frame, roi_idx)
-                try:
-                    offset = _phase_corr_2d(
-                        roi_frame,
-                        upsample=upsample,
-                        border=border,
-                        max_offset=max_offset,
-                        use_fft=use_fft,
-                        fft_method=fft_method,
-                    )
-                    roi_offsets.append(offset)
-                except Exception:
-                    pass
+        self.results.offsets_fft = np.array(offsets)
+        stats = self.results.compute_stats(self.results.offsets_fft)
+        logger.info(f"per-frame: mean={stats['mean']:.3f}, std={stats['std']:.3f}")
+        return self.results.offsets_fft
 
-            if roi_offsets:
-                offsets.append(np.mean(roi_offsets))
-            else:
-                offsets.append(np.nan)
-
-        offsets = np.array(offsets)
-
-        if use_fft:
-            self.results.offsets_fft = offsets
-        else:
-            self.results.offsets_int = offsets
-
-        stats = self.results.compute_stats(offsets)
-        method = "FFT" if use_fft else "int"
-        logger.info(f"Per-frame ({method}): mean={stats['mean']:.4f}, std={stats['std']:.4f}")
-
-        return offsets
-
-    def analyze_window_sizes(self, fft_method="1d", upsample=10, border=4, max_offset=10, num_samples=10):
+    def analyze_window_sizes(self, fft_method="1d", upsample=10, border=4, max_offset=10, num_samples=5):
         """
-        Analyze how offset estimate varies with temporal window size.
+        analyze how offset estimate varies with temporal window size.
 
-        Tests window sizes from 1 to num_frames to determine minimum
-        window needed for stable offset estimation.
+        key diagnostic - shows how many frames are needed for stable estimation.
+        small windows = noisy estimates, large windows = converged estimate.
         """
-        # generate window sizes: 1, 2, 5, 10, 20, 50, 100, ... up to num_frames
+        # window sizes from 1 to num_frames
         sizes = []
         for base in [1, 2, 5]:
             for mult in [1, 10, 100, 1000, 10000]:
@@ -213,109 +223,69 @@ class ScanPhaseAnalyzer:
                 if val <= self.num_frames:
                     sizes.append(val)
         sizes = sorted(set(sizes))
-
-        # ensure num_frames is included
         if self.num_frames not in sizes:
             sizes.append(self.num_frames)
         sizes = sorted(sizes)
 
         self.results.window_sizes = np.array(sizes)
-        offsets_fft = []
-        offsets_int = []
-        std_fft = []
-        std_int = []
+        window_offsets = []
+        window_stds = []
 
         for ws in tqdm(sizes, desc="window sizes", leave=False):
-            # sample multiple non-overlapping windows
+            # sample multiple windows and measure variance
             n_possible = self.num_frames // ws
-            n_samples = min(num_samples, n_possible)
+            n_samp = min(num_samples, n_possible)
 
-            if n_samples == n_possible:
-                starts = [i * ws for i in range(n_samples)]
+            if n_samp == n_possible:
+                starts = [i * ws for i in range(n_samp)]
             else:
-                starts = np.linspace(0, self.num_frames - ws, n_samples, dtype=int).tolist()
+                starts = np.linspace(0, self.num_frames - ws, n_samp, dtype=int).tolist()
 
-            fft_vals = []
-            int_vals = []
-
+            sample_offsets = []
             for start in starts:
                 # average frames in window
                 indices = range(start, min(start + ws, self.num_frames))
                 frames = [self._get_frame(i) for i in indices]
                 mean_frame = np.mean(frames, axis=0)
+                offset = self._compute_offset(mean_frame, fft_method, upsample, border, max_offset)
+                if not np.isnan(offset):
+                    sample_offsets.append(offset)
 
-                # analyze each ROI
-                roi_fft = []
-                roi_int = []
-                for roi_idx in range(self.num_rois):
-                    roi_frame = self._get_roi_frame(mean_frame, roi_idx)
-                    try:
-                        off_fft = _phase_corr_2d(
-                            roi_frame, upsample=upsample, border=border,
-                            max_offset=max_offset, use_fft=True, fft_method=fft_method
-                        )
-                        roi_fft.append(off_fft)
-                    except Exception:
-                        pass
-                    try:
-                        off_int = _phase_corr_2d(
-                            roi_frame, upsample=upsample, border=border,
-                            max_offset=max_offset, use_fft=False, fft_method=fft_method
-                        )
-                        roi_int.append(off_int)
-                    except Exception:
-                        pass
+            if sample_offsets:
+                window_offsets.append(np.mean(sample_offsets))
+                window_stds.append(np.std(sample_offsets) if len(sample_offsets) > 1 else 0)
+            else:
+                window_offsets.append(np.nan)
+                window_stds.append(np.nan)
 
-                if roi_fft:
-                    fft_vals.append(np.mean(roi_fft))
-                if roi_int:
-                    int_vals.append(np.mean(roi_int))
+        self.results.window_offsets = np.array(window_offsets)
+        self.results.window_stds = np.array(window_stds)
+        logger.info(f"window sizes: {len(sizes)} sizes tested")
 
-            offsets_fft.append(np.mean(fft_vals) if fft_vals else np.nan)
-            offsets_int.append(np.mean(int_vals) if int_vals else np.nan)
-            std_fft.append(np.std(fft_vals) if len(fft_vals) > 1 else 0)
-            std_int.append(np.std(int_vals) if len(int_vals) > 1 else 0)
-
-        self.results.window_offsets_fft = np.array(offsets_fft)
-        self.results.window_offsets_int = np.array(offsets_int)
-        self.results.window_std_fft = np.array(std_fft)
-        self.results.window_std_int = np.array(std_int)
-
-        logger.info(f"Window analysis: {len(sizes)} sizes from 1 to {sizes[-1]}")
-        return sizes, offsets_fft, std_fft
-
-    def analyze_spatial_grid(self, patch_sizes=None, fft_method="1d", upsample=10, max_offset=10, num_frames=100):
+    def analyze_spatial_grid(self, patch_sizes=(32, 64), fft_method="1d", upsample=10, max_offset=10, num_frames=100):
         """
-        Analyze spatial distribution of offsets using small patches.
+        compute offset in a grid of patches across the fov.
 
-        Creates a grid of patches and computes offset for each to identify
-        spatial variation across the FOV.
+        shows spatial variation - edges often differ from center.
         """
-        if patch_sizes is None:
-            patch_sizes = [ps for ps in DEFAULT_PATCH_SIZES if ps <= min(self.frame_height, self.frame_width) // 2]
-
-        if not patch_sizes:
-            logger.warning("No valid patch sizes for this frame size")
-            return {}
-
-        # average some frames for robust spatial analysis
         sample_indices = np.linspace(0, self.num_frames - 1, min(num_frames, self.num_frames), dtype=int)
         frames = [self._get_frame(i) for i in sample_indices]
         mean_frame = np.mean(frames, axis=0)
 
-        # analyze first ROI for spatial grid
         roi_frame = self._get_roi_frame(mean_frame, 0)
+        while roi_frame.ndim > 2:
+            roi_frame = roi_frame[0]
+
         even_rows = roi_frame[::2]
         odd_rows = roi_frame[1::2]
         m = min(even_rows.shape[0], odd_rows.shape[0])
         even_rows = even_rows[:m]
         odd_rows = odd_rows[:m]
-        h, w = even_rows.shape
+        h, w = even_rows.shape[-2], even_rows.shape[-1]
 
         for patch_size in tqdm(patch_sizes, desc="spatial grid", leave=False):
             n_rows = h // patch_size
             n_cols = w // patch_size
-
             if n_rows < 1 or n_cols < 1:
                 continue
 
@@ -330,11 +300,9 @@ class ScanPhaseAnalyzer:
                     patch_even = even_rows[y0:y1, x0:x1]
                     patch_odd = odd_rows[y0:y1, x0:x1]
 
-                    # skip low-intensity patches
                     if patch_even.mean() < 10 or patch_odd.mean() < 10:
                         continue
 
-                    # reconstruct 2D frame for phase_corr
                     combined = np.zeros((patch_size * 2, patch_size))
                     combined[::2] = patch_even
                     combined[1::2] = patch_odd
@@ -355,66 +323,132 @@ class ScanPhaseAnalyzer:
             n_valid = valid.sum()
             if n_valid > 0:
                 stats = self.results.compute_stats(offsets[valid])
-                logger.info(f"Grid {patch_size}px: {n_valid}/{valid.size} patches, mean={stats['mean']:.4f}")
+                logger.info(f"grid {patch_size}px: {n_valid} patches, mean={stats['mean']:.3f}")
 
-        return self.results.grid_offsets
+    def analyze_z_planes(self, fft_method="1d", upsample=10, border=4, max_offset=10, num_frames=100):
+        """
+        compute offset for each z-plane.
 
-    def analyze_per_roi(self, fft_method="1d", upsample=10, border=4, max_offset=10, num_frames=100):
-        """Analyze offset for each ROI separately."""
-        if self.num_rois <= 1:
+        different depths may have different offsets.
+        """
+        if self.num_planes <= 1:
             return
 
         sample_indices = np.linspace(0, self.num_frames - 1, min(num_frames, self.num_frames), dtype=int)
-        frames = [self._get_frame(i) for i in sample_indices]
-        mean_frame = np.mean(frames, axis=0)
+        plane_offsets = []
 
-        fft_offsets = []
-        int_offsets = []
+        for plane in tqdm(range(self.num_planes), desc="z-planes", leave=False):
+            frames = [self._get_frame(i, plane=plane) for i in sample_indices]
+            mean_frame = np.mean(frames, axis=0)
+            offset = self._compute_offset(mean_frame, fft_method, upsample, border, max_offset)
+            plane_offsets.append(offset)
 
-        for roi_idx in range(self.num_rois):
-            roi_frame = self._get_roi_frame(mean_frame, roi_idx)
-            try:
-                off_fft = _phase_corr_2d(
-                    roi_frame, upsample=upsample, border=border,
-                    max_offset=max_offset, use_fft=True, fft_method=fft_method
-                )
-                fft_offsets.append(off_fft)
-            except Exception:
-                fft_offsets.append(np.nan)
-            try:
-                off_int = _phase_corr_2d(
-                    roi_frame, upsample=upsample, border=border,
-                    max_offset=max_offset, use_fft=False, fft_method=fft_method
-                )
-                int_offsets.append(off_int)
-            except Exception:
-                int_offsets.append(np.nan)
+        self.results.plane_offsets = np.array(plane_offsets)
 
-        self.results.roi_offsets_fft = np.array(fft_offsets)
-        self.results.roi_offsets_int = np.array(int_offsets)
+        if self.pixel_resolution_um > 0:
+            self.results.plane_depths_um = np.arange(self.num_planes) * self.pixel_resolution_um
+        else:
+            self.results.plane_depths_um = np.arange(self.num_planes)
 
-        logger.info(f"Per-ROI: {self.num_rois} ROIs analyzed")
+        logger.info(f"z-planes: {self.num_planes} planes")
+
+    def analyze_parameters(self, fft_method="1d", upsample=10, border=4, max_offset=10, num_frames=50):
+        """
+        analyze offset reliability vs signal intensity.
+
+        low signal regions produce unreliable offsets - helps set max_offset.
+        """
+        sample_indices = np.linspace(0, self.num_frames - 1, min(num_frames, self.num_frames), dtype=int)
+
+        intensities = []
+        offsets = []
+
+        for idx in sample_indices:
+            frame = self._get_frame(idx)
+            roi_frame = self._get_roi_frame(frame, 0)
+            while roi_frame.ndim > 2:
+                roi_frame = roi_frame[0]
+
+            even_rows = roi_frame[::2]
+            odd_rows = roi_frame[1::2]
+            m = min(even_rows.shape[0], odd_rows.shape[0])
+            even_rows = even_rows[:m]
+            odd_rows = odd_rows[:m]
+
+            patch_size = 32
+            h, w = even_rows.shape[-2], even_rows.shape[-1]
+
+            for row in range(h // patch_size):
+                for col in range(w // patch_size):
+                    y0, y1 = row * patch_size, (row + 1) * patch_size
+                    x0, x1 = col * patch_size, (col + 1) * patch_size
+
+                    patch_even = even_rows[y0:y1, x0:x1]
+                    patch_odd = odd_rows[y0:y1, x0:x1]
+
+                    intensity = (patch_even.mean() + patch_odd.mean()) / 2
+                    intensities.append(intensity)
+
+                    combined = np.zeros((patch_size * 2, patch_size))
+                    combined[::2] = patch_even
+                    combined[1::2] = patch_odd
+
+                    try:
+                        offset = _phase_corr_2d(
+                            combined, upsample=upsample, border=0,
+                            max_offset=max_offset, use_fft=True, fft_method=fft_method
+                        )
+                        offsets.append(abs(offset))
+                    except Exception:
+                        offsets.append(np.nan)
+
+        intensities = np.array(intensities)
+        offsets = np.array(offsets)
+
+        valid = ~np.isnan(offsets) & (intensities > 0)
+        if valid.sum() < 10:
+            return
+
+        percentiles = np.percentile(intensities[valid], np.linspace(0, 100, 11))
+        bins = np.unique(percentiles)
+
+        bin_centers = []
+        bin_means = []
+        bin_stds = []
+
+        for i in range(len(bins) - 1):
+            mask = valid & (intensities >= bins[i]) & (intensities < bins[i + 1])
+            if mask.sum() > 5:
+                bin_centers.append((bins[i] + bins[i + 1]) / 2)
+                bin_means.append(np.mean(offsets[mask]))
+                bin_stds.append(np.std(offsets[mask]))
+
+        self.results.intensity_bins = np.array(bin_centers)
+        self.results.offset_by_intensity = np.array(bin_means)
+        self.results.offset_std_by_intensity = np.array(bin_stds)
+        logger.info(f"parameters: {len(offsets)} patches")
 
     def run(self, fft_method="1d", upsample=10, border=4, max_offset=10):
-        """Run full analysis."""
+        """run full analysis"""
         start = time.time()
 
         steps = [
-            ("per-frame (FFT)", lambda: self.analyze_per_frame(
-                use_fft=True, fft_method=fft_method, upsample=upsample,
-                border=border, max_offset=max_offset)),
-            ("per-frame (int)", lambda: self.analyze_per_frame(
-                use_fft=False, fft_method=fft_method, upsample=upsample,
+            ("per-frame", lambda: self.analyze_per_frame(
+                fft_method=fft_method, upsample=upsample,
                 border=border, max_offset=max_offset)),
             ("window sizes", lambda: self.analyze_window_sizes(
                 fft_method=fft_method, upsample=upsample,
                 border=border, max_offset=max_offset)),
             ("spatial grid", lambda: self.analyze_spatial_grid(
-                fft_method=fft_method, upsample=upsample, max_offset=max_offset)),
+                patch_sizes=(32, 64), fft_method=fft_method,
+                upsample=upsample, max_offset=max_offset)),
+            ("parameters", lambda: self.analyze_parameters(
+                fft_method=fft_method, upsample=upsample,
+                border=border, max_offset=max_offset)),
         ]
 
-        if self.num_rois > 1:
-            steps.append(("per-ROI", lambda: self.analyze_per_roi(
+        if self.num_planes > 1:
+            steps.append(("z-planes", lambda: self.analyze_z_planes(
                 fft_method=fft_method, upsample=upsample,
                 border=border, max_offset=max_offset)))
 
@@ -422,13 +456,13 @@ class ScanPhaseAnalyzer:
             func()
 
         self.results.analysis_time = time.time() - start
-        logger.info(f"Analysis complete in {self.results.analysis_time:.1f}s")
-
+        logger.info(f"complete in {self.results.analysis_time:.1f}s")
         return self.results
 
     def generate_figures(self, output_dir=None, fmt="png", dpi=150, show=False):
-        """Generate analysis figures."""
+        """generate analysis figures with dark theme"""
         import matplotlib.pyplot as plt
+        _setup_dark_style()
 
         if output_dir:
             output_dir = Path(output_dir)
@@ -436,32 +470,55 @@ class ScanPhaseAnalyzer:
 
         saved = []
 
-        # figure 1: temporal analysis
+        # temporal: per-frame offset over movie
         fig = self._fig_temporal()
         if output_dir:
             path = output_dir / f"temporal.{fmt}"
-            fig.savefig(path, dpi=dpi, facecolor='white', bbox_inches='tight')
+            fig.savefig(path, dpi=dpi, facecolor=fig.get_facecolor(), bbox_inches='tight')
             saved.append(path)
         if show:
             plt.show()
         plt.close(fig)
 
-        # figure 2: window size convergence
-        fig = self._fig_window_convergence()
-        if output_dir:
-            path = output_dir / f"window_convergence.{fmt}"
-            fig.savefig(path, dpi=dpi, facecolor='white', bbox_inches='tight')
-            saved.append(path)
-        if show:
-            plt.show()
-        plt.close(fig)
+        # window sizes: convergence analysis
+        if len(self.results.window_sizes) > 0:
+            fig = self._fig_windows()
+            if output_dir:
+                path = output_dir / f"windows.{fmt}"
+                fig.savefig(path, dpi=dpi, facecolor=fig.get_facecolor(), bbox_inches='tight')
+                saved.append(path)
+            if show:
+                plt.show()
+            plt.close(fig)
 
-        # figure 3: spatial grid (if data available)
+        # spatial heatmaps
         if self.results.grid_offsets:
             fig = self._fig_spatial()
             if output_dir:
                 path = output_dir / f"spatial.{fmt}"
-                fig.savefig(path, dpi=dpi, facecolor='white', bbox_inches='tight')
+                fig.savefig(path, dpi=dpi, facecolor=fig.get_facecolor(), bbox_inches='tight')
+                saved.append(path)
+            if show:
+                plt.show()
+            plt.close(fig)
+
+        # z-planes
+        if len(self.results.plane_offsets) > 1:
+            fig = self._fig_zplanes()
+            if output_dir:
+                path = output_dir / f"zplanes.{fmt}"
+                fig.savefig(path, dpi=dpi, facecolor=fig.get_facecolor(), bbox_inches='tight')
+                saved.append(path)
+            if show:
+                plt.show()
+            plt.close(fig)
+
+        # parameters
+        if len(self.results.intensity_bins) > 0:
+            fig = self._fig_parameters()
+            if output_dir:
+                path = output_dir / f"parameters.{fmt}"
+                fig.savefig(path, dpi=dpi, facecolor=fig.get_facecolor(), bbox_inches='tight')
                 saved.append(path)
             if show:
                 plt.show()
@@ -470,109 +527,92 @@ class ScanPhaseAnalyzer:
         return saved
 
     def _fig_temporal(self):
-        """Create temporal analysis figure."""
-        import matplotlib.pyplot as plt
+        """per-frame offset over movie"""
+        fig, axes = _dark_fig(1, 2, figsize=(10, 4))
 
-        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+        offsets = self.results.offsets_fft
+        valid = offsets[~np.isnan(offsets)]
 
         # time series
         ax = axes[0]
-        if len(self.results.offsets_fft) > 0:
-            ax.plot(self.results.offsets_fft, 'b-', lw=0.5, alpha=0.7, label='FFT')
-            mean_fft = np.nanmean(self.results.offsets_fft)
-            ax.axhline(mean_fft, color='blue', ls='--', lw=1.5)
-        if len(self.results.offsets_int) > 0:
-            ax.plot(self.results.offsets_int, 'g-', lw=0.5, alpha=0.5, label='int')
-        ax.set_xlabel('frame')
-        ax.set_ylabel('offset (px)')
-        ax.set_title('per-frame offset')
-        ax.legend(loc='upper right')
-        ax.grid(True, alpha=0.3)
+        ax.plot(offsets, color='#4da6ff', lw=0.5, alpha=0.8)
+        if len(valid) > 0:
+            mean_val = np.mean(valid)
+            ax.axhline(mean_val, color='#ff6b6b', ls='--', lw=1.5, label=f'mean={mean_val:.2f} px')
+            ax.legend(facecolor='#1a1a2e', edgecolor='white')
+        ax.set_xlabel('frame', color='white')
+        ax.set_ylabel('offset (px)', color='white')
+        ax.set_title('offset over time', color='white')
+        ax.grid(True, alpha=0.2, color='white')
 
         # histogram
         ax = axes[1]
-        if len(self.results.offsets_fft) > 0:
-            valid = self.results.offsets_fft[~np.isnan(self.results.offsets_fft)]
-            ax.hist(valid, bins=50, alpha=0.7, label='FFT', color='blue', density=True)
+        if len(valid) > 0:
+            ax.hist(valid, bins=50, alpha=0.8, color='#4da6ff', edgecolor='#1a1a2e')
             stats = self.results.compute_stats(valid)
-            txt = f"mean: {stats['mean']:.3f}\nstd: {stats['std']:.3f}"
+            txt = f"mean: {stats['mean']:.3f} px\nstd: {stats['std']:.3f} px"
             ax.text(0.95, 0.95, txt, transform=ax.transAxes, fontsize=9,
-                    va='top', ha='right', fontfamily='monospace',
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        if len(self.results.offsets_int) > 0:
-            valid = self.results.offsets_int[~np.isnan(self.results.offsets_int)]
-            ax.hist(valid, bins=50, alpha=0.5, label='int', color='green', density=True)
-        ax.set_xlabel('offset (px)')
-        ax.set_ylabel('density')
-        ax.set_title('distribution')
-        ax.legend()
+                    va='top', ha='right', fontfamily='monospace', color='white',
+                    bbox=dict(boxstyle='round', facecolor='#1a1a2e', edgecolor='white', alpha=0.8))
+        ax.set_xlabel('offset (px)', color='white')
+        ax.set_ylabel('count', color='white')
+        ax.set_title('distribution', color='white')
 
-        plt.tight_layout()
+        fig.tight_layout()
         return fig
 
-    def _fig_window_convergence(self):
-        """Create window size convergence figure - key diagnostic."""
-        import matplotlib.pyplot as plt
-
-        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    def _fig_windows(self):
+        """window size convergence"""
+        fig, axes = _dark_fig(1, 2, figsize=(10, 4))
 
         ws = self.results.window_sizes
-        fft_off = self.results.window_offsets_fft
-        fft_std = self.results.window_std_fft
-        int_off = self.results.window_offsets_int
+        offs = self.results.window_offsets
+        stds = self.results.window_stds
 
         # offset vs window size
         ax = axes[0]
-        ax.errorbar(ws, fft_off, yerr=fft_std, fmt='b-o', capsize=3, ms=4, label='FFT')
-        ax.plot(ws, int_off, 'g-s', ms=4, label='int')
+        ax.errorbar(ws, offs, yerr=stds, fmt='o-', color='#4da6ff', capsize=3, ms=5, ecolor='#ff6b6b')
         ax.set_xscale('log')
-        ax.set_xlabel('window size (frames)')
-        ax.set_ylabel('offset (px)')
-        ax.set_title('offset vs window size')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        ax.set_xlabel('window size (frames)', color='white')
+        ax.set_ylabel('offset (px)', color='white')
+        ax.set_title('offset vs window size', color='white')
+        ax.grid(True, alpha=0.2, color='white')
+        # format x ticks without scientific notation
+        ax.xaxis.set_major_formatter(lambda x, p: f'{int(x)}' if x >= 1 else f'{x:.1f}')
 
-        # format x-axis without scientific notation
-        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x)}'))
-
-        # estimation variance vs window size
+        # std vs window size
         ax = axes[1]
-        ax.plot(ws, fft_std, 'b-o', ms=4, label='FFT std')
+        ax.plot(ws, stds, 'o-', color='#50fa7b', ms=5)
         ax.set_xscale('log')
-        ax.set_xlabel('window size (frames)')
-        ax.set_ylabel('std of estimate (px)')
-        ax.set_title('estimation variance')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x)}'))
+        ax.set_xlabel('window size (frames)', color='white')
+        ax.set_ylabel('std of estimate (px)', color='white')
+        ax.set_title('estimation variance', color='white')
+        ax.grid(True, alpha=0.2, color='white')
+        ax.xaxis.set_major_formatter(lambda x, p: f'{int(x)}' if x >= 1 else f'{x:.1f}')
 
-        # add annotation for convergence
-        if len(fft_std) > 0:
-            # find window size where std drops below threshold
+        # mark convergence threshold
+        if len(stds) > 2:
             threshold = 0.1
-            converged_idx = np.where(fft_std < threshold)[0]
-            if len(converged_idx) > 0:
-                conv_ws = ws[converged_idx[0]]
-                ax.axvline(conv_ws, color='red', ls='--', alpha=0.7)
-                ax.text(conv_ws, ax.get_ylim()[1] * 0.9, f'{conv_ws}', color='red', ha='center')
+            below = np.where(np.array(stds) < threshold)[0]
+            if len(below) > 0:
+                conv_ws = ws[below[0]]
+                ax.axvline(conv_ws, color='#ff6b6b', ls='--', alpha=0.7)
+                ax.text(conv_ws * 1.2, ax.get_ylim()[1] * 0.8, f'{conv_ws} frames',
+                        color='#ff6b6b', fontsize=9)
 
-        plt.tight_layout()
+        fig.tight_layout()
         return fig
 
     def _fig_spatial(self):
-        """Create spatial grid figure."""
+        """spatial heatmaps with interpolation"""
         import matplotlib.pyplot as plt
+        from scipy.ndimage import zoom
 
-        # use smallest available patch size for finest resolution
         patch_sizes = sorted(self.results.grid_offsets.keys())
-        if not patch_sizes:
-            fig, ax = plt.subplots(figsize=(6, 4))
-            ax.text(0.5, 0.5, 'no spatial data', ha='center', va='center', transform=ax.transAxes)
-            return fig
+        n = len(patch_sizes)
 
-        n_sizes = len(patch_sizes)
-        fig, axes = plt.subplots(1, n_sizes, figsize=(4 * n_sizes, 4))
-        if n_sizes == 1:
+        fig, axes = _dark_fig(1, n, figsize=(5 * n, 4))
+        if n == 1:
             axes = [axes]
 
         for ax, ps in zip(axes, patch_sizes):
@@ -580,36 +620,135 @@ class ScanPhaseAnalyzer:
             valid = self.results.grid_valid[ps]
             masked = np.where(valid, offsets, np.nan)
 
-            vmax = max(0.5, np.nanmax(np.abs(masked)))
-            im = ax.imshow(masked, cmap='RdBu_r', vmin=-vmax, vmax=vmax, aspect='auto')
-            plt.colorbar(im, ax=ax, label='offset (px)')
-            ax.set_xlabel('x patch')
-            ax.set_ylabel('y patch')
-            ax.set_title(f'{ps}px patches')
+            # interpolate for smoother display
+            if masked.shape[0] > 1 and masked.shape[1] > 1:
+                # fill nans with nearest valid for interpolation
+                from scipy.ndimage import generic_filter
+                filled = masked.copy()
+                nan_mask = np.isnan(filled)
+                if nan_mask.any() and not nan_mask.all():
+                    # simple nearest fill
+                    from scipy.interpolate import griddata
+                    y, x = np.mgrid[0:filled.shape[0], 0:filled.shape[1]]
+                    valid_pts = ~nan_mask
+                    if valid_pts.sum() > 3:
+                        filled = griddata(
+                            (y[valid_pts], x[valid_pts]), filled[valid_pts],
+                            (y, x), method='nearest'
+                        )
+                # zoom for smoother display
+                zoom_factor = max(1, 100 // max(filled.shape))
+                if zoom_factor > 1:
+                    filled = zoom(filled, zoom_factor, order=1)
+                display = filled
+            else:
+                display = masked
 
-            # stats annotation
+            vmax = max(0.5, np.nanmax(np.abs(display)))
+            im = ax.imshow(display, cmap='RdBu_r', vmin=-vmax, vmax=vmax,
+                          aspect='auto', interpolation='bilinear')
+            cbar = plt.colorbar(im, ax=ax)
+            cbar.set_label('offset (px)', color='white')
+            cbar.ax.yaxis.set_tick_params(color='white')
+            plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
+
+            ax.set_xlabel('x', color='white')
+            ax.set_ylabel('y', color='white')
+
             valid_vals = offsets[valid]
             if len(valid_vals) > 0:
-                stats = self.results.compute_stats(valid_vals)
-                ax.set_xlabel(f'x patch  [mean={stats["mean"]:.3f}]')
+                mean_val = np.mean(valid_vals)
+                ax.set_title(f'{ps}x{ps} patches  (mean={mean_val:.2f} px)', color='white')
+            else:
+                ax.set_title(f'{ps}x{ps} patches', color='white')
 
-        plt.tight_layout()
+            # remove tick labels (they're misleading after zoom)
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+        fig.tight_layout()
+        return fig
+
+    def _fig_zplanes(self):
+        """offset vs z-plane depth"""
+        fig, ax = _dark_fig(figsize=(6, 4))
+
+        offsets = self.results.plane_offsets
+        depths = self.results.plane_depths_um
+
+        if self.pixel_resolution_um > 0:
+            ax.plot(depths, offsets, 'o-', color='#4da6ff', ms=6)
+            ax.set_xlabel('depth (µm)', color='white')
+        else:
+            ax.plot(np.arange(len(offsets)), offsets, 'o-', color='#4da6ff', ms=6)
+            ax.set_xlabel('z-plane', color='white')
+
+        ax.set_ylabel('offset (px)', color='white')
+        ax.set_title('offset by depth', color='white')
+        ax.grid(True, alpha=0.2, color='white')
+
+        valid = offsets[~np.isnan(offsets)]
+        if len(valid) > 0:
+            ax.axhline(np.mean(valid), color='#ff6b6b', ls='--', alpha=0.7,
+                      label=f'mean={np.mean(valid):.2f} px')
+            ax.legend(facecolor='#1a1a2e', edgecolor='white')
+
+        fig.tight_layout()
+        return fig
+
+    def _fig_parameters(self):
+        """offset reliability vs signal intensity"""
+        fig, axes = _dark_fig(1, 2, figsize=(10, 4))
+
+        bins = self.results.intensity_bins
+        means = self.results.offset_by_intensity
+        stds = self.results.offset_std_by_intensity
+
+        # offset vs intensity
+        ax = axes[0]
+        ax.errorbar(bins, means, yerr=stds, fmt='o-', color='#4da6ff', capsize=3, ms=5, ecolor='#ff6b6b')
+        ax.set_xlabel('signal intensity (a.u.)', color='white')
+        ax.set_ylabel('|offset| (px)', color='white')
+        ax.set_title('offset vs signal', color='white')
+        ax.grid(True, alpha=0.2, color='white')
+
+        # mark threshold
+        if len(means) > 2:
+            threshold_idx = np.argmax(means < means[-1] * 1.5)
+            if threshold_idx > 0:
+                threshold_int = bins[threshold_idx]
+                ax.axvline(threshold_int, color='#ff6b6b', ls='--', alpha=0.7)
+                ax.text(threshold_int * 1.1, ax.get_ylim()[1] * 0.85,
+                        f'threshold\n~{threshold_int:.0f}', fontsize=8, color='#ff6b6b')
+
+        # std vs intensity
+        ax = axes[1]
+        ax.plot(bins, stds, 'o-', color='#50fa7b', ms=5)
+        ax.set_xlabel('signal intensity (a.u.)', color='white')
+        ax.set_ylabel('std of offset (px)', color='white')
+        ax.set_title('variability vs signal', color='white')
+        ax.grid(True, alpha=0.2, color='white')
+
+        fig.tight_layout()
         return fig
 
     def save_results(self, path):
-        """Save results to npz file."""
+        """save results to npz"""
         path = Path(path)
         data = {
             'offsets_fft': self.results.offsets_fft,
-            'offsets_int': self.results.offsets_int,
             'window_sizes': self.results.window_sizes,
-            'window_offsets_fft': self.results.window_offsets_fft,
-            'window_offsets_int': self.results.window_offsets_int,
-            'window_std_fft': self.results.window_std_fft,
-            'window_std_int': self.results.window_std_int,
+            'window_offsets': self.results.window_offsets,
+            'window_stds': self.results.window_stds,
+            'plane_offsets': self.results.plane_offsets,
+            'plane_depths_um': self.results.plane_depths_um,
+            'intensity_bins': self.results.intensity_bins,
+            'offset_by_intensity': self.results.offset_by_intensity,
+            'offset_std_by_intensity': self.results.offset_std_by_intensity,
             'num_frames': self.results.num_frames,
-            'num_rois': self.results.num_rois,
+            'num_planes': self.results.num_planes,
             'frame_shape': self.results.frame_shape,
+            'pixel_resolution_um': self.results.pixel_resolution_um,
             'analysis_time': self.results.analysis_time,
         }
         for ps, grid in self.results.grid_offsets.items():
@@ -617,7 +756,7 @@ class ScanPhaseAnalyzer:
             data[f'grid_{ps}_valid'] = self.results.grid_valid[ps]
 
         np.savez_compressed(path, **data)
-        logger.info(f"Results saved to {path}")
+        logger.info(f"saved to {path}")
         return path
 
 
@@ -628,82 +767,50 @@ def run_scanphase_analysis(
     image_format="png",
     show_plots=False,
 ):
-    """
-    Run scan-phase analysis from CLI or programmatically.
-
-    Parameters
-    ----------
-    data_path : str, Path, or list of Path, optional
-        Path to data file, folder, or list of tiff files. If None, opens file dialog.
-    output_dir : str or Path, optional
-        Output directory. If None, creates <input>_scanphase_analysis/
-    fft_method : str
-        FFT method: '1d' (fast) or '2d'.
-    image_format : str
-        Output image format.
-    show_plots : bool
-        Show plots interactively.
-
-    Returns
-    -------
-    ScanPhaseResults or None
-        Analysis results, or None if user cancelled.
-    """
+    """run scan-phase analysis"""
     from pathlib import Path
-    from mbo_utilities import open as mbo_open
+    from mbo_utilities import imread
 
-    # handle file selection
     if data_path is None:
         from mbo_utilities.graphics import select_file
         data_path = select_file(title="Select data for scan-phase analysis")
         if data_path is None:
             return None
 
-    # handle list of paths (from --num-tifs)
     if isinstance(data_path, (list, tuple)):
-        # list of tiff files - pass directly to mbo_open
         if len(data_path) == 0:
-            raise ValueError("Empty list of paths")
+            raise ValueError("empty list of paths")
         first_path = Path(data_path[0])
         if output_dir is None:
             output_dir = first_path.parent / f"{first_path.parent.name}_scanphase_analysis"
-        logger.info(f"Loading {len(data_path)} tiff files")
-        arr = mbo_open(data_path)
+        logger.info(f"loading {len(data_path)} tiff files")
+        arr = imread(data_path)
     else:
         data_path = Path(data_path)
         if output_dir is None:
             output_dir = data_path.parent / f"{data_path.stem}_scanphase_analysis"
-        logger.info(f"Loading {data_path}")
-        arr = mbo_open(data_path)
+        logger.info(f"loading {data_path}")
+        arr = imread(data_path)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # check for ROI structure (MboRawArray)
     roi_yslices = None
     if hasattr(arr, 'yslices') and hasattr(arr, 'num_rois'):
         if arr.num_rois > 1:
             roi_yslices = arr.yslices
-            logger.info(f"Detected {arr.num_rois} ROIs with y-slices: {roi_yslices}")
+            logger.info(f"detected {arr.num_rois} ROIs")
 
-    # create analyzer
     analyzer = ScanPhaseAnalyzer(arr, roi_yslices=roi_yslices)
-
-    # run analysis
     results = analyzer.run(fft_method=fft_method)
-
-    # generate figures
     analyzer.generate_figures(output_dir=output_dir, fmt=image_format, show=show_plots)
-
-    # save numerical results
     analyzer.save_results(output_dir / "scanphase_results.npz")
 
     return results
 
 
-# convenience function
 def analyze_scanphase(data, output_dir=None, **kwargs):
-    """Run scan-phase analysis on array data."""
+    """run scan-phase analysis on array data"""
     analyzer = ScanPhaseAnalyzer(data)
     results = analyzer.run(**kwargs)
     if output_dir:

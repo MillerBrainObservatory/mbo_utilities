@@ -1013,6 +1013,38 @@ def _try_generic_writers(
             ops["nframes"] = arr.shape[0] if arr.ndim >= 1 else 1
             # Convert Path objects to strings for cross-platform compatibility
             np.save(outpath.parent / "ops.npy", _convert_paths_to_strings(ops))
+    elif outpath.suffix.lower() == ".zarr":
+        # Zarr v3 format for numpy arrays
+        import zarr
+        from zarr.codecs import BytesCodec, GzipCodec
+
+        arr = np.asarray(data)
+
+        # Compute chunks: (1, ..., H, W) for time-series data
+        if arr.ndim >= 3:
+            chunks = (1,) * (arr.ndim - 2) + arr.shape[-2:]
+        else:
+            chunks = arr.shape
+
+        # Create zarr array with compression
+        z = zarr.create(
+            store=str(outpath),
+            shape=arr.shape,
+            chunks=chunks,
+            dtype=arr.dtype,
+            codecs=[BytesCodec(), GzipCodec(level=5)],
+            overwrite=True,
+            zarr_format=3,
+        )
+        z[:] = arr
+
+        # Add metadata as attributes if provided
+        if metadata:
+            for k, v in metadata.items():
+                try:
+                    z.attrs[k] = v if np.isscalar(v) or isinstance(v, (list, dict, str)) else str(v)
+                except Exception:
+                    z.attrs[k] = str(v)
     else:
         raise ValueError(f"Unsupported file extension: {outpath.suffix}")
 
@@ -1117,7 +1149,7 @@ def write_ops(metadata, raw_filename, **kwargs):
             "umPerPixX": dx,
             "umPerPixY": dy,
             "umPerPixZ": dz,
-            # Tuple format for legacy compatibility
+            # legacy compatibility
             "pixel_resolution": (dx, dy),
             "z_step": dz,
             "ops_path": str(ops_path),
