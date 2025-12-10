@@ -142,7 +142,8 @@ class CrosstalkCompareWidget(EdgeWindow):
 
         # difference stats (computed on current frame)
         try:
-            t_idx = self.iw.current_index.get("t", 0)
+            indices = tuple(self.iw.indices)
+            t_idx = indices[0] if len(indices) > 0 else 0
             if self.num_planes > 1:
                 raw_frame = np.asarray(self.raw[t_idx, self.current_plane])
                 demix_frame = np.asarray(self.demixed[t_idx, self.current_plane])
@@ -171,8 +172,10 @@ class CrosstalkCompareWidget(EdgeWindow):
 
     def _update_indices(self):
         """update z index in imagewidget."""
-        if "z" in self.iw.current_index:
-            self.iw.current_index["z"] = self.current_plane
+        indices = list(self.iw.indices)
+        if len(indices) > 1:
+            indices[1] = self.current_plane
+            self.iw.indices = indices
 
 
 if __name__ == "__main__":
