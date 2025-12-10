@@ -36,7 +36,7 @@ dependencies = [
 	"jupyter_rfb>=0.5.1",
 	"llvmlite>=0.43.0",
 	"mkl_fft>=2.0.0",
-	"fastplotlib",
+	"mbo-fastplotlib>=0.7.2",
 	"imgui-bundle>=1.92.5",
 	"pyside6>=6.10.1",
 ]
@@ -57,8 +57,8 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 # Suite2p cell extraction pipeline
 suite2p = [
     "numba>=0.60.0",
-    "lbm_suite2p_python",
-    "suite2p_mbo>=2.0.0",
+    "lbm_suite2p_python>=2.3.1",
+    "suite2p_mbo>=2.0.1",
 ]
 # Suite3D volumetric registration (requires CUDA GPU)
 suite3d = [
@@ -114,7 +114,6 @@ torch = [
 torchvision = [
   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
-fastplotlib = { git = "https://github.com/fastplotlib/fastplotlib.git", rev = "iw-check-subclass-bugfix" }
 
 [tool.ruff]
 line-length = 88
