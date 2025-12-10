@@ -39,6 +39,8 @@ dependencies = [
 	"mbo-fastplotlib>=0.7.2",
 	"imgui-bundle>=1.92.5",
 	"pyside6>=6.10.1",
+	"napari",
+	"napari-animation",
 ]
 
 [project.scripts]
