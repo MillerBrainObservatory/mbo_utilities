@@ -9,8 +9,11 @@ maxdepth: 3
 numbered: 2
 ---
 
-save_as
+cli
+gui_guide
 run_gui
+scanphase
+save_as
 save_mp4
 
 ````

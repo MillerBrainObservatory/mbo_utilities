@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import struct
-from typing import NamedTuple
+from typing import NamedTuple, Any
 from tqdm.auto import tqdm
 
 import numpy as np
@@ -16,6 +16,389 @@ from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities.util import load_npy
 
 logger = log.get("metadata")
+
+
+@dataclass
+class MetadataParameter:
+    """
+    Standardized metadata parameter.
+
+    Provides a central registry for parameter names, their aliases across
+    different formats (ScanImage, Suite2p, OME, TIFF tags), and type information.
+
+    Attributes
+    ----------
+    canonical : str
+        The standard key name (e.g., "dx", "fs", "nplanes").
+    aliases : tuple[str, ...]
+        All known aliases for this parameter.
+    dtype : type
+        Expected Python type (float, int, str).
+    unit : str, optional
+        Physical unit if applicable (e.g., "micrometer", "Hz").
+    default : Any
+        Default value if parameter is not found in metadata.
+    description : str
+        Human-readable description of the parameter.
+    """
+
+    canonical: str
+    aliases: tuple[str, ...] = field(default_factory=tuple)
+    dtype: type = float
+    unit: str | None = None
+    default: Any = None
+    description: str = ""
+
+
+# This metadata system is designed for calcium imaging datasets with array
+# dimensions in one of these formats:
+#   - TZYX (4D): frames × z-planes × height × width
+#   - TYX  (3D): frames × height × width
+#   - YX   (2D): height × width
+#
+# Note: Channel dimension is not explicitly supported as most calcium imaging
+# pipelines process single-channel data. Multi-channel data should be split
+# before processing.
+
+METADATA_PARAMS: dict[str, MetadataParameter] = {
+    # Spatial resolution (micrometers per pixel)
+    "dx": MetadataParameter(
+        canonical="dx",
+        aliases=(
+            "Dx",
+            "umPerPixX",
+            "PhysicalSizeX",
+            "pixelResolutionX",
+            "pixel_size_x",
+            "XResolution",
+        ),
+        dtype=float,
+        unit="micrometer",
+        default=1.0,
+        description="Pixel size in X dimension (µm/pixel)",
+    ),
+    "dy": MetadataParameter(
+        canonical="dy",
+        aliases=(
+            "Dy",
+            "umPerPixY",
+            "PhysicalSizeY",
+            "pixelResolutionY",
+            "pixel_size_y",
+            "YResolution",
+        ),
+        dtype=float,
+        unit="micrometer",
+        default=1.0,
+        description="Pixel size in Y dimension (µm/pixel)",
+    ),
+    "dz": MetadataParameter(
+        canonical="dz",
+        aliases=(
+            "Dz",
+            "umPerPixZ",
+            "PhysicalSizeZ",
+            "z_step",
+            "spacing",
+            "pixelResolutionZ",
+            "ZResolution",
+        ),
+        dtype=float,
+        unit="micrometer",
+        default=1.0,
+        description="Voxel size in Z dimension (µm/z-step)",
+    ),
+    # Temporal
+    "fs": MetadataParameter(
+        canonical="fs",
+        aliases=(
+            "frame_rate",
+            "fr",
+            "sampling_frequency",
+            "frameRate",
+            "scanFrameRate",
+            "fps",
+        ),
+        dtype=float,
+        unit="Hz",
+        default=None,
+        description="Frame rate / sampling frequency (Hz)",
+    ),
+    # Image dimensions (pixels)
+    "Lx": MetadataParameter(
+        canonical="Lx",
+        aliases=(
+            "lx",
+            "LX",
+            "width",
+            "nx",
+            "size_x",
+            "image_width",
+            "fov_x",
+            "num_px_x",
+        ),
+        dtype=int,
+        unit="pixels",
+        default=None,
+        description="Image width in pixels",
+    ),
+    "Ly": MetadataParameter(
+        canonical="Ly",
+        aliases=(
+            "ly",
+            "LY",
+            "height",
+            "ny",
+            "size_y",
+            "image_height",
+            "fov_y",
+            "num_px_y",
+        ),
+        dtype=int,
+        unit="pixels",
+        default=None,
+        description="Image height in pixels",
+    ),
+    # Frame/plane/channel counts
+    "nframes": MetadataParameter(
+        canonical="nframes",
+        aliases=("num_frames", "n_frames", "frames", "T", "nt"),
+        dtype=int,
+        default=None,
+        description="Number of frames (time points) in the dataset",
+    ),
+    "nplanes": MetadataParameter(
+        canonical="nplanes",
+        aliases=(
+            "num_planes",
+            "n_planes",
+            "planes",
+            "Z",
+            "nz",
+            "num_z",
+            "numPlanes",
+        ),
+        dtype=int,
+        default=1,
+        description="Number of z-planes",
+    ),
+    "nchannels": MetadataParameter(
+        canonical="nchannels",
+        aliases=(
+            "num_channels",
+            "n_channels",
+            "channels",
+            "C",
+            "nc",
+            "numChannels",
+        ),
+        dtype=int,
+        default=1,
+        description="Number of channels (typically 1 for calcium imaging)",
+    ),
+    # Data type
+    "dtype": MetadataParameter(
+        canonical="dtype",
+        aliases=("data_type", "pixel_type", "datatype"),
+        dtype=str,
+        default="int16",
+        description="Data type of pixel values",
+    ),
+    # Shape (tuple - special handling)
+    "shape": MetadataParameter(
+        canonical="shape",
+        aliases=("array_shape", "data_shape", "size"),
+        dtype=tuple,
+        default=None,
+        description="Array shape as tuple (T, Z, Y, X) or (T, Y, X) or (Y, X)",
+    ),
+}
+
+# Build reverse lookup: alias (lowercase) -> canonical name
+_ALIAS_MAP: dict[str, str] = {}
+for _param in METADATA_PARAMS.values():
+    _ALIAS_MAP[_param.canonical.lower()] = _param.canonical
+    for _alias in _param.aliases:
+        _ALIAS_MAP[_alias.lower()] = _param.canonical
+
+
+def get_param(
+    metadata: dict | None,
+    name: str,
+    default: Any = None,
+    *,
+    override: Any = None,
+    shape: tuple | None = None,
+) -> Any:
+    """
+    Get a metadata parameter by canonical name, checking all known aliases.
+
+    This provides a unified way to access metadata values without needing to
+    know which alias was used to store it. The function checks the canonical
+    name first, then all registered aliases.
+
+    Parameters
+    ----------
+    metadata : dict or None
+        Metadata dictionary to search.
+    name : str
+        Canonical parameter name (e.g., "dx", "fs", "nplanes").
+        Case-insensitive; will be resolved to canonical form.
+    default : Any, optional
+        Override default value. If None, uses the parameter's registered default.
+    override : Any, optional
+        If provided, returns this value directly (for user-specified overrides).
+    shape : tuple, optional
+        Array shape for fallback dimension extraction (Lx, Ly from shape[-1], shape[-2]).
+
+    Returns
+    -------
+    Any
+        Parameter value converted to the correct dtype, or default if not found.
+
+    Examples
+    --------
+    >>> meta = {"umPerPixX": 0.5, "frame_rate": 30.0}
+    >>> get_param(meta, "dx")
+    0.5
+    >>> get_param(meta, "fs")
+    30.0
+    >>> get_param(meta, "nplanes")  # uses default
+    1
+    >>> get_param(meta, "dx", override=0.3)  # override wins
+    0.3
+    """
+    # If override provided, use it directly
+    if override is not None:
+        return override
+
+    # Resolve canonical name (case-insensitive lookup)
+    canonical = _ALIAS_MAP.get(name.lower())
+    if canonical is None:
+        # Not a registered parameter - just do simple dict lookup
+        if metadata is not None and name in metadata:
+            return metadata[name]
+        return default
+
+    param = METADATA_PARAMS[canonical]
+
+    # Determine final default
+    final_default = default if default is not None else param.default
+
+    if metadata is None:
+        # Try shape fallback for dimensions
+        if shape is not None:
+            if canonical == "Lx" and len(shape) >= 1:
+                return int(shape[-1])
+            if canonical == "Ly" and len(shape) >= 2:
+                return int(shape[-2])
+        return final_default
+
+    # Check canonical name first, then all aliases
+    keys_to_check = (param.canonical,) + param.aliases
+    for key in keys_to_check:
+        val = metadata.get(key)
+        if val is not None:
+            try:
+                if param.dtype == tuple:
+                    # Handle tuple specially
+                    if isinstance(val, (list, tuple)):
+                        return tuple(val)
+                    return val
+                return param.dtype(val)
+            except (TypeError, ValueError):
+                continue
+
+    # Special handling for pixel_resolution tuple -> dx/dy
+    if canonical in ("dx", "dy"):
+        pixel_res = metadata.get("pixel_resolution")
+        if pixel_res is not None:
+            if isinstance(pixel_res, (list, tuple)) and len(pixel_res) >= 2:
+                try:
+                    idx = 0 if canonical == "dx" else 1
+                    return float(pixel_res[idx])
+                except (TypeError, ValueError, IndexError):
+                    pass
+            elif isinstance(pixel_res, (int, float)):
+                return float(pixel_res)
+
+    # Fallback: extract Lx/Ly from shape
+    if shape is not None:
+        if canonical == "Lx" and len(shape) >= 1:
+            return int(shape[-1])
+        if canonical == "Ly" and len(shape) >= 2:
+            return int(shape[-2])
+
+    # Special: try to get dtype from shape metadata
+    if canonical == "dtype":
+        arr_dtype = metadata.get("dtype")
+        if arr_dtype is not None:
+            return str(arr_dtype)
+
+    return final_default
+
+
+def normalize_metadata(
+    metadata: dict,
+    shape: tuple | None = None,
+    **overrides,
+) -> dict:
+    """
+    Normalize metadata by adding all standard parameter aliases.
+
+    This ensures that metadata values are accessible under all commonly-used
+    keys for different tools and formats. Modifies the dictionary in-place.
+
+    Parameters
+    ----------
+    metadata : dict
+        Metadata dictionary to normalize. Modified in-place AND returned.
+    shape : tuple, optional
+        Array shape for inferring Lx, Ly if not present in metadata.
+    **overrides
+        Override values for specific parameters (e.g., dx=0.5, fs=30.0).
+
+    Returns
+    -------
+    dict
+        The same metadata dict with all standard aliases added.
+
+    Examples
+    --------
+    >>> meta = {"umPerPixX": 0.5, "frame_rate": 30.0}
+    >>> normalize_metadata(meta)
+    >>> meta["dx"]
+    0.5
+    >>> meta["fs"]
+    30.0
+    >>> meta["PhysicalSizeX"]
+    0.5
+    """
+    # Handle VoxelSize (existing comprehensive resolution handling)
+    vs = get_voxel_size(
+        metadata,
+        dx=overrides.get("dx"),
+        dy=overrides.get("dy"),
+        dz=overrides.get("dz"),
+    )
+    metadata.update(vs.to_dict(include_aliases=True))
+
+    # Normalize other parameters
+    for name, param in METADATA_PARAMS.items():
+        if name in ("dx", "dy", "dz"):
+            continue  # Already handled by VoxelSize
+
+        value = get_param(
+            metadata, name, override=overrides.get(name), shape=shape
+        )
+        if value is not None:
+            # Set canonical key
+            metadata[name] = value
+            # Set all aliases
+            for alias in param.aliases:
+                metadata[alias] = value
+
+    return metadata
 
 class VoxelSize(NamedTuple):
     """

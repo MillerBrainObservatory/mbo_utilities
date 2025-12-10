@@ -45,6 +45,7 @@ _ARRAY_TYPE_KWARGS = {
         "border",
         "upsample",
         "max_offset",
+        "use_fft",
     },
     ZarrArray: {"filenames", "compressor", "rois"},
     MBOTiffArray: {"filenames", "_chunks"},
@@ -108,7 +109,7 @@ def imread(
     # Wrap numpy arrays in NumpyArray for full imwrite/protocol support
     if isinstance(inputs, np.ndarray):
         logger.debug(f"Wrapping numpy array with shape {inputs.shape} as NumpyArray")
-        return NumpyArray(inputs)
+        return NumpyArray(inputs, **_filter_kwargs(NumpyArray, kwargs))
     # Pass through already-loaded lazy arrays (has _imwrite method)
     if hasattr(inputs, "_imwrite") and hasattr(inputs, "shape"):
         return inputs
@@ -228,12 +229,12 @@ def imread(
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
             logger.debug(f"Detected raw ScanImage TIFFs, loading as MboRawArray.")
-            return MboRawArray(files=paths, **kwargs)
+            return MboRawArray(files=paths, **_filter_kwargs(MboRawArray, kwargs))
         if has_mbo_metadata(first):
             logger.debug(f"Detected MBO TIFFs, loading as MBOTiffArray.")
-            return MBOTiffArray(paths, **kwargs)
+            return MBOTiffArray(paths, **_filter_kwargs(MBOTiffArray, kwargs))
         logger.debug(f"Loading TIFF files as TiffArray.")
-        return TiffArray(paths)
+        return TiffArray(paths, **_filter_kwargs(TiffArray, kwargs))
 
     if first.suffix == ".bin":
         if isinstance(inputs, (str, Path)) and Path(inputs).suffix == ".bin":
@@ -252,7 +253,7 @@ def imread(
 
     if first.suffix == ".h5":
         logger.debug(f"Reading HDF5 files from {first}.")
-        return H5Array(first)
+        return H5Array(first, **_filter_kwargs(H5Array, kwargs))
 
     if first.suffix == ".zarr":
         # Case 1: nested zarrs inside
@@ -281,7 +282,7 @@ def imread(
             raise NotImplementedError("PMD Arrays are not yet supported.")
 
         logger.debug(f"Loading .npy file as NumpyArray: {first}")
-        return NumpyArray(first)
+        return NumpyArray(first, **_filter_kwargs(NumpyArray, kwargs))
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
 

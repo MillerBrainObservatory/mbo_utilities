@@ -107,6 +107,7 @@ class ZarrArray(ReductionMixin):
             else:
                 self._metadata.append(dict(z.attrs))
         self.compressor = compressor
+        self._target_dtype = None
 
     @property
     def metadata(self):
@@ -114,9 +115,10 @@ class ZarrArray(ReductionMixin):
         if not self._metadata:
             md = {}
         else:
-            md = self._metadata[0]
+            md = self._metadata[0].copy()
 
         # Ensure critical keys are present
+        md["dtype"] = self.dtype
         if "num_frames" not in md and "nframes" not in md:
             if self.zs:
                 md["num_frames"] = int(self.zs[0].shape[0])
@@ -178,7 +180,32 @@ class ZarrArray(ReductionMixin):
 
     @property
     def dtype(self):
-        return self.zs[0].dtype
+        return self._target_dtype if self._target_dtype is not None else self.zs[0].dtype
+
+    def astype(self, dtype, copy=True):
+        """Set target dtype for lazy conversion on data access."""
+        self._target_dtype = np.dtype(dtype)
+        return self
+
+    def _compute_frame_vminmax(self):
+        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_vmin'):
+            frame = self[0, 0] if self.ndim == 4 else self[0]
+            frame = np.asarray(frame)
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
+
+    @property
+    def vmin(self) -> float:
+        """Min from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmin
+
+    @property
+    def vmax(self) -> float:
+        """Max from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmax
 
     @property
     def size(self):
@@ -225,32 +252,32 @@ class ZarrArray(ReductionMixin):
         is_single_4d = len(self.zs) == 1 and len(self.zs[0].shape) == 4
 
         if is_single_4d:
-            return self.zs[0][t_key, z_key, y_key, x_key]
-
-        if len(self.zs) == 1:
+            out = self.zs[0][t_key, z_key, y_key, x_key]
+        elif len(self.zs) == 1:
             if isinstance(z_key, int):
                 if z_key != 0:
                     raise IndexError("Z dimension has size 1, only index 0 is valid")
-                return self.zs[0][t_key, y_key, x_key]
+                out = self.zs[0][t_key, y_key, x_key]
             elif isinstance(z_key, slice):
                 data = self.zs[0][t_key, y_key, x_key]
-                return data[:, np.newaxis, ...]
+                out = data[:, np.newaxis, ...]
             else:
-                return self.zs[0][t_key, y_key, x_key]
-
-        # Multi-zarr case
-        if isinstance(z_key, int):
-            return self.zs[z_key][t_key, y_key, x_key]
-
-        if isinstance(z_key, slice):
-            z_indices = range(len(self.zs))[z_key]
-        elif isinstance(z_key, np.ndarray) or isinstance(z_key, list):
-            z_indices = z_key
+                out = self.zs[0][t_key, y_key, x_key]
+        elif isinstance(z_key, int):
+            out = self.zs[z_key][t_key, y_key, x_key]
         else:
-            z_indices = range(len(self.zs))
+            if isinstance(z_key, slice):
+                z_indices = range(len(self.zs))[z_key]
+            elif isinstance(z_key, np.ndarray) or isinstance(z_key, list):
+                z_indices = z_key
+            else:
+                z_indices = range(len(self.zs))
+            arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
+            out = np.stack(arrs, axis=1)
 
-        arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
-        return np.stack(arrs, axis=1)
+        if self._target_dtype is not None:
+            out = out.astype(self._target_dtype)
+        return out
 
     def _imwrite(
         self,

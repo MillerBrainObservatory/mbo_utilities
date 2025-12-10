@@ -84,8 +84,38 @@ class H5Array(ReductionMixin):
 
         self.dataset_name = dataset
         self.shape = self._d.shape
-        self.dtype = self._d.dtype
+        self._dtype = self._d.dtype
         self.ndim = self._d.ndim
+        self._target_dtype = None
+
+    @property
+    def dtype(self):
+        return self._target_dtype if self._target_dtype is not None else self._dtype
+
+    def astype(self, dtype, copy=True):
+        """Set target dtype for lazy conversion on data access."""
+        self._target_dtype = np.dtype(dtype)
+        return self
+
+    def _compute_frame_vminmax(self):
+        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_vmin'):
+            frame = self[0, 0] if self.ndim == 4 else self[0]
+            frame = np.asarray(frame)
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
+
+    @property
+    def vmin(self) -> float:
+        """Min from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmin
+
+    @property
+    def vmax(self) -> float:
+        """Max from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmax
 
     @property
     def num_planes(self) -> int:
@@ -140,6 +170,8 @@ class H5Array(ReductionMixin):
             if k is None:
                 data = np.expand_dims(data, axis=i)
 
+        if self._target_dtype is not None:
+            data = data.astype(self._target_dtype)
         return data
 
     def __array__(self):
