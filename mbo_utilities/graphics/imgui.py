@@ -548,119 +548,93 @@ def draw_saveas_popup(parent):
 
         # Metadata Section (collapsible)
         imgui.spacing()
-        if imgui.collapsing_header("Metadata Overrides"):
+        if imgui.collapsing_header("Metadata"):
             imgui.dummy(imgui.ImVec2(0, 5))
 
-            # Get current metadata from data for showing auto-detected values
+            # Get current metadata and data source
             try:
-                current_meta = parent.image_widget.data[0].metadata or {}
+                current_data = parent.image_widget.data[0]
+                current_meta = current_data.metadata or {}
             except (IndexError, AttributeError):
+                current_data = None
                 current_meta = {}
 
-            # Frame Rate
-            auto_fs = current_meta.get("frame_rate") or current_meta.get("fs") or ""
-            imgui.text("Frame Rate (Hz)")
-            imgui.same_line()
-            imgui.text_disabled("(?)")
-            if imgui.is_item_hovered():
-                imgui.begin_tooltip()
-                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-                imgui.text_unformatted(
-                    f"Acquisition frame rate in Hz.\n"
-                    f"Auto-detected: {auto_fs if auto_fs else 'Not found'}\n"
-                    f"Aliases: fs, frame_rate"
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.end_tooltip()
-            imgui.set_next_item_width(hello_imgui.em_size(12))
-            _, parent._saveas_fs = imgui.input_text(
-                "##fs_input",
-                parent._saveas_fs,
-                flags=imgui.InputTextFlags_.chars_decimal,
-            )
-            imgui.same_line()
-            imgui.text_disabled(f"(auto: {auto_fs})" if auto_fs else "(not detected)")
+            # Use get_param for standardized metadata access
+            from mbo_utilities.metadata import get_param
 
-            # Pixel Resolution X
-            auto_dx = ""
-            pixel_res = current_meta.get("pixel_resolution")
-            if pixel_res and isinstance(pixel_res, (list, tuple)) and len(pixel_res) >= 1:
-                auto_dx = pixel_res[0]
-            elif current_meta.get("dx"):
-                auto_dx = current_meta.get("dx")
-            imgui.text("Pixel Size X (µm)")
-            imgui.same_line()
-            imgui.text_disabled("(?)")
-            if imgui.is_item_hovered():
-                imgui.begin_tooltip()
-                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-                imgui.text_unformatted(
-                    f"X pixel size in micrometers.\n"
-                    f"Auto-detected: {auto_dx if auto_dx else 'Not found'}\n"
-                    f"Aliases: dx, umPerPixX, PhysicalSizeX, pixel_resolution[0]"
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.end_tooltip()
-            imgui.set_next_item_width(hello_imgui.em_size(12))
-            _, parent._saveas_dx = imgui.input_text(
-                "##dx_input",
-                parent._saveas_dx,
-                flags=imgui.InputTextFlags_.chars_decimal,
-            )
-            imgui.same_line()
-            imgui.text_disabled(f"(auto: {auto_dx})" if auto_dx else "(not detected)")
+            # Helper to display a metadata field with edit capability
+            def _metadata_row(label, canonical, unit, aliases, dtype=float):
+                """Display metadata row: label | value or 'not found' | input | Add button"""
+                value = get_param(current_meta, canonical, default=None)
 
-            # Pixel Resolution Y
-            auto_dy = ""
-            if pixel_res and isinstance(pixel_res, (list, tuple)) and len(pixel_res) >= 2:
-                auto_dy = pixel_res[1]
-            elif current_meta.get("dy"):
-                auto_dy = current_meta.get("dy")
-            imgui.text("Pixel Size Y (µm)")
-            imgui.same_line()
-            imgui.text_disabled("(?)")
-            if imgui.is_item_hovered():
-                imgui.begin_tooltip()
-                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-                imgui.text_unformatted(
-                    f"Y pixel size in micrometers.\n"
-                    f"Auto-detected: {auto_dy if auto_dy else 'Not found'}\n"
-                    f"Aliases: dy, umPerPixY, PhysicalSizeY, pixel_resolution[1]"
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.end_tooltip()
-            imgui.set_next_item_width(hello_imgui.em_size(12))
-            _, parent._saveas_dy = imgui.input_text(
-                "##dy_input",
-                parent._saveas_dy,
-                flags=imgui.InputTextFlags_.chars_decimal,
-            )
-            imgui.same_line()
-            imgui.text_disabled(f"(auto: {auto_dy})" if auto_dy else "(not detected)")
+                # Row layout
+                imgui.text(f"{label}")
+                imgui.same_line(hello_imgui.em_size(10))
 
-            # Z Step
-            auto_dz = current_meta.get("dz") or current_meta.get("z_step") or ""
-            imgui.text("Z Step (µm)")
-            imgui.same_line()
-            imgui.text_disabled("(?)")
-            if imgui.is_item_hovered():
-                imgui.begin_tooltip()
-                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-                imgui.text_unformatted(
-                    f"Distance between z-planes in micrometers.\n"
-                    f"Auto-detected: {auto_dz if auto_dz else 'Not found'}\n"
-                    f"Aliases: dz, z_step, umPerPixZ, PhysicalSizeZ, spacing"
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.end_tooltip()
-            imgui.set_next_item_width(hello_imgui.em_size(12))
-            _, parent._saveas_dz = imgui.input_text(
-                "##dz_input",
-                parent._saveas_dz,
-                flags=imgui.InputTextFlags_.chars_decimal,
-            )
-            imgui.same_line()
-            imgui.text_disabled(f"(auto: {auto_dz})" if auto_dz else "(not detected)")
+                # Show current value or "not found"
+                if value is not None:
+                    imgui.text_colored(imgui.ImVec4(0.6, 0.9, 0.6, 1.0), f"{value} {unit}")
+                else:
+                    imgui.text_disabled("not found")
+
+                # Tooltip with aliases
+                imgui.same_line()
+                imgui.text_disabled("(?)")
+                if imgui.is_item_hovered():
+                    imgui.begin_tooltip()
+                    imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+                    imgui.text_unformatted(f"Aliases: {aliases}")
+                    imgui.pop_text_wrap_pos()
+                    imgui.end_tooltip()
+
+                # Input field for adding/editing
+                imgui.same_line(hello_imgui.em_size(22))
+                input_key = f"_meta_input_{canonical}"
+                if not hasattr(parent, input_key):
+                    setattr(parent, input_key, "")
+
+                imgui.set_next_item_width(hello_imgui.em_size(8))
+                flags = imgui.InputTextFlags_.chars_decimal if dtype in (float, int) else 0
+                _, new_val = imgui.input_text(f"##{canonical}_input", getattr(parent, input_key), flags=flags)
+                setattr(parent, input_key, new_val)
+
+                # Add button
+                imgui.same_line()
+                if imgui.small_button(f"Set##{canonical}"):
+                    input_val = getattr(parent, input_key).strip()
+                    if input_val:
+                        try:
+                            parsed = dtype(input_val)
+                            # Add to custom metadata for saving
+                            parent._saveas_custom_metadata[canonical] = parsed
+                            # Try to update source metadata if supported
+                            if current_data is not None and hasattr(current_data, 'metadata'):
+                                if isinstance(current_data.metadata, dict):
+                                    current_data.metadata[canonical] = parsed
+                                    # Show saved indicator
+                                    if not hasattr(parent, '_meta_saved_time'):
+                                        parent._meta_saved_time = {}
+                                    import time
+                                    parent._meta_saved_time[canonical] = time.time()
+                            setattr(parent, input_key, "")
+                        except (ValueError, TypeError):
+                            pass
+
+                # Show "saved!" indicator briefly
+                if hasattr(parent, '_meta_saved_time') and canonical in parent._meta_saved_time:
+                    import time
+                    elapsed = time.time() - parent._meta_saved_time[canonical]
+                    if elapsed < 2.0:
+                        imgui.same_line()
+                        imgui.text_colored(imgui.ImVec4(0.3, 1.0, 0.3, 1.0), "set!")
+
+            # Standard metadata fields
+            _metadata_row("Frame Rate", "fs", "Hz", "fs, frame_rate, fps", float)
+            _metadata_row("Pixel Size X", "dx", "µm", "dx, Dx, umPerPixX, PhysicalSizeX", float)
+            _metadata_row("Pixel Size Y", "dy", "µm", "dy, Dy, umPerPixY, PhysicalSizeY", float)
+            _metadata_row("Z Step", "dz", "µm", "dz, Dz, z_step, umPerPixZ", float)
+            _metadata_row("Num Planes", "nplanes", "", "nplanes, num_planes, numPlanes", int)
+            _metadata_row("Num Frames", "nframes", "", "nframes, num_frames, T", int)
 
             imgui.spacing()
             imgui.separator()
@@ -874,31 +848,9 @@ def draw_saveas_popup(parent):
                     except (IndexError, AttributeError):
                         pass
 
-                    # Build metadata overrides dict
+                    # Build metadata overrides dict from custom metadata
+                    # (all standard fields are added via the Set buttons in the Metadata section)
                     metadata_overrides = dict(parent._saveas_custom_metadata)
-                    # Add resolution overrides if provided (non-empty strings)
-                    if parent._saveas_fs.strip():
-                        try:
-                            fs_val = float(parent._saveas_fs)
-                            metadata_overrides["fs"] = fs_val
-                            metadata_overrides["frame_rate"] = fs_val
-                        except ValueError:
-                            pass
-                    if parent._saveas_dx.strip():
-                        try:
-                            metadata_overrides["dx"] = float(parent._saveas_dx)
-                        except ValueError:
-                            pass
-                    if parent._saveas_dy.strip():
-                        try:
-                            metadata_overrides["dy"] = float(parent._saveas_dy)
-                        except ValueError:
-                            pass
-                    if parent._saveas_dz.strip():
-                        try:
-                            metadata_overrides["dz"] = float(parent._saveas_dz)
-                        except ValueError:
-                            pass
 
                     # Determine output_suffix: only use custom suffix for multi-ROI stitched data
                     output_suffix = None
@@ -1162,16 +1114,10 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_rois = False
         self._saveas_selected_roi_mode = "All"
 
-        # Metadata override state for save dialog
-        self._saveas_metadata_expanded = False
+        # Metadata state for save dialog
         self._saveas_custom_metadata = {}  # user-added key-value pairs
         self._saveas_custom_key = ""  # temp input for new key
         self._saveas_custom_value = ""  # temp input for new value
-        # Resolution overrides (empty string = use auto-detected value)
-        self._saveas_fs = ""  # frame rate override
-        self._saveas_dx = ""  # x pixel resolution override
-        self._saveas_dy = ""  # y pixel resolution override
-        self._saveas_dz = ""  # z step override
 
         # Output suffix for filename customization (default: "_stitched" for multi-ROI)
         self._saveas_output_suffix = "_stitched"

@@ -22,30 +22,14 @@ mbo download https://github.com/user/repo/blob/main/data.npy -o ./data/
 
 ## Scan-Phase Analysis
 
-Analyze bidirectional scanning phase offset characteristics:
+Analyze bidirectional scanning phase offset. See [scanphase](scanphase) for details.
 
 ```bash
 mbo scanphase                          # open file dialog
 mbo scanphase /path/to/data.tiff       # analyze specific file
 mbo scanphase ./folder/ -n 5           # use first 5 tiffs from folder
-mbo scanphase data.tiff -o ./results/  # custom output directory
 mbo scanphase data.tiff --show         # show plots interactively
 ```
-
-### Options
-
-- `-o, --output PATH` - output directory (default: `<input>_scanphase_analysis/`)
-- `-n, --num-tifs N` - if input is a folder, only use first N tiff files
-- `--fft-method [1d|2d]` - FFT method: '1d' (fast) or '2d' (more accurate)
-- `--format [png|pdf|svg|tiff]` - output image format
-- `--show` - display plots interactively
-
-### Output
-
-- `temporal.png` - per-frame offset time series and histogram
-- `window_convergence.png` - offset vs window size (key diagnostic for determining optimal window)
-- `spatial.png` - spatial variation across FOV
-- `scanphase_results.npz` - all numerical data
 
 ## File Conversion
 

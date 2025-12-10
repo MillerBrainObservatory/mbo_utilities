@@ -256,13 +256,14 @@ def create_page2(c, width, height):
         (".h5, .hdf5", "HDF5 datasets"),
         (".bin", "Suite2p binary + ops.npy"),
         (".npy", "NumPy arrays"),
+        (".nwb", "Neurodata Without Borders"),
         ("In-memory", "NumPy/Dask arrays"),
     ]
 
     for ext, desc in inputs:
         draw_code(c, ext, 0.6 * inch, y_input, size=10, color=ACCENT_CYAN)
         draw_text(c, desc, 1.7 * inch, y_input, size=9, color=LIGHT_GRAY)
-        y_input -= 0.2 * inch
+        y_input -= 0.19 * inch
 
     # Output formats - right
     draw_section_header(c, "Output", 4.2 * inch, y, size=14)
@@ -280,23 +281,29 @@ def create_page2(c, width, height):
     for ext, desc in outputs:
         draw_code(c, ext, 4.3 * inch, y_output, size=10, color=ACCENT_CYAN)
         draw_text(c, desc, 5.0 * inch, y_output, size=9, color=LIGHT_GRAY)
-        y_output -= 0.2 * inch
+        y_output -= 0.19 * inch
 
     # Lazy array types
-    y = min(y_input, y_output) - 0.25 * inch
+    y = min(y_input, y_output) - 0.2 * inch
     draw_section_header(c, "Lazy Array Types (returned by imread)", 0.5 * inch, y, size=12)
-    y -= 0.22 * inch
+    y -= 0.2 * inch
 
     arrays = [
-        "MboRawArray - Raw ScanImage multi-ROI data with metadata",
-        "TiffArray - Memory-mapped TIFF access",
-        "ZarrArray - Chunked cloud-ready arrays",
-        "Suite2pArray - Suite2p binary with ops integration",
+        "MboRawArray - Raw ScanImage multi-ROI with phase correction",
+        "TiffArray / MBOTiffArray - Standard/Dask-backed TIFF",
+        "TiffVolumeArray - Directory of planeXX.tiff files",
+        "Suite2pArray / Suite2pVolumeArray - Suite2p output",
+        "ZarrArray - OME-Zarr / Zarr v3 stores",
+        "H5Array - HDF5 datasets",
+        "NumpyArray - .npy files or in-memory arrays",
+        "BinArray - Direct binary file manipulation",
+        "NWBArray - Neurodata Without Borders",
+        "IsoviewArray - Lightsheet multi-view data",
     ]
 
     for arr in arrays:
-        draw_bullet(c, arr, 0.6 * inch, y, size=9, color=LIGHT_GRAY)
-        y -= 0.18 * inch
+        draw_bullet(c, arr, 0.6 * inch, y, size=8, color=LIGHT_GRAY)
+        y -= 0.16 * inch
 
 
 def create_page3(c, width, height):

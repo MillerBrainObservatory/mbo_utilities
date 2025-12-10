@@ -50,12 +50,22 @@ class MetadataParameter:
     description: str = ""
 
 
-# central registry of all standardized metadata parameters
+# This metadata system is designed for calcium imaging datasets with array
+# dimensions in one of these formats:
+#   - TZYX (4D): frames × z-planes × height × width
+#   - TYX  (3D): frames × height × width
+#   - YX   (2D): height × width
+#
+# Note: Channel dimension is not explicitly supported as most calcium imaging
+# pipelines process single-channel data. Multi-channel data should be split
+# before processing.
+
 METADATA_PARAMS: dict[str, MetadataParameter] = {
-    # spatial resolution (µm per pixel)
+    # Spatial resolution (micrometers per pixel)
     "dx": MetadataParameter(
         canonical="dx",
         aliases=(
+            "Dx",
             "umPerPixX",
             "PhysicalSizeX",
             "pixelResolutionX",
@@ -70,6 +80,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
     "dy": MetadataParameter(
         canonical="dy",
         aliases=(
+            "Dy",
             "umPerPixY",
             "PhysicalSizeY",
             "pixelResolutionY",
@@ -84,6 +95,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
     "dz": MetadataParameter(
         canonical="dz",
         aliases=(
+            "Dz",
             "umPerPixZ",
             "PhysicalSizeZ",
             "z_step",
@@ -96,7 +108,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         default=1.0,
         description="Voxel size in Z dimension (µm/z-step)",
     ),
-    # temporal
+    # Temporal
     "fs": MetadataParameter(
         canonical="fs",
         aliases=(
@@ -112,10 +124,19 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         default=None,
         description="Frame rate / sampling frequency (Hz)",
     ),
-    # image dims (px)
+    # Image dimensions (pixels)
     "Lx": MetadataParameter(
         canonical="Lx",
-        aliases=("lx", "width", "nx", "size_x", "image_width", "fov_x", "num_px_x"),
+        aliases=(
+            "lx",
+            "LX",
+            "width",
+            "nx",
+            "size_x",
+            "image_width",
+            "fov_x",
+            "num_px_x",
+        ),
         dtype=int,
         unit="pixels",
         default=None,
@@ -123,28 +144,59 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
     ),
     "Ly": MetadataParameter(
         canonical="Ly",
-        aliases=("ly", "height", "ny", "size_y", "image_height", "fov_y", "num_px_y"),
+        aliases=(
+            "ly",
+            "LY",
+            "height",
+            "ny",
+            "size_y",
+            "image_height",
+            "fov_y",
+            "num_px_y",
+        ),
         dtype=int,
         unit="pixels",
         default=None,
         description="Image height in pixels",
     ),
-    # frame/plane counts
+    # Frame/plane/channel counts
     "nframes": MetadataParameter(
         canonical="nframes",
         aliases=("num_frames", "n_frames", "frames", "T", "nt"),
         dtype=int,
         default=None,
-        description="Number of frames in the dataset",
+        description="Number of frames (time points) in the dataset",
     ),
     "nplanes": MetadataParameter(
         canonical="nplanes",
-        aliases=("num_planes", "n_planes", "planes", "Z", "nz", "num_z"),
+        aliases=(
+            "num_planes",
+            "n_planes",
+            "planes",
+            "Z",
+            "nz",
+            "num_z",
+            "numPlanes",
+        ),
         dtype=int,
         default=1,
         description="Number of z-planes",
     ),
-    # dtype
+    "nchannels": MetadataParameter(
+        canonical="nchannels",
+        aliases=(
+            "num_channels",
+            "n_channels",
+            "channels",
+            "C",
+            "nc",
+            "numChannels",
+        ),
+        dtype=int,
+        default=1,
+        description="Number of channels (typically 1 for calcium imaging)",
+    ),
+    # Data type
     "dtype": MetadataParameter(
         canonical="dtype",
         aliases=("data_type", "pixel_type", "datatype"),
@@ -152,13 +204,13 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         default="int16",
         description="Data type of pixel values",
     ),
-    # shape (tuple - special handling)
+    # Shape (tuple - special handling)
     "shape": MetadataParameter(
         canonical="shape",
         aliases=("array_shape", "data_shape", "size"),
         dtype=tuple,
         default=None,
-        description="Array shape as tuple",
+        description="Array shape as tuple (T, Z, Y, X) or (T, Y, X) or (Y, X)",
     ),
 }
 

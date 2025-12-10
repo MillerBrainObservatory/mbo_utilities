@@ -18,20 +18,30 @@ Understanding what `imread()` returns and when to use each array type.
 
 ## Overview
 
-`mbo_utilities.imread()` is a smart file reader that automatically detects the file type and returns the appropriate lazy array class. This guide explains what to expect when reading different file formats.
+`mbo_utilities.imread()` is a smart file reader that automatically detects the file type and returns the appropriate lazy array class. All array types provide:
+
+- **Lazy loading**: Data is read on-demand, not loaded entirely into memory
+- **NumPy-like indexing**: Standard slicing syntax (`arr[0]`, `arr[10:20, :, 100:200]`)
+- **`_imwrite()` support**: All arrays can be written to any output format via `imwrite()`
+- **Metadata**: Accessible via `.metadata` property
 
 ## Quick Reference
 
-| Input | Returns | Use Case |
-|-------|---------|----------|
-| `.tif` (raw ScanImage) | `MboRawArray` | Multi-ROI volumetric data with phase correction |
-| `.tif` (processed) | `TiffArray` or `MBOTiffArray` | Standard TIFF files |
-| `.bin` (direct path) | `BinArray` | Direct binary file manipulation |
-| Directory with `ops.npy` | `Suite2pArray` | Suite2p workflow integration |
-| `.h5` / `.hdf5` | `H5Array` | HDF5 datasets |
-| `.zarr` | `ZarrArray` | Zarr v3 stores |
-| `.npy` | `NumpyArray` | NumPy memory-mapped files |
-| `np.ndarray` (in-memory) | `NumpyArray` | Wrap numpy arrays for full imwrite support |
+| Input | Returns | Shape | Use Case |
+|-------|---------|-------|----------|
+| `.tif` (raw ScanImage) | `MboRawArray` | (T, Z, Y, X) | Multi-ROI volumetric data with phase correction |
+| `.tif` (processed, single file) | `TiffArray` | (T, 1, Y, X) | Standard TIFF files, lazy page access |
+| `.tif` (processed, multiple files) | `MBOTiffArray` | (T, Z, Y, X) | Dask-backed multi-file TIFF |
+| Directory with `planeXX.tiff` files | `TiffVolumeArray` | (T, Z, Y, X) | Multi-plane TIFF volume |
+| `.bin` (direct path) | `BinArray` | (T, Y, X) | Direct binary file manipulation |
+| Directory with `ops.npy` | `Suite2pArray` | (T, Y, X) | Suite2p workflow integration |
+| Directory with `planeXX/` subdirs | `Suite2pVolumeArray` | (T, Z, Y, X) | Multi-plane Suite2p output |
+| `.h5` / `.hdf5` | `H5Array` | varies | HDF5 datasets |
+| `.zarr` | `ZarrArray` | (T, Z, Y, X) | Zarr v3 / OME-Zarr stores |
+| `.npy` | `NumpyArray` | varies | NumPy memory-mapped files |
+| `.nwb` | `NWBArray` | varies | Neurodata Without Borders files |
+| `np.ndarray` (in-memory) | `NumpyArray` | varies | Wrap numpy arrays for imwrite support |
+| Isoview lightsheet directory | `IsoviewArray` | (T, Z, V, Y, X) | Multi-view lightsheet data |
 
 ## Array Type Details
 
@@ -46,24 +56,124 @@ import mbo_utilities as mbo
 scan = mbo.imread("/path/to/raw/*.tif")
 # Returns: MboRawArray
 
-print(type(scan))  # <class 'MboRawArray'>
-print(scan.shape)  # (T, Z, Y, X)
+print(type(scan))     # <class 'MboRawArray'>
+print(scan.shape)     # (T, Z, Y, X) - e.g., (10000, 14, 456, 896)
 print(scan.num_rois)  # Number of ROIs
+print(scan.num_planes)  # Alias for num_channels (Z planes)
 
-# Configuration options
-scan.roi = None      # Stitch all ROIs (default)
-scan.roi = 0         # Split into separate ROIs
-scan.roi = 1         # Use only ROI 1
-scan.fix_phase = True  # Enable scan-phase correction
-scan.use_fft = True    # Use FFT-based phase correction
+# ROI handling
+scan.roi = None      # Stitch all ROIs horizontally (default)
+scan.roi = 0         # Split into separate ROIs (returns tuple)
+scan.roi = 1         # Use only ROI 1 (1-indexed)
+scan.roi = [1, 2]    # Select specific ROIs
+
+# Phase correction settings
+scan.fix_phase = True           # Enable bidirectional scan-phase correction
+scan.use_fft = True             # Use FFT-based phase correction
+scan.phasecorr_method = "mean"  # "mean", "median", "max"
+scan.border = 3                 # Border pixels to exclude
+scan.upsample = 5               # Subpixel upsampling factor
+scan.max_offset = 4             # Maximum phase offset to search
 ```
 
 **Key Features:**
 
-- Automatic ROI stitching/splitting
-- Bidirectional scan-phase correction
-- Lazy loading (doesn't load entire dataset into memory)
+- Automatic ROI stitching/splitting via `roi` property
+- Bidirectional scan-phase correction (configurable methods)
 - Multi-plane volumetric data support
+- ROI position extraction from ScanImage metadata
+- Stores all ScanImage-metadata in array.metadata["si"]
+
+---
+
+### TiffArray
+
+**Returned when:** Reading processed TIFF file(s) without ScanImage metadata
+
+```python
+# Single or multiple standard TIFF files
+arr = mbo.imread("/path/to/processed.tif")
+arr = mbo.imread(["/path/file1.tif", "/path/file2.tif"])
+# Returns: TiffArray
+
+print(type(arr))   # <class 'TiffArray'>
+print(arr.shape)   # (T, 1, Y, X) - always 4D with Z=1
+print(arr.dtype)   # Data type from TIFF
+
+# Lazy frame reading
+frame = arr[0]        # Read first frame
+subset = arr[10:20]   # Read frames 10-19 (only those pages are loaded)
+
+# Dtype conversion
+arr32 = arr.astype(np.float32)
+```
+
+**Key Features:**
+
+- Uses `TiffFile` handles for lazy page access
+- Auto-detects frame count from JSON metadata, IFD estimation, or page counting
+- Multi-file support (concatenated along time axis)
+- Thread-safe page reading
+- Always outputs (T, 1, Y, X) format
+
+---
+
+### MBOTiffArray
+
+**Returned when:** Reading TIFFs with MBO-specific metadata (uses Dask backend)
+
+```python
+# MBO-processed TIFFs with metadata
+arr = mbo.imread("/path/to/processed/*.tif")
+# Returns: MBOTiffArray if MBO metadata detected
+
+print(type(arr))   # <class 'MBOTiffArray'>
+print(arr.shape)   # (T, Z, Y, X) - Dask infers shape
+print(arr.dask)    # Access underlying dask.Array
+
+# Lazy operations via Dask
+mean_proj = arr[:100].mean(axis=0).compute()
+```
+
+**Key Features:**
+
+- Dask-backed for truly lazy, chunked access
+- Uses `tifffile.imread(aszarr=True)` for memory-mapped access
+- Automatic dimension handling (2D → TZYX, 3D → TZYX, 4D passthrough)
+- Preserves file tags from filenames
+
+---
+
+### TiffVolumeArray
+
+**Returned when:** Directory contains files matching `planeXX.tiff` pattern
+
+```python
+# Directory with plane TIFF files
+arr = mbo.imread("/path/to/tiff_output/")
+# Detects plane01.tiff, plane02.tiff, etc.
+# Returns: TiffVolumeArray
+
+print(type(arr))      # <class 'TiffVolumeArray'>
+print(arr.shape)      # (T, Z, Y, X) - e.g., (10000, 14, 512, 512)
+print(arr.num_planes) # 14
+print(len(arr.planes)) # 14 TiffArray objects
+
+# Access specific plane
+plane7_data = arr[:, 6]  # All frames from plane 7 (0-indexed)
+
+# Close file handles when done
+arr.close()
+```
+
+**Key Features:**
+
+- Stacks individual plane TIFFs into a 4D volume
+- Each plane is loaded lazily via `TiffArray`
+- Auto-sorts by plane number from filename
+- Validates consistent spatial shapes across planes
+
+---
 
 ### BinArray
 
@@ -77,10 +187,18 @@ arr = mbo.imread("path/to/data_raw.bin")
 print(type(arr))   # <class 'BinArray'>
 print(arr.shape)   # (nframes, Ly, Lx)
 print(arr.nframes) # Number of frames
+print(arr.Ly, arr.Lx)  # Spatial dimensions
 
 # Access data like numpy array
 frame = arr[0]      # First frame
 subset = arr[0:100] # First 100 frames
+
+# Write access (if opened for writing)
+arr[0] = new_frame
+
+# Context manager support
+with BinArray("data.bin", shape=(100, 512, 512)) as arr:
+    arr[:] = data
 
 # Close when done
 arr.close()
@@ -88,11 +206,11 @@ arr.close()
 
 **Key Features:**
 
-- Direct binary file access without full Suite2p context
-- Automatically infers shape from adjacent `ops.npy` if present
-- Can provide shape manually: `imread("file.bin", shape=(1000, 512, 512))`
-- Read/write access to the binary file
-- Useful for workflows that manipulate individual binaries (e.g., `data_raw.bin` vs `data.bin`)
+- Direct binary file access via `np.memmap`
+- Auto-infers shape from adjacent `ops.npy` if present
+- Can provide shape manually: `BinArray("file.bin", shape=(1000, 512, 512))`
+- Read/write access (supports `__setitem__`)
+- Useful for creating new binary files from scratch
 
 **When to use:**
 
@@ -100,107 +218,165 @@ arr.close()
 - Creating new binary files from scratch
 - When you want to work with the file directly, not through Suite2p's abstraction
 
+---
+
 ### Suite2pArray
 
-**Returned when:** Reading a directory containing `ops.npy`
+**Returned when:** Reading a directory containing `ops.npy`, or `ops.npy` directly
 
 ```python
 # Reading a Suite2p directory
 arr = mbo.imread("/path/to/suite2p/plane0")
-# Returns: Suite2pArray (reads ops.npy automatically)
+arr = mbo.imread("/path/to/suite2p/plane0/ops.npy")
+# Returns: Suite2pArray
 
 print(type(arr))   # <class 'Suite2pArray'>
-print(arr.shape)   # (nframes, Ly, Lx)
+print(arr.shape)   # (nframes, Ly, Lx) - 3D
+print(arr.metadata)  # Full ops.npy contents
 
-# Suite2pArray handles both data_raw.bin and data.bin
-print(arr.raw_file)  # Path to data_raw.bin
-print(arr.reg_file)  # Path to data.bin
-print(arr.active_file)  # Currently active file
+# File paths
+print(arr.raw_file)    # Path to data_raw.bin (unregistered)
+print(arr.reg_file)    # Path to data.bin (registered)
+print(arr.active_file) # Currently active file
 
 # Switch between raw and registered
 arr.switch_channel(use_raw=True)   # Use data_raw.bin
-arr.switch_channel(use_raw=False)  # Use data.bin
+arr.switch_channel(use_raw=False)  # Use data.bin (default)
+
+# Visualization with both channels
+iw = arr.imshow()  # Shows raw and registered side-by-side if both exist
 ```
 
 **Key Features:**
 
 - Full Suite2p context (metadata from `ops.npy`)
-- Access to both raw and registered data
+- Access to both raw (`data_raw.bin`) and registered (`data.bin`) data
+- Memory-mapped via `np.memmap` for lazy loading
+- File size validation against ops metadata
 - Integrates with Suite2p's processing pipeline
-- Preserves all Suite2p metadata
 
-**When to use:**
+---
 
-- Working with Suite2p output directories
-- Need access to both raw and registered data
-- Want full Suite2p metadata and context
+### Suite2pVolumeArray
 
-### TiffArray & MBOTiffArray
-
-**Returned when:** Reading processed TIFF files (not raw ScanImage)
+**Returned when:** Directory contains multiple `planeXX/` subdirectories with `ops.npy`
 
 ```python
-# Standard TIFF files
-arr = mbo.imread("/path/to/processed.tif")
-# Returns: TiffArray or MBOTiffArray (depending on metadata)
+# Multi-plane Suite2p output
+arr = mbo.imread("/path/to/suite2p_output/")
+# Detects plane01_stitched/, plane02_stitched/, etc.
+# Returns: Suite2pVolumeArray
 
-print(type(arr))   # <class 'TiffArray'> or <class 'MBOTiffArray'>
+print(type(arr))      # <class 'Suite2pVolumeArray'>
+print(arr.shape)      # (T, Z, Y, X) - e.g., (10000, 14, 512, 512)
+print(arr.num_planes) # 14
+
+# Access specific plane
+plane7_data = arr[:, 6]  # All frames from plane 7 (0-indexed)
+
+# Switch all planes between raw and registered
+arr.switch_channel(use_raw=True)
+
+# Close all memory-mapped files
+arr.close()
 ```
 
-**Difference:**
+**Key Features:**
 
-- `MBOTiffArray`: Has MBO-specific metadata, uses Dask for lazy loading
-- `TiffArray`: Standard TIFF, basic lazy loading
+- Stacks individual `Suite2pArray` objects into 4D volume
+- Auto-sorts by plane number from directory name
+- `switch_channel()` applies to all planes
+- Validates consistent shapes across planes
+
+---
 
 ### H5Array
 
-**Returned when:** Reading HDF5 files
+**Returned when:** Reading HDF5 files (`.h5`, `.hdf5`)
 
 ```python
 # HDF5 dataset
 arr = mbo.imread("/path/to/data.h5")
 # Returns: H5Array
 
+print(type(arr))        # <class 'H5Array'>
+print(arr.shape)        # Dataset shape
+print(arr.dataset_name) # Auto-detected: 'mov', 'data', or first available
+
 # Optionally specify dataset name
 arr = mbo.imread("/path/to/data.h5", dataset="imaging_data")
+
+# Access data
+frame = arr[0]
+subset = arr[10:20, :, 100:200]
+
+# File-level metadata
+print(arr.metadata)  # HDF5 file attributes
+
+# Close file handle
+arr.close()
 ```
+
+**Key Features:**
+
+- Auto-detects common dataset names: `'mov'`, `'data'`, `'scan_corrections'`
+- Lazy loading via `h5py.Dataset`
+- Supports ellipsis indexing (`arr[..., 100:200]`)
+- File-level attributes exposed via `.metadata`
+
+---
 
 ### ZarrArray
 
-**Returned when:** Reading Zarr stores
+**Returned when:** Reading Zarr stores (`.zarr` directories)
 
 ```python
-# Zarr directory or collection
+# Zarr store (standard or OME-Zarr)
 arr = mbo.imread("/path/to/data.zarr")
 # Returns: ZarrArray
 
-# Can read nested zarr stores (one per plane)
-arr = mbo.imread("/path/with/plane01.zarr", "/path/with/plane02.zarr")
+print(type(arr))   # <class 'ZarrArray'>
+print(arr.shape)   # (T, Z, Y, X) - always 4D
+
+# Read multiple zarr stores as z-planes
+arr = mbo.imread(["/path/plane01.zarr", "/path/plane02.zarr"])
+
+# Access pre-computed statistics (if available in OME metadata)
+print(arr.zstats)  # {'mean': [...], 'std': [...], 'snr': [...]}
+
+# Access metadata (OME-NGFF attributes if present)
+print(arr.metadata)
 ```
+
+**Key Features:**
+
+- Supports both standard Zarr arrays and OME-Zarr groups
+- Auto-detects OME-Zarr structure (looks for `"0"` subarray in groups)
+- Multi-store support (stacked along Z axis)
+- Zarr v3 compatible
+- Exposes OME-NGFF metadata via `.metadata`
+
+---
 
 ### NumpyArray
 
 **Returned when:** Reading `.npy` files OR passing an in-memory numpy array to `imread()`
 
-`NumpyArray` is the most versatile array type - it wraps any numpy array (from disk or memory) and provides full `imwrite()` support with all formats including zarr chunking, compression, and sharding.
+This is the most versatile array type - it wraps any numpy array and provides full `imwrite()` support.
 
 #### From .npy Files (Memory-Mapped)
 
 ```python
-import mbo_utilities as mbo
-
 # Read .npy file - memory-mapped for lazy loading
 arr = mbo.imread("/path/to/data.npy")
 # Returns: NumpyArray
 
 print(type(arr))   # <class 'NumpyArray'>
 print(arr.shape)   # (T, Y, X) or (T, Z, Y, X)
-print(arr.dims)    # 'TYX' or 'TZYX'
+print(arr.dims)    # 'TYX' or 'TZYX' (auto-inferred)
 ```
 
 #### From In-Memory Numpy Arrays
-
-This is the key feature: wrap any numpy array you've created or loaded elsewhere to get full `imwrite()` support.
 
 ```python
 import numpy as np
@@ -232,116 +408,150 @@ arr = mbo.imread(volume)
 
 print(arr.dims)        # 'TZYX'
 print(arr.num_planes)  # 15
-print(arr.shape)       # (100, 15, 512, 512)
 
-# Write specific planes (1-based indexing)
+# Write specific planes
 mbo.imwrite(arr, "output", ext=".zarr", planes=[1, 7, 14])
-
-# Write all planes
-mbo.imwrite(arr, "output", ext=".zarr")  # Creates plane01.zarr, plane02.zarr, ...
-```
-
-#### Properties and Methods
-
-```python
-arr = mbo.imread(my_numpy_array)
-
-# Shape and dtype
-arr.shape      # (T, Y, X) or (T, Z, Y, X)
-arr.dtype      # numpy dtype
-arr.ndim       # Number of dimensions
-
-# Dimension info
-arr.dims       # 'TYX', 'TZYX', 'YX', etc. (can be set)
-arr.num_planes # Number of Z-planes (1 for 3D data)
-
-# Metadata (auto-generated from shape)
-arr.metadata   # {'nframes': T, 'num_frames': T, 'Ly': Y, 'Lx': X, ...}
-
-# Source info
-arr.filenames  # [Path] for .npy files, [] for in-memory
-
-# Indexing (numpy-like)
-frame = arr[0]           # First frame
-subset = arr[10:20]      # Frames 10-19
-crop = arr[:, 100:200, 100:200]  # Spatial crop
-
-# Reduction operations (chunked for large arrays)
-mean_img = arr.mean(axis=0)  # Mean projection
-max_img = arr.max(axis=0)    # Max projection
-std_img = arr.std(axis=0)    # Standard deviation
-
-# Set custom dimension labels
-arr.dims = "TCYX"  # If your data is (Time, Channel, Y, X)
-
-# Add custom metadata
-arr.metadata = {"experiment": "session1", "fs": 30.0}
-```
-
-#### Use Cases
-
-**1. Save processed results to disk:**
-
-```python
-# After some processing...
-result = some_processing_function(raw_data)  # Returns numpy array
-
-# Wrap and save with full format support
-arr = mbo.imread(result)
-mbo.imwrite(arr, "results", ext=".zarr")
-```
-
-**2. Convert numpy array to Suite2p format:**
-
-```python
-data = np.load("my_data.npy")
-arr = mbo.imread(data)
-arr.metadata = {"fs": 30.0}  # Add frame rate
-mbo.imwrite(arr, "suite2p_input", ext=".bin")
-# Creates suite2p_input/plane01/data_raw.bin + ops.npy
-```
-
-**3. Create zarr with chunking from any array:**
-
-```python
-# Large array from any source
-big_array = load_from_some_source()  # numpy array
-
-arr = mbo.imread(big_array)
-mbo.imwrite(arr, "chunked_output", ext=".zarr")
-# Automatically creates sharded zarr with optimal chunking
 ```
 
 **Key Features:**
 
-- Automatic dimension inference (`TYX`, `TZYX`, etc.)
-- Full `imwrite()` support with all formats
-- Chunked reduction operations for large arrays
+- Automatic dimension inference (`TYX`, `TZYX`, `YX`, etc.)
+- Memory-mapped for `.npy` files (lazy loading)
+- Full `imwrite()` support with all output formats
+- Chunked reduction operations (`mean`, `std`, `max`, `min`)
 - Metadata auto-generation from array shape
+
+---
+
+### NWBArray
+
+**Returned when:** Reading NWB (Neurodata Without Borders) files
+
+```python
+# NWB file with TwoPhotonSeries
+arr = mbo.imread("/path/to/experiment.nwb")
+# Returns: NWBArray
+
+print(type(arr))   # <class 'NWBArray'>
+print(arr.shape)   # Shape from TwoPhotonSeries data
+
+# Access data
+frame = arr[0]
+```
+
+**Key Features:**
+
+- Reads `TwoPhotonSeries` acquisition data from NWB files
+- Requires `pynwb` package (`pip install pynwb`)
+- Exposes underlying NWB data object
+
+---
+
+### IsoviewArray
+
+**Returned when:** Manually instantiated for isoview lightsheet microscopy data
+
+```python
+from mbo_utilities.arrays import IsoviewArray
+
+# Isoview lightsheet data (multi-timepoint)
+arr = IsoviewArray("/path/to/output")
+# Shape: (T, Z, Views, Y, X) - 5D
+
+print(arr.shape)       # (10, 543, 4, 2048, 2048)
+print(arr.views)       # [(0, 0), (1, 0), (2, 1), (3, 1)] - (camera, channel) pairs
+print(arr.num_views)   # 4
+
+# Access specific view
+frame = arr[0, 100, 0]  # timepoint 0, z=100, view 0 (camera 0, channel 0)
+
+# Get view index for camera/channel
+idx = arr.view_index(camera=1, channel=0)
+
+# Access labels and projections (consolidated structure only)
+labels = arr.get_labels(timepoint=0, camera=0, label_type='segmentation')
+proj = arr.get_projection(timepoint=0, camera=0, proj_type='xy')
+```
+
+**Key Features:**
+
+- Supports two data structures:
+  - **Consolidated**: `data_TM000000_SPM00.zarr/camera_0/0/`
+  - **Separate**: `SPM00_TM000000_CM00_CHN01.zarr`
+- Multi-view (camera/channel combinations)
+- 5D shape: `(T, Z, Views, Y, X)` or 4D `(Z, Views, Y, X)` for single timepoint
+- Access to segmentation labels and projections
+- Lazy loading via Zarr
+
+---
 
 ## Decision Tree: What Will imread() Return?
 
 ```text
-Input
+imread(input)
   │
-  ├─ np.ndarray (in-memory)? → NumpyArray
+  ├─ isinstance(input, np.ndarray)?
+  │   └─ Yes → NumpyArray (in-memory wrapper)
   │
-  ├─ .tif/.tiff file?
-  │   ├─ Has ScanImage metadata? → MboRawArray
-  │   ├─ Has MBO metadata? → MBOTiffArray
-  │   └─ Standard TIFF → TiffArray
+  ├─ Is input a Path or string?
+  │   │
+  │   ├─ .npy file?
+  │   │   └─ NumpyArray (memory-mapped)
+  │   │
+  │   ├─ .nwb file?
+  │   │   └─ NWBArray
+  │   │
+  │   ├─ .h5 / .hdf5 file?
+  │   │   └─ H5Array
+  │   │
+  │   ├─ .zarr directory?
+  │   │   └─ ZarrArray
+  │   │
+  │   ├─ .bin file (direct path)?
+  │   │   └─ BinArray
+  │   │
+  │   ├─ .tif / .tiff file(s)?
+  │   │   ├─ Has ScanImage ROI metadata? → MboRawArray
+  │   │   ├─ Has MBO metadata (multiple files)? → MBOTiffArray
+  │   │   └─ Standard TIFF → TiffArray
+  │   │
+  │   ├─ Directory?
+  │   │   ├─ Contains planeXX.tiff files? → TiffVolumeArray
+  │   │   ├─ Contains planeXX/ subdirs with ops.npy? → Suite2pVolumeArray
+  │   │   ├─ Contains ops.npy? → Suite2pArray
+  │   │   └─ Contains raw ScanImage TIFFs? → MboRawArray
+  │   │
+  │   └─ ops.npy file directly?
+  │       └─ Suite2pArray
   │
-  ├─ .bin file?
-  │   ├─ Explicit file path (e.g., "data_raw.bin")? → BinArray
-  │   └─ Directory with ops.npy? → Suite2pArray
-  │
-  ├─ Directory with ops.npy? → Suite2pArray
-  │
-  ├─ .h5/.hdf5 file? → H5Array
-  │
-  ├─ .zarr directory? → ZarrArray
-  │
-  └─ .npy file? → NumpyArray
+  └─ List of paths?
+      ├─ All .tif files → TiffArray or MBOTiffArray
+      └─ All .zarr stores → ZarrArray (stacked along Z)
 ```
 
-- API Reference: `mbo_utilities.imread()`, `mbo_utilities.imwrite()`
+## Common Properties Across All Array Types
+
+All lazy array types provide these standard properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `.shape` | `tuple[int, ...]` | Array dimensions |
+| `.dtype` | `np.dtype` | Data type |
+| `.ndim` | `int` | Number of dimensions |
+| `.metadata` | `dict` | Array/file metadata |
+| `.filenames` | `list[Path]` | Source file paths |
+| `._imwrite()` | method | Write to any output format |
+
+Most array types also provide:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `.num_planes` | `int` | Number of Z-planes |
+| `.num_rois` | `int` | Number of ROIs (MboRawArray) |
+| `.close()` | method | Release file handles |
+
+## API Reference
+
+- `mbo_utilities.imread()` - Smart file reader
+- `mbo_utilities.imwrite()` - Universal file writer
+- `mbo_utilities.arrays` - Direct access to array classes

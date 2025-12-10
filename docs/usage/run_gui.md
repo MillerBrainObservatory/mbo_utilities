@@ -12,8 +12,8 @@ kernelspec:
 ---
 # `run_gui`
 
-```{note}
-For a comprehensive guide to using the GUI, see the [GUI User Guide (PDF)](../_static/mbo_gui_user_guide.pdf).
+```{seealso}
+For a full walkthrough of all GUI features, see the [GUI User Guide](gui_guide.md).
 ```
 
 {func}`mbo_utilities.run_gui` is a convenience function for viewing common data formats used in processing MBO datasets, usable from the terminal, jupyter-lab or a callable from a python script.

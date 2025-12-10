@@ -4,7 +4,7 @@ TIFF array readers.
 This module provides array readers for TIFF files:
 - TiffArray: Generic TIFF reader using TiffFile handles
 - TiffVolumeArray: Reader for directories with plane TIFF files (4D volumes)
-- MBOTiffArray: Dask-backed reader for MBO processed TIFFs
+- MBOTiffArray: Lazy TIFF reader for MBO processed TIFFs (no dask)
 - MboRawArray: Raw ScanImage TIFF reader with phase correction
 """
 
@@ -14,18 +14,15 @@ import copy
 import json
 import re
 import threading
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Sequence
 
 import numpy as np
 import tifffile
-from dask import array as da
 from tifffile import TiffFile
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import (
-    CHUNKS_4D,
     _imwrite_base,
     iter_rois,
     ReductionMixin,
@@ -91,20 +88,18 @@ def find_tiff_plane_files(directory: Path) -> list[Path]:
     return sorted(plane_files, key=sort_key)
 
 
-@dataclass
-class MBOTiffArray:
+class MBOTiffArray(ReductionMixin):
     """
-    Dask-backed TIFF array reader for MBO processed TIFFs.
+    Lazy TIFF array reader for MBO processed TIFFs.
 
-    Uses tifffile's aszarr() for truly lazy, memory-mapped access.
+    Uses TiffFile handles for lazy, memory-efficient access without dask.
+    Reads frames on-demand using metadata to determine array structure.
     Output is always in TZYX format.
 
     Parameters
     ----------
     filenames : list[Path]
         List of TIFF file paths.
-    _chunks : tuple or dict, optional
-        Chunk specification for dask array.
     roi : int, optional
         ROI index (not used for processed TIFFs).
 
@@ -114,28 +109,82 @@ class MBOTiffArray:
         Array shape in TZYX format.
     dtype : np.dtype
         Data type.
-    dask : da.Array
-        Underlying dask array.
     """
 
-    filenames: list[Path]
-    _chunks: tuple[int, ...] | dict | None = None
-    roi: int | None = None
-    _metadata: dict | None = field(default=None, init=False)
-    _dask_array: da.Array | None = field(default=None, init=False, repr=False)
+    def __init__(self, filenames: list[Path], roi: int | None = None):
+        from mbo_utilities.metadata import query_tiff_pages
 
-    def __post_init__(self):
-        if not self.filenames:
+        if not filenames:
             raise ValueError("No filenames provided.")
 
-        # allow string paths
-        self.filenames = [Path(f) for f in self.filenames]
+        # Allow string paths
+        self.filenames = [Path(f) for f in filenames]
+        self.roi = roi
 
-        # collect metadata from first TIFF
+        # Open TiffFile handles (no data read yet)
+        self.tiff_files = [TiffFile(f) for f in self.filenames]
+        self._tiff_lock = threading.Lock()
+
+        # Extract info from first file's first page
+        tf = self.tiff_files[0]
+        page0 = tf.pages.first
+        self._page_shape = page0.shape  # (Y, X) for 2D page
+        self._dtype = page0.dtype
+
+        # Try to get frame count from metadata without seeking
+        self._frames_per_file = []
+        self._num_frames = 0
+
+        for i, (tfile, fpath) in enumerate(zip(self.tiff_files, self.filenames)):
+            nframes = None
+
+            # Method 1: ImageDescription JSON (tifffile shaped writes)
+            if i == 0:
+                desc = page0.description
+            else:
+                desc = tfile.pages.first.description
+
+            if desc:
+                try:
+                    meta = json.loads(desc)
+                    if "shape" in meta and isinstance(meta["shape"], list):
+                        # First dimension is frames for 3D+ arrays
+                        if len(meta["shape"]) >= 3:
+                            nframes = meta["shape"][0]
+                except (json.JSONDecodeError, TypeError, KeyError):
+                    pass
+
+            # Method 2: IFD offset estimation (fast for uniform pages)
+            if nframes is None:
+                try:
+                    est = query_tiff_pages(fpath)
+                    if est > 1:
+                        nframes = est
+                except Exception:
+                    pass
+
+            # Method 3: Fallback to len(pages) - triggers seek but guaranteed
+            if nframes is None:
+                logger.debug(f"Using len(pages) fallback for {fpath}")
+                nframes = len(tfile.pages)
+
+            self._frames_per_file.append(nframes)
+            self._num_frames += nframes
+
+        # Collect metadata from first TIFF
         self._metadata = get_metadata(self.filenames)
-        self.num_rois = self.metadata.get("num_rois", 1)
-
+        self._metadata.update({
+            "shape": self.shape,
+            "dtype": str(self._dtype),
+            "nframes": self._num_frames,
+            "num_frames": self._num_frames,
+            "frames_per_file": self._frames_per_file,
+            "file_paths": [str(p) for p in self.filenames],
+            "num_files": len(self.filenames),
+        })
+        self.num_rois = self._metadata.get("num_rois", 1)
         self.tags = [derive_tag_from_filename(f) for f in self.filenames]
+        self._target_dtype = None
 
     @property
     def metadata(self) -> dict:
@@ -146,104 +195,142 @@ class MBOTiffArray:
         self._metadata = metadata
 
     @property
-    def chunks(self):
-        return self._chunks or CHUNKS_4D
-
-    def _get_file_shape_dtype(self):
-        """Get shape/dtype from first file only, cache it."""
-        if not hasattr(self, "_cached_shape"):
-            with tifffile.TiffFile(self.filenames[0]) as tf:
-                self._cached_shape = tf.series[0].shape
-                self._cached_dtype = tf.series[0].dtype
-        return self._cached_shape, self._cached_dtype
+    def shape(self) -> tuple[int, ...]:
+        # Return TZYX format: (frames, 1, Y, X)
+        return self._num_frames, 1, self._page_shape[0], self._page_shape[1]
 
     @property
-    def dask(self) -> da.Array:
-        if self._dask_array is not None:
-            return self._dask_array
-
-        # Get metadata from first file only
-        shape, dtype = self._get_file_shape_dtype()
-
-        # Use aszarr for truly lazy, memory-mapped access
-        lazy_arrays = []
-        for fname in self.filenames:
-            arr = tifffile.imread(fname, aszarr=True)
-            lazy_arrays.append(da.from_zarr(arr))
-
-        if len(lazy_arrays) == 1:
-            darr = lazy_arrays[0]
-            # TZYX format: (time, z, y, x)
-            if darr.ndim == 2:
-                # Single 2D image -> add T and Z dimensions
-                darr = darr[None, None, :, :]  # (1, 1, y, x)
-            elif darr.ndim == 3:
-                # 3D stack (t, y, x) -> add Z dimension
-                darr = darr[:, None, :, :]  # (t, 1, y, x)
-            # else: already 4D (t, z, y, x)
-        else:
-            # Concatenate along time axis - use native zarr chunks for fast access
-            darr = da.concatenate(lazy_arrays, axis=0)
-            if darr.ndim == 3:
-                # After concat: (t, y, x) with shape (189879, 456, 448)
-                # Insert Z dimension at axis 1 to get TZYX
-                darr = darr[:, None, :, :]  # Shape: (189879, 1, 456, 448) = TZYX
-            # else: 4D from files, already TZYX
-            # No rechunking - native zarr chunks from tifffile are optimal
-
-        self._dask_array = darr
-        return darr
+    def dtype(self):
+        return self._target_dtype if self._target_dtype is not None else self._dtype
 
     @property
-    def shape(self):
-        if self._dask_array is not None:
-            return tuple(self._dask_array.shape)
-        # Infer shape without building full dask array
-        file_shape, _ = self._get_file_shape_dtype()
-        if len(self.filenames) == 1:
-            if len(file_shape) == 2:
-                # Single 2D image: (1, 1, y, x) = TZYX
-                return (1, 1, *file_shape)
-            elif len(file_shape) == 3:
-                # Single 3D stack (t, y, x): add Z -> (t, 1, y, x) = TZYX
-                return (file_shape[0], 1, file_shape[1], file_shape[2])
-            return file_shape
-        else:
-            # Multiple files: each file shape (t, y, x), concat on T
-            total_t = sum(1 for _ in self.filenames) * file_shape[0]
-            if len(file_shape) == 3:
-                # Files are (t, y, x), concat to (total_t, y, x), add Z
-                return (total_t, 1, file_shape[1], file_shape[2])
-            return (total_t, *file_shape[1:])
+    def ndim(self) -> int:
+        return 4
 
-    @property
-    def ndim(self):
-        return self.dask.ndim
+    def __len__(self) -> int:
+        return self._num_frames
 
     def __getitem__(self, key):
-        key = tuple(
-            slice(k.start, k.stop) if isinstance(k, range) else k
-            for k in (key if isinstance(key, tuple) else (key,))
-        )
-        return self.dask[key]
+        """Read frames lazily using tf.asarray(key=frame_indices)."""
+        if not isinstance(key, tuple):
+            key = (key,)
 
-    def __getattr__(self, attr):
-        # Prevent recursion by never delegating internal attributes
-        if attr.startswith("_") or attr in ("dask", "filenames", "metadata"):
-            raise AttributeError(
-                f"'{type(self).__name__}' object has no attribute '{attr}'"
-            )
-        # Use object.__getattribute__ to avoid recursion
-        try:
-            dask_arr = object.__getattribute__(self, "_dask_array")
-            if dask_arr is None:
-                # Force dask property to initialize
-                dask_arr = object.__getattribute__(self, "dask")
-            return getattr(dask_arr, attr)
-        except AttributeError:
-            raise AttributeError(
-                f"'{type(self).__name__}' object has no attribute '{attr}'"
-            )
+        # Parse the key into frame indices
+        t_key = key[0] if len(key) > 0 else slice(None)
+        z_key = key[1] if len(key) > 1 else slice(None)
+        y_key = key[2] if len(key) > 2 else slice(None)
+        x_key = key[3] if len(key) > 3 else slice(None)
+
+        # Convert range to slice
+        t_key = _convert_range_to_slice(t_key)
+        z_key = _convert_range_to_slice(z_key)
+        y_key = _convert_range_to_slice(y_key)
+        x_key = _convert_range_to_slice(x_key)
+
+        # Convert to list of frame indices
+        frames = listify_index(t_key, self._num_frames)
+        if not frames:
+            return np.empty((0, 1) + self._page_shape, dtype=self.dtype)
+
+        # Read the requested frames
+        out = self._read_frames(frames)
+
+        # Apply spatial slicing if needed
+        if y_key != slice(None) or x_key != slice(None):
+            out = out[:, :, y_key, x_key]
+
+        # Handle z dimension (always 1 for processed TIFFs)
+        z_indices = listify_index(z_key, 1)
+        if z_indices != [0]:
+            out = out[:, z_indices, :, :]
+
+        # Squeeze dimensions for integer indices
+        squeeze_axes = []
+        if isinstance(t_key, int):
+            squeeze_axes.append(0)
+        if isinstance(z_key, int):
+            squeeze_axes.append(1 - len([a for a in squeeze_axes if a < 1]))
+        if squeeze_axes:
+            out = np.squeeze(out, axis=tuple(squeeze_axes))
+
+        # Apply dtype conversion if astype() was called
+        if self._target_dtype is not None:
+            out = out.astype(self._target_dtype)
+
+        return out
+
+    def _read_frames(self, frames: list[int]) -> np.ndarray:
+        """Read specific frame indices across all files."""
+        buf = np.empty(
+            (len(frames), 1, self._page_shape[0], self._page_shape[1]), dtype=self._dtype
+        )
+
+        start = 0
+        frame_to_buf_idx = {f: i for i, f in enumerate(frames)}
+
+        for tf, nframes in zip(self.tiff_files, self._frames_per_file):
+            end = start + nframes
+            # Find which requested frames are in this file
+            file_frames = [f for f in frames if start <= f < end]
+            if not file_frames:
+                start = end
+                continue
+
+            # Convert global frame indices to local file indices
+            local_indices = [f - start for f in file_frames]
+
+            with self._tiff_lock:
+                try:
+                    chunk = tf.asarray(key=local_indices)
+                except Exception as e:
+                    raise IOError(
+                        f"MBOTiffArray: Failed to read frames {local_indices} from {tf.filename}\n"
+                        f"File may be corrupted or incomplete.\n"
+                        f": {type(e).__name__}: {e}"
+                    ) from e
+
+            # Handle single frame case where asarray returns 2D
+            if chunk.ndim == 2:
+                chunk = chunk[np.newaxis, ...]
+
+            # Copy to output buffer
+            for local_idx, global_frame in zip(local_indices, file_frames):
+                buf_idx = frame_to_buf_idx[global_frame]
+                chunk_idx = local_indices.index(local_idx)
+                buf[buf_idx, 0] = chunk[chunk_idx]
+
+            start = end
+
+        return buf
+
+    def astype(self, dtype, copy=True):
+        """Set target dtype for lazy conversion on data access."""
+        self._target_dtype = np.dtype(dtype)
+        return self
+
+    def __array__(self):
+        """Return first 10 frames as numpy array."""
+        n = min(10, self._num_frames)
+        return self[:n]
+
+    def close(self):
+        """Close all TIFF file handles."""
+        for tf in self.tiff_files:
+            tf.close()
+
+    def imshow(self, **kwargs):
+        import fastplotlib as fpl
+
+        histogram_widget = kwargs.get("histogram_widget", True)
+        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
+        window_funcs = kwargs.get("window_funcs", None)
+        return fpl.ImageWidget(
+            data=self,
+            histogram_widget=histogram_widget,
+            figure_kwargs=figure_kwargs,
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
+            window_funcs=window_funcs,
+        )
 
     def _imwrite(
         self,
@@ -345,6 +432,7 @@ class TiffArray(ReductionMixin):
 
             # Method 3: Fallback to len(pages) - triggers seek but guaranteed
             if nframes is None:
+                logger.warning(f"Could not query TIFF pages for {fpath}")
                 nframes = len(tfile.pages)
 
             self._frames_per_file.append(nframes)

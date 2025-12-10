@@ -563,6 +563,7 @@ def scanphase(input_path, output_dir, num_tifs, fft_method, image_format, show):
       mbo scanphase data.tiff --show         # show plots interactively
     """
     from pathlib import Path
+    from mbo_utilities import get_files
     from mbo_utilities.analysis.scanphase import run_scanphase_analysis
 
     try:
@@ -571,8 +572,7 @@ def scanphase(input_path, output_dir, num_tifs, fft_method, image_format, show):
         if input_path is not None:
             input_path_obj = Path(input_path)
             if input_path_obj.is_dir() and num_tifs is not None:
-                # get sorted list of tiff files
-                tiffs = sorted(input_path_obj.glob("*.tif")) + sorted(input_path_obj.glob("*.tiff"))
+                tiffs = get_files(input_path, str_contains=".tif", max_depth=1)
                 if not tiffs:
                     click.secho(f"No tiff files found in {input_path}", fg="red")
                     raise click.Abort()

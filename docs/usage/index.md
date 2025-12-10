@@ -10,8 +10,10 @@ numbered: 2
 ---
 
 cli
-save_as
+gui_guide
 run_gui
+scanphase
+save_as
 save_mp4
 
 ````
