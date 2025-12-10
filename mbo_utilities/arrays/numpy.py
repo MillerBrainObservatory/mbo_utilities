@@ -105,11 +105,21 @@ class NumpyArray(ReductionMixin):
             self._metadata = metadata
 
         self.shape = self.data.shape
-        self.dtype = self.data.dtype
+        self._dtype = self.data.dtype
         self.ndim = self.data.ndim
+        self._target_dtype = None
 
         # Set dimension labels based on array shape
         self._dims = self._infer_dims()
+
+    @property
+    def dtype(self):
+        return self._target_dtype if self._target_dtype is not None else self._dtype
+
+    def astype(self, dtype, copy=True):
+        """Set target dtype for lazy conversion on data access."""
+        self._target_dtype = np.dtype(dtype)
+        return self
 
     def _infer_dims(self) -> str:
         """Infer dimension labels from array shape."""
@@ -125,7 +135,10 @@ class NumpyArray(ReductionMixin):
             return "".join([f"D{i}" for i in range(self.ndim)])
 
     def __getitem__(self, item):
-        return self.data[item]
+        out = self.data[item]
+        if self._target_dtype is not None:
+            out = out.astype(self._target_dtype)
+        return out
 
     def __len__(self) -> int:
         """Return length of first dimension (number of frames for 3D/4D)."""
@@ -157,25 +170,25 @@ class NumpyArray(ReductionMixin):
             return self.shape[1]  # TZYX -> Z is index 1
         return 1
 
-    def _compute_frame_minmax(self):
-        """Compute min/max from first frame (frame 0, plane 0)."""
-        if not hasattr(self, '_cached_min'):
+    def _compute_frame_vminmax(self):
+        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_vmin'):
             frame = self[0, 0] if self.ndim == 4 else self[0]
             frame = np.asarray(frame)
-            self._cached_min = float(frame.min())
-            self._cached_max = float(frame.max())
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
 
     @property
-    def min(self) -> float:
-        """Min from first frame (avoids full data read)."""
-        self._compute_frame_minmax()
-        return self._cached_min
+    def vmin(self) -> float:
+        """Min from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmin
 
     @property
-    def max(self) -> float:
-        """Max from first frame (avoids full data read)."""
-        self._compute_frame_minmax()
-        return self._cached_max
+    def vmax(self) -> float:
+        """Max from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmax
 
     @property
     def filenames(self) -> list[Path]:

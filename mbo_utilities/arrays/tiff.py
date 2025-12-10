@@ -203,24 +203,24 @@ class MBOTiffArray(ReductionMixin):
     def dtype(self):
         return self._target_dtype if self._target_dtype is not None else self._dtype
 
-    def _compute_frame_minmax(self):
-        """Compute min/max from first frame (frame 0, plane 0)."""
-        if not hasattr(self, '_cached_min'):
+    def _compute_frame_vminmax(self):
+        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_vmin'):
             frame = np.asarray(self[0, 0])
-            self._cached_min = float(frame.min())
-            self._cached_max = float(frame.max())
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
 
     @property
-    def min(self) -> float:
-        """Min from first frame (avoids full data read)."""
-        self._compute_frame_minmax()
-        return self._cached_min
+    def vmin(self) -> float:
+        """Min from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmin
 
     @property
-    def max(self) -> float:
-        """Max from first frame (avoids full data read)."""
-        self._compute_frame_minmax()
-        return self._cached_max
+    def vmax(self) -> float:
+        """Max from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmax
 
     @property
     def ndim(self) -> int:
@@ -484,24 +484,24 @@ class TiffArray(ReductionMixin):
     def ndim(self) -> int:
         return 4
 
-    def _compute_frame_minmax(self):
-        """Compute min/max from first frame (frame 0, plane 0)."""
-        if not hasattr(self, '_cached_min'):
+    def _compute_frame_vminmax(self):
+        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_vmin'):
             frame = np.asarray(self[0, 0])
-            self._cached_min = float(frame.min())
-            self._cached_max = float(frame.max())
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
 
     @property
-    def min(self) -> float:
-        """Min from first frame (avoids full data read)."""
-        self._compute_frame_minmax()
-        return self._cached_min
+    def vmin(self) -> float:
+        """Min from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmin
 
     @property
-    def max(self) -> float:
-        """Max from first frame (avoids full data read)."""
-        self._compute_frame_minmax()
-        return self._cached_max
+    def vmax(self) -> float:
+        """Max from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmax
 
     @property
     def metadata(self) -> dict:
@@ -718,7 +718,8 @@ class TiffVolumeArray(ReductionMixin):
         self._nframes = min(nframes)
         self._nz = len(self.planes)
         self._ly, self._lx = shapes[0]
-        self.dtype = self.planes[0].dtype
+        self._dtype = self.planes[0]._dtype
+        self._target_dtype = None
 
         # Aggregate metadata from first plane
         self._metadata = dict(self.planes[0].metadata)
@@ -756,24 +757,33 @@ class TiffVolumeArray(ReductionMixin):
     def num_planes(self) -> int:
         return self._nz
 
-    def _compute_frame_minmax(self):
-        """Compute min/max from first frame (frame 0, plane 0)."""
-        if not hasattr(self, '_cached_min'):
+    @property
+    def dtype(self):
+        return self._target_dtype if self._target_dtype is not None else self._dtype
+
+    def astype(self, dtype, copy=True):
+        """Set target dtype for lazy conversion on data access."""
+        self._target_dtype = np.dtype(dtype)
+        return self
+
+    def _compute_frame_vminmax(self):
+        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_vmin'):
             frame = np.asarray(self[0, 0])
-            self._cached_min = float(frame.min())
-            self._cached_max = float(frame.max())
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
 
     @property
-    def min(self) -> float:
-        """Min from first frame (avoids full data read)."""
-        self._compute_frame_minmax()
-        return self._cached_min
+    def vmin(self) -> float:
+        """Min from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmin
 
     @property
-    def max(self) -> float:
-        """Max from first frame (avoids full data read)."""
-        self._compute_frame_minmax()
-        return self._cached_max
+    def vmax(self) -> float:
+        """Max from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmax
 
     def __len__(self) -> int:
         return self._nframes
@@ -803,21 +813,24 @@ class TiffVolumeArray(ReductionMixin):
             if z_key < 0 or z_key >= self._nz:
                 raise IndexError(f"Z index {z_key} out of bounds for {self._nz} planes")
             # TiffArray returns (T, 1, Y, X), squeeze out the singleton Z
-            result = self.planes[z_key][t_key, 0, y_key, x_key]
-            return result
-
-        # Handle z slice or full z
-        if isinstance(z_key, slice):
-            z_indices = range(self._nz)[z_key]
-        elif isinstance(z_key, (list, np.ndarray)):
-            z_indices = z_key
+            out = self.planes[z_key][t_key, 0, y_key, x_key]
         else:
-            z_indices = range(self._nz)
+            # Handle z slice or full z
+            if isinstance(z_key, slice):
+                z_indices = range(self._nz)[z_key]
+            elif isinstance(z_key, (list, np.ndarray)):
+                z_indices = z_key
+            else:
+                z_indices = range(self._nz)
 
-        # Stack data from selected planes
-        # TiffArray returns (T, 1, Y, X), squeeze out the singleton Z before stacking
-        arrs = [self.planes[i][t_key, 0, y_key, x_key] for i in z_indices]
-        return np.stack(arrs, axis=1)
+            # Stack data from selected planes
+            # TiffArray returns (T, 1, Y, X), squeeze out the singleton Z before stacking
+            arrs = [self.planes[i][t_key, 0, y_key, x_key] for i in z_indices]
+            out = np.stack(arrs, axis=1)
+
+        if self._target_dtype is not None:
+            out = out.astype(self._target_dtype)
+        return out
 
     def __array__(self) -> np.ndarray:
         """Materialize full array into memory: (T, Z, Y, X)."""
@@ -1029,29 +1042,30 @@ class MboRawArray(ReductionMixin):
             self._target_dtype if self._target_dtype is not None else self._source_dtype
         )
 
-    def _compute_frame_minmax(self):
-        """Compute min/max from first frame (frame 0, plane 0)."""
-        if not hasattr(self, '_cached_min'):
+    def _compute_frame_vminmax(self):
+        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        if not hasattr(self, '_cached_vmin'):
             frame = np.asarray(self[0, 0])
-            self._cached_min = float(frame.min())
-            self._cached_max = float(frame.max())
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
 
     @property
-    def min(self) -> float:
-        """Min from first frame (avoids full data read)."""
-        self._compute_frame_minmax()
-        return self._cached_min
+    def vmin(self) -> float:
+        """Min from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmin
 
     @property
-    def max(self) -> float:
-        """Max from first frame (avoids full data read)."""
-        self._compute_frame_minmax()
-        return self._cached_max
+    def vmax(self) -> float:
+        """Max from first frame for display (avoids full data read)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmax
 
     @property
     def metadata(self):
         self._metadata.update(
             {
+                "dtype": self.dtype,
                 "fix_phase": self.fix_phase,
                 "phasecorr_method": self.phasecorr_method,
                 "offset": self.offset,
