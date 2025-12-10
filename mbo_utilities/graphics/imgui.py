@@ -858,6 +858,12 @@ def draw_saveas_popup(parent):
                         # Stitching all ROIs - use custom suffix (or default "_stitched")
                         output_suffix = parent._saveas_output_suffix
 
+                    # Determine output_suffix: only use custom suffix for multi-ROI stitched data
+                    output_suffix = None
+                    if rois is None:
+                        # Stitching all ROIs - use custom suffix (or default "_stitched")
+                        output_suffix = parent._saveas_output_suffix
+
                     save_kwargs = {
                         "path": parent.fpath,
                         "outpath": parent._saveas_outdir,
@@ -1118,6 +1124,9 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_custom_metadata = {}  # user-added key-value pairs
         self._saveas_custom_key = ""  # temp input for new key
         self._saveas_custom_value = ""  # temp input for new value
+
+        # Output suffix for filename customization (default: "_stitched" for multi-ROI)
+        self._saveas_output_suffix = "_stitched"
 
         # Output suffix for filename customization (default: "_stitched" for multi-ROI)
         self._saveas_output_suffix = "_stitched"
