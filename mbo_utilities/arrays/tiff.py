@@ -897,9 +897,6 @@ class MboRawArray(ReductionMixin):
         Maximum phase offset to search.
     use_fft : bool, default True
         Use FFT-based 2D phase correction (more accurate).
-    phase_window : int, default 50
-        Number of frames to average for phase estimation. Using a mean of
-        multiple frames improves phase detection accuracy.
 
     Attributes
     ----------
@@ -923,7 +920,6 @@ class MboRawArray(ReductionMixin):
         upsample: int = 5,
         max_offset: int = 4,
         use_fft: bool = True,
-        phase_window: int = 50,
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
@@ -941,12 +937,10 @@ class MboRawArray(ReductionMixin):
         self._fix_phase = fix_phase
         self._use_fft = use_fft
         self._phasecorr_method = phasecorr_method
-        self.border = border
-        self.max_offset = max_offset
-        self.upsample = upsample
-        self._phase_window = phase_window
+        self._border = border
+        self._max_offset = max_offset
+        self._upsample = upsample
         self._offset = 0.0
-        self._cached_offset = None  # Cached offset from phase_window estimation
         self._mean_subtraction = False
         self.pbar = None
         self.show_pbar = False
@@ -1071,7 +1065,6 @@ class MboRawArray(ReductionMixin):
                 "nframes": self.num_frames,
                 "num_frames": self.num_frames,
                 "use_fft": self.use_fft,
-                "phase_window": self.phase_window,
                 "mean_subtraction": self.mean_subtraction,
             }
         )
@@ -1132,6 +1125,33 @@ class MboRawArray(ReductionMixin):
         self._fix_phase = value
 
     @property
+    def border(self):
+        """Border pixels to exclude from phase correlation."""
+        return self._border
+
+    @border.setter
+    def border(self, value: int):
+        self._border = value
+
+    @property
+    def max_offset(self):
+        """Maximum allowed pixel offset for phase correction."""
+        return self._max_offset
+
+    @max_offset.setter
+    def max_offset(self, value: int):
+        self._max_offset = value
+
+    @property
+    def upsample(self):
+        """Upsampling factor for subpixel phase correlation."""
+        return self._upsample
+
+    @upsample.setter
+    def upsample(self, value: int):
+        self._upsample = value
+
+    @property
     def mean_subtraction(self):
         return self._mean_subtraction
 
@@ -1140,18 +1160,6 @@ class MboRawArray(ReductionMixin):
         if not isinstance(value, bool):
             raise ValueError("mean_subtraction must be a boolean value.")
         self._mean_subtraction = value
-
-    @property
-    def phase_window(self):
-        """Number of frames to average for phase estimation."""
-        return self._phase_window
-
-    @phase_window.setter
-    def phase_window(self, value: int):
-        if not isinstance(value, int) or value < 1:
-            raise ValueError("phase_window must be a positive integer.")
-        self._phase_window = value
-        self._cached_offset = None  # Reset cached offset when window changes
 
     @property
     def roi(self):
@@ -1198,61 +1206,11 @@ class MboRawArray(ReductionMixin):
     def xslices(self):
         return [slice(0, roi["width"]) for roi in self._rois]
 
-    def _compute_phase_offset(self):
-        """
-        Compute phase offset using mean of phase_window frames.
-
-        Uses randomly sampled frames across the recording for robust estimation.
-        Result is cached until phase_window or phase correction params change.
-        """
-        if self._cached_offset is not None:
-            return self._cached_offset
-
-        # Sample frames across the recording
-        n_sample = min(self._phase_window, self.num_frames)
-        if n_sample < self.num_frames:
-            # Random sampling for better representation
-            rng = np.random.default_rng(42)  # Fixed seed for reproducibility
-            sample_frames = sorted(rng.choice(self.num_frames, n_sample, replace=False).tolist())
-        else:
-            sample_frames = list(range(self.num_frames))
-
-        # Read sample frames without phase correction
-        old_fix_phase = self._fix_phase
-        self._fix_phase = False
-        try:
-            # Read first channel only for phase estimation
-            sample_data = self._read_pages(sample_frames, [0])
-        finally:
-            self._fix_phase = old_fix_phase
-
-        # Compute mean frame
-        mean_frame = np.mean(sample_data[:, 0], axis=0)
-
-        # Compute offset from mean frame
-        _, offset = bidir_phasecorr(
-            mean_frame[np.newaxis, ...],
-            method=self.phasecorr_method,
-            upsample=self.upsample,
-            max_offset=self.max_offset,
-            border=self.border,
-            use_fft=self.use_fft,
-        )
-
-        self._cached_offset = offset
-        logger.debug(f"Computed phase offset from {n_sample} frames: {offset:.3f} px")
-        return offset
-
     def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **_):
         pages = [f * self.num_channels + z for f in frames for z in chans]
         tiff_width_px = len(listify_index(xslice, self._page_width))
         tiff_height_px = len(listify_index(yslice, self._page_height))
         buf = np.empty((len(pages), tiff_height_px, tiff_width_px), dtype=self.dtype)
-
-        # Get cached phase offset if phase correction is enabled
-        if self.fix_phase:
-            cached_offset = self._compute_phase_offset()
-            self._offset = cached_offset
 
         start = 0
         tiff_iterator = (
@@ -1285,17 +1243,16 @@ class MboRawArray(ReductionMixin):
             chunk = chunk[..., yslice, xslice]
 
             if self.fix_phase:
-                # Apply phase correction using cached offset
-                corrected, _ = bidir_phasecorr(
+                corrected, offset = bidir_phasecorr(
                     chunk,
                     method=self.phasecorr_method,
                     upsample=self.upsample,
                     max_offset=self.max_offset,
                     border=self.border,
                     use_fft=self.use_fft,
-                    offset=cached_offset,
                 )
                 buf[idxs] = corrected
+                self._offset = offset
             else:
                 buf[idxs] = chunk
                 self._offset = 0.0

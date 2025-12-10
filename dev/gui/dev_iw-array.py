@@ -6,10 +6,9 @@ import fastplotlib as fpl
 from mbo_utilities import subsample_array
 
 # Initial data
-data_path = r"D:\cj\2025-11-21\results\grid_search\ana4_dia2_cel0.00_flo0.00_spa0.50"
+data_path = r"D:/raw_scanimage_tiffs"
 data = imread(data_path)
 pdw = run_gui(data)
-x = 5
 # iw = fpl.ImageWidget(
 #     [data],
 #     names=["My Custom Filetype"],
