@@ -46,7 +46,6 @@ _ARRAY_TYPE_KWARGS = {
         "upsample",
         "max_offset",
         "use_fft",
-        "fft_method",
     },
     ZarrArray: {"filenames", "compressor", "rois"},
     MBOTiffArray: {"filenames", "_chunks"},

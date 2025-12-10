@@ -206,12 +206,6 @@ def draw_menu(parent):
                     webbrowser.open(
                         "https://millerbrainobservatory.github.io/mbo_utilities/"
                     )
-                if imgui.menu_item(
-                    "Download User Guide Notebook", "", p_selected=False, enabled=True
-                )[0]:
-                    webbrowser.open(
-                        "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
-                    )
                 imgui.end_menu()
             if imgui.begin_menu("Settings", True):
                 imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")

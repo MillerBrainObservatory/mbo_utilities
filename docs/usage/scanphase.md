@@ -43,11 +43,11 @@ use this to determine how many frames to average for correction.
 
 ### spatial.png
 
-heatmaps show variation across fov. uniform = good. edges different from center is normal. gray = low signal (unreliable).
+heatmaps show variation across fov. edges different from center is normal. gray = low signal (unreliable).
 
 ### zplanes.png
 
-if offset varies with depth, may need per-plane correction. most data shows little variation.
+assess if offset varies with depth, owing to the angle on the resonant scanner
 
 ### parameters.png
 
@@ -55,6 +55,5 @@ shows offset reliability vs signal. low signal = unreliable (high/variable offse
 
 ## Tips
 
-- use `-n 2` or `-n 3` to run quickly on subset
-- `--fft-method 1d` is faster and usually sufficient
+- use `-n 2` or `-n 3` to run quickly on subset of frames
 - multi-ROI data: offsets are averaged across ROIs

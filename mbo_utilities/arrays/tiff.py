@@ -896,9 +896,7 @@ class MboRawArray(ReductionMixin):
     max_offset : int, default 4
         Maximum phase offset to search.
     use_fft : bool, default True
-        Use FFT-based phase correction (more accurate).
-    fft_method : str, default "2d"
-        FFT method ("1d" or "2d").
+        Use FFT-based 2D phase correction (more accurate).
     phase_window : int, default 50
         Number of frames to average for phase estimation. Using a mean of
         multiple frames improves phase detection accuracy.
@@ -925,7 +923,6 @@ class MboRawArray(ReductionMixin):
         upsample: int = 5,
         max_offset: int = 4,
         use_fft: bool = True,
-        fft_method: str = "2d",
         phase_window: int = 50,
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
@@ -943,7 +940,6 @@ class MboRawArray(ReductionMixin):
 
         self._fix_phase = fix_phase
         self._use_fft = use_fft
-        self._fft_method = fft_method
         self._phasecorr_method = phasecorr_method
         self.border = border
         self.max_offset = max_offset
@@ -1075,7 +1071,6 @@ class MboRawArray(ReductionMixin):
                 "nframes": self.num_frames,
                 "num_frames": self.num_frames,
                 "use_fft": self.use_fft,
-                "fft_method": self._fft_method,
                 "phase_window": self.phase_window,
                 "mean_subtraction": self.mean_subtraction,
             }
@@ -1242,7 +1237,6 @@ class MboRawArray(ReductionMixin):
             max_offset=self.max_offset,
             border=self.border,
             use_fft=self.use_fft,
-            fft_method=self._fft_method,
         )
 
         self._cached_offset = offset
@@ -1299,8 +1293,7 @@ class MboRawArray(ReductionMixin):
                     max_offset=self.max_offset,
                     border=self.border,
                     use_fft=self.use_fft,
-                    fft_method=self._fft_method,
-                    offset=cached_offset,  # Use precomputed offset
+                    offset=cached_offset,
                 )
                 buf[idxs] = corrected
             else:

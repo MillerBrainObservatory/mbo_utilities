@@ -524,12 +524,6 @@ def list_formats():
     help="If input is a folder, only use the first N tiff files.",
 )
 @click.option(
-    "--fft-method",
-    type=click.Choice(["1d", "2d"]),
-    default="1d",
-    help="FFT method: '1d' (fast, recommended) or '2d' (more accurate).",
-)
-@click.option(
     "--format",
     "image_format",
     type=click.Choice(["png", "pdf", "svg", "tiff"]),
@@ -541,7 +535,7 @@ def list_formats():
     default=False,
     help="Display plots interactively after analysis.",
 )
-def scanphase(input_path, output_dir, num_tifs, fft_method, image_format, show):
+def scanphase(input_path, output_dir, num_tifs, image_format, show):
     """
     Scan-phase analysis for bidirectional scanning data.
 
@@ -590,7 +584,6 @@ def scanphase(input_path, output_dir, num_tifs, fft_method, image_format, show):
         results = run_scanphase_analysis(
             data_path=actual_input,
             output_dir=output_dir,
-            fft_method=fft_method,
             image_format=image_format,
             show_plots=show,
         )
