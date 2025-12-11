@@ -458,6 +458,26 @@ def listify_index(index, dim_size):
     return index_as_list
 
 
+def index_length(index, dim_size):
+    """
+    compute length of index without creating full list.
+
+    much faster than len(listify_index(...)) for slices.
+    """
+    if np.issubdtype(type(index), np.signedinteger):
+        return 1
+    elif isinstance(index, (list, tuple, np.ndarray)):
+        return len(index)
+    elif isinstance(index, slice):
+        start, stop, step = index.indices(dim_size)
+        if step > 0:
+            return max(0, (stop - start + step - 1) // step)
+        else:
+            return max(0, (start - stop - step - 1) // (-step))
+    else:
+        raise TypeError(f"index {index} is not integer, slice or array")
+
+
 def load_npy(path):
     """
     Load .npy file across Windows, Mac, and Linux.
