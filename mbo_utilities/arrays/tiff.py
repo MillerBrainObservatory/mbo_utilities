@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+        import time
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Sequence
@@ -1263,6 +1264,8 @@ class MboRawArray(ReductionMixin):
             chunk = chunk[..., yslice, xslice]
 
             if self.fix_phase:
+                import time as _t
+                _t0 = _t.perf_counter()
                 corrected, offset = bidir_phasecorr(
                     chunk,
                     method=self.phasecorr_method,
@@ -1273,14 +1276,21 @@ class MboRawArray(ReductionMixin):
                 )
                 buf[idxs] = corrected
                 self._offset = offset
+                _t1 = _t.perf_counter()
+                logger.debug(
+                    f"phase_corr: offset={offset:.2f}, method={self.phasecorr_method}, "
+                    f"fft={self.use_fft}, chunk={chunk.shape}, took {(_t1-_t0)*1000:.1f}ms"
+                )
             else:
                 buf[idxs] = chunk
                 self._offset = 0.0
             start = end
 
+        logger.debug(f"_read_pages: {len(frames)} frames, {len(chans)} chans -> {buf.shape}")
         return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
 
     def __getitem__(self, key):
+        t0 = time.perf_counter()
         if not isinstance(key, tuple):
             key = (key,)
         t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (
@@ -1292,6 +1302,8 @@ class MboRawArray(ReductionMixin):
             return np.empty(0)
 
         out = self.process_rois(frames, chans)
+        t1 = time.perf_counter()
+        self.logger.debug(f"__getitem__ took {(t1-t0)*1000:.1f}ms")
 
         squeeze = []
         if isinstance(t_key, int):
