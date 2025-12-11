@@ -1655,19 +1655,34 @@ class PreviewDataWidget(EdgeWindow):
                     proc.window_sizes = None
                     proc.window_order = None
 
+                # Update slider_dim_names to match new dimensionality
+                if new_ndim == 4:
+                    new_names = ("t", "z")
+                elif new_ndim == 3:
+                    new_names = ("t",)
+                else:
+                    new_names = None
+
+                # Reset ImageWidget's internal indices to avoid axis conflicts
+                # fastplotlib's _indices dict needs to match the new slider_dim_names
+                self.image_widget._slider_dim_names = new_names
+                if new_names:
+                    self.image_widget._indices = {name: 0 for name in new_names}
+                else:
+                    self.image_widget._indices = {}
+
             # iw-array API: use data indexer for replacing data
             # iw.data[0] = new_array handles shape changes automatically
             self.image_widget.data[0] = new_data
 
-            # Reset indices
+            # Reset indices to start of data
             try:
                 names = self.image_widget._slider_dim_names or ()
-                if "t" in names:
-                    self.image_widget.indices["t"] = 0
-                if "z" in names and new_data.ndim >= 4:
-                    self.image_widget.indices["z"] = 0
-            except (IndexError, KeyError):
-                pass  # Indices not available yet
+                for name in names:
+                    if name in self.image_widget._indices:
+                        self.image_widget._indices[name] = 0
+            except (KeyError, AttributeError):
+                pass  # Indices not available
 
             # Update internal state
             self.fpath = path

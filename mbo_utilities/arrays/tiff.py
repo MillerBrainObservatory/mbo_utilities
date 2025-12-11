@@ -268,7 +268,7 @@ class MBOTiffArray(ReductionMixin):
         if isinstance(t_key, int):
             squeeze_axes.append(0)
         if isinstance(z_key, int):
-            squeeze_axes.append(1 - len([a for a in squeeze_axes if a < 1]))
+            squeeze_axes.append(1)  # z is always axis 1 before any squeeze
         if squeeze_axes:
             out = np.squeeze(out, axis=tuple(squeeze_axes))
 
@@ -540,7 +540,7 @@ class TiffArray(ReductionMixin):
         if isinstance(t_key, int):
             squeeze_axes.append(0)
         if isinstance(z_key, int):
-            squeeze_axes.append(1 - len([a for a in squeeze_axes if a < 1]))
+            squeeze_axes.append(1)  # z is always axis 1 before any squeeze
         if squeeze_axes:
             out = np.squeeze(out, axis=tuple(squeeze_axes))
 
