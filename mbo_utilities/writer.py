@@ -300,7 +300,11 @@ def imwrite(
     # Collect input files for processing history
     input_files = getattr(lazy_array, "filenames", None)
     if input_files:
-        input_files = [str(f) for f in input_files]
+        # handle single path or list of paths
+        if isinstance(input_files, (str, Path)):
+            input_files = [str(input_files)]
+        else:
+            input_files = [str(f) for f in input_files]
 
     # Extract scan-phase correction parameters if available (MboRawArray)
     scan_phase_params = {}
