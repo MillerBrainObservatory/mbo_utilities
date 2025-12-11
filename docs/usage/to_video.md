@@ -195,11 +195,11 @@ Quick stability check.
 
 Gamma < 1 brightens midtones (useful for dim calcium signals):
 
-```{figure} ../_images/to_video/frame_gamma_07.png
-:width: 400px
+```{figure} ../_images/to_video/gamma_comparison.png
+:width: 600px
 :align: center
 
-Gamma = 0.7 (brighter midtones)
+Gamma comparison: 1.0 (default), 0.7 (brighter), 1.3 (darker)
 ```
 
 ```{seealso}
