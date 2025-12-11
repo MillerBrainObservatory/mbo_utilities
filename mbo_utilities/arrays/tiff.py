@@ -895,8 +895,8 @@ class MboRawArray(ReductionMixin):
         Upsampling factor for subpixel phase estimation.
     max_offset : int, default 4
         Maximum phase offset to search.
-    use_fft : bool, default True
-        Use FFT-based 2D phase correction (more accurate).
+    use_fft : bool, default False
+        Use FFT-based 2D phase correction (more accurate but slower).
 
     Attributes
     ----------
@@ -919,7 +919,7 @@ class MboRawArray(ReductionMixin):
         border: int | tuple[int, int, int, int] = 3,
         upsample: int = 5,
         max_offset: int = 4,
-        use_fft: bool = True,
+        use_fft: bool = False,
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
@@ -1035,7 +1035,7 @@ class MboRawArray(ReductionMixin):
     def _compute_frame_vminmax(self):
         """Compute vmin/vmax from first frame (frame 0, plane 0)."""
         if not hasattr(self, '_cached_vmin'):
-            frame = np.asarray(self[0, 0])
+            frame = self[0, 0]
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
 
@@ -1275,6 +1275,11 @@ class MboRawArray(ReductionMixin):
                 )
                 buf[idxs] = corrected
                 self._offset = offset
+                _t1 = _t.perf_counter()
+                logger.debug(
+                    f"phase_corr: offset={offset:.2f}, method={self.phasecorr_method}, "
+                    f"fft={self.use_fft}, chunk={chunk.shape}, took {(_t1-_t0)*1000:.1f}ms"
+                )
             else:
                 buf[idxs] = chunk
                 self._offset = 0.0

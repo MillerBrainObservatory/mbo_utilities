@@ -10,6 +10,7 @@ from mbo_utilities.analysis.scanphase import (
 )
 
 __all__ = [
+    # scanphase
     "ScanPhaseAnalyzer",
     "ScanPhaseResults",
     "analyze_scanphase",
