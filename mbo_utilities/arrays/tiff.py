@@ -13,12 +13,12 @@ from __future__ import annotations
 import copy
 import json
 import re
+import time
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Sequence
 
 import numpy as np
-import tifffile
 from tifffile import TiffFile
 
 from mbo_utilities import log
@@ -30,7 +30,7 @@ from mbo_utilities.arrays._base import (
 from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
 from mbo_utilities.metadata import get_metadata
 from mbo_utilities.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
-from mbo_utilities.util import listify_index, subsample_array
+from mbo_utilities.util import listify_index, index_length
 
 if TYPE_CHECKING:
     pass
