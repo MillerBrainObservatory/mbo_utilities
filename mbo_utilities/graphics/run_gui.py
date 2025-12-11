@@ -413,12 +413,19 @@ def _create_image_widget(data_array, widget: bool = True):
     if hasattr(data_array, "rois"):
         arrays = []
         names = []
+        # get name from first filename if available, truncate if too long
+        base_name = None
+        if hasattr(data_array, "filenames") and data_array.filenames:
+            from pathlib import Path
+            base_name = Path(data_array.filenames[0]).stem
+            if len(base_name) > 24:
+                base_name = base_name[:21] + "..."
         for r in iter_rois(data_array):
             arr = copy.copy(data_array)
             arr.fix_phase = False
             arr.roi = r
             arrays.append(arr)
-            names.append(f"ROI {r}" if r else "Full Image")
+            names.append(f"ROI {r}" if r else (base_name or "Full Image"))
 
         iw = fpl.ImageWidget(
             data=arrays,

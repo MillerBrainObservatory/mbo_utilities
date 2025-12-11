@@ -12,6 +12,8 @@ _NAME_COLORS = (
 )
 _VALUE_COLOR = imgui.ImVec4(0.85, 0.85, 0.85, 1.0)
 _TREE_NODE_COLOR = imgui.ImVec4(0.40, 0.80, 0.95, 1.0)  # cyan for tree nodes
+_ALIAS_COLOR = imgui.ImVec4(0.5, 0.5, 0.5, 0.8)  # muted gray for aliases
+_CANONICAL_COLOR = imgui.ImVec4(0.4, 0.9, 0.6, 1.0)  # bright green for canonical
 
 
 def _colored_tree_node(label: str) -> bool:
@@ -61,20 +63,63 @@ def compact_header(label: str, default_open: bool = False) -> bool:
 
     flags = imgui.TreeNodeFlags_.default_open if default_open else 0
     is_open = imgui.collapsing_header(label, flags)
+    if isinstance(is_open, tuple):
+        is_open = is_open[0]
 
     imgui.pop_style_var(2)
     return is_open
 
 
 def draw_metadata_inspector(metadata: dict):
+    """draw metadata with canonical params first, then other fields."""
+    from mbo_utilities.metadata import METADATA_PARAMS
+
     with imgui_ctx.begin_child("Metadata Viewer"):
-        # Use text instead of imgui_md.render to avoid "Markdown was not initialized" warning
-        imgui.text("Metadata Viewer")
-        imgui.separator()
         imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4))
+
         try:
-            for k, v in sorted(metadata.items()):
-                _render_item(k, v)
+            shown_keys = set()
+            value_col = 180
+
+            # section: imaging parameters
+            imgui.text_colored(_TREE_NODE_COLOR, "Imaging")
+            imgui.same_line()
+            imgui.text_colored(_ALIAS_COLOR, "(names are interchangeable aliases)")
+            imgui.separator()
+            for name, param in METADATA_PARAMS.items():
+                value = metadata.get(param.canonical)
+                if value is None:
+                    for alias in param.aliases:
+                        if alias in metadata:
+                            value = metadata[alias]
+                            break
+
+                if value is not None:
+                    shown_keys.add(param.canonical)
+                    shown_keys.update(param.aliases)
+
+                    imgui.text_colored(_CANONICAL_COLOR, param.canonical)
+                    imgui.same_line(value_col)
+                    imgui.text_colored(_VALUE_COLOR, _fmt(value))
+                    if param.unit:
+                        imgui.same_line()
+                        imgui.text_colored(_ALIAS_COLOR, f"({param.unit})")
+
+                    # show aliases below
+                    if param.aliases:
+                        alias_str = ", ".join(param.aliases[:5])
+                        if len(param.aliases) > 5:
+                            alias_str += f", +{len(param.aliases)-5}"
+                        imgui.text_colored(_ALIAS_COLOR, f"    {alias_str}")
+
+            # section: other metadata
+            remaining = {k: v for k, v in metadata.items() if k not in shown_keys}
+            if remaining:
+                imgui.spacing()
+                imgui.text_colored(_TREE_NODE_COLOR, "Other")
+                imgui.separator()
+                for k, v in sorted(remaining.items()):
+                    _render_item(k, v)
         finally:
             imgui.pop_style_var()
 
