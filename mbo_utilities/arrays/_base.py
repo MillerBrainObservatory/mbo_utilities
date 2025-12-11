@@ -288,6 +288,16 @@ def _imwrite_base(
     nframes = arr.shape[0] if "T" in dims else 1
     Ly, Lx = arr.shape[-2], arr.shape[-1]
 
+    # validate num_planes against actual shape (metadata may not match data)
+    if len(arr.shape) == 4:
+        actual_z_size = arr.shape[1]  # TZYX format
+        if num_planes > actual_z_size:
+            logger.debug(f"num_planes ({num_planes}) > actual Z dim ({actual_z_size}), using shape")
+            num_planes = actual_z_size
+    elif len(arr.shape) == 3:
+        # 3D data (TYX) has no Z dimension, treat as single plane
+        num_planes = 1
+
     # Update metadata
     md["Ly"] = Ly
     md["Lx"] = Lx
