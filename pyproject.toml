@@ -120,7 +120,17 @@ torchvision = [
 [tool.ruff]
 line-length = 88
 src = ["mbo_utilities", "pollen"]
-exclude = ["docs", "exclude", "demos", "scripts"]
+extend-exclude = [
+    "*.ipynb",
+    "docs",
+    "demos",
+    "scripts",
+    "dev",
+    "processing",
+    "benchmarks",
+    "gists",
+    "slurm",
+]
 
 [tool.ruff.lint]
 pydocstyle = { convention = "numpy" }
