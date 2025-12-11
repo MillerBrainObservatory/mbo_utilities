@@ -1035,7 +1035,7 @@ class MboRawArray(ReductionMixin):
     def _compute_frame_vminmax(self):
         """Compute vmin/vmax from first frame (frame 0, plane 0)."""
         if not hasattr(self, '_cached_vmin'):
-            frame = np.asarray(self[0, 0])
+            frame = self[0, 0]
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
 
@@ -1294,21 +1294,39 @@ class MboRawArray(ReductionMixin):
         return out
 
     def process_rois(self, frames, chans):
-        """Dispatch ROI processing."""
+        """Dispatch ROI processing.
+
+        For multi-ROI modes, reads full pages once and applies phase correction
+        before slicing by ROI. This ensures consistent offset across all ROIs
+        (since scan phase offset is a property of the scan, not individual ROIs).
+        """
+        # single ROI mode - read only that ROI's data
+        if self.roi is not None and isinstance(self.roi, int) and self.roi != 0:
+            return self._read_pages(
+                frames, chans,
+                yslice=self._rois[self.roi - 1]["slice"],
+                xslice=slice(None),
+            )
+
+        # multi-ROI modes: read full page once, apply phase correction, then slice
+        # this is more efficient (single read) and correct (single offset for entire scan)
+        full_data = self._read_pages(frames, chans, yslice=slice(None), xslice=slice(None))
+
         if self.roi is not None:
             if isinstance(self.roi, list):
+                # return tuple of selected ROIs
                 return tuple(
-                    self.process_single_roi(r - 1, frames, chans) for r in self.roi
+                    full_data[:, :, self._rois[r - 1]["slice"], :]
+                    for r in self.roi
                 )
             elif self.roi == 0:
+                # return tuple of all ROIs split
                 return tuple(
-                    self.process_single_roi(r, frames, chans)
+                    full_data[:, :, self._rois[r]["slice"], :]
                     for r in range(self.num_rois)
                 )
-            elif isinstance(self.roi, int):
-                return self.process_single_roi(self.roi - 1, frames, chans)
 
-        # roi=None: Horizontally concatenate ROIs
+        # roi=None: horizontally concatenate all ROIs
         total_width = sum(roi["width"] for roi in self._rois)
         max_height = max(roi["height"] for roi in self._rois)
         out = np.zeros(
@@ -1316,26 +1334,12 @@ class MboRawArray(ReductionMixin):
         )
 
         for roi_idx in range(self.num_rois):
-            roi_data = self._read_pages(
-                frames,
-                chans,
-                yslice=self._rois[roi_idx]["slice"],
-                xslice=slice(None),
-            )
+            yslice = self._rois[roi_idx]["slice"]
             oys = self.output_yslices[roi_idx]
             oxs = self.output_xslices[roi_idx]
-            out[:, :, oys, oxs] = roi_data
+            out[:, :, oys, oxs] = full_data[:, :, yslice, :]
 
         return out
-
-    def process_single_roi(self, roi_idx, frames, chans):
-        roi = self._rois[roi_idx]
-        return self._read_pages(
-            frames,
-            chans,
-            yslice=roi["slice"],
-            xslice=slice(None),
-        )
 
     @property
     def num_planes(self):
