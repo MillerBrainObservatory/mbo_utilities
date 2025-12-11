@@ -896,12 +896,15 @@ def draw_saveas_popup(parent):
                     reset_progress_state("saveas")
                     parent._saveas_progress = 0.0
                     parent._saveas_done = False
+                    parent._saveas_running = True
+                    parent.logger.info("Starting save operation...")
                     # Also reset register_z progress if enabled
                     if parent._register_z:
                         reset_progress_state("register_z")
                         parent._register_z_progress = 0.0
                         parent._register_z_done = False
-                        parent._register_z_current_msg = ""
+                        parent._register_z_running = True
+                        parent._register_z_current_msg = "Starting..."
                     threading.Thread(
                         target=_save_as_worker, kwargs=save_kwargs, daemon=True
                     ).start()
@@ -1053,6 +1056,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_means = [None] * self.num_graphics
         self._zstats_mean_scalar = [0.0] * self.num_graphics
         self._zstats_done = [False] * self.num_graphics
+        self._zstats_running = [False] * self.num_graphics
         self._zstats_progress = [0.0] * self.num_graphics
         self._zstats_current_z = [0] * self.num_graphics
 
@@ -1074,6 +1078,7 @@ class PreviewDataWidget(EdgeWindow):
         self._register_z = False
         self._register_z_progress = 0.0
         self._register_z_done = False
+        self._register_z_running = False
         self._register_z_current_msg = ""
 
         self._selected_pipelines = None
@@ -1097,6 +1102,7 @@ class PreviewDataWidget(EdgeWindow):
 
         self._saveas_popup_open = False
         self._saveas_done = False
+        self._saveas_running = False
         self._saveas_progress = 0.0
         self._saveas_current_index = 0
         # pre-fill with context-specific saved directory if available
@@ -1137,7 +1143,10 @@ class PreviewDataWidget(EdgeWindow):
         self.set_context_info()
 
         if threading_enabled:
-            self.logger.info("Starting zstats computation in a separate thread.")
+            self.logger.info("Starting zstats computation...")
+            # mark all graphics as running immediately
+            for i in range(self.num_graphics):
+                self._zstats_running[i] = True
             threading.Thread(target=self.compute_zstats, daemon=True).start()
 
     def set_context_info(self):
@@ -1245,12 +1254,16 @@ class PreviewDataWidget(EdgeWindow):
             self._saveas_progress = frac
             self._saveas_current_index = meta
             self._saveas_done = frac >= 1.0
+            if frac >= 1.0:
+                self._saveas_running = False
 
         elif isinstance(meta, str):
             # Suite3D progress message
             self._register_z_progress = frac
             self._register_z_current_msg = meta
             self._register_z_done = frac >= 1.0
+            if frac >= 1.0:
+                self._register_z_running = False
 
     @property
     def s2p_dir(self):
@@ -2280,6 +2293,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_means[roi - 1] = means_stack
         self._zstats_mean_scalar[roi - 1] = means_stack.mean(axis=(1, 2))
         self._zstats_done[roi - 1] = True
+        self._zstats_running[roi - 1] = False
 
     def _compute_zstats_single_array(self, idx, arr):
         # Check for pre-computed z-stats in zarr metadata (instant loading)
@@ -2304,6 +2318,7 @@ class PreviewDataWidget(EdgeWindow):
             self._zstats_means[idx - 1] = means_stack
             self._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
             self._zstats_done[idx - 1] = True
+            self._zstats_running[idx - 1] = False
             self.logger.info(f"Loaded pre-computed z-stats from zarr metadata for array {idx}")
             return
 
@@ -2335,6 +2350,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_means[idx - 1] = means_stack
         self._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
         self._zstats_done[idx - 1] = True
+        self._zstats_running[idx - 1] = False
 
         # Save z-stats to array metadata for persistence (zarr files)
         if hasattr(arr, "zstats"):
@@ -2374,6 +2390,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_means = [None] * n
         self._zstats_mean_scalar = [0.0] * n
         self._zstats_done = [False] * n
+        self._zstats_running = [False] * n
         self._zstats_progress = [0.0] * n
         self._zstats_current_z = [0] * n
 
@@ -2390,6 +2407,10 @@ class PreviewDataWidget(EdgeWindow):
             self.nz = 1
 
         self.logger.info(f"Refreshing z-stats for {n} arrays, nz={self.nz}")
+
+        # Mark all as running before starting
+        for i in range(n):
+            self._zstats_running[i] = True
 
         # Recompute z-stats
         self.compute_zstats()

@@ -25,8 +25,8 @@ dependencies = [
 	"opencv-python-headless",
 	"h5py",
 	"tqdm",
-	# "jupyterlab>=4.2.6,<5",
-	"jupyterlab",
+	"jupyterlab>=4.2.6",
+	# "jupyterlab",
 	"ipykernel",
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
@@ -39,6 +39,8 @@ dependencies = [
 	"mbo-fastplotlib>=0.7.2",
 	"imgui-bundle>=1.92.5",
 	"pyside6>=6.10.1",
+	"napari",
+	"napari-animation",
 ]
 
 [project.scripts]

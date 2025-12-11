@@ -1208,8 +1208,8 @@ class MboRawArray(ReductionMixin):
 
     def _read_pages(self, frames, chans, yslice=slice(None), xslice=slice(None), **_):
         pages = [f * self.num_channels + z for f in frames for z in chans]
-        tiff_width_px = len(listify_index(xslice, self._page_width))
-        tiff_height_px = len(listify_index(yslice, self._page_height))
+        tiff_width_px = index_length(xslice, self._page_width)
+        tiff_height_px = index_length(yslice, self._page_height)
         buf = np.empty((len(pages), tiff_height_px, tiff_width_px), dtype=self.dtype)
 
         start = 0
@@ -1229,20 +1229,42 @@ class MboRawArray(ReductionMixin):
                 continue
 
             frame_idx = [pages[i] - start for i in idxs]
-            with self._tiff_lock:
-                try:
-                    chunk = tf.asarray(key=frame_idx)
-                except Exception as e:
-                    raise IOError(
-                        f"MboRawArray: Failed to read pages {frame_idx} from {tf.filename}\n"
-                        f"File may be corrupted or incomplete.\n"
-                        f": {type(e).__name__}: {e}"
-                    ) from e
+
+            # for small reads, do single locked read
+            # for large reads, chunk to avoid blocking other threads
+            if len(frame_idx) <= 4:
+                with self._tiff_lock:
+                    try:
+                        chunk = tf.asarray(key=frame_idx)
+                    except Exception as e:
+                        raise IOError(
+                            f"MboRawArray: Failed to read pages {frame_idx} from {tf.filename}\n"
+                            f"File may be corrupted or incomplete.\n"
+                            f": {type(e).__name__}: {e}"
+                        ) from e
+            else:
+                # chunked read - release lock between chunks to allow other threads
+                chunks = []
+                for fi in frame_idx:
+                    with self._tiff_lock:
+                        try:
+                            c = tf.asarray(key=fi)
+                        except Exception as e:
+                            raise IOError(
+                                f"MboRawArray: Failed to read page {fi} from {tf.filename}\n"
+                                f"File may be corrupted or incomplete.\n"
+                                f": {type(e).__name__}: {e}"
+                            ) from e
+                    chunks.append(c if c.ndim == 3 else c[np.newaxis, ...])
+                chunk = np.concatenate(chunks, axis=0)
+
             if chunk.ndim == 2:
                 chunk = chunk[np.newaxis, ...]
             chunk = chunk[..., yslice, xslice]
 
             if self.fix_phase:
+                import time as _t
+                _t0 = _t.perf_counter()
                 corrected, offset = bidir_phasecorr(
                     chunk,
                     method=self.phasecorr_method,
@@ -1258,9 +1280,11 @@ class MboRawArray(ReductionMixin):
                 self._offset = 0.0
             start = end
 
+        logger.debug(f"_read_pages: {len(frames)} frames, {len(chans)} chans -> {buf.shape}")
         return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
 
     def __getitem__(self, key):
+        t0 = time.perf_counter()
         if not isinstance(key, tuple):
             key = (key,)
         t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (
@@ -1272,6 +1296,8 @@ class MboRawArray(ReductionMixin):
             return np.empty(0)
 
         out = self.process_rois(frames, chans)
+        t1 = time.perf_counter()
+        self.logger.debug(f"__getitem__ took {(t1-t0)*1000:.1f}ms")
 
         squeeze = []
         if isinstance(t_key, int):
@@ -1294,21 +1320,39 @@ class MboRawArray(ReductionMixin):
         return out
 
     def process_rois(self, frames, chans):
-        """Dispatch ROI processing."""
+        """Dispatch ROI processing.
+
+        For multi-ROI modes, reads full pages once and applies phase correction
+        before slicing by ROI. This ensures consistent offset across all ROIs
+        (since scan phase offset is a property of the scan, not individual ROIs).
+        """
+        # single ROI mode - read only that ROI's data
+        if self.roi is not None and isinstance(self.roi, int) and self.roi != 0:
+            return self._read_pages(
+                frames, chans,
+                yslice=self._rois[self.roi - 1]["slice"],
+                xslice=slice(None),
+            )
+
+        # multi-ROI modes: read full page once, apply phase correction, then slice
+        # this is more efficient (single read) and correct (single offset for entire scan)
+        full_data = self._read_pages(frames, chans, yslice=slice(None), xslice=slice(None))
+
         if self.roi is not None:
             if isinstance(self.roi, list):
+                # return tuple of selected ROIs
                 return tuple(
-                    self.process_single_roi(r - 1, frames, chans) for r in self.roi
+                    full_data[:, :, self._rois[r - 1]["slice"], :]
+                    for r in self.roi
                 )
             elif self.roi == 0:
+                # return tuple of all ROIs split
                 return tuple(
-                    self.process_single_roi(r, frames, chans)
+                    full_data[:, :, self._rois[r]["slice"], :]
                     for r in range(self.num_rois)
                 )
-            elif isinstance(self.roi, int):
-                return self.process_single_roi(self.roi - 1, frames, chans)
 
-        # roi=None: Horizontally concatenate ROIs
+        # roi=None: horizontally concatenate all ROIs
         total_width = sum(roi["width"] for roi in self._rois)
         max_height = max(roi["height"] for roi in self._rois)
         out = np.zeros(
@@ -1316,26 +1360,12 @@ class MboRawArray(ReductionMixin):
         )
 
         for roi_idx in range(self.num_rois):
-            roi_data = self._read_pages(
-                frames,
-                chans,
-                yslice=self._rois[roi_idx]["slice"],
-                xslice=slice(None),
-            )
+            yslice = self._rois[roi_idx]["slice"]
             oys = self.output_yslices[roi_idx]
             oxs = self.output_xslices[roi_idx]
-            out[:, :, oys, oxs] = roi_data
+            out[:, :, oys, oxs] = full_data[:, :, yslice, :]
 
         return out
-
-    def process_single_roi(self, roi_idx, frames, chans):
-        roi = self._rois[roi_idx]
-        return self._read_pages(
-            frames,
-            chans,
-            yslice=roi["slice"],
-            xslice=slice(None),
-        )
 
     @property
     def num_planes(self):
