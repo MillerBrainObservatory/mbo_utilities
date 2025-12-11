@@ -149,8 +149,11 @@ def bidir_phasecorr(
         If provided, skip offset computation and apply this precomputed offset directly.
         Useful for applying a consistent offset computed from a larger frame average.
     """
+    logger.debug(f"bidir_phasecorr: arr={arr.shape}, method={method}, use_fft={use_fft}")
+
     if offset is not None:
         _offsets = float(offset)
+        logger.debug(f"using precomputed offset: {_offsets}")
         out = _apply_offset(arr.copy(), _offsets, use_fft)
         return out, _offsets
 

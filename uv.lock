@@ -1721,7 +1721,7 @@ wheels = [
 
 [[package]]
 name = "mbo-utilities"
-version = "2.3.1"
+version = "2.3.2"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },
@@ -1859,7 +1859,7 @@ requires-dist = [
     { name = "ipykernel", marker = "extra == 'docs'" },
     { name = "ipywidgets", specifier = ">=8.0.0,<9" },
     { name = "jupyter-rfb", specifier = ">=0.5.1" },
-    { name = "jupyterlab" },
+    { name = "jupyterlab", specifier = ">=4.2.6" },
     { name = "jupytext", marker = "extra == 'docs'" },
     { name = "lbm-suite2p-python", marker = "extra == 'suite2p'", specifier = ">=2.3.1" },
     { name = "llvmlite", specifier = ">=0.43.0" },

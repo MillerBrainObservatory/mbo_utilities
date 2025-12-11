@@ -10,12 +10,13 @@ All preferences are stored in ~/mbo/settings/ as JSON files.
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from mbo_utilities import log
+
+logger = log.get("preferences")
 
 # Maximum number of recent files/folders to track
 MAX_RECENT_FILES = 20

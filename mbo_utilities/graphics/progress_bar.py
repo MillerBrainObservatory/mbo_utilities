@@ -368,55 +368,67 @@ def _get_active_progress_items(self) -> list[dict]:
     """
     Collect all active progress operations from the widget state.
 
-    Checks widget attributes directly for active operations, not relying on
-    _progress_state which requires draw_progress() to be called.
+    Checks widget attributes directly for active operations, using _running flags
+    for immediate feedback when tasks start.
 
     Returns list of dicts with: key, text, progress, done
     """
     items = []
 
-    # Check saveas progress - directly from widget attributes
+    # Check saveas progress - use _running flag for immediate feedback
+    saveas_running = getattr(self, '_saveas_running', False)
     saveas_progress = getattr(self, '_saveas_progress', 0.0)
     saveas_current = getattr(self, '_saveas_current_index', 0)
-    # Only show if actively saving (progress between 0 and 1, exclusive)
-    if 0.0 < saveas_progress < 1.0:
+
+    if saveas_running or (0.0 < saveas_progress < 1.0):
+        # show "Starting..." if progress is still 0
+        if saveas_progress == 0.0:
+            text = "Starting save..."
+        else:
+            text = f"Saving z-plane {saveas_current}"
         items.append({
             "key": "saveas",
-            "text": f"Saving z-plane {saveas_current}",
-            "progress": saveas_progress,
+            "text": text,
+            "progress": max(0.01, saveas_progress),  # show small progress when starting
             "done": False,
         })
 
-    # Check zstats progress for each graphic
+    # Check zstats progress for each graphic - use _running flags
     num_graphics = getattr(self, 'num_graphics', 1)
+    zstats_running = getattr(self, '_zstats_running', [])
     zstats_progress = getattr(self, '_zstats_progress', [])
     zstats_current_z = getattr(self, '_zstats_current_z', [])
     nz = getattr(self, 'nz', 1)
 
     for i in range(num_graphics):
+        running = zstats_running[i] if isinstance(zstats_running, list) and i < len(zstats_running) else False
         progress = zstats_progress[i] if isinstance(zstats_progress, list) and i < len(zstats_progress) else 0.0
         current_z = zstats_current_z[i] if isinstance(zstats_current_z, list) and i < len(zstats_current_z) else 0
 
-        # Only show if actively computing (progress between 0 and 1, exclusive)
-        if 0.0 < progress < 1.0:
+        if running or (0.0 < progress < 1.0):
+            # show "Starting..." if progress is still 0
+            if progress == 0.0:
+                text = f"Z-stats {i+1}: starting..."
+            else:
+                text = f"Z-stats: plane {current_z + 1}/{nz}"
             items.append({
                 "key": f"zstats_{i}",
-                "text": f"Z-stats: plane {current_z + 1}/{nz}",
-                "progress": progress,
+                "text": text,
+                "progress": max(0.01, progress),
                 "done": False,
             })
 
-    # Check register_z progress
+    # Check register_z progress - use _running flag
+    register_running = getattr(self, '_register_z_running', False)
     register_progress = getattr(self, '_register_z_progress', 0.0)
     register_msg = getattr(self, '_register_z_current_msg', None)
 
-    # Only show if actively registering (progress between 0 and 1, exclusive)
-    if 0.0 < register_progress < 1.0:
-        msg = register_msg or "Processing"
+    if register_running or (0.0 < register_progress < 1.0):
+        msg = register_msg if register_msg else "Starting..."
         items.append({
             "key": "register_z",
             "text": f"Z-Reg: {msg}",
-            "progress": register_progress,
+            "progress": max(0.01, register_progress),
             "done": False,
         })
 
