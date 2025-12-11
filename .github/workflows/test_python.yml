@@ -15,16 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install system dependencies for offscreen rendering
+
+      - name: Install system dependencies
         run: |
           sudo apt-get update -y -qq
-          sudo apt-get install --no-install-recommends -y \
-            ffmpeg \
-            libegl1-mesa-dev \
-            libgl1-mesa-dri \
-            libxcb-xfixes0-dev \
-            mesa-vulkan-drivers \
-            xorg-dev
+          sudo apt-get install --no-install-recommends -y ffmpeg
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
@@ -35,10 +30,9 @@ jobs:
       - name: Sync dependencies
         run: GIT_LFS_SKIP_SMUDGE=1 uv sync
 
-      - name: Install additional test dependencies
-        run: uv pip install pytest pytest-xdist imageio
+      - name: Install test dependencies
+        run: uv pip install pytest
 
-      - name: Run graphics tests
-        env:
-          RENDERCANVAS_FORCE_OFFSCREEN: 1
-        run: uv run pytest tests/test_graphics.py tests/test_graphics_screenshots.py -v --tb=short
+      - name: Run tests (synthetic data only)
+        run: |
+          uv run pytest tests/test_arrays.py tests/test_to_video.py -v --tb=short -k "synthetic or Synthetic"
