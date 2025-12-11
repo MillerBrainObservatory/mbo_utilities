@@ -14,6 +14,6 @@ gui_guide
 run_gui
 scanphase
 save_as
-save_mp4
+to_video
 
 ````

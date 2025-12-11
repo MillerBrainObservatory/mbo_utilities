@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.3.2"
+version = "2.4.0"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -120,7 +120,17 @@ torchvision = [
 [tool.ruff]
 line-length = 88
 src = ["mbo_utilities", "pollen"]
-exclude = ["docs", "exclude", "demos", "scripts"]
+extend-exclude = [
+    "*.ipynb",
+    "docs",
+    "demos",
+    "scripts",
+    "dev",
+    "processing",
+    "benchmarks",
+    "gists",
+    "slurm",
+]
 
 [tool.ruff.lint]
 pydocstyle = { convention = "numpy" }

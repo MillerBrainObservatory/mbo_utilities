@@ -1721,7 +1721,7 @@ wheels = [
 
 [[package]]
 name = "mbo-utilities"
-version = "2.3.2"
+version = "2.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },
@@ -1739,6 +1739,8 @@ dependencies = [
     { name = "matplotlib" },
     { name = "mbo-fastplotlib" },
     { name = "mkl-fft" },
+    { name = "napari" },
+    { name = "napari-animation" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
     { name = "pandas" },
@@ -1870,6 +1872,8 @@ requires-dist = [
     { name = "mbo-utilities", extras = ["suite2p", "suite3d", "rastermap", "torch"], marker = "extra == 'processing'" },
     { name = "mkl-fft", specifier = ">=2.0.0" },
     { name = "myst-nb", marker = "extra == 'docs'" },
+    { name = "napari" },
+    { name = "napari-animation" },
     { name = "nbsphinx", marker = "extra == 'docs'" },
     { name = "numba", marker = "extra == 'suite2p'", specifier = ">=0.60.0" },
     { name = "numpy", specifier = ">=2.2.5,<3.0" },
@@ -2084,6 +2088,26 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/0f/2c/cff26b706e1982317b19d1bd57bc7809fbbc586da794c968d1b3997e1b85/napari-0.6.5.tar.gz", hash = "sha256:00663221583467f41fa956a672b0b4cd7a761e2642db41fc3c336d1c82339533", size = 3249897, upload-time = "2025-10-02T02:18:48.616Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4a/69/1e8c5c7d487ad109206ce7f028ad02d41171641e1e95b4e45a913ee4d6b1/napari-0.6.5-py3-none-any.whl", hash = "sha256:51bc0b0fb6b6271555ad4167ce510b9453735aaad0ef947cfbc38bdd03d6a7be", size = 3536276, upload-time = "2025-10-02T02:18:46.062Z" },
+]
+
+[[package]]
+name = "napari-animation"
+version = "0.0.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "imageio" },
+    { name = "imageio-ffmpeg" },
+    { name = "napari" },
+    { name = "npe2" },
+    { name = "numpy" },
+    { name = "qtpy" },
+    { name = "scipy" },
+    { name = "superqt" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/54/905b6e2978679f720ac328369fa65470185b728d757a37337f77068415dd/napari_animation-0.0.9.tar.gz", hash = "sha256:ab3b0f7f1a48d5010403889e83ca7ff6d58cdd1ec16d4603418cb55421898410", size = 821266, upload-time = "2025-07-23T16:41:49.981Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/63/d5/be61ec93bcfccc8f25e550c1956f286aee6062285b78e522a1113260bf52/napari_animation-0.0.9-py3-none-any.whl", hash = "sha256:9eccd5a1c8fadb785e77516b5fe33b78e1d74117b067426911f8bcc1d148d739", size = 35966, upload-time = "2025-07-23T16:41:48.018Z" },
 ]
 
 [[package]]

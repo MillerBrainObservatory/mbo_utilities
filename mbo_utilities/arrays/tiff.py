@@ -13,13 +13,12 @@ from __future__ import annotations
 import copy
 import json
 import re
-        import time
+import time
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Sequence
 
 import numpy as np
-import tifffile
 from tifffile import TiffFile
 
 from mbo_utilities import log
@@ -31,7 +30,7 @@ from mbo_utilities.arrays._base import (
 from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
 from mbo_utilities.metadata import get_metadata
 from mbo_utilities.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
-from mbo_utilities.util import listify_index, index_length, subsample_array
+from mbo_utilities.util import listify_index, index_length
 
 if TYPE_CHECKING:
     pass
@@ -269,7 +268,7 @@ class MBOTiffArray(ReductionMixin):
         if isinstance(t_key, int):
             squeeze_axes.append(0)
         if isinstance(z_key, int):
-            squeeze_axes.append(1 - len([a for a in squeeze_axes if a < 1]))
+            squeeze_axes.append(1)  # z is always axis 1 before any squeeze
         if squeeze_axes:
             out = np.squeeze(out, axis=tuple(squeeze_axes))
 
@@ -541,7 +540,7 @@ class TiffArray(ReductionMixin):
         if isinstance(t_key, int):
             squeeze_axes.append(0)
         if isinstance(z_key, int):
-            squeeze_axes.append(1 - len([a for a in squeeze_axes if a < 1]))
+            squeeze_axes.append(1)  # z is always axis 1 before any squeeze
         if squeeze_axes:
             out = np.squeeze(out, axis=tuple(squeeze_axes))
 
