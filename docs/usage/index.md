@@ -1,6 +1,6 @@
 (function_usage)=
 
-# CLI & GUI
+# Usage
 
 Command-line tools and graphical interface documentation.
 
@@ -11,8 +11,5 @@ maxdepth: 2
 
 cli
 gui_guide
-scanphase
-save_as
-to_video
 
 ````
