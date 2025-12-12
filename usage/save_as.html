@@ -1,0 +1,1125 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Save Imaging Data with imwrite &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/togglebutton.css?v=13237357" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=581e03ae" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../_static/togglebutton.js?v=4a39c7ea"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="../_static/tippy/usage/save_as.f1acc661-b894-467b-84ec-025b28743af3.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'usage/save_as';</script>
+    <link rel="icon" href="../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../user_guide.html">User Guide</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="index.html">CLI &amp; GUI</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="cli.html">CLI Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="gui_guide.html">GUI User Guide</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../array_types.html">Array Types</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../venvs.html">Virtual Environments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/usage/save_as.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/usage/save_as.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Fusage/save_as.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/usage/save_as.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Save Imaging Data with imwrite</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#supported-file-formats">Supported File Formats</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#basic-usage-examples">Basic Usage Examples</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#stitch-all-rois-and-save-as-tiff">Stitch All ROIs and Save as TIFF</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-specific-planes-only">Save Specific Planes Only</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#roi-handling-options">ROI Handling Options</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#split-all-rois-into-separate-files">Split All ROIs into Separate Files</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-specific-roi-only">Save Specific ROI Only</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-multiple-specific-rois">Save Multiple Specific ROIs</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#format-conversion">Format Conversion</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#convert-to-suite2p-binary-format">Convert to Suite2p Binary Format</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-to-zarr-format">Save to Zarr Format</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-to-hdf5-format">Save to HDF5 Format</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#advanced-features">Advanced Features</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#enable-phase-correction">Enable Phase Correction</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#z-plane-registration">Z-Plane Registration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#use-pre-computed-registration-shifts">Use Pre-Computed Registration Shifts</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#data-subsetting">Data Subsetting</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#export-subset-of-frames">Export Subset of Frames</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#combine-frame-subsetting-with-roi-selection">Combine Frame Subsetting with ROI Selection</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#file-management">File Management</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#overwrite-existing-files">Overwrite Existing Files</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#custom-metadata">Custom Metadata</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#performance-tuning">Performance Tuning</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adjust-chunk-size">Adjust Chunk Size</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#progress-callback">Progress Callback</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#advanced-use-cases">Advanced Use Cases</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#reorder-planes-during-write">Reorder Planes During Write</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#debug-mode">Debug Mode</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#complete-example-workflows">Complete Example Workflows</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#workflow-1-raw-scanimage-to-stitched-tiff">Workflow 1: Raw ScanImage to Stitched TIFF</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#workflow-2-multi-roi-data-to-suite2p-format">Workflow 2: Multi-ROI Data to Suite2p Format</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#workflow-3-registered-z-stack-with-subset-export">Workflow 3: Registered Z-Stack with Subset Export</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#workflow-4-high-performance-zarr-export">Workflow 4: High-Performance Zarr Export</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#file-naming-convention">File Naming Convention</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#see-also">See Also</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="save-imaging-data-with-imwrite">
+<h1>Save Imaging Data with <code class="docutils literal notranslate"><span class="pre">imwrite</span></code><a class="headerlink" href="#save-imaging-data-with-imwrite" title="Link to this heading">#</a></h1>
+<p><a class="reference internal" href="../api/io.html#mbo_utilities.imwrite" title="mbo_utilities.imwrite"><code class="xref py py-func docutils literal notranslate"><span class="pre">mbo_utilities.imwrite()</span></code></a> is the primary function for writing imaging data to disk in various formats.</p>
+<p>It handles:</p>
+<ul class="simple">
+<li><p>Multi-dimensional imaging data (TZYX)</p></li>
+<li><p>Multiple ROI configurations</p></li>
+<li><p>Z-plane registration</p></li>
+<li><p>Phase correction</p></li>
+<li><p>Format conversion between TIFF, Zarr, HDF5, and Suite2p binary</p></li>
+<li><p>Chunked streaming for large datasets</p></li>
+</ul>
+<section id="supported-file-formats">
+<h2>Supported File Formats<a class="headerlink" href="#supported-file-formats" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">.tiff</span></code>, <code class="docutils literal notranslate"><span class="pre">.tif</span></code> : Multi-page TIFF (BigTIFF for &gt;4GB)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">.bin</span></code> : Suite2p-compatible binary format with ops.npy metadata</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">.zarr</span></code> : Zarr v3 array store</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">.h5</span></code>, <code class="docutils literal notranslate"><span class="pre">.hdf5</span></code> : HDF5 format</p></li>
+</ul>
+<hr class="docutils" />
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">mbo_utilities</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mbo</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="basic-usage-examples">
+<h2>Basic Usage Examples<a class="headerlink" href="#basic-usage-examples" title="Link to this heading">#</a></h2>
+<section id="stitch-all-rois-and-save-as-tiff">
+<h3>Stitch All ROIs and Save as TIFF<a class="headerlink" href="#stitch-all-rois-and-save-as-tiff" title="Link to this heading">#</a></h3>
+<p>The default behavior stitches/fuses all ROIs horizontally into a single field of view:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Load raw data</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/raw/*.tiff&quot;</span><span class="p">)</span>
+
+<span class="c1"># Stitch all ROIs together</span>
+<span class="n">data</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># or just omit setting roi</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/session1&quot;</span><span class="p">)</span>
+<span class="c1"># Creates: plane01_stitched.tiff, plane02_stitched.tiff, ..., plane14_stitched.tiff</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="save-specific-planes-only">
+<h3>Save Specific Planes Only<a class="headerlink" href="#save-specific-planes-only" title="Link to this heading">#</a></h3>
+<p>Export only specific z-planes (1-based indexing):</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Save first, middle, and last planes (for 14-plane volume)</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/session1&quot;</span><span class="p">,</span> <span class="n">planes</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">14</span><span class="p">])</span>
+<span class="c1"># Creates: plane01_stitched.tiff, plane07_stitched.tiff, plane14_stitched.tiff</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Single plane:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Save only plane 7</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/session1&quot;</span><span class="p">,</span> <span class="n">planes</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+<span class="c1"># Creates: plane07_stitched.tiff</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="roi-handling-options">
+<h2>ROI Handling Options<a class="headerlink" href="#roi-handling-options" title="Link to this heading">#</a></h2>
+<section id="split-all-rois-into-separate-files">
+<h3>Split All ROIs into Separate Files<a class="headerlink" href="#split-all-rois-into-separate-files" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">data</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="mi">0</span>  <span class="c1"># Special value: save all ROIs separately</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/split_rois&quot;</span><span class="p">)</span>
+<span class="c1"># Creates: plane01_roi1.tiff, plane01_roi2.tiff, ..., plane14_roi1.tiff, plane14_roi2.tiff</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="save-specific-roi-only">
+<h3>Save Specific ROI Only<a class="headerlink" href="#save-specific-roi-only" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">data</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="mi">1</span>  <span class="c1"># Save only ROI 1</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/roi1_only&quot;</span><span class="p">)</span>
+<span class="c1"># Creates: plane01_roi1.tiff, plane02_roi1.tiff, ..., plane14_roi1.tiff</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="save-multiple-specific-rois">
+<h3>Save Multiple Specific ROIs<a class="headerlink" href="#save-multiple-specific-rois" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">data</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>  <span class="c1"># Save ROIs 1 and 3</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/roi1_and_roi3&quot;</span><span class="p">)</span>
+<span class="c1"># Creates: plane01_roi1.tiff, plane01_roi3.tiff, ..., plane14_roi1.tiff, plane14_roi3.tiff</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="format-conversion">
+<h2>Format Conversion<a class="headerlink" href="#format-conversion" title="Link to this heading">#</a></h2>
+<section id="convert-to-suite2p-binary-format">
+<h3>Convert to Suite2p Binary Format<a class="headerlink" href="#convert-to-suite2p-binary-format" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Save as Suite2p-compatible binary files</span>
+<span class="n">data</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="mi">0</span>  <span class="c1"># Must split ROIs for Suite2p format</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/suite2p&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.bin&quot;</span><span class="p">)</span>
+<span class="c1"># Creates: plane01_roi1/data_raw.bin + ops.npy, plane01_roi2/data_raw.bin + ops.npy, ...</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Each plane/ROI gets its own directory with:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">data_raw.bin</span></code>: Raw imaging data</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ops.npy</span></code>: Metadata file compatible with Suite2p</p></li>
+</ul>
+</section>
+<section id="save-to-zarr-format">
+<h3>Save to Zarr Format<a class="headerlink" href="#save-to-zarr-format" title="Link to this heading">#</a></h3>
+<p>Zarr is efficient for large datasets and supports compression:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Save as Zarr v3 stores</span>
+<span class="n">data</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/zarr_data&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.zarr&quot;</span><span class="p">)</span>
+<span class="c1"># Creates: plane01_roi1.zarr, plane01_roi2.zarr, ...</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="save-to-hdf5-format">
+<h3>Save to HDF5 Format<a class="headerlink" href="#save-to-hdf5-format" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Save as HDF5 files</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/hdf5_data&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.h5&quot;</span><span class="p">)</span>
+<span class="c1"># Creates: plane01_stitched.h5, plane02_stitched.h5, ...</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="advanced-features">
+<h2>Advanced Features<a class="headerlink" href="#advanced-features" title="Link to this heading">#</a></h2>
+<section id="enable-phase-correction">
+<h3>Enable Phase Correction<a class="headerlink" href="#enable-phase-correction" title="Link to this heading">#</a></h3>
+<p>Fix bidirectional scan phase artifacts before saving (for raw ScanImage data):</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">data</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/raw/*.tiff&quot;</span><span class="p">)</span>
+<span class="n">data</span><span class="o">.</span><span class="n">fix_phase</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="n">data</span><span class="o">.</span><span class="n">phasecorr_method</span> <span class="o">=</span> <span class="s2">&quot;mean&quot;</span>  <span class="c1"># Options: &quot;mean&quot;, &quot;median&quot;, &quot;max&quot;</span>
+<span class="n">data</span><span class="o">.</span><span class="n">use_fft</span> <span class="o">=</span> <span class="kc">True</span>  <span class="c1"># Use FFT-based correction (faster)</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/phase_corrected&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p><strong>Phase correction methods:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;mean&quot;</span></code>: Use mean intensity for phase estimation (default)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;median&quot;</span></code>: Use median intensity (more robust to outliers)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;max&quot;</span></code>: Use maximum intensity projection</p></li>
+</ul>
+</section>
+<section id="z-plane-registration">
+<h3>Z-Plane Registration<a class="headerlink" href="#z-plane-registration" title="Link to this heading">#</a></h3>
+<p>Align z-planes spatially using Suite3D registration:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Automatic registration with Suite3D (requires Suite3D + CuPy installed)</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/raw/*.tiff&quot;</span><span class="p">)</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span>
+    <span class="n">data</span><span class="p">,</span>
+    <span class="s2">&quot;output/registered&quot;</span><span class="p">,</span>
+    <span class="n">register_z</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">roi</span><span class="o">=</span><span class="kc">None</span>  <span class="c1"># Usually stitch ROIs for registration</span>
+<span class="p">)</span>
+<span class="c1"># Computes rigid shifts between planes</span>
+<span class="c1"># Validates registration results</span>
+<span class="c1"># Applies shifts during write to align planes</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p><strong>Requirements:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>mbo_utilities<span class="o">[</span>suite3d,cuda12<span class="o">]</span>
+</pre></div>
+</div>
+<p><strong>What happens:</strong></p>
+<ol class="arabic simple">
+<li><p>Creates/reuses Suite3D job directory in output path</p></li>
+<li><p>Computes rigid shifts between z-planes</p></li>
+<li><p>Validates registration (checks <code class="docutils literal notranslate"><span class="pre">summary.npy</span></code> for valid <code class="docutils literal notranslate"><span class="pre">plane_shifts</span></code>)</p></li>
+<li><p>Applies shifts during write</p></li>
+<li><p>Output files are padded to accommodate all shifts</p></li>
+</ol>
+</section>
+<section id="use-pre-computed-registration-shifts">
+<h3>Use Pre-Computed Registration Shifts<a class="headerlink" href="#use-pre-computed-registration-shifts" title="Link to this heading">#</a></h3>
+<p>If you already have registration shifts from a previous run:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Load previously computed shifts</span>
+<span class="n">summary</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;previous_job/summary/summary.npy&quot;</span><span class="p">,</span> <span class="n">allow_pickle</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+<span class="n">shift_vectors</span> <span class="o">=</span> <span class="n">summary</span><span class="p">[</span><span class="s1">&#39;plane_shifts&#39;</span><span class="p">]</span>  <span class="c1"># shape: (n_planes, 2) for [dy, dx]</span>
+
+<span class="c1"># Apply shifts without re-running registration</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/registered&quot;</span><span class="p">,</span> <span class="n">shift_vectors</span><span class="o">=</span><span class="n">shift_vectors</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="data-subsetting">
+<h2>Data Subsetting<a class="headerlink" href="#data-subsetting" title="Link to this heading">#</a></h2>
+<section id="export-subset-of-frames">
+<h3>Export Subset of Frames<a class="headerlink" href="#export-subset-of-frames" title="Link to this heading">#</a></h3>
+<p>Useful for testing, creating demos, or extracting specific time windows:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Export only first 1000 frames</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/test_data&quot;</span><span class="p">,</span> <span class="n">num_frames</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">planes</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">14</span><span class="p">])</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="combine-frame-subsetting-with-roi-selection">
+<h3>Combine Frame Subsetting with ROI Selection<a class="headerlink" href="#combine-frame-subsetting-with-roi-selection" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># First 500 frames, only ROI 1, planes 1 and 7</span>
+<span class="n">data</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="mi">1</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/roi1_subset&quot;</span><span class="p">,</span> <span class="n">num_frames</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span> <span class="n">planes</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">7</span><span class="p">])</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="file-management">
+<h2>File Management<a class="headerlink" href="#file-management" title="Link to this heading">#</a></h2>
+<section id="overwrite-existing-files">
+<h3>Overwrite Existing Files<a class="headerlink" href="#overwrite-existing-files" title="Link to this heading">#</a></h3>
+<p>By default, <code class="docutils literal notranslate"><span class="pre">imwrite</span></code> skips existing files. To overwrite:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/session1&quot;</span><span class="p">,</span> <span class="n">planes</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="custom-metadata">
+<h3>Custom Metadata<a class="headerlink" href="#custom-metadata" title="Link to this heading">#</a></h3>
+<p>Add custom metadata to output file headers/attributes:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">custom_meta</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;experimenter&quot;</span><span class="p">:</span> <span class="s2">&quot;MBO-User&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;date&quot;</span><span class="p">:</span> <span class="s2">&quot;2025-01-15&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;experiment_id&quot;</span><span class="p">:</span> <span class="s2">&quot;EXP-12345&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;notes&quot;</span><span class="p">:</span> <span class="s2">&quot;High laser power session&quot;</span>
+<span class="p">}</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/session1&quot;</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="n">custom_meta</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="performance-tuning">
+<h2>Performance Tuning<a class="headerlink" href="#performance-tuning" title="Link to this heading">#</a></h2>
+<section id="adjust-chunk-size">
+<h3>Adjust Chunk Size<a class="headerlink" href="#adjust-chunk-size" title="Link to this heading">#</a></h3>
+<p>Control memory usage and write performance:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Larger chunks = faster but more memory</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/session1&quot;</span><span class="p">,</span> <span class="n">target_chunk_mb</span><span class="o">=</span><span class="mi">50</span><span class="p">)</span>
+
+<span class="c1"># Smaller chunks = less memory but slower</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/session1&quot;</span><span class="p">,</span> <span class="n">target_chunk_mb</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Default is 20 MB. Adjust based on available RAM.</p>
+</section>
+<section id="progress-callback">
+<h3>Progress Callback<a class="headerlink" href="#progress-callback" title="Link to this heading">#</a></h3>
+<p>Monitor write progress in custom UIs:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">progress_handler</span><span class="p">(</span><span class="n">progress</span><span class="p">,</span> <span class="n">plane</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Plane </span><span class="si">{</span><span class="n">plane</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">progress</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">% complete&quot;</span><span class="p">)</span>
+
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/session1&quot;</span><span class="p">,</span> <span class="n">progress_callback</span><span class="o">=</span><span class="n">progress_handler</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p><strong>Example output:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Plane</span> <span class="mi">1</span><span class="p">:</span> <span class="mf">25.0</span><span class="o">%</span> <span class="n">complete</span>
+<span class="n">Plane</span> <span class="mi">1</span><span class="p">:</span> <span class="mf">50.0</span><span class="o">%</span> <span class="n">complete</span>
+<span class="n">Plane</span> <span class="mi">1</span><span class="p">:</span> <span class="mf">75.0</span><span class="o">%</span> <span class="n">complete</span>
+<span class="n">Plane</span> <span class="mi">1</span><span class="p">:</span> <span class="mf">100.0</span><span class="o">%</span> <span class="n">complete</span>
+<span class="n">Plane</span> <span class="mi">7</span><span class="p">:</span> <span class="mf">25.0</span><span class="o">%</span> <span class="n">complete</span>
+<span class="o">...</span>
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="advanced-use-cases">
+<h2>Advanced Use Cases<a class="headerlink" href="#advanced-use-cases" title="Link to this heading">#</a></h2>
+<section id="reorder-planes-during-write">
+<h3>Reorder Planes During Write<a class="headerlink" href="#reorder-planes-during-write" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Write planes in custom order</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span>
+    <span class="n">data</span><span class="p">,</span>
+    <span class="s2">&quot;output/session1&quot;</span><span class="p">,</span>
+    <span class="n">planes</span><span class="o">=</span><span class="p">[</span><span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span>
+    <span class="n">order</span><span class="o">=</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>  <span class="c1"># Reverses the order</span>
+<span class="p">)</span>
+<span class="c1"># Writes plane 3 first, then plane 2, then plane 1</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="debug-mode">
+<h3>Debug Mode<a class="headerlink" href="#debug-mode" title="Link to this heading">#</a></h3>
+<p>Enable verbose logging for troubleshooting:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/session1&quot;</span><span class="p">,</span> <span class="n">debug</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="complete-example-workflows">
+<h2>Complete Example Workflows<a class="headerlink" href="#complete-example-workflows" title="Link to this heading">#</a></h2>
+<section id="workflow-1-raw-scanimage-to-stitched-tiff">
+<h3>Workflow 1: Raw ScanImage to Stitched TIFF<a class="headerlink" href="#workflow-1-raw-scanimage-to-stitched-tiff" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Load raw data</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/raw/*.tiff&quot;</span><span class="p">)</span>
+
+<span class="c1"># Configure phase correction</span>
+<span class="n">data</span><span class="o">.</span><span class="n">fix_phase</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="n">data</span><span class="o">.</span><span class="n">phasecorr_method</span> <span class="o">=</span> <span class="s2">&quot;mean&quot;</span>
+
+<span class="c1"># Stitch all ROIs and save all planes</span>
+<span class="n">data</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/stitched_corrected&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="workflow-2-multi-roi-data-to-suite2p-format">
+<h3>Workflow 2: Multi-ROI Data to Suite2p Format<a class="headerlink" href="#workflow-2-multi-roi-data-to-suite2p-format" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Load data</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/raw/*.tiff&quot;</span><span class="p">)</span>
+
+<span class="c1"># Save each ROI separately in Suite2p binary format</span>
+<span class="n">data</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s2">&quot;output/suite2p_input&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.bin&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="workflow-3-registered-z-stack-with-subset-export">
+<h3>Workflow 3: Registered Z-Stack with Subset Export<a class="headerlink" href="#workflow-3-registered-z-stack-with-subset-export" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Load data</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/raw/*.tiff&quot;</span><span class="p">)</span>
+
+<span class="c1"># Register z-planes and export first 2000 frames of key planes</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span>
+    <span class="n">data</span><span class="p">,</span>
+    <span class="s2">&quot;output/registered_subset&quot;</span><span class="p">,</span>
+    <span class="n">register_z</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">roi</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">planes</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">14</span><span class="p">],</span>
+    <span class="n">num_frames</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+    <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="workflow-4-high-performance-zarr-export">
+<h3>Workflow 4: High-Performance Zarr Export<a class="headerlink" href="#workflow-4-high-performance-zarr-export" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Load data</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/raw/*.tiff&quot;</span><span class="p">)</span>
+
+<span class="c1"># Save to Zarr with large chunks for performance</span>
+<span class="n">data</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span>
+    <span class="n">data</span><span class="p">,</span>
+    <span class="s2">&quot;output/zarr_optimized&quot;</span><span class="p">,</span>
+    <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.zarr&quot;</span><span class="p">,</span>
+    <span class="n">target_chunk_mb</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>  <span class="c1"># Large chunks for network storage</span>
+    <span class="n">planes</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">15</span><span class="p">))</span>  <span class="c1"># All 14 planes</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="file-naming-convention">
+<h2>File Naming Convention<a class="headerlink" href="#file-naming-convention" title="Link to this heading">#</a></h2>
+<p>Understanding output file names:</p>
+<p><strong>Single ROI or stitched:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">plane01_stitched</span><span class="o">.</span><span class="n">tiff</span>
+<span class="n">plane02_stitched</span><span class="o">.</span><span class="n">tiff</span>
+<span class="o">...</span>
+</pre></div>
+</div>
+<p><strong>Multiple ROIs:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">plane01_roi1</span><span class="o">.</span><span class="n">tiff</span>
+<span class="n">plane01_roi2</span><span class="o">.</span><span class="n">tiff</span>
+<span class="n">plane02_roi1</span><span class="o">.</span><span class="n">tiff</span>
+<span class="n">plane02_roi2</span><span class="o">.</span><span class="n">tiff</span>
+<span class="o">...</span>
+</pre></div>
+</div>
+<p><strong>Binary format:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>plane01_roi1/
+  ├── data_raw.bin
+  └── ops.npy
+plane01_roi2/
+  ├── data_raw.bin
+  └── ops.npy
+...
+</pre></div>
+</div>
+</section>
+<hr class="docutils" />
+<section id="see-also">
+<h2>See Also<a class="headerlink" href="#see-also" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="../api/io.html#mbo_utilities.imread" title="mbo_utilities.imread"><code class="xref py py-func docutils literal notranslate"><span class="pre">mbo_utilities.imread()</span></code></a> - Load imaging data from various formats</p></li>
+<li><p><code class="xref py py-func docutils literal notranslate"><span class="pre">mbo_utilities.run_gui()</span></code> - Visualize data interactively</p></li>
+<li><p><code class="xref py py-func docutils literal notranslate"><span class="pre">mbo_utilities.save_mp4()</span></code> - Export data as video</p></li>
+</ul>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#supported-file-formats">Supported File Formats</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#basic-usage-examples">Basic Usage Examples</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#stitch-all-rois-and-save-as-tiff">Stitch All ROIs and Save as TIFF</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-specific-planes-only">Save Specific Planes Only</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#roi-handling-options">ROI Handling Options</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#split-all-rois-into-separate-files">Split All ROIs into Separate Files</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-specific-roi-only">Save Specific ROI Only</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-multiple-specific-rois">Save Multiple Specific ROIs</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#format-conversion">Format Conversion</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#convert-to-suite2p-binary-format">Convert to Suite2p Binary Format</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-to-zarr-format">Save to Zarr Format</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-to-hdf5-format">Save to HDF5 Format</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#advanced-features">Advanced Features</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#enable-phase-correction">Enable Phase Correction</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#z-plane-registration">Z-Plane Registration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#use-pre-computed-registration-shifts">Use Pre-Computed Registration Shifts</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#data-subsetting">Data Subsetting</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#export-subset-of-frames">Export Subset of Frames</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#combine-frame-subsetting-with-roi-selection">Combine Frame Subsetting with ROI Selection</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#file-management">File Management</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#overwrite-existing-files">Overwrite Existing Files</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#custom-metadata">Custom Metadata</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#performance-tuning">Performance Tuning</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#adjust-chunk-size">Adjust Chunk Size</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#progress-callback">Progress Callback</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#advanced-use-cases">Advanced Use Cases</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#reorder-planes-during-write">Reorder Planes During Write</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#debug-mode">Debug Mode</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#complete-example-workflows">Complete Example Workflows</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#workflow-1-raw-scanimage-to-stitched-tiff">Workflow 1: Raw ScanImage to Stitched TIFF</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#workflow-2-multi-roi-data-to-suite2p-format">Workflow 2: Multi-ROI Data to Suite2p Format</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#workflow-3-registered-z-stack-with-subset-export">Workflow 3: Registered Z-Stack with Subset Export</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#workflow-4-high-performance-zarr-export">Workflow 4: High-Performance Zarr Export</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#file-naming-convention">File Naming Convention</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#see-also">See Also</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
