@@ -70,6 +70,33 @@ def compact_header(label: str, default_open: bool = False) -> bool:
     return is_open
 
 
+def _fmt_multivalue(value, max_items=8):
+    """format a value that may be a list of per-camera values."""
+    if isinstance(value, (list, tuple)):
+        if len(value) <= max_items:
+            # round floats for cleaner display
+            formatted = []
+            for v in value:
+                if isinstance(v, float):
+                    if v == int(v):
+                        formatted.append(str(int(v)))
+                    else:
+                        formatted.append(f"{v:.4g}")
+                else:
+                    formatted.append(str(v))
+            return "[" + ", ".join(formatted) + "]"
+        else:
+            # truncate long lists
+            formatted = []
+            for v in value[:max_items]:
+                if isinstance(v, float):
+                    formatted.append(f"{v:.4g}")
+                else:
+                    formatted.append(str(v))
+            return "[" + ", ".join(formatted) + f", +{len(value)-max_items}...]"
+    return _fmt(value)
+
+
 def draw_metadata_inspector(metadata: dict):
     """draw metadata with canonical params first, then other fields."""
     from mbo_utilities.metadata import METADATA_PARAMS
@@ -100,7 +127,8 @@ def draw_metadata_inspector(metadata: dict):
 
                     imgui.text_colored(_CANONICAL_COLOR, param.canonical)
                     imgui.same_line(value_col)
-                    imgui.text_colored(_VALUE_COLOR, _fmt(value))
+                    # handle multi-value (per-camera) metadata
+                    imgui.text_colored(_VALUE_COLOR, _fmt_multivalue(value))
                     if param.unit:
                         imgui.same_line()
                         imgui.text_colored(_ALIAS_COLOR, f"({param.unit})")
@@ -111,6 +139,23 @@ def draw_metadata_inspector(metadata: dict):
                         if len(param.aliases) > 5:
                             alias_str += f", +{len(param.aliases)-5}"
                         imgui.text_colored(_ALIAS_COLOR, f"    {alias_str}")
+
+            # section: cameras (if present)
+            cameras = metadata.get("cameras")
+            if cameras and isinstance(cameras, dict):
+                imgui.spacing()
+                imgui.text_colored(_TREE_NODE_COLOR, "Cameras")
+                imgui.separator()
+                for cam_idx, cam_meta in sorted(cameras.items()):
+                    if _colored_tree_node(f"camera_{cam_idx}"):
+                        for k, v in sorted(cam_meta.items()):
+                            if k == "multiscales":
+                                continue  # skip verbose ome-ngff metadata
+                            imgui.text_colored(_NAME_COLORS[0], k)
+                            imgui.same_line(value_col)
+                            imgui.text_colored(_VALUE_COLOR, _fmt_multivalue(v))
+                        imgui.tree_pop()
+                shown_keys.add("cameras")
 
             # section: other metadata
             remaining = {k: v for k, v in metadata.items() if k not in shown_keys}

@@ -6,7 +6,7 @@ from imgui_bundle import imgui, immapp, hello_imgui, portable_file_dialogs as pf
 class SimpleSelector:
     def __init__(
         self,
-        mode: Literal["file", "folder", "files"] = "file",
+        mode: Literal["folder", "files"] = "files",
         title: str = "Select",
         filters: Optional[list[str]] = None,
         start_path: Optional[Union[str, Path]] = None,
@@ -23,19 +23,8 @@ class SimpleSelector:
         imgui.text(self.title)
         imgui.spacing()
 
-        if self.mode == "file":
-            if imgui.button("Select File"):
-                result = pfd.open_file(
-                    self.title,
-                    self.start_path,
-                    self.filters
-                )
-                if result and result.result():
-                    self.selected_path = Path(result.result()[0])
-                else:
-                    self.cancelled = True
-
-        elif self.mode == "folder":
+        if self.mode == "folder":
+            # native folder dialogs don't show files - this is an OS limitation
             if imgui.button("Select Folder"):
                 result = pfd.select_folder(self.start_path)
                 if result:
@@ -44,7 +33,7 @@ class SimpleSelector:
                     self.cancelled = True
 
         elif self.mode == "files":
-            if imgui.button("Select Files"):
+            if imgui.button("Select File(s)"):
                 result = pfd.open_file(
                     self.title,
                     self.start_path,
@@ -61,7 +50,7 @@ class SimpleSelector:
         if self.selected_path:
             imgui.text(f"Selected: {self.selected_path}")
         elif self.selected_paths:
-            imgui.text(f"Selected {len(self.selected_paths)} files:")
+            imgui.text(f"Selected {len(self.selected_paths)} file(s):")
             for p in self.selected_paths[:5]:
                 imgui.text(f"  {p.name}")
             if len(self.selected_paths) > 5:
@@ -74,31 +63,14 @@ class SimpleSelector:
                 hello_imgui.get_runner_params().app_shall_exit = True
 
 
-def select_file(
-    title: str = "Select File",
-    filters: Optional[list[str]] = None,
-    start_path: Optional[Union[str, Path]] = None,
-) -> Optional[Path]:
-    selector = SimpleSelector("file", title, filters, start_path)
-
-    params = hello_imgui.RunnerParams()
-    params.app_window_params.window_title = title
-    params.app_window_params.window_geometry.size = (500, 200)
-    params.callbacks.show_gui = selector.draw
-
-    addons = immapp.AddOnsParams()
-    addons.with_markdown = False
-    addons.with_implot = False
-
-    immapp.run(runner_params=params, add_ons_params=addons)
-
-    return selector.selected_path
-
-
 def select_folder(
     title: str = "Select Folder",
     start_path: Optional[Union[str, Path]] = None,
 ) -> Optional[Path]:
+    """Select a folder using native OS dialog.
+    
+    Note: Native folder dialogs don't show files - this is an OS limitation.
+    """
     selector = SimpleSelector("folder", title, None, start_path)
 
     params = hello_imgui.RunnerParams()
@@ -116,10 +88,14 @@ def select_folder(
 
 
 def select_files(
-    title: str = "Select Files",
+    title: str = "Select File(s)",
     filters: Optional[list[str]] = None,
     start_path: Optional[Union[str, Path]] = None,
 ) -> list[Path]:
+    """Select one or more files using native OS dialog.
+    
+    Supports multi-select - user can select single or multiple files.
+    """
     selector = SimpleSelector("files", title, filters, start_path)
 
     params = hello_imgui.RunnerParams()
@@ -137,8 +113,8 @@ def select_files(
 
 
 if __name__ == "__main__":
-    selected = select_file(
-        title="Choose a TIFF file",
+    selected = select_files(
+        title="Choose TIFF file(s)",
         filters=None,
         start_path=Path.home()
     )
@@ -146,4 +122,4 @@ if __name__ == "__main__":
     if selected:
         print(f"You selected: {selected}")
     else:
-        print("No file selected")
+        print("No files selected")
