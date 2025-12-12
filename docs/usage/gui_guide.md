@@ -10,29 +10,7 @@ Interactive data preview and processing tools for calcium imaging data.
 uv pip install mbo_utilities
 mbo                    # opens file dialog
 mbo /path/to/data      # opens specific file
-mbo /path --metadata   # metadata only
-```
-
-## Features
-
-- time and z-plane sliders
-- window functions (mean, max, std, mean-subtracted)
-- multi-ROI statistics
-- contrast controls (vmin/vmax)
-- suite2p processing integration
-- export to .tiff, .zarr, .bin, .h5
-
-## Supported Formats
-
-| Format | Description |
-|--------|-------------|
-| `.tiff` | raw scanimage, bigtiff, ome-tiff |
-| `.zarr` | zarr v3 arrays |
-| `.bin` | suite2p binary format |
-| `.h5` | hdf5 files |
-
-```{note}
-The full **Data Preview widget** is only available for raw ScanImage tiffs.
+mbo /path/to/data --metadata   # metadata only
 ```
 
 ## Data Selection Dialog
@@ -41,15 +19,6 @@ The full **Data Preview widget** is only available for raw ScanImage tiffs.
 
 - **Open File(s)**: select specific tiff files
 - **Select Folder**: load all supported files in folder
-
-### Load Options
-
-| Option | Description |
-|--------|-------------|
-| Separate ScanImage mROIs | split multi-ROI acquisitions |
-| Enable Threading | parallel loading |
-| Enable Data Preview Widget | full preview with window functions |
-| Metadata Preview Only | show only metadata |
 
 ## Preview Widget
 
@@ -101,11 +70,10 @@ Access via **File → Save As** or **Process** tab.
 
 ## Suite2p Processing
 
-Access via **Process** tab.
+Access via **Run** tab.
 
-- run suite2p on selected z-plane
+- run suite2p on selected z-plane or multi-zplane
 - all parameters exposed with descriptions
-- crop selector for spatial subset
 
 ## Python API
 
