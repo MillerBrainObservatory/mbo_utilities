@@ -1,65 +1,114 @@
 (cli_usage)=
-# CLI Commands
 
-The `mbo` command provides several utilities for working with imaging data.
+# CLI Reference
 
-## Launch GUI
+The `mbo` command provides tools for viewing, converting, and analyzing imaging data.
+
+## Overview
+
+| Command | Description |
+|---------|-------------|
+| `mbo` | launch gui with file dialog |
+| `mbo view` | view data in gui |
+| `mbo convert` | convert between formats |
+| `mbo info` | show array info |
+| `mbo scanphase` | analyze scan-phase offset |
+| `mbo download` | download files from github |
+| `mbo formats` | list supported formats |
+
+## GUI Mode
 
 ```bash
-mbo                     # open file dialog
-mbo /path/to/data       # open specific file
-mbo /path/to/data --metadata  # show only metadata
+mbo                            # file dialog
+mbo /path/to/data              # open specific file
+mbo /path/to/data --metadata   # show only metadata
+mbo view /data --roi 0 --roi 2 # view specific ROIs
 ```
 
-## Download Files
+## Convert
 
-Download files from GitHub URLs:
+Convert between formats with optional processing.
+
+```bash
+mbo convert input.tiff output/ -e .zarr           # tiff to zarr
+mbo convert input.tiff output/ -e .bin            # tiff to suite2p binary
+mbo convert input.zarr output/ -e .tiff           # zarr to tiff
+mbo convert input.tiff output/ -e .zarr -p 1 -p 7 # specific planes
+mbo convert input.tiff output/ --fix-phase        # with phase correction
+mbo convert input.tiff output/ -n 1000            # first 1000 frames
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-e, --ext` | output format: .tiff, .zarr, .bin, .h5, .npy |
+| `-p, --planes` | z-planes to export (1-based), repeatable |
+| `-n, --num-frames` | limit number of frames |
+| `--roi` | roi selection: None, 0, N, or "1,3" |
+| `--fix-phase/--no-fix-phase` | bidirectional phase correction |
+| `--phasecorr-method` | mean, median, or max |
+| `--register-z` | z-plane registration via suite3d |
+| `--ome/--no-ome` | ome-zarr metadata (zarr only) |
+| `--overwrite` | replace existing files |
+| `--chunk-mb` | streaming chunk size (default: 100) |
+| `--debug` | verbose logging |
+
+## Info
+
+Display array information without loading data.
+
+```bash
+mbo info /data/raw.tiff
+mbo info /data/volume.zarr
+mbo info /data/suite2p/plane0
+```
+
+## Scan-Phase Analysis
+
+Analyze bidirectional scanning phase offset. See [scanphase](scanphase) for interpreting results.
+
+```bash
+mbo scanphase                             # file dialog
+mbo scanphase /path/to/data.tiff          # analyze file
+mbo scanphase ./folder/ -n 5              # first 5 tiffs
+mbo scanphase data.tiff -o ./results/     # custom output
+mbo scanphase data.tiff --show            # show plots
+mbo scanphase data.tiff --format pdf      # output as pdf
+```
+
+**Output files:**
+- `temporal.png` - offset time series + histogram
+- `windows.png` - offset vs window size
+- `spatial.png` - spatial heatmaps
+- `zplanes.png` - offset vs depth
+- `parameters.png` - offset vs signal intensity
+- `scanphase_results.npz` - numerical data
+
+## Download
+
+Download files from github (auto-converts blob to raw urls).
 
 ```bash
 mbo download https://github.com/user/repo/blob/main/notebook.ipynb
 mbo download https://github.com/user/repo/blob/main/data.npy -o ./data/
 ```
 
-## Scan-Phase Analysis
-
-Analyze bidirectional scanning phase offset. See [scanphase](scanphase) for details.
+## Utilities
 
 ```bash
-mbo scanphase                          # open file dialog
-mbo scanphase /path/to/data.tiff       # analyze specific file
-mbo scanphase ./folder/ -n 5           # use first 5 tiffs from folder
-mbo scanphase data.tiff --show         # show plots interactively
+mbo --download-notebook     # download user guide notebook
+mbo --download-file URL     # download any file
+mbo --check-install         # verify installation and gpu config
 ```
 
-## File Conversion
+## Formats
 
-Convert between supported formats:
-
-```bash
-mbo convert input.tiff output.zarr     # tiff to zarr
-mbo convert input.tiff output.bin      # tiff to suite2p binary
-mbo convert input.zarr output.tiff     # zarr to tiff
-```
-
-## File Info
-
-Display information about a data file:
-
-```bash
-mbo info /path/to/data.tiff
-```
-
-## List Formats
-
-Show supported input and output formats:
+Show supported file formats:
 
 ```bash
 mbo formats
 ```
 
-## Utilities
-
-```bash
-mbo --download-notebook    # download user guide notebook
-mbo --check-install        # verify installation and GPU config
-```
+**Input formats:** .tif, .tiff, .zarr, .bin, .h5, .hdf5, .npy, .json
+**Output formats:** .tiff, .zarr, .bin, .h5, .npy

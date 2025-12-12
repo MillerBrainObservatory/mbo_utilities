@@ -117,6 +117,89 @@ def _save_as_worker(path, **imwrite_kwargs):
     imwrite(data, **imwrite_kwargs)
 
 
+def _get_array_z_info(arr):
+    """
+    Get Z dimension info from an array, handling different dimension layouts.
+
+    Returns
+    -------
+    tuple (nz, z_axis, has_views)
+        nz: number of z-planes
+        z_axis: axis index for Z dimension
+        has_views: True if array has a Views/camera dimension
+    """
+    shape = arr.shape
+    ndim = len(shape)
+
+    # check for dims property (IsoviewArray, etc.)
+    if hasattr(arr, 'dims'):
+        dims = arr.dims
+        if 'Z' in dims:
+            z_axis = dims.index('Z')
+            nz = shape[z_axis]
+            has_views = 'V' in dims
+            return nz, z_axis, has_views
+
+    # standard TZYX or TYX layout
+    if ndim == 4:
+        return shape[1], 1, False  # nz=shape[1], z_axis=1
+    elif ndim == 3:
+        return 1, None, False
+    elif ndim == 5:
+        # assume TZVYX or TZYX + extra dim
+        return shape[1], 1, True
+    else:
+        return 1, None, False
+
+
+def _index_array_for_zstats(arr, t_slice, z_idx):
+    """
+    Index an array for zstats computation, handling different dimension layouts.
+
+    Parameters
+    ----------
+    arr : array-like
+        The array to index
+    t_slice : slice
+        Time/frame slice (e.g., slice(None, None, 10) for every 10th frame)
+    z_idx : int
+        Z-plane index
+
+    Returns
+    -------
+    np.ndarray
+        2D or 3D array suitable for computing mean/std images
+    """
+    shape = arr.shape
+    ndim = len(shape)
+
+    # check for dims property
+    if hasattr(arr, 'dims'):
+        dims = arr.dims
+        # IsoviewArray single timepoint: (Z, V, Y, X)
+        if dims == ('Z', 'V', 'Y', 'X'):
+            # index z-plane, take first view, return 2D (Y, X)
+            # we need to handle the fact there's no T dimension to slice
+            return arr[z_idx, 0]  # single z-plane, first camera
+        # IsoviewArray multi-timepoint: (T, Z, V, Y, X)
+        elif dims == ('T', 'Z', 'V', 'Y', 'X'):
+            # index time, z-plane, first view
+            return arr[t_slice, z_idx, 0]  # (T_subset, Y, X)
+
+    # standard layouts
+    if ndim == 3:
+        # TYX - no Z, return time slice
+        return arr[t_slice]
+    elif ndim == 4:
+        # TZYX
+        return arr[t_slice, z_idx]
+    elif ndim == 5:
+        # assume extra dim is views at axis 2
+        return arr[t_slice, z_idx, 0]
+
+    raise ValueError(f"Unsupported array shape {shape} with ndim={ndim}")
+
+
 def draw_menu(parent):
     # (accessible from the "Tools" menu)
     if parent.show_scope_window:
@@ -1039,12 +1122,9 @@ class PreviewDataWidget(EdgeWindow):
         self._window_size = 1
         self._gaussian_sigma = 0.0  # Track gaussian sigma locally, applied via spatial_func
 
-        if len(self.shape) == 4:
-            self.nz = self.shape[1]
-        elif len(self.shape) == 3:
-            self.nz = 1
-        else:
-            self.nz = 1
+        # detect Z dimension properly for different array types
+        first_arr = self.image_widget.data[0]
+        self.nz, self._z_axis, self._has_views = _get_array_z_info(first_arr)
 
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
@@ -1689,13 +1769,8 @@ class PreviewDataWidget(EdgeWindow):
             self.shape = new_data.shape
             self.is_mbo_scan = isinstance(new_data, MboRawArray)
 
-            # Update nz for z-plane count
-            if len(self.shape) == 4:
-                self.nz = self.shape[1]
-            elif len(self.shape) == 3:
-                self.nz = 1
-            else:
-                self.nz = 1
+            # Update nz for z-plane count (handles different array types)
+            self.nz, self._z_axis, self._has_views = _get_array_z_info(new_data)
 
             # Reset save dialog state for new data
             self._saveas_selected_roi = set()
@@ -2311,6 +2386,10 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_running[roi - 1] = False
 
     def _compute_zstats_single_array(self, idx, arr):
+        # get z dimension info for this array
+        nz, z_axis, has_views = _get_array_z_info(arr)
+        t_slice = slice(None, None, 10)  # every 10th frame
+
         # Check for pre-computed z-stats in zarr metadata (instant loading)
         if hasattr(arr, "zstats") and arr.zstats is not None:
             stats = arr.zstats
@@ -2318,20 +2397,26 @@ class PreviewDataWidget(EdgeWindow):
             # Still need to compute mean images for visualization
             means = []
             self._tiff_lock = threading.Lock()
-            for z in [0] if arr.ndim == 3 else range(self.nz):
+            for z in range(nz):
                 with self._tiff_lock:
-                    stack = (
-                        arr[::10].astype(np.float32)
-                        if arr.ndim == 3
-                        else arr[::10, z].astype(np.float32)
-                    )
-                    mean_img = np.mean(stack, axis=0)
-                    means.append(mean_img)
-                    self._zstats_progress[idx - 1] = (z + 1) / self.nz
+                    try:
+                        stack = _index_array_for_zstats(arr, t_slice, z)
+                        stack = np.asarray(stack).astype(np.float32)
+                        # ensure we have a stack to take mean over
+                        if stack.ndim == 2:
+                            mean_img = stack  # single frame, use as-is
+                        else:
+                            mean_img = np.mean(stack, axis=0)
+                        means.append(mean_img)
+                    except Exception as e:
+                        self.logger.warning(f"Error indexing z={z}: {e}")
+                        continue
+                    self._zstats_progress[idx - 1] = (z + 1) / nz
                     self._zstats_current_z[idx - 1] = z
-            means_stack = np.stack(means)
-            self._zstats_means[idx - 1] = means_stack
-            self._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
+            if means:
+                means_stack = np.stack(means)
+                self._zstats_means[idx - 1] = means_stack
+                self._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
             self._zstats_done[idx - 1] = True
             self._zstats_running[idx - 1] = False
             self.logger.info(f"Loaded pre-computed z-stats from zarr metadata for array {idx}")
@@ -2340,30 +2425,41 @@ class PreviewDataWidget(EdgeWindow):
         stats, means = {"mean": [], "std": [], "snr": []}, []
         self._tiff_lock = threading.Lock()
 
-        for z in [0] if arr.ndim == 3 else range(self.nz):
+        for z in range(nz):
             with self._tiff_lock:
-                stack = (
-                    arr[::10].astype(np.float32)
-                    if arr.ndim == 3
-                    else arr[::10, z].astype(np.float32)
-                )
+                try:
+                    stack = _index_array_for_zstats(arr, t_slice, z)
+                    stack = np.asarray(stack).astype(np.float32)
 
-                mean_img = np.mean(stack, axis=0)
-                std_img = np.std(stack, axis=0)
-                snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
+                    # handle single frame vs stack
+                    if stack.ndim == 2:
+                        mean_img = stack
+                        std_img = np.zeros_like(stack)
+                    else:
+                        mean_img = np.mean(stack, axis=0)
+                        std_img = np.std(stack, axis=0)
 
-                stats["mean"].append(float(np.mean(mean_img)))
-                stats["std"].append(float(np.mean(std_img)))
-                stats["snr"].append(float(np.mean(snr_img)))
+                    snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
 
-                means.append(mean_img)
-                self._zstats_progress[idx - 1] = (z + 1) / self.nz
+                    stats["mean"].append(float(np.mean(mean_img)))
+                    stats["std"].append(float(np.mean(std_img)))
+                    stats["snr"].append(float(np.mean(snr_img)))
+
+                    means.append(mean_img)
+                except Exception as e:
+                    self.logger.warning(f"Error computing zstats for z={z}: {e}")
+                    stats["mean"].append(0.0)
+                    stats["std"].append(0.0)
+                    stats["snr"].append(0.0)
+
+                self._zstats_progress[idx - 1] = (z + 1) / nz
                 self._zstats_current_z[idx - 1] = z
 
         self._zstats[idx - 1] = stats
-        means_stack = np.stack(means)
-        self._zstats_means[idx - 1] = means_stack
-        self._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
+        if means:
+            means_stack = np.stack(means)
+            self._zstats_means[idx - 1] = means_stack
+            self._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
         self._zstats_done[idx - 1] = True
         self._zstats_running[idx - 1] = False
 
@@ -2413,13 +2509,14 @@ class PreviewDataWidget(EdgeWindow):
         for i in range(n):
             reset_progress_state(f"zstats_{i}")
 
-        # Update nz based on current data shape
-        if len(self.shape) >= 4:
-            self.nz = self.shape[1]
-        elif len(self.shape) == 3:
-            self.nz = 1
+        # Update nz based on current data (handles different array types)
+        if self.image_widget and self.image_widget.data:
+            first_arr = self.image_widget.data[0]
+            self.nz, self._z_axis, self._has_views = _get_array_z_info(first_arr)
         else:
             self.nz = 1
+            self._z_axis = None
+            self._has_views = False
 
         self.logger.info(f"Refreshing z-stats for {n} arrays, nz={self.nz}")
 

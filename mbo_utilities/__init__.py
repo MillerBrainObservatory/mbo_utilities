@@ -57,6 +57,9 @@ __all__ = [
     # CLI utilities
     "download_file",
     "download_notebook",
+    # File/folder selection (GUI)
+    "select_folder",
+    "select_files",
 ]
 
 
@@ -122,5 +125,10 @@ def __getattr__(name):
     if name in ("download_file", "download_notebook"):
         from . import cli
         return getattr(cli, name)
+
+    # File/folder selection (widgets -> imgui, wgpu)
+    if name in ("select_folder", "select_files"):
+        from . import widgets
+        return getattr(widgets, name)
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

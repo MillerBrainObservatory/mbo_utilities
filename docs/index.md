@@ -1,25 +1,38 @@
 # Miller Brain Observatory: Python Utilities
 
-This repository contains python functions to pre/post process datasets recording at the [Miller Brain Observatory](https://mbo.rockefeller.edu)
+Python tools for pre/post processing datasets at the [Miller Brain Observatory](https://mbo.rockefeller.edu).
 
-## Overview
+## Contents
 
 ```{toctree}
 ---
 maxdepth: 1
 ---
 User Guide <user_guide>
+CLI & GUI <usage/index>
 Array Types <array_types>
 API <api/index>
 venvs
-image_gallery
 glossary
 ```
 
-## GUI
+## Quick Start
 
-[Download GUI User Guide (PDF)](_static/mbo_gui_user_guide.pdf)
+```bash
+# install
+uv pip install mbo_utilities
 
-## Useful 
+# launch gui
+mbo
 
-[uv-cheatsheet](https://www.saaspegasus.com/guides/uv-deep-dive/#cheatsheet-common-operations-in-uvs-workflows)
+# convert data
+mbo convert input.tiff output.zarr
+
+# analyze scan-phase
+mbo scanphase /path/to/data
+```
+
+## Resources
+
+- [GUI User Guide (PDF)](_static/mbo_gui_user_guide.pdf)
+- [uv cheatsheet](https://www.saaspegasus.com/guides/uv-deep-dive/#cheatsheet-common-operations-in-uvs-workflows)

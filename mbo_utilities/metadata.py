@@ -71,6 +71,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "pixelResolutionX",
             "pixel_size_x",
             "XResolution",
+            "pixel_resolution_um",  # isoview
         ),
         dtype=float,
         unit="micrometer",
@@ -118,6 +119,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "frameRate",
             "scanFrameRate",
             "fps",
+            "vps",
         ),
         dtype=float,
         unit="Hz",
@@ -177,6 +179,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "nz",
             "num_z",
             "numPlanes",
+            "zplanes",  # isoview
         ),
         dtype=int,
         default=1,

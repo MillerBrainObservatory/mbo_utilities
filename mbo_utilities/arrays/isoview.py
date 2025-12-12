@@ -323,11 +323,32 @@ class IsoviewArray:
         - num_frames: alias for nframes
         - Ly: height in pixels
         - Lx: width in pixels
+        - nplanes: number of z-planes
+        - dx, dy, dz: voxel size in micrometers
+        - fs: frame rate in Hz
 
         Plus isoview-specific fields:
         - num_timepoints, views, shape, structure
+        - cameras: per-camera metadata dict
         """
         meta = dict(self._zarr_attrs)
+
+        # map isoview keys to canonical metadata keys
+        # pixel resolution: pixel_resolution_um -> dx, dy
+        px_res = meta.get('pixel_resolution_um')
+        if px_res is not None:
+            meta['dx'] = float(px_res)
+            meta['dy'] = float(px_res)
+
+        # z step: z_step -> dz
+        z_step = meta.get('z_step')
+        if z_step is not None:
+            meta['dz'] = float(z_step)
+
+        # frame rate: fps -> fs
+        fps = meta.get('fps')
+        if fps is not None:
+            meta['fs'] = float(fps)
 
         # LazyArrayProtocol required fields
         meta['nframes'] = len(self.tm_folders)
@@ -335,13 +356,30 @@ class IsoviewArray:
         meta['Ly'] = self._single_shape[1]
         meta['Lx'] = self._single_shape[2]
 
-        # Isoview-specific fields
+        # z-planes from shape (not timepoints!)
+        meta['nplanes'] = self._single_shape[0]
+        meta['num_planes'] = self._single_shape[0]
+
+        # isoview-specific fields
         meta['num_timepoints'] = len(self.tm_folders)
         meta['views'] = self._views
         meta['shape'] = self.shape
         meta['structure'] = self._structure
         meta['single_timepoint'] = self._single_timepoint
-        meta['num_planes'] = self._single_shape[0]
+
+        # add per-camera metadata
+        cam_meta = self.camera_metadata
+        if cam_meta:
+            meta['cameras'] = cam_meta
+            # aggregate per-camera values for display
+            for key in ['zplanes', 'min_intensity', 'illumination_arms', 'vps']:
+                values = [cm.get(key) for cm in cam_meta.values() if cm.get(key) is not None]
+                if values:
+                    # if all same, use single value, otherwise use list
+                    if len(set(str(v) for v in values)) == 1:
+                        meta[key] = values[0]
+                    else:
+                        meta[key] = values
 
         return meta
 

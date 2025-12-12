@@ -83,11 +83,13 @@ class ZarrArray(ReductionMixin):
         # If we opened a Group (OME-Zarr structure), get the "0" array
         self.zs = []
         self._groups = []
-        for z in opened:
+        for i, z in enumerate(opened):
             if isinstance(z, zarr.Group):
                 if "0" not in z:
+                    # get store path for error message (zarr v3 uses .root)
+                    store_path = getattr(z.store, 'root', getattr(z.store, 'path', self.filenames[i]))
                     raise ValueError(
-                        f"OME-Zarr group missing '0' array in {z.store.path}"
+                        f"OME-Zarr group missing '0' array in {store_path}"
                     )
                 self.zs.append(z["0"])
                 self._groups.append(z)
