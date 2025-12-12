@@ -766,10 +766,11 @@ def run_scanphase_analysis(
     from mbo_utilities import imread
 
     if data_path is None:
-        from mbo_utilities.graphics import select_file
-        data_path = select_file(title="Select data for scan-phase analysis")
-        if data_path is None:
+        from mbo_utilities.graphics import select_files
+        paths = select_files(title="Select data for scan-phase analysis")
+        if not paths:
             return None
+        data_path = paths[0] if len(paths) == 1 else paths
 
     if isinstance(data_path, (list, tuple)):
         if len(data_path) == 0:

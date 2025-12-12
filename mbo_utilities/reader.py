@@ -264,6 +264,20 @@ def imread(
 
         # Case 2: flat zarr store with zarr.json
         if (first / "zarr.json").exists():
+            # Check if this is an isoview consolidated zarr (has camera_N groups)
+            camera_dirs = [d for d in first.iterdir() if d.is_dir() and d.name.startswith("camera_")]
+            if camera_dirs:
+                logger.info(f"Detected isoview consolidated zarr with {len(camera_dirs)} cameras.")
+                # For a single consolidated zarr, find the parent TM folder
+                # or use the zarr's parent as the isoview root
+                parent = first.parent
+                if parent.name.startswith("TM"):
+                    # Single TM folder
+                    return IsoviewArray(parent)
+                else:
+                    # The zarr file IS the isoview structure (single timepoint)
+                    return IsoviewArray(parent)
+
             logger.info(f"Detected zarr.json, loading as ZarrArray.")
             return ZarrArray(paths, **_filter_kwargs(ZarrArray, kwargs))
 

@@ -6,23 +6,16 @@ This module requires imgui extras. Install with:
 
 Examples
 --------
->>> from mbo_utilities.widgets import select_file, select_folder, select_files
+>>> from mbo_utilities.widgets import select_folder, select_files
 >>> from pathlib import Path
 >>>
->>> # Select a single file
->>> path = select_file(
-...     title="Select ops.npy",
-...     filters=["Numpy Files", "*.npy"],
-...     start_path=Path.home()
-... )
->>>
->>> # Select a folder
+>>> # Select a folder (note: native folder dialogs don't show files)
 >>> folder = select_folder(
 ...     title="Select Suite2p output",
 ...     start_path=Path.home()
 ... )
 >>>
->>> # Select multiple files
+>>> # Select one or more files
 >>> paths = select_files(
 ...     title="Select TIFF files",
 ...     filters=["TIFF Files", "*.tif *.tiff"]
@@ -31,14 +24,12 @@ Examples
 
 from mbo_utilities.graphics.simple_selector import (
     SimpleSelector,
-    select_file,
     select_folder,
     select_files,
 )
 
 __all__ = [
     "SimpleSelector",
-    "select_file",
     "select_folder",
     "select_files",
 ]
