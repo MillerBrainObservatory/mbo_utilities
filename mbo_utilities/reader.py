@@ -21,12 +21,8 @@ from mbo_utilities.arrays import (
     MboRawArray,
     NumpyArray,
     Suite2pArray,
-    Suite2pVolumeArray,
     TiffArray,
-    TiffVolumeArray,
     ZarrArray,
-    find_suite2p_plane_dirs,
-    find_tiff_plane_files,
 )
 from mbo_utilities.metadata import has_mbo_metadata, is_raw_scanimage
 
@@ -154,21 +150,25 @@ def imread(
                 )
                 paths = zarrs
             else:
-                # Check for Suite2p volume structure (subdirs with ops.npy)
-                plane_dirs = find_suite2p_plane_dirs(p)
-                if plane_dirs:
-                    logger.info(
-                        f"Detected Suite2p volume with {len(plane_dirs)} planes in {p}"
-                    )
-                    return Suite2pVolumeArray(p, plane_dirs=plane_dirs)
+                # Check for Suite2p structure (ops.npy or plane subdirs)
+                # unified Suite2pArray handles both single plane and volume
+                ops_file = p / "ops.npy"
+                if ops_file.exists():
+                    logger.info(f"Detected Suite2p directory at {p}")
+                    return Suite2pArray(p)
+
+                # Check for plane subdirectories (volumetric suite2p)
+                plane_subdirs = [d for d in p.iterdir() if d.is_dir() and (d / "ops.npy").exists()]
+                if plane_subdirs:
+                    logger.info(f"Detected Suite2p volume with {len(plane_subdirs)} planes in {p}")
+                    return Suite2pArray(p)
 
                 # Check for TIFF volume structure (planeXX.tiff files)
-                tiff_plane_files = find_tiff_plane_files(p)
-                if tiff_plane_files:
-                    logger.info(
-                        f"Detected TIFF volume with {len(tiff_plane_files)} planes in {p}"
-                    )
-                    return TiffVolumeArray(p, plane_files=tiff_plane_files)
+                # unified TiffArray handles both single files and plane volumes
+                plane_tiffs = sorted(p.glob("plane*.tif*"))
+                if plane_tiffs:
+                    logger.info(f"Detected TIFF volume with {len(plane_tiffs)} planes in {p}")
+                    return TiffArray(p)
 
                 paths = [Path(f) for f in p.glob("*") if f.is_file()]
                 logger.debug(f"Found {len(paths)} files in {p}")

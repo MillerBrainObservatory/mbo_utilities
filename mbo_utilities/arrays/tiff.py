@@ -2,9 +2,8 @@
 TIFF array readers.
 
 This module provides array readers for TIFF files:
-- TiffArray: Generic TIFF reader using TiffFile handles
-- TiffVolumeArray: Reader for directories with plane TIFF files (4D volumes)
-- MBOTiffArray: Lazy TIFF reader for MBO processed TIFFs (no dask)
+- TiffArray: Lazy TIFF reader, auto-detects single file vs volume directory
+- MBOTiffArray: Lazy TIFF reader for MBO processed TIFFs
 - MboRawArray: Raw ScanImage TIFF reader with phase correction
 """
 
@@ -80,12 +79,411 @@ def find_tiff_plane_files(directory: Path) -> list[Path]:
     if not plane_files:
         return []
 
-    # Sort by plane number
     def sort_key(p):
         num = _extract_tiff_plane_number(p.stem)
         return num if num is not None else float("inf")
 
     return sorted(plane_files, key=sort_key)
+
+
+class _SingleTiffPlaneReader:
+    """Internal reader for a single TIFF plane."""
+
+    def __init__(self, files: list[Path]):
+        from mbo_utilities.metadata import query_tiff_pages
+
+        self.filenames = files
+        self.tiff_files = [TiffFile(f) for f in files]
+        self._tiff_lock = threading.Lock()
+
+        tf = self.tiff_files[0]
+        page0 = tf.pages.first
+        self._page_shape = page0.shape
+        self._dtype = page0.dtype
+
+        self._frames_per_file = []
+        self._num_frames = 0
+
+        for i, (tfile, fpath) in enumerate(zip(self.tiff_files, self.filenames)):
+            nframes = None
+
+            if i == 0:
+                desc = page0.description
+            else:
+                desc = tfile.pages.first.description
+
+            if desc:
+                try:
+                    meta = json.loads(desc)
+                    if "shape" in meta and isinstance(meta["shape"], list):
+                        if len(meta["shape"]) >= 3:
+                            nframes = meta["shape"][0]
+                except (json.JSONDecodeError, TypeError, KeyError):
+                    pass
+
+            if nframes is None:
+                try:
+                    est = query_tiff_pages(fpath)
+                    if est > 1:
+                        nframes = est
+                except Exception:
+                    pass
+
+            if nframes is None:
+                nframes = len(tfile.pages)
+
+            self._frames_per_file.append(nframes)
+            self._num_frames += nframes
+
+    @property
+    def shape(self) -> tuple:
+        return (self._num_frames, self._page_shape[0], self._page_shape[1])
+
+    @property
+    def nframes(self) -> int:
+        return self._num_frames
+
+    @property
+    def Ly(self) -> int:
+        return self._page_shape[0]
+
+    @property
+    def Lx(self) -> int:
+        return self._page_shape[1]
+
+    @property
+    def dtype(self):
+        return self._dtype
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+
+        t_key = key[0] if len(key) > 0 else slice(None)
+        y_key = key[1] if len(key) > 1 else slice(None)
+        x_key = key[2] if len(key) > 2 else slice(None)
+
+        t_key = _convert_range_to_slice(t_key)
+
+        frames = listify_index(t_key, self._num_frames)
+        if not frames:
+            return np.empty((0,) + self._page_shape, dtype=self._dtype)
+
+        out = self._read_frames(frames)
+
+        if y_key != slice(None) or x_key != slice(None):
+            out = out[:, y_key, x_key]
+
+        if isinstance(t_key, int):
+            out = out[0]
+
+        return out
+
+    def _read_frames(self, frames: list[int]) -> np.ndarray:
+        buf = np.empty((len(frames), self._page_shape[0], self._page_shape[1]), dtype=self._dtype)
+
+        start = 0
+        frame_to_buf_idx = {f: i for i, f in enumerate(frames)}
+
+        for tf, nframes in zip(self.tiff_files, self._frames_per_file):
+            end = start + nframes
+            file_frames = [f for f in frames if start <= f < end]
+            if not file_frames:
+                start = end
+                continue
+
+            local_indices = [f - start for f in file_frames]
+
+            with self._tiff_lock:
+                try:
+                    chunk = tf.asarray(key=local_indices)
+                except Exception as e:
+                    raise IOError(
+                        f"Failed to read frames {local_indices} from {tf.filename}: {e}"
+                    ) from e
+
+            if chunk.ndim == 2:
+                chunk = chunk[np.newaxis, ...]
+
+            for local_idx, global_frame in zip(local_indices, file_frames):
+                buf_idx = frame_to_buf_idx[global_frame]
+                chunk_idx = local_indices.index(local_idx)
+                buf[buf_idx] = chunk[chunk_idx]
+
+            start = end
+
+        return buf
+
+    def close(self):
+        for tf in self.tiff_files:
+            tf.close()
+
+
+class TiffArray(ReductionMixin):
+    """
+    Lazy TIFF array reader with auto-detection of single file vs volume.
+
+    Auto-detects:
+    - Single TIFF file(s): returns 4D (T, 1, Y, X)
+    - Directory with planeXX.tiff files: returns 4D (T, Z, Y, X) where Z > 1
+
+    Parameters
+    ----------
+    files : str, Path, or list
+        TIFF file path(s), or a directory containing plane TIFF files.
+
+    Attributes
+    ----------
+    shape : tuple[int, ...]
+        Array shape in TZYX format.
+    dtype : np.dtype
+        Data type.
+    is_volumetric : bool
+        True if multiple planes were detected.
+    num_planes : int
+        Number of Z-planes.
+
+    Examples
+    --------
+    >>> # Single TIFF file
+    >>> arr = TiffArray("data.tiff")
+    >>> arr.shape
+    (10000, 1, 512, 512)
+
+    >>> # Volume directory with plane files
+    >>> arr = TiffArray("tiff_volume/")
+    >>> arr.shape
+    (10000, 14, 512, 512)
+    >>> arr.is_volumetric
+    True
+    """
+
+    def __init__(self, files: str | Path | List[str] | List[Path]):
+        self._planes: list[_SingleTiffPlaneReader] = []
+        self._is_volumetric = False
+        self._target_dtype = None
+
+        # Normalize input
+        if isinstance(files, (str, Path)):
+            path = Path(files)
+            if path.is_dir():
+                plane_files = find_tiff_plane_files(path)
+                if plane_files:
+                    self._init_volume(plane_files)
+                else:
+                    tiff_files = list(path.glob("*.tif")) + list(path.glob("*.tiff"))
+                    if tiff_files:
+                        self._init_single_plane(tiff_files)
+                    else:
+                        raise ValueError(f"No TIFF files found in {path}")
+            else:
+                self._init_single_plane(expand_paths(files))
+        else:
+            self._init_single_plane([Path(f) for f in files])
+
+    def _init_single_plane(self, files: list[Path]):
+        """Initialize as single-plane array."""
+        self._is_volumetric = False
+        reader = _SingleTiffPlaneReader(files)
+        self._planes = [reader]
+
+        self._nframes = reader.nframes
+        self._nz = 1
+        self._ly = reader.Ly
+        self._lx = reader.Lx
+        self._dtype = reader.dtype
+        self.filenames = files
+
+        self._metadata = {
+            "shape": self.shape,
+            "dtype": str(self._dtype),
+            "nframes": self._nframes,
+            "num_frames": self._nframes,
+            "file_paths": [str(p) for p in files],
+            "num_files": len(files),
+        }
+        self.num_rois = 1
+
+    def _init_volume(self, plane_files: list[Path]):
+        """Initialize as volumetric array."""
+        self._is_volumetric = True
+
+        for pfile in plane_files:
+            reader = _SingleTiffPlaneReader([pfile])
+            self._planes.append(reader)
+
+        shapes = [(p.Ly, p.Lx) for p in self._planes]
+        if len(set(shapes)) != 1:
+            raise ValueError(f"Inconsistent spatial shapes across planes: {shapes}")
+
+        nframes = [p.nframes for p in self._planes]
+        if len(set(nframes)) != 1:
+            logger.warning(
+                f"Inconsistent frame counts across planes: {nframes}. "
+                f"Using minimum: {min(nframes)}"
+            )
+
+        self._nframes = min(nframes)
+        self._nz = len(self._planes)
+        self._ly, self._lx = shapes[0]
+        self._dtype = self._planes[0].dtype
+        self.filenames = plane_files
+
+        self._metadata = {
+            "shape": self.shape,
+            "dtype": str(self._dtype),
+            "nframes": self._nframes,
+            "num_frames": self._nframes,
+            "num_planes": self._nz,
+            "plane_files": [str(p) for p in plane_files],
+        }
+        self.num_rois = 1
+
+        logger.info(
+            f"Loaded TIFF volume: {self._nframes} frames, {self._nz} planes, "
+            f"{self._ly}x{self._lx} px"
+        )
+
+    @property
+    def is_volumetric(self) -> bool:
+        """True if this array represents multi-plane data."""
+        return self._is_volumetric
+
+    @property
+    def num_planes(self) -> int:
+        """Number of Z-planes."""
+        return self._nz
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return (self._nframes, self._nz, self._ly, self._lx)
+
+    @property
+    def dtype(self):
+        return self._target_dtype if self._target_dtype is not None else self._dtype
+
+    @property
+    def ndim(self) -> int:
+        return 4
+
+    @property
+    def metadata(self) -> dict:
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
+
+    def _compute_frame_vminmax(self):
+        if not hasattr(self, '_cached_vmin'):
+            frame = np.asarray(self[0, 0])
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
+
+    @property
+    def vmin(self) -> float:
+        self._compute_frame_vminmax()
+        return self._cached_vmin
+
+    @property
+    def vmax(self) -> float:
+        self._compute_frame_vminmax()
+        return self._cached_vmax
+
+    def __len__(self) -> int:
+        return self._nframes
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+        key = key + (slice(None),) * (4 - len(key))
+        t_key, z_key, y_key, x_key = key
+
+        t_key = _convert_range_to_slice(t_key)
+        z_key = _convert_range_to_slice(z_key)
+
+        # normalize t_key
+        if isinstance(t_key, slice):
+            start, stop, step = t_key.indices(self._nframes)
+            t_key = slice(start, stop, step)
+        elif isinstance(t_key, int):
+            if t_key < 0:
+                t_key = self._nframes + t_key
+            if t_key >= self._nframes:
+                raise IndexError(f"Time index {t_key} out of bounds for {self._nframes} frames")
+
+        # handle z indexing
+        if isinstance(z_key, int):
+            if z_key < 0:
+                z_key = self._nz + z_key
+            if z_key < 0 or z_key >= self._nz:
+                raise IndexError(f"Z index {z_key} out of bounds for {self._nz} planes")
+            out = self._planes[z_key][t_key, y_key, x_key]
+        else:
+            if isinstance(z_key, slice):
+                z_indices = range(self._nz)[z_key]
+            elif isinstance(z_key, (list, np.ndarray)):
+                z_indices = z_key
+            else:
+                z_indices = range(self._nz)
+
+            arrs = [self._planes[i][t_key, y_key, x_key] for i in z_indices]
+            out = np.stack(arrs, axis=1)
+
+        if self._target_dtype is not None:
+            out = out.astype(self._target_dtype)
+        return out
+
+    def astype(self, dtype, copy=True):
+        self._target_dtype = np.dtype(dtype)
+        return self
+
+    def __array__(self):
+        n = min(10, self._nframes)
+        return self[:n]
+
+    def close(self):
+        for plane in self._planes:
+            plane.close()
+
+    def imshow(self, **kwargs):
+        import fastplotlib as fpl
+
+        histogram_widget = kwargs.get("histogram_widget", True)
+        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
+        window_funcs = kwargs.get("window_funcs", None)
+        return fpl.ImageWidget(
+            data=self,
+            histogram_widget=histogram_widget,
+            figure_kwargs=figure_kwargs,
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
+            window_funcs=window_funcs,
+        )
+
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
+        progress_callback=None,
+        debug=None,
+        planes=None,
+        **kwargs,
+    ):
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
 
 
 class MBOTiffArray(ReductionMixin):
@@ -117,28 +515,23 @@ class MBOTiffArray(ReductionMixin):
         if not filenames:
             raise ValueError("No filenames provided.")
 
-        # Allow string paths
         self.filenames = [Path(f) for f in filenames]
         self.roi = roi
 
-        # Open TiffFile handles (no data read yet)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
         self._tiff_lock = threading.Lock()
 
-        # Extract info from first file's first page
         tf = self.tiff_files[0]
         page0 = tf.pages.first
-        self._page_shape = page0.shape  # (Y, X) for 2D page
+        self._page_shape = page0.shape
         self._dtype = page0.dtype
 
-        # Try to get frame count from metadata without seeking
         self._frames_per_file = []
         self._num_frames = 0
 
         for i, (tfile, fpath) in enumerate(zip(self.tiff_files, self.filenames)):
             nframes = None
 
-            # Method 1: ImageDescription JSON (tifffile shaped writes)
             if i == 0:
                 desc = page0.description
             else:
@@ -148,13 +541,11 @@ class MBOTiffArray(ReductionMixin):
                 try:
                     meta = json.loads(desc)
                     if "shape" in meta and isinstance(meta["shape"], list):
-                        # First dimension is frames for 3D+ arrays
                         if len(meta["shape"]) >= 3:
                             nframes = meta["shape"][0]
                 except (json.JSONDecodeError, TypeError, KeyError):
                     pass
 
-            # Method 2: IFD offset estimation (fast for uniform pages)
             if nframes is None:
                 try:
                     est = query_tiff_pages(fpath)
@@ -163,7 +554,6 @@ class MBOTiffArray(ReductionMixin):
                 except Exception:
                     pass
 
-            # Method 3: Fallback to len(pages) - triggers seek but guaranteed
             if nframes is None:
                 logger.debug(f"Using len(pages) fallback for {fpath}")
                 nframes = len(tfile.pages)
@@ -171,7 +561,6 @@ class MBOTiffArray(ReductionMixin):
             self._frames_per_file.append(nframes)
             self._num_frames += nframes
 
-        # Collect metadata from first TIFF
         self._metadata = get_metadata(self.filenames)
         self._metadata.update({
             "shape": self.shape,
@@ -196,7 +585,6 @@ class MBOTiffArray(ReductionMixin):
 
     @property
     def shape(self) -> tuple[int, ...]:
-        # Return TZYX format: (frames, 1, Y, X)
         return self._num_frames, 1, self._page_shape[0], self._page_shape[1]
 
     @property
@@ -204,7 +592,6 @@ class MBOTiffArray(ReductionMixin):
         return self._target_dtype if self._target_dtype is not None else self._dtype
 
     def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
         if not hasattr(self, '_cached_vmin'):
             frame = np.asarray(self[0, 0])
             self._cached_vmin = float(frame.min())
@@ -212,13 +599,11 @@ class MBOTiffArray(ReductionMixin):
 
     @property
     def vmin(self) -> float:
-        """Min from first frame for display (avoids full data read)."""
         self._compute_frame_vminmax()
         return self._cached_vmin
 
     @property
     def vmax(self) -> float:
-        """Max from first frame for display (avoids full data read)."""
         self._compute_frame_vminmax()
         return self._cached_vmax
 
@@ -230,56 +615,46 @@ class MBOTiffArray(ReductionMixin):
         return self._num_frames
 
     def __getitem__(self, key):
-        """Read frames lazily using tf.asarray(key=frame_indices)."""
         if not isinstance(key, tuple):
             key = (key,)
 
-        # Parse the key into frame indices
         t_key = key[0] if len(key) > 0 else slice(None)
         z_key = key[1] if len(key) > 1 else slice(None)
         y_key = key[2] if len(key) > 2 else slice(None)
         x_key = key[3] if len(key) > 3 else slice(None)
 
-        # Convert range to slice
         t_key = _convert_range_to_slice(t_key)
         z_key = _convert_range_to_slice(z_key)
         y_key = _convert_range_to_slice(y_key)
         x_key = _convert_range_to_slice(x_key)
 
-        # Convert to list of frame indices
         frames = listify_index(t_key, self._num_frames)
         if not frames:
             return np.empty((0, 1) + self._page_shape, dtype=self.dtype)
 
-        # Read the requested frames
         out = self._read_frames(frames)
 
-        # Apply spatial slicing if needed
         if y_key != slice(None) or x_key != slice(None):
             out = out[:, :, y_key, x_key]
 
-        # Handle z dimension (always 1 for processed TIFFs)
         z_indices = listify_index(z_key, 1)
         if z_indices != [0]:
             out = out[:, z_indices, :, :]
 
-        # Squeeze dimensions for integer indices
         squeeze_axes = []
         if isinstance(t_key, int):
             squeeze_axes.append(0)
         if isinstance(z_key, int):
-            squeeze_axes.append(1)  # z is always axis 1 before any squeeze
+            squeeze_axes.append(1)
         if squeeze_axes:
             out = np.squeeze(out, axis=tuple(squeeze_axes))
 
-        # Apply dtype conversion if astype() was called
         if self._target_dtype is not None:
             out = out.astype(self._target_dtype)
 
         return out
 
     def _read_frames(self, frames: list[int]) -> np.ndarray:
-        """Read specific frame indices across all files."""
         buf = np.empty(
             (len(frames), 1, self._page_shape[0], self._page_shape[1]), dtype=self._dtype
         )
@@ -289,13 +664,11 @@ class MBOTiffArray(ReductionMixin):
 
         for tf, nframes in zip(self.tiff_files, self._frames_per_file):
             end = start + nframes
-            # Find which requested frames are in this file
             file_frames = [f for f in frames if start <= f < end]
             if not file_frames:
                 start = end
                 continue
 
-            # Convert global frame indices to local file indices
             local_indices = [f - start for f in file_frames]
 
             with self._tiff_lock:
@@ -308,11 +681,9 @@ class MBOTiffArray(ReductionMixin):
                         f": {type(e).__name__}: {e}"
                     ) from e
 
-            # Handle single frame case where asarray returns 2D
             if chunk.ndim == 2:
                 chunk = chunk[np.newaxis, ...]
 
-            # Copy to output buffer
             for local_idx, global_frame in zip(local_indices, file_frames):
                 buf_idx = frame_to_buf_idx[global_frame]
                 chunk_idx = local_indices.index(local_idx)
@@ -323,17 +694,14 @@ class MBOTiffArray(ReductionMixin):
         return buf
 
     def astype(self, dtype, copy=True):
-        """Set target dtype for lazy conversion on data access."""
         self._target_dtype = np.dtype(dtype)
         return self
 
     def __array__(self):
-        """Return first 10 frames as numpy array."""
         n = min(10, self._num_frames)
         return self[:n]
 
     def close(self):
-        """Close all TIFF file handles."""
         for tf in self.tiff_files:
             tf.close()
 
@@ -362,499 +730,6 @@ class MBOTiffArray(ReductionMixin):
         planes=None,
         **kwargs,
     ):
-        """Write MBOTiffArray to disk in various formats."""
-        return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            **kwargs,
-        )
-
-
-class TiffArray(ReductionMixin):
-    """
-    Lazy TIFF array reader using TiffFile handles.
-
-    Opens TiffFile handles on init (no data read), extracts shape from
-    metadata/first page, and reads data lazily via tf.asarray() when indexed.
-    Output is always in TZYX format.
-
-    Parameters
-    ----------
-    files : str, Path, or list
-        TIFF file path(s).
-
-    Attributes
-    ----------
-    shape : tuple[int, ...]
-        Array shape in TZYX format (nframes, 1, Y, X).
-    dtype : np.dtype
-        Data type.
-    """
-
-    def __init__(self, files: str | Path | List[str] | List[Path]):
-        from mbo_utilities.metadata import query_tiff_pages
-
-        # Normalize to list of Paths
-        if isinstance(files, (str, Path)):
-            self.filenames = expand_paths(files)
-        else:
-            self.filenames = [Path(f) for f in files]
-        self.filenames = [Path(p) for p in self.filenames]
-
-        # Open TiffFile handles (no data read yet)
-        self.tiff_files = [TiffFile(f) for f in self.filenames]
-        self._tiff_lock = threading.Lock()
-
-        # Extract info from first file's first page (no seeks)
-        tf = self.tiff_files[0]
-        page0 = tf.pages.first
-        self._page_shape = page0.shape  # (Y, X) for 2D page
-        self._dtype = page0.dtype
-
-        # Try to get frame count from metadata without seeking
-        self._frames_per_file = []
-        self._num_frames = 0
-
-        for i, (tfile, fpath) in enumerate(zip(self.tiff_files, self.filenames)):
-            nframes = None
-
-            # Method 1: ImageDescription JSON (tifffile shaped writes)
-            if i == 0:
-                desc = page0.description
-            else:
-                desc = tfile.pages.first.description
-
-            if desc:
-                try:
-                    meta = json.loads(desc)
-                    if "shape" in meta and isinstance(meta["shape"], list):
-                        # First dimension is frames for 3D+ arrays
-                        if len(meta["shape"]) >= 3:
-                            nframes = meta["shape"][0]
-                except (json.JSONDecodeError, TypeError, KeyError):
-                    pass
-
-            # Method 2: IFD offset estimation (fast for uniform pages)
-            if nframes is None:
-                try:
-                    est = query_tiff_pages(fpath)
-                    if est > 1:
-                        nframes = est
-                except Exception:
-                    pass
-
-            # Method 3: Fallback to len(pages) - triggers seek but guaranteed
-            if nframes is None:
-                logger.warning(f"Could not query TIFF pages for {fpath}")
-                nframes = len(tfile.pages)
-
-            self._frames_per_file.append(nframes)
-            self._num_frames += nframes
-
-        # Build metadata dict
-        self._metadata = {
-            "shape": self.shape,
-            "dtype": str(self._dtype),
-            "nframes": self._num_frames,
-            "num_frames": self._num_frames,
-            "frames_per_file": self._frames_per_file,
-            "file_paths": [str(p) for p in self.filenames],
-            "num_files": len(self.filenames),
-        }
-
-        self.num_rois = 1
-        self._target_dtype = None
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        # Return TZYX format: (frames, 1, Y, X)
-        return self._num_frames, 1, self._page_shape[0], self._page_shape[1]
-
-    @property
-    def dtype(self):
-        return self._target_dtype if self._target_dtype is not None else self._dtype
-
-    @property
-    def ndim(self) -> int:
-        return 4
-
-    def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
-        if not hasattr(self, '_cached_vmin'):
-            frame = np.asarray(self[0, 0])
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        """Min from first frame for display (avoids full data read)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        """Max from first frame for display (avoids full data read)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmax
-
-    @property
-    def metadata(self) -> dict:
-        return self._metadata
-
-    def __getitem__(self, key):
-        """Read frames lazily using tf.asarray(key=frame_indices)."""
-        if not isinstance(key, tuple):
-            key = (key,)
-
-        # Parse the key into frame indices
-        t_key = key[0] if len(key) > 0 else slice(None)
-        z_key = key[1] if len(key) > 1 else slice(None)
-        y_key = key[2] if len(key) > 2 else slice(None)
-        x_key = key[3] if len(key) > 3 else slice(None)
-
-        # Convert to list of frame indices
-        frames = listify_index(t_key, self._num_frames)
-        if not frames:
-            return np.empty((0, 1) + self._page_shape, dtype=self.dtype)
-
-        # Read the requested frames
-        out = self._read_frames(frames)
-
-        # Apply spatial slicing if needed
-        if y_key != slice(None) or x_key != slice(None):
-            out = out[:, :, y_key, x_key]
-
-        # Handle z dimension (always 1 for generic TIFFs)
-        z_indices = listify_index(z_key, 1)
-        if z_indices != [0]:
-            out = out[:, z_indices, :, :]
-
-        # Squeeze dimensions for integer indices
-        squeeze_axes = []
-        if isinstance(t_key, int):
-            squeeze_axes.append(0)
-        if isinstance(z_key, int):
-            squeeze_axes.append(1)  # z is always axis 1 before any squeeze
-        if squeeze_axes:
-            out = np.squeeze(out, axis=tuple(squeeze_axes))
-
-        # Apply dtype conversion if astype() was called
-        if self._target_dtype is not None:
-            out = out.astype(self._target_dtype)
-
-        return out
-
-    def _read_frames(self, frames: list[int]) -> np.ndarray:
-        """Read specific frame indices across all files."""
-        buf = np.empty(
-            (len(frames), 1, self._page_shape[0], self._page_shape[1]), dtype=self._dtype
-        )
-
-        start = 0
-        frame_to_buf_idx = {f: i for i, f in enumerate(frames)}
-
-        for tf, nframes in zip(self.tiff_files, self._frames_per_file):
-            end = start + nframes
-            # Find which requested frames are in this file
-            file_frames = [f for f in frames if start <= f < end]
-            if not file_frames:
-                start = end
-                continue
-
-            # Convert global frame indices to local file indices
-            local_indices = [f - start for f in file_frames]
-
-            with self._tiff_lock:
-                try:
-                    chunk = tf.asarray(key=local_indices)
-                except Exception as e:
-                    raise IOError(
-                        f"TiffArray: Failed to read frames {local_indices} from {tf.filename}\n"
-                        f"File may be corrupted or incomplete.\n"
-                        f": {type(e).__name__}: {e}"
-                    ) from e
-
-            # Handle single frame case where asarray returns 2D
-            if chunk.ndim == 2:
-                chunk = chunk[np.newaxis, ...]
-
-            # Copy to output buffer
-            for local_idx, global_frame in zip(local_indices, file_frames):
-                buf_idx = frame_to_buf_idx[global_frame]
-                chunk_idx = local_indices.index(local_idx)
-                buf[buf_idx, 0] = chunk[chunk_idx]
-
-            start = end
-
-        return buf
-
-    def astype(self, dtype, copy=True):
-        """Set target dtype for lazy conversion on data access."""
-        self._target_dtype = np.dtype(dtype)
-        return self
-
-    def __array__(self):
-        """Return first 10 frames as numpy array."""
-        n = min(10, self._num_frames)
-        return self[:n]
-
-    def imshow(self, **kwargs):
-        import fastplotlib as fpl
-
-        histogram_widget = kwargs.get("histogram_widget", True)
-        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
-        window_funcs = kwargs.get("window_funcs", None)
-        return fpl.ImageWidget(
-            data=self,
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
-            window_funcs=window_funcs,
-        )
-
-    def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite=False,
-        target_chunk_mb=50,
-        ext=".tiff",
-        progress_callback=None,
-        debug=None,
-        planes=None,
-        **kwargs,
-    ):
-        """Write TiffArray to disk in various formats."""
-        return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            **kwargs,
-        )
-
-
-class TiffVolumeArray(ReductionMixin):
-    """
-    Reader for directories containing plane TIFF files as a 4D volume.
-
-    Presents data as (T, Z, Y, X) by stacking individual plane TIFFs along
-    the Z dimension. Each plane is loaded lazily via TiffArray.
-
-    Parameters
-    ----------
-    directory : str or Path
-        Path to directory containing plane TIFF files (e.g., plane01.tiff).
-    plane_files : list[Path], optional
-        Explicit list of plane files to use. If not provided, auto-detected.
-
-    Attributes
-    ----------
-    shape : tuple[int, int, int, int]
-        Shape as (T, Z, Y, X).
-    dtype : np.dtype
-        Data type.
-    planes : list[TiffArray]
-        Individual plane arrays.
-
-    Examples
-    --------
-    >>> arr = TiffVolumeArray("tiff_output/")
-    >>> arr.shape
-    (10000, 14, 512, 512)
-    >>> frame = arr[0]  # Get first frame across all planes
-    >>> plane7 = arr[:, 6]  # Get all frames from plane 7 (0-indexed)
-    """
-
-    def __init__(
-        self,
-        directory: str | Path,
-        plane_files: Sequence[Path] | None = None,
-    ):
-        self.directory = Path(directory)
-        if not self.directory.exists():
-            raise FileNotFoundError(f"Directory not found: {self.directory}")
-
-        # Find plane files
-        if plane_files is None:
-            plane_files = find_tiff_plane_files(self.directory)
-
-        if not plane_files:
-            raise ValueError(
-                f"No TIFF plane files found in {self.directory}. "
-                "Expected files matching pattern 'planeXX.tiff'."
-            )
-
-        # Load each plane as TiffArray
-        self.planes: list[TiffArray] = []
-        self.filenames = []
-        for pfile in plane_files:
-            arr = TiffArray(pfile)
-            self.planes.append(arr)
-            self.filenames.append(pfile)
-
-        # Validate consistent shapes across planes
-        # TiffArray shape is (T, 1, Y, X) - we check Y, X dimensions
-        shapes = [(p.shape[2], p.shape[3]) for p in self.planes]
-        if len(set(shapes)) != 1:
-            raise ValueError(f"Inconsistent spatial shapes across planes: {shapes}")
-
-        nframes = [p.shape[0] for p in self.planes]
-        if len(set(nframes)) != 1:
-            logger.warning(
-                f"Inconsistent frame counts across planes: {nframes}. "
-                f"Using minimum: {min(nframes)}"
-            )
-
-        self._nframes = min(nframes)
-        self._nz = len(self.planes)
-        self._ly, self._lx = shapes[0]
-        self._dtype = self.planes[0]._dtype
-        self._target_dtype = None
-
-        # Aggregate metadata from first plane
-        self._metadata = dict(self.planes[0].metadata)
-        self._metadata["num_planes"] = self._nz
-        self._metadata["plane_files"] = [str(p) for p in plane_files]
-
-        logger.info(
-            f"Loaded TIFF volume: {self._nframes} frames, {self._nz} planes, "
-            f"{self._ly}x{self._lx} px"
-        )
-
-    @property
-    def shape(self) -> tuple[int, int, int, int]:
-        return (self._nframes, self._nz, self._ly, self._lx)
-
-    @property
-    def metadata(self) -> dict:
-        return self._metadata
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise TypeError(f"metadata must be a dict, got {type(value)}")
-        self._metadata = value
-
-    @property
-    def ndim(self) -> int:
-        return 4
-
-    @property
-    def size(self) -> int:
-        return int(np.prod(self.shape))
-
-    @property
-    def num_planes(self) -> int:
-        return self._nz
-
-    @property
-    def dtype(self):
-        return self._target_dtype if self._target_dtype is not None else self._dtype
-
-    def astype(self, dtype, copy=True):
-        """Set target dtype for lazy conversion on data access."""
-        self._target_dtype = np.dtype(dtype)
-        return self
-
-    def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
-        if not hasattr(self, '_cached_vmin'):
-            frame = np.asarray(self[0, 0])
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        """Min from first frame for display (avoids full data read)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        """Max from first frame for display (avoids full data read)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmax
-
-    def __len__(self) -> int:
-        return self._nframes
-
-    def __getitem__(self, key):
-        if not isinstance(key, tuple):
-            key = (key,)
-        key = key + (slice(None),) * (4 - len(key))
-        t_key, z_key, y_key, x_key = key
-
-        # Normalize t_key to respect _nframes limit
-        if isinstance(t_key, slice):
-            start, stop, step = t_key.indices(self._nframes)
-            t_key = slice(start, stop, step)
-        elif isinstance(t_key, int):
-            if t_key < 0:
-                t_key = self._nframes + t_key
-            if t_key >= self._nframes:
-                raise IndexError(
-                    f"Time index {t_key} out of bounds for {self._nframes} frames"
-                )
-
-        # Handle single z index
-        if isinstance(z_key, int):
-            if z_key < 0:
-                z_key = self._nz + z_key
-            if z_key < 0 or z_key >= self._nz:
-                raise IndexError(f"Z index {z_key} out of bounds for {self._nz} planes")
-            # TiffArray returns (T, 1, Y, X), squeeze out the singleton Z
-            out = self.planes[z_key][t_key, 0, y_key, x_key]
-        else:
-            # Handle z slice or full z
-            if isinstance(z_key, slice):
-                z_indices = range(self._nz)[z_key]
-            elif isinstance(z_key, (list, np.ndarray)):
-                z_indices = z_key
-            else:
-                z_indices = range(self._nz)
-
-            # Stack data from selected planes
-            # TiffArray returns (T, 1, Y, X), squeeze out the singleton Z before stacking
-            arrs = [self.planes[i][t_key, 0, y_key, x_key] for i in z_indices]
-            out = np.stack(arrs, axis=1)
-
-        if self._target_dtype is not None:
-            out = out.astype(self._target_dtype)
-        return out
-
-    def __array__(self) -> np.ndarray:
-        """Materialize full array into memory: (T, Z, Y, X)."""
-        arrs = [p[: self._nframes, 0] for p in self.planes]
-        return np.stack(arrs, axis=1)
-
-    def close(self):
-        """Close all TIFF file handles."""
-        for plane in self.planes:
-            for tf in plane.tiff_files:
-                tf.close()
-
-    def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite: bool = False,
-        target_chunk_mb: int = 50,
-        ext: str = ".tiff",
-        progress_callback=None,
-        debug: bool = False,
-        planes: list[int] | int | None = None,
-        **kwargs,
-    ):
-        """Write TiffVolumeArray to disk in various formats."""
         return _imwrite_base(
             self,
             outpath,
@@ -925,12 +800,10 @@ class MboRawArray(ReductionMixin):
         self.tiff_files = [TiffFile(f) for f in self.filenames]
         self._tiff_lock = threading.Lock()
 
-        # Initialize data attributes first (needed for roi setter validation)
         self._metadata = get_metadata(self.filenames)
         self.num_channels = self._metadata["num_planes"]
         self.num_rois = self._metadata.get("num_rois", 1)
 
-        # Now set roi (this will call the setter which validates)
         self._roi = roi
         self.roi = roi
 
@@ -946,7 +819,6 @@ class MboRawArray(ReductionMixin):
         self.show_pbar = False
         self.logger = logger
 
-        # Debug flags
         self.debug_flags = {
             "frame_idx": True,
             "roi_array_shape": False,
@@ -962,7 +834,6 @@ class MboRawArray(ReductionMixin):
         self._rois = self._extract_roi_info()
 
     def _extract_roi_info(self):
-        """Extract ROI positions and dimensions from metadata."""
         roi_groups = self._metadata["roi_groups"]
         if isinstance(roi_groups, dict):
             roi_groups = [roi_groups]
@@ -971,7 +842,6 @@ class MboRawArray(ReductionMixin):
         actual_page_height = self._page_height
         num_fly_to_lines = self._metadata.get("num_fly_to_lines", 0)
 
-        # Get heights from metadata
         heights_from_metadata = []
         for roi_data in roi_groups:
             scanfields = roi_data["scanfields"]
@@ -979,7 +849,6 @@ class MboRawArray(ReductionMixin):
                 scanfields = scanfields[0]
             heights_from_metadata.append(scanfields["pixelResolutionXY"][1])
 
-        # Calculate actual heights proportionally
         total_metadata_height = sum(heights_from_metadata)
         total_available_height = (
             actual_page_height - (len(roi_groups) - 1) * num_fly_to_lines
@@ -999,7 +868,6 @@ class MboRawArray(ReductionMixin):
                 remaining_height -= height
             actual_heights.append(height)
 
-        # Build ROI info
         rois = []
         y_offset = 0
 
@@ -1027,13 +895,11 @@ class MboRawArray(ReductionMixin):
 
     @property
     def dtype(self):
-        """Return target dtype if set via astype(), otherwise source dtype."""
         return (
             self._target_dtype if self._target_dtype is not None else self._source_dtype
         )
 
     def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
         if not hasattr(self, '_cached_vmin'):
             frame = self[0, 0]
             self._cached_vmin = float(frame.min())
@@ -1041,13 +907,11 @@ class MboRawArray(ReductionMixin):
 
     @property
     def vmin(self) -> float:
-        """Min from first frame for display (avoids full data read)."""
         self._compute_frame_vminmax()
         return self._cached_vmin
 
     @property
     def vmax(self) -> float:
-        """Max from first frame for display (avoids full data read)."""
         self._compute_frame_vminmax()
         return self._cached_vmax
 
@@ -1076,7 +940,6 @@ class MboRawArray(ReductionMixin):
 
     @property
     def rois(self):
-        """ROI info dict list."""
         return self._rois
 
     @property
@@ -1126,7 +989,6 @@ class MboRawArray(ReductionMixin):
 
     @property
     def border(self):
-        """Border pixels to exclude from phase correlation."""
         return self._border
 
     @border.setter
@@ -1135,7 +997,6 @@ class MboRawArray(ReductionMixin):
 
     @property
     def max_offset(self):
-        """Maximum allowed pixel offset for phase correction."""
         return self._max_offset
 
     @max_offset.setter
@@ -1144,7 +1005,6 @@ class MboRawArray(ReductionMixin):
 
     @property
     def upsample(self):
-        """Upsampling factor for subpixel phase correlation."""
         return self._upsample
 
     @upsample.setter
@@ -1167,7 +1027,6 @@ class MboRawArray(ReductionMixin):
 
     @roi.setter
     def roi(self, value):
-        # Validate ROI bounds
         if value is not None and value != 0:
             if isinstance(value, int):
                 if value < 1 or value > self.num_rois:
@@ -1230,8 +1089,6 @@ class MboRawArray(ReductionMixin):
 
             frame_idx = [pages[i] - start for i in idxs]
 
-            # for small reads, do single locked read
-            # for large reads, chunk to avoid blocking other threads
             if len(frame_idx) <= 4:
                 with self._tiff_lock:
                     try:
@@ -1243,7 +1100,6 @@ class MboRawArray(ReductionMixin):
                             f": {type(e).__name__}: {e}"
                         ) from e
             else:
-                # chunked read - release lock between chunks to allow other threads
                 chunks = []
                 for fi in frame_idx:
                     with self._tiff_lock:
@@ -1315,7 +1171,6 @@ class MboRawArray(ReductionMixin):
             else:
                 out = np.squeeze(out, axis=tuple(squeeze))
 
-        # Convert dtype if astype() was called
         if self._target_dtype is not None:
             if isinstance(out, tuple):
                 out = tuple(x.astype(self._target_dtype) for x in out)
@@ -1325,13 +1180,6 @@ class MboRawArray(ReductionMixin):
         return out
 
     def process_rois(self, frames, chans):
-        """Dispatch ROI processing.
-
-        For multi-ROI modes, reads full pages once and applies phase correction
-        before slicing by ROI. This ensures consistent offset across all ROIs
-        (since scan phase offset is a property of the scan, not individual ROIs).
-        """
-        # single ROI mode - read only that ROI's data
         if self.roi is not None and isinstance(self.roi, int) and self.roi != 0:
             return self._read_pages(
                 frames, chans,
@@ -1339,25 +1187,20 @@ class MboRawArray(ReductionMixin):
                 xslice=slice(None),
             )
 
-        # multi-ROI modes: read full page once, apply phase correction, then slice
-        # this is more efficient (single read) and correct (single offset for entire scan)
         full_data = self._read_pages(frames, chans, yslice=slice(None), xslice=slice(None))
 
         if self.roi is not None:
             if isinstance(self.roi, list):
-                # return tuple of selected ROIs
                 return tuple(
                     full_data[:, :, self._rois[r - 1]["slice"], :]
                     for r in self.roi
                 )
             elif self.roi == 0:
-                # return tuple of all ROIs split
                 return tuple(
                     full_data[:, :, self._rois[r]["slice"], :]
                     for r in range(self.num_rois)
                 )
 
-        # roi=None: horizontally concatenate all ROIs
         total_width = sum(roi["width"] for roi in self._rois)
         max_height = max(roi["height"] for roi in self._rois)
         out = np.zeros(
@@ -1374,12 +1217,10 @@ class MboRawArray(ReductionMixin):
 
     @property
     def num_planes(self):
-        """Alias for num_channels (ScanImage terminology)."""
         return self.num_channels
 
     @property
     def shape(self):
-        """Shape is relative to the current ROI."""
         if self.roi is not None:
             if not isinstance(self.roi, (list, tuple)):
                 if self.roi > 0:
@@ -1390,7 +1231,6 @@ class MboRawArray(ReductionMixin):
                         roi["height"],
                         roi["width"],
                     )
-        # roi = None: return horizontally concatenated shape
         total_width = sum(roi["width"] for roi in self._rois)
         max_height = max(roi["height"] for roi in self._rois)
         return (
@@ -1401,13 +1241,11 @@ class MboRawArray(ReductionMixin):
         )
 
     def size(self):
-        """Total number of elements."""
         total_width = sum(roi["width"] for roi in self._rois)
         max_height = max(roi["height"] for roi in self._rois)
         return self.num_frames * self.num_channels * max_height * total_width
 
     def astype(self, dtype, copy=True):
-        """Set target dtype for lazy conversion on data access."""
         self._target_dtype = np.dtype(dtype)
         return self
 
@@ -1420,24 +1258,10 @@ class MboRawArray(ReductionMixin):
         return self._metadata["page_width"]
 
     def __array__(self, max_frames: int = 100):
-        """
-        Return array representation using random frame subsampling.
-
-        For large arrays, randomly samples frames to avoid loading entire dataset.
-        This is more representative than strided subsampling for min/max estimation.
-
-        Parameters
-        ----------
-        max_frames : int, default 100
-            Maximum number of frames to sample. If array has more frames,
-            random sampling is used.
-        """
         if self.num_frames <= max_frames:
-            # Small enough to load entirely
             return np.asarray(self[:])
 
-        # Random sampling for large arrays
-        rng = np.random.default_rng(42)  # Fixed seed for reproducibility
+        rng = np.random.default_rng(42)
         sample_frames = sorted(rng.choice(self.num_frames, max_frames, replace=False).tolist())
         return np.asarray(self[sample_frames])
 
@@ -1452,7 +1276,6 @@ class MboRawArray(ReductionMixin):
         planes=None,
         **kwargs,
     ):
-        """Write MboRawArray to disk in various formats."""
         return _imwrite_base(
             self,
             outpath,
@@ -1484,7 +1307,6 @@ class MboRawArray(ReductionMixin):
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (600, 600)})
         window_funcs = kwargs.get("window_funcs", None)
 
-        # Fast vmin/vmax from single frame (no phase correction overhead)
         sample_frame = arrays[0][0]
         vmin, vmax = float(sample_frame.min()), float(sample_frame.max())
 
