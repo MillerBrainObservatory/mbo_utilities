@@ -1,6 +1,6 @@
 (cli_usage)=
 
-# CLI Guide
+# CLI Reference
 
 The `mbo` command provides tools for viewing, converting, and analyzing imaging data.
 
@@ -12,6 +12,7 @@ The `mbo` command provides tools for viewing, converting, and analyzing imaging 
 | `mbo view` | view data in gui |
 | `mbo convert` | convert between formats |
 | `mbo info` | show array info |
+| `mbo scanphase` | analyze scan-phase offset |
 | `mbo download` | download files from github |
 | `mbo formats` | list supported formats |
 
@@ -62,6 +63,27 @@ mbo info /data/raw.tiff
 mbo info /data/volume.zarr
 mbo info /data/suite2p/plane0
 ```
+
+## Scan-Phase Analysis
+
+Analyze bidirectional scanning phase offset. See [scanphase](scanphase) for interpreting results.
+
+```bash
+mbo scanphase                             # file dialog
+mbo scanphase /path/to/data.tiff          # analyze file
+mbo scanphase ./folder/ -n 5              # first 5 tiffs
+mbo scanphase data.tiff -o ./results/     # custom output
+mbo scanphase data.tiff --show            # show plots
+mbo scanphase data.tiff --format pdf      # output as pdf
+```
+
+**Output files:**
+- `temporal.png` - offset time series + histogram
+- `windows.png` - offset vs window size
+- `spatial.png` - spatial heatmaps
+- `zplanes.png` - offset vs depth
+- `parameters.png` - offset vs signal intensity
+- `scanphase_results.npz` - numerical data
 
 ## Download
 

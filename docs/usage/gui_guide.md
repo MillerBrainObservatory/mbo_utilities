@@ -10,7 +10,30 @@ Interactive data preview and processing tools for calcium imaging data.
 uv pip install mbo_utilities
 mbo                    # opens file dialog
 mbo /path/to/data      # opens specific file
-mbo /path/to/data --metadata   # metadata only
+mbo /path --metadata   # metadata only
+```
+
+## Features
+
+- time and z-plane sliders
+- window functions (mean, max, std, mean-subtracted)
+- scan-phase correction preview
+- multi-ROI statistics
+- contrast controls (vmin/vmax)
+- suite2p processing integration
+- export to .tiff, .zarr, .bin, .h5
+
+## Supported Formats
+
+| Format | Description |
+|--------|-------------|
+| `.tiff` | raw scanimage, bigtiff, ome-tiff |
+| `.zarr` | zarr v3 arrays |
+| `.bin` | suite2p binary format |
+| `.h5` | hdf5 files |
+
+```{note}
+The full **Data Preview widget** is only available for raw ScanImage tiffs.
 ```
 
 ## Data Selection Dialog
@@ -19,6 +42,15 @@ mbo /path/to/data --metadata   # metadata only
 
 - **Open File(s)**: select specific tiff files
 - **Select Folder**: load all supported files in folder
+
+### Load Options
+
+| Option | Description |
+|--------|-------------|
+| Separate ScanImage mROIs | split multi-ROI acquisitions |
+| Enable Threading | parallel loading |
+| Enable Data Preview Widget | full preview with window functions |
+| Metadata Preview Only | show only metadata |
 
 ## Preview Widget
 
@@ -35,6 +67,26 @@ mbo /path/to/data --metadata   # metadata only
 
 - **Window Size**: frames to include (3-20 recommended)
 - **sigma**: spatial gaussian filter
+
+### Scan-Phase Correction
+
+Preview bidirectional phase correction before saving.
+
+| Parameter | Description |
+|-----------|-------------|
+| Fix Phase | enable/disable correction |
+| Sub-Pixel | FFT-based sub-pixel correction |
+| Upsample | sub-pixel precision (1/N pixel) |
+| Exclude border-px | exclude edge pixels |
+| max-offset | limit allowed offset |
+
+**Workflow:**
+
+1. view mean-subtracted projection (window 3-15)
+2. toggle Fix Phase on/off to compare
+3. adjust border-px and max-offset
+4. toggle Sub-Pixel for improvement
+5. adjust Upsample if needed (2-3 typical)
 
 ### Summary Stats
 
@@ -66,14 +118,23 @@ Access via **File → Save As** or **Process** tab.
 | Save mROI Separately | separate file per mROI |
 | Overwrite | replace existing files |
 | Register Z-Planes | suite3d axial registration |
+| Fix Scan Phase | apply phase correction |
+| Subpixel Phase Correction | FFT-based correction |
 | Chunk Size (MB) | memory chunk size |
 
 ## Suite2p Processing
 
-Access via **Run** tab.
+Access via **Process** tab.
 
-- run suite2p on selected z-plane or multi-zplane
+- run suite2p on selected z-plane
 - all parameters exposed with descriptions
+- crop selector for spatial subset
+
+### Spatial Crop
+
+1. click "Add Crop Selector"
+2. drag yellow rectangle on image
+3. only cropped region is processed
 
 ## Python API
 
