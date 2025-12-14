@@ -11,6 +11,7 @@ from imgui_bundle import (
     portable_file_dialogs as pfd,
 )
 from mbo_utilities.graphics._widgets import set_tooltip
+from mbo_utilities.file_io import get_package_assets_path
 from mbo_utilities.preferences import (
     get_default_open_dir,
     get_last_dir,
@@ -22,10 +23,19 @@ from mbo_utilities.preferences import (
 
 
 def setup_imgui():
-    assets = Path(mbo.get_mbo_dirs()["base"]) / "imgui" / "assets"
-    fonts_dst = assets / "fonts"
+    """set up hello_imgui assets folder, copying package assets to user config."""
+    package_assets = get_package_assets_path()
+    user_assets = Path(mbo.get_mbo_dirs()["base"]) / "imgui" / "assets"
+
+    # copy package assets to user config directory
+    user_assets.mkdir(parents=True, exist_ok=True)
+    if package_assets.is_dir():
+        shutil.copytree(package_assets, user_assets, dirs_exist_ok=True)
+
+    # also copy imgui_bundle default fonts as fallback
+    fonts_dst = user_assets / "fonts"
     fonts_dst.mkdir(parents=True, exist_ok=True)
-    (assets / "static").mkdir(parents=True, exist_ok=True)
+    (user_assets / "static").mkdir(parents=True, exist_ok=True)
 
     fonts_src = Path(imgui_bundle.__file__).parent / "assets" / "fonts"
     for p in fonts_src.rglob("*"):
@@ -35,6 +45,7 @@ def setup_imgui():
                 d.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(p, d)
 
+    # ensure roboto fonts exist for markdown rendering
     roboto_dir = fonts_dst / "Roboto"
     roboto_dir.mkdir(parents=True, exist_ok=True)
     required = [
@@ -49,7 +60,8 @@ def setup_imgui():
             need.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(fallback, need)
 
-    hello_imgui.set_assets_folder(str(assets))
+    # set hello_imgui assets folder (icon.png must be in assets/app_settings/)
+    hello_imgui.set_assets_folder(str(user_assets))
 
 
 # setup_imgui()

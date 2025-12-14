@@ -290,9 +290,8 @@ def create_page2(c, width, height):
 
     arrays = [
         "MboRawArray - Raw ScanImage multi-ROI with phase correction",
-        "TiffArray / MBOTiffArray - Standard/Dask-backed TIFF",
-        "TiffVolumeArray - Directory of planeXX.tiff files",
-        "Suite2pArray / Suite2pVolumeArray - Suite2p output",
+        "TiffArray / MBOTiffArray - Standard/Dask-backed TIFF (auto-detects volumes)",
+        "Suite2pArray - Suite2p output (auto-detects volumes)",
         "ZarrArray - OME-Zarr / Zarr v3 stores",
         "H5Array - HDF5 datasets",
         "NumpyArray - .npy files or in-memory arrays",

@@ -43,14 +43,12 @@ from mbo_utilities.arrays.numpy import NumpyArray
 from mbo_utilities.arrays.nwb import NWBArray
 from mbo_utilities.arrays.suite2p import (
     Suite2pArray,
-    Suite2pVolumeArray,
     find_suite2p_plane_dirs,
 )
 from mbo_utilities.arrays.tiff import (
     MBOTiffArray,
     MboRawArray,
     TiffArray,
-    TiffVolumeArray,
     find_tiff_plane_files,
 )
 from mbo_utilities.arrays.zarr import ZarrArray
@@ -58,10 +56,8 @@ from mbo_utilities.arrays.zarr import ZarrArray
 __all__ = [
     # Array classes
     "Suite2pArray",
-    "Suite2pVolumeArray",
     "H5Array",
     "TiffArray",
-    "TiffVolumeArray",
     "MBOTiffArray",
     "MboRawArray",
     "NumpyArray",

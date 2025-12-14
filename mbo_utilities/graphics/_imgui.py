@@ -6,35 +6,39 @@ from imgui_bundle import imgui, hello_imgui, implot, ImVec4, ImVec2
 from pathlib import Path
 
 from mbo_utilities.file_io import (
-    _get_mbo_project_root,
+    get_package_assets_path,
     get_mbo_dirs,
 )
 
 
 def setup_imgui():
-    project_assets: Path = _get_mbo_project_root().joinpath("assets")
+    """set up imgui assets folder and fonts for hello_imgui windows."""
+    package_assets = get_package_assets_path()
     mbo_dirs = get_mbo_dirs()
 
     imgui_path = mbo_dirs["base"].joinpath("imgui")
     imgui_path.mkdir(exist_ok=True)
 
-    imgui_ini_path = imgui_path.joinpath("imgui.ini")
-    imgui_ini_path.parent.mkdir(exist_ok=True)
+    # set ini file path to user's mbo config directory
+    imgui_ini_path = imgui_path / "imgui.ini"
     imgui.create_context()
-    imgui.get_io().set_ini_filename("/home/flynn/lbm_data/mbo_filesettings.ini")
+    imgui.get_io().set_ini_filename(str(imgui_ini_path))
 
-    if not project_assets.is_dir():
-        ic("Assets folder not found.")
+    if not package_assets.is_dir():
+        ic("Assets folder not found:", package_assets)
         return
 
-    assets_path = imgui_path.joinpath("assets")
-    assets_path.mkdir(exist_ok=True)
+    # copy package assets to user config for hello_imgui
+    user_assets = imgui_path / "assets"
+    user_assets.mkdir(exist_ok=True)
+    shutil.copytree(package_assets, user_assets, dirs_exist_ok=True)
 
-    shutil.copytree(project_assets, assets_path, dirs_exist_ok=True)
-    hello_imgui.set_assets_folder(str(project_assets))
+    # set hello_imgui assets folder (icon.png must be in assets/app_settings/)
+    hello_imgui.set_assets_folder(str(user_assets))
 
+    # load custom font
     font_path = (
-        assets_path / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"
+        user_assets / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"
     )
     try:
         if font_path.is_file():
