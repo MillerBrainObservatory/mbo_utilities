@@ -19,14 +19,22 @@ from mbo_utilities.preferences import (
     get_gui_preference,
     set_gui_preference,
 )
+from mbo_utilities.file_io import get_package_assets_path
 
 
 def setup_imgui():
-    assets = Path(mbo.get_mbo_dirs()["base"]) / "imgui" / "assets"
-    fonts_dst = assets / "fonts"
-    fonts_dst.mkdir(parents=True, exist_ok=True)
-    (assets / "static").mkdir(parents=True, exist_ok=True)
+    """set up hello_imgui assets folder, copying package assets to user config."""
+    user_assets = Path(mbo.get_mbo_dirs()["base"]) / "imgui" / "assets"
+    user_assets.mkdir(parents=True, exist_ok=True)
 
+    # copy package assets (icon, fonts, static) to user config
+    package_assets = get_package_assets_path()
+    if package_assets.is_dir():
+        shutil.copytree(package_assets, user_assets, dirs_exist_ok=True)
+
+    # also copy imgui_bundle fonts as fallback
+    fonts_dst = user_assets / "fonts"
+    fonts_dst.mkdir(parents=True, exist_ok=True)
     fonts_src = Path(imgui_bundle.__file__).parent / "assets" / "fonts"
     for p in fonts_src.rglob("*"):
         if p.is_file():
@@ -35,6 +43,7 @@ def setup_imgui():
                 d.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(p, d)
 
+    # ensure required fonts exist (use fallback if needed)
     roboto_dir = fonts_dst / "Roboto"
     roboto_dir.mkdir(parents=True, exist_ok=True)
     required = [
@@ -49,7 +58,7 @@ def setup_imgui():
             need.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(fallback, need)
 
-    hello_imgui.set_assets_folder(str(assets))
+    hello_imgui.set_assets_folder(str(user_assets))
 
 
 # setup_imgui()
