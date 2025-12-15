@@ -116,12 +116,13 @@ class FileDialog:
         self.selected_path = None
         self._open_multi = None
         self._select_folder = None
-        # Load saved GUI preferences
-        self._widget_enabled = get_gui_preference("widget_enabled", True)
-        self.metadata_only = get_gui_preference("metadata_only", False)
-        self.split_rois = get_gui_preference("split_rois", False)
+        # fixed options (always enabled)
+        self._widget_enabled = True
+        self.metadata_only = False
+        self.split_rois = False
+        # load update checker preference
         self.show_update_checker = get_gui_preference("show_update_checker", True)
-        # Get default directory for file dialogs
+        # get default directory for file dialogs
         self._default_dir = str(get_default_open_dir())
         # upgrade manager for checking pypi updates
         self.upgrade_manager = UpgradeManager(enabled=self.show_update_checker)
@@ -136,9 +137,6 @@ class FileDialog:
 
     def _save_gui_preferences(self):
         """Save current GUI preferences to disk."""
-        set_gui_preference("widget_enabled", self._widget_enabled)
-        set_gui_preference("metadata_only", self.metadata_only)
-        set_gui_preference("split_rois", self.split_rois)
         set_gui_preference("show_update_checker", self.show_update_checker)
 
     def render(self):
@@ -211,8 +209,8 @@ class FileDialog:
             # fixed heights: header ~3em, buttons ~4.5em, quit ~2em, padding ~2em
             fixed_height = hello_imgui.em_size(12)
             available_for_card = win_h - fixed_height
-            # content needs ~22em to fit without scrollbar (formats + options + update checker)
-            content_height = hello_imgui.em_size(22)
+            # content needs ~18em to fit without scrollbar (formats + update checker)
+            content_height = hello_imgui.em_size(18)
             # use available space, but cap at content height (no need to be bigger)
             card_h = min(available_for_card, content_height)
             # minimum height to show at least something useful
@@ -272,15 +270,6 @@ class FileDialog:
                         imgui.table_next_column()
                         imgui.text_colored(COL_TEXT_DIM, ext)
                     imgui.end_table()
-
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
-                imgui.separator()
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
-
-                imgui.text_colored(COL_ACCENT, "Options")
-                _, self._widget_enabled = imgui.checkbox("Preview widget", self._widget_enabled)
-                _, self.split_rois = imgui.checkbox("Separate mROIs", self.split_rois)
-                _, self.metadata_only = imgui.checkbox("Metadata only", self.metadata_only)
 
                 imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
                 imgui.separator()
