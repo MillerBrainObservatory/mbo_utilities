@@ -2,8 +2,16 @@
 
 # MBO Utilities Installation Script for Linux/macOS
 # installs uv if not present, installs mbo_utilities, and creates desktop entry
+#
+# usage:
+#   curl -LsSf https://raw.githubusercontent.com/.../install.sh | bash           # CLI-only
+#   curl -LsSf https://raw.githubusercontent.com/.../install.sh | bash -s -- --env  # full environment
+#
+# the full environment installs to ~/mbo_env and can be used with VSCode/Jupyter
 
 set -euo pipefail
+
+MBO_ENV_PATH="${MBO_ENV_PATH:-$HOME/mbo_env}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -68,6 +76,48 @@ install_mbo() {
     info "Installing mbo_utilities using uv..."
     uv tool install mbo_utilities --from git+https://github.com/millerbrainobservatory/mbo_utilities.git
     success "mbo_utilities installed successfully"
+}
+
+install_mbo_env() {
+    local env_path="${1:-$MBO_ENV_PATH}"
+
+    info "Creating full MBO environment at: $env_path"
+
+    if ! check_uv_installed; then
+        install_uv
+    fi
+
+    # create venv
+    info "Creating virtual environment..."
+    uv venv "$env_path" --python 3.11
+
+    # install mbo_utilities with all extras
+    info "Installing mbo_utilities (this may take a few minutes)..."
+    uv pip install --python "$env_path/bin/python" "mbo_utilities[all] @ git+https://github.com/millerbrainobservatory/mbo_utilities.git"
+
+    # install jupyter for notebook support
+    info "Installing Jupyter..."
+    uv pip install --python "$env_path/bin/python" jupyterlab ipykernel
+
+    # register kernel for jupyter
+    info "Registering Jupyter kernel..."
+    "$env_path/bin/python" -m ipykernel install --user --name mbo --display-name "MBO Utilities"
+
+    success "Environment created at: $env_path"
+    echo ""
+    echo "To use this environment:"
+    echo ""
+    echo -e "${CYAN}VSCode:${NC}"
+    echo "  1. Open VSCode"
+    echo "  2. Press Ctrl+Shift+P -> 'Python: Select Interpreter'"
+    echo "  3. Choose: $env_path/bin/python"
+    echo ""
+    echo -e "${CYAN}JupyterLab:${NC}"
+    echo "  $env_path/bin/jupyter-lab"
+    echo ""
+    echo -e "${CYAN}Terminal:${NC}"
+    echo "  source $env_path/bin/activate"
+    echo ""
 }
 
 create_desktop_entry_linux() {
@@ -173,6 +223,27 @@ EOF
 }
 
 main() {
+    local install_env=false
+    local env_path="$MBO_ENV_PATH"
+
+    # parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --env)
+                install_env=true
+                shift
+                ;;
+            --env-path)
+                env_path="$2"
+                install_env=true
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
     echo ""
     echo -e "${CYAN}  __  __ ____   ___  ${NC}"
     echo -e "${CYAN} |  \\/  | __ ) / _ \\ ${NC}"
@@ -189,6 +260,7 @@ main() {
         install_uv
     fi
 
+    # install CLI tool
     install_mbo
 
     if [[ "$PLATFORM" == "linux" ]]; then
@@ -197,12 +269,23 @@ main() {
         create_desktop_entry_macos
     fi
 
+    # optionally install full environment
+    if [[ "$install_env" == true ]]; then
+        echo ""
+        install_mbo_env "$env_path"
+    fi
+
     if command -v mbo &> /dev/null; then
         success "Installation completed successfully!"
         echo ""
         echo "You can now:"
         echo "  - Double-click the 'MBO Utilities' icon on your desktop"
         echo "  - Or run 'mbo' from any terminal"
+        if [[ "$install_env" == false ]]; then
+            echo ""
+            echo -e "${YELLOW}For VSCode/Jupyter development, re-run with --env:${NC}"
+            echo "  curl -LsSf <url>/install.sh | bash -s -- --env"
+        fi
         echo ""
     else
         warning "Installation completed but 'mbo' command not found"
@@ -210,4 +293,4 @@ main() {
     fi
 }
 
-main
+main "$@"

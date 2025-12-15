@@ -21,6 +21,7 @@ from mbo_utilities.preferences import (
     set_gui_preference,
 )
 from mbo_utilities.file_io import get_package_assets_path
+from mbo_utilities.graphics.upgrade_manager import UpgradeManager
 
 
 def setup_imgui():
@@ -119,8 +120,11 @@ class FileDialog:
         self._widget_enabled = get_gui_preference("widget_enabled", True)
         self.metadata_only = get_gui_preference("metadata_only", False)
         self.split_rois = get_gui_preference("split_rois", False)
+        self.show_update_checker = get_gui_preference("show_update_checker", True)
         # Get default directory for file dialogs
         self._default_dir = str(get_default_open_dir())
+        # upgrade manager for checking pypi updates
+        self.upgrade_manager = UpgradeManager(enabled=self.show_update_checker)
 
     @property
     def widget_enabled(self):
@@ -135,6 +139,7 @@ class FileDialog:
         set_gui_preference("widget_enabled", self._widget_enabled)
         set_gui_preference("metadata_only", self.metadata_only)
         set_gui_preference("split_rois", self.split_rois)
+        set_gui_preference("show_update_checker", self.show_update_checker)
 
     def render(self):
         # global style - high contrast for visibility
@@ -206,8 +211,8 @@ class FileDialog:
             # fixed heights: header ~3em, buttons ~4.5em, quit ~2em, padding ~2em
             fixed_height = hello_imgui.em_size(12)
             available_for_card = win_h - fixed_height
-            # content needs ~14em to fit without scrollbar
-            content_height = hello_imgui.em_size(14)
+            # content needs ~22em to fit without scrollbar (formats + options + update checker)
+            content_height = hello_imgui.em_size(22)
             # use available space, but cap at content height (no need to be bigger)
             card_h = min(available_for_card, content_height)
             # minimum height to show at least something useful
@@ -276,6 +281,71 @@ class FileDialog:
                 _, self._widget_enabled = imgui.checkbox("Preview widget", self._widget_enabled)
                 _, self.split_rois = imgui.checkbox("Separate mROIs", self.split_rois)
                 _, self.metadata_only = imgui.checkbox("Metadata only", self.metadata_only)
+
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+                imgui.separator()
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+                # update checker section
+                _, self.show_update_checker = imgui.checkbox("Check for updates", self.show_update_checker)
+                self.upgrade_manager.enabled = self.show_update_checker
+
+                if self.show_update_checker:
+                    imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
+
+                    # version info
+                    imgui.text_colored(COL_TEXT_DIM, f"v{self.upgrade_manager.current_version}")
+
+                    if self.upgrade_manager.latest_version:
+                        imgui.same_line()
+                        imgui.text_colored(COL_TEXT_DIM, f"| PyPI: v{self.upgrade_manager.latest_version}")
+
+                    # status
+                    from mbo_utilities.graphics.upgrade_manager import CheckStatus, UpgradeStatus
+
+                    if self.upgrade_manager.check_status == CheckStatus.CHECKING:
+                        imgui.text_colored(COL_TEXT_DIM, "Checking...")
+                    elif self.upgrade_manager.check_status == CheckStatus.ERROR:
+                        imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), "Check failed")
+                    elif self.upgrade_manager.check_status == CheckStatus.DONE:
+                        if self.upgrade_manager.upgrade_available:
+                            imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), "Update available!")
+                        elif self.upgrade_manager.is_dev_build:
+                            imgui.text_colored(COL_TEXT_DIM, "Dev build")
+
+                    # buttons
+                    imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
+                    btn_w = hello_imgui.em_size(7)
+
+                    checking = self.upgrade_manager.check_status == CheckStatus.CHECKING
+                    if checking:
+                        imgui.begin_disabled()
+                    push_button_style(primary=False)
+                    if imgui.button("Check", imgui.ImVec2(btn_w, 0)):
+                        self.upgrade_manager.check_for_upgrade()
+                    pop_button_style()
+                    if checking:
+                        imgui.end_disabled()
+
+                    if self.upgrade_manager.upgrade_available:
+                        imgui.same_line()
+                        upgrading = self.upgrade_manager.upgrade_status == UpgradeStatus.RUNNING
+                        if upgrading:
+                            imgui.begin_disabled()
+                        push_button_style(primary=True)
+                        if imgui.button("Upgrade", imgui.ImVec2(btn_w, 0)):
+                            self.upgrade_manager.start_upgrade()
+                        pop_button_style()
+                        if upgrading:
+                            imgui.end_disabled()
+
+                    # upgrade status message
+                    if self.upgrade_manager.upgrade_status == UpgradeStatus.RUNNING:
+                        imgui.text_colored(COL_TEXT_DIM, "Upgrading...")
+                    elif self.upgrade_manager.upgrade_status == UpgradeStatus.SUCCESS:
+                        imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), "Restart to apply")
+                    elif self.upgrade_manager.upgrade_status == UpgradeStatus.ERROR:
+                        imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), "Upgrade failed")
 
                 imgui.unindent(hello_imgui.em_size(0.4))
             imgui.pop_style_var()

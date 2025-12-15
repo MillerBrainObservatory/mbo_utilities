@@ -12,6 +12,70 @@ from typing import Any, Optional, Union
 
 import click
 
+
+def _get_version() -> str:
+    """Get the current mbo_utilities version."""
+    try:
+        import mbo_utilities
+        return getattr(mbo_utilities, "__version__", "unknown")
+    except ImportError:
+        return "unknown"
+
+
+def _check_for_upgrade() -> tuple[str, str | None]:
+    """Check PyPI for newer version of mbo_utilities.
+
+    Returns (current_version, latest_version) or (current_version, None) if check fails.
+    """
+    import urllib.request
+    import json
+
+    current = _get_version()
+
+    try:
+        url = "https://pypi.org/pypi/mbo-utilities/json"
+        with urllib.request.urlopen(url, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            latest = data["info"]["version"]
+            return current, latest
+    except Exception:
+        return current, None
+
+
+def _print_upgrade_status():
+    """Print upgrade status to console."""
+    current, latest = _check_for_upgrade()
+
+    click.echo(f"Current version: {current}")
+
+    if latest is None:
+        click.secho("Could not check for updates (network error or package not on PyPI)", fg="yellow")
+        return
+
+    click.echo(f"Latest version:  {latest}")
+
+    if current == "unknown":
+        click.secho("Could not determine current version", fg="yellow")
+    elif current == latest:
+        click.secho("You are running the latest version!", fg="green")
+    else:
+        # simple version comparison (works for semver)
+        try:
+            from packaging.version import parse
+            if parse(current) < parse(latest):
+                click.secho(f"\nUpgrade available! Run:", fg="cyan")
+                click.secho(f"  uv pip install --upgrade mbo-utilities", fg="cyan", bold=True)
+                click.echo("  or")
+                click.secho(f"  pip install --upgrade mbo-utilities", fg="cyan", bold=True)
+            else:
+                click.secho("You are running a newer version than PyPI (dev build)", fg="green")
+        except ImportError:
+            # no packaging module, do string comparison
+            if current != latest:
+                click.secho(f"\nDifferent version on PyPI. To upgrade:", fg="cyan")
+                click.secho(f"  uv pip install --upgrade mbo-utilities", fg="cyan", bold=True)
+
+
 def _download_notebook_file(
     output_path: Optional[Union[str, Path]] = None,
     notebook_url: Optional[str] = None,
@@ -344,7 +408,7 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "MBO Utilities – Data Selection"
-    params.app_window_params.window_geometry.size = (420, 480)
+    params.app_window_params.window_geometry.size = (420, 620)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = True
     params.ini_filename = str(
@@ -621,6 +685,12 @@ def run_gui(
 
 
 @click.command()
+@click.version_option(version=_get_version(), prog_name="mbo-utilities")
+@click.option(
+    "--check-upgrade",
+    is_flag=True,
+    help="Check if a newer version is available on PyPI.",
+)
 @click.option(
     "--roi",
     multiple=True,
@@ -661,9 +731,14 @@ def run_gui(
     help="Verify the installation of mbo_utilities and dependencies.",
 )
 @click.argument("data_in", required=False)
-def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, select_only=False, download_notebook=False, notebook_url=None, check_install=False):
+def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, select_only=False, download_notebook=False, notebook_url=None, check_install=False, check_upgrade=False):
     """CLI entry point for mbo-gui command."""
-    # Handle installation check first (light operation)
+    # Handle upgrade check first (light operation)
+    if check_upgrade:
+        _print_upgrade_status()
+        return
+
+    # Handle installation check (light operation)
     if check_install:
         _check_installation()
         if download_notebook:

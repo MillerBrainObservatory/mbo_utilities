@@ -18,6 +18,60 @@ from typing import Optional, Union
 import click
 
 
+def _get_version() -> str:
+    """Get the current mbo_utilities version."""
+    try:
+        import mbo_utilities
+        return getattr(mbo_utilities, "__version__", "unknown")
+    except ImportError:
+        return "unknown"
+
+
+def _check_for_upgrade() -> tuple[str, str | None]:
+    """Check PyPI for newer version."""
+    import urllib.request
+    import json
+
+    current = _get_version()
+    try:
+        url = "https://pypi.org/pypi/mbo-utilities/json"
+        with urllib.request.urlopen(url, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            return current, data["info"]["version"]
+    except Exception:
+        return current, None
+
+
+def _print_upgrade_status():
+    """Print upgrade status to console."""
+    current, latest = _check_for_upgrade()
+
+    click.echo(f"Current version: {current}")
+
+    if latest is None:
+        click.secho("Could not check for updates (network error or not on PyPI)", fg="yellow")
+        return
+
+    click.echo(f"Latest version:  {latest}")
+
+    if current == "unknown":
+        click.secho("Could not determine current version", fg="yellow")
+    elif current == latest:
+        click.secho("You are running the latest version!", fg="green")
+    else:
+        try:
+            from packaging.version import parse
+            if parse(current) < parse(latest):
+                click.secho(f"\nUpgrade available! Run:", fg="cyan")
+                click.secho(f"  uv pip install --upgrade mbo-utilities", fg="cyan", bold=True)
+            else:
+                click.secho("You are running a newer version than PyPI (dev build)", fg="green")
+        except ImportError:
+            if current != latest:
+                click.secho(f"\nDifferent version on PyPI. To upgrade:", fg="cyan")
+                click.secho(f"  uv pip install --upgrade mbo-utilities", fg="cyan", bold=True)
+
+
 class PathAwareGroup(click.Group):
     """Custom click Group that routes file paths to the 'view' command.
 
@@ -114,6 +168,12 @@ def download_notebook(
     return output_file
 
 @click.group(cls=PathAwareGroup, invoke_without_command=True)
+@click.version_option(version=_get_version(), prog_name="mbo-utilities")
+@click.option(
+    "--check-upgrade",
+    is_flag=True,
+    help="Check if a newer version is available on PyPI.",
+)
 @click.option(
     "--download-notebook",
     is_flag=True,
@@ -147,6 +207,7 @@ def download_notebook(
 @click.pass_context
 def main(
     ctx,
+    check_upgrade=False,
     download_notebook=False,
     notebook_url=None,
     download_file_url=None,
@@ -171,9 +232,15 @@ def main(
 
     \b
     Utilities:
+      mbo --version                       Show version
+      mbo --check-upgrade                 Check for updates
       mbo --download-notebook             Download user guide notebook
       mbo --check-install                 Verify installation
     """
+    if check_upgrade:
+        _print_upgrade_status()
+        return
+
     if download_file_url:
         download_file(download_file_url, output_path)
         return

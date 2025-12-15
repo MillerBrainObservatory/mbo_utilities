@@ -1,7 +1,16 @@
 # MBO Utilities Installation Script for Windows
 # installs uv if not present, installs mbo_utilities, and creates a desktop shortcut
+#
+# usage:
+#   irm https://raw.githubusercontent.com/.../install.ps1 | iex           # CLI-only install
+#   irm https://raw.githubusercontent.com/.../install.ps1 | iex; Install-MboEnv   # full environment
+#
+# the full environment installs to ~/mbo_env and can be used with VSCode/Jupyter
 
 $ErrorActionPreference = "Stop"
+
+# default install location for full environment
+$MBO_ENV_PATH = Join-Path $env:USERPROFILE "mbo_env"
 
 # colors for output
 function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Blue }
@@ -128,6 +137,68 @@ function New-DesktopShortcut {
     Write-Success "Desktop shortcut created at: $shortcutPath"
 }
 
+function Install-MboEnv {
+    <#
+    .SYNOPSIS
+    Creates a full mbo_utilities environment for use with VSCode/Jupyter.
+
+    .DESCRIPTION
+    Creates a Python virtual environment at ~/mbo_env with mbo_utilities installed.
+    This environment can be selected in VSCode or used to run Jupyter notebooks.
+
+    .PARAMETER Path
+    Installation path. Defaults to ~/mbo_env
+
+    .EXAMPLE
+    Install-MboEnv
+    Install-MboEnv -Path "C:\projects\mbo_env"
+    #>
+    param(
+        [string]$Path = $MBO_ENV_PATH
+    )
+
+    Write-Info "Creating full MBO environment at: $Path"
+
+    # check uv is available
+    if (-not (Test-UvInstalled)) {
+        Install-Uv
+    }
+
+    # create venv
+    Write-Info "Creating virtual environment..."
+    uv venv $Path --python 3.11
+
+    # install mbo_utilities with all extras using uv pip (targets the venv)
+    Write-Info "Installing mbo_utilities (this may take a few minutes)..."
+    uv pip install --python "$Path\Scripts\python.exe" "mbo_utilities[all] @ git+https://github.com/millerbrainobservatory/mbo_utilities.git"
+
+    # install jupyter for notebook support
+    Write-Info "Installing Jupyter..."
+    uv pip install --python "$Path\Scripts\python.exe" jupyterlab ipykernel
+
+    # register kernel for jupyter
+    Write-Info "Registering Jupyter kernel..."
+    & "$Path\Scripts\python.exe" -m ipykernel install --user --name mbo --display-name "MBO Utilities"
+
+    Write-Success "Environment created at: $Path"
+    Write-Host ""
+    Write-Host "To use this environment:" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  VSCode:" -ForegroundColor Cyan
+    Write-Host "    1. Open VSCode" -ForegroundColor Gray
+    Write-Host "    2. Press Ctrl+Shift+P -> 'Python: Select Interpreter'" -ForegroundColor Gray
+    Write-Host "    3. Choose: $Path\Scripts\python.exe" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  JupyterLab:" -ForegroundColor Cyan
+    Write-Host "    $Path\Scripts\jupyter-lab.exe" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Terminal:" -ForegroundColor Cyan
+    Write-Host "    $Path\Scripts\Activate.ps1" -ForegroundColor Gray
+    Write-Host ""
+
+    return $Path
+}
+
 function Main {
     Write-Host ""
     Write-Host "  __  __ ____   ___  " -ForegroundColor Cyan
@@ -144,7 +215,7 @@ function Main {
         Install-Uv
     }
 
-    # install mbo_utilities
+    # install mbo_utilities as CLI tool
     Install-MboUtilities
 
     # create desktop shortcut
@@ -159,6 +230,9 @@ function Main {
         Write-Host "  - Double-click the 'MBO Utilities' icon on your desktop" -ForegroundColor Gray
         Write-Host "  - Or run 'mbo' from any terminal" -ForegroundColor Gray
         Write-Host ""
+        Write-Host "For VSCode/Jupyter development, also run:" -ForegroundColor Yellow
+        Write-Host "  Install-MboEnv" -ForegroundColor Yellow
+        Write-Host ""
     }
     catch {
         Write-Warning "Installation completed but 'mbo' command not found in PATH"
@@ -170,5 +244,8 @@ function Main {
         Write-Host ""
     }
 }
+
+# export functions for use after piping
+Export-ModuleMember -Function Install-MboEnv, Main -ErrorAction SilentlyContinue
 
 Main
