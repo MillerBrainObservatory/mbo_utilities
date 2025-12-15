@@ -408,7 +408,7 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "MBO Utilities – Data Selection"
-    params.app_window_params.window_geometry.size = (420, 480)
+    params.app_window_params.window_geometry.size = (420, 620)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = True
     params.ini_filename = str(
