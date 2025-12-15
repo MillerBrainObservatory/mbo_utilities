@@ -20,6 +20,7 @@ from mbo_utilities.preferences import (
     get_gui_preference,
     set_gui_preference,
 )
+from mbo_utilities.file_io import get_package_assets_path
 
 
 def setup_imgui():
@@ -37,6 +38,14 @@ def setup_imgui():
     fonts_dst.mkdir(parents=True, exist_ok=True)
     (user_assets / "static").mkdir(parents=True, exist_ok=True)
 
+    # copy package assets (icon, fonts, static) to user config
+    package_assets = get_package_assets_path()
+    if package_assets.is_dir():
+        shutil.copytree(package_assets, user_assets, dirs_exist_ok=True)
+
+    # also copy imgui_bundle fonts as fallback
+    fonts_dst = user_assets / "fonts"
+    fonts_dst.mkdir(parents=True, exist_ok=True)
     fonts_src = Path(imgui_bundle.__file__).parent / "assets" / "fonts"
     for p in fonts_src.rglob("*"):
         if p.is_file():

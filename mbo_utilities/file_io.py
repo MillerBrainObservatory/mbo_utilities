@@ -383,6 +383,15 @@ def get_mbo_dirs() -> dict:
     }
 
 
+def get_package_assets_path() -> Path:
+    """Return path to the bundled assets folder in the installed package."""
+    try:
+        import importlib.resources as resources
+        return Path(str(resources.files("mbo_utilities").joinpath("assets")))
+    except (ImportError, TypeError):
+        return _get_mbo_project_root() / "assets"
+
+
 def get_last_savedir_path() -> Path:
     """Return path to settings file tracking last saved folder.
 
