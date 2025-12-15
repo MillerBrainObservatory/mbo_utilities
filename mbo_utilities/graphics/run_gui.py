@@ -317,6 +317,22 @@ def _setup_qt_backend():
         import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
 
 
+def _set_qt_icon():
+    """Set the Qt application window icon. Call after QApplication is created."""
+    try:
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtGui import QIcon
+        from mbo_utilities.file_io import get_package_assets_path
+
+        app = QApplication.instance()
+        if app is not None:
+            icon_path = get_package_assets_path() / "app_settings" / "icon.png"
+            if icon_path.exists():
+                app.setWindowIcon(QIcon(str(icon_path)))
+    except Exception:
+        pass  # icon is non-critical
+
+
 def _select_file() -> tuple[Any, Any, Any, bool]:
     """Show file selection dialog and return user choices."""
     from mbo_utilities.file_io import get_mbo_dirs
@@ -356,6 +372,9 @@ def _show_metadata_viewer(metadata: dict) -> None:
     """Show metadata in an ImGui window."""
     from imgui_bundle import immapp, hello_imgui
     from mbo_utilities.graphics._widgets import draw_metadata_inspector
+    from mbo_utilities.graphics._file_dialog import setup_imgui
+
+    setup_imgui()  # ensure assets (fonts + icons) are available
 
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "MBO Metadata Viewer"
@@ -449,6 +468,9 @@ def _create_image_widget(data_array, widget: bool = True):
         )
 
     iw.show()
+
+    # set qt window icon after canvas is created
+    _set_qt_icon()
 
     # Add PreviewDataWidget if requested
     if widget:

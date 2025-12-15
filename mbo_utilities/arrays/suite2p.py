@@ -4,8 +4,7 @@ Suite2p binary array reader.
 This module provides Suite2pArray for reading Suite2p binary output files
 (data.bin, data_raw.bin) with their associated ops.npy metadata.
 
-Also provides Suite2pVolumeArray for reading directories containing multiple
-Suite2p plane outputs as a 4D volume (T, Z, H, W).
+Automatically detects single-plane vs multi-plane (volume) directories.
 """
 
 from __future__ import annotations
@@ -23,261 +22,6 @@ from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 from mbo_utilities.util import load_npy
 
 logger = log.get("arrays.suite2p")
-
-
-@dataclass
-class Suite2pArray(ReductionMixin):
-    """
-    Lazy array reader for Suite2p binary output files.
-
-    Reads memory-mapped binary files (data.bin or data_raw.bin) alongside
-    their ops.npy metadata. Supports switching between raw and registered
-    data channels.
-
-    Parameters
-    ----------
-    filename : str or Path
-        Path to ops.npy or a .bin file in a Suite2p output directory.
-
-    Attributes
-    ----------
-    shape : tuple[int, int, int]
-        Shape as (nframes, Ly, Lx).
-    dtype : np.dtype
-        Data type (always np.int16 for Suite2p).
-    metadata : dict
-        Contents of ops.npy.
-    active_file : Path
-        Currently active binary file.
-    raw_file : Path
-        Path to data_raw.bin (unregistered).
-    reg_file : Path
-        Path to data.bin (registered).
-
-    Examples
-    --------
-    >>> arr = Suite2pArray("suite2p_output/ops.npy")
-    >>> arr.shape
-    (10000, 512, 512)
-    >>> frame = arr[0]  # Get first frame
-    >>> arr.switch_channel(use_raw=True)  # Switch to raw data
-    """
-
-    filename: str | Path
-    metadata: dict = field(init=False)
-    active_file: Path = field(init=False)
-    raw_file: Path = field(default=None)
-    reg_file: Path = field(default=None)
-
-    def __post_init__(self):
-        path = Path(self.filename)
-        if not path.exists():
-            raise FileNotFoundError(path)
-
-        if path.suffix == ".npy" and path.stem == "ops":
-            ops_path = path
-        elif path.suffix == ".bin":
-            ops_path = path.with_name("ops.npy")
-            if not ops_path.exists():
-                raise FileNotFoundError(f"Missing ops.npy near {path}")
-        else:
-            raise ValueError(f"Unsupported input: {path}")
-
-        self.metadata = load_npy(ops_path).item()
-        self.num_rois = self.metadata.get("num_rois", 1)
-
-        # resolve both possible bins - always look in the same directory as ops.npy
-        # (metadata paths may be stale if data was moved)
-        ops_dir = ops_path.parent
-        self.raw_file = ops_dir / "data_raw.bin"
-        self.reg_file = ops_dir / "data.bin"
-
-        # choose which one to use
-        if path.suffix == ".bin":
-            # User clicked directly on a .bin file - use that specific file
-            self.active_file = path
-            if not self.active_file.exists():
-                raise FileNotFoundError(
-                    f"Binary file not found: {self.active_file}\n"
-                    f"Available files in {ops_dir}:\n"
-                    f"  - data.bin: {'exists' if self.reg_file.exists() else 'missing'}\n"
-                    f"  - data_raw.bin: {'exists' if self.raw_file.exists() else 'missing'}"
-                )
-        else:
-            # User clicked on directory/ops.npy - choose best available file
-            # Prefer registered (data.bin) over raw (data_raw.bin)
-            if self.reg_file.exists():
-                self.active_file = self.reg_file
-            elif self.raw_file.exists():
-                self.active_file = self.raw_file
-            else:
-                raise FileNotFoundError(
-                    f"No binary files found in {ops_dir}\n"
-                    f"Expected either:\n"
-                    f"  - {self.reg_file} (registered)\n"
-                    f"  - {self.raw_file} (raw)\n"
-                    f"Please check that Suite2p processing completed successfully."
-                )
-
-        self.Ly = self.metadata["Ly"]
-        self.Lx = self.metadata["Lx"]
-        self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
-        self.shape = (self.nframes, self.Ly, self.Lx)
-        self._dtype = np.int16
-        self._target_dtype = None
-
-        # Validate file size matches expected shape
-        expected_bytes = int(np.prod(self.shape)) * np.dtype(self._dtype).itemsize
-        actual_bytes = self.active_file.stat().st_size
-        if actual_bytes < expected_bytes:
-            raise ValueError(
-                f"Binary file {self.active_file.name} is too small!\n"
-                f"Expected: {expected_bytes:,} bytes for shape {self.shape}\n"
-                f"Actual: {actual_bytes:,} bytes\n"
-                f"File may be corrupted or ops.npy metadata may be incorrect."
-            )
-        elif actual_bytes > expected_bytes:
-            warnings.warn(
-                f"Binary file {self.active_file.name} is larger than expected.\n"
-                f"Expected: {expected_bytes:,} bytes for shape {self.shape}\n"
-                f"Actual: {actual_bytes:,} bytes\n"
-                f"Extra data will be ignored.",
-                UserWarning,
-            )
-
-        self._file = np.memmap(
-            self.active_file, mode="r", dtype=self.dtype, shape=self.shape
-        )
-        self.filenames = [self.active_file]
-
-    def switch_channel(self, use_raw=False):
-        """Switch between raw and registered data channels."""
-        new_file = self.raw_file if use_raw else self.reg_file
-        if not new_file.exists():
-            raise FileNotFoundError(new_file)
-        self._file = np.memmap(new_file, mode="r", dtype=self.dtype, shape=self.shape)
-        self.active_file = new_file
-
-    def __getitem__(self, key):
-        out = self._file[key]
-        if self._target_dtype is not None:
-            out = out.astype(self._target_dtype)
-        return out
-
-    def __len__(self):
-        return self.shape[0]
-
-    def __array__(self):
-        n = min(10, self.nframes) if self.nframes >= 10 else self.nframes
-        return np.stack([self._file[i] for i in range(n)], axis=0)
-
-    @property
-    def ndim(self):
-        return len(self.shape)
-
-    @property
-    def dtype(self):
-        return self._target_dtype if self._target_dtype is not None else self._dtype
-
-    def astype(self, dtype, copy=True):
-        """Set target dtype for lazy conversion on data access."""
-        self._target_dtype = np.dtype(dtype)
-        return self
-
-    def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame."""
-        if not hasattr(self, '_cached_vmin'):
-            frame = np.asarray(self[0])
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        """Min from first frame for display (avoids full data read)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        """Max from first frame for display (avoids full data read)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmax
-
-    def close(self):
-        """Close the memory-mapped file."""
-        self._file._mmap.close()  # type: ignore
-
-    def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite=False,
-        target_chunk_mb=50,
-        ext=".tiff",
-        progress_callback=None,
-        debug=None,
-        planes=None,
-        **kwargs,
-    ):
-        """Write Suite2pArray to disk in various formats."""
-        return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            **kwargs,
-        )
-
-    def imshow(self, **kwargs):
-        """Display array using fastplotlib ImageWidget."""
-        arrays = []
-        names = []
-
-        # Try to load both files if they exist
-        if self.raw_file.exists():
-            try:
-                raw = Suite2pArray(self.raw_file)
-                arrays.append(raw)
-                names.append("raw")
-            except Exception as e:
-                logger.warning(f"Could not open raw file {self.raw_file}: {e}")
-
-        if self.reg_file.exists():
-            try:
-                reg = Suite2pArray(self.reg_file)
-                arrays.append(reg)
-                names.append("registered")
-            except Exception as e:
-                logger.warning(f"Could not open registered file {self.reg_file}: {e}")
-
-        # If neither file could be loaded, show the currently active file
-        if not arrays:
-            arrays.append(self)
-            if self.active_file == self.raw_file:
-                names.append("raw")
-            elif self.active_file == self.reg_file:
-                names.append("registered")
-            else:
-                names.append(self.active_file.name)
-
-        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
-        histogram_widget = kwargs.get("histogram_widget", True)
-        window_funcs = kwargs.get("window_funcs", None)
-
-        import fastplotlib as fpl
-
-        return fpl.ImageWidget(
-            data=arrays,
-            names=names,
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,
-            figure_shape=(1, len(arrays)),
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
-            window_funcs=window_funcs,
-        )
 
 
 def _extract_plane_number(name: str) -> int | None:
@@ -319,77 +63,191 @@ def find_suite2p_plane_dirs(directory: Path) -> list[Path]:
     return sorted(plane_dirs, key=sort_key)
 
 
-class Suite2pVolumeArray(ReductionMixin):
-    """
-    Reader for Suite2p output directories containing multiple planes.
+class _SinglePlaneReader:
+    """Internal reader for a single Suite2p plane."""
 
-    Presents data as (T, Z, H, W) by stacking individual plane arrays along
-    the Z dimension. Each plane is loaded lazily via Suite2pArray.
+    def __init__(self, ops_path: Path, use_raw: bool = False):
+        self.ops_path = ops_path
+        self.metadata = load_npy(ops_path).item()
+
+        ops_dir = ops_path.parent
+        self.raw_file = ops_dir / "data_raw.bin"
+        self.reg_file = ops_dir / "data.bin"
+
+        # choose which file to use
+        if use_raw and self.raw_file.exists():
+            self.active_file = self.raw_file
+        elif self.reg_file.exists():
+            self.active_file = self.reg_file
+        elif self.raw_file.exists():
+            self.active_file = self.raw_file
+        else:
+            raise FileNotFoundError(
+                f"No binary files found in {ops_dir}\n"
+                f"Expected either:\n"
+                f"  - {self.reg_file} (registered)\n"
+                f"  - {self.raw_file} (raw)"
+            )
+
+        self.Ly = self.metadata["Ly"]
+        self.Lx = self.metadata["Lx"]
+        self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
+        self.shape = (self.nframes, self.Ly, self.Lx)
+        self.dtype = np.int16
+
+        # validate file size
+        expected_bytes = int(np.prod(self.shape)) * np.dtype(self.dtype).itemsize
+        actual_bytes = self.active_file.stat().st_size
+        if actual_bytes < expected_bytes:
+            raise ValueError(
+                f"Binary file {self.active_file.name} is too small!\n"
+                f"Expected: {expected_bytes:,} bytes for shape {self.shape}\n"
+                f"Actual: {actual_bytes:,} bytes"
+            )
+        elif actual_bytes > expected_bytes:
+            warnings.warn(
+                f"Binary file {self.active_file.name} is larger than expected.\n"
+                f"Expected: {expected_bytes:,} bytes\n"
+                f"Actual: {actual_bytes:,} bytes\nExtra data will be ignored.",
+                UserWarning,
+            )
+
+        self._file = np.memmap(
+            self.active_file, mode="r", dtype=self.dtype, shape=self.shape
+        )
+
+    def switch_channel(self, use_raw: bool = False):
+        new_file = self.raw_file if use_raw else self.reg_file
+        if not new_file.exists():
+            raise FileNotFoundError(new_file)
+        self._file = np.memmap(new_file, mode="r", dtype=self.dtype, shape=self.shape)
+        self.active_file = new_file
+
+    def __getitem__(self, key):
+        return self._file[key]
+
+    def close(self):
+        self._file._mmap.close()
+
+
+class Suite2pArray(ReductionMixin):
+    """
+    Lazy array reader for Suite2p binary output files.
+
+    Auto-detects single-plane vs multi-plane (volumetric) data:
+    - Single plane: reads ops.npy + data.bin from one directory → 3D (T, Y, X)
+    - Volume: reads multiple plane directories → 4D (T, Z, Y, X)
 
     Parameters
     ----------
-    directory : str or Path
-        Path to directory containing plane subdirectories (e.g., plane01_stitched/).
-    plane_dirs : list[Path], optional
-        Explicit list of plane directories to use. If not provided, auto-detected.
+    filename : str or Path
+        Path to ops.npy, a .bin file, or a directory containing plane subdirs.
     use_raw : bool, optional
         If True, prefer data_raw.bin over data.bin. Default False.
 
     Attributes
     ----------
-    shape : tuple[int, int, int, int]
-        Shape as (T, Z, H, W).
+    shape : tuple
+        Shape as (T, Y, X) for single plane or (T, Z, Y, X) for volume.
     dtype : np.dtype
-        Data type (int16 for Suite2p).
-    planes : list[Suite2pArray]
-        Individual plane arrays.
+        Data type (always np.int16 for Suite2p).
+    metadata : dict
+        Contents of ops.npy (first plane for volumes).
+    is_volumetric : bool
+        True if this represents multi-plane data.
+    num_planes : int
+        Number of Z-planes (1 for single plane).
 
     Examples
     --------
-    >>> arr = Suite2pVolumeArray("suite2p_output/")
+    >>> # Single plane
+    >>> arr = Suite2pArray("suite2p_output/plane0/ops.npy")
+    >>> arr.shape
+    (10000, 512, 512)
+
+    >>> # Volume (auto-detected from directory structure)
+    >>> arr = Suite2pArray("suite2p_output/")
     >>> arr.shape
     (10000, 14, 512, 512)
-    >>> frame = arr[0]  # Get first frame across all planes
-    >>> plane7 = arr[:, 6]  # Get all frames from plane 7 (0-indexed)
+    >>> arr.is_volumetric
+    True
     """
 
-    def __init__(
-        self,
-        directory: str | Path,
-        plane_dirs: Sequence[Path] | None = None,
-        use_raw: bool = False,
-    ):
-        self.directory = Path(directory)
-        if not self.directory.exists():
-            raise FileNotFoundError(f"Directory not found: {self.directory}")
+    def __init__(self, filename: str | Path, use_raw: bool = False):
+        path = Path(filename)
+        if not path.exists():
+            raise FileNotFoundError(path)
 
-        # Find plane directories
-        if plane_dirs is None:
-            plane_dirs = find_suite2p_plane_dirs(self.directory)
+        self._use_raw = use_raw
+        self._planes: list[_SinglePlaneReader] = []
+        self._is_volumetric = False
 
-        if not plane_dirs:
-            raise ValueError(
-                f"No Suite2p plane directories found in {self.directory}. "
-                "Expected subdirectories containing ops.npy files."
-            )
+        # determine if this is a volume or single plane
+        if path.is_dir():
+            # check for plane subdirectories
+            plane_dirs = find_suite2p_plane_dirs(path)
+            if plane_dirs:
+                self._init_volume(plane_dirs, use_raw)
+            else:
+                # maybe directory contains ops.npy directly
+                ops_file = path / "ops.npy"
+                if ops_file.exists():
+                    self._init_single_plane(ops_file, use_raw)
+                else:
+                    raise ValueError(
+                        f"Directory {path} has no plane subdirectories or ops.npy"
+                    )
+        elif path.suffix == ".npy" and path.stem == "ops":
+            # check if parent has sibling plane directories (volume)
+            parent = path.parent.parent
+            plane_dirs = find_suite2p_plane_dirs(parent)
+            if len(plane_dirs) > 1:
+                self._init_volume(plane_dirs, use_raw)
+            else:
+                self._init_single_plane(path, use_raw)
+        elif path.suffix == ".bin":
+            ops_path = path.with_name("ops.npy")
+            if not ops_path.exists():
+                raise FileNotFoundError(f"Missing ops.npy near {path}")
+            # check if parent has sibling plane directories (volume)
+            parent = path.parent.parent
+            plane_dirs = find_suite2p_plane_dirs(parent)
+            if len(plane_dirs) > 1:
+                self._init_volume(plane_dirs, use_raw)
+            else:
+                self._init_single_plane(ops_path, use_raw)
+        else:
+            raise ValueError(f"Unsupported input: {path}")
 
-        # Load each plane as Suite2pArray
-        self.planes: list[Suite2pArray] = []
-        self.filenames = []
+    def _init_single_plane(self, ops_path: Path, use_raw: bool):
+        """Initialize as single-plane array."""
+        self._is_volumetric = False
+        reader = _SinglePlaneReader(ops_path, use_raw)
+        self._planes = [reader]
+
+        self._nframes = reader.nframes
+        self._ly = reader.Ly
+        self._lx = reader.Lx
+        self._dtype = reader.dtype
+        self._metadata = dict(reader.metadata)
+        self.num_rois = self._metadata.get("num_rois", 1)
+        self.filenames = [reader.active_file]
+
+    def _init_volume(self, plane_dirs: list[Path], use_raw: bool):
+        """Initialize as volumetric array."""
+        self._is_volumetric = True
+
         for pdir in plane_dirs:
             ops_file = pdir / "ops.npy"
-            arr = Suite2pArray(ops_file)
-            if use_raw and arr.raw_file.exists():
-                arr.switch_channel(use_raw=True)
-            self.planes.append(arr)
-            self.filenames.append(arr.active_file)
+            reader = _SinglePlaneReader(ops_file, use_raw)
+            self._planes.append(reader)
 
-        # Validate consistent shapes across planes
-        shapes = [(p.shape[1], p.shape[2]) for p in self.planes]  # (Ly, Lx)
+        # validate consistent shapes
+        shapes = [(p.Ly, p.Lx) for p in self._planes]
         if len(set(shapes)) != 1:
             raise ValueError(f"Inconsistent spatial shapes across planes: {shapes}")
 
-        nframes = [p.shape[0] for p in self.planes]
+        nframes = [p.nframes for p in self._planes]
         if len(set(nframes)) != 1:
             logger.warning(
                 f"Inconsistent frame counts across planes: {nframes}. "
@@ -397,15 +255,16 @@ class Suite2pVolumeArray(ReductionMixin):
             )
 
         self._nframes = min(nframes)
-        self._nz = len(self.planes)
+        self._nz = len(self._planes)
         self._ly, self._lx = shapes[0]
-        self._dtype = self.planes[0]._dtype
-        self._target_dtype = None
+        self._dtype = self._planes[0].dtype
 
-        # Aggregate metadata from first plane
-        self._metadata = dict(self.planes[0].metadata)
+        # aggregate metadata from first plane
+        self._metadata = dict(self._planes[0].metadata)
         self._metadata["num_planes"] = self._nz
-        self._metadata["plane_dirs"] = [str(p) for p in plane_dirs]
+        self._metadata["plane_dirs"] = [str(p.ops_path.parent) for p in self._planes]
+        self.num_rois = self._metadata.get("num_rois", 1)
+        self.filenames = [p.active_file for p in self._planes]
 
         logger.info(
             f"Loaded Suite2p volume: {self._nframes} frames, {self._nz} planes, "
@@ -413,8 +272,29 @@ class Suite2pVolumeArray(ReductionMixin):
         )
 
     @property
-    def shape(self) -> tuple[int, int, int, int]:
-        return (self._nframes, self._nz, self._ly, self._lx)
+    def is_volumetric(self) -> bool:
+        """True if this array represents multi-plane data."""
+        return self._is_volumetric
+
+    @property
+    def num_planes(self) -> int:
+        """Number of Z-planes."""
+        return len(self._planes)
+
+    @property
+    def shape(self) -> tuple:
+        if self._is_volumetric:
+            return (self._nframes, self._nz, self._ly, self._lx)
+        else:
+            return (self._nframes, self._ly, self._lx)
+
+    @property
+    def ndim(self) -> int:
+        return 4 if self._is_volumetric else 3
+
+    @property
+    def dtype(self):
+        return self._target_dtype if hasattr(self, '_target_dtype') and self._target_dtype else self._dtype
 
     @property
     def metadata(self) -> dict:
@@ -427,20 +307,8 @@ class Suite2pVolumeArray(ReductionMixin):
         self._metadata = value
 
     @property
-    def ndim(self) -> int:
-        return 4
-
-    @property
     def size(self) -> int:
         return int(np.prod(self.shape))
-
-    @property
-    def num_planes(self) -> int:
-        return self._nz
-
-    @property
-    def dtype(self):
-        return self._target_dtype if self._target_dtype is not None else self._dtype
 
     def astype(self, dtype, copy=True):
         """Set target dtype for lazy conversion on data access."""
@@ -448,21 +316,24 @@ class Suite2pVolumeArray(ReductionMixin):
         return self
 
     def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        """Compute vmin/vmax from first frame."""
         if not hasattr(self, '_cached_vmin'):
-            frame = np.asarray(self[0, 0])
+            if self._is_volumetric:
+                frame = np.asarray(self[0, 0])
+            else:
+                frame = np.asarray(self[0])
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
 
     @property
     def vmin(self) -> float:
-        """Min from first frame for display (avoids full data read)."""
+        """Min from first frame for display."""
         self._compute_frame_vminmax()
         return self._cached_vmin
 
     @property
     def vmax(self) -> float:
-        """Max from first frame for display (avoids full data read)."""
+        """Max from first frame for display."""
         self._compute_frame_vminmax()
         return self._cached_vmax
 
@@ -470,33 +341,43 @@ class Suite2pVolumeArray(ReductionMixin):
         return self._nframes
 
     def __getitem__(self, key):
+        if self._is_volumetric:
+            return self._getitem_volume(key)
+        else:
+            return self._getitem_single(key)
+
+    def _getitem_single(self, key):
+        """Index single-plane array."""
+        out = self._planes[0][key]
+        if hasattr(self, '_target_dtype') and self._target_dtype is not None:
+            out = out.astype(self._target_dtype)
+        return out
+
+    def _getitem_volume(self, key):
+        """Index volumetric array."""
         if not isinstance(key, tuple):
             key = (key,)
         key = key + (slice(None),) * (4 - len(key))
         t_key, z_key, y_key, x_key = key
 
-        # Normalize t_key to respect _nframes limit
+        # normalize t_key
         if isinstance(t_key, slice):
-            # Clamp slice to valid frame range
             start, stop, step = t_key.indices(self._nframes)
             t_key = slice(start, stop, step)
         elif isinstance(t_key, int):
             if t_key < 0:
                 t_key = self._nframes + t_key
             if t_key >= self._nframes:
-                raise IndexError(
-                    f"Time index {t_key} out of bounds for {self._nframes} frames"
-                )
+                raise IndexError(f"Time index {t_key} out of bounds for {self._nframes} frames")
 
-        # Handle single z index
+        # handle z indexing
         if isinstance(z_key, int):
             if z_key < 0:
                 z_key = self._nz + z_key
             if z_key < 0 or z_key >= self._nz:
                 raise IndexError(f"Z index {z_key} out of bounds for {self._nz} planes")
-            out = self.planes[z_key][t_key, y_key, x_key]
+            out = self._planes[z_key][t_key, y_key, x_key]
         else:
-            # Handle z slice or full z
             if isinstance(z_key, slice):
                 z_indices = range(self._nz)[z_key]
             elif isinstance(z_key, (list, np.ndarray)):
@@ -504,42 +385,45 @@ class Suite2pVolumeArray(ReductionMixin):
             else:
                 z_indices = range(self._nz)
 
-            # Stack data from selected planes
-            arrs = [self.planes[i][t_key, y_key, x_key] for i in z_indices]
+            arrs = [self._planes[i][t_key, y_key, x_key] for i in z_indices]
             out = np.stack(arrs, axis=1)
 
-        if self._target_dtype is not None:
+        if hasattr(self, '_target_dtype') and self._target_dtype is not None:
             out = out.astype(self._target_dtype)
         return out
 
     def __array__(self) -> np.ndarray:
-        """Materialize full array into memory: (T, Z, H, W)."""
-        arrs = [p[: self._nframes] for p in self.planes]
-        return np.stack(arrs, axis=1)
+        """Materialize array into memory."""
+        if self._is_volumetric:
+            arrs = [p._file[:self._nframes] for p in self._planes]
+            return np.stack(arrs, axis=1)
+        else:
+            n = min(10, self._nframes)
+            return np.stack([self._planes[0][i] for i in range(n)], axis=0)
 
     def switch_channel(self, use_raw: bool = False):
         """Switch all planes between raw and registered data."""
-        for plane in self.planes:
+        for plane in self._planes:
             plane.switch_channel(use_raw=use_raw)
-        self.filenames = [p.active_file for p in self.planes]
+        self.filenames = [p.active_file for p in self._planes]
 
     def close(self):
         """Close all memory-mapped files."""
-        for plane in self.planes:
+        for plane in self._planes:
             plane.close()
 
     def _imwrite(
         self,
         outpath: Path | str,
-        overwrite: bool = False,
-        target_chunk_mb: int = 50,
-        ext: str = ".tiff",
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
         progress_callback=None,
-        debug: bool = False,
-        planes: list[int] | int | None = None,
+        debug=None,
+        planes=None,
         **kwargs,
     ):
-        """Write Suite2pVolumeArray to disk in various formats."""
+        """Write Suite2pArray to disk in various formats."""
         return _imwrite_base(
             self,
             outpath,
@@ -550,6 +434,69 @@ class Suite2pVolumeArray(ReductionMixin):
             progress_callback=progress_callback,
             debug=debug,
             **kwargs,
+        )
+
+    def imshow(self, **kwargs):
+        """Display array using fastplotlib ImageWidget."""
+        arrays = []
+        names = []
+
+        if not self._is_volumetric:
+            # single plane - try to show both raw and registered
+            plane = self._planes[0]
+            if plane.raw_file.exists():
+                try:
+                    raw_reader = _SinglePlaneReader(plane.ops_path, use_raw=True)
+                    raw_arr = Suite2pArray.__new__(Suite2pArray)
+                    raw_arr._planes = [raw_reader]
+                    raw_arr._is_volumetric = False
+                    raw_arr._nframes = raw_reader.nframes
+                    raw_arr._ly = raw_reader.Ly
+                    raw_arr._lx = raw_reader.Lx
+                    raw_arr._dtype = raw_reader.dtype
+                    raw_arr._metadata = {}
+                    arrays.append(raw_arr)
+                    names.append("raw")
+                except Exception as e:
+                    logger.warning(f"Could not open raw file: {e}")
+
+            if plane.reg_file.exists():
+                try:
+                    reg_reader = _SinglePlaneReader(plane.ops_path, use_raw=False)
+                    reg_arr = Suite2pArray.__new__(Suite2pArray)
+                    reg_arr._planes = [reg_reader]
+                    reg_arr._is_volumetric = False
+                    reg_arr._nframes = reg_reader.nframes
+                    reg_arr._ly = reg_reader.Ly
+                    reg_arr._lx = reg_reader.Lx
+                    reg_arr._dtype = reg_reader.dtype
+                    reg_arr._metadata = {}
+                    arrays.append(reg_arr)
+                    names.append("registered")
+                except Exception as e:
+                    logger.warning(f"Could not open registered file: {e}")
+
+            if not arrays:
+                arrays.append(self)
+                names.append(self._planes[0].active_file.name)
+        else:
+            arrays.append(self)
+            names.append("volume")
+
+        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
+        histogram_widget = kwargs.get("histogram_widget", True)
+        window_funcs = kwargs.get("window_funcs", None)
+
+        import fastplotlib as fpl
+
+        return fpl.ImageWidget(
+            data=arrays,
+            names=names,
+            histogram_widget=histogram_widget,
+            figure_kwargs=figure_kwargs,
+            figure_shape=(1, len(arrays)),
+            graphic_kwargs={"vmin": -300, "vmax": 4000},
+            window_funcs=window_funcs,
         )
 
 
@@ -568,42 +515,26 @@ def _add_suite2p_labels(
 
     Creates a 'labels' subgroup with ROI masks from Suite2p stat.npy files.
     Follows OME-NGFF v0.5 labels specification.
-
-    Parameters
-    ----------
-    root_group : zarr.Group
-        Root Zarr group to add labels to.
-    suite2p_dirs : list of Path
-        Suite2p output directories for each z-plane.
-    T, Z, Y, X : int
-        Dimensions of the volume.
-    dtype : np.dtype
-        Data type for label array.
-    compression_level : int
-        Gzip compression level.
     """
     import zarr
     from zarr.codecs import BytesCodec, GzipCodec
 
     logger.info("Creating labels array from Suite2p masks...")
 
-    # Create labels subgroup
     labels_group = root_group.create_group("labels", overwrite=True)
 
-    # Create ROI masks array (static across time, just Z, Y, X)
     label_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
     masks = zarr.create(
         store=labels_group.store,
         path="labels/0",
         shape=(Z, Y, X),
         chunks=(1, Y, X),
-        dtype=np.uint32,  # uint32 for up to 4 billion ROIs
+        dtype=np.uint32,
         codecs=label_codecs,
         overwrite=True,
     )
 
-    # Process each z-plane
-    roi_id = 1  # Start ROI IDs at 1 (0 = background)
+    roi_id = 1
 
     for zi, s2p_dir in enumerate(suite2p_dirs):
         stat_path = s2p_dir / "stat.npy"
@@ -613,56 +544,45 @@ def _add_suite2p_labels(
             logger.warning(f"stat.npy not found in {s2p_dir}, skipping z={zi}")
             continue
 
-        # Load Suite2p data
         stat = load_npy(stat_path)
 
-        # Load iscell if available to filter
         if iscell_path.exists():
             iscell = load_npy(iscell_path)[:, 0].astype(bool)
         else:
             iscell = np.ones(len(stat), dtype=bool)
 
-        # Create mask for this z-plane
         plane_mask = np.zeros((Y, X), dtype=np.uint32)
 
         for roi_idx, (roi_stat, is_cell) in enumerate(zip(stat, iscell)):
             if not is_cell:
                 continue
 
-            # Get pixel coordinates for this ROI
             ypix = roi_stat.get("ypix", [])
             xpix = roi_stat.get("xpix", [])
 
             if len(ypix) == 0 or len(xpix) == 0:
                 continue
 
-            # Ensure coordinates are within bounds
             ypix = np.clip(ypix, 0, Y - 1)
             xpix = np.clip(xpix, 0, X - 1)
 
-            # Assign unique ROI ID
             plane_mask[ypix, xpix] = roi_id
             roi_id += 1
 
-        # Write to Zarr
         masks[zi, :, :] = plane_mask
-        logger.debug(
-            f"Added {(plane_mask > 0).sum()} labeled pixels for z-plane {zi + 1}/{Z}"
-        )
+        logger.debug(f"Added {(plane_mask > 0).sum()} labeled pixels for z-plane {zi + 1}/{Z}")
 
-    # Add OME-NGFF labels metadata
     labels_metadata = {
         "version": "0.5",
-        "labels": ["0"],  # Path to the label array
+        "labels": ["0"],
     }
 
-    # Add metadata for label array
     label_array_meta = {
         "version": "0.5",
         "image-label": {
             "version": "0.5",
-            "colors": [],  # Can add color LUT here if desired
-            "source": {"image": "../../0"},  # Reference to main image
+            "colors": [],
+            "source": {"image": "../../0"},
         },
     }
 
@@ -673,7 +593,7 @@ def _add_suite2p_labels(
 
 
 def load_ops(ops_input: str | Path | list[str | Path]):
-    """Simple utility load a suite2p npy file"""
+    """Simple utility to load a suite2p npy file."""
     if isinstance(ops_input, (str, Path)):
         return load_npy(ops_input).item()
     elif isinstance(ops_input, dict):
@@ -682,5 +602,4 @@ def load_ops(ops_input: str | Path | list[str | Path]):
     return {}
 
 
-# Re-export write_ops for backward compatibility (moved to _writers.py to avoid circular imports)
 from mbo_utilities._writers import write_ops

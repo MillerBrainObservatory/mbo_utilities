@@ -334,8 +334,22 @@ def derive_tag_from_filename(path):
 
 
 def _get_mbo_project_root() -> Path:
-    """Return the root path of the mbo_utilities repository (based on this file)."""
-    return Path(__file__).resolve().parent.parent
+    """Return the root path of the mbo_utilities package (where assets folder lives)."""
+    return Path(__file__).resolve().parent
+
+
+def get_package_assets_path() -> Path:
+    """Return path to the bundled assets folder in the installed package.
+
+    uses importlib.resources for robust installed package support.
+    """
+    try:
+        import importlib.resources as resources
+        # for python 3.9+, use files() API
+        return Path(str(resources.files("mbo_utilities").joinpath("assets")))
+    except (ImportError, TypeError):
+        # fallback for older python or edge cases
+        return _get_mbo_project_root() / "assets"
 
 
 def get_mbo_dirs() -> dict:
@@ -367,6 +381,15 @@ def get_mbo_dirs() -> dict:
         "data": data,
         "tests": tests,
     }
+
+
+def get_package_assets_path() -> Path:
+    """Return path to the bundled assets folder in the installed package."""
+    try:
+        import importlib.resources as resources
+        return Path(str(resources.files("mbo_utilities").joinpath("assets")))
+    except (ImportError, TypeError):
+        return _get_mbo_project_root() / "assets"
 
 
 def get_last_savedir_path() -> Path:

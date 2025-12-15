@@ -310,9 +310,12 @@ class TestTiffArray:
         arr = TiffArray(tiff_path)
 
         frame = arr[0]
-        # May have extra Z dimension
+        # may have extra Z dimension due to 4D normalization
         frame_np = np.asarray(frame)
-        assert frame_np.shape[-2:] == expected_data[0].shape[-2:]
+        # verify spatial dims are present (order may vary due to 4D normalization)
+        frame_squeezed = frame_np.squeeze()
+        assert frame_squeezed.shape == expected_data[0].shape, \
+            f"Squeezed frame shape mismatch: {frame_squeezed.shape} vs {expected_data[0].shape}"
 
 
 # =============================================================================
@@ -371,6 +374,147 @@ class TestSuite2pArray:
         frame = arr[0]
         frame_np = np.asarray(frame)
         assert frame_np.shape[-2:] == expected_data[0].shape[-2:]
+
+
+# =============================================================================
+# Volume auto-detection tests
+# =============================================================================
+
+
+class TestTiffVolumeAutoDetection:
+    """Test TiffArray auto-detection of volume directories."""
+
+    @pytest.fixture
+    def tiff_volume_dir(self, synthetic_4d_data, tmp_path):
+        """Create a directory with planeXX.tiff files."""
+        import tifffile
+
+        vol_dir = tmp_path / "volume"
+        vol_dir.mkdir()
+
+        # synthetic_4d_data is (T, Z, Y, X) - write each plane as separate file
+        n_planes = synthetic_4d_data.shape[1]
+        for z in range(n_planes):
+            plane_data = synthetic_4d_data[:, z, :, :]  # (T, Y, X)
+            plane_path = vol_dir / f"plane{z:02d}.tiff"
+            tifffile.imwrite(plane_path, plane_data)
+
+        return vol_dir, synthetic_4d_data
+
+    def test_volume_directory_detection(self, tiff_volume_dir):
+        """TiffArray should detect volume directory and return 4D shape."""
+        vol_dir, expected_data = tiff_volume_dir
+
+        arr = TiffArray(vol_dir)
+
+        # should be 4D: (T, Z, Y, X)
+        assert arr.ndim == 4, f"Expected 4D array, got {arr.ndim}D"
+        assert arr.shape[0] == expected_data.shape[0], "Frame count mismatch"
+        assert arr.shape[1] == expected_data.shape[1], "Plane count mismatch"
+        assert arr.shape[2:] == expected_data.shape[2:], "Spatial dims mismatch"
+
+    def test_volume_indexing(self, tiff_volume_dir):
+        """Test indexing volume TiffArray."""
+        vol_dir, expected_data = tiff_volume_dir
+
+        arr = TiffArray(vol_dir)
+
+        # index single timepoint
+        frame = arr[0]
+        frame_np = np.asarray(frame)
+        # verify total elements match (axis order may differ)
+        assert frame_np.size == expected_data[0].size, "Element count mismatch"
+        assert frame_np.ndim == 3, "Single frame should be 3D"
+
+    def test_find_tiff_plane_files(self, tiff_volume_dir):
+        """Test find_tiff_plane_files helper function."""
+        from mbo_utilities.arrays.tiff import find_tiff_plane_files
+
+        vol_dir, expected_data = tiff_volume_dir
+        n_planes = expected_data.shape[1]
+
+        plane_files = find_tiff_plane_files(vol_dir)
+
+        assert len(plane_files) == n_planes
+        # should be sorted by plane number
+        for i, f in enumerate(plane_files):
+            assert f"plane{i:02d}" in f.name
+
+
+class TestSuite2pVolumeAutoDetection:
+    """Test Suite2pArray auto-detection of multi-plane directories."""
+
+    @pytest.fixture
+    def suite2p_volume_dir(self, synthetic_4d_data, tmp_path):
+        """Create a Suite2p multi-plane directory structure."""
+        parent_dir = tmp_path / "suite2p"
+        parent_dir.mkdir()
+
+        # synthetic_4d_data is (T, Z, Y, X)
+        n_planes = synthetic_4d_data.shape[1]
+
+        for z in range(n_planes):
+            plane_dir = parent_dir / f"plane{z}"
+            plane_dir.mkdir()
+
+            plane_data = synthetic_4d_data[:, z, :, :]  # (T, Y, X)
+
+            # write binary file
+            bin_path = plane_dir / "data.bin"
+            mmap = np.memmap(bin_path, mode="w+", dtype=np.int16, shape=plane_data.shape)
+            mmap[:] = plane_data
+            mmap.flush()
+            del mmap
+
+            # write ops.npy
+            ops = {
+                "Ly": plane_data.shape[1],
+                "Lx": plane_data.shape[2],
+                "nframes": plane_data.shape[0],
+                "reg_file": str(bin_path),
+            }
+            np.save(plane_dir / "ops.npy", ops)
+
+        return parent_dir, synthetic_4d_data
+
+    def test_volume_directory_detection(self, suite2p_volume_dir):
+        """Suite2pArray should detect multi-plane directory and return 4D shape."""
+        parent_dir, expected_data = suite2p_volume_dir
+
+        arr = Suite2pArray(parent_dir)
+
+        # should be 4D: (T, Z, Y, X)
+        assert arr.ndim == 4, f"Expected 4D array, got {arr.ndim}D"
+        assert arr.shape[0] == expected_data.shape[0], "Frame count mismatch"
+        assert arr.shape[1] == expected_data.shape[1], "Plane count mismatch"
+        assert arr.shape[2:] == expected_data.shape[2:], "Spatial dims mismatch"
+
+    def test_volume_indexing(self, suite2p_volume_dir):
+        """Test indexing volume Suite2pArray."""
+        parent_dir, expected_data = suite2p_volume_dir
+
+        arr = Suite2pArray(parent_dir)
+
+        # index single timepoint
+        frame = arr[0]
+        frame_np = np.asarray(frame)
+        # verify total elements match (axis order may differ)
+        assert frame_np.size == expected_data[0].size, "Element count mismatch"
+        assert frame_np.ndim == 3, "Single frame should be 3D"
+
+    def test_find_suite2p_plane_dirs(self, suite2p_volume_dir):
+        """Test find_suite2p_plane_dirs helper function."""
+        from mbo_utilities.arrays.suite2p import find_suite2p_plane_dirs
+
+        parent_dir, expected_data = suite2p_volume_dir
+        n_planes = expected_data.shape[1]
+
+        plane_dirs = find_suite2p_plane_dirs(parent_dir)
+
+        assert len(plane_dirs) == n_planes
+        # should be sorted by plane number
+        for i, d in enumerate(plane_dirs):
+            assert f"plane{i}" in d.name
 
 
 # =============================================================================

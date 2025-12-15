@@ -32,10 +32,10 @@ Understanding what `imread()` returns and when to use each array type.
 | `.tif` (raw ScanImage) | `MboRawArray` | (T, Z, Y, X) | Multi-ROI volumetric data with phase correction |
 | `.tif` (processed, single file) | `TiffArray` | (T, 1, Y, X) | Standard TIFF files, lazy page access |
 | `.tif` (processed, multiple files) | `MBOTiffArray` | (T, Z, Y, X) | Dask-backed multi-file TIFF |
-| Directory with `planeXX.tiff` files | `TiffVolumeArray` | (T, Z, Y, X) | Multi-plane TIFF volume |
+| Directory with `planeXX.tiff` files | `TiffArray` | (T, Z, Y, X) | Multi-plane TIFF volume (auto-detected) |
 | `.bin` (direct path) | `BinArray` | (T, Y, X) | Direct binary file manipulation |
 | Directory with `ops.npy` | `Suite2pArray` | (T, Y, X) | Suite2p workflow integration |
-| Directory with `planeXX/` subdirs | `Suite2pVolumeArray` | (T, Z, Y, X) | Multi-plane Suite2p output |
+| Directory with `planeXX/` subdirs | `Suite2pArray` | (T, Z, Y, X) | Multi-plane Suite2p output (auto-detected) |
 | `.h5` / `.hdf5` | `H5Array` | varies | HDF5 datasets |
 | `.zarr` | `ZarrArray` | (T, Z, Y, X) | Zarr v3 / OME-Zarr stores |
 | `.npy` | `NumpyArray` | varies | NumPy memory-mapped files |
@@ -88,7 +88,7 @@ scan.max_offset = 4             # Maximum phase offset to search
 
 ### TiffArray
 
-**Returned when:** Reading processed TIFF file(s) without ScanImage metadata
+**Returned when:** Reading processed TIFF file(s) without ScanImage metadata, or a directory with `planeXX.tiff` files
 
 ```python
 # Single or multiple standard TIFF files
@@ -97,8 +97,15 @@ arr = mbo.imread(["/path/file1.tif", "/path/file2.tif"])
 # Returns: TiffArray
 
 print(type(arr))   # <class 'TiffArray'>
-print(arr.shape)   # (T, 1, Y, X) - always 4D with Z=1
+print(arr.shape)   # (T, 1, Y, X) - 4D with Z=1 for single files
 print(arr.dtype)   # Data type from TIFF
+
+# Directory with planeXX.tiff files (auto-detected volumetric)
+vol = mbo.imread("/path/to/tiff_output/")
+# Detects plane01.tiff, plane02.tiff, etc.
+print(vol.shape)         # (T, Z, Y, X) - e.g., (10000, 14, 512, 512)
+print(vol.is_volumetric) # True
+print(vol.num_planes)    # 14
 
 # Lazy frame reading
 frame = arr[0]        # Read first frame
@@ -111,10 +118,10 @@ arr32 = arr.astype(np.float32)
 **Key Features:**
 
 - Uses `TiffFile` handles for lazy page access
-- Auto-detects frame count from JSON metadata, IFD estimation, or page counting
+- Auto-detects volumetric structure from `planeXX.tiff` filename patterns
 - Multi-file support (concatenated along time axis)
 - Thread-safe page reading
-- Always outputs (T, 1, Y, X) format
+- Always outputs 4D format: (T, Z, Y, X) where Z=1 for single files
 
 ---
 
@@ -141,37 +148,6 @@ mean_proj = arr[:100].mean(axis=0).compute()
 - Uses `tifffile.imread(aszarr=True)` for memory-mapped access
 - Automatic dimension handling (2D → TZYX, 3D → TZYX, 4D passthrough)
 - Preserves file tags from filenames
-
----
-
-### TiffVolumeArray
-
-**Returned when:** Directory contains files matching `planeXX.tiff` pattern
-
-```python
-# Directory with plane TIFF files
-arr = mbo.imread("/path/to/tiff_output/")
-# Detects plane01.tiff, plane02.tiff, etc.
-# Returns: TiffVolumeArray
-
-print(type(arr))      # <class 'TiffVolumeArray'>
-print(arr.shape)      # (T, Z, Y, X) - e.g., (10000, 14, 512, 512)
-print(arr.num_planes) # 14
-print(len(arr.planes)) # 14 TiffArray objects
-
-# Access specific plane
-plane7_data = arr[:, 6]  # All frames from plane 7 (0-indexed)
-
-# Close file handles when done
-arr.close()
-```
-
-**Key Features:**
-
-- Stacks individual plane TIFFs into a 4D volume
-- Each plane is loaded lazily via `TiffArray`
-- Auto-sorts by plane number from filename
-- Validates consistent spatial shapes across planes
 
 ---
 
@@ -222,19 +198,26 @@ arr.close()
 
 ### Suite2pArray
 
-**Returned when:** Reading a directory containing `ops.npy`, or `ops.npy` directly
+**Returned when:** Reading a directory containing `ops.npy`, or `ops.npy` directly, or a directory with multiple `planeXX/` subdirectories
 
 ```python
-# Reading a Suite2p directory
+# Reading a Suite2p single-plane directory
 arr = mbo.imread("/path/to/suite2p/plane0")
 arr = mbo.imread("/path/to/suite2p/plane0/ops.npy")
 # Returns: Suite2pArray
 
 print(type(arr))   # <class 'Suite2pArray'>
-print(arr.shape)   # (nframes, Ly, Lx) - 3D
+print(arr.shape)   # (nframes, Ly, Lx) - 3D for single plane
 print(arr.metadata)  # Full ops.npy contents
 
-# File paths
+# Multi-plane Suite2p output (auto-detected volumetric)
+vol = mbo.imread("/path/to/suite2p_output/")
+# Detects plane01_stitched/, plane02_stitched/, etc.
+print(vol.shape)         # (T, Z, Y, X) - e.g., (10000, 14, 512, 512)
+print(vol.is_volumetric) # True
+print(vol.num_planes)    # 14
+
+# File paths (single plane)
 print(arr.raw_file)    # Path to data_raw.bin (unregistered)
 print(arr.reg_file)    # Path to data.bin (registered)
 print(arr.active_file) # Currently active file
@@ -250,43 +233,11 @@ iw = arr.imshow()  # Shows raw and registered side-by-side if both exist
 **Key Features:**
 
 - Full Suite2p context (metadata from `ops.npy`)
+- Auto-detects volumetric structure from `planeXX/` subdirectory patterns
 - Access to both raw (`data_raw.bin`) and registered (`data.bin`) data
 - Memory-mapped via `np.memmap` for lazy loading
 - File size validation against ops metadata
-- Integrates with Suite2p's processing pipeline
-
----
-
-### Suite2pVolumeArray
-
-**Returned when:** Directory contains multiple `planeXX/` subdirectories with `ops.npy`
-
-```python
-# Multi-plane Suite2p output
-arr = mbo.imread("/path/to/suite2p_output/")
-# Detects plane01_stitched/, plane02_stitched/, etc.
-# Returns: Suite2pVolumeArray
-
-print(type(arr))      # <class 'Suite2pVolumeArray'>
-print(arr.shape)      # (T, Z, Y, X) - e.g., (10000, 14, 512, 512)
-print(arr.num_planes) # 14
-
-# Access specific plane
-plane7_data = arr[:, 6]  # All frames from plane 7 (0-indexed)
-
-# Switch all planes between raw and registered
-arr.switch_channel(use_raw=True)
-
-# Close all memory-mapped files
-arr.close()
-```
-
-**Key Features:**
-
-- Stacks individual `Suite2pArray` objects into 4D volume
-- Auto-sorts by plane number from directory name
-- `switch_channel()` applies to all planes
-- Validates consistent shapes across planes
+- For volumes: `switch_channel()` applies to all planes
 
 ---
 
@@ -516,8 +467,8 @@ imread(input)
   │   │   └─ Standard TIFF → TiffArray
   │   │
   │   ├─ Directory?
-  │   │   ├─ Contains planeXX.tiff files? → TiffVolumeArray
-  │   │   ├─ Contains planeXX/ subdirs with ops.npy? → Suite2pVolumeArray
+  │   │   ├─ Contains planeXX.tiff files? → TiffArray (volumetric)
+  │   │   ├─ Contains planeXX/ subdirs with ops.npy? → Suite2pArray (volumetric)
   │   │   ├─ Contains ops.npy? → Suite2pArray
   │   │   └─ Contains raw ScanImage TIFFs? → MboRawArray
   │   │

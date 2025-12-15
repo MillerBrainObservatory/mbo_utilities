@@ -1020,6 +1020,10 @@ class PreviewDataWidget(EdgeWindow):
         window_flags: int | None = None,
         **kwargs,
     ):
+        # ensure assets (fonts + icons) are available for this imgui context
+        from mbo_utilities.graphics._file_dialog import setup_imgui
+        setup_imgui()
+
         flags = (
             (imgui.WindowFlags_.no_title_bar if not show_title else 0)
             | (imgui.WindowFlags_.no_move if not movable else 0)
@@ -2386,6 +2390,14 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_running[roi - 1] = False
 
     def _compute_zstats_single_array(self, idx, arr):
+        try:
+            self._compute_zstats_single_array_impl(idx, arr)
+        except Exception as e:
+            self.logger.error(f"Error computing zstats for array {idx}: {e}", exc_info=True)
+            self._zstats_done[idx - 1] = True
+            self._zstats_running[idx - 1] = False
+
+    def _compute_zstats_single_array_impl(self, idx, arr):
         # get z dimension info for this array
         nz, z_axis, has_views = _get_array_z_info(arr)
         t_slice = slice(None, None, 10)  # every 10th frame
