@@ -245,7 +245,7 @@ function Main {
     }
 }
 
-# export functions for use after piping
-Export-ModuleMember -Function Install-MboEnv, Main -ErrorAction SilentlyContinue
-
+# run main installer
 Main
+
+# note: Install-MboEnv function remains available in the session after piping
