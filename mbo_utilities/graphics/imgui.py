@@ -1724,7 +1724,11 @@ class PreviewDataWidget(EdgeWindow):
             self._load_status_msg = "Loading..."
             self._load_status_color = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
 
-            new_data = imread(path)
+            try:
+                new_data = imread(path)
+            except Exception as e:
+                self.logger.error(f"imread failed: {e}", exc_info=True)
+                raise
 
             # Check if dimensionality is changing - if so, reset window functions
             # to avoid IndexError in fastplotlib's _apply_window_function
@@ -1757,7 +1761,11 @@ class PreviewDataWidget(EdgeWindow):
 
             # iw-array API: use data indexer for replacing data
             # iw.data[0] = new_array handles shape changes automatically
-            self.image_widget.data[0] = new_data
+            try:
+                self.image_widget.data[0] = new_data
+            except Exception as e:
+                self.logger.error(f"ImageWidget data assignment failed: {e}", exc_info=True)
+                raise
 
             # Reset indices to start of data
             try:
@@ -1786,7 +1794,11 @@ class PreviewDataWidget(EdgeWindow):
             self.set_context_info()
 
             # refresh widgets based on new data capabilities
-            self._refresh_widgets()
+            try:
+                self._refresh_widgets()
+            except Exception as e:
+                self.logger.error(f"_refresh_widgets failed: {e}", exc_info=True)
+                raise
 
             # Automatically recompute z-stats for new data
             self.refresh_zstats()
