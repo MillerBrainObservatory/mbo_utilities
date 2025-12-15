@@ -22,6 +22,7 @@ from mbo_utilities.preferences import (
 )
 from mbo_utilities.file_io import get_package_assets_path
 from mbo_utilities.graphics.upgrade_manager import UpgradeManager
+from mbo_utilities.install_checker import check_installation, Status
 
 
 def setup_imgui():
@@ -120,12 +121,14 @@ class FileDialog:
         self._widget_enabled = True
         self.metadata_only = False
         self.split_rois = False
-        # load update checker preference
-        self.show_update_checker = get_gui_preference("show_update_checker", True)
+        # load preferences
+        self.show_install_status = get_gui_preference("show_install_status", True)
         # get default directory for file dialogs
         self._default_dir = str(get_default_open_dir())
         # upgrade manager for checking pypi updates
-        self.upgrade_manager = UpgradeManager(enabled=self.show_update_checker)
+        self.upgrade_manager = UpgradeManager(enabled=True)
+        # cached install status (computed on first render)
+        self._install_status = None
 
     @property
     def widget_enabled(self):
@@ -137,7 +140,7 @@ class FileDialog:
 
     def _save_gui_preferences(self):
         """Save current GUI preferences to disk."""
-        set_gui_preference("show_update_checker", self.show_update_checker)
+        set_gui_preference("show_install_status", self.show_install_status)
 
     def render(self):
         # global style - high contrast for visibility
@@ -209,8 +212,8 @@ class FileDialog:
             # fixed heights: header ~3em, buttons ~4.5em, quit ~2em, padding ~2em
             fixed_height = hello_imgui.em_size(12)
             available_for_card = win_h - fixed_height
-            # content needs ~18em to fit without scrollbar (formats + update checker)
-            content_height = hello_imgui.em_size(18)
+            # content needs ~24em to fit without scrollbar (formats + install status table)
+            content_height = hello_imgui.em_size(24)
             # use available space, but cap at content height (no need to be bigger)
             card_h = min(available_for_card, content_height)
             # minimum height to show at least something useful
@@ -275,66 +278,66 @@ class FileDialog:
                 imgui.separator()
                 imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
-                # update checker section
-                _, self.show_update_checker = imgui.checkbox("Check for updates", self.show_update_checker)
-                self.upgrade_manager.enabled = self.show_update_checker
+                # install status section
+                _, self.show_install_status = imgui.checkbox("Show install status", self.show_install_status)
 
-                if self.show_update_checker:
+                if self.show_install_status:
+                    # lazy load install status (can be slow on first check)
+                    if self._install_status is None:
+                        self._install_status = check_installation()
+
                     imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
 
-                    # version info
-                    imgui.text_colored(COL_TEXT_DIM, f"v{self.upgrade_manager.current_version}")
-
+                    # version line with upgrade check
+                    ver_text = f"v{self._install_status.mbo_version}"
                     if self.upgrade_manager.latest_version:
-                        imgui.same_line()
-                        imgui.text_colored(COL_TEXT_DIM, f"| PyPI: v{self.upgrade_manager.latest_version}")
-
-                    # status
-                    from mbo_utilities.graphics.upgrade_manager import CheckStatus, UpgradeStatus
-
-                    if self.upgrade_manager.check_status == CheckStatus.CHECKING:
-                        imgui.text_colored(COL_TEXT_DIM, "Checking...")
-                    elif self.upgrade_manager.check_status == CheckStatus.ERROR:
-                        imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), "Check failed")
-                    elif self.upgrade_manager.check_status == CheckStatus.DONE:
                         if self.upgrade_manager.upgrade_available:
-                            imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), "Update available!")
-                        elif self.upgrade_manager.is_dev_build:
-                            imgui.text_colored(COL_TEXT_DIM, "Dev build")
+                            ver_text += f" (v{self.upgrade_manager.latest_version} available)"
+                    imgui.text_colored(COL_TEXT_DIM, ver_text)
 
-                    # buttons
                     imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
-                    btn_w = hello_imgui.em_size(7)
 
-                    checking = self.upgrade_manager.check_status == CheckStatus.CHECKING
-                    if checking:
-                        imgui.begin_disabled()
-                    push_button_style(primary=False)
-                    if imgui.button("Check", imgui.ImVec2(btn_w, 0)):
-                        self.upgrade_manager.check_for_upgrade()
-                    pop_button_style()
-                    if checking:
-                        imgui.end_disabled()
+                    # compact features table
+                    COL_OK = imgui.ImVec4(0.4, 1.0, 0.4, 1.0)
+                    COL_WARN = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
+                    COL_ERR = imgui.ImVec4(1.0, 0.4, 0.4, 1.0)
+                    COL_NA = imgui.ImVec4(0.5, 0.5, 0.5, 1.0)
 
-                    if self.upgrade_manager.upgrade_available:
-                        imgui.same_line()
-                        upgrading = self.upgrade_manager.upgrade_status == UpgradeStatus.RUNNING
-                        if upgrading:
-                            imgui.begin_disabled()
-                        push_button_style(primary=True)
-                        if imgui.button("Upgrade", imgui.ImVec2(btn_w, 0)):
-                            self.upgrade_manager.start_upgrade()
-                        pop_button_style()
-                        if upgrading:
-                            imgui.end_disabled()
+                    table_flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.sizing_stretch_same
+                    if imgui.begin_table("##install_status", 3, table_flags):
+                        imgui.table_setup_column("Feature", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(5))
+                        imgui.table_setup_column("Status", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(2))
+                        imgui.table_setup_column("Info")
 
-                    # upgrade status message
-                    if self.upgrade_manager.upgrade_status == UpgradeStatus.RUNNING:
-                        imgui.text_colored(COL_TEXT_DIM, "Upgrading...")
-                    elif self.upgrade_manager.upgrade_status == UpgradeStatus.SUCCESS:
-                        imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), "Restart to apply")
-                    elif self.upgrade_manager.upgrade_status == UpgradeStatus.ERROR:
-                        imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), "Upgrade failed")
+                        for f in self._install_status.features:
+                            imgui.table_next_row()
+
+                            # feature name
+                            imgui.table_next_column()
+                            imgui.text(f.name)
+
+                            # status icon
+                            imgui.table_next_column()
+                            if f.status == Status.OK:
+                                imgui.text_colored(COL_OK, "OK")
+                            elif f.status == Status.WARN:
+                                imgui.text_colored(COL_WARN, "!")
+                            elif f.status == Status.ERROR:
+                                imgui.text_colored(COL_ERR, "X")
+                            else:
+                                imgui.text_colored(COL_NA, "-")
+
+                            # info/message
+                            imgui.table_next_column()
+                            if f.status == Status.MISSING:
+                                imgui.text_colored(COL_NA, "not installed")
+                            elif f.message:
+                                color = COL_OK if f.status == Status.OK else (COL_WARN if f.status == Status.WARN else COL_ERR)
+                                # truncate long messages
+                                msg = f.message[:25] + "..." if len(f.message) > 28 else f.message
+                                imgui.text_colored(color, msg)
+
+                        imgui.end_table()
 
                 imgui.unindent(hello_imgui.em_size(0.4))
             imgui.pop_style_var()
