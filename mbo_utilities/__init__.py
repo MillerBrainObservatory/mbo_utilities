@@ -76,12 +76,18 @@ def __getattr__(name):
         "files_to_dask",
         "get_files",
         "expand_paths",
-        "load_ops",
-        "write_ops",
         "merge_zarr_zplanes",
     ):
         from . import file_io
         return getattr(file_io, name)
+
+    # Suite2p ops utilities
+    if name == "load_ops":
+        from .arrays.suite2p import load_ops
+        return load_ops
+    if name == "write_ops":
+        from ._writers import write_ops
+        return write_ops
 
     # Metadata (metadata -> tifffile)
     if name in ("is_raw_scanimage", "get_metadata", "get_voxel_size", "normalize_resolution", "VoxelSize"):
