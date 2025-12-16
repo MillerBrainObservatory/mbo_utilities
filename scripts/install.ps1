@@ -68,20 +68,68 @@ function Install-Uv {
 function Test-NvidiaGpu {
     <#
     .SYNOPSIS
-    Check if NVIDIA GPU and CUDA are available.
+    Check if NVIDIA GPU and CUDA are available, detect CUDA version.
     #>
     try {
         $null = Get-Command nvidia-smi -ErrorAction Stop
-        $output = nvidia-smi --query-gpu=name --format=csv,noheader 2>$null
-        if ($output) {
+        $gpuName = nvidia-smi --query-gpu=name --format=csv,noheader 2>$null
+        if ($gpuName) {
+            # get cuda version from nvidia-smi
+            $cudaVersion = $null
+            $smiOutput = nvidia-smi 2>$null
+            if ($smiOutput -match "CUDA Version:\s*(\d+\.\d+)") {
+                $cudaVersion = $matches[1]
+            }
             return @{
                 Available = $true
-                GpuName = $output.Trim()
+                GpuName = $gpuName.Trim()
+                CudaVersion = $cudaVersion
             }
         }
     }
     catch {}
-    return @{ Available = $false; GpuName = $null }
+    return @{ Available = $false; GpuName = $null; CudaVersion = $null }
+}
+
+function Get-PyTorchIndexUrl {
+    <#
+    .SYNOPSIS
+    Get the PyTorch index URL for the detected CUDA version.
+    #>
+    param(
+        [string]$CudaVersion
+    )
+
+    if (-not $CudaVersion) {
+        return $null
+    }
+
+    # parse major.minor version
+    $parts = $CudaVersion -split '\.'
+    $major = [int]$parts[0]
+    $minor = [int]$parts[1]
+
+    # map cuda version to pytorch index url
+    # pytorch supports: cu118, cu121, cu124 (as of 2025)
+    if ($major -eq 11) {
+        return "https://download.pytorch.org/whl/cu118"
+    }
+    elseif ($major -eq 12) {
+        if ($minor -le 1) {
+            return "https://download.pytorch.org/whl/cu121"
+        }
+        elseif ($minor -le 4) {
+            return "https://download.pytorch.org/whl/cu124"
+        }
+        else {
+            # cuda 12.5+ use cu124 (forward compatible)
+            return "https://download.pytorch.org/whl/cu124"
+        }
+    }
+    else {
+        # unknown version, let pip figure it out
+        return $null
+    }
 }
 
 function Show-OptionalDependencies {
@@ -101,6 +149,10 @@ function Show-OptionalDependencies {
     if ($GpuInfo.Available) {
         Write-Host "  GPU detected: " -NoNewline -ForegroundColor Green
         Write-Host $GpuInfo.GpuName -ForegroundColor White
+        if ($GpuInfo.CudaVersion) {
+            Write-Host "  CUDA version: " -NoNewline -ForegroundColor Green
+            Write-Host $GpuInfo.CudaVersion -ForegroundColor White
+        }
     }
     else {
         Write-Host "  No NVIDIA GPU detected (GPU features will be slower)" -ForegroundColor Yellow
@@ -194,7 +246,8 @@ function Install-MboUtilities {
     Install mbo_utilities with selected optional dependencies.
     #>
     param(
-        [string[]]$Extras = @()
+        [string[]]$Extras = @(),
+        [hashtable]$GpuInfo = @{}
     )
 
     Write-Info "Installing mbo_utilities..."
@@ -205,8 +258,32 @@ function Install-MboUtilities {
         Write-Info "  Base installation (no optional dependencies)"
     }
 
+    # check if pytorch is needed (suite2p or processing extras)
+    $needsPytorch = $false
+    foreach ($e in $Extras) {
+        if ($e -eq "suite2p" -or $e -eq "processing") {
+            $needsPytorch = $true
+            break
+        }
+    }
+
     try {
-        # install as tool from github
+        # install pytorch with correct cuda version first if needed
+        if ($needsPytorch -and $GpuInfo.CudaVersion) {
+            $indexUrl = Get-PyTorchIndexUrl -CudaVersion $GpuInfo.CudaVersion
+            if ($indexUrl) {
+                Write-Info "Installing PyTorch for CUDA $($GpuInfo.CudaVersion)..."
+                Write-Info "  Using index: $indexUrl"
+                uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" `
+                    --with "torch" --with "torchvision" --with "torchaudio" `
+                    --index-url $indexUrl `
+                    --with "mbo_utilities[$($Extras -join ',')]"
+                Write-Success "mbo_utilities installed with CUDA-optimized PyTorch"
+                return
+            }
+        }
+
+        # fallback: standard installation
         if ($Extras.Count -eq 0) {
             uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git"
         }
@@ -297,6 +374,7 @@ function Install-MboEnv {
     .DESCRIPTION
     Creates a Python virtual environment with mbo_utilities installed.
     Prompts for optional dependencies if not specified.
+    Automatically installs PyTorch with correct CUDA version if GPU detected.
 
     .PARAMETER Path
     Installation path. Defaults to ~/mbo_env
@@ -320,15 +398,36 @@ function Install-MboEnv {
         Install-Uv
     }
 
+    # detect GPU and CUDA version
+    $gpuInfo = Test-NvidiaGpu
+
     # prompt for extras if not specified
     if ($null -eq $Extras) {
-        $gpuInfo = Test-NvidiaGpu
         $Extras = Show-OptionalDependencies -GpuInfo $gpuInfo
     }
 
     # create venv
     Write-Info "Creating virtual environment..."
     uv venv $Path --python 3.12
+
+    # check if pytorch is needed
+    $needsPytorch = $false
+    foreach ($e in $Extras) {
+        if ($e -eq "suite2p" -or $e -eq "processing" -or $e -eq "all") {
+            $needsPytorch = $true
+            break
+        }
+    }
+
+    # install pytorch with correct cuda version first
+    if ($needsPytorch -and $gpuInfo.CudaVersion) {
+        $indexUrl = Get-PyTorchIndexUrl -CudaVersion $gpuInfo.CudaVersion
+        if ($indexUrl) {
+            Write-Info "Installing PyTorch for CUDA $($gpuInfo.CudaVersion)..."
+            Write-Info "  Using index: $indexUrl"
+            uv pip install --python "$Path\Scripts\python.exe" torch torchvision torchaudio --index-url $indexUrl
+        }
+    }
 
     # build install spec
     $spec = Get-InstallSpec -Extras $Extras
@@ -378,68 +477,6 @@ function Install-MboEnv {
     return $Path
 }
 
-function Install-MboEnv {
-    <#
-    .SYNOPSIS
-    Creates a full mbo_utilities environment for use with VSCode/Jupyter.
-
-    .DESCRIPTION
-    Creates a Python virtual environment at ~/mbo_env with mbo_utilities installed.
-    This environment can be selected in VSCode or used to run Jupyter notebooks.
-
-    .PARAMETER Path
-    Installation path. Defaults to ~/mbo_env
-
-    .EXAMPLE
-    Install-MboEnv
-    Install-MboEnv -Path "C:\projects\mbo_env"
-    #>
-    param(
-        [string]$Path = $MBO_ENV_PATH
-    )
-
-    Write-Info "Creating full MBO environment at: $Path"
-
-    # check uv is available
-    if (-not (Test-UvInstalled)) {
-        Install-Uv
-    }
-
-    # create venv
-    Write-Info "Creating virtual environment..."
-    uv venv $Path --python 3.11
-
-    # install mbo_utilities with all extras using uv pip (targets the venv)
-    Write-Info "Installing mbo_utilities (this may take a few minutes)..."
-    uv pip install --python "$Path\Scripts\python.exe" "mbo_utilities[all] @ git+https://github.com/millerbrainobservatory/mbo_utilities.git"
-
-    # install jupyter for notebook support
-    Write-Info "Installing Jupyter..."
-    uv pip install --python "$Path\Scripts\python.exe" jupyterlab ipykernel
-
-    # register kernel for jupyter
-    Write-Info "Registering Jupyter kernel..."
-    & "$Path\Scripts\python.exe" -m ipykernel install --user --name mbo --display-name "MBO Utilities"
-
-    Write-Success "Environment created at: $Path"
-    Write-Host ""
-    Write-Host "To use this environment:" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  VSCode:" -ForegroundColor Cyan
-    Write-Host "    1. Open VSCode" -ForegroundColor Gray
-    Write-Host "    2. Press Ctrl+Shift+P -> 'Python: Select Interpreter'" -ForegroundColor Gray
-    Write-Host "    3. Choose: $Path\Scripts\python.exe" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  JupyterLab:" -ForegroundColor Cyan
-    Write-Host "    $Path\Scripts\jupyter-lab.exe" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  Terminal:" -ForegroundColor Cyan
-    Write-Host "    $Path\Scripts\Activate.ps1" -ForegroundColor Gray
-    Write-Host ""
-
-    return $Path
-}
-
 function Main {
     Show-Banner
 
@@ -455,7 +492,7 @@ function Main {
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
     # install mbo_utilities with selected extras
-    Install-MboUtilities -Extras $extras
+    Install-MboUtilities -Extras $extras -GpuInfo $gpuInfo
 
     # create desktop shortcut
     New-DesktopShortcut
