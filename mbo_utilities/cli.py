@@ -368,6 +368,12 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
     help="Output filename for binary format.",
 )
 @click.option(
+    "--output-suffix",
+    type=str,
+    default=None,
+    help="Custom suffix for output filenames (e.g., '_processed', '_session1'). Default: '_stitched' for multi-ROI data.",
+)
+@click.option(
     "--debug/--no-debug",
     default=False,
     help="Verbose debug logging.",
@@ -386,6 +392,7 @@ def convert(
     phasecorr_method,
     ome,
     output_name,
+    output_suffix,
     debug,
 ):
     """
@@ -472,6 +479,8 @@ def convert(
         imwrite_kwargs["ome"] = ome
     if output_name:
         imwrite_kwargs["output_name"] = output_name
+    if output_suffix:
+        imwrite_kwargs["output_suffix"] = output_suffix
 
     result = imwrite(data, output_path, **imwrite_kwargs)
     click.secho(f"\nDone! Output saved to: {result}", fg="green")

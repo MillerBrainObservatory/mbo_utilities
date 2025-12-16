@@ -615,7 +615,6 @@ def _save_log_to_file():
     # Write all captured lines
     lines = _output_capture.lines
     if not lines:
-        print(f"No log output to save.")
         return
 
     with open(log_file, "w", encoding="utf-8") as f:
@@ -626,7 +625,7 @@ def _save_log_to_file():
             stream_label = "ERR" if stream == "stderr" else "OUT"
             f.write(f"[{timestamp}] [{stream_label}] {text}\n")
 
-    print(f"Log saved to: {log_file}")
+    # silently save without console output
 
 
 def draw_progress_overlay(self):

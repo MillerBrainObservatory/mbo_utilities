@@ -1237,9 +1237,21 @@ class PreviewDataWidget(EdgeWindow):
         if self.fpath is None:
             title = "Test Data"
         elif isinstance(self.fpath, list):
-            title = f"{[Path(f).stem for f in self.fpath]}"
+            # use parent folder name for suite2p files (data.bin, data_raw.bin)
+            names = []
+            for f in self.fpath:
+                p = Path(f)
+                name = p.stem
+                if name in ("data", "data_raw"):
+                    name = p.parent.name
+                names.append(name)
+            title = f"{names}"
         else:
-            title = f"Filepath: {Path(self.fpath).stem}"
+            p = Path(self.fpath)
+            name = p.stem
+            if name in ("data", "data_raw"):
+                name = p.parent.name
+            title = f"Filepath: {name}"
         self.image_widget.figure.canvas.set_title(str(title))
 
     def _refresh_image_widget(self):

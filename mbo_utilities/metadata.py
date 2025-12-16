@@ -1603,7 +1603,6 @@ def save_metadata_html(
 
     tree_html = render_dict(cleaned)
 
-    # ---- Assemble page -------------------------------------------------------
     css = """
 :root {
   --bg:#0e1116; --fg:#e6edf3; --muted:#9aa5b1; --accent:#4aa3ff; --badge:#293241;

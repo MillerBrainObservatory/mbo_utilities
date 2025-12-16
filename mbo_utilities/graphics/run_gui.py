@@ -198,177 +198,10 @@ def download_notebook(
 
 def _check_installation():
     """Verify that mbo_utilities and key dependencies are properly installed."""
-    click.echo("Checking mbo_utilities installation...\n")
-
-    # Core package check
-    try:
-        import mbo_utilities
-        version = getattr(mbo_utilities, "__version__", "unknown")
-        click.secho(f"mbo_utilities {version} installed", fg="green")
-    except ImportError as e:
-        click.secho(f"mbo_utilities import failed: {e}", fg="red")
-        return False
-
-    # Check Python version
-    py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    click.secho(f"Python {py_version}", fg="green")
-
-    # Check critical dependencies
-    dependencies = {
-        "imgui_bundle": "ImGui Bundle - required for GUI",
-        "fastplotlib": "FastPlotLib - required for GUI visualization",
-    }
-
-    optional_dependencies = {
-        "cupy": "CuPy - required for Suite3D z-registration",
-        "torch": "PyTorch - required for Suite2p processing",
-        "suite2p": "Suite2p - calcium imaging processing pipeline",
-    }
-
-    all_good = True
-    click.echo("\nCore Dependencies:")
-    for module, desc in dependencies.items():
-        try:
-            mod = __import__(module)
-            ver = getattr(mod, "__version__", "installed")
-            click.secho(f"  {desc}: {ver}", fg="green")
-        except ImportError:
-            click.secho(f"  {desc}: not installed", fg="red")
-            all_good = False
-
-    click.echo("\nOptional Dependencies:")
-    cupy_installed = False
-    for module, desc in optional_dependencies.items():
-        try:
-            mod = __import__(module)
-            ver = getattr(mod, "__version__", "installed")
-            click.secho(f"  {desc}: {ver}", fg="green")
-            if module == "cupy":
-                cupy_installed = True
-        except ImportError:
-            click.secho(f"  {desc}: not installed (optional)", fg="yellow")
-
-    # Check CUDA/GPU configuration if CuPy is installed
-    cuda_path = None
-    suggested_cuda_path = None
-    if cupy_installed:
-        click.echo("\nGPU/CUDA Configuration:")
-        cuda_path = os.environ.get("CUDA_PATH")
-
-        # Try to find CUDA installation
-        if not cuda_path:
-            # Common CUDA installation paths
-            if sys.platform == "win32":
-                base_path = Path("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA")
-                if base_path.exists():
-                    # Find the latest version
-                    versions = sorted([d for d in base_path.iterdir() if d.is_dir()], reverse=True)
-                    if versions:
-                        suggested_cuda_path = str(versions[0])
-            else:
-                # Linux/Mac common paths
-                for path in ["/usr/local/cuda", "/opt/cuda"]:
-                    if Path(path).exists():
-                        suggested_cuda_path = path
-                        break
-
-        if cuda_path:
-            click.secho(f"  CUDA_PATH environment variable set: {cuda_path}", fg="green")
-        else:
-            click.secho("  CUDA_PATH environment variable not set", fg="yellow")
-            if suggested_cuda_path:
-                click.secho(f"  Found CUDA installation at: {suggested_cuda_path}", fg="cyan")
-            all_good = False
-
-        try:
-            import cupy as cp
-            # Try to create a simple array to test CUDA functionality
-            test_array = cp.array([1, 2, 3])
-
-            # Test NVRTC compilation (required for Suite3D)
-            # This will fail if nvrtc64_*.dll is missing
-            try:
-                kernel = cp.ElementwiseKernel(
-                    'float32 x', 'float32 y', 'y = x * 2', 'test_kernel'
-                )
-                # Actually execute the kernel to trigger compilation
-                test_in = cp.array([1.0], dtype='float32')
-                test_out = cp.empty_like(test_in)
-                kernel(test_in, test_out)
-                click.secho("  NVRTC (CUDA JIT compiler) working", fg="green")
-            except Exception as nvrtc_err:
-                click.secho("  NVRTC compilation failed", fg="red")
-                click.echo(f"         Error: {str(nvrtc_err)[:100]}")
-                click.echo("         Suite3D z-registration will NOT work without NVRTC.")
-                click.echo("         Install CUDA Toolkit 12.0 runtime libraries to fix this.")
-                all_good = False
-
-            # Get CUDA runtime version
-            cuda_version = cp.cuda.runtime.runtimeGetVersion()
-            cuda_major = cuda_version // 1000
-            cuda_minor = (cuda_version % 1000) // 10
-            click.secho(f"  CUDA Runtime Version: {cuda_major}.{cuda_minor}", fg="green")
-
-            device_count = cp.cuda.runtime.getDeviceCount()
-            if device_count > 0:
-                device = cp.cuda.Device()
-                device_name = device.attributes.get("Name", "Unknown")
-                click.secho(f"  CUDA device available: {device_name} (Device {device.id})", fg="green")
-                click.secho(f"  Total CUDA devices: {device_count}", fg="green")
-
-                # Detect likely CUDA installation path from version
-                if not suggested_cuda_path and sys.platform == "win32":
-                    suggested_cuda_path = f"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v{cuda_major}.{cuda_minor}"
-            else:
-                click.secho("  No CUDA devices found", fg="red")
-                all_good = False
-        except Exception as e:
-            click.secho(f"  CuPy CUDA initialization failed: {e}", fg="red")
-            click.echo("         This will prevent GPU-accelerated operations like Suite3D z-registration.")
-            click.echo("         Action required: Set CUDA_PATH environment variable to your CUDA installation directory.")
-            all_good = False
-
-    # Check for mbo directories
-    click.echo("\nConfiguration:")
-    try:
-        from mbo_utilities.file_io import get_mbo_dirs
-        dirs = get_mbo_dirs()
-        click.secho(f"  Config directory: {dirs.get('base', 'unknown')}", fg="green")
-    except Exception as e:
-        click.secho(f"  Failed to get config directories: {e}", fg="red")
-        all_good = False
-
-    # Summary
-    click.echo("\n" + "=" * 50)
-    if all_good:
-        click.secho("Installation check passed!", fg="green", bold=True)
-        click.echo("\nYou can now:")
-        click.echo("  - Run 'uv run mbo' to open the GUI")
-        click.echo("  - Run 'uv run mbo /path/to/file' to directly open any supported file")
-        click.echo("  - Run 'uv run mbo --download-notebook' to get the user guide")
-        return True
-    else:
-        click.secho("Installation check failed!", fg="red", bold=True)
-        click.echo("\nIssues detected:")
-        if not cuda_path and cupy_installed:
-            click.echo("  - CUDA_PATH not set: GPU operations (Suite3D z-registration) will fail")
-            click.echo("    Fix: Set CUDA_PATH environment variable to your CUDA installation")
-            if suggested_cuda_path:
-                if sys.platform == "win32":
-                    click.secho("\n    Run this command (then restart terminal):", fg="cyan")
-                    click.secho(f"      setx CUDA_PATH \"{suggested_cuda_path}\"", fg="cyan", bold=True)
-                    click.echo("\n    Or set for current session only:")
-                    click.secho(f"      $env:CUDA_PATH = \"{suggested_cuda_path}\"", fg="cyan")
-                else:
-                    click.echo("\n    Add this to your ~/.bashrc or ~/.zshrc:")
-                    click.secho(f"      export CUDA_PATH={suggested_cuda_path}", fg="cyan", bold=True)
-                    click.echo("\n    Or set for current session only:")
-                    click.secho(f"      export CUDA_PATH={suggested_cuda_path}", fg="cyan")
-            else:
-                click.echo("    Example (Windows): setx CUDA_PATH \"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\"")
-                click.echo("    Example (Linux/Mac): export CUDA_PATH=/usr/local/cuda")
-        click.echo("\nFor other issues, try reinstalling with: uv sync")
-        return False
+    from mbo_utilities.install_checker import check_installation, print_status_cli
+    status = check_installation()
+    print_status_cli(status)
+    return status.all_ok
 
 
 def _setup_qt_backend():
@@ -408,9 +241,9 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "MBO Utilities – Data Selection"
-    params.app_window_params.window_geometry.size = (420, 620)
+    params.app_window_params.window_geometry.size = (420, 680)
     params.app_window_params.window_geometry.size_auto = False
-    params.app_window_params.resizable = True
+    params.app_window_params.resizable = False  # fixed size to prevent scrollbar issues
     params.ini_filename = str(
         Path(get_mbo_dirs()["settings"], "fd_settings.ini").expanduser()
     )
@@ -500,7 +333,11 @@ def _create_image_widget(data_array, widget: bool = True):
         base_name = None
         if hasattr(data_array, "filenames") and data_array.filenames:
             from pathlib import Path
-            base_name = Path(data_array.filenames[0]).stem
+            first_file = Path(data_array.filenames[0])
+            base_name = first_file.stem
+            # for suite2p arrays (data.bin), use parent folder name instead
+            if base_name in ("data", "data_raw"):
+                base_name = first_file.parent.name
             if len(base_name) > 24:
                 base_name = base_name[:21] + "..."
         for r in iter_rois(data_array):

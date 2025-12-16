@@ -30,11 +30,6 @@ def wrap_array(data):
     return data
 
 
-# =============================================================================
-# Core Round-trip Tests
-# =============================================================================
-
-
 class TestRoundtripToTiff:
     """Test writing to TIFF and comparing against reference."""
 
@@ -289,11 +284,6 @@ class TestRoundtripToNpy:
         assert arr.metadata.get("experiment") == "test_001" or "nframes" in arr.metadata
 
 
-# =============================================================================
-# Cross-format conversion tests
-# =============================================================================
-
-
 class TestCrossFormatConversion:
     """Test converting between different formats."""
 
@@ -345,11 +335,6 @@ class TestCrossFormatConversion:
         assert result["exact_match"], f"{source_ext}→{target_ext} data mismatch: {result}"
 
 
-# =============================================================================
-# Frame count tests (num_frames parameter)
-# =============================================================================
-
-
 class TestNumFramesParameter:
     """Test that num_frames parameter limits output correctly."""
 
@@ -378,11 +363,6 @@ class TestNumFramesParameter:
 
         assert readback.shape[0] == num_frames, \
             f"Expected {num_frames} frames, got {readback.shape[0]}"
-
-
-# =============================================================================
-# Data integrity tests
-# =============================================================================
 
 
 class TestDataIntegrity:
@@ -429,11 +409,6 @@ class TestDataIntegrity:
                 f"Dtype changed for {ext}: {expected_dtype} → {dtype}"
 
 
-# =============================================================================
-# Overwrite behavior tests
-# =============================================================================
-
-
 class TestOverwriteBehavior:
     """Test overwrite=True/False behavior."""
 
@@ -453,11 +428,6 @@ class TestOverwriteBehavior:
 
         # Should be different (data2 was written)
         assert not np.array_equal(first_read, second_read), "Overwrite didn't replace data"
-
-
-# =============================================================================
-# Source array type tests
-# =============================================================================
 
 
 class TestSourceArrayTypes:

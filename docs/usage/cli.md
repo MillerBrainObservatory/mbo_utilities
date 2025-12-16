@@ -36,6 +36,7 @@ mbo convert input.zarr output/ -e .tiff           # zarr to tiff
 mbo convert input.tiff output/ -e .zarr -p 1 -p 7 # specific planes
 mbo convert input.tiff output/ --fix-phase        # with phase correction
 mbo convert input.tiff output/ -n 1000            # first 1000 frames
+mbo convert input.tiff output/ --output-suffix _session1  # plane01_session1.zarr
 ```
 
 **Options:**
@@ -46,6 +47,7 @@ mbo convert input.tiff output/ -n 1000            # first 1000 frames
 | `-p, --planes` | z-planes to export (1-based), repeatable |
 | `-n, --num-frames` | limit number of frames |
 | `--roi` | roi selection: None, 0, N, or "1,3" |
+| `--output-suffix` | custom filename suffix (default: _stitched for multi-roi) |
 | `--fix-phase/--no-fix-phase` | bidirectional phase correction |
 | `--phasecorr-method` | mean, median, or max |
 | `--register-z` | z-plane registration via suite3d |

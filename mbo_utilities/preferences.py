@@ -54,11 +54,6 @@ def _save_preferences(prefs: dict) -> None:
         logger.warning(f"Failed to save preferences: {e}")
 
 
-# -----------------------------------------------------------------------------
-# Recent Files
-# -----------------------------------------------------------------------------
-
-
 def get_recent_files() -> list[dict]:
     """
     Get list of recently opened files/folders.
@@ -143,11 +138,7 @@ def remove_recent_file(path: str | Path) -> None:
     _save_preferences(prefs)
 
 
-# -----------------------------------------------------------------------------
-# Directory Preferences
-# -----------------------------------------------------------------------------
-
-# Keys for different dialog contexts - each dialog type has its own cached path
+# keys for different dialog contexts - each dialog type has its own cached path
 _DIR_KEYS = {
     # General file/folder opening
     "open_file": "last_open_file_dir",      # File > Open File
@@ -383,11 +374,6 @@ def get_default_open_dir() -> Path:
     return Path.home()
 
 
-# -----------------------------------------------------------------------------
-# GUI Preferences
-# -----------------------------------------------------------------------------
-
-
 def get_gui_preference(key: str, default: Any = None) -> Any:
     """
     Get a GUI preference value.
@@ -442,11 +428,6 @@ def set_gui_preferences(gui_prefs: dict) -> None:
     _save_preferences(prefs)
 
 
-# -----------------------------------------------------------------------------
-# Pipeline Preferences
-# -----------------------------------------------------------------------------
-
-
 def get_pipeline_defaults() -> dict:
     """
     Get default pipeline settings (Suite2p parameters, etc.).
@@ -489,11 +470,6 @@ def set_pipeline_default(key: str, value: Any) -> None:
         prefs["pipeline_defaults"] = {}
     prefs["pipeline_defaults"][key] = value
     _save_preferences(prefs)
-
-
-# -----------------------------------------------------------------------------
-# Utility Functions
-# -----------------------------------------------------------------------------
 
 
 def reset_preferences() -> None:

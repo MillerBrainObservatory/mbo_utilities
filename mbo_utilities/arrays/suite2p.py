@@ -206,16 +206,11 @@ class Suite2pArray(ReductionMixin):
             else:
                 self._init_single_plane(path, use_raw)
         elif path.suffix == ".bin":
+            # user explicitly selected a .bin file - load only that plane
             ops_path = path.with_name("ops.npy")
             if not ops_path.exists():
                 raise FileNotFoundError(f"Missing ops.npy near {path}")
-            # check if parent has sibling plane directories (volume)
-            parent = path.parent.parent
-            plane_dirs = find_suite2p_plane_dirs(parent)
-            if len(plane_dirs) > 1:
-                self._init_volume(plane_dirs, use_raw)
-            else:
-                self._init_single_plane(ops_path, use_raw)
+            self._init_single_plane(ops_path, use_raw)
         else:
             raise ValueError(f"Unsupported input: {path}")
 
