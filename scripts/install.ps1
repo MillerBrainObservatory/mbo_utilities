@@ -320,19 +320,19 @@ function New-DesktopShortcut {
             $mboExe = (Get-Command mbo -ErrorAction Stop).Source
         }
         catch {
-            Write-Warn "Could not locate mbo.exe - shortcut will use 'uv run mbo'"
+            Write-Warn "Could not locate mbo.exe"
             $mboExe = $null
         }
     }
 
-    # download icon
+    # setup local app data directory
     $iconDir = Join-Path $env:LOCALAPPDATA "mbo_utilities"
-    $iconPath = Join-Path $iconDir "mbo_icon.ico"
-
     if (-not (Test-Path $iconDir)) {
         New-Item -ItemType Directory -Path $iconDir -Force | Out-Null
     }
 
+    # download icon
+    $iconPath = Join-Path $iconDir "mbo_icon.ico"
     try {
         Write-Info "Downloading icon..."
         Invoke-WebRequest -Uri "https://raw.githubusercontent.com/millerbrainobservatory/mbo_utilities/master/docs/_static/mbo_icon.ico" -OutFile $iconPath
@@ -342,11 +342,27 @@ function New-DesktopShortcut {
         $iconPath = $null
     }
 
+    # download vbs launcher (runs without console window)
+    $launcherPath = Join-Path $iconDir "mbo_launcher.vbs"
+    try {
+        Write-Info "Downloading launcher..."
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/millerbrainobservatory/mbo_utilities/master/scripts/mbo_launcher.vbs" -OutFile $launcherPath
+    }
+    catch {
+        Write-Warn "Could not download launcher, shortcut will show console"
+        $launcherPath = $null
+    }
+
     # create shortcut
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
 
-    if ($mboExe -and (Test-Path $mboExe)) {
+    # prefer vbs launcher (no console), fallback to exe
+    if ($launcherPath -and (Test-Path $launcherPath)) {
+        $shortcut.TargetPath = "wscript.exe"
+        $shortcut.Arguments = """$launcherPath"""
+    }
+    elseif ($mboExe -and (Test-Path $mboExe)) {
         $shortcut.TargetPath = $mboExe
     }
     else {
