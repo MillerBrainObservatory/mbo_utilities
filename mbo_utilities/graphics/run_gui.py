@@ -333,7 +333,11 @@ def _create_image_widget(data_array, widget: bool = True):
         base_name = None
         if hasattr(data_array, "filenames") and data_array.filenames:
             from pathlib import Path
-            base_name = Path(data_array.filenames[0]).stem
+            first_file = Path(data_array.filenames[0])
+            base_name = first_file.stem
+            # for suite2p arrays (data.bin), use parent folder name instead
+            if base_name in ("data", "data_raw"):
+                base_name = first_file.parent.name
             if len(base_name) > 24:
                 base_name = base_name[:21] + "..."
         for r in iter_rois(data_array):

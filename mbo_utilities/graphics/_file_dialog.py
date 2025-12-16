@@ -20,8 +20,7 @@ from mbo_utilities.preferences import (
     get_gui_preference,
     set_gui_preference,
 )
-from mbo_utilities.file_io import get_package_assets_path
-from mbo_utilities.graphics.upgrade_manager import UpgradeManager
+from mbo_utilities.graphics.upgrade_manager import UpgradeManager, CheckStatus, UpgradeStatus
 from mbo_utilities.install_checker import check_installation, Status
 
 
@@ -35,19 +34,11 @@ def setup_imgui():
     if package_assets.is_dir():
         shutil.copytree(package_assets, user_assets, dirs_exist_ok=True)
 
-    # also copy imgui_bundle default fonts as fallback
+    # also copy imgui_bundle fonts as fallback
     fonts_dst = user_assets / "fonts"
     fonts_dst.mkdir(parents=True, exist_ok=True)
     (user_assets / "static").mkdir(parents=True, exist_ok=True)
 
-    # copy package assets (icon, fonts, static) to user config
-    package_assets = get_package_assets_path()
-    if package_assets.is_dir():
-        shutil.copytree(package_assets, user_assets, dirs_exist_ok=True)
-
-    # also copy imgui_bundle fonts as fallback
-    fonts_dst = user_assets / "fonts"
-    fonts_dst.mkdir(parents=True, exist_ok=True)
     fonts_src = Path(imgui_bundle.__file__).parent / "assets" / "fonts"
     for p in fonts_src.rglob("*"):
         if p.is_file():
@@ -75,21 +66,22 @@ def setup_imgui():
     hello_imgui.set_assets_folder(str(user_assets))
 
 
-# setup_imgui()
-
-
 # colors - high contrast dark theme for better visibility
 COL_BG = imgui.ImVec4(0.11, 0.11, 0.12, 1.0)
 COL_BG_CARD = imgui.ImVec4(0.16, 0.16, 0.17, 1.0)
-COL_ACCENT = imgui.ImVec4(0.20, 0.50, 0.85, 1.0)  # Darker blue for better text contrast
+COL_ACCENT = imgui.ImVec4(0.20, 0.50, 0.85, 1.0)
 COL_ACCENT_HOVER = imgui.ImVec4(0.25, 0.55, 0.90, 1.0)
 COL_ACCENT_ACTIVE = imgui.ImVec4(0.15, 0.45, 0.80, 1.0)
-COL_TEXT = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)  # Pure white for maximum visibility
-COL_TEXT_DIM = imgui.ImVec4(0.75, 0.75, 0.77, 1.0)  # Lighter dim text
+COL_TEXT = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
+COL_TEXT_DIM = imgui.ImVec4(0.75, 0.75, 0.77, 1.0)
 COL_BORDER = imgui.ImVec4(0.35, 0.35, 0.37, 0.7)
-COL_SECONDARY = imgui.ImVec4(0.35, 0.35, 0.37, 1.0)  # Lighter secondary buttons
+COL_SECONDARY = imgui.ImVec4(0.35, 0.35, 0.37, 1.0)
 COL_SECONDARY_HOVER = imgui.ImVec4(0.42, 0.42, 0.44, 1.0)
 COL_SECONDARY_ACTIVE = imgui.ImVec4(0.28, 0.28, 0.30, 1.0)
+COL_OK = imgui.ImVec4(0.4, 1.0, 0.4, 1.0)
+COL_WARN = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
+COL_ERR = imgui.ImVec4(1.0, 0.4, 0.4, 1.0)
+COL_NA = imgui.ImVec4(0.5, 0.5, 0.5, 1.0)
 
 
 def push_button_style(primary=True):
@@ -117,14 +109,13 @@ class FileDialog:
         self.selected_path = None
         self._open_multi = None
         self._select_folder = None
-        # fixed options (always enabled)
         self._widget_enabled = True
         self.metadata_only = False
         self.split_rois = False
-        # get default directory for file dialogs
         self._default_dir = str(get_default_open_dir())
-        # upgrade manager for checking pypi updates
+        # upgrade manager - auto-check on startup
         self.upgrade_manager = UpgradeManager(enabled=True)
+        self.upgrade_manager.check_for_upgrade()
         # cached install status (computed on first render)
         self._install_status = None
 
@@ -137,11 +128,128 @@ class FileDialog:
         self._widget_enabled = value
 
     def _save_gui_preferences(self):
-        """Save current GUI preferences to disk."""
-        pass  # no preferences to save currently
+        pass
+
+    def _get_feature(self, name: str):
+        """get feature status by name from install status."""
+        if self._install_status is None:
+            return None
+        for f in self._install_status.features:
+            if f.name == name:
+                return f
+        return None
+
+    def _draw_version_status(self):
+        """draw version with update status inline."""
+        version = self._install_status.mbo_version if self._install_status else "?"
+
+        checking = self.upgrade_manager.check_status == CheckStatus.CHECKING
+        done = self.upgrade_manager.check_status == CheckStatus.DONE
+        has_update = done and self.upgrade_manager.upgrade_available
+        is_dev = done and self.upgrade_manager.is_dev_build
+        up_to_date = done and not has_update and not is_dev
+
+        # version text - green if up to date, normal otherwise
+        if up_to_date:
+            imgui.text_colored(COL_OK, f"v{version}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("up to date")
+        elif is_dev:
+            imgui.text_colored(COL_TEXT_DIM, f"v{version}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("development build")
+        elif checking:
+            imgui.text_colored(COL_TEXT_DIM, f"v{version}")
+            imgui.same_line()
+            imgui.text_colored(COL_TEXT_DIM, "...")
+        else:
+            imgui.text_colored(COL_TEXT_DIM, f"v{version}")
+
+        # update button if available
+        if has_update:
+            imgui.same_line()
+            upgrading = self.upgrade_manager.upgrade_status == UpgradeStatus.RUNNING
+            if upgrading:
+                imgui.begin_disabled()
+
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.5, 0.2, 1.0))
+            imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.25, 0.6, 0.25, 1.0))
+            imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.15, 0.4, 0.15, 1.0))
+            text_h = imgui.get_text_line_height()
+            if imgui.button("update", imgui.ImVec2(0, text_h)):
+                self.upgrade_manager.start_upgrade()
+            imgui.pop_style_color(3)
+
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"v{self.upgrade_manager.latest_version} available")
+
+            if upgrading:
+                imgui.end_disabled()
+
+            # show restart message after upgrade
+            if self.upgrade_manager.upgrade_status == UpgradeStatus.SUCCESS:
+                imgui.same_line()
+                imgui.text_colored(COL_OK, "restart")
+            elif self.upgrade_manager.upgrade_status == UpgradeStatus.ERROR:
+                imgui.same_line()
+                imgui.text_colored(COL_ERR, "failed")
+
+    def _draw_dependency_group(self, name: str, pipeline_feature: str, requires: list[tuple[str, str]]):
+        """draw a single dependency group inline: Name - Requirement vX.X (GPU/CPU)."""
+        pipeline = self._get_feature(pipeline_feature)
+
+        # not installed
+        if pipeline is None or pipeline.status == Status.MISSING:
+            imgui.text_colored(COL_NA, f"{name} - not installed")
+            return
+
+        # build the line: "Suite2p - PyTorch v2.1.0 (GPU)"
+        parts = [name]
+
+        # add requirement info inline
+        for req_name, feature_name in requires:
+            feat = self._get_feature(feature_name)
+            if feat is None or feat.status == Status.MISSING:
+                parts.append(f"- {req_name}: missing")
+            else:
+                ver_str = f"v{feat.version}" if feat.version and feat.version != "installed" else ""
+                gpu_str = ""
+                if feat.gpu_ok is True:
+                    gpu_str = "GPU"
+                elif feat.gpu_ok is False:
+                    gpu_str = "CPU"
+
+                req_parts = [f"- {req_name}"]
+                if ver_str:
+                    req_parts.append(ver_str)
+                if gpu_str:
+                    req_parts.append(f"({gpu_str})")
+                parts.append(" ".join(req_parts))
+
+        line = " ".join(parts)
+
+        # color based on status
+        if pipeline.status == Status.OK:
+            imgui.text_colored(COL_OK, line)
+        elif pipeline.status == Status.WARN:
+            imgui.text_colored(COL_WARN, line)
+        else:
+            imgui.text_colored(COL_ERR, line)
+
+        # tooltip with detailed info
+        if imgui.is_item_hovered():
+            tooltip_parts = []
+            if pipeline.version and pipeline.version != "installed":
+                tooltip_parts.append(f"{name} v{pipeline.version}")
+            for req_name, feature_name in requires:
+                feat = self._get_feature(feature_name)
+                if feat and feat.message:
+                    tooltip_parts.append(f"{req_name}: {feat.message}")
+            if tooltip_parts:
+                imgui.set_tooltip("\n".join(tooltip_parts))
 
     def render(self):
-        # global style - high contrast for visibility
+        # global style
         imgui.push_style_color(imgui.Col_.window_bg, COL_BG)
         imgui.push_style_color(imgui.Col_.child_bg, imgui.ImVec4(0, 0, 0, 0))
         imgui.push_style_color(imgui.Col_.text, COL_TEXT)
@@ -206,34 +314,34 @@ class FileDialog:
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.4))
 
-            # calculate dynamic card height based on available space
-            # fixed heights: header ~3em, buttons ~4.5em, quit ~2em, padding ~2em
-            fixed_height = hello_imgui.em_size(12)
-            available_for_card = win_h - fixed_height
-            # content needs ~25em to fit without scrollbar (formats + install status)
-            content_height = hello_imgui.em_size(25)
-            # use available space, but cap at content height (no need to be bigger)
-            card_h = min(available_for_card, content_height)
-            # minimum height to show at least something useful
-            card_h = max(card_h, hello_imgui.em_size(8))
+            # lazy load install status
+            if self._install_status is None:
+                self._install_status = check_installation()
 
-            # formats section - dynamic width based on window
-            card_w = min(hello_imgui.em_size(24), win_w - hello_imgui.em_size(2))
+            # card width based on window, auto-height to fit content
+            min_card_width = hello_imgui.em_size(24)
+            card_w = max(win_w - hello_imgui.em_size(2), min_card_width)
             card_x = (win_w - card_w) * 0.5
             imgui.set_cursor_pos_x(card_x)
 
             imgui.push_style_color(imgui.Col_.child_bg, COL_BG_CARD)
             imgui.push_style_var(imgui.StyleVar_.child_rounding, 6.0)
+            imgui.push_style_var(imgui.StyleVar_.cell_padding, hello_imgui.em_to_vec2(0.4, 0.2))
 
-            # only show scrollbar if content doesn't fit
-            needs_scroll = card_h < content_height
-            child_flags = imgui.ChildFlags_.borders
-            window_flags = imgui.WindowFlags_.none if needs_scroll else (imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
+            # auto-resize height to content, no scrollbar
+            child_flags = imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y
+            window_flags = imgui.WindowFlags_.no_scrollbar
 
-            with imgui_ctx.begin_child("##formats", size=imgui.ImVec2(card_w, card_h), child_flags=child_flags, window_flags=window_flags):
+            with imgui_ctx.begin_child("##formats", size=imgui.ImVec2(card_w, 0), child_flags=child_flags, window_flags=window_flags):
                 imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
-                imgui.indent(hello_imgui.em_size(0.4))
+                imgui.indent(hello_imgui.em_size(0.6))
 
+                # version line
+                self._draw_version_status()
+
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+                # supported formats section
                 imgui.text_colored(COL_ACCENT, "Supported Formats")
                 imgui.same_line()
                 push_button_style(primary=False)
@@ -244,15 +352,19 @@ class FileDialog:
 
                 imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
 
-                # table with array types
+                # calculate table width to fit content
+                available_width = imgui.get_content_region_avail().x - hello_imgui.em_size(1)
+                col1_width = hello_imgui.em_size(6)
+                col2_width = available_width - col1_width
+
                 table_flags = (
                     imgui.TableFlags_.borders_inner_v
                     | imgui.TableFlags_.row_bg
-                    | imgui.TableFlags_.sizing_stretch_same
+                    | imgui.TableFlags_.no_host_extend_x
                 )
-                if imgui.begin_table("##array_types", 2, table_flags):
-                    imgui.table_setup_column("Format")
-                    imgui.table_setup_column("Extensions")
+                if imgui.begin_table("##array_types", 2, table_flags, imgui.ImVec2(available_width, 0)):
+                    imgui.table_setup_column("Format", imgui.TableColumnFlags_.width_fixed, col1_width)
+                    imgui.table_setup_column("Extensions", imgui.TableColumnFlags_.width_fixed, col2_width)
                     imgui.table_headers_row()
 
                     array_types = [
@@ -272,111 +384,43 @@ class FileDialog:
                         imgui.text_colored(COL_TEXT_DIM, ext)
                     imgui.end_table()
 
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
                 imgui.separator()
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+
+                # optional dependencies section
+                imgui.text_colored(COL_ACCENT, "Optional Dependencies")
                 imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
-                # lazy load install status
-                if self._install_status is None:
-                    self._install_status = check_installation()
+                # suite2p group
+                self._draw_dependency_group(
+                    "Suite2p",
+                    "Suite2p",
+                    [("PyTorch", "PyTorch")]
+                )
 
-                from mbo_utilities.graphics.upgrade_manager import CheckStatus, UpgradeStatus
+                # suite3d group
+                self._draw_dependency_group(
+                    "Suite3D",
+                    "Suite3D",
+                    [("CuPy", "CuPy")]
+                )
 
-                # header line: version + check button + status
-                imgui.text_colored(COL_TEXT_DIM, f"v{self._install_status.mbo_version}")
-
-                imgui.same_line()
-                checking = self.upgrade_manager.check_status == CheckStatus.CHECKING
-                if checking:
-                    imgui.begin_disabled()
-                push_button_style(primary=False)
-                btn_label = "Checking..." if checking else "Check for updates"
-                # small button matching text height
-                text_h = imgui.get_text_line_height()
-                if imgui.button(btn_label, imgui.ImVec2(0, text_h)):
-                    self.upgrade_manager.check_for_upgrade()
-                pop_button_style()
-                if checking:
-                    imgui.end_disabled()
-
-                # status text on same line
-                imgui.same_line()
-                COL_OK = imgui.ImVec4(0.4, 1.0, 0.4, 1.0)
-                COL_ERR = imgui.ImVec4(1.0, 0.4, 0.4, 1.0)
-
-                if self.upgrade_manager.check_status == CheckStatus.DONE:
-                    if self.upgrade_manager.upgrade_available:
-                        imgui.text_colored(COL_OK, f"v{self.upgrade_manager.latest_version}!")
-                    elif self.upgrade_manager.is_dev_build:
-                        imgui.text_colored(COL_TEXT_DIM, "dev")
+                # rastermap (no additional requirements)
+                rastermap = self._get_feature("Rastermap")
+                if rastermap is None or rastermap.status == Status.MISSING:
+                    imgui.text_colored(COL_NA, "Rastermap - not installed")
+                else:
+                    ver = f" v{rastermap.version}" if rastermap.version and rastermap.version != "installed" else ""
+                    if rastermap.status == Status.OK:
+                        imgui.text_colored(COL_OK, f"Rastermap{ver}")
                     else:
-                        imgui.text_colored(COL_OK, "up to date")
-                elif self.upgrade_manager.check_status == CheckStatus.ERROR:
-                    imgui.text_colored(COL_ERR, "failed")
+                        imgui.text_colored(COL_WARN, f"Rastermap{ver}")
 
-                # upgrade button row (only if update available)
-                if self.upgrade_manager.check_status == CheckStatus.DONE and self.upgrade_manager.upgrade_available:
-                    upgrading = self.upgrade_manager.upgrade_status == UpgradeStatus.RUNNING
-                    if upgrading:
-                        imgui.begin_disabled()
-                    push_button_style(primary=True)
-                    upgrade_label = "Upgrading..." if upgrading else "Upgrade now"
-                    if imgui.button(upgrade_label, imgui.ImVec2(0, text_h)):
-                        self.upgrade_manager.start_upgrade()
-                    pop_button_style()
-                    if upgrading:
-                        imgui.end_disabled()
+                imgui.unindent(hello_imgui.em_size(0.6))
+                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
 
-                    imgui.same_line()
-                    if self.upgrade_manager.upgrade_status == UpgradeStatus.SUCCESS:
-                        imgui.text_colored(COL_OK, "Restart to apply")
-                    elif self.upgrade_manager.upgrade_status == UpgradeStatus.ERROR:
-                        imgui.text_colored(COL_ERR, "failed")
-
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
-
-                # compact features table
-                COL_WARN = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
-                COL_NA = imgui.ImVec4(0.5, 0.5, 0.5, 1.0)
-
-                table_flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.sizing_stretch_same
-                if imgui.begin_table("##install_status", 3, table_flags):
-                    imgui.table_setup_column("Feature", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(5))
-                    imgui.table_setup_column("Status", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(2))
-                    imgui.table_setup_column("Info")
-
-                    for f in self._install_status.features:
-                        imgui.table_next_row()
-
-                        # feature name
-                        imgui.table_next_column()
-                        imgui.text(f.name)
-
-                        # status icon
-                        imgui.table_next_column()
-                        if f.status == Status.OK:
-                            imgui.text_colored(COL_OK, "OK")
-                        elif f.status == Status.WARN:
-                            imgui.text_colored(COL_WARN, "!")
-                        elif f.status == Status.ERROR:
-                            imgui.text_colored(COL_ERR, "X")
-                        else:
-                            imgui.text_colored(COL_NA, "-")
-
-                        # info/message
-                        imgui.table_next_column()
-                        if f.status == Status.MISSING:
-                            imgui.text_colored(COL_NA, "not installed")
-                        elif f.message:
-                            color = COL_OK if f.status == Status.OK else (COL_WARN if f.status == Status.WARN else COL_ERR)
-                            # truncate long messages
-                            msg = f.message[:20] + "..." if len(f.message) > 23 else f.message
-                            imgui.text_colored(color, msg)
-
-                    imgui.end_table()
-
-                imgui.unindent(hello_imgui.em_size(0.4))
-            imgui.pop_style_var()
+            imgui.pop_style_var(2)
             imgui.pop_style_color()
 
             # file/folder completion
@@ -398,7 +442,7 @@ class FileDialog:
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._select_folder = None
 
-            # quit button - inline at bottom
+            # quit button
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
             qsz = imgui.ImVec2(hello_imgui.em_size(5), hello_imgui.em_size(1.5))
             imgui.set_cursor_pos_x(win_w - qsz.x - hello_imgui.em_size(1.0))

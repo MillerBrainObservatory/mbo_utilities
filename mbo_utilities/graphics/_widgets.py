@@ -111,7 +111,18 @@ def draw_metadata_inspector(metadata: dict):
             # section: imaging parameters
             imgui.text_colored(_TREE_NODE_COLOR, "Imaging")
             imgui.same_line()
-            imgui.text_colored(_ALIAS_COLOR, "(names are interchangeable aliases)")
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.begin_tooltip()
+                imgui.push_text_wrap_pos(imgui.get_font_size() * 30.0)
+                imgui.text_unformatted(
+                    "Hover parameter names to see aliases.\n\n"
+                    "These imaging parameters have standardized aliases for "
+                    "compatibility with ImageJ, OME-TIFF, OME-Zarr, and other systems.\n\n"
+                    "imread/imwrite handles all alias conversions automatically."
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.end_tooltip()
             imgui.separator()
             for name, param in METADATA_PARAMS.items():
                 value = metadata.get(param.canonical)
@@ -125,20 +136,20 @@ def draw_metadata_inspector(metadata: dict):
                     shown_keys.add(param.canonical)
                     shown_keys.update(param.aliases)
 
+                    # parameter name with alias tooltip on hover
                     imgui.text_colored(_CANONICAL_COLOR, param.canonical)
+                    if param.aliases and imgui.is_item_hovered():
+                        imgui.begin_tooltip()
+                        imgui.text("Aliases:")
+                        for alias in param.aliases:
+                            imgui.bullet_text(alias)
+                        imgui.end_tooltip()
                     imgui.same_line(value_col)
-                    # handle multi-value (per-camera) metadata
-                    imgui.text_colored(_VALUE_COLOR, _fmt_multivalue(value))
+                    # value with optional unit
+                    val_str = _fmt_multivalue(value)
                     if param.unit:
-                        imgui.same_line()
-                        imgui.text_colored(_ALIAS_COLOR, f"({param.unit})")
-
-                    # show aliases below
-                    if param.aliases:
-                        alias_str = ", ".join(param.aliases[:5])
-                        if len(param.aliases) > 5:
-                            alias_str += f", +{len(param.aliases)-5}"
-                        imgui.text_colored(_ALIAS_COLOR, f"    {alias_str}")
+                        val_str += f" ({param.unit})"
+                    imgui.text_colored(_VALUE_COLOR, val_str)
 
             # section: cameras (if present)
             cameras = metadata.get("cameras")
