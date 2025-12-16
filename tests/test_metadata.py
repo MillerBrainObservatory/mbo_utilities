@@ -26,11 +26,6 @@ def wrap_array(data):
     return data
 
 
-# =============================================================================
-# Metadata reading tests
-# =============================================================================
-
-
 class TestMetadataReading:
     """Test reading metadata from various sources."""
 
@@ -62,11 +57,6 @@ class TestMetadataReading:
         if "num_planes" in md and arr.ndim == 4:
             assert md["num_planes"] == arr.shape[1], \
                 f"num_planes mismatch: {md['num_planes']} vs {arr.shape[1]}"
-
-
-# =============================================================================
-# Metadata preservation tests
-# =============================================================================
 
 
 class TestMetadataPreservation:
@@ -187,11 +177,6 @@ class TestMetadataPreservation:
         assert zarr_path is not None, "No zarr output found"
 
 
-# =============================================================================
-# Format-specific metadata tests
-# =============================================================================
-
-
 class TestZarrMetadata:
     """Test Zarr-specific metadata handling."""
 
@@ -298,11 +283,6 @@ class TestTiffMetadata:
         assert out_file.exists()
 
 
-# =============================================================================
-# Metadata round-trip tests
-# =============================================================================
-
-
 class TestMetadataRoundtrip:
     """Test metadata survives full round-trip."""
 
@@ -330,11 +310,6 @@ class TestMetadataRoundtrip:
             md = arr.metadata
             assert md is not None, f"No metadata after {ext} round-trip"
             assert isinstance(md, dict), f"Metadata not dict: {type(md)}"
-
-
-# =============================================================================
-# Edge cases
-# =============================================================================
 
 
 class TestMetadataEdgeCases:

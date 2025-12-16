@@ -17,19 +17,10 @@ import pytest
 
 import mbo_utilities as mbo
 
-# =============================================================================
-# Test Data Paths
-# =============================================================================
-
 TEST_DATA_ROOT = Path("E:/tests/lbm/mbo_utilities")
 TEST_INPUT_TIFF = TEST_DATA_ROOT / "test_input.tif"
 BASELINE_DIR = TEST_DATA_ROOT / "baselines"
 OUTPUT_DIR = TEST_DATA_ROOT / "test_outputs"
-
-
-# =============================================================================
-# Session-scoped fixtures (created once per test session)
-# =============================================================================
 
 
 @pytest.fixture(scope="session")
@@ -153,11 +144,6 @@ def reference_tiff(reference_tiff_path, source_data_subset):
     }
 
 
-# =============================================================================
-# Function-scoped fixtures (created fresh for each test)
-# =============================================================================
-
-
 @pytest.fixture
 def output_dir(request, test_data_root):
     """
@@ -192,11 +178,6 @@ def temp_array(source_data_subset):
     """
     subset, shape_info = source_data_subset
     return subset.copy(), shape_info
-
-
-# =============================================================================
-# Synthetic data fixtures (for tests that don't need real data)
-# =============================================================================
 
 
 @pytest.fixture
@@ -255,11 +236,6 @@ def synthetic_4d_data():
     return data.clip(0, 4095).astype(np.int16)
 
 
-# =============================================================================
-# Metadata fixtures
-# =============================================================================
-
-
 @pytest.fixture
 def sample_metadata():
     """Sample metadata dict for testing metadata preservation."""
@@ -275,11 +251,6 @@ def sample_metadata():
     }
 
 
-# =============================================================================
-# Comparison helper fixtures
-# =============================================================================
-
-
 @pytest.fixture
 def array_compare():
     """Fixture to access compare_arrays helper."""
@@ -290,11 +261,6 @@ def array_compare():
 def correlation_check():
     """Fixture to access compute_frame_correlation helper."""
     return compute_frame_correlation
-
-
-# =============================================================================
-# Helper functions (module-level, importable)
-# =============================================================================
 
 
 def compare_arrays(arr1, arr2, rtol=1e-5, atol=0.5):
@@ -443,10 +409,6 @@ def find_output():
     """Fixture to access find_output_file helper."""
     return find_output_file
 
-
-# =============================================================================
-# Test result tracking
-# =============================================================================
 
 _test_results = []
 

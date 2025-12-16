@@ -24,11 +24,6 @@ from mbo_utilities.arrays import (
 )
 
 
-# =============================================================================
-# NumpyArray tests
-# =============================================================================
-
-
 class TestNumpyArray:
     """Test NumpyArray class."""
 
@@ -81,11 +76,6 @@ class TestNumpyArray:
         arr = NumpyArray(synthetic_3d_data)
         assert hasattr(arr, "metadata")
         assert isinstance(arr.metadata, dict)
-
-
-# =============================================================================
-# BinArray tests
-# =============================================================================
 
 
 class TestBinArray:
@@ -160,11 +150,6 @@ class TestBinArray:
         # Should not raise
 
 
-# =============================================================================
-# H5Array tests
-# =============================================================================
-
-
 class TestH5Array:
     """Test H5Array class."""
 
@@ -208,11 +193,6 @@ class TestH5Array:
         sliced = arr[1:4]
         assert sliced.shape == expected_data[1:4].shape
         assert np.array_equal(sliced, expected_data[1:4])
-
-
-# =============================================================================
-# ZarrArray tests
-# =============================================================================
 
 
 class TestZarrArray:
@@ -273,11 +253,6 @@ class TestZarrArray:
         assert hasattr(arr, "zstats")
 
 
-# =============================================================================
-# TiffArray tests
-# =============================================================================
-
-
 class TestTiffArray:
     """Test TiffArray class."""
 
@@ -316,11 +291,6 @@ class TestTiffArray:
         frame_squeezed = frame_np.squeeze()
         assert frame_squeezed.shape == expected_data[0].shape, \
             f"Squeezed frame shape mismatch: {frame_squeezed.shape} vs {expected_data[0].shape}"
-
-
-# =============================================================================
-# Suite2pArray tests
-# =============================================================================
 
 
 class TestSuite2pArray:
@@ -374,11 +344,6 @@ class TestSuite2pArray:
         frame = arr[0]
         frame_np = np.asarray(frame)
         assert frame_np.shape[-2:] == expected_data[0].shape[-2:]
-
-
-# =============================================================================
-# Volume auto-detection tests
-# =============================================================================
 
 
 class TestTiffVolumeAutoDetection:
@@ -517,11 +482,6 @@ class TestSuite2pVolumeAutoDetection:
             assert f"plane{i}" in d.name
 
 
-# =============================================================================
-# Protocol compliance tests
-# =============================================================================
-
-
 class TestProtocolCompliance:
     """Test that array classes comply with expected protocols."""
 
@@ -595,11 +555,6 @@ class TestProtocolCompliance:
     def test_has_metadata(self, array_instance):
         """All arrays should have metadata attribute."""
         assert hasattr(array_instance, "metadata")
-
-
-# =============================================================================
-# imread dispatcher tests
-# =============================================================================
 
 
 class TestImreadDispatcher:

@@ -73,14 +73,14 @@ class Suite2pSettings:
     force_refImg: bool = False  # Use refImg stored in ops
     pad_fft: bool = False  # Pad image during FFT registration
 
-    # --- 1P Registration ---
-    do_1Preg: bool = False  # Perform 1P-specific registration
+    # 1P registration
+    do_1Preg: bool = False  # perform 1P-specific registration
     spatial_hp_reg: int = 42  # Window for spatial high-pass filtering (1P)
     pre_smooth: float = 0.0  # Gaussian smoothing before high-pass (1P)
     spatial_taper: float = 40.0  # Pixels to ignore on edges (1P)
 
-    # --- Non-rigid Registration ---
-    nonrigid: bool = True  # Perform non-rigid registration
+    # non-rigid registration
+    nonrigid: bool = True  # perform non-rigid registration
     block_size: list = (
         None  # Block size for non-rigid (default [128, 128], power of 2/3)
     )
@@ -713,7 +713,6 @@ def draw_section_suite2p(self):
                 set_last_dir("suite2p_chan2", res.result()[0])
         set_tooltip("Path to channel 2 binary file for cross-channel registration.")
 
-        # --- 1P Registration Collapsible Subsection ---
         if imgui.tree_node("1-Photon Registration"):
             _, self.s2p.do_1Preg = imgui.checkbox(
                 "Enable 1P Registration", self.s2p.do_1Preg
@@ -746,7 +745,6 @@ def draw_section_suite2p(self):
 
             imgui.tree_pop()
 
-        # --- Non-rigid Registration Collapsible Subsection ---
         if imgui.tree_node("Non-rigid Registration"):
             _, self.s2p.nonrigid = imgui.checkbox(
                 "Enable Non-rigid", self.s2p.nonrigid
