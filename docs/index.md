@@ -13,6 +13,7 @@ CLI & GUI <usage/index>
 Array Types <array_types>
 API <api/index>
 venvs
+development
 glossary
 ```
 
