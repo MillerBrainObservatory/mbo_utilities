@@ -14,15 +14,24 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 ## Installation
 
-`mbo_utilities` is a pure pip install. For help setting up a virtual environment, see the [Virtual Environments guide](https://millerbrainobservatory.github.io/mbo_utilities/venvs.html).
+`mbo_utilities` is a pure pip install. For help setting up a virtual environment, see the [Virtual Environments guide](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ```bash
 uv venv --python 3.12.9
 uv pip install mbo_utilities
 
-# install all optional dependencies 
+# install all optional dependencies
 uv pip install "mbo_utilities[all]"
 ```
+
+### Installation Methods
+
+| Method | Location | Use Case |
+|--------|----------|----------|
+| `uv pip install` in project | `project/.venv/` | Project-specific, use with `uv run mbo` |
+| `uv tool install mbo_utilities` | `~/.local/bin/` | Global `mbo` command |
+
+These are isolated - a global tool install won't affect project environments.
 
 The GUI allows registration/segmentation for users to quickly process subsets of their datasets.
 

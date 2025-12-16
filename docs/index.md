@@ -12,7 +12,6 @@ User Guide <user_guide>
 CLI & GUI <usage/index>
 Array Types <array_types>
 API <api/index>
-venvs
 development
 glossary
 ```
@@ -36,4 +35,5 @@ mbo scanphase /path/to/data
 ## Resources
 
 - [GUI User Guide (PDF)](_static/mbo_gui_user_guide.pdf)
+- [Virtual Environments Guide](https://millerbrainobservatory.github.io/guides/venvs.html)
 - [uv cheatsheet](https://www.saaspegasus.com/guides/uv-deep-dive/#cheatsheet-common-operations-in-uvs-workflows)
