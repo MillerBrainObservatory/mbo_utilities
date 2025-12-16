@@ -114,6 +114,7 @@ to_video(arr_4d, "plane5.mp4", plane=5)
 
 ```{eval-rst}
 .. autofunction:: mbo_utilities.to_video
+   :no-index:
 ```
 
 ## Parameters
