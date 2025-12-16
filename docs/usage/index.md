@@ -11,8 +11,5 @@ maxdepth: 2
 
 cli
 gui_guide
-scanphase
-save_as
-to_video
 
 ````
