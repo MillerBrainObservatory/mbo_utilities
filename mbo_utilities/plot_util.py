@@ -1,15 +1,18 @@
+"""plotting utilities with lazy-loaded visualization dependencies.
+
+heavy imports (matplotlib, ffmpeg, tifffile) are deferred to function calls
+to avoid slowing down CLI startup when these functions aren't used.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import ffmpeg
 import numpy as np
-import matplotlib.pyplot as plt
-import tifffile
-from icecream import ic
-from matplotlib import cm
 
-from mbo_utilities.util import norm_minmax
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 
 
 def save_phase_images_png(
@@ -18,6 +21,8 @@ def save_phase_images_png(
     save_path: str | Path,
     chan_id: int,
 ):
+    import matplotlib.pyplot as plt
+
     after = data_chunk
     mid = len(before) // 2
     projection = before.std(axis=0)  # or max, or mean
@@ -62,6 +67,8 @@ def update_colocalization(shift_x=None, shift_y=None, image_a=None, image_b=None
 
 
 def plot_colocalization_hist(max_proj1, max_proj2_shifted, bins=100):
+    import matplotlib.pyplot as plt
+
     x = max_proj1.flatten()
     y = max_proj2_shifted.flatten()
     plt.figure(figsize=(6, 5))
@@ -92,14 +99,16 @@ def save_png(fname, data):
     >>> frame = data[0, ...]
     >>> mbo.save_png("plane_0_frame_1.png", frame)
     """
-    # TODO: move this to a separate module that imports matplotlib
+    import matplotlib.pyplot as plt
+
+    from mbo_utilities import log
 
     plt.imshow(data)
     plt.axis("tight")
     plt.axis("off")
     plt.tight_layout()
     plt.savefig(fname, dpi=300, bbox_inches="tight")
-    ic(f"Saved data to {fname}")
+    log.get("plot_util").info(f"Saved data to {fname}")
 
 
 def save_mp4(
@@ -168,10 +177,19 @@ def save_mp4(
 
     >>> save_mp4('output.mp4', 'path/to/stack.tiff', framerate=60, cmap='gray')
     """
+    import ffmpeg
+    import tifffile
+    from matplotlib import cm
+
+    from mbo_utilities import log
+    from mbo_utilities.util import norm_minmax
+
+    logger = log.get("plot_util")
+
     if not isinstance(fname, (str, Path)):
         raise TypeError(f"Expected fname to be str or Path, got {type(fname)}")
     if isinstance(images, (str, Path)):
-        ic(f"Loading TIFF stack from {images}")
+        logger.info(f"Loading TIFF stack from {images}")
         if Path(images).is_file():
             try:
                 images = tifffile.memmap(images)
@@ -190,17 +208,17 @@ def save_mp4(
     colormap = cm.get_cmap(cmap)
 
     if normalize:
-        ic("Normalizing mp4 images to [0, 1]")
+        logger.info("Normalizing mp4 images to [0, 1]")
         images = norm_minmax(images)
 
     if win and win > 1:
-        ic(f"Applying temporal averaging with window size {win}")
+        logger.info(f"Applying temporal averaging with window size {win}")
         kernel = np.ones(win) / win
         images = np.apply_along_axis(
             lambda x: np.convolve(x, kernel, mode="same"), axis=0, arr=images
         )
 
-    ic(f"Saving {T} frames to {fname}")
+    logger.info(f"Saving {T} frames to {fname}")
     output_framerate = int(framerate * speedup)
     process = (
         ffmpeg.input(
@@ -224,4 +242,4 @@ def save_mp4(
 
     process.stdin.close()
     process.wait()
-    ic(f"Video saved to {fname}")
+    logger.info(f"Video saved to {fname}")
