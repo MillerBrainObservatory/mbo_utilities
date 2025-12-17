@@ -303,7 +303,7 @@ function Install-MboUtilities {
                 uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" `
                     --with "torch" --with "torchvision" --with "torchaudio" `
                     --index-url $indexUrl `
-                    --with "mbo_utilities[$($Extras -join ',')]" 2>&1 | Out-Host
+                    --with "mbo_utilities[$($Extras -join ',')]" 2>&1 | ForEach-Object { Write-Host $_ }
                 if ($LASTEXITCODE -eq 0) {
                     Write-Success "mbo_utilities installed with CUDA-optimized PyTorch"
                     return
@@ -316,11 +316,11 @@ function Install-MboUtilities {
 
         # fallback: standard installation
         if ($Extras.Count -eq 0) {
-            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" 2>&1 | Out-Host
+            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" 2>&1 | ForEach-Object { Write-Host $_ }
         }
         else {
             $extraStr = $Extras -join ","
-            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" --with "mbo_utilities[$extraStr]" 2>&1 | Out-Host
+            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" --with "mbo_utilities[$extraStr]" 2>&1 | ForEach-Object { Write-Host $_ }
         }
 
         if ($LASTEXITCODE -eq 0) {
@@ -469,7 +469,7 @@ function Install-MboEnv {
     try {
         # create venv
         Write-Info "Creating virtual environment..."
-        uv venv $Path --python 3.12 2>&1 | Out-Host
+        uv venv $Path --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
 
         # check if pytorch is needed
         $needsPytorch = $false
@@ -486,7 +486,7 @@ function Install-MboEnv {
             if ($indexUrl) {
                 Write-Info "Installing PyTorch for CUDA $($gpuInfo.CudaVersion)..."
                 Write-Info "  Using index: $indexUrl"
-                uv pip install --python "$Path\Scripts\python.exe" torch torchvision torchaudio --index-url $indexUrl 2>&1 | Out-Host
+                uv pip install --python "$Path\Scripts\python.exe" torch torchvision torchaudio --index-url $indexUrl 2>&1 | ForEach-Object { Write-Host $_ }
             }
         }
 
@@ -500,11 +500,11 @@ function Install-MboEnv {
             Write-Info "  This may take several minutes for GPU packages..."
         }
 
-        uv pip install --python "$Path\Scripts\python.exe" $spec 2>&1 | Out-Host
+        uv pip install --python "$Path\Scripts\python.exe" $spec 2>&1 | ForEach-Object { Write-Host $_ }
 
         # install jupyter
         Write-Info "Installing Jupyter..."
-        uv pip install --python "$Path\Scripts\python.exe" jupyterlab ipykernel 2>&1 | Out-Host
+        uv pip install --python "$Path\Scripts\python.exe" jupyterlab ipykernel 2>&1 | ForEach-Object { Write-Host $_ }
     }
     finally {
         $ErrorActionPreference = $prevErrorAction
