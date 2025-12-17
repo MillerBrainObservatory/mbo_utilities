@@ -442,10 +442,10 @@ class FileDialog:
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._select_folder = None
 
-            # quit button
+            # quit button (centered)
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
             qsz = imgui.ImVec2(hello_imgui.em_size(5), hello_imgui.em_size(1.5))
-            imgui.set_cursor_pos_x(win_w - qsz.x - hello_imgui.em_size(1.0))
+            imgui.set_cursor_pos_x((win_w - qsz.x) * 0.5)
             push_button_style(primary=False)
             if imgui.button("Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
                 self.selected_path = None

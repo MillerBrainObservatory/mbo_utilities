@@ -80,11 +80,35 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._grid_search_popup_open = False
         self._grid_search_dialog = None
 
-        # suite2p GUI integration
-        self._suite2p_window = None
+        # external GUI integration (suite2p or cellpose)
+        self._external_gui_window = None
+        self._external_gui_type = None  # "suite2p" or "cellpose"
         self._last_suite2p_ichosen = None
         self._last_poll_time = 0.0
         self._poll_interval = 0.1  # 100ms polling interval
+
+        # gui choice: 0 = suite2p, 1 = cellpose
+        self._gui_choice = 0
+        self._suite2p_available = self._check_suite2p_gui()
+        self._cellpose_available = self._check_cellpose_gui()
+
+    @staticmethod
+    def _check_suite2p_gui() -> bool:
+        """check if suite2p GUI is available (requires rastermap)."""
+        try:
+            from suite2p.gui.gui2p import MainWindow
+            return True
+        except ImportError:
+            return False
+
+    @staticmethod
+    def _check_cellpose_gui() -> bool:
+        """check if cellpose GUI is available."""
+        try:
+            from cellpose import gui
+            return True
+        except ImportError:
+            return False
 
     def draw_config(self) -> None:
         """draw suite2p configuration ui."""
@@ -149,11 +173,34 @@ class Suite2pPipelineWidget(PipelineWidget):
                 ["stat.npy files", "stat.npy"],
             )
         if imgui.is_item_hovered():
-            imgui.set_tooltip(
-                "Load a stat.npy file to view ROI diagnostics.\n"
-                "Opens suite2p GUI synced with the diagnostics popup.\n"
-                "Click cells in suite2p to update the diagnostics view."
-            )
+            imgui.set_tooltip("Load a stat.npy file to view ROI diagnostics.")
+
+        # gui choice radio buttons
+        imgui.same_line()
+        imgui.text("Open in:")
+        imgui.same_line()
+
+        # suite2p option
+        if not self._suite2p_available:
+            imgui.begin_disabled()
+        if imgui.radio_button("suite2p", self._gui_choice == 0):
+            self._gui_choice = 0
+        if not self._suite2p_available:
+            imgui.end_disabled()
+            if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                imgui.set_tooltip("suite2p GUI requires rastermap.\nInstall with: uv pip install rastermap")
+
+        imgui.same_line()
+
+        # cellpose option
+        if not self._cellpose_available:
+            imgui.begin_disabled()
+        if imgui.radio_button("cellpose", self._gui_choice == 1):
+            self._gui_choice = 1
+        if not self._cellpose_available:
+            imgui.end_disabled()
+            if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                imgui.set_tooltip("cellpose GUI not available.\nInstall with: uv pip install cellpose[gui]")
 
         imgui.same_line()
 
@@ -184,33 +231,36 @@ class Suite2pPipelineWidget(PipelineWidget):
 
     def _poll_suite2p_selection(self):
         """Poll suite2p window for selection changes."""
+        # only poll for suite2p gui (cellpose doesn't sync selections)
+        if self._external_gui_type != "suite2p" or self._external_gui_window is None:
+            return
+
         current_time = time.time()
         if current_time - self._last_poll_time < self._poll_interval:
             return
         self._last_poll_time = current_time
 
-        if self._suite2p_window is None:
-            return
-
-        # Check if window was closed by user - isVisible() returns False after close
+        # check if window was closed by user
         try:
-            if not self._suite2p_window.isVisible():
-                self._suite2p_window = None
+            if not self._external_gui_window.isVisible():
+                self._external_gui_window = None
+                self._external_gui_type = None
                 self._last_suite2p_ichosen = None
                 return
         except RuntimeError:
-            # Window was deleted (Qt object wrapped C++ deleted)
-            self._suite2p_window = None
+            # window was deleted (Qt object wrapped C++ deleted)
+            self._external_gui_window = None
+            self._external_gui_type = None
             self._last_suite2p_ichosen = None
             return
 
-        if not hasattr(self._suite2p_window, 'loaded') or not self._suite2p_window.loaded:
+        if not hasattr(self._external_gui_window, 'loaded') or not self._external_gui_window.loaded:
             return
 
-        # Get current selection from suite2p
-        ichosen = getattr(self._suite2p_window, 'ichosen', None)
+        # get current selection from suite2p
+        ichosen = getattr(self._external_gui_window, 'ichosen', None)
 
-        # Check if selection changed
+        # check if selection changed
         if ichosen != self._last_suite2p_ichosen:
             self._last_suite2p_ichosen = ichosen
             self._on_suite2p_cell_selected(ichosen)
@@ -251,8 +301,8 @@ class Suite2pPipelineWidget(PipelineWidget):
                         self._diagnostics_widget.load_results(plane_dir)
                         self._show_diagnostics_popup = True
 
-                        # Open suite2p GUI with this stat file
-                        self._open_suite2p_gui(stat_path)
+                        # Open external GUI based on user choice (optional)
+                        self._open_external_gui(stat_path)
                     except Exception as e:
                         print(f"Error loading results: {e}")
                 else:
@@ -297,26 +347,36 @@ class Suite2pPipelineWidget(PipelineWidget):
 
             imgui.end_popup()
 
-    def _open_suite2p_gui(self, statfile: Path):
-        """Open suite2p GUI with the given stat.npy file.
-
-        Positions both the MBO GUI and suite2p side-by-side, each taking
-        half the screen width and full available height.
+    def _open_external_gui(self, statfile: Path):
+        """Open external GUI (suite2p or cellpose) based on user choice.
 
         Parameters
         ----------
         statfile : Path
             Path to stat.npy file
         """
+        if self._gui_choice == 0:
+            if self._suite2p_available:
+                self._open_suite2p_gui(statfile)
+            else:
+                print("suite2p GUI not available (requires rastermap). Install with: uv pip install rastermap")
+        elif self._gui_choice == 1:
+            if self._cellpose_available:
+                self._open_cellpose_gui(statfile)
+            else:
+                print("cellpose GUI not available. Install with: uv pip install cellpose[gui]")
+
+    def _open_suite2p_gui(self, statfile: Path):
+        """Open suite2p GUI with the given stat.npy file."""
         try:
             from suite2p.gui.gui2p import MainWindow as Suite2pMainWindow
             from PySide6.QtWidgets import QApplication
             from PySide6.QtCore import QRect
 
-            # Create suite2p window
-            self._suite2p_window = Suite2pMainWindow(statfile=str(statfile))
+            self._external_gui_window = Suite2pMainWindow(statfile=str(statfile))
+            self._external_gui_type = "suite2p"
 
-            # Get screen geometry for side-by-side layout
+            # position windows side-by-side
             screen = QApplication.primaryScreen()
             if screen:
                 screen_geom = screen.availableGeometry()
@@ -324,38 +384,111 @@ class Suite2pPipelineWidget(PipelineWidget):
                 screen_y = screen_geom.y()
                 screen_w = screen_geom.width()
                 screen_h = screen_geom.height()
-
-                # Split screen in half - each window gets 50% width
                 half_width = screen_w // 2
-
-                # Leave margin for title bar and taskbar
                 margin_top = 30
                 margin_bottom = 10
                 win_height = screen_h - margin_top - margin_bottom
 
-                # Suite2p goes on the RIGHT half
-                s2p_x = screen_x + half_width
-                s2p_y = screen_y + margin_top
-                s2p_width = half_width
-
-                # Set suite2p geometry and ensure it's resizable
-                self._suite2p_window.setGeometry(QRect(s2p_x, s2p_y, s2p_width, win_height))
-
-                # Set minimum size to allow shrinking (suite2p default min size is too large)
-                self._suite2p_window.setMinimumSize(400, 300)
-
-                # Try to reposition the MBO imgui window to the LEFT half
+                self._external_gui_window.setGeometry(QRect(
+                    screen_x + half_width,
+                    screen_y + margin_top,
+                    half_width,
+                    win_height
+                ))
+                self._external_gui_window.setMinimumSize(400, 300)
                 self._reposition_mbo_window(screen_x, screen_y + margin_top, half_width, win_height)
 
-            self._suite2p_window.show()
-            # Ensure window has normal state (not maximized/fullscreen)
-            self._suite2p_window.showNormal()
+            self._external_gui_window.show()
+            self._external_gui_window.showNormal()
             self._last_suite2p_ichosen = None
 
         except ImportError as e:
             print(f"Could not open suite2p GUI: {e}")
         except Exception as e:
             print(f"Error opening suite2p GUI: {e}")
+
+    def _open_cellpose_gui(self, statfile: Path):
+        """Open cellpose GUI with the stat.npy converted to masks."""
+        try:
+            import tempfile
+            import tifffile
+            from mbo_utilities.analysis import stat_to_masks
+            from cellpose.gui.gui import MainW
+            from cellpose.gui import io as cellpose_io
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import QRect
+
+            # patch QCheckBox for Qt5/Qt6 compatibility
+            from mbo_utilities.analysis import _patch_qt_checkbox
+            _patch_qt_checkbox()
+
+            # load stat.npy and convert to masks for cellpose
+            plane_dir = statfile.parent
+            stat = np.load(statfile, allow_pickle=True)
+
+            # get image shape from ops.npy, or use meanImg if available
+            ops_file = plane_dir / "ops.npy"
+            image = None
+            if ops_file.exists():
+                ops = np.load(ops_file, allow_pickle=True).item()
+                Ly, Lx = ops.get("Ly", 512), ops.get("Lx", 512)
+                # use meanImg if available for better visualization
+                if "meanImg" in ops:
+                    image = ops["meanImg"].astype(np.float32)
+            else:
+                # fallback: estimate from stat
+                Ly = max(s["ypix"].max() for s in stat) + 1
+                Lx = max(s["xpix"].max() for s in stat) + 1
+
+            if image is None:
+                image = np.zeros((Ly, Lx), dtype=np.float32)
+
+            masks = stat_to_masks(stat, (Ly, Lx))
+
+            # save image to temp file (cellpose expects file path)
+            temp_file = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
+            tifffile.imwrite(temp_file.name, image)
+            temp_file.close()
+
+            # create cellpose MainW directly (avoid creating new QApplication)
+            self._external_gui_window = MainW(image=temp_file.name)
+            self._external_gui_type = "cellpose"
+
+            # load masks into the gui
+            self._external_gui_window.masks = masks
+            self._external_gui_window.ncells = int(masks.max())
+            # trigger redraw with masks
+            if hasattr(self._external_gui_window, 'draw_layer'):
+                self._external_gui_window.draw_layer()
+
+            # position window side-by-side
+            screen = QApplication.primaryScreen()
+            if screen:
+                screen_geom = screen.availableGeometry()
+                screen_x = screen_geom.x()
+                screen_y = screen_geom.y()
+                screen_w = screen_geom.width()
+                screen_h = screen_geom.height()
+                half_width = screen_w // 2
+                margin_top = 30
+                margin_bottom = 10
+                win_height = screen_h - margin_top - margin_bottom
+
+                self._external_gui_window.setGeometry(QRect(
+                    screen_x + half_width,
+                    screen_y + margin_top,
+                    half_width,
+                    win_height
+                ))
+                self._reposition_mbo_window(screen_x, screen_y + margin_top, half_width, win_height)
+
+            self._external_gui_window.show()
+            print(f"Opened cellpose GUI with {len(stat)} ROIs")
+
+        except ImportError as e:
+            print(f"Could not open cellpose GUI: {e}")
+        except Exception as e:
+            print(f"Error opening cellpose GUI: {e}")
 
     def _reposition_mbo_window(self, x: int, y: int, width: int, height: int):
         """Reposition the MBO window to the specified geometry.
@@ -398,7 +531,14 @@ class Suite2pPipelineWidget(PipelineWidget):
     @property
     def suite2p_window(self):
         """Access to the suite2p GUI window if open."""
-        return self._suite2p_window
+        if self._external_gui_type == "suite2p":
+            return self._external_gui_window
+        return None
+
+    @property
+    def external_gui_window(self):
+        """Access to the external GUI window (suite2p or cellpose) if open."""
+        return self._external_gui_window
 
     def _draw_grid_search_popup(self):
         """Draw the grid search viewer popup window if open."""

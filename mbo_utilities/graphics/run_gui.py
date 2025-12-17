@@ -13,6 +13,97 @@ from typing import Any, Optional, Union
 import click
 
 
+class SplashScreen:
+    """Simple splash screen using tkinter (always available on windows)."""
+
+    def __init__(self):
+        self.root = None
+        self._closed = False
+
+    def show(self):
+        """Show splash screen with loading indicator."""
+        try:
+            import tkinter as tk
+
+            self.root = tk.Tk()
+            self.root.overrideredirect(True)  # no title bar
+            self.root.attributes("-topmost", True)
+
+            # center on screen
+            width, height = 300, 120
+            x = (self.root.winfo_screenwidth() - width) // 2
+            y = (self.root.winfo_screenheight() - height) // 2
+            self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+            # styling
+            self.root.configure(bg="#1e1e2e")
+
+            # title
+            title = tk.Label(
+                self.root,
+                text="MBO Utilities",
+                font=("Segoe UI", 16, "bold"),
+                fg="#89b4fa",
+                bg="#1e1e2e",
+            )
+            title.pack(pady=(20, 5))
+
+            # loading text
+            self.loading_label = tk.Label(
+                self.root,
+                text="Loading...",
+                font=("Segoe UI", 10),
+                fg="#a6adc8",
+                bg="#1e1e2e",
+            )
+            self.loading_label.pack(pady=(0, 10))
+
+            # simple progress animation
+            self.progress_frame = tk.Frame(self.root, bg="#1e1e2e")
+            self.progress_frame.pack(pady=5)
+
+            self.dots = []
+            for i in range(5):
+                dot = tk.Label(
+                    self.progress_frame,
+                    text="●",
+                    font=("Segoe UI", 12),
+                    fg="#45475a",
+                    bg="#1e1e2e",
+                )
+                dot.pack(side=tk.LEFT, padx=3)
+                self.dots.append(dot)
+
+            self.current_dot = 0
+            self._animate()
+            self.root.update()
+
+        except Exception:
+            self.root = None
+
+    def _animate(self):
+        """Animate the loading dots."""
+        if self.root is None or self._closed:
+            return
+        try:
+            for i, dot in enumerate(self.dots):
+                dot.configure(fg="#89b4fa" if i == self.current_dot else "#45475a")
+            self.current_dot = (self.current_dot + 1) % len(self.dots)
+            self.root.after(200, self._animate)
+        except Exception:
+            pass
+
+    def close(self):
+        """Close the splash screen."""
+        self._closed = True
+        if self.root is not None:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+            self.root = None
+
+
 def _get_version() -> str:
     """Get the current mbo_utilities version."""
     try:
@@ -404,58 +495,76 @@ def _run_gui_impl(
     widget: bool = True,
     metadata_only: bool = False,
     select_only: bool = False,
+    show_splash: bool = False,
 ):
     """Internal implementation of run_gui with all heavy imports."""
-    # Set up Qt backend before any GUI imports
-    _setup_qt_backend()
+    # show splash screen while loading (only for desktop shortcut launches)
+    splash = None
+    if show_splash and not _is_jupyter():
+        splash = SplashScreen()
+        splash.show()
 
-    # Import heavy dependencies only when actually running GUI
-    from mbo_utilities.array_types import normalize_roi
-    from mbo_utilities.graphics._file_dialog import setup_imgui
+    try:
+        # Set up Qt backend before any GUI imports
+        _setup_qt_backend()
 
-    setup_imgui()  # ensure assets (fonts + icons) are available
+        # Import heavy dependencies only when actually running GUI
+        from mbo_utilities.array_types import normalize_roi
+        from mbo_utilities.graphics._file_dialog import setup_imgui
 
-    # Handle file selection if no path provided
-    if data_in is None:
-        data_in, roi_from_dialog, widget, metadata_only = _select_file()
-        if not data_in:
-            print("No file selected, exiting.")
+        setup_imgui()  # ensure assets (fonts + icons) are available
+
+        # close splash before showing file dialog
+        if splash:
+            splash.close()
+            splash = None
+
+        # Handle file selection if no path provided
+        if data_in is None:
+            data_in, roi_from_dialog, widget, metadata_only = _select_file()
+            if not data_in:
+                print("No file selected, exiting.")
+                return None
+            # Use ROI from dialog if not specified in function call
+            if roi is None:
+                roi = roi_from_dialog
+
+        # If select_only, just return the path without loading data or opening viewer
+        if select_only:
+            return data_in
+
+        # Normalize ROI to standard format
+        roi = normalize_roi(roi)
+
+        # Load data
+        from mbo_utilities.lazy_array import imread
+        data_array = imread(data_in, roi=roi)
+
+        # Show metadata viewer if requested
+        if metadata_only:
+            metadata = data_array.metadata
+            if not metadata:
+                print("No metadata found.")
+                return None
+            _show_metadata_viewer(metadata)
             return None
-        # Use ROI from dialog if not specified in function call
-        if roi is None:
-            roi = roi_from_dialog
 
-    # If select_only, just return the path without loading data or opening viewer
-    if select_only:
-        return data_in
+        # Create and show image viewer
+        import fastplotlib as fpl
+        iw = _create_image_widget(data_array, widget=widget)
 
-    # Normalize ROI to standard format
-    roi = normalize_roi(roi)
-
-    # Load data
-    from mbo_utilities.lazy_array import imread
-    data_array = imread(data_in, roi=roi)
-
-    # Show metadata viewer if requested
-    if metadata_only:
-        metadata = data_array.metadata
-        if not metadata:
-            print("No metadata found.")
+        # In Jupyter, just return the widget (user can interact immediately)
+        # In standalone, run the event loop
+        if _is_jupyter():
+            return iw
+        else:
+            fpl.loop.run()
             return None
-        _show_metadata_viewer(metadata)
-        return None
 
-    # Create and show image viewer
-    import fastplotlib as fpl
-    iw = _create_image_widget(data_array, widget=widget)
-
-    # In Jupyter, just return the widget (user can interact immediately)
-    # In standalone, run the event loop
-    if _is_jupyter():
-        return iw
-    else:
-        fpl.loop.run()
-        return None
+    finally:
+        # ensure splash is closed on any exit path
+        if splash:
+            splash.close()
 
 
 def run_gui(
@@ -567,8 +676,14 @@ def run_gui(
     is_flag=True,
     help="Verify the installation of mbo_utilities and dependencies.",
 )
+@click.option(
+    "--splash",
+    is_flag=True,
+    hidden=True,
+    help="Show splash screen during startup (used by desktop shortcut).",
+)
 @click.argument("data_in", required=False)
-def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, select_only=False, download_notebook=False, notebook_url=None, check_install=False, check_upgrade=False):
+def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, select_only=False, download_notebook=False, notebook_url=None, check_install=False, check_upgrade=False, splash=False):
     """CLI entry point for mbo-gui command."""
     # Handle upgrade check first (light operation)
     if check_upgrade:
@@ -589,12 +704,13 @@ def _cli_entry(data_in=None, widget=None, roi=None, metadata_only=False, select_
         return
 
     # Run the GUI (heavy imports happen here)
-    result = run_gui(
+    result = _run_gui_impl(
         data_in=data_in,
         roi=roi if roi else None,
         widget=widget,
         metadata_only=metadata_only,
         select_only=select_only,
+        show_splash=splash,
     )
 
     # If select_only, print the selected path

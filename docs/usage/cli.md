@@ -1,10 +1,10 @@
 (cli_usage)=
 
-# CLI Reference
+# Command Line Interface
 
 The `mbo` command provides tools for viewing, converting, and analyzing imaging data.
 
-## Overview
+## Commands
 
 | Command | Description |
 |---------|-------------|
@@ -68,7 +68,9 @@ mbo info /data/suite2p/plane0
 
 ## Scan-Phase Analysis
 
-Analyze bidirectional scanning phase offset. See [scanphase](scanphase) for interpreting results.
+Bidirectional resonant scanning causes alternating rows to be shifted horizontally. This tool measures that shift to help configure correction parameters.
+
+### Usage
 
 ```bash
 mbo scanphase                             # file dialog
@@ -79,13 +81,33 @@ mbo scanphase data.tiff --show            # show plots
 mbo scanphase data.tiff --format pdf      # output as pdf
 ```
 
-**Output files:**
-- `temporal.png` - offset time series + histogram
-- `windows.png` - offset vs window size
-- `spatial.png` - spatial heatmaps
-- `zplanes.png` - offset vs depth
-- `parameters.png` - offset vs signal intensity
-- `scanphase_results.npz` - numerical data
+### Output Files
+
+| File | Description |
+|------|-------------|
+| `temporal.png` | offset time series + histogram |
+| `windows.png` | offset vs window size (convergence) |
+| `spatial.png` | spatial heatmaps at 32x32 and 64x64 patches |
+| `zplanes.png` | offset vs depth (if multi-plane) |
+| `parameters.png` | offset vs signal intensity |
+| `scanphase_results.npz` | numerical data |
+
+### Interpreting Results
+
+**temporal.png**: time series should be flat. large jumps indicate motion or hardware issues. typical offset is 0.5-2.0 px.
+
+**windows.png**: shows how estimate stabilizes with more frames. left plot: offset converges to stable value. right plot: variance decreases with window size. red line marks where std drops below 0.1 px. use this to determine how many frames to average for correction.
+
+**spatial.png**: heatmaps show variation across fov. edges different from center is normal. gray = low signal (unreliable).
+
+**zplanes.png**: assess if offset varies with depth, owing to the angle on the resonant scanner.
+
+**parameters.png**: shows offset reliability vs signal. low signal = unreliable (high/variable offset). red line suggests intensity threshold below which measurements are noisy.
+
+### Tips
+
+- use `-n 2` or `-n 3` to run quickly on subset of frames
+- multi-ROI data: offsets are averaged across ROIs
 
 ## Download
 

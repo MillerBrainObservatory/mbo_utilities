@@ -1763,13 +1763,9 @@ class PreviewDataWidget(EdgeWindow):
                 else:
                     new_names = None
 
-                # Reset ImageWidget's internal indices to avoid axis conflicts
-                # fastplotlib's _indices dict needs to match the new slider_dim_names
+                # update slider_dim_names - fastplotlib's _reset will rebuild
+                # the Indices object when data is assigned
                 self.image_widget._slider_dim_names = new_names
-                if new_names:
-                    self.image_widget._indices = {name: 0 for name in new_names}
-                else:
-                    self.image_widget._indices = {}
 
             # iw-array API: use data indexer for replacing data
             # iw.data[0] = new_array handles shape changes automatically
@@ -1779,14 +1775,7 @@ class PreviewDataWidget(EdgeWindow):
                 self.logger.error(f"ImageWidget data assignment failed: {e}", exc_info=True)
                 raise
 
-            # Reset indices to start of data
-            try:
-                names = self.image_widget._slider_dim_names or ()
-                for name in names:
-                    if name in self.image_widget._indices:
-                        self.image_widget._indices[name] = 0
-            except (KeyError, AttributeError):
-                pass  # Indices not available
+            # fastplotlib's _reset() already resets indices to 0 for new data
 
             # Update internal state
             self.fpath = path

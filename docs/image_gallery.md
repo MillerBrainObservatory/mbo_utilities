@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Image gallery
 
 A place to render images so that they can be linked/referenced to with inline citations.
