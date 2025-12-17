@@ -71,38 +71,34 @@ function Test-NvidiaGpu {
     Check if NVIDIA GPU and CUDA are available, detect CUDA version.
     #>
 
-    # find nvidia-smi (may not be in PATH when running via irm | iex)
-    $nvidiaSmi = $null
-    $searchPaths = @(
-        "nvidia-smi",  # check PATH first
-        "$env:SystemRoot\System32\nvidia-smi.exe",
-        "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
-    )
-
-    foreach ($path in $searchPaths) {
-        try {
-            if ($path -eq "nvidia-smi") {
-                $cmd = Get-Command nvidia-smi -ErrorAction Stop
-                $nvidiaSmi = $cmd.Source
-            }
-            elseif (Test-Path $path) {
-                $nvidiaSmi = $path
-            }
-            if ($nvidiaSmi) { break }
-        }
-        catch {}
+    # try hardcoded path first (most reliable)
+    $nvidiaSmi = "C:\Windows\System32\nvidia-smi.exe"
+    if (-not (Test-Path $nvidiaSmi)) {
+        # try env var path
+        $nvidiaSmi = "$env:SystemRoot\System32\nvidia-smi.exe"
     }
-
-    if (-not $nvidiaSmi) {
-        return @{ Available = $false; GpuName = $null; CudaVersion = $null }
+    if (-not (Test-Path $nvidiaSmi)) {
+        # try NVSMI location
+        $nvidiaSmi = "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+    }
+    if (-not (Test-Path $nvidiaSmi)) {
+        # try PATH
+        try {
+            $cmd = Get-Command nvidia-smi -ErrorAction Stop
+            $nvidiaSmi = $cmd.Source
+        }
+        catch {
+            return @{ Available = $false; GpuName = $null; CudaVersion = $null }
+        }
     }
 
     try {
+        # run nvidia-smi to get GPU info
         $gpuName = & $nvidiaSmi --query-gpu=name --format=csv,noheader 2>$null
         if ($gpuName) {
-            # get cuda version from nvidia-smi
+            # get cuda version from nvidia-smi full output
             $cudaVersion = $null
-            $smiOutput = & $nvidiaSmi 2>$null
+            $smiOutput = & $nvidiaSmi 2>$null | Out-String
             if ($smiOutput -match "CUDA Version:\s*(\d+\.\d+)") {
                 $cudaVersion = $matches[1]
             }
@@ -307,7 +303,7 @@ function Install-MboUtilities {
                 uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" `
                     --with "torch" --with "torchvision" --with "torchaudio" `
                     --index-url $indexUrl `
-                    --with "mbo_utilities[$($Extras -join ',')]" 2>&1 | Out-Host
+                    --with "mbo_utilities[$($Extras -join ',')]" 2>&1 | ForEach-Object { Write-Host $_ }
                 if ($LASTEXITCODE -eq 0) {
                     Write-Success "mbo_utilities installed with CUDA-optimized PyTorch"
                     return
@@ -320,11 +316,11 @@ function Install-MboUtilities {
 
         # fallback: standard installation
         if ($Extras.Count -eq 0) {
-            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" 2>&1 | Out-Host
+            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" 2>&1 | ForEach-Object { Write-Host $_ }
         }
         else {
             $extraStr = $Extras -join ","
-            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" --with "mbo_utilities[$extraStr]" 2>&1 | Out-Host
+            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" --with "mbo_utilities[$extraStr]" 2>&1 | ForEach-Object { Write-Host $_ }
         }
 
         if ($LASTEXITCODE -eq 0) {
@@ -473,7 +469,7 @@ function Install-MboEnv {
     try {
         # create venv
         Write-Info "Creating virtual environment..."
-        uv venv $Path --python 3.12 2>&1 | Out-Host
+        uv venv $Path --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
 
         # check if pytorch is needed
         $needsPytorch = $false
@@ -490,7 +486,7 @@ function Install-MboEnv {
             if ($indexUrl) {
                 Write-Info "Installing PyTorch for CUDA $($gpuInfo.CudaVersion)..."
                 Write-Info "  Using index: $indexUrl"
-                uv pip install --python "$Path\Scripts\python.exe" torch torchvision torchaudio --index-url $indexUrl 2>&1 | Out-Host
+                uv pip install --python "$Path\Scripts\python.exe" torch torchvision torchaudio --index-url $indexUrl 2>&1 | ForEach-Object { Write-Host $_ }
             }
         }
 
@@ -504,11 +500,11 @@ function Install-MboEnv {
             Write-Info "  This may take several minutes for GPU packages..."
         }
 
-        uv pip install --python "$Path\Scripts\python.exe" $spec 2>&1 | Out-Host
+        uv pip install --python "$Path\Scripts\python.exe" $spec 2>&1 | ForEach-Object { Write-Host $_ }
 
         # install jupyter
         Write-Info "Installing Jupyter..."
-        uv pip install --python "$Path\Scripts\python.exe" jupyterlab ipykernel 2>&1 | Out-Host
+        uv pip install --python "$Path\Scripts\python.exe" jupyterlab ipykernel 2>&1 | ForEach-Object { Write-Host $_ }
     }
     finally {
         $ErrorActionPreference = $prevErrorAction
