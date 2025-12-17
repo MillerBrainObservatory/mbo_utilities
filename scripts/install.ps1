@@ -302,7 +302,7 @@ function Install-MboUtilities {
                 Write-Info "  Using index: $indexUrl"
                 uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" `
                     --with "torch" --with "torchvision" --with "torchaudio" `
-                    --index-url $indexUrl `
+                    --extra-index-url $indexUrl `
                     --with "mbo_utilities[$($Extras -join ',')]" 2>&1 | ForEach-Object { Write-Host $_ }
                 if ($LASTEXITCODE -eq 0) {
                     Write-Success "mbo_utilities installed with CUDA-optimized PyTorch"
@@ -486,7 +486,7 @@ function Install-MboEnv {
             if ($indexUrl) {
                 Write-Info "Installing PyTorch for CUDA $($gpuInfo.CudaVersion)..."
                 Write-Info "  Using index: $indexUrl"
-                uv pip install --python "$Path\Scripts\python.exe" torch torchvision torchaudio --index-url $indexUrl 2>&1 | ForEach-Object { Write-Host $_ }
+                uv pip install --python "$Path\Scripts\python.exe" torch torchvision torchaudio --extra-index-url $indexUrl 2>&1 | ForEach-Object { Write-Host $_ }
             }
         }
 
