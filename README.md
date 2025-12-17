@@ -49,6 +49,33 @@ uv pip install "mbo_utilities[all]"
 
 These are isolated - a global tool install won't affect project environments.
 
+### Uninstall
+
+**If installed via quick install script:**
+
+```powershell
+# Windows - remove venv and shortcut
+Remove-Item -Recurse -Force "$env:USERPROFILE\.mbo"
+Remove-Item "$env:USERPROFILE\Desktop\MBO Utilities.lnk" -ErrorAction SilentlyContinue
+```
+
+```bash
+# Linux/macOS
+rm -rf ~/.mbo
+```
+
+**If installed in a project venv:**
+
+```bash
+uv pip uninstall mbo_utilities
+```
+
+**If installed as a global tool:**
+
+```bash
+uv tool uninstall mbo_utilities
+```
+
 The GUI allows registration/segmentation for users to quickly process subsets of their datasets.
 
 These pipelines need to be installed separately.

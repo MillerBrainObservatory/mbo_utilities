@@ -70,13 +70,39 @@ function Test-NvidiaGpu {
     .SYNOPSIS
     Check if NVIDIA GPU and CUDA are available, detect CUDA version.
     #>
+
+    # find nvidia-smi (may not be in PATH when running via irm | iex)
+    $nvidiaSmi = $null
+    $searchPaths = @(
+        "nvidia-smi",  # check PATH first
+        "$env:SystemRoot\System32\nvidia-smi.exe",
+        "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+    )
+
+    foreach ($path in $searchPaths) {
+        try {
+            if ($path -eq "nvidia-smi") {
+                $cmd = Get-Command nvidia-smi -ErrorAction Stop
+                $nvidiaSmi = $cmd.Source
+            }
+            elseif (Test-Path $path) {
+                $nvidiaSmi = $path
+            }
+            if ($nvidiaSmi) { break }
+        }
+        catch {}
+    }
+
+    if (-not $nvidiaSmi) {
+        return @{ Available = $false; GpuName = $null; CudaVersion = $null }
+    }
+
     try {
-        $null = Get-Command nvidia-smi -ErrorAction Stop
-        $gpuName = nvidia-smi --query-gpu=name --format=csv,noheader 2>$null
+        $gpuName = & $nvidiaSmi --query-gpu=name --format=csv,noheader 2>$null
         if ($gpuName) {
             # get cuda version from nvidia-smi
             $cudaVersion = $null
-            $smiOutput = nvidia-smi 2>$null
+            $smiOutput = & $nvidiaSmi 2>$null
             if ($smiOutput -match "CUDA Version:\s*(\d+\.\d+)") {
                 $cudaVersion = $matches[1]
             }
@@ -267,6 +293,10 @@ function Install-MboUtilities {
         }
     }
 
+    # temporarily allow errors (uv writes progress to stderr which PowerShell treats as error)
+    $prevErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+
     try {
         # install pytorch with correct cuda version first if needed
         if ($needsPytorch -and $GpuInfo.CudaVersion) {
@@ -277,25 +307,39 @@ function Install-MboUtilities {
                 uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" `
                     --with "torch" --with "torchvision" --with "torchaudio" `
                     --index-url $indexUrl `
-                    --with "mbo_utilities[$($Extras -join ',')]"
-                Write-Success "mbo_utilities installed with CUDA-optimized PyTorch"
-                return
+                    --with "mbo_utilities[$($Extras -join ',')]" 2>&1 | Out-Host
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Success "mbo_utilities installed with CUDA-optimized PyTorch"
+                    return
+                }
+                else {
+                    throw "uv tool install failed with exit code $LASTEXITCODE"
+                }
             }
         }
 
         # fallback: standard installation
         if ($Extras.Count -eq 0) {
-            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git"
+            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" 2>&1 | Out-Host
         }
         else {
             $extraStr = $Extras -join ","
-            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" --with "mbo_utilities[$extraStr]"
+            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" --with "mbo_utilities[$extraStr]" 2>&1 | Out-Host
         }
-        Write-Success "mbo_utilities installed successfully"
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "mbo_utilities installed successfully"
+        }
+        else {
+            throw "uv tool install failed with exit code $LASTEXITCODE"
+        }
     }
     catch {
         Write-Err "Failed to install mbo_utilities: $_"
         exit 1
+    }
+    finally {
+        $ErrorActionPreference = $prevErrorAction
     }
 }
 
@@ -422,44 +466,53 @@ function Install-MboEnv {
         $Extras = Show-OptionalDependencies -GpuInfo $gpuInfo
     }
 
-    # create venv
-    Write-Info "Creating virtual environment..."
-    uv venv $Path --python 3.12
+    # temporarily allow errors (uv writes progress to stderr)
+    $prevErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
 
-    # check if pytorch is needed
-    $needsPytorch = $false
-    foreach ($e in $Extras) {
-        if ($e -eq "suite2p" -or $e -eq "processing" -or $e -eq "all") {
-            $needsPytorch = $true
-            break
+    try {
+        # create venv
+        Write-Info "Creating virtual environment..."
+        uv venv $Path --python 3.12 2>&1 | Out-Host
+
+        # check if pytorch is needed
+        $needsPytorch = $false
+        foreach ($e in $Extras) {
+            if ($e -eq "suite2p" -or $e -eq "processing" -or $e -eq "all") {
+                $needsPytorch = $true
+                break
+            }
         }
-    }
 
-    # install pytorch with correct cuda version first
-    if ($needsPytorch -and $gpuInfo.CudaVersion) {
-        $indexUrl = Get-PyTorchIndexUrl -CudaVersion $gpuInfo.CudaVersion
-        if ($indexUrl) {
-            Write-Info "Installing PyTorch for CUDA $($gpuInfo.CudaVersion)..."
-            Write-Info "  Using index: $indexUrl"
-            uv pip install --python "$Path\Scripts\python.exe" torch torchvision torchaudio --index-url $indexUrl
+        # install pytorch with correct cuda version first
+        if ($needsPytorch -and $gpuInfo.CudaVersion) {
+            $indexUrl = Get-PyTorchIndexUrl -CudaVersion $gpuInfo.CudaVersion
+            if ($indexUrl) {
+                Write-Info "Installing PyTorch for CUDA $($gpuInfo.CudaVersion)..."
+                Write-Info "  Using index: $indexUrl"
+                uv pip install --python "$Path\Scripts\python.exe" torch torchvision torchaudio --index-url $indexUrl 2>&1 | Out-Host
+            }
         }
+
+        # build install spec
+        $spec = Get-InstallSpec -Extras $Extras
+
+        # install mbo_utilities
+        Write-Info "Installing mbo_utilities..."
+        if ($Extras.Count -gt 0) {
+            Write-Info "  With extras: $($Extras -join ', ')"
+            Write-Info "  This may take several minutes for GPU packages..."
+        }
+
+        uv pip install --python "$Path\Scripts\python.exe" $spec 2>&1 | Out-Host
+
+        # install jupyter
+        Write-Info "Installing Jupyter..."
+        uv pip install --python "$Path\Scripts\python.exe" jupyterlab ipykernel 2>&1 | Out-Host
     }
-
-    # build install spec
-    $spec = Get-InstallSpec -Extras $Extras
-
-    # install mbo_utilities
-    Write-Info "Installing mbo_utilities..."
-    if ($Extras.Count -gt 0) {
-        Write-Info "  With extras: $($Extras -join ', ')"
-        Write-Info "  This may take several minutes for GPU packages..."
+    finally {
+        $ErrorActionPreference = $prevErrorAction
     }
-
-    uv pip install --python "$Path\Scripts\python.exe" $spec
-
-    # install jupyter
-    Write-Info "Installing Jupyter..."
-    uv pip install --python "$Path\Scripts\python.exe" jupyterlab ipykernel
 
     # register kernel
     Write-Info "Registering Jupyter kernel..."
