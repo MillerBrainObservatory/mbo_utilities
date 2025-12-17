@@ -14,7 +14,23 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 ## Installation
 
-`mbo_utilities` is a pure pip install. For help setting up a virtual environment, see the [Virtual Environments guide](https://millerbrainobservatory.github.io/guides/venvs.html).
+### Quick Install (Recommended)
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
+```
+
+**Linux/macOS:**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
+```
+
+### Manual Install
+
+For help setting up a virtual environment, see the [Virtual Environments guide](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ```bash
 uv venv --python 3.12.9
@@ -32,6 +48,33 @@ uv pip install "mbo_utilities[all]"
 | `uv tool install mbo_utilities` | `~/.local/bin/` | Global `mbo` command |
 
 These are isolated - a global tool install won't affect project environments.
+
+### Uninstall
+
+**If installed via quick install script:**
+
+```powershell
+# Windows - remove venv and shortcut
+Remove-Item -Recurse -Force "$env:USERPROFILE\.mbo"
+Remove-Item "$env:USERPROFILE\Desktop\MBO Utilities.lnk" -ErrorAction SilentlyContinue
+```
+
+```bash
+# Linux/macOS
+rm -rf ~/.mbo
+```
+
+**If installed in a project venv:**
+
+```bash
+uv pip uninstall mbo_utilities
+```
+
+**If installed as a global tool:**
+
+```bash
+uv tool uninstall mbo_utilities
+```
 
 The GUI allows registration/segmentation for users to quickly process subsets of their datasets.
 
