@@ -252,14 +252,13 @@ function Get-InstallSpec {
         [string[]]$Extras
     )
 
-    $baseUrl = "git+https://github.com/millerbrainobservatory/mbo_utilities.git"
-
+    # install from PyPI
     if ($Extras.Count -eq 0) {
-        return "mbo_utilities @ $baseUrl"
+        return "mbo_utilities"
     }
 
     $extraStr = $Extras -join ","
-    return "mbo_utilities[$extraStr] @ $baseUrl"
+    return "mbo_utilities[$extraStr]"
 }
 
 function Install-MboUtilities {
@@ -300,10 +299,9 @@ function Install-MboUtilities {
             if ($indexUrl) {
                 Write-Info "Installing PyTorch for CUDA $($GpuInfo.CudaVersion)..."
                 Write-Info "  Using index: $indexUrl"
-                uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" `
+                uv tool install "mbo_utilities[$($Extras -join ',')]" `
                     --with "torch" --with "torchvision" --with "torchaudio" `
-                    --extra-index-url $indexUrl `
-                    --with "mbo_utilities[$($Extras -join ',')]" 2>&1 | ForEach-Object { Write-Host $_ }
+                    --extra-index-url $indexUrl 2>&1 | ForEach-Object { Write-Host $_ }
                 if ($LASTEXITCODE -eq 0) {
                     Write-Success "mbo_utilities installed with CUDA-optimized PyTorch"
                     return
@@ -314,13 +312,13 @@ function Install-MboUtilities {
             }
         }
 
-        # fallback: standard installation
+        # fallback: standard installation from PyPI
         if ($Extras.Count -eq 0) {
-            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" 2>&1 | ForEach-Object { Write-Host $_ }
+            uv tool install mbo_utilities 2>&1 | ForEach-Object { Write-Host $_ }
         }
         else {
             $extraStr = $Extras -join ","
-            uv tool install mbo_utilities --from "git+https://github.com/millerbrainobservatory/mbo_utilities.git" --with "mbo_utilities[$extraStr]" 2>&1 | ForEach-Object { Write-Host $_ }
+            uv tool install "mbo_utilities[$extraStr]" 2>&1 | ForEach-Object { Write-Host $_ }
         }
 
         if ($LASTEXITCODE -eq 0) {
