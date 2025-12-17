@@ -71,38 +71,34 @@ function Test-NvidiaGpu {
     Check if NVIDIA GPU and CUDA are available, detect CUDA version.
     #>
 
-    # find nvidia-smi (may not be in PATH when running via irm | iex)
-    $nvidiaSmi = $null
-    $searchPaths = @(
-        "nvidia-smi",  # check PATH first
-        "$env:SystemRoot\System32\nvidia-smi.exe",
-        "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
-    )
-
-    foreach ($path in $searchPaths) {
-        try {
-            if ($path -eq "nvidia-smi") {
-                $cmd = Get-Command nvidia-smi -ErrorAction Stop
-                $nvidiaSmi = $cmd.Source
-            }
-            elseif (Test-Path $path) {
-                $nvidiaSmi = $path
-            }
-            if ($nvidiaSmi) { break }
-        }
-        catch {}
+    # try hardcoded path first (most reliable)
+    $nvidiaSmi = "C:\Windows\System32\nvidia-smi.exe"
+    if (-not (Test-Path $nvidiaSmi)) {
+        # try env var path
+        $nvidiaSmi = "$env:SystemRoot\System32\nvidia-smi.exe"
     }
-
-    if (-not $nvidiaSmi) {
-        return @{ Available = $false; GpuName = $null; CudaVersion = $null }
+    if (-not (Test-Path $nvidiaSmi)) {
+        # try NVSMI location
+        $nvidiaSmi = "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+    }
+    if (-not (Test-Path $nvidiaSmi)) {
+        # try PATH
+        try {
+            $cmd = Get-Command nvidia-smi -ErrorAction Stop
+            $nvidiaSmi = $cmd.Source
+        }
+        catch {
+            return @{ Available = $false; GpuName = $null; CudaVersion = $null }
+        }
     }
 
     try {
+        # run nvidia-smi to get GPU info
         $gpuName = & $nvidiaSmi --query-gpu=name --format=csv,noheader 2>$null
         if ($gpuName) {
-            # get cuda version from nvidia-smi
+            # get cuda version from nvidia-smi full output
             $cudaVersion = $null
-            $smiOutput = & $nvidiaSmi 2>$null
+            $smiOutput = & $nvidiaSmi 2>$null | Out-String
             if ($smiOutput -match "CUDA Version:\s*(\d+\.\d+)") {
                 $cudaVersion = $matches[1]
             }
