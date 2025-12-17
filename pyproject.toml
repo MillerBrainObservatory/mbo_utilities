@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.4.1"
+version = "2.4.0"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
-license = {text = "BSD-3-Clause"}
+license = "BSD-3-Clause"
 requires-python = ">=3.12.7,<3.13"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
@@ -36,8 +36,8 @@ dependencies = [
 	"jupyter_rfb>=0.5.1",
 	"llvmlite>=0.43.0",
 	"mkl_fft>=2.0.0",
-	"mbo-fastplotlib>=0.7.3",
-	"wgpu>=0.28.1,<0.29",
+	"mbo-fastplotlib>=0.7.2",
+	"rendercanvas>=2.4.2,<2.5",
 	"imgui-bundle>=1.92.5",
 	"pyside6>=6.10.1",
 	"napari",
@@ -154,10 +154,7 @@ package-dir = {"" = "."}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mbo_utilities*", "pollen*"]
-exclude = ["dev*", "gists*", "slurm*", "demos*", "docs*", "tests*"]
-
-[tool.setuptools.package-data]
-"mbo_utilities" = ["assets/**/*"]
+exclude = ["dev*", "gists*", "slurm*", "demos*", "assets*", "docs*", "tests*"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["data/*"]
