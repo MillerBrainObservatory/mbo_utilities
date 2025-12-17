@@ -7,7 +7,7 @@ name = "mbo_utilities"
 version = "2.4.0"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
-license = "BSD-3-Clause"
+license = {text = "BSD-3-Clause"}
 requires-python = ">=3.12.7,<3.13"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
