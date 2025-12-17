@@ -12,125 +12,10 @@ Usage patterns:
   mbo info INPUT                # Show array info (CLI only)
 """
 import sys
-import threading
-import time
 from pathlib import Path
 from typing import Optional, Union
 
 import click
-
-
-def _get_first_run_marker() -> Path:
-    """Get path to first-run marker file."""
-    return Path.home() / "mbo" / ".initialized"
-
-
-def _is_first_run() -> bool:
-    """Check if this is the first run (no marker file exists)."""
-    return not _get_first_run_marker().exists()
-
-
-def _mark_initialized():
-    """Create marker file to indicate initialization is complete."""
-    marker = _get_first_run_marker()
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.touch()
-
-
-class LoadingSpinner:
-    """Console loading spinner for CLI startup."""
-
-    def __init__(self, message: str = "Loading"):
-        self.message = message
-        self._stop = False
-        self._thread = None
-        # ascii-safe spinner frames (works on windows)
-        self._frames = ["|", "/", "-", "\\"]
-        self._frame_idx = 0
-
-    def start(self):
-        """Start the spinner in a background thread."""
-        self._stop = False
-        self._thread = threading.Thread(target=self._spin, daemon=True)
-        self._thread.start()
-
-    def _spin(self):
-        """Animate the spinner."""
-        line_len = len(self.message) + 10
-        while not self._stop:
-            frame = self._frames[self._frame_idx % len(self._frames)]
-            line = f"{frame} {self.message}..."
-            # pad to fixed width to ensure clean overwrites
-            sys.stdout.write(f"\r{line:<{line_len}}")
-            sys.stdout.flush()
-            self._frame_idx += 1
-            time.sleep(0.15)
-
-    def stop(self, final_message: str = None):
-        """Stop the spinner and optionally show final message."""
-        self._stop = True
-        if self._thread:
-            self._thread.join(timeout=0.5)
-        # clear the line completely
-        line_len = len(self.message) + 10
-        sys.stdout.write(f"\r{'':<{line_len}}\r")
-        sys.stdout.flush()
-        if final_message:
-            click.echo(final_message)
-
-
-def _get_version() -> str:
-    """Get the current mbo_utilities version."""
-    try:
-        import mbo_utilities
-        return getattr(mbo_utilities, "__version__", "unknown")
-    except ImportError:
-        return "unknown"
-
-
-def _check_for_upgrade() -> tuple[str, str | None]:
-    """Check PyPI for newer version."""
-    import urllib.request
-    import json
-
-    current = _get_version()
-    try:
-        url = "https://pypi.org/pypi/mbo-utilities/json"
-        with urllib.request.urlopen(url, timeout=5) as response:
-            data = json.loads(response.read().decode())
-            return current, data["info"]["version"]
-    except Exception:
-        return current, None
-
-
-def _print_upgrade_status():
-    """Print upgrade status to console."""
-    current, latest = _check_for_upgrade()
-
-    click.echo(f"Current version: {current}")
-
-    if latest is None:
-        click.secho("Could not check for updates (network error or not on PyPI)", fg="yellow")
-        return
-
-    click.echo(f"Latest version:  {latest}")
-
-    if current == "unknown":
-        click.secho("Could not determine current version", fg="yellow")
-    elif current == latest:
-        click.secho("You are running the latest version!", fg="green")
-    else:
-        try:
-            from packaging.version import parse
-            if parse(current) < parse(latest):
-                click.secho(f"\nUpgrade available! Run:", fg="cyan")
-                click.secho(f"  uv pip install --upgrade mbo-utilities", fg="cyan", bold=True)
-            else:
-                click.secho("You are running a newer version than PyPI (dev build)", fg="green")
-        except ImportError:
-            if current != latest:
-                click.secho(f"\nDifferent version on PyPI. To upgrade:", fg="cyan")
-                click.secho(f"  uv pip install --upgrade mbo-utilities", fg="cyan", bold=True)
 
 
 class PathAwareGroup(click.Group):
@@ -229,12 +114,6 @@ def download_notebook(
     return output_file
 
 @click.group(cls=PathAwareGroup, invoke_without_command=True)
-@click.version_option(version=_get_version(), prog_name="mbo-utilities")
-@click.option(
-    "--check-upgrade",
-    is_flag=True,
-    help="Check if a newer version is available on PyPI.",
-)
 @click.option(
     "--download-notebook",
     is_flag=True,
@@ -268,7 +147,6 @@ def download_notebook(
 @click.pass_context
 def main(
     ctx,
-    check_upgrade=False,
     download_notebook=False,
     notebook_url=None,
     download_file_url=None,
@@ -293,15 +171,9 @@ def main(
 
     \b
     Utilities:
-      mbo --version                       Show version
-      mbo --check-upgrade                 Check for updates
       mbo --download-notebook             Download user guide notebook
       mbo --check-install                 Verify installation
     """
-    if check_upgrade:
-        _print_upgrade_status()
-        return
-
     if download_file_url:
         download_file(download_file_url, output_path)
         return
@@ -320,25 +192,8 @@ def main(
     if ctx.invoked_subcommand is not None:
         return
 
-    # show first-run warning
-    first_run = _is_first_run()
-    if first_run:
-        click.secho("First run detected - initial startup may take longer while caches are built.", fg="yellow")
-
-    # show loading spinner while importing heavy dependencies
-    spinner = LoadingSpinner("Loading GUI")
-    spinner.start()
-    try:
-        from mbo_utilities.graphics.run_gui import run_gui
-        spinner.stop()
-    except Exception as e:
-        spinner.stop()
-        raise e
-
-    # mark as initialized after successful import
-    if first_run:
-        _mark_initialized()
-
+    # open GUI with file dialog
+    from mbo_utilities.graphics.run_gui import run_gui
     run_gui(data_in=None, roi=None, widget=True, metadata_only=False)
 
 
@@ -371,24 +226,7 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
       mbo view /data/raw --metadata  Show only metadata
       mbo view /data --roi 0 --roi 2 View specific ROIs
     """
-    # show first-run warning
-    first_run = _is_first_run()
-    if first_run:
-        click.secho("First run detected - initial startup may take longer while caches are built.", fg="yellow")
-
-    # show loading spinner while importing
-    spinner = LoadingSpinner("Loading GUI")
-    spinner.start()
-    try:
-        from mbo_utilities.graphics.run_gui import run_gui
-        spinner.stop()
-    except Exception as e:
-        spinner.stop()
-        raise e
-
-    if first_run:
-        _mark_initialized()
-
+    from mbo_utilities.graphics.run_gui import run_gui
     run_gui(
         data_in=data_in,
         roi=roi if roi else None,
@@ -463,12 +301,6 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
     help="Output filename for binary format.",
 )
 @click.option(
-    "--output-suffix",
-    type=str,
-    default=None,
-    help="Custom suffix for output filenames (e.g., '_processed', '_session1'). Default: '_stitched' for multi-ROI data.",
-)
-@click.option(
     "--debug/--no-debug",
     default=False,
     help="Verbose debug logging.",
@@ -487,7 +319,6 @@ def convert(
     phasecorr_method,
     ome,
     output_name,
-    output_suffix,
     debug,
 ):
     """
@@ -574,8 +405,6 @@ def convert(
         imwrite_kwargs["ome"] = ome
     if output_name:
         imwrite_kwargs["output_name"] = output_name
-    if output_suffix:
-        imwrite_kwargs["output_suffix"] = output_suffix
 
     result = imwrite(data, output_path, **imwrite_kwargs)
     click.secho(f"\nDone! Output saved to: {result}", fg="green")
