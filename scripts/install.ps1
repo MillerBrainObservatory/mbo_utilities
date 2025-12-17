@@ -65,10 +65,70 @@ function Install-Uv {
     }
 }
 
+function Test-CudaToolkit {
+    <#
+    .SYNOPSIS
+    Check if CUDA Toolkit is installed (not just the driver).
+    Returns the toolkit version if found, $null otherwise.
+    #>
+
+    # check CUDA_PATH environment variable
+    if ($env:CUDA_PATH -and (Test-Path $env:CUDA_PATH)) {
+        $nvccPath = Join-Path $env:CUDA_PATH "bin\nvcc.exe"
+        if (Test-Path $nvccPath) {
+            try {
+                $nvccOutput = & $nvccPath --version 2>$null | Out-String
+                if ($nvccOutput -match "release (\d+\.\d+)") {
+                    return $matches[1]
+                }
+            }
+            catch {}
+        }
+    }
+
+    # check common CUDA Toolkit locations
+    $cudaPaths = @(
+        "$env:ProgramFiles\NVIDIA GPU Computing Toolkit\CUDA"
+    )
+
+    foreach ($basePath in $cudaPaths) {
+        if (Test-Path $basePath) {
+            # find version folders (e.g., v12.1, v11.8)
+            $versions = Get-ChildItem -Path $basePath -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^v\d+\.\d+' } |
+                Sort-Object Name -Descending
+
+            foreach ($ver in $versions) {
+                $nvccPath = Join-Path $ver.FullName "bin\nvcc.exe"
+                if (Test-Path $nvccPath) {
+                    # extract version from folder name
+                    if ($ver.Name -match 'v(\d+\.\d+)') {
+                        return $matches[1]
+                    }
+                }
+            }
+        }
+    }
+
+    # try nvcc in PATH
+    try {
+        $nvcc = Get-Command nvcc -ErrorAction Stop
+        $nvccOutput = & $nvcc.Source --version 2>$null | Out-String
+        if ($nvccOutput -match "release (\d+\.\d+)") {
+            return $matches[1]
+        }
+    }
+    catch {}
+
+    return $null
+}
+
 function Test-NvidiaGpu {
     <#
     .SYNOPSIS
-    Check if NVIDIA GPU and CUDA are available, detect CUDA version.
+    Check if NVIDIA GPU is available, detect GPU name and CUDA Toolkit version.
+    Note: CUDA version from nvidia-smi is driver capability, not toolkit version.
+    We need the toolkit for PyTorch CUDA support.
     #>
 
     # try hardcoded path first (most reliable)
@@ -88,7 +148,7 @@ function Test-NvidiaGpu {
             $nvidiaSmi = $cmd.Source
         }
         catch {
-            return @{ Available = $false; GpuName = $null; CudaVersion = $null }
+            return @{ Available = $false; GpuName = $null; CudaVersion = $null; ToolkitInstalled = $false }
         }
     }
 
@@ -96,21 +156,19 @@ function Test-NvidiaGpu {
         # run nvidia-smi to get GPU info
         $gpuName = & $nvidiaSmi --query-gpu=name --format=csv,noheader 2>$null
         if ($gpuName) {
-            # get cuda version from nvidia-smi full output
-            $cudaVersion = $null
-            $smiOutput = & $nvidiaSmi 2>$null | Out-String
-            if ($smiOutput -match "CUDA Version:\s*(\d+\.\d+)") {
-                $cudaVersion = $matches[1]
-            }
+            # check for actual CUDA Toolkit installation
+            $toolkitVersion = Test-CudaToolkit
+
             return @{
                 Available = $true
                 GpuName = $gpuName.Trim()
-                CudaVersion = $cudaVersion
+                CudaVersion = $toolkitVersion  # use toolkit version, not driver version
+                ToolkitInstalled = ($null -ne $toolkitVersion)
             }
         }
     }
     catch {}
-    return @{ Available = $false; GpuName = $null; CudaVersion = $null }
+    return @{ Available = $false; GpuName = $null; CudaVersion = $null; ToolkitInstalled = $false }
 }
 
 function Get-PyTorchIndexUrl {
@@ -171,9 +229,14 @@ function Show-OptionalDependencies {
     if ($GpuInfo.Available) {
         Write-Host "  GPU detected: " -NoNewline -ForegroundColor Green
         Write-Host $GpuInfo.GpuName -ForegroundColor White
-        if ($GpuInfo.CudaVersion) {
-            Write-Host "  CUDA version: " -NoNewline -ForegroundColor Green
+        if ($GpuInfo.ToolkitInstalled) {
+            Write-Host "  CUDA Toolkit: " -NoNewline -ForegroundColor Green
             Write-Host $GpuInfo.CudaVersion -ForegroundColor White
+        }
+        else {
+            Write-Host "  CUDA Toolkit: " -NoNewline -ForegroundColor Yellow
+            Write-Host "Not installed (PyTorch will use CPU)" -ForegroundColor Yellow
+            Write-Host "                Install CUDA Toolkit for GPU acceleration" -ForegroundColor Gray
         }
     }
     else {
@@ -293,13 +356,14 @@ function Install-MboUtilities {
     $ErrorActionPreference = "Continue"
 
     try {
-        # install pytorch with correct cuda version first if needed
-        if ($needsPytorch -and $GpuInfo.CudaVersion) {
+        # install pytorch with correct cuda version first if needed AND toolkit is installed
+        if ($needsPytorch -and $GpuInfo.ToolkitInstalled -and $GpuInfo.CudaVersion) {
             $indexUrl = Get-PyTorchIndexUrl -CudaVersion $GpuInfo.CudaVersion
             if ($indexUrl) {
                 Write-Info "Installing PyTorch for CUDA $($GpuInfo.CudaVersion)..."
                 Write-Info "  Using index: $indexUrl"
                 uv tool install "mbo_utilities[$($Extras -join ',')]" `
+                    --python 3.12.9 `
                     --with "torch" --with "torchvision" --with "torchaudio" `
                     --extra-index-url $indexUrl 2>&1 | ForEach-Object { Write-Host $_ }
                 if ($LASTEXITCODE -eq 0) {
@@ -312,13 +376,13 @@ function Install-MboUtilities {
             }
         }
 
-        # fallback: standard installation from PyPI
+        # fallback: standard installation from PyPI (includes CPU PyTorch)
         if ($Extras.Count -eq 0) {
-            uv tool install mbo_utilities 2>&1 | ForEach-Object { Write-Host $_ }
+            uv tool install mbo_utilities --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
         }
         else {
             $extraStr = $Extras -join ","
-            uv tool install "mbo_utilities[$extraStr]" 2>&1 | ForEach-Object { Write-Host $_ }
+            uv tool install "mbo_utilities[$extraStr]" --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
         }
 
         if ($LASTEXITCODE -eq 0) {

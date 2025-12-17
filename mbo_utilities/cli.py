@@ -12,10 +12,71 @@ Usage patterns:
   mbo info INPUT                # Show array info (CLI only)
 """
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Optional, Union
 
 import click
+
+
+def _get_first_run_marker() -> Path:
+    """Get path to first-run marker file."""
+    return Path.home() / "mbo" / ".initialized"
+
+
+def _is_first_run() -> bool:
+    """Check if this is the first run (no marker file exists)."""
+    return not _get_first_run_marker().exists()
+
+
+def _mark_initialized():
+    """Create marker file to indicate initialization is complete."""
+    marker = _get_first_run_marker()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+
+
+class LoadingSpinner:
+    """Console loading spinner for CLI startup."""
+
+    def __init__(self, message: str = "Loading"):
+        self.message = message
+        self._stop = False
+        self._thread = None
+        # ascii-safe spinner frames (works on windows)
+        self._frames = ["|", "/", "-", "\\"]
+        self._frame_idx = 0
+
+    def start(self):
+        """Start the spinner in a background thread."""
+        self._stop = False
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def _spin(self):
+        """Animate the spinner."""
+        line_len = len(self.message) + 10
+        while not self._stop:
+            frame = self._frames[self._frame_idx % len(self._frames)]
+            line = f"{frame} {self.message}..."
+            # pad to fixed width to ensure clean overwrites
+            sys.stdout.write(f"\r{line:<{line_len}}")
+            sys.stdout.flush()
+            self._frame_idx += 1
+            time.sleep(0.15)
+
+    def stop(self, final_message: str = None):
+        """Stop the spinner and optionally show final message."""
+        self._stop = True
+        if self._thread:
+            self._thread.join(timeout=0.5)
+        # clear the line completely
+        line_len = len(self.message) + 10
+        sys.stdout.write(f"\r{'':<{line_len}}\r")
+        sys.stdout.flush()
+        if final_message:
+            click.echo(final_message)
 
 
 def _get_version() -> str:
@@ -259,8 +320,25 @@ def main(
     if ctx.invoked_subcommand is not None:
         return
 
-    # open GUI with file dialog
-    from mbo_utilities.graphics.run_gui import run_gui
+    # show first-run warning
+    first_run = _is_first_run()
+    if first_run:
+        click.secho("First run detected - initial startup may take longer while caches are built.", fg="yellow")
+
+    # show loading spinner while importing heavy dependencies
+    spinner = LoadingSpinner("Loading GUI")
+    spinner.start()
+    try:
+        from mbo_utilities.graphics.run_gui import run_gui
+        spinner.stop()
+    except Exception as e:
+        spinner.stop()
+        raise e
+
+    # mark as initialized after successful import
+    if first_run:
+        _mark_initialized()
+
     run_gui(data_in=None, roi=None, widget=True, metadata_only=False)
 
 
@@ -293,7 +371,24 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
       mbo view /data/raw --metadata  Show only metadata
       mbo view /data --roi 0 --roi 2 View specific ROIs
     """
-    from mbo_utilities.graphics.run_gui import run_gui
+    # show first-run warning
+    first_run = _is_first_run()
+    if first_run:
+        click.secho("First run detected - initial startup may take longer while caches are built.", fg="yellow")
+
+    # show loading spinner while importing
+    spinner = LoadingSpinner("Loading GUI")
+    spinner.start()
+    try:
+        from mbo_utilities.graphics.run_gui import run_gui
+        spinner.stop()
+    except Exception as e:
+        spinner.stop()
+        raise e
+
+    if first_run:
+        _mark_initialized()
+
     run_gui(
         data_in=data_in,
         roi=roi if roi else None,
