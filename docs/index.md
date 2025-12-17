@@ -1,6 +1,6 @@
-# Miller Brain Observatory: Python Utilities
+# Miller Brain Observatory: Utilities
 
-Python tools for pre/post processing datasets at the [Miller Brain Observatory](https://mbo.rockefeller.edu).
+Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO).
 
 ## Contents
 
@@ -9,8 +9,10 @@ Python tools for pre/post processing datasets at the [Miller Brain Observatory](
 maxdepth: 1
 ---
 User Guide <user_guide>
-CLI & GUI <usage/index>
+Command Line Interface <usage/cli>
+Graphical User Interface <usage/gui_guide>
 Array Types <array_types>
+DF/F Analysis <dff>
 API <api/index>
 development
 glossary
