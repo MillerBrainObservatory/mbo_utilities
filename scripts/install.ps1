@@ -1,17 +1,13 @@
-# mbo_utilities Installation Script for Windows (PowerShell)
-# installs uv if not present, installs mbo_utilities with user-selected optional dependencies
+# MBO Utilities Installation Script v2 for Windows
+# installs uv if not present, installs mbo_utilities with user-selected version and optional dependencies
 #
 # usage:
-#   irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
-#
-# after installation, run Install-MboEnv for a full VSCode/Jupyter development environment
+#   irm https://raw.githubusercontent.com/.../install_v2.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
-# default install location for full environment
-$MBO_ENV_PATH = Join-Path $env:USERPROFILE "mbo_env"
+$GITHUB_REPO = "MillerBrainObservatory/mbo_utilities"
 
-# colors for output
 function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Blue }
 function Write-Success { Write-Host "[OK] $args" -ForegroundColor Green }
 function Write-Warn { Write-Host "[WARN] $args" -ForegroundColor Yellow }
@@ -25,7 +21,7 @@ function Show-Banner {
     Write-Host " | |  | | |_) | |_| |" -ForegroundColor Cyan
     Write-Host " |_|  |_|____/ \___/ " -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "MBO Utilities Installer" -ForegroundColor White
+    Write-Host "MBO Utilities Installer v2" -ForegroundColor White
     Write-Host ""
 }
 
@@ -37,26 +33,20 @@ function Test-UvInstalled {
         return $true
     }
     catch {
-        Write-Info "uv is not installed"
         return $false
     }
 }
 
 function Install-Uv {
-    Write-Info "Installing uv using the official Astral installer..."
-
+    Write-Info "Installing uv..."
     try {
         Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
-
-        # refresh PATH for current session
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-
         if (Test-UvInstalled) {
             Write-Success "uv installed successfully"
         }
         else {
-            Write-Warn "uv was installed but not found in PATH"
-            Write-Warn "You may need to restart your terminal"
+            Write-Warn "uv installed but not found in PATH. Restart terminal after installation."
         }
     }
     catch {
@@ -65,14 +55,149 @@ function Install-Uv {
     }
 }
 
-function Test-CudaToolkit {
+function Get-PyPiVersion {
     <#
     .SYNOPSIS
-    Check if CUDA Toolkit is installed (not just the driver).
-    Returns the toolkit version if found, $null otherwise.
+    Get the latest version from PyPI.
     #>
+    try {
+        $response = Invoke-RestMethod -Uri "https://pypi.org/pypi/mbo-utilities/json" -TimeoutSec 10
+        return $response.info.version
+    }
+    catch {
+        return $null
+    }
+}
 
-    # check CUDA_PATH environment variable
+function Get-GitHubBranches {
+    <#
+    .SYNOPSIS
+    Get list of branches from GitHub repo.
+    #>
+    try {
+        $response = Invoke-RestMethod -Uri "https://api.github.com/repos/$GITHUB_REPO/branches" -TimeoutSec 10
+        return $response | ForEach-Object { $_.name }
+    }
+    catch {
+        Write-Warn "Could not fetch branches: $_"
+        return @()
+    }
+}
+
+function Get-GitHubTags {
+    <#
+    .SYNOPSIS
+    Get list of tags (releases) from GitHub repo.
+    #>
+    try {
+        $response = Invoke-RestMethod -Uri "https://api.github.com/repos/$GITHUB_REPO/tags" -TimeoutSec 10
+        return $response | ForEach-Object { $_.name }
+    }
+    catch {
+        return @()
+    }
+}
+
+function Show-SourceSelection {
+    <#
+    .SYNOPSIS
+    Let user choose installation source: PyPI or GitHub branch.
+    #>
+    Write-Host ""
+    Write-Host "Installation Source" -ForegroundColor White
+    Write-Host ""
+
+    # get pypi version
+    $pypiVersion = Get-PyPiVersion
+    if ($pypiVersion) {
+        Write-Host "  [1] PyPI (stable)" -ForegroundColor Cyan
+        Write-Host "      Version: $pypiVersion" -ForegroundColor Gray
+    }
+    else {
+        Write-Host "  [1] PyPI (stable)" -ForegroundColor Cyan
+        Write-Host "      Version: unknown (could not fetch)" -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Host "  [2] GitHub (development)" -ForegroundColor Cyan
+    Write-Host "      Install from a specific branch or tag" -ForegroundColor Gray
+    Write-Host ""
+
+    do {
+        $choice = Read-Host "Select source (1-2)"
+        $valid = $choice -match '^[12]$'
+        if (-not $valid) {
+            Write-Warn "Invalid selection. Enter 1 or 2."
+        }
+    } while (-not $valid)
+
+    if ($choice -eq "1") {
+        return @{ Source = "pypi"; Spec = "mbo_utilities" }
+    }
+
+    # github selection - show branches and tags
+    Write-Host ""
+    Write-Host "Fetching available branches and tags..." -ForegroundColor Gray
+
+    $branches = Get-GitHubBranches
+    $tags = Get-GitHubTags | Select-Object -First 5  # limit tags to recent ones
+
+    Write-Host ""
+    Write-Host "Available Branches:" -ForegroundColor White
+
+    $options = @()
+    $idx = 1
+
+    # add master/main first if exists
+    $mainBranch = $branches | Where-Object { $_ -eq "master" -or $_ -eq "main" } | Select-Object -First 1
+    if ($mainBranch) {
+        Write-Host "  [$idx] $mainBranch" -ForegroundColor Cyan -NoNewline
+        Write-Host " (default)" -ForegroundColor Gray
+        $options += @{ Type = "branch"; Name = $mainBranch }
+        $idx++
+    }
+
+    # add other branches (excluding master/main)
+    $otherBranches = $branches | Where-Object { $_ -ne "master" -and $_ -ne "main" } | Select-Object -First 10
+    foreach ($branch in $otherBranches) {
+        Write-Host "  [$idx] $branch" -ForegroundColor Cyan
+        $options += @{ Type = "branch"; Name = $branch }
+        $idx++
+    }
+
+    # add tags
+    if ($tags.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Recent Tags:" -ForegroundColor White
+        foreach ($tag in $tags) {
+            Write-Host "  [$idx] $tag" -ForegroundColor Green
+            $options += @{ Type = "tag"; Name = $tag }
+            $idx++
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  [c] Custom branch/tag name" -ForegroundColor Yellow
+    Write-Host ""
+
+    do {
+        $choice = Read-Host "Select branch/tag (1-$($options.Count) or 'c' for custom)"
+        if ($choice -eq "c") {
+            $customRef = Read-Host "Enter branch or tag name"
+            return @{ Source = "github"; Spec = "git+https://github.com/$GITHUB_REPO@$customRef" }
+        }
+        $choiceNum = 0
+        $valid = [int]::TryParse($choice, [ref]$choiceNum) -and $choiceNum -ge 1 -and $choiceNum -le $options.Count
+        if (-not $valid) {
+            Write-Warn "Invalid selection."
+        }
+    } while (-not $valid)
+
+    $selected = $options[$choiceNum - 1]
+    $ref = $selected.Name
+    return @{ Source = "github"; Spec = "git+https://github.com/$GITHUB_REPO@$ref"; Ref = $ref }
+}
+
+function Test-CudaToolkit {
     if ($env:CUDA_PATH -and (Test-Path $env:CUDA_PATH)) {
         $nvccPath = Join-Path $env:CUDA_PATH "bin\nvcc.exe"
         if (Test-Path $nvccPath) {
@@ -86,23 +211,15 @@ function Test-CudaToolkit {
         }
     }
 
-    # check common CUDA Toolkit locations
-    $cudaPaths = @(
-        "$env:ProgramFiles\NVIDIA GPU Computing Toolkit\CUDA"
-    )
-
+    $cudaPaths = @("$env:ProgramFiles\NVIDIA GPU Computing Toolkit\CUDA")
     foreach ($basePath in $cudaPaths) {
         if (Test-Path $basePath) {
-            # find version folders (e.g., v12.1, v11.8)
             $versions = Get-ChildItem -Path $basePath -Directory -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -match '^v\d+\.\d+' } |
                 Sort-Object Name -Descending
-
-            # nvcc --version shows us the CUDA
             foreach ($ver in $versions) {
                 $nvccPath = Join-Path $ver.FullName "bin\nvcc.exe"
                 if (Test-Path $nvccPath) {
-                    # extract version from folder name
                     if ($ver.Name -match 'v(\d+\.\d+)') {
                         return $matches[1]
                     }
@@ -111,7 +228,6 @@ function Test-CudaToolkit {
         }
     }
 
-    # try nvcc in PATH
     try {
         $nvcc = Get-Command nvcc -ErrorAction Stop
         $nvccOutput = & $nvcc.Source --version 2>$null | Out-String
@@ -125,45 +241,22 @@ function Test-CudaToolkit {
 }
 
 function Test-NvidiaGpu {
-    <#
-    .SYNOPSIS
-    Check if NVIDIA GPU is available, detect GPU name and CUDA Toolkit version.
-    Note: CUDA version from nvidia-smi is driver capability, not toolkit version.
-    We need the toolkit for PyTorch CUDA support.
-    #>
-
-    # try hardcoded path first (most reliable)
     $nvidiaSmi = "C:\Windows\System32\nvidia-smi.exe"
+    if (-not (Test-Path $nvidiaSmi)) { $nvidiaSmi = "$env:SystemRoot\System32\nvidia-smi.exe" }
+    if (-not (Test-Path $nvidiaSmi)) { $nvidiaSmi = "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe" }
     if (-not (Test-Path $nvidiaSmi)) {
-        # try env var path
-        $nvidiaSmi = "$env:SystemRoot\System32\nvidia-smi.exe"
-    }
-    if (-not (Test-Path $nvidiaSmi)) {
-        # try NVSMI location
-        $nvidiaSmi = "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
-    }
-    if (-not (Test-Path $nvidiaSmi)) {
-        # try PATH
-        try {
-            $cmd = Get-Command nvidia-smi -ErrorAction Stop
-            $nvidiaSmi = $cmd.Source
-        }
-        catch {
-            return @{ Available = $false; GpuName = $null; CudaVersion = $null; ToolkitInstalled = $false }
-        }
+        try { $nvidiaSmi = (Get-Command nvidia-smi -ErrorAction Stop).Source }
+        catch { return @{ Available = $false; GpuName = $null; CudaVersion = $null; ToolkitInstalled = $false } }
     }
 
     try {
-        # run nvidia-smi to get GPU info
         $gpuName = & $nvidiaSmi --query-gpu=name --format=csv,noheader 2>$null
         if ($gpuName) {
-            # check for actual CUDA Toolkit installation
             $toolkitVersion = Test-CudaToolkit
-
             return @{
                 Available = $true
                 GpuName = $gpuName.Trim()
-                CudaVersion = $toolkitVersion  # use toolkit version, not driver version
+                CudaVersion = $toolkitVersion
                 ToolkitInstalled = ($null -ne $toolkitVersion)
             }
         }
@@ -173,60 +266,28 @@ function Test-NvidiaGpu {
 }
 
 function Get-PyTorchIndexUrl {
-    <#
-    .SYNOPSIS
-    Get the PyTorch index URL for the detected CUDA version.
-    #>
-    param(
-        [string]$CudaVersion
-    )
+    param([string]$CudaVersion)
+    if (-not $CudaVersion) { return $null }
 
-    if (-not $CudaVersion) {
-        return $null
-    }
-
-    # parse major.minor version
     $parts = $CudaVersion -split '\.'
     $major = [int]$parts[0]
     $minor = [int]$parts[1]
 
-    # map cuda version to pytorch index url
-    # pytorch supports: cu118, cu121, cu124 (as of 2025)
-    if ($major -eq 11) {
-        return "https://download.pytorch.org/whl/cu118"
-    }
+    if ($major -eq 11) { return "https://download.pytorch.org/whl/cu118" }
     elseif ($major -eq 12) {
-        if ($minor -le 1) {
-            return "https://download.pytorch.org/whl/cu121"
-        }
-        elseif ($minor -le 4) {
-            return "https://download.pytorch.org/whl/cu124"
-        }
-        else {
-            # cuda 12.5+ use cu124 (forward compatible)
-            return "https://download.pytorch.org/whl/cu124"
-        }
+        if ($minor -le 1) { return "https://download.pytorch.org/whl/cu121" }
+        else { return "https://download.pytorch.org/whl/cu124" }
     }
-    else {
-        # unknown version, let pip figure it out
-        return $null
-    }
+    return $null
 }
 
 function Show-OptionalDependencies {
-    <#
-    .SYNOPSIS
-    Display information about optional dependencies and let user choose.
-    #>
-    param(
-        [hashtable]$GpuInfo
-    )
+    param([hashtable]$GpuInfo)
 
     Write-Host ""
     Write-Host "Optional Processing Pipelines" -ForegroundColor White
     Write-Host ""
 
-    # check GPU
     if ($GpuInfo.Available) {
         Write-Host "  GPU detected: " -NoNewline -ForegroundColor Green
         Write-Host $GpuInfo.GpuName -ForegroundColor White
@@ -237,7 +298,6 @@ function Show-OptionalDependencies {
         else {
             Write-Host "  CUDA Toolkit: " -NoNewline -ForegroundColor Yellow
             Write-Host "Not installed (PyTorch will use CPU)" -ForegroundColor Yellow
-            Write-Host "                Install CUDA Toolkit for GPU acceleration" -ForegroundColor Gray
         }
     }
     else {
@@ -245,60 +305,47 @@ function Show-OptionalDependencies {
     }
     Write-Host ""
 
-    # describe options
     Write-Host "  [1] Suite2p   - 2D cell extraction (PyTorch + CUDA)" -ForegroundColor Cyan
-    Write-Host "                  Best for: single-plane calcium imaging" -ForegroundColor Gray
-    Write-Host ""
     Write-Host "  [2] Suite3D   - 3D volumetric registration (CuPy + CUDA)" -ForegroundColor Cyan
-    Write-Host "                  Best for: multi-plane/volumetric imaging" -ForegroundColor Gray
-    Write-Host ""
     Write-Host "  [3] Rastermap - Dimensionality reduction" -ForegroundColor Cyan
-    Write-Host "                  Best for: neural activity analysis" -ForegroundColor Gray
-    Write-Host ""
     Write-Host "  [4] All       - Install all processing pipelines" -ForegroundColor Cyan
-    Write-Host ""
     Write-Host "  [5] None      - Base installation only (fastest)" -ForegroundColor Cyan
-    Write-Host "                  Includes: data viewing, format conversion, metadata" -ForegroundColor Gray
     Write-Host ""
 
-    # get user choice
     do {
         $choice = Read-Host "Select option (1-5, or comma-separated like 1,3)"
         $valid = $choice -match '^[1-5](,[1-5])*$'
-        if (-not $valid) {
-            Write-Warn "Invalid selection. Enter 1-5 or comma-separated (e.g., 1,3)"
-        }
+        if (-not $valid) { Write-Warn "Invalid selection. Enter 1-5 or comma-separated." }
     } while (-not $valid)
 
-    # parse selection
     $extras = @()
-    $choices = $choice -split ',' | ForEach-Object { $_.Trim() }
+    $choices = $choice -split ',' | ForEach-Object { $_.Trim() } | Select-Object -Unique
 
-    foreach ($c in $choices) {
+    :parseLoop foreach ($c in $choices) {
         switch ($c) {
             "1" { $extras += "suite2p" }
             "2" { $extras += "suite3d" }
             "3" { $extras += "rastermap" }
-            "4" { $extras = @("processing"); break }
-            "5" { $extras = @(); break }
+            "4" { $extras = @("processing"); break parseLoop }
+            "5" { $extras = @(); break parseLoop }
         }
     }
 
-    # warn if GPU options selected without GPU
-    if (-not $GpuInfo.Available) {
+    # warn if GPU packages selected without toolkit
+    if ($extras.Count -gt 0) {
         $gpuPackages = @("suite2p", "suite3d", "processing")
-        $hasGpuPackage = $false
-        foreach ($e in $extras) {
-            if ($gpuPackages -contains $e) { $hasGpuPackage = $true; break }
-        }
+        $hasGpuPackage = ($extras | Where-Object { $gpuPackages -contains $_ }).Count -gt 0
 
-        if ($hasGpuPackage) {
+        if ($hasGpuPackage -and $GpuInfo.Available -and -not $GpuInfo.ToolkitInstalled) {
             Write-Host ""
-            Write-Warn "You selected GPU-dependent packages but no NVIDIA GPU was detected."
-            Write-Warn "These packages will install but may run slowly (CPU-only mode)."
+            Write-Warn "CUDA Toolkit not installed. PyTorch will use CPU (slower)."
+            Write-Warn "Install CUDA Toolkit for GPU acceleration."
+        }
+        elseif ($hasGpuPackage -and -not $GpuInfo.Available) {
+            Write-Host ""
+            Write-Warn "No NVIDIA GPU detected. These packages will run in CPU-only mode."
             $continue = Read-Host "Continue anyway? (y/n)"
             if ($continue -ne "y") {
-                Write-Info "Removing GPU-dependent packages from selection..."
                 $extras = $extras | Where-Object { $gpuPackages -notcontains $_ }
             }
         }
@@ -307,84 +354,70 @@ function Show-OptionalDependencies {
     return $extras
 }
 
-function Get-InstallSpec {
-    <#
-    .SYNOPSIS
-    Build the pip install specification string with extras.
-    #>
+function Install-MboUtilities {
     param(
-        [string[]]$Extras
+        [string]$InstallSpec,
+        [string[]]$Extras = @(),
+        [hashtable]$GpuInfo = @{},
+        [string]$Source = "pypi"
     )
 
-    # install from PyPI
-    if ($Extras.Count -eq 0) {
-        return "mbo_utilities"
+    Write-Host ""
+    Write-Info "Installing mbo_utilities..."
+    Write-Info "  Source: $Source"
+    if ($Extras.Count -gt 0) {
+        Write-Info "  Extras: $($Extras -join ', ')"
     }
 
-    $extraStr = $Extras -join ","
-    return "mbo_utilities[$extraStr]"
-}
-
-function Install-MboUtilities {
-    <#
-    .SYNOPSIS
-    Install mbo_utilities with selected optional dependencies.
-    #>
-    param(
-        [string[]]$Extras = @(),
-        [hashtable]$GpuInfo = @{}
-    )
-
-    Write-Info "Installing mbo_utilities..."
-    if ($Extras.Count -gt 0) {
-        Write-Info "  With extras: $($Extras -join ', ')"
+    # build the install spec with extras
+    if ($Source -eq "pypi") {
+        if ($Extras.Count -gt 0) {
+            $spec = "mbo_utilities[$($Extras -join ',')]"
+        }
+        else {
+            $spec = "mbo_utilities"
+        }
     }
     else {
-        Write-Info "  Base installation (no optional dependencies)"
-    }
-
-    # check if pytorch is needed (suite2p or processing extras)
-    $needsPytorch = $false
-    foreach ($e in $Extras) {
-        if ($e -eq "suite2p" -or $e -eq "processing") {
-            $needsPytorch = $true
-            break
+        # github - extras go after the URL
+        if ($Extras.Count -gt 0) {
+            $spec = "$InstallSpec[" + ($Extras -join ',') + "]"
+        }
+        else {
+            $spec = $InstallSpec
         }
     }
 
-    # temporarily allow errors (uv writes progress to stderr which PowerShell treats as error)
+    # check if pytorch needed
+    $needsPytorch = ($Extras | Where-Object { $_ -eq "suite2p" -or $_ -eq "processing" }).Count -gt 0
+
     $prevErrorAction = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
 
     try {
-        # install pytorch with correct cuda version first if needed AND toolkit is installed
+        # install with cuda pytorch if toolkit available
         if ($needsPytorch -and $GpuInfo.ToolkitInstalled -and $GpuInfo.CudaVersion) {
             $indexUrl = Get-PyTorchIndexUrl -CudaVersion $GpuInfo.CudaVersion
             if ($indexUrl) {
                 Write-Info "Installing PyTorch for CUDA $($GpuInfo.CudaVersion)..."
-                Write-Info "  Using index: $indexUrl"
-                uv tool install "mbo_utilities[$($Extras -join ',')]" `
-                    --python 3.12.9 `
-                    --with "torch" --with "torchvision" --with "torchaudio" `
+                # use index-strategy to allow mixing pytorch cuda index with pypi
+                # removed torchaudio due to version conflicts on windows
+                uv tool install $spec `
+                    --reinstall `
+                    --python 3.12 `
+                    --with "torch" --with "torchvision" `
+                    --index-strategy unsafe-best-match `
                     --extra-index-url $indexUrl 2>&1 | ForEach-Object { Write-Host $_ }
                 if ($LASTEXITCODE -eq 0) {
-                    Write-Success "mbo_utilities installed with CUDA-optimized PyTorch"
+                    Write-Success "Installed with CUDA-optimized PyTorch"
                     return
                 }
-                else {
-                    throw "uv tool install failed with exit code $LASTEXITCODE"
-                }
+                Write-Warn "CUDA install failed, falling back to standard install..."
             }
         }
 
-        # fallback: standard installation from PyPI (includes CPU PyTorch)
-        if ($Extras.Count -eq 0) {
-            uv tool install mbo_utilities --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
-        }
-        else {
-            $extraStr = $Extras -join ","
-            uv tool install "mbo_utilities[$extraStr]" --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
-        }
+        # standard installation
+        uv tool install $spec --reinstall --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
 
         if ($LASTEXITCODE -eq 0) {
             Write-Success "mbo_utilities installed successfully"
@@ -403,206 +436,69 @@ function Install-MboUtilities {
 }
 
 function New-DesktopShortcut {
+    param([string]$BranchRef = $null)
+
     Write-Info "Creating desktop shortcut..."
 
     $desktopPath = [Environment]::GetFolderPath("Desktop")
-    $shortcutPath = Join-Path $desktopPath "MBO Utilities.lnk"
+    $shortcutName = if ($BranchRef -and $BranchRef -ne "master") { "MBO Utilities ($BranchRef).lnk" } else { "MBO Utilities.lnk" }
+    $shortcutPath = Join-Path $desktopPath $shortcutName
 
-    # find uv tools bin directory
-    $uvToolsBin = Join-Path $env:LOCALAPPDATA "uv\tools\mbo_utilities\Scripts"
-    $mboExe = Join-Path $uvToolsBin "mbo.exe"
-
-    # fallback: check standard uv bin location
-    if (-not (Test-Path $mboExe)) {
-        $uvBin = Join-Path $env:USERPROFILE ".local\bin"
-        $mboExe = Join-Path $uvBin "mbo.exe"
+    # find mbo.exe
+    $mboExe = $null
+    $searchPaths = @(
+        (Join-Path $env:APPDATA "uv\tools\mbo-utilities\Scripts\mbo.exe"),
+        (Join-Path $env:LOCALAPPDATA "uv\tools\mbo-utilities\Scripts\mbo.exe"),
+        (Join-Path $env:USERPROFILE ".local\bin\mbo.exe")
+    )
+    foreach ($p in $searchPaths) {
+        if (Test-Path $p) { $mboExe = $p; break }
+    }
+    if (-not $mboExe) {
+        try { $mboExe = (Get-Command mbo -ErrorAction Stop).Source }
+        catch { Write-Warn "Could not locate mbo.exe"; return }
     }
 
-    if (-not (Test-Path $mboExe)) {
-        try {
-            $mboExe = (Get-Command mbo -ErrorAction Stop).Source
-        }
-        catch {
-            Write-Warn "Could not locate mbo.exe"
-            $mboExe = $null
-        }
-    }
-
-    # setup local app data directory
+    # setup icon directory
     $iconDir = Join-Path $env:LOCALAPPDATA "mbo_utilities"
-    if (-not (Test-Path $iconDir)) {
-        New-Item -ItemType Directory -Path $iconDir -Force | Out-Null
-    }
+    if (-not (Test-Path $iconDir)) { New-Item -ItemType Directory -Path $iconDir -Force | Out-Null }
 
     # download icon
     $iconPath = Join-Path $iconDir "mbo_icon.ico"
     try {
-        Write-Info "Downloading icon..."
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/millerbrainobservatory/mbo_utilities/master/docs/_static/mbo_icon.ico" -OutFile $iconPath
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/docs/_static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop
     }
-    catch {
-        Write-Warn "Could not download icon, using default"
-        $iconPath = $null
-    }
+    catch { $iconPath = $null }
 
-    # download vbs launcher (runs without console window)
+    # download launcher
     $launcherPath = Join-Path $iconDir "mbo_launcher.vbs"
     try {
-        Write-Info "Downloading launcher..."
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/millerbrainobservatory/mbo_utilities/master/scripts/mbo_launcher.vbs" -OutFile $launcherPath
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/scripts/mbo_launcher.vbs" -OutFile $launcherPath -ErrorAction Stop
     }
-    catch {
-        Write-Warn "Could not download launcher, shortcut will show console"
-        $launcherPath = $null
-    }
+    catch { $launcherPath = $null }
 
     # create shortcut
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
 
-    # prefer vbs launcher (no console), fallback to exe
     if ($launcherPath -and (Test-Path $launcherPath)) {
         $shortcut.TargetPath = "wscript.exe"
         $shortcut.Arguments = """$launcherPath"""
     }
-    elseif ($mboExe -and (Test-Path $mboExe)) {
+    elseif ($mboExe) {
         $shortcut.TargetPath = $mboExe
     }
     else {
-        $shortcut.TargetPath = "cmd.exe"
-        $shortcut.Arguments = "/k uv run mbo"
+        Write-Warn "Skipping shortcut creation - mbo.exe not found"
+        return
     }
 
     $shortcut.WorkingDirectory = [Environment]::GetFolderPath("UserProfile")
-
-    if ($iconPath -and (Test-Path $iconPath)) {
-        $shortcut.IconLocation = $iconPath
-    }
-
+    if ($iconPath -and (Test-Path $iconPath)) { $shortcut.IconLocation = $iconPath }
     $shortcut.Description = "MBO Utilities - Miller Brain Observatory"
     $shortcut.Save()
 
-    Write-Success "Desktop shortcut created"
-}
-
-function Install-MboEnv {
-    <#
-    .SYNOPSIS
-    Creates a full mbo_utilities environment for use with VSCode/Jupyter.
-
-    .DESCRIPTION
-    Creates a Python virtual environment with mbo_utilities installed.
-    Prompts for optional dependencies if not specified.
-    Automatically installs PyTorch with correct CUDA version if GPU detected.
-
-    .PARAMETER Path
-    Installation path. Defaults to ~/mbo_env
-
-    .PARAMETER Extras
-    Optional extras: suite2p, suite3d, rastermap, processing, all.
-    If not specified, prompts interactively.
-
-    .EXAMPLE
-    Install-MboEnv
-    Install-MboEnv -Path "C:\projects\mbo_env" -Extras @("suite2p", "rastermap")
-    #>
-    param(
-        [string]$Path = $MBO_ENV_PATH,
-        [string[]]$Extras = $null
-    )
-
-    Write-Info "Creating MBO environment at: $Path"
-
-    if (-not (Test-UvInstalled)) {
-        Install-Uv
-    }
-
-    # detect GPU and CUDA version
-    $gpuInfo = Test-NvidiaGpu
-
-    # prompt for extras if not specified
-    if ($null -eq $Extras) {
-        $Extras = Show-OptionalDependencies -GpuInfo $gpuInfo
-    }
-
-    # temporarily allow errors (uv writes progress to stderr)
-    $prevErrorAction = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-
-    try {
-        # create venv
-        Write-Info "Creating virtual environment..."
-        uv venv $Path --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
-
-        # check if pytorch is needed
-        $needsPytorch = $false
-        foreach ($e in $Extras) {
-            if ($e -eq "suite2p" -or $e -eq "processing" -or $e -eq "all") {
-                $needsPytorch = $true
-                break
-            }
-        }
-
-        # install pytorch with correct cuda version first
-        if ($needsPytorch -and $gpuInfo.CudaVersion) {
-            $indexUrl = Get-PyTorchIndexUrl -CudaVersion $gpuInfo.CudaVersion
-            if ($indexUrl) {
-                Write-Info "Installing PyTorch for CUDA $($gpuInfo.CudaVersion)..."
-                Write-Info "  Using index: $indexUrl"
-                uv pip install --python "$Path\Scripts\python.exe" torch torchvision torchaudio --extra-index-url $indexUrl 2>&1 | ForEach-Object { Write-Host $_ }
-            }
-        }
-
-        # build install spec
-        $spec = Get-InstallSpec -Extras $Extras
-
-        # install mbo_utilities
-        Write-Info "Installing mbo_utilities..."
-        if ($Extras.Count -gt 0) {
-            Write-Info "  With extras: $($Extras -join ', ')"
-            Write-Info "  This may take several minutes for GPU packages..."
-        }
-
-        uv pip install --python "$Path\Scripts\python.exe" $spec 2>&1 | ForEach-Object { Write-Host $_ }
-
-        # install jupyter
-        Write-Info "Installing Jupyter..."
-        uv pip install --python "$Path\Scripts\python.exe" jupyterlab ipykernel 2>&1 | ForEach-Object { Write-Host $_ }
-    }
-    finally {
-        $ErrorActionPreference = $prevErrorAction
-    }
-
-    # register kernel
-    Write-Info "Registering Jupyter kernel..."
-    & "$Path\Scripts\python.exe" -m ipykernel install --user --name mbo --display-name "MBO Utilities"
-
-    Write-Success "Environment created at: $Path"
-    Write-Host ""
-    Write-Host "To use this environment:" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  VSCode:" -ForegroundColor Cyan
-    Write-Host "    1. Open VSCode" -ForegroundColor Gray
-    Write-Host "    2. Ctrl+Shift+P -> 'Python: Select Interpreter'" -ForegroundColor Gray
-    Write-Host "    3. Choose: $Path\Scripts\python.exe" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  JupyterLab:" -ForegroundColor Cyan
-    Write-Host "    $Path\Scripts\jupyter-lab.exe" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  Terminal:" -ForegroundColor Cyan
-    Write-Host "    $Path\Scripts\Activate.ps1" -ForegroundColor Gray
-    Write-Host ""
-
-    # verify installation
-    Write-Info "Verifying installation..."
-    try {
-        & "$Path\Scripts\python.exe" -c "from mbo_utilities.install_checker import check_installation, print_status_cli; print_status_cli(check_installation())"
-    }
-    catch {
-        Write-Warn "Could not verify installation: $_"
-    }
-
-    return $Path
+    Write-Success "Desktop shortcut created: $shortcutName"
 }
 
 function Main {
@@ -613,40 +509,34 @@ function Main {
         Install-Uv
     }
 
-    # detect GPU
+    # step 1: choose source (pypi vs github)
+    $sourceInfo = Show-SourceSelection
+
+    # step 2: detect GPU
     $gpuInfo = Test-NvidiaGpu
 
-    # ask user what to install
+    # step 3: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
-    # install mbo_utilities with selected extras
-    Install-MboUtilities -Extras $extras -GpuInfo $gpuInfo
+    # step 4: install
+    Install-MboUtilities -InstallSpec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -Source $sourceInfo.Source
 
-    # create desktop shortcut
-    New-DesktopShortcut
+    # step 5: create shortcut
+    New-DesktopShortcut -BranchRef $sourceInfo.Ref
 
-    # verify installation
+    # verify
+    Write-Host ""
     try {
         $null = Get-Command mbo -ErrorAction Stop
         Write-Success "Installation completed!"
         Write-Host ""
-
-        if ($extras.Count -eq 0) {
-            Write-Host "Installed: Base package (viewing, conversion, metadata)" -ForegroundColor Cyan
-        }
-        else {
-            Write-Host "Installed: Base + $($extras -join ', ')" -ForegroundColor Cyan
+        Write-Host "Source: $($sourceInfo.Source)" -ForegroundColor Cyan
+        if ($sourceInfo.Ref) { Write-Host "Branch/Tag: $($sourceInfo.Ref)" -ForegroundColor Cyan }
+        if ($extras.Count -gt 0) {
+            Write-Host "Extras: $($extras -join ', ')" -ForegroundColor Cyan
         }
         Write-Host ""
-
-        Write-Host "You can now:" -ForegroundColor White
-        Write-Host "  - Double-click 'MBO Utilities' on your desktop" -ForegroundColor Gray
-        Write-Host "  - Or run 'mbo' from any terminal" -ForegroundColor Gray
-        Write-Host ""
-
-        Write-Host "For VSCode/Jupyter development:" -ForegroundColor Yellow
-        Write-Host "  Install-MboEnv" -ForegroundColor Yellow
-        Write-Host ""
+        Write-Host "Run 'mbo' or use the desktop shortcut to start." -ForegroundColor Gray
     }
     catch {
         Write-Warn "Installation completed but 'mbo' not found in PATH"
@@ -654,7 +544,4 @@ function Main {
     }
 }
 
-# run main installer
 Main
-
-# note: Install-MboEnv remains available after piping
