@@ -61,7 +61,7 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 # Suite2p cell extraction pipeline
 suite2p = [
     "numba>=0.60.0",
-    "lbm_suite2p_python>=2.3.1",
+    "lbm_suite2p_python>=2.4.0",
     "suite2p_mbo>=2.0.1",
 ]
 # Suite3D volumetric registration (requires CUDA GPU)

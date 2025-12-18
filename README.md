@@ -32,7 +32,7 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 
 ### Pip
 
-For help setting up a virtual environment, see the [Virtual Environments guide](https://millerbrainobservatory.github.io/guides/venvs.html).
+We recommend creating a virtual environment to install all python packages ith `pip` ([see the MBO guide](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ```bash
 uv venv --python 3.12.9
@@ -44,7 +44,7 @@ uv pip install "mbo_utilities[all]"
 
 Using the installation scripts will install an isolated environment.
 
-You can also install mbo_utilities into other environments and they will not conflict.
+You can also install mbo_utilities into other environments with `pip` and they will not conflict.
 
 | Method | Location | Use Case |
 |--------|----------|----------|
