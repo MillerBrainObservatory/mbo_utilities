@@ -1096,14 +1096,14 @@ def get_metadata_batch(file_paths: list | tuple):
 
 def query_tiff_pages(file_path):
     """
-    Get page count INSTANTLY for ScanImage files (milliseconds, not hours).
+    Get page count for TIFF files for both 64-bit (BigTiff) and 32-bit TIFFS.
 
-    Works by:
+    Frames per tiff must be uniform.
+
     1. Reading first TWO IFD offsets only
     2. Calculating page_size = second_offset - first_offset
     3. Estimating: total_pages = file_size / page_size
 
-    For ScanImage files where all pages are uniform, this is exact.
 
     Parameters
     ----------
