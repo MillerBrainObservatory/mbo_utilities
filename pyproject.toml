@@ -40,6 +40,7 @@ dependencies = [
 	"rendercanvas>=2.4.2,<2.5",
 	"imgui-bundle>=1.92.5",
 	"pyside6>=6.10.1",
+	"wgpu>=0.28.1,<0.29",
 	"napari",
 	"napari-animation",
 ]
