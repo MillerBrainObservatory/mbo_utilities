@@ -157,6 +157,9 @@ where = ["."]
 include = ["mbo_utilities*", "pollen*"]
 exclude = ["dev*", "gists*", "slurm*", "demos*", "assets*", "docs*", "tests*"]
 
+[tool.setuptools.package-data]
+mbo_utilities = ["assets/**/*"]
+
 [tool.setuptools.exclude-package-data]
 "*" = ["data/*"]
 
