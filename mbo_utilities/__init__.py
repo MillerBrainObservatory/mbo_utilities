@@ -23,6 +23,7 @@ __all__ = [
     "imread",
     "imwrite",
     "SUPPORTED_FTYPES",
+    "describe",
     # File utilities
     "get_mbo_dirs",
     "files_to_dask",
@@ -69,6 +70,11 @@ def __getattr__(name):
     if name in ("imread", "imwrite", "MBO_SUPPORTED_FTYPES"):
         from . import lazy_array
         return getattr(lazy_array, name)
+
+    # Format detection
+    if name == "describe":
+        from .formats.registry import describe
+        return describe
 
     # File utilities (file_io -> dask, tifffile, zarr)
     if name in (
