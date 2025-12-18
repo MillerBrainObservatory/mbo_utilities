@@ -1,8 +1,8 @@
-# MBO Utilities Installation Script for Windows
+# mbo_utilities Installation Script for Windows (PowerShell)
 # installs uv if not present, installs mbo_utilities with user-selected optional dependencies
 #
 # usage:
-#   irm https://raw.githubusercontent.com/.../install.ps1 | iex
+#   irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
 #
 # after installation, run Install-MboEnv for a full VSCode/Jupyter development environment
 
@@ -98,6 +98,7 @@ function Test-CudaToolkit {
                 Where-Object { $_.Name -match '^v\d+\.\d+' } |
                 Sort-Object Name -Descending
 
+            # nvcc --version shows us the CUDA
             foreach ($ver in $versions) {
                 $nvccPath = Join-Path $ver.FullName "bin\nvcc.exe"
                 if (Test-Path $nvccPath) {
