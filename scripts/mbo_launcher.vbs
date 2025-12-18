@@ -53,8 +53,8 @@ Dim mboExe
 mboExe = FindMboExe()
 
 If mboExe <> "" Then
-    ' run hidden (0) with splash flag
-    WshShell.Run """" & mboExe & """ --splash", 0, False
+    ' run hidden (0) - no console window
+    WshShell.Run """" & mboExe & """", 0, False
 Else
     MsgBox "Could not find mbo.exe. Please reinstall mbo_utilities." & vbCrLf & vbCrLf & _
            "Expected location: %LOCALAPPDATA%\uv\tools\mbo-utilities\Scripts\mbo.exe", _
