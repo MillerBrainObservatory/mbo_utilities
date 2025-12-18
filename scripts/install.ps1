@@ -463,19 +463,30 @@ function New-DesktopShortcut {
     $iconDir = Join-Path $env:LOCALAPPDATA "mbo_utilities"
     if (-not (Test-Path $iconDir)) { New-Item -ItemType Directory -Path $iconDir -Force | Out-Null }
 
+    # use branch ref for downloads, fallback to master
+    $downloadRef = if ($BranchRef) { $BranchRef } else { "master" }
+
     # download icon
     $iconPath = Join-Path $iconDir "mbo_icon.ico"
     try {
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/docs/_static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/$downloadRef/docs/_static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop
     }
-    catch { $iconPath = $null }
+    catch {
+        # fallback to master if branch doesn't have icon
+        try { Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/docs/_static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop }
+        catch { $iconPath = $null }
+    }
 
     # download launcher
     $launcherPath = Join-Path $iconDir "mbo_launcher.vbs"
     try {
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/scripts/mbo_launcher.vbs" -OutFile $launcherPath -ErrorAction Stop
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/$downloadRef/scripts/mbo_launcher.vbs" -OutFile $launcherPath -ErrorAction Stop
     }
-    catch { $launcherPath = $null }
+    catch {
+        # fallback to master if branch doesn't have launcher
+        try { Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/scripts/mbo_launcher.vbs" -OutFile $launcherPath -ErrorAction Stop }
+        catch { $launcherPath = $null }
+    }
 
     # create shortcut
     $shell = New-Object -ComObject WScript.Shell
