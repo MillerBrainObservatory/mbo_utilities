@@ -12,6 +12,8 @@ Usage patterns:
   mbo info INPUT                # Show array info (CLI only)
 """
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Optional, Union
 
@@ -192,8 +194,25 @@ def main(
     if ctx.invoked_subcommand is not None:
         return
 
-    # open GUI with file dialog
-    from mbo_utilities.graphics.run_gui import run_gui
+    # show first-run warning
+    first_run = _is_first_run()
+    if first_run:
+        click.secho("First run detected - initial startup may take longer while caches are built.", fg="yellow")
+
+    # show loading spinner while importing heavy dependencies
+    spinner = LoadingSpinner("Loading GUI")
+    spinner.start()
+    try:
+        from mbo_utilities.graphics.run_gui import run_gui
+        spinner.stop()
+    except Exception as e:
+        spinner.stop()
+        raise e
+
+    # mark as initialized after successful import
+    if first_run:
+        _mark_initialized()
+
     run_gui(data_in=None, roi=None, widget=True, metadata_only=False)
 
 
@@ -226,7 +245,24 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
       mbo view /data/raw --metadata  Show only metadata
       mbo view /data --roi 0 --roi 2 View specific ROIs
     """
-    from mbo_utilities.graphics.run_gui import run_gui
+    # show first-run warning
+    first_run = _is_first_run()
+    if first_run:
+        click.secho("First run detected - initial startup may take longer while caches are built.", fg="yellow")
+
+    # show loading spinner while importing
+    spinner = LoadingSpinner("Loading GUI")
+    spinner.start()
+    try:
+        from mbo_utilities.graphics.run_gui import run_gui
+        spinner.stop()
+    except Exception as e:
+        spinner.stop()
+        raise e
+
+    if first_run:
+        _mark_initialized()
+
     run_gui(
         data_in=data_in,
         roi=roi if roi else None,
