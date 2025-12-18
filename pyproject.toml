@@ -58,7 +58,7 @@ Repository = "https://github.com/millerbrainobservatory/mbo_utilities"
 Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
-# Suite2p cell extraction pipeline
+# Suite2p alone will not include torch
 suite2p = [
     "numba>=0.60.0",
     "lbm_suite2p_python>=2.4.0",

@@ -1610,9 +1610,17 @@ class PreviewDataWidget(EdgeWindow):
                 start_dir = str(get_last_dir("open_folder") or Path.home())
             self._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
 
-        # ctrl+m: toggle metadata viewer
-        if io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.m):
+        # m: toggle metadata viewer (no modifier)
+        if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.m):
             self.show_metadata_viewer = not self.show_metadata_viewer
+
+        # enter: reset vmin/vmax for current frame
+        if imgui.is_key_pressed(imgui.Key.enter) or imgui.is_key_pressed(imgui.Key.keypad_enter):
+            if self.image_widget:
+                try:
+                    self.image_widget.reset_vmin_vmax_frame()
+                except Exception:
+                    pass
 
         # arrow keys for slider dimensions (only when data is loaded)
         try:
