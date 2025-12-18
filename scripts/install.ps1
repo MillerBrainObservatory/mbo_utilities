@@ -432,21 +432,6 @@ function New-DesktopShortcut {
     $shortcutName = if ($BranchRef -and $BranchRef -ne "master") { "MBO Utilities ($BranchRef).lnk" } else { "MBO Utilities.lnk" }
     $shortcutPath = Join-Path $desktopPath $shortcutName
 
-    # find mbo.exe
-    $mboExe = $null
-    $searchPaths = @(
-        (Join-Path $env:APPDATA "uv\tools\mbo-utilities\Scripts\mbo.exe"),
-        (Join-Path $env:LOCALAPPDATA "uv\tools\mbo-utilities\Scripts\mbo.exe"),
-        (Join-Path $env:USERPROFILE ".local\bin\mbo.exe")
-    )
-    foreach ($p in $searchPaths) {
-        if (Test-Path $p) { $mboExe = $p; break }
-    }
-    if (-not $mboExe) {
-        try { $mboExe = (Get-Command mbo -ErrorAction Stop).Source }
-        catch { Write-Warn "Could not locate mbo.exe"; return }
-    }
-
     # setup icon directory
     $iconDir = Join-Path $env:LOCALAPPDATA "mbo_utilities"
     if (-not (Test-Path $iconDir)) { New-Item -ItemType Directory -Path $iconDir -Force | Out-Null }
@@ -465,11 +450,11 @@ function New-DesktopShortcut {
         catch { $iconPath = $null }
     }
 
-    # create shortcut directly to mbo.exe (no VBS needed)
+    # create shortcut that runs mbo via cmd (uv tool makes it globally available)
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $mboExe
-    $shortcut.Arguments = "--splash"
+    $shortcut.TargetPath = "cmd.exe"
+    $shortcut.Arguments = "/c mbo --splash"
     $shortcut.WorkingDirectory = [Environment]::GetFolderPath("UserProfile")
     if ($iconPath -and (Test-Path $iconPath)) { $shortcut.IconLocation = $iconPath }
     $shortcut.Description = "MBO Image Viewer"
