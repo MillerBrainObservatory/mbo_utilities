@@ -311,10 +311,15 @@ def _set_qt_icon():
         from PySide6.QtWidgets import QApplication
         from PySide6.QtGui import QIcon
         from mbo_utilities.file_io import get_package_assets_path
+        from mbo_utilities import get_mbo_dirs
+        from pathlib import Path
 
         app = QApplication.instance()
         if app is not None:
+            # try package assets first, then user assets
             icon_path = get_package_assets_path() / "app_settings" / "icon.png"
+            if not icon_path.exists():
+                icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
             if icon_path.exists():
                 app.setWindowIcon(QIcon(str(icon_path)))
     except Exception:

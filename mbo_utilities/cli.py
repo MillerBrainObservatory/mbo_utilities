@@ -161,7 +161,8 @@ class LoadingSpinner:
         sys.stdout.flush()
 
     def _spin(self):
-        chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        # ascii spinner for windows compatibility (cp1252 can't encode unicode spinners)
+        chars = "|/-\\"
         i = 0
         while self._running:
             sys.stdout.write(f"\r{chars[i % len(chars)]} {self.message}...")
