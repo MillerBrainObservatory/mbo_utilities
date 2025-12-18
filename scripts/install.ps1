@@ -477,36 +477,14 @@ function New-DesktopShortcut {
         catch { $iconPath = $null }
     }
 
-    # download launcher
-    $launcherPath = Join-Path $iconDir "mbo_launcher.vbs"
-    try {
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/$downloadRef/scripts/mbo_launcher.vbs" -OutFile $launcherPath -ErrorAction Stop
-    }
-    catch {
-        # fallback to master if branch doesn't have launcher
-        try { Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/scripts/mbo_launcher.vbs" -OutFile $launcherPath -ErrorAction Stop }
-        catch { $launcherPath = $null }
-    }
-
-    # create shortcut
+    # create shortcut directly to mbo.exe (no VBS needed)
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
-
-    if ($launcherPath -and (Test-Path $launcherPath)) {
-        $shortcut.TargetPath = "wscript.exe"
-        $shortcut.Arguments = """$launcherPath"""
-    }
-    elseif ($mboExe) {
-        $shortcut.TargetPath = $mboExe
-    }
-    else {
-        Write-Warn "Skipping shortcut creation - mbo.exe not found"
-        return
-    }
-
+    $shortcut.TargetPath = $mboExe
+    $shortcut.Arguments = "--splash"
     $shortcut.WorkingDirectory = [Environment]::GetFolderPath("UserProfile")
     if ($iconPath -and (Test-Path $iconPath)) { $shortcut.IconLocation = $iconPath }
-    $shortcut.Description = "MBO Utilities - Miller Brain Observatory"
+    $shortcut.Description = "MBO Image Viewer"
     $shortcut.Save()
 
     Write-Success "Desktop shortcut created: $shortcutName"
