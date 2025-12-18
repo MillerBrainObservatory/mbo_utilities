@@ -7,16 +7,18 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 ## Features
 
 - **Fast, lazy I/O** with `imread`/`imwrite` for [multiple array types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) (ScanImage and generic TIFFs, Suite2p binaries, Zarr and HDF5)
-- **Interactive GUI** via `uv run mbo` for visualization and processing
+- **Interactive GUI** via `uv run mbo` for data visualization and processing
 - **(WIP) Pollen calibration** via `uv run pollen`
 
 [![Documentation](https://img.shields.io/badge/Documentation-black?style=for-the-badge&logo=readthedocs&logoColor=white)](https://millerbrainobservatory.github.io/mbo_utilities/)
 
 ## Installation
 
-### Quick Install (Recommended)
+### Quick Install
 
-**Windows (PowerShell):**
+The provided installation scripts will install [UV](https://docs.astral.sh/uv/getting-started/features/) and allow you to choose a set of optional dependencies.
+
+**Windows (PowerShell-Only):**
 
 ```powershell
 irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
@@ -28,7 +30,7 @@ irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/maste
 curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
 ```
 
-### Manual Install
+### Pip
 
 For help setting up a virtual environment, see the [Virtual Environments guide](https://millerbrainobservatory.github.io/guides/venvs.html).
 
@@ -40,27 +42,35 @@ uv pip install mbo_utilities
 uv pip install "mbo_utilities[all]"
 ```
 
-### Installation Methods
+Using the installation scripts will install an isolated environment.
+
+You can also install mbo_utilities into other environments and they will not conflict.
 
 | Method | Location | Use Case |
 |--------|----------|----------|
 | `uv pip install` in project | `project/.venv/` | Project-specific, use with `uv run mbo` |
 | `uv tool install mbo_utilities` | `~/.local/bin/` | Global `mbo` command |
 
-These are isolated - a global tool install won't affect project environments.
-
 ### Uninstall
 
 **If installed via quick install script:**
+ 
+Powershell:
 
 ```powershell
+uv tool uninstall mbo_utilities
+
 # Windows - remove venv and shortcut
 Remove-Item -Recurse -Force "$env:USERPROFILE\.mbo"
 Remove-Item "$env:USERPROFILE\Desktop\MBO Utilities.lnk" -ErrorAction SilentlyContinue
 ```
 
+Linux/macOS:
+
 ```bash
-# Linux/macOS
+
+uv tool uninstall mbo_utilities
+
 rm -rf ~/.mbo
 ```
 
@@ -68,12 +78,6 @@ rm -rf ~/.mbo
 
 ```bash
 uv pip uninstall mbo_utilities
-```
-
-**If installed as a global tool:**
-
-```bash
-uv tool uninstall mbo_utilities
 ```
 
 The GUI allows registration/segmentation for users to quickly process subsets of their datasets.
@@ -88,6 +92,8 @@ A few exciting future prospects include [masknmf](https://github.com/apasarkar/m
 uv pip install mbo_utilities[suite2p]
 ```
 
+**Note:** On Windows, you may need to add `$USERPROFILE/.local/bin` to your PATH via environment variables.
+
 ## Usage
 
 We encourage users to start with the [user_guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html).
@@ -100,7 +106,11 @@ See [array types](https://millerbrainobservatory.github.io/mbo_utilities/array_t
 
 **Launch GUI:**
 
+`uv run mbo`: Works when in a directory with a `.venv` folder
+`mbo`: Calls the global installation, from any terminal.
+
 ```bash
+# in a project
 uv run mbo
 ```
 
