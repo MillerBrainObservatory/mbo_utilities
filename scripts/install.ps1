@@ -134,12 +134,11 @@ function Show-SourceSelection {
         return @{ Source = "pypi"; Spec = "mbo_utilities" }
     }
 
-    # github selection - show branches and tags
+    # github selection - show branches
     Write-Host ""
-    Write-Host "Fetching available branches and tags..." -ForegroundColor Gray
+    Write-Host "Fetching available branches..." -ForegroundColor Gray
 
     $branches = Get-GitHubBranches
-    $tags = Get-GitHubTags | Select-Object -First 5  # limit tags to recent ones
 
     Write-Host ""
     Write-Host "Available Branches:" -ForegroundColor White
@@ -162,17 +161,6 @@ function Show-SourceSelection {
         Write-Host "  [$idx] $branch" -ForegroundColor Cyan
         $options += @{ Type = "branch"; Name = $branch }
         $idx++
-    }
-
-    # add tags
-    if ($tags.Count -gt 0) {
-        Write-Host ""
-        Write-Host "Recent Tags:" -ForegroundColor White
-        foreach ($tag in $tags) {
-            Write-Host "  [$idx] $tag" -ForegroundColor Green
-            $options += @{ Type = "tag"; Name = $tag }
-            $idx++
-        }
     }
 
     Write-Host ""
@@ -285,7 +273,7 @@ function Show-OptionalDependencies {
     param([hashtable]$GpuInfo)
 
     Write-Host ""
-    Write-Host "Optional Processing Pipelines" -ForegroundColor White
+    Write-Host "Optional Dependencies" -ForegroundColor White
     Write-Host ""
 
     if ($GpuInfo.Available) {
@@ -444,58 +432,32 @@ function New-DesktopShortcut {
     $shortcutName = if ($BranchRef -and $BranchRef -ne "master") { "MBO Utilities ($BranchRef).lnk" } else { "MBO Utilities.lnk" }
     $shortcutPath = Join-Path $desktopPath $shortcutName
 
-    # find mbo.exe
-    $mboExe = $null
-    $searchPaths = @(
-        (Join-Path $env:APPDATA "uv\tools\mbo-utilities\Scripts\mbo.exe"),
-        (Join-Path $env:LOCALAPPDATA "uv\tools\mbo-utilities\Scripts\mbo.exe"),
-        (Join-Path $env:USERPROFILE ".local\bin\mbo.exe")
-    )
-    foreach ($p in $searchPaths) {
-        if (Test-Path $p) { $mboExe = $p; break }
-    }
-    if (-not $mboExe) {
-        try { $mboExe = (Get-Command mbo -ErrorAction Stop).Source }
-        catch { Write-Warn "Could not locate mbo.exe"; return }
-    }
-
     # setup icon directory
     $iconDir = Join-Path $env:LOCALAPPDATA "mbo_utilities"
     if (-not (Test-Path $iconDir)) { New-Item -ItemType Directory -Path $iconDir -Force | Out-Null }
 
+    # use branch ref for downloads, fallback to master
+    $downloadRef = if ($BranchRef) { $BranchRef } else { "master" }
+
     # download icon
     $iconPath = Join-Path $iconDir "mbo_icon.ico"
     try {
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/docs/_static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/$downloadRef/docs/_static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop
     }
-    catch { $iconPath = $null }
-
-    # download launcher
-    $launcherPath = Join-Path $iconDir "mbo_launcher.vbs"
-    try {
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/scripts/mbo_launcher.vbs" -OutFile $launcherPath -ErrorAction Stop
+    catch {
+        # fallback to master if branch doesn't have icon
+        try { Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/docs/_static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop }
+        catch { $iconPath = $null }
     }
-    catch { $launcherPath = $null }
 
-    # create shortcut
+    # create shortcut that runs mbo via cmd (uv tool makes it globally available)
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
-
-    if ($launcherPath -and (Test-Path $launcherPath)) {
-        $shortcut.TargetPath = "wscript.exe"
-        $shortcut.Arguments = """$launcherPath"""
-    }
-    elseif ($mboExe) {
-        $shortcut.TargetPath = $mboExe
-    }
-    else {
-        Write-Warn "Skipping shortcut creation - mbo.exe not found"
-        return
-    }
-
+    $shortcut.TargetPath = "cmd.exe"
+    $shortcut.Arguments = "/c mbo --splash"
     $shortcut.WorkingDirectory = [Environment]::GetFolderPath("UserProfile")
     if ($iconPath -and (Test-Path $iconPath)) { $shortcut.IconLocation = $iconPath }
-    $shortcut.Description = "MBO Utilities - Miller Brain Observatory"
+    $shortcut.Description = "MBO Image Viewer"
     $shortcut.Save()
 
     Write-Success "Desktop shortcut created: $shortcutName"

@@ -1705,7 +1705,7 @@ wheels = [
 
 [[package]]
 name = "mbo-utilities"
-version = "2.4.0"
+version = "2.4.3"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },
@@ -1736,6 +1736,7 @@ dependencies = [
     { name = "seaborn" },
     { name = "tifffile" },
     { name = "tqdm" },
+    { name = "wgpu" },
     { name = "zarr" },
 ]
 
@@ -1848,10 +1849,10 @@ requires-dist = [
     { name = "jupyter-rfb", specifier = ">=0.5.1" },
     { name = "jupyterlab", specifier = ">=4.2.6" },
     { name = "jupytext", marker = "extra == 'docs'" },
-    { name = "lbm-suite2p-python", marker = "extra == 'suite2p'", specifier = ">=2.3.1" },
+    { name = "lbm-suite2p-python", marker = "extra == 'suite2p'", specifier = ">=2.4.0" },
     { name = "llvmlite", specifier = ">=0.43.0" },
     { name = "matplotlib", specifier = ">=3.10.1" },
-    { name = "mbo-fastplotlib", specifier = ">=0.7.2" },
+    { name = "mbo-fastplotlib", specifier = ">=0.7.3" },
     { name = "mbo-suite3d", marker = "extra == 'suite3d'", specifier = ">=0.0.6" },
     { name = "mbo-utilities", extras = ["processing", "docs"], marker = "extra == 'all'" },
     { name = "mbo-utilities", extras = ["suite2p", "suite3d", "rastermap", "torch"], marker = "extra == 'processing'" },
@@ -1892,6 +1893,7 @@ requires-dist = [
     { name = "torchvision", marker = "(sys_platform == 'linux' and extra == 'torch') or (sys_platform == 'win32' and extra == 'torch')", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torchvision", marker = "sys_platform != 'linux' and sys_platform != 'win32' and extra == 'torch'" },
     { name = "tqdm" },
+    { name = "wgpu", specifier = ">=0.28.1,<0.29" },
     { name = "zarr", specifier = ">=3.1.3" },
 ]
 provides-extras = ["suite2p", "suite3d", "rastermap", "torch", "processing", "docs", "all"]
@@ -1949,27 +1951,27 @@ wheels = [
 
 [[package]]
 name = "mkl-fft"
-version = "2.1.1"
+version = "2.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mkl-service" },
     { name = "numpy" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/e8/11294c46170b991b9b1e7b3aa3a47af0097d3360b7d5e50c100af673fc19/mkl_fft-2.1.1-0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:96e431cd7dabbd52d8c4ef5d5cfff526c099215306e9d245a3f66ab0f6580d1f", size = 154961, upload-time = "2025-10-27T17:53:12.732Z" },
-    { url = "https://files.pythonhosted.org/packages/b0/9e/560e5b00e00b06b418e2ec15766322168ebc04bf7b9723267ce9c058f059/mkl_fft-2.1.1-0-cp312-cp312-win_amd64.whl", hash = "sha256:70a1b4baba54513f2b1572f1e33256f393a6fe0401ff0bec9a7fca007208a81b", size = 140430, upload-time = "2025-10-27T17:53:37.92Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/e1/a78b5d209789c33ab5f0fb08d9ec4426f0d15fac894f38ea4244d3ededad/mkl_fft-2.1.2-0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:69ca28e18427892f504d9bfd3f84352dea667b09c87a6218624ee5dd05214da0", size = 153267, upload-time = "2025-12-18T03:17:22.91Z" },
+    { url = "https://files.pythonhosted.org/packages/41/b6/1c341fd7d3d93569050d5b30db9ccccbec353ede4e7de619f93acea6f8bb/mkl_fft-2.1.2-0-cp312-cp312-win_amd64.whl", hash = "sha256:7a389640a489fc802e3ff55012d6381d30f996a61d48929232abe6cd6b5a527d", size = 139965, upload-time = "2025-12-18T03:17:37.72Z" },
 ]
 
 [[package]]
 name = "mkl-service"
-version = "2.6.0"
+version = "2.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mkl" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/2b/da412ee13861f7b355b431cc1deeaadd08f6e4ebb6b52affb7d264452593/mkl_service-2.6.0-0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:5b6616b794691186236d30d383bca4d3fa569ed5d89a9c0c051197f0b20d3df1", size = 82544, upload-time = "2025-10-27T18:06:17.911Z" },
-    { url = "https://files.pythonhosted.org/packages/1d/6d/6dc4ce8c23aaaacfd29d4c68331901aca6deeaf6c149e38f658b5a08d287/mkl_service-2.6.0-0-cp312-cp312-win_amd64.whl", hash = "sha256:548e3b45d59d24d6ecb7dad44ae26fb71ddeed8856ed58bedb30aa9a09ccb635", size = 83943, upload-time = "2025-10-27T18:06:42.635Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/3c/47e5c48db719895fd5a5fb2ec709a8cbf62269b03df022afd4df12b63afb/mkl_service-2.6.1-0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:63515445a87c61f7a61fbe9e95f94aa3f317fe4a8ea166a80d067179e2e4eacc", size = 79014, upload-time = "2025-12-18T03:22:55.682Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/6e/d753f25948edc5dc3110532db0346d95a1c3522d190b111f5e62950466ea/mkl_service-2.6.1-0-cp312-cp312-win_amd64.whl", hash = "sha256:8a8c750a69b202afd0a9445601c318872c0d6c6e2e9add83b0340f92d98c8a09", size = 83351, upload-time = "2025-12-18T03:23:20.462Z" },
 ]
 
 [[package]]

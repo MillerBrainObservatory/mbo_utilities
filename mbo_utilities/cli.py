@@ -115,6 +115,62 @@ def download_notebook(
     click.echo(f"  jupyter lab {output_file.resolve()}")
     return output_file
 
+
+def _get_marker_path() -> Path:
+    """get path to first-run marker file"""
+    from mbo_utilities import get_mbo_dirs
+    return get_mbo_dirs()["base"] / ".initialized"
+
+
+def _is_first_run() -> bool:
+    """check if this is the first run (no marker file exists)"""
+    try:
+        return not _get_marker_path().exists()
+    except Exception:
+        return False
+
+
+def _mark_initialized() -> None:
+    """create marker file to indicate successful initialization"""
+    try:
+        marker = _get_marker_path()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+    except Exception:
+        pass
+
+
+class LoadingSpinner:
+    """simple terminal spinner for loading feedback"""
+
+    def __init__(self, message: str = "Loading"):
+        self.message = message
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=0.5)
+        sys.stdout.write("\r" + " " * (len(self.message) + 10) + "\r")
+        sys.stdout.flush()
+
+    def _spin(self):
+        # ascii spinner for windows compatibility (cp1252 can't encode unicode spinners)
+        chars = "|/-\\"
+        i = 0
+        while self._running:
+            sys.stdout.write(f"\r{chars[i % len(chars)]} {self.message}...")
+            sys.stdout.flush()
+            time.sleep(0.1)
+            i += 1
+
+
 @click.group(cls=PathAwareGroup, invoke_without_command=True)
 @click.option(
     "--download-notebook",

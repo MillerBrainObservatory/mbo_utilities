@@ -97,8 +97,50 @@ def _fmt_multivalue(value, max_items=8):
     return _fmt(value)
 
 
+# module-level state for metadata search
+_metadata_search_filter = ""
+_metadata_search_active = False
+
+
+def _matches_filter_shallow(key: str, value, filter_text: str) -> bool:
+    """check if key or stringified value matches the search filter (case-insensitive)."""
+    if not filter_text:
+        return True
+    filter_lower = filter_text.lower()
+    if filter_lower in str(key).lower():
+        return True
+    # only check stringified value for non-containers
+    if not isinstance(value, (Mapping, list, tuple)):
+        if filter_lower in str(value).lower():
+            return True
+    return False
+
+
+def _matches_filter_recursive(key: str, value, filter_text: str) -> bool:
+    """recursively check if key, value, or any nested children match the filter."""
+    if not filter_text:
+        return True
+
+    # check current key/value
+    if _matches_filter_shallow(key, value, filter_text):
+        return True
+
+    # recurse into nested structures
+    if isinstance(value, Mapping):
+        for k, v in value.items():
+            if _matches_filter_recursive(k, v, filter_text):
+                return True
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for i, v in enumerate(value):
+            if _matches_filter_recursive(f"[{i}]", v, filter_text):
+                return True
+
+    return False
+
+
 def draw_metadata_inspector(metadata: dict):
     """draw metadata with canonical params first, then other fields."""
+    global _metadata_search_filter, _metadata_search_active
     from mbo_utilities.metadata import METADATA_PARAMS
 
     with imgui_ctx.begin_child("Metadata Viewer"):
@@ -108,7 +150,7 @@ def draw_metadata_inspector(metadata: dict):
             shown_keys = set()
             value_col = 180
 
-            # section: imaging parameters
+            # section: imaging parameters with search icon
             imgui.text_colored(_TREE_NODE_COLOR, "Imaging")
             imgui.same_line()
             imgui.text_disabled("(?)")
@@ -123,6 +165,29 @@ def draw_metadata_inspector(metadata: dict):
                 )
                 imgui.pop_text_wrap_pos()
                 imgui.end_tooltip()
+
+            # search icon on the right side
+            avail_width = imgui.get_content_region_avail().x
+            imgui.same_line(avail_width - 20)
+            search_color = _TREE_NODE_COLOR if _metadata_search_active else imgui.ImVec4(0.6, 0.6, 0.6, 1.0)
+            imgui.push_style_color(imgui.Col_.text, search_color)
+            if imgui.small_button("\U0001F50D"):  # magnifying glass emoji
+                _metadata_search_active = not _metadata_search_active
+                if not _metadata_search_active:
+                    _metadata_search_filter = ""
+            imgui.pop_style_color()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Search metadata (click to toggle)")
+
+            # search input field
+            if _metadata_search_active:
+                imgui.set_next_item_width(-1)
+                changed, _metadata_search_filter = imgui.input_text_with_hint(
+                    "##metadata_search",
+                    "filter by key or value...",
+                    _metadata_search_filter,
+                )
+
             imgui.separator()
             for name, param in METADATA_PARAMS.items():
                 value = metadata.get(param.canonical)
@@ -135,6 +200,10 @@ def draw_metadata_inspector(metadata: dict):
                 if value is not None:
                     shown_keys.add(param.canonical)
                     shown_keys.update(param.aliases)
+
+                    # skip if doesn't match filter (recursive check for nested values)
+                    if _metadata_search_filter and not _matches_filter_recursive(param.canonical, value, _metadata_search_filter):
+                        continue
 
                     # parameter name with alias tooltip on hover
                     imgui.text_colored(_CANONICAL_COLOR, param.canonical)
@@ -154,28 +223,42 @@ def draw_metadata_inspector(metadata: dict):
             # section: cameras (if present)
             cameras = metadata.get("cameras")
             if cameras and isinstance(cameras, dict):
-                imgui.spacing()
-                imgui.text_colored(_TREE_NODE_COLOR, "Cameras")
-                imgui.separator()
-                for cam_idx, cam_meta in sorted(cameras.items()):
-                    if _colored_tree_node(f"camera_{cam_idx}"):
-                        for k, v in sorted(cam_meta.items()):
-                            if k == "multiscales":
-                                continue  # skip verbose ome-ngff metadata
-                            imgui.text_colored(_NAME_COLORS[0], k)
-                            imgui.same_line(value_col)
-                            imgui.text_colored(_VALUE_COLOR, _fmt_multivalue(v))
-                        imgui.tree_pop()
+                # check if any camera data matches filter (recursive)
+                cameras_match = not _metadata_search_filter
+                if _metadata_search_filter:
+                    cameras_match = _matches_filter_recursive("cameras", cameras, _metadata_search_filter)
+
+                if cameras_match:
+                    imgui.spacing()
+                    imgui.text_colored(_TREE_NODE_COLOR, "Cameras")
+                    imgui.separator()
+                    for cam_idx, cam_meta in sorted(cameras.items()):
+                        # skip cameras that don't match filter
+                        if _metadata_search_filter and not _matches_filter_recursive(f"camera_{cam_idx}", cam_meta, _metadata_search_filter):
+                            continue
+                        if _colored_tree_node(f"camera_{cam_idx}"):
+                            for k, v in sorted(cam_meta.items()):
+                                if k == "multiscales":
+                                    continue  # skip verbose ome-ngff metadata
+                                if _metadata_search_filter and not _matches_filter_recursive(k, v, _metadata_search_filter):
+                                    continue
+                                imgui.text_colored(_NAME_COLORS[0], k)
+                                imgui.same_line(value_col)
+                                imgui.text_colored(_VALUE_COLOR, _fmt_multivalue(v))
+                            imgui.tree_pop()
                 shown_keys.add("cameras")
 
             # section: other metadata
             remaining = {k: v for k, v in metadata.items() if k not in shown_keys}
+            # filter remaining items (recursive)
+            if _metadata_search_filter:
+                remaining = {k: v for k, v in remaining.items() if _matches_filter_recursive(k, v, _metadata_search_filter)}
             if remaining:
                 imgui.spacing()
                 imgui.text_colored(_TREE_NODE_COLOR, "Other")
                 imgui.separator()
                 for k, v in sorted(remaining.items()):
-                    _render_item(k, v)
+                    _render_item(k, v, filter_text=_metadata_search_filter)
         finally:
             imgui.pop_style_var()
 
@@ -200,8 +283,13 @@ def draw_scope():
             imgui.pop_style_var()
 
 
-def _render_item(name, val, prefix="", depth=0):
+def _render_item(name, val, prefix="", depth=0, filter_text=""):
     full_name = f"{prefix}{name}"
+
+    # skip items that don't match filter (recursively checks children too)
+    if filter_text and not _matches_filter_recursive(name, val, filter_text):
+        return
+
     if isinstance(val, Mapping):
         # filter out all-underscore keys and callables
         children = [
@@ -209,10 +297,13 @@ def _render_item(name, val, prefix="", depth=0):
             for k, v in val.items()
             if not (k.startswith("__") and k.endswith("__")) and not callable(v)
         ]
+        # filter children if search is active
+        if filter_text:
+            children = [(k, v) for k, v in children if _matches_filter_recursive(k, v, filter_text)]
         if children:
             if _colored_tree_node(full_name):
                 for k, v in children:
-                    _render_item(str(k), v, prefix=full_name + ".", depth=depth + 1)
+                    _render_item(str(k), v, prefix=full_name + ".", depth=depth + 1, filter_text=filter_text)
                 imgui.tree_pop()
         else:
             imgui.text_colored(_NAME_COLORS[0], full_name)
@@ -226,27 +317,34 @@ def _render_item(name, val, prefix="", depth=0):
             and any("\\" in v or "/" in v for v in val[:min(3, len(val))])
         )
         if is_path_list:
-            # Display path lists as a collapsible tree with compact formatting
-            if _colored_tree_node(f"{full_name} ({len(val)} paths)"):
-                for i, path in enumerate(val):
-                    imgui.text_colored(_NAME_COLORS[1], f"[{i}]")
-                    imgui.same_line(spacing=8)
-                    # Truncate long paths from the left, showing the end
-                    display_path = path if len(path) <= 60 else "..." + path[-57:]
-                    imgui.text_colored(_VALUE_COLOR, display_path)
-                    if imgui.is_item_hovered() and len(path) > 60:
-                        imgui.set_tooltip(path)
-                imgui.tree_pop()
+            # filter paths if search is active
+            filtered_paths = list(enumerate(val))
+            if filter_text:
+                filtered_paths = [(i, p) for i, p in filtered_paths if filter_text.lower() in p.lower()]
+            if filtered_paths:
+                label = f"{full_name} ({len(filtered_paths)}/{len(val)} paths)" if filter_text else f"{full_name} ({len(val)} paths)"
+                if _colored_tree_node(label):
+                    for i, path in filtered_paths:
+                        imgui.text_colored(_NAME_COLORS[1], f"[{i}]")
+                        imgui.same_line(spacing=8)
+                        display_path = path if len(path) <= 60 else "..." + path[-57:]
+                        imgui.text_colored(_VALUE_COLOR, display_path)
+                        if imgui.is_item_hovered() and len(path) > 60:
+                            imgui.set_tooltip(path)
+                    imgui.tree_pop()
         elif len(val) <= 8 and all(isinstance(v, (int, float, str, bool)) for v in val):
             imgui.text_colored(_NAME_COLORS[0], full_name)
             imgui.same_line(spacing=16)
             imgui.text_colored(_VALUE_COLOR, repr(val))
         else:
             children = [(i, v) for i, v in enumerate(val) if not callable(v)]
+            # filter children if search is active
+            if filter_text:
+                children = [(i, v) for i, v in children if _matches_filter_recursive(f"[{i}]", v, filter_text)]
             if children:
                 if _colored_tree_node(f"{full_name} ({len(val)} items)"):
                     for i, v in children:
-                        _render_item(f"[{i}]", v, prefix=full_name, depth=depth + 1)
+                        _render_item(f"[{i}]", v, prefix=full_name, depth=depth + 1, filter_text=filter_text)
                     imgui.tree_pop()
             else:
                 imgui.text_colored(_NAME_COLORS[0], full_name)
@@ -268,16 +366,20 @@ def _render_item(name, val, prefix="", depth=0):
         # if there are any fields or properties, show a tree node
         if fields or prop_names:
             if _colored_tree_node(f"{full_name} ({cls.__name__})"):
-                # render instance attributes
+                # render instance attributes (filtered)
                 for k, v in fields.items():
-                    _render_item(k, v, prefix=full_name + ".", depth=depth + 1)
-                # render properties by retrieving their current value
+                    if filter_text and not _matches_filter_recursive(k, v, filter_text):
+                        continue
+                    _render_item(k, v, prefix=full_name + ".", depth=depth + 1, filter_text=filter_text)
+                # render properties by retrieving their current value (filtered)
                 for prop in prop_names:
                     try:
                         prop_val = getattr(val, prop)
                     except Exception:
                         continue
-                    _render_item(prop, prop_val, prefix=full_name + ".", depth=depth + 1)
+                    if filter_text and not _matches_filter_recursive(prop, prop_val, filter_text):
+                        continue
+                    _render_item(prop, prop_val, prefix=full_name + ".", depth=depth + 1, filter_text=filter_text)
                 imgui.tree_pop()
         else:
             # leaf node: display name and formatted value

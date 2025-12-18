@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.4.2"
+version = "2.4.3"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -36,7 +36,7 @@ dependencies = [
 	"jupyter_rfb>=0.5.1",
 	"llvmlite>=0.43.0",
 	"mkl_fft>=2.0.0",
-	"mbo-fastplotlib>=0.7.2",
+	"mbo-fastplotlib>=0.7.3",
 	"rendercanvas>=2.4.2,<2.5",
 	"imgui-bundle>=1.92.5",
 	"pyside6>=6.10.1",
@@ -58,10 +58,10 @@ Repository = "https://github.com/millerbrainobservatory/mbo_utilities"
 Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
-# Suite2p cell extraction pipeline
+# Suite2p alone will not include torch
 suite2p = [
     "numba>=0.60.0",
-    "lbm_suite2p_python>=2.3.1",
+    "lbm_suite2p_python>=2.4.0",
     "suite2p_mbo>=2.0.1",
 ]
 # Suite3D volumetric registration (requires CUDA GPU)
@@ -156,6 +156,9 @@ package-dir = {"" = "."}
 where = ["."]
 include = ["mbo_utilities*", "pollen*"]
 exclude = ["dev*", "gists*", "slurm*", "demos*", "assets*", "docs*", "tests*"]
+
+[tool.setuptools.package-data]
+mbo_utilities = ["assets/**/*"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["data/*"]

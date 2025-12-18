@@ -174,7 +174,7 @@ def draw_menu(parent):
                         start_dir
                     )
                 # Open Folder - iw-array API
-                if imgui.menu_item("Open Folder", "", p_selected=False, enabled=True)[0]:
+                if imgui.menu_item("Open Folder", "Ctrl+Shift+O", p_selected=False, enabled=True)[0]:
                     # Handle fpath being a list or a string
                     fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
                     if fpath and Path(fpath).exists():
@@ -1584,7 +1584,105 @@ class PreviewDataWidget(EdgeWindow):
                 arr.upsample = value
         self._refresh_image_widget()
 
+    def _handle_keyboard_shortcuts(self):
+        """Handle global keyboard shortcuts."""
+        io = imgui.get_io()
+
+        # skip if any widget has focus (typing in text field)
+        if io.want_text_input:
+            return
+
+        # ctrl+o: open file
+        if io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.o):
+            fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
+            if fpath and Path(fpath).exists():
+                start_dir = str(Path(fpath).parent)
+            else:
+                start_dir = str(get_last_dir("open_file") or Path.home())
+            self._file_dialog = pfd.open_file("Select Data File", start_dir)
+
+        # ctrl+shift+o: open folder
+        if io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.o):
+            fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
+            if fpath and Path(fpath).exists():
+                start_dir = str(Path(fpath).parent)
+            else:
+                start_dir = str(get_last_dir("open_folder") or Path.home())
+            self._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
+
+        # m: toggle metadata viewer (no modifier)
+        if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.m):
+            self.show_metadata_viewer = not self.show_metadata_viewer
+
+        # enter: reset vmin/vmax for current frame
+        if imgui.is_key_pressed(imgui.Key.enter) or imgui.is_key_pressed(imgui.Key.keypad_enter):
+            if self.image_widget:
+                try:
+                    self.image_widget.reset_vmin_vmax_frame()
+                except Exception:
+                    pass
+
+        # arrow keys for slider dimensions (only when data is loaded)
+        try:
+            self._handle_arrow_keys()
+        except Exception:
+            pass  # ignore errors during data transitions
+
+    def _handle_arrow_keys(self):
+        """Handle arrow key navigation for T and Z dimensions."""
+        if not self.image_widget or not self.image_widget.data:
+            return
+
+        n_sliders = self.image_widget.n_sliders
+        if n_sliders == 0:
+            return
+
+        # get shape from actual data
+        shape = self.image_widget.data[0].shape
+        if not isinstance(shape, tuple) or len(shape) < 3:
+            return
+
+        current_indices = list(self.image_widget.indices)
+
+        # left/right: T dimension (index 0)
+        t_max = shape[0] - 1
+        current_t = current_indices[0]
+
+        if imgui.is_key_pressed(imgui.Key.left_arrow):
+            new_t = max(0, current_t - 1)
+            if new_t != current_t:
+                current_indices[0] = new_t
+                self.image_widget.indices = current_indices
+                return
+
+        if imgui.is_key_pressed(imgui.Key.right_arrow):
+            new_t = min(t_max, current_t + 1)
+            if new_t != current_t:
+                current_indices[0] = new_t
+                self.image_widget.indices = current_indices
+                return
+
+        # up/down: Z dimension (index 1, only for 4D data)
+        if n_sliders >= 2 and len(shape) >= 4:
+            z_max = shape[1] - 1
+            current_z = current_indices[1]
+
+            if imgui.is_key_pressed(imgui.Key.down_arrow):
+                new_z = max(0, current_z - 1)
+                if new_z != current_z:
+                    current_indices[1] = new_z
+                    self.image_widget.indices = current_indices
+                    return
+
+            if imgui.is_key_pressed(imgui.Key.up_arrow):
+                new_z = min(z_max, current_z + 1)
+                if new_z != current_z:
+                    current_indices[1] = new_z
+                    self.image_widget.indices = current_indices
+
     def update(self):
+        # Handle keyboard shortcuts
+        self._handle_keyboard_shortcuts()
         # Check for file/folder dialog results (iw-array API)
         self._check_file_dialogs()
         draw_saveas_popup(self)
@@ -1648,7 +1746,9 @@ class PreviewDataWidget(EdgeWindow):
 
             # Check if dimensionality is changing - if so, reset window functions
             # to avoid IndexError in fastplotlib's _apply_window_function
-            old_ndim = len(self.shape) if hasattr(self, 'shape') and self.shape else 0
+            old_ndim = 0
+            if hasattr(self, 'shape') and self.shape and isinstance(self.shape, tuple):
+                old_ndim = len(self.shape)
             new_ndim = new_data.ndim
 
             # Reset window functions on processors if dimensionality changes
@@ -1659,34 +1759,13 @@ class PreviewDataWidget(EdgeWindow):
                     proc.window_sizes = None
                     proc.window_order = None
 
-                # Update slider_dim_names to match new dimensionality
-                if new_ndim == 4:
-                    new_names = ("t", "z")
-                elif new_ndim == 3:
-                    new_names = ("t",)
-                else:
-                    new_names = None
-
-                # Reset ImageWidget's internal indices to avoid axis conflicts
-                # fastplotlib's _indices dict needs to match the new slider_dim_names
-                self.image_widget._slider_dim_names = new_names
-                if new_names:
-                    self.image_widget._indices = {name: 0 for name in new_names}
-                else:
-                    self.image_widget._indices = {}
-
             # iw-array API: use data indexer for replacing data
-            # iw.data[0] = new_array handles shape changes automatically
+            # data[0] = new_array triggers _reset_dimensions() automatically
             self.image_widget.data[0] = new_data
 
-            # Reset indices to start of data
-            try:
-                names = self.image_widget._slider_dim_names or ()
-                for name in names:
-                    if name in self.image_widget._indices:
-                        self.image_widget._indices[name] = 0
-            except (KeyError, AttributeError):
-                pass  # Indices not available
+            # reset indices to start of data using public API
+            if self.image_widget.n_sliders > 0:
+                self.image_widget.indices = [0] * self.image_widget.n_sliders
 
             # Update internal state
             self.fpath = path
