@@ -134,12 +134,11 @@ function Show-SourceSelection {
         return @{ Source = "pypi"; Spec = "mbo_utilities" }
     }
 
-    # github selection - show branches and tags
+    # github selection - show branches
     Write-Host ""
-    Write-Host "Fetching available branches and tags..." -ForegroundColor Gray
+    Write-Host "Fetching available branches..." -ForegroundColor Gray
 
     $branches = Get-GitHubBranches
-    $tags = Get-GitHubTags | Select-Object -First 5  # limit tags to recent ones
 
     Write-Host ""
     Write-Host "Available Branches:" -ForegroundColor White
@@ -162,17 +161,6 @@ function Show-SourceSelection {
         Write-Host "  [$idx] $branch" -ForegroundColor Cyan
         $options += @{ Type = "branch"; Name = $branch }
         $idx++
-    }
-
-    # add tags
-    if ($tags.Count -gt 0) {
-        Write-Host ""
-        Write-Host "Recent Tags:" -ForegroundColor White
-        foreach ($tag in $tags) {
-            Write-Host "  [$idx] $tag" -ForegroundColor Green
-            $options += @{ Type = "tag"; Name = $tag }
-            $idx++
-        }
     }
 
     Write-Host ""
@@ -285,7 +273,7 @@ function Show-OptionalDependencies {
     param([hashtable]$GpuInfo)
 
     Write-Host ""
-    Write-Host "Optional Processing Pipelines" -ForegroundColor White
+    Write-Host "Optional Dependencies" -ForegroundColor White
     Write-Host ""
 
     if ($GpuInfo.Available) {
