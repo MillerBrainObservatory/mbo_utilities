@@ -115,6 +115,30 @@ def download_notebook(
     click.echo(f"  jupyter lab {output_file.resolve()}")
     return output_file
 
+
+def _get_marker_path() -> Path:
+    """get path to first-run marker file"""
+    from mbo_utilities import get_mbo_dirs
+    return get_mbo_dirs()["base"] / ".initialized"
+
+
+def _is_first_run() -> bool:
+    """check if this is the first run (no marker file exists)"""
+    try:
+        return not _get_marker_path().exists()
+    except Exception:
+        return False
+
+
+def _mark_initialized() -> None:
+    """create marker file to indicate successful initialization"""
+    try:
+        marker = _get_marker_path()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+    except Exception:
+        pass
+
 @click.group(cls=PathAwareGroup, invoke_without_command=True)
 @click.option(
     "--download-notebook",
