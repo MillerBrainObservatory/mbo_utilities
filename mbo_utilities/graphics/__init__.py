@@ -7,50 +7,15 @@ top-level imports minimal for fast startup of light operations like
 --download-notebook and --check-install.
 """
 
-import os
-import sys
-import importlib.util
-
 __all__ = [
     "PreviewDataWidget",
     "run_gui",
     "download_notebook",
     "GridSearchViewer",
+    "setup_imgui",
+    "set_qt_icon",
+    "get_default_ini_path",
 ]
-
-# Track if wgpu has been configured (to avoid duplicate setup)
-_wgpu_configured = False
-
-
-def _configure_wgpu_backend():
-    """Configure wgpu backend settings. Called lazily before first GUI use."""
-    global _wgpu_configured
-    if _wgpu_configured:
-        return
-
-    # Force rendercanvas to use Qt backend if PySide6 is available
-    # This must happen BEFORE importing fastplotlib to avoid glfw selection
-    if importlib.util.find_spec("PySide6") is not None:
-        os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
-        import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
-
-    # Configure wgpu instance to skip OpenGL backend and avoid EGL warnings
-    # Only applies to native platforms (not pyodide/emscripten)
-    if sys.platform != "emscripten":
-        try:
-            from wgpu.backends.wgpu_native.extras import set_instance_extras
-            # Use Vulkan on Linux, DX12 on Windows, Metal on macOS - skip GL to avoid EGL errors
-            if sys.platform == "win32":
-                set_instance_extras(backends=["Vulkan", "DX12"])
-            elif sys.platform == "darwin":
-                set_instance_extras(backends=["Metal"])
-            else:
-                # Linux - Vulkan only, skip GL/EGL
-                set_instance_extras(backends=["Vulkan"])
-        except ImportError:
-            pass  # wgpu not installed or older version without extras
-
-    _wgpu_configured = True
 
 
 def __getattr__(name):
@@ -62,10 +27,19 @@ def __getattr__(name):
         from .run_gui import download_notebook
         return download_notebook
     elif name == "PreviewDataWidget":
-        _configure_wgpu_backend()  # Configure before GUI imports
+        from . import _setup  # triggers setup on import
         from .imgui import PreviewDataWidget
         return PreviewDataWidget
     elif name == "GridSearchViewer":
         from .grid_search_viewer import GridSearchViewer
         return GridSearchViewer
+    elif name == "setup_imgui":
+        from ._setup import setup_imgui
+        return setup_imgui
+    elif name == "set_qt_icon":
+        from ._setup import set_qt_icon
+        return set_qt_icon
+    elif name == "get_default_ini_path":
+        from ._setup import get_default_ini_path
+        return get_default_ini_path
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

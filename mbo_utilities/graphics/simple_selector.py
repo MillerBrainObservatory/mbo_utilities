@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Optional, Union, Literal
 from imgui_bundle import imgui, immapp, hello_imgui, portable_file_dialogs as pfd
+from mbo_utilities.graphics import _setup  # triggers setup on import
+from mbo_utilities.graphics._setup import get_default_ini_path
 
 
 class SimpleSelector:
@@ -68,7 +70,7 @@ def select_folder(
     start_path: Optional[Union[str, Path]] = None,
 ) -> Optional[Path]:
     """Select a folder using native OS dialog.
-    
+
     Note: Native folder dialogs don't show files - this is an OS limitation.
     """
     selector = SimpleSelector("folder", title, None, start_path)
@@ -76,6 +78,7 @@ def select_folder(
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = title
     params.app_window_params.window_geometry.size = (500, 200)
+    params.ini_filename = get_default_ini_path("simple_selector")
     params.callbacks.show_gui = selector.draw
 
     addons = immapp.AddOnsParams()
@@ -93,7 +96,7 @@ def select_files(
     start_path: Optional[Union[str, Path]] = None,
 ) -> list[Path]:
     """Select one or more files using native OS dialog.
-    
+
     Supports multi-select - user can select single or multiple files.
     """
     selector = SimpleSelector("files", title, filters, start_path)
@@ -101,6 +104,7 @@ def select_files(
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = title
     params.app_window_params.window_geometry.size = (500, 300)
+    params.ini_filename = get_default_ini_path("simple_selector")
     params.callbacks.show_gui = selector.draw
 
     addons = immapp.AddOnsParams()

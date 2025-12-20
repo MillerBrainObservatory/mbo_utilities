@@ -295,44 +295,12 @@ def _check_installation():
     return status.all_ok
 
 
-def _setup_qt_backend():
-    """Set up Qt backend for rendercanvas if PySide6 is available.
-
-    This must happen BEFORE importing fastplotlib to avoid glfw selection.
-    """
-    if importlib.util.find_spec("PySide6") is not None:
-        os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
-        import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
-
-
-def _set_qt_icon():
-    """Set the Qt application window icon. Call after QApplication is created."""
-    try:
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtGui import QIcon
-        from mbo_utilities.file_io import get_package_assets_path
-        from mbo_utilities import get_mbo_dirs
-        from pathlib import Path
-
-        app = QApplication.instance()
-        if app is not None:
-            # try package assets first, then user assets
-            icon_path = get_package_assets_path() / "app_settings" / "icon.png"
-            if not icon_path.exists():
-                icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
-            if icon_path.exists():
-                app.setWindowIcon(QIcon(str(icon_path)))
-    except Exception:
-        pass  # icon is non-critical
-
-
 def _select_file() -> tuple[Any, Any, Any, bool]:
     """Show file selection dialog and return user choices."""
-    from mbo_utilities.file_io import get_mbo_dirs
-    from mbo_utilities.graphics._file_dialog import FileDialog, setup_imgui
+    from mbo_utilities.graphics._file_dialog import FileDialog  # triggers _setup import
+    from mbo_utilities.graphics._setup import get_default_ini_path
     from imgui_bundle import immapp, hello_imgui
 
-    setup_imgui()  # ensure assets (fonts + icons) are available
     dlg = FileDialog()
 
     params = hello_imgui.RunnerParams()
@@ -340,9 +308,7 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
     params.app_window_params.window_geometry.size = (420, 680)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = False  # fixed size to prevent scrollbar issues
-    params.ini_filename = str(
-        Path(get_mbo_dirs()["settings"], "fd_settings.ini").expanduser()
-    )
+    params.ini_filename = get_default_ini_path("file_dialog")
     params.callbacks.show_gui = dlg.render
 
     addons = immapp.AddOnsParams()
@@ -350,7 +316,6 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
     addons.with_implot = False
     addons.with_implot3d = False
 
-    hello_imgui.set_assets_folder(str(get_mbo_dirs()["assets"]))
     immapp.run(runner_params=params, add_ons_params=addons)
 
     return (
@@ -365,13 +330,12 @@ def _show_metadata_viewer(metadata: dict) -> None:
     """Show metadata in an ImGui window."""
     from imgui_bundle import immapp, hello_imgui
     from mbo_utilities.graphics._widgets import draw_metadata_inspector
-    from mbo_utilities.graphics._file_dialog import setup_imgui
-
-    setup_imgui()  # ensure assets (fonts + icons) are available
+    from mbo_utilities.graphics._setup import get_default_ini_path
 
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "MBO Metadata Viewer"
     params.app_window_params.window_geometry.size = (800, 800)
+    params.ini_filename = get_default_ini_path("metadata_viewer")
     params.callbacks.show_gui = lambda: draw_metadata_inspector(metadata)
 
     addons = immapp.AddOnsParams()
@@ -467,7 +431,8 @@ def _create_image_widget(data_array, widget: bool = True):
     iw.show()
 
     # set qt window icon after canvas is created
-    _set_qt_icon()
+    from mbo_utilities.graphics._setup import set_qt_icon
+    set_qt_icon()
 
     # Add PreviewDataWidget if requested
     if widget:
@@ -510,14 +475,9 @@ def _run_gui_impl(
         splash.show()
 
     try:
-        # Set up Qt backend before any GUI imports
-        _setup_qt_backend()
-
         # Import heavy dependencies only when actually running GUI
         from mbo_utilities.array_types import normalize_roi
-        from mbo_utilities.graphics._file_dialog import setup_imgui
-
-        setup_imgui()  # ensure assets (fonts + icons) are available
+        from mbo_utilities.graphics import _setup  # triggers setup on import
 
         # close splash before showing file dialog
         if splash:

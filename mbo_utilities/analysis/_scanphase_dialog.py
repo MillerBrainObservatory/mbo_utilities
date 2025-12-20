@@ -280,11 +280,10 @@ def select_scanphase_file() -> str | None:
     str or None
         Selected file path, or None if cancelled.
     """
-    from mbo_utilities.file_io import get_mbo_dirs
-    from mbo_utilities.graphics._file_dialog import setup_imgui
+    from mbo_utilities.graphics import _setup  # triggers setup on import
+    from mbo_utilities.graphics._setup import get_default_ini_path
     from imgui_bundle import immapp, hello_imgui
 
-    setup_imgui()
     dlg = ScanPhaseFileDialog()
 
     params = hello_imgui.RunnerParams()
@@ -292,9 +291,7 @@ def select_scanphase_file() -> str | None:
     params.app_window_params.window_geometry.size = (500, 720)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = True
-    params.ini_filename = str(
-        Path(get_mbo_dirs()["settings"], "scanphase_dialog.ini").expanduser()
-    )
+    params.ini_filename = get_default_ini_path("scanphase_dialog")
     params.callbacks.show_gui = dlg.render
 
     addons = immapp.AddOnsParams()
@@ -302,7 +299,6 @@ def select_scanphase_file() -> str | None:
     addons.with_implot = False
     addons.with_implot3d = False
 
-    hello_imgui.set_assets_folder(str(get_mbo_dirs()["assets"]))
     immapp.run(runner_params=params, add_ons_params=addons)
 
     return dlg.selected_path

@@ -440,6 +440,8 @@ def calibrate_xy(xs, ys, III, filepath):
 
 def select_pollen_file() -> str | None:
     from imgui_bundle import immapp, hello_imgui
+    from mbo_utilities.graphics import _setup  # triggers setup on import
+    from mbo_utilities.graphics._setup import get_default_ini_path
 
     dlg = PollenDialog()
 
@@ -449,6 +451,7 @@ def select_pollen_file() -> str | None:
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "Pollen Calibration"
     params.app_window_params.window_geometry.size = (1000, 700)
+    params.ini_filename = get_default_ini_path("pollen_calibration")
     params.callbacks.show_gui = _render
 
     addons = immapp.AddOnsParams()
@@ -456,7 +459,6 @@ def select_pollen_file() -> str | None:
     addons.with_implot = False
     addons.with_implot3d = False
 
-    hello_imgui.set_assets_folder(str(dlg._assets_path))
     immapp.run(runner_params=params, add_ons_params=addons)
 
     return dlg.selected_path if dlg.selected_path else None

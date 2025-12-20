@@ -1,9 +1,5 @@
-import shutil
 from pathlib import Path
 
-import imgui_bundle
-
-import mbo_utilities as mbo
 from imgui_bundle import (
     hello_imgui,
     imgui,
@@ -11,7 +7,7 @@ from imgui_bundle import (
     portable_file_dialogs as pfd,
 )
 from mbo_utilities.graphics._widgets import set_tooltip
-from mbo_utilities.file_io import get_package_assets_path
+from mbo_utilities.graphics import _setup  # triggers setup on import
 from mbo_utilities.preferences import (
     get_default_open_dir,
     get_last_dir,
@@ -23,50 +19,11 @@ from mbo_utilities.preferences import (
 from mbo_utilities.graphics.upgrade_manager import UpgradeManager, CheckStatus, UpgradeStatus
 from mbo_utilities.install_checker import check_installation, Status
 
+# re-export for backwards compatibility
+setup_imgui = _setup.setup_imgui
+__all__ = ["setup_imgui", "FileDialog"]
 
-def setup_imgui():
-    """set up hello_imgui assets folder, copying package assets to user config."""
-    package_assets = get_package_assets_path()
-    user_assets = Path(mbo.get_mbo_dirs()["base"]) / "imgui" / "assets"
-
-    # copy package assets to user config directory
-    user_assets.mkdir(parents=True, exist_ok=True)
-    if package_assets.is_dir():
-        shutil.copytree(package_assets, user_assets, dirs_exist_ok=True)
-
-    # also copy imgui_bundle fonts as fallback
-    fonts_dst = user_assets / "fonts"
-    fonts_dst.mkdir(parents=True, exist_ok=True)
-    (user_assets / "static").mkdir(parents=True, exist_ok=True)
-
-    fonts_src = Path(imgui_bundle.__file__).parent / "assets" / "fonts"
-    for p in fonts_src.rglob("*"):
-        if p.is_file():
-            d = fonts_dst / p.relative_to(fonts_src)
-            if not d.exists():
-                d.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(p, d)
-
-    # ensure roboto fonts exist for markdown rendering
-    roboto_dir = fonts_dst / "Roboto"
-    roboto_dir.mkdir(parents=True, exist_ok=True)
-    required = [
-        roboto_dir / "Roboto-Regular.ttf",
-        roboto_dir / "Roboto-Bold.ttf",
-        roboto_dir / "Roboto-RegularItalic.ttf",
-        fonts_dst / "fontawesome-webfont.ttf",
-    ]
-    fallback = next((t for t in roboto_dir.glob("*.ttf")), None)
-    for need in required:
-        if not need.exists() and fallback and fallback.exists():
-            need.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(fallback, need)
-
-    # set hello_imgui assets folder (icon.png must be in assets/app_settings/)
-    hello_imgui.set_assets_folder(str(user_assets))
-
-
-# colors - high contrast dark theme for better visibility
+# dark theme
 COL_BG = imgui.ImVec4(0.11, 0.11, 0.12, 1.0)
 COL_BG_CARD = imgui.ImVec4(0.16, 0.16, 0.17, 1.0)
 COL_ACCENT = imgui.ImVec4(0.20, 0.50, 0.85, 1.0)
@@ -264,7 +221,6 @@ class FileDialog:
         imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
 
         win_w = imgui.get_window_width()
-        win_h = imgui.get_window_height()
 
         with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0)):
             imgui.push_id("pfd")
@@ -357,6 +313,7 @@ class FileDialog:
                 col1_width = hello_imgui.em_size(6)
                 col2_width = available_width - col1_width
 
+                # the color is set via table flags?
                 table_flags = (
                     imgui.TableFlags_.borders_inner_v
                     | imgui.TableFlags_.row_bg

@@ -32,7 +32,7 @@ from imgui_bundle import (
     implot,
     portable_file_dialogs as pfd,
 )
-
+from mbo_utilities.metadata import get_param
 from mbo_utilities.file_io import (
     get_mbo_dirs,
 )
@@ -52,6 +52,7 @@ from mbo_utilities.graphics._widgets import (
     set_tooltip,
     checkbox_with_tooltip,
     draw_scope,
+    draw_metadata_inspector
 )
 from mbo_utilities.graphics.progress_bar import (
     draw_status_indicator,
@@ -147,7 +148,6 @@ def draw_menu(parent):
         )
         if parent.image_widget and parent.image_widget.data:
             metadata = parent.image_widget.data[0].metadata
-            from mbo_utilities.graphics._widgets import draw_metadata_inspector
             draw_metadata_inspector(metadata)
         else:
             imgui.text("No data loaded")
@@ -553,8 +553,6 @@ def draw_saveas_popup(parent):
                 current_data = None
                 current_meta = {}
 
-            # Use get_param for standardized metadata access
-            from mbo_utilities.metadata import get_param
 
             # Helper to display a metadata field with edit capability
             def _metadata_row(label, canonical, unit, aliases, dtype=float):
@@ -565,9 +563,12 @@ def draw_saveas_popup(parent):
                 imgui.text(f"{label}")
                 imgui.same_line(hello_imgui.em_size(10))
 
-                # Show current value or "not found"
+                # Show current value or appropriate placeholder
                 if value is not None:
                     imgui.text_colored(imgui.ImVec4(0.6, 0.9, 0.6, 1.0), f"{value} {unit}")
+                elif canonical == "dz" and get_param(current_meta, "lbm_stack", default=False):
+                    # LBM stacks require user-supplied dz
+                    imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "User Input")
                 else:
                     imgui.text_disabled("not found")
 
@@ -938,8 +939,7 @@ class PreviewDataWidget(EdgeWindow):
         **kwargs,
     ):
         # ensure assets (fonts + icons) are available for this imgui context
-        from mbo_utilities.graphics._file_dialog import setup_imgui
-        setup_imgui()
+        from mbo_utilities.graphics import _setup  # triggers setup on import
 
         flags = (
             (imgui.WindowFlags_.no_title_bar if not show_title else 0)
@@ -1030,7 +1030,7 @@ class PreviewDataWidget(EdgeWindow):
         # image widget setup
         self.image_widget = iw
 
-        # Unified naming: num_graphics matches len(iw.graphics)
+        # num_graphics matches len(iw.graphics)
         self.num_graphics = len(self.image_widget.graphics)
         self.shape = self.image_widget.data[0].shape
         self.is_mbo_scan = (
@@ -1484,7 +1484,6 @@ class PreviewDataWidget(EdgeWindow):
                 result = result.astype(np.float32) - mean_img
             # Apply gaussian blur second
             if sigma is not None and sigma > 0:
-                from scipy.ndimage import gaussian_filter
                 result = gaussian_filter(result, sigma=sigma)
             return result
         return spatial_func
@@ -1685,6 +1684,7 @@ class PreviewDataWidget(EdgeWindow):
         self._handle_keyboard_shortcuts()
         # Check for file/folder dialog results (iw-array API)
         self._check_file_dialogs()
+
         draw_saveas_popup(self)
         draw_menu(self)
         draw_tabs(self)
