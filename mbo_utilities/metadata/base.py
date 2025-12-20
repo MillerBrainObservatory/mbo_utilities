@@ -24,7 +24,7 @@ class MetadataParameter:
     Attributes
     ----------
     canonical : str
-        The standard key name (e.g., "dx", "fs", "nplanes").
+        The standard key name (e.g., "dx", "fs", "num_zplanes").
     aliases : tuple[str, ...]
         All known aliases for this parameter.
     dtype : type
@@ -55,11 +55,12 @@ class VoxelSize(NamedTuple):
     Attributes
     ----------
     dx : float
-        Pixel size in X dimension (micrometers per pixel).
+        Pixel size in X dimension (µm / px).
     dy : float
-        Pixel size in Y dimension (micrometers per pixel).
-    dz : float
-        Pixel/voxel size in Z dimension (micrometers per z-step).
+        Pixel size in Y dimension (µm / px).
+    dz : float | None, optional
+        Pixel/voxel size in Z dimension (µm / px).
+        For LBM configurations, this must be supplied by the user.
 
     Examples
     --------
@@ -109,11 +110,6 @@ class VoxelSize(NamedTuple):
         }
 
         if include_aliases:
-            # legacy aliases
-            result["umPerPixX"] = self.dx
-            result["umPerPixY"] = self.dy
-            result["umPerPixZ"] = self.dz
-
             # OME format
             result["PhysicalSizeX"] = self.dx
             result["PhysicalSizeY"] = self.dy
@@ -144,7 +140,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "pixel_resolution_um",
         ),
         dtype=float,
-        unit="micrometer",
+        unit="µm",
         default=1.0,
         description="Pixel size in X dimension (µm/pixel)",
     ),
@@ -159,7 +155,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "YResolution",
         ),
         dtype=float,
-        unit="micrometer",
+        unit="µm",
         default=1.0,
         description="Pixel size in Y dimension (µm/pixel)",
     ),
@@ -175,7 +171,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "ZResolution",
         ),
         dtype=float,
-        unit="micrometer",
+        unit="µm",
         default=1.0,
         description="Voxel size in Z dimension (µm/z-step)",
     ),
@@ -210,7 +206,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "num_px_x",
         ),
         dtype=int,
-        unit="pixels",
+        unit="px",
         default=None,
         description="Image width in pixels",
     ),
@@ -227,7 +223,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "num_px_y",
         ),
         dtype=int,
-        unit="pixels",
+        unit="px",
         default=None,
         description="Image height in pixels",
     ),
@@ -239,10 +235,11 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         default=None,
         description="Number of frames (time points) in the dataset",
     ),
-    "nplanes": MetadataParameter(
-        canonical="nplanes",
+    "num_zplanes": MetadataParameter(
+        canonical="num_zplanes",
         aliases=(
             "num_planes",
+            "nplanes",
             "n_planes",
             "planes",
             "Z",
@@ -277,13 +274,74 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         default="int16",
         description="Data type of pixel values",
     ),
-    # shape (tuple - special handling)
-    "shape": MetadataParameter(
-        canonical="shape",
-        aliases=("array_shape", "data_shape", "size"),
+    # size (tuple - special handling)
+    "size": MetadataParameter(
+        canonical="size",
+        aliases=("shape", "array_shape", "data_shape"),
         dtype=tuple,
         default=None,
-        description="Array shape as tuple (T, Z, Y, X) or (T, Y, X) or (Y, X)",
+        description="Array size as tuple (T, Z, Y, X) or (T, Y, X) or (Y, X)",
+    ),
+    # stack detection (ScanImage-derived)
+    "stack_type": MetadataParameter(
+        canonical="stack_type",
+        aliases=("stackType",),
+        dtype=str,
+        default="single_plane",
+        description="Stack type: lbm, piezo, or single_plane",
+    ),
+    "lbm_stack": MetadataParameter(
+        canonical="lbm_stack",
+        aliases=("is_lbm", "lbmStack"),
+        dtype=bool,
+        default=False,
+        description="True if Light Beads Microscopy stack",
+    ),
+    "piezo_stack": MetadataParameter(
+        canonical="piezo_stack",
+        aliases=("is_piezo", "piezoStack"),
+        dtype=bool,
+        default=False,
+        description="True if piezo-driven z-stack",
+    ),
+    "num_color_channels": MetadataParameter(
+        canonical="num_color_channels",
+        aliases=("color_channels", "ncolors", "num_colors"),
+        dtype=int,
+        default=1,
+        description="Number of color channels (1 or 2)",
+    ),
+    # ROI/FOV parameters
+    "num_mrois": MetadataParameter(
+        canonical="num_mrois",
+        aliases=("num_rois", "scanimage_multirois", "numROIs", "nrois", "n_rois"),
+        dtype=int,
+        default=1,
+        description="Number of mROIs (ScanImage multi-ROI scan regions)",
+    ),
+    "roi": MetadataParameter(
+        canonical="roi",
+        aliases=("roi_size", "roi_px"),
+        dtype=tuple,
+        unit="px",
+        default=None,
+        description="ROI dimensions as (width, height) in pixels",
+    ),
+    "fov": MetadataParameter(
+        canonical="fov",
+        aliases=("fov_px", "fov_pixels"),
+        dtype=tuple,
+        unit="px",
+        default=None,
+        description="Field of view as (x, y) in pixels",
+    ),
+    "fov_um": MetadataParameter(
+        canonical="fov_um",
+        aliases=("fov_micrometers",),
+        dtype=tuple,
+        unit="µm",
+        default=None,
+        description="Field of view as (x, y) in µm",
     ),
 }
 

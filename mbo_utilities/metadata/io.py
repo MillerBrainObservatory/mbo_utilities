@@ -300,7 +300,7 @@ def get_metadata_single(file: Path):
                         ops = load_npy(ops_path).item()
                         return {
                             "num_planes": int(ops.get("nplanes", 1) or 1),
-                            "fov_px": (
+                            "fov": (
                                 int(ops.get("Lx", 0) or 0),
                                 int(ops.get("Ly", 0) or 0),
                             ),
@@ -366,11 +366,17 @@ def get_metadata_single(file: Path):
         fov_y_um = round(objective_resolution * size_xy[1])
         pixel_resolution = (fov_x_um / num_pixel_xy[0], fov_y_um / num_pixel_xy[1])
 
+        # roi is per-strip dimensions (width, height)
+        # fov is total field of view in pixels (num_rois * width, height)
+        # fov_um is total field of view in micrometers
+        roi_width, roi_height = num_pixel_xy[0], num_pixel_xy[1]
+
         metadata = {
             "num_planes": num_planes,
             "num_rois": num_rois,
-            "fov": (fov_x_um, fov_y_um),
-            "fov_px": tuple(num_pixel_xy),
+            "roi": (roi_width, roi_height),
+            "fov": (num_rois * roi_width, roi_height),
+            "fov_um": (fov_x_um, fov_y_um),
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
             "ndim": len(shape),
@@ -405,7 +411,7 @@ def get_metadata_single(file: Path):
                             num_planes = 1
                         return {
                             "num_planes": num_planes,
-                            "fov_px": (
+                            "fov": (
                                 int(ops.get("Lx") or 0),
                                 int(ops.get("Ly") or 0),
                             ),
@@ -426,7 +432,7 @@ def get_metadata_single(file: Path):
                 ops = load_npy(ops_path).item()
                 return {
                     "num_planes": ops.get("nplanes", 1),
-                    "fov_px": (ops.get("Lx"), ops.get("Ly")),
+                    "fov": (ops.get("Lx"), ops.get("Ly")),
                     "frame_rate": ops.get("fs"),
                     "zoom_factor": ops.get("zoom", None),
                     "pixel_resolution": (ops.get("umPerPixX"), ops.get("umPerPixY")),
@@ -676,7 +682,46 @@ def clean_scanimage_metadata(meta: dict) -> dict:
     for dotted_key, val in si_pairs:
         _nest_into_si(result["si"], dotted_key, val)
 
-    return _prune(result)
+    result = _prune(result)
+
+    # 5) Add derived ScanImage stack detection fields
+    from .scanimage import (
+        detect_stack_type,
+        get_num_color_channels,
+        get_num_zplanes,
+        get_z_step_size,
+        get_frame_rate,
+        get_roi_info,
+    )
+
+    if result.get("si"):
+        stack_type = detect_stack_type(result)
+        result["stack_type"] = stack_type
+        result["lbm_stack"] = stack_type == "lbm"
+        result["piezo_stack"] = stack_type == "piezo"
+        result["num_color_channels"] = get_num_color_channels(result)
+
+        # set num_zplanes from stack detection if not already present
+        if "num_zplanes" not in result and "num_planes" not in result:
+            result["num_zplanes"] = get_num_zplanes(result)
+
+        # add dz if available from ScanImage
+        dz = get_z_step_size(result)
+        if dz is not None:
+            result["dz"] = dz
+
+        # add frame rate if available
+        fs = get_frame_rate(result)
+        if fs is not None:
+            result["fs"] = fs
+
+        # add ROI/FOV info (don't overwrite existing values)
+        roi_info = get_roi_info(result)
+        for k, v in roi_info.items():
+            if v is not None and k not in result:
+                result[k] = v
+
+    return result
 
 
 def default_ops():

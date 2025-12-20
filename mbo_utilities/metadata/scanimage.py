@@ -115,16 +115,16 @@ def get_num_color_channels(metadata: dict) -> int:
 
     Notes
     -----
-    For LBM: count unique AI sources in virtualChannelSettings
-    For non-LBM: check if channelSave is list with length 2 (dual channel)
+    Uses virtualChannelSettings__N.source for both LBM and non-LBM.
+    AI0 only = 1 color channel, AI0 + AI1 = 2 color channels.
+    Falls back to channelSave if virtualChannelSettings not available.
     """
-    stack_type = detect_stack_type(metadata)
+    # try virtualChannelSettings first (works for both LBM and non-LBM)
+    sources = get_lbm_ai_sources(metadata)
+    if sources:
+        return len(sources)
 
-    if stack_type == "lbm":
-        sources = get_lbm_ai_sources(metadata)
-        return len(sources) if sources else 1
-
-    # non-LBM: check channelSave
+    # fallback: check channelSave
     si = metadata.get("si", {})
     hch = si.get("hChannels", {})
     channel_save = hch.get("channelSave", 1)
@@ -305,6 +305,96 @@ def compute_num_timepoints(total_frames: int, metadata: dict) -> int:
     return total_frames // frames_per_volume
 
 
+def get_roi_info(metadata: dict) -> dict:
+    """
+    Get ROI and FOV information from ScanImage metadata.
+
+    Parameters
+    ----------
+    metadata : dict
+        Metadata dict containing 'si' key and optionally 'roi_groups' or 'num_rois'.
+
+    Returns
+    -------
+    dict
+        Dictionary with ROI/FOV parameters:
+        - num_mrois: number of mROIs
+        - roi: (width, height) in pixels
+        - fov: (x, y) total FOV in pixels
+    """
+    si = metadata.get("si", {})
+    roi_mgr = si.get("hRoiManager", {})
+
+    # get lines per frame (height)
+    lines_per_frame = roi_mgr.get("linesPerFrame")
+
+    # get pixels per line (width)
+    pixels_per_line = roi_mgr.get("pixelsPerLine")
+
+    # number of mROIs - check multiple sources
+    # priority: existing num_rois/num_mrois > roi_groups > hRoiManager.roiGroup
+    num_mrois = metadata.get("num_rois") or metadata.get("num_mrois")
+
+    if num_mrois is None:
+        # check roi_groups (set by get_metadata_single)
+        roi_groups = metadata.get("roi_groups")
+        if isinstance(roi_groups, list):
+            num_mrois = len(roi_groups)
+
+    if num_mrois is None:
+        # fallback to hRoiManager.roiGroup
+        num_mrois = 1
+        mroi_enable = roi_mgr.get("mroiEnable", False)
+        if mroi_enable:
+            roi_group = roi_mgr.get("roiGroup")
+            if isinstance(roi_group, dict):
+                rois = roi_group.get("rois")
+                if isinstance(rois, list):
+                    num_mrois = len(rois)
+
+    result = {"num_mrois": num_mrois}
+
+    # roi as (width, height) tuple
+    if pixels_per_line is not None and lines_per_frame is not None:
+        result["roi"] = (pixels_per_line, lines_per_frame)
+
+    # fov as (x, y) tuple in pixels
+    if pixels_per_line is not None and lines_per_frame is not None:
+        result["fov"] = (num_mrois * pixels_per_line, lines_per_frame)
+
+    return result
+
+
+def get_frame_rate(metadata: dict) -> float | None:
+    """
+    Get frame/volume rate from ScanImage metadata.
+
+    Parameters
+    ----------
+    metadata : dict
+        Metadata dict containing 'si' key.
+
+    Returns
+    -------
+    float or None
+        Frame rate in Hz, or None if not available.
+    """
+    si = metadata.get("si", {})
+    roi_mgr = si.get("hRoiManager", {})
+
+    # scanFrameRate is the most reliable source
+    fs = roi_mgr.get("scanFrameRate")
+    if fs is not None:
+        return float(fs)
+
+    # fallback to computing from scanFramePeriod
+    period = roi_mgr.get("scanFramePeriod")
+    if period is not None and period > 0:
+        return 1.0 / float(period)
+
+    return None
+
+
 def get_stack_info(metadata: dict) -> dict:
     """
     Get comprehensive stack information from metadata.
@@ -324,12 +414,20 @@ def get_stack_info(metadata: dict) -> dict:
         - frames_per_slice: frames per z-slice
         - log_average_factor: averaging factor
         - dz: z-step size (None if unknown)
+        - fs: frame rate in Hz (None if unknown)
+        - roi info (num_rois, roi_width, roi_height, fov_x, fov_y)
     """
-    return {
+    info = {
         "stack_type": detect_stack_type(metadata),
         "num_zplanes": get_num_zplanes(metadata),
         "num_color_channels": get_num_color_channels(metadata),
         "frames_per_slice": get_frames_per_slice(metadata),
         "log_average_factor": get_log_average_factor(metadata),
         "dz": get_z_step_size(metadata),
+        "fs": get_frame_rate(metadata),
     }
+
+    # add ROI info
+    info.update(get_roi_info(metadata))
+
+    return info

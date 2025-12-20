@@ -54,12 +54,17 @@ class TestMetadataParameter:
         """Check METADATA_PARAMS has expected entries."""
         assert "dx" in METADATA_PARAMS
         assert "fs" in METADATA_PARAMS
-        assert "nplanes" in METADATA_PARAMS
+        assert "num_zplanes" in METADATA_PARAMS
 
         # check dx parameter
         dx = METADATA_PARAMS["dx"]
-        assert dx.unit == "micrometer"
+        assert dx.unit == "µm"
         assert "umPerPixX" in dx.aliases
+
+        # check num_zplanes has num_planes and nplanes as aliases
+        num_zplanes = METADATA_PARAMS["num_zplanes"]
+        assert "num_planes" in num_zplanes.aliases
+        assert "nplanes" in num_zplanes.aliases
 
 
 class TestAliasMap:
@@ -178,8 +183,9 @@ class TestVoxelSize:
         """to_dict includes standard aliases."""
         vs = VoxelSize(0.5, 0.5, 5.0)
         d = vs.to_dict(include_aliases=True)
-        assert d["umPerPixX"] == 0.5
         assert d["PhysicalSizeX"] == 0.5
+        assert d["PhysicalSizeY"] == 0.5
+        assert d["PhysicalSizeZ"] == 5.0
         assert d["z_step"] == 5.0
 
 
@@ -241,8 +247,9 @@ class TestNormalizeResolution:
         """normalize_resolution adds all standard aliases."""
         meta = {"dx": 0.5, "dy": 0.5, "dz": 5.0}
         normalize_resolution(meta)
-        assert meta["umPerPixX"] == 0.5
         assert meta["PhysicalSizeX"] == 0.5
+        assert meta["PhysicalSizeY"] == 0.5
+        assert meta["PhysicalSizeZ"] == 5.0
         assert meta["z_step"] == 5.0
 
 
@@ -472,3 +479,170 @@ class TestGetStackInfo:
         assert info["num_zplanes"] == 17
         assert info["frames_per_slice"] == 10
         assert info["dz"] == 2.5
+
+
+class TestRoiInfo:
+    """Test ROI and FOV extraction."""
+
+    def test_get_roi_info_basic(self):
+        """Extract basic ROI dimensions."""
+        from mbo_utilities.metadata import get_roi_info
+
+        meta = {
+            "si": {
+                "hRoiManager": {
+                    "linesPerFrame": 512,
+                    "pixelsPerLine": 512,
+                }
+            }
+        }
+        info = get_roi_info(meta)
+        assert info["roi"] == (512, 512)
+        assert info["fov"] == (512, 512)
+        assert info["num_mrois"] == 1
+
+    def test_get_roi_info_missing(self):
+        """Handle missing ROI info gracefully."""
+        from mbo_utilities.metadata import get_roi_info
+
+        info = get_roi_info({})
+        assert info["num_mrois"] == 1
+        assert "roi" not in info
+
+    def test_get_roi_info_respects_existing_num_rois(self):
+        """get_roi_info should use existing num_rois from metadata."""
+        from mbo_utilities.metadata import get_roi_info
+
+        # simulate metadata that already has num_rois from get_metadata_single
+        meta = {
+            "num_rois": 7,  # set by get_metadata_single from RoiGroups
+            "si": {
+                "hRoiManager": {
+                    "linesPerFrame": 68,
+                    "pixelsPerLine": 68,
+                }
+            }
+        }
+        info = get_roi_info(meta)
+        assert info["num_mrois"] == 7
+        assert info["fov"] == (7 * 68, 68)
+
+    def test_get_roi_info_uses_roi_groups(self):
+        """get_roi_info should count from roi_groups if num_rois not set."""
+        from mbo_utilities.metadata import get_roi_info
+
+        meta = {
+            "roi_groups": [{"id": 1}, {"id": 2}, {"id": 3}, {"id": 4}],
+            "si": {
+                "hRoiManager": {
+                    "linesPerFrame": 100,
+                    "pixelsPerLine": 100,
+                }
+            }
+        }
+        info = get_roi_info(meta)
+        assert info["num_mrois"] == 4
+        assert info["fov"] == (400, 100)
+
+
+class TestFrameRate:
+    """Test frame rate extraction."""
+
+    def test_get_frame_rate_direct(self):
+        """Get frame rate from scanFrameRate."""
+        from mbo_utilities.metadata import get_frame_rate
+
+        meta = {
+            "si": {
+                "hRoiManager": {
+                    "scanFrameRate": 30.5
+                }
+            }
+        }
+        assert get_frame_rate(meta) == 30.5
+
+    def test_get_frame_rate_from_period(self):
+        """Compute frame rate from scanFramePeriod."""
+        from mbo_utilities.metadata import get_frame_rate
+
+        meta = {
+            "si": {
+                "hRoiManager": {
+                    "scanFramePeriod": 0.1  # 10 Hz
+                }
+            }
+        }
+        assert get_frame_rate(meta) == 10.0
+
+    def test_get_frame_rate_missing(self):
+        """Return None if frame rate not available."""
+        from mbo_utilities.metadata import get_frame_rate
+
+        assert get_frame_rate({}) is None
+
+
+class TestColorChannelsUnified:
+    """Test that color channel detection works for both LBM and non-LBM."""
+
+    def test_non_lbm_uses_virtual_channel_settings(self):
+        """Non-LBM should also use virtualChannelSettings when available."""
+        from mbo_utilities.metadata import get_num_color_channels
+
+        meta = {
+            "si": {
+                "hChannels": {"channelSave": 1},
+                "hStackManager": {"enable": True},
+                "hScan2D": {
+                    "virtualChannelSettings__1": {"source": "AI0"},
+                    "virtualChannelSettings__2": {"source": "AI1"},
+                }
+            }
+        }
+        # should detect 2 color channels from AI sources
+        assert get_num_color_channels(meta) == 2
+
+
+class TestCleanScanImageMetadata:
+    """Test that clean_scanimage_metadata adds derived fields."""
+
+    def test_adds_stack_detection_fields(self):
+        """clean_scanimage_metadata should add lbm_stack, piezo_stack, etc."""
+        from mbo_utilities.metadata import clean_scanimage_metadata
+
+        # simulate raw ScanImage metadata with LBM config
+        raw_meta = {
+            "si": {
+                "SI.hChannels.channelSave": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+                "SI.hRoiManager.scanFrameRate": 7.5,
+                "SI.hRoiManager.linesPerFrame": 512,
+                "SI.hRoiManager.pixelsPerLine": 512,
+            }
+        }
+        result = clean_scanimage_metadata(raw_meta)
+
+        assert result["stack_type"] == "lbm"
+        assert result["lbm_stack"] is True
+        assert result["piezo_stack"] is False
+        assert result["num_zplanes"] == 14
+        assert result["fs"] == 7.5
+        assert result["roi"] == (512, 512)
+
+    def test_adds_piezo_stack_fields(self):
+        """clean_scanimage_metadata should detect piezo stack."""
+        from mbo_utilities.metadata import clean_scanimage_metadata
+
+        raw_meta = {
+            "si": {
+                "SI.hChannels.channelSave": 1,
+                "SI.hStackManager.enable": True,
+                "SI.hStackManager.numSlices": 17,
+                "SI.hStackManager.stackZStepSize": 2.5,
+            }
+        }
+        result = clean_scanimage_metadata(raw_meta)
+
+        assert result["stack_type"] == "piezo"
+        assert result["lbm_stack"] is False
+        assert result["piezo_stack"] is True
+        assert result["num_zplanes"] == 17
+        assert result["dz"] == 2.5

@@ -31,7 +31,7 @@ def get_param(
     metadata : dict or None
         Metadata dictionary to search.
     name : str
-        Canonical parameter name (e.g., "dx", "fs", "nplanes").
+        Canonical parameter name (e.g., "dx", "fs", "num_planes").
         Case-insensitive; will be resolved to canonical form.
     default : Any, optional
         Override default value. If None, uses the parameter's registered default.
@@ -52,7 +52,7 @@ def get_param(
     0.5
     >>> get_param(meta, "fs")
     30.0
-    >>> get_param(meta, "nplanes")  # uses default
+    >>> get_param(meta, "num_planes")  # uses default
     1
     >>> get_param(meta, "dx", override=0.3)  # override wins
     0.3
