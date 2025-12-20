@@ -1,0 +1,474 @@
+"""
+Tests for the metadata module.
+
+Tests the centralized metadata parameter handling including:
+- get_param with aliases
+- VoxelSize extraction
+- ScanImage detection functions
+"""
+
+import pytest
+from mbo_utilities.metadata import (
+    MetadataParameter,
+    VoxelSize,
+    METADATA_PARAMS,
+    ALIAS_MAP,
+    get_canonical_name,
+    get_param,
+    get_voxel_size,
+    normalize_resolution,
+    normalize_metadata,
+    detect_stack_type,
+    is_lbm_stack,
+    is_piezo_stack,
+    get_lbm_ai_sources,
+    get_num_color_channels,
+    get_num_zplanes,
+    get_frames_per_slice,
+    get_log_average_factor,
+    get_z_step_size,
+    compute_num_timepoints,
+    get_stack_info,
+)
+
+
+class TestMetadataParameter:
+    """Test MetadataParameter dataclass."""
+
+    def test_parameter_creation(self):
+        """Create a basic MetadataParameter."""
+        param = MetadataParameter(
+            canonical="test",
+            aliases=("t", "tst"),
+            dtype=float,
+            unit="Hz",
+            default=1.0,
+            description="Test param",
+        )
+        assert param.canonical == "test"
+        assert "t" in param.aliases
+        assert param.dtype == float
+        assert param.default == 1.0
+
+    def test_metadata_params_registry(self):
+        """Check METADATA_PARAMS has expected entries."""
+        assert "dx" in METADATA_PARAMS
+        assert "fs" in METADATA_PARAMS
+        assert "nplanes" in METADATA_PARAMS
+
+        # check dx parameter
+        dx = METADATA_PARAMS["dx"]
+        assert dx.unit == "micrometer"
+        assert "umPerPixX" in dx.aliases
+
+
+class TestAliasMap:
+    """Test alias resolution."""
+
+    def test_canonical_name_lookup(self):
+        """get_canonical_name should resolve aliases."""
+        assert get_canonical_name("dx") == "dx"
+        assert get_canonical_name("umPerPixX") == "dx"
+        assert get_canonical_name("PhysicalSizeX") == "dx"
+        assert get_canonical_name("frame_rate") == "fs"
+        assert get_canonical_name("fps") == "fs"
+
+    def test_unknown_name_returns_none(self):
+        """Unknown names return None."""
+        assert get_canonical_name("unknown_param") is None
+
+    def test_case_insensitive(self):
+        """Lookups should be case-insensitive."""
+        assert get_canonical_name("DX") == "dx"
+        assert get_canonical_name("Fs") == "fs"
+
+
+class TestGetParam:
+    """Test get_param function."""
+
+    def test_canonical_key(self):
+        """Get param by canonical key."""
+        meta = {"dx": 0.5}
+        assert get_param(meta, "dx") == 0.5
+
+    def test_alias_key(self):
+        """Get param by alias."""
+        meta = {"umPerPixX": 0.5}
+        assert get_param(meta, "dx") == 0.5
+
+    def test_another_alias(self):
+        """Get param by another alias."""
+        meta = {"PhysicalSizeX": 0.5}
+        assert get_param(meta, "dx") == 0.5
+
+    def test_frame_rate_aliases(self):
+        """Test frame rate with various aliases."""
+        assert get_param({"fs": 30.0}, "fs") == 30.0
+        assert get_param({"frame_rate": 30.0}, "fs") == 30.0
+        assert get_param({"fps": 30.0}, "fs") == 30.0
+
+    def test_default_value(self):
+        """Missing param returns default."""
+        meta = {}
+        assert get_param(meta, "dx", default=1.0) == 1.0
+
+    def test_override_wins(self):
+        """Override value takes precedence."""
+        meta = {"dx": 0.5}
+        assert get_param(meta, "dx", override=0.3) == 0.3
+
+    def test_none_metadata(self):
+        """Handle None metadata gracefully."""
+        result = get_param(None, "dx", default=1.0)
+        assert result == 1.0
+
+    def test_shape_fallback_lx(self):
+        """Lx can be inferred from shape."""
+        meta = {}
+        result = get_param(meta, "Lx", shape=(10, 128, 256))
+        assert result == 256
+
+    def test_shape_fallback_ly(self):
+        """Ly can be inferred from shape."""
+        meta = {}
+        result = get_param(meta, "Ly", shape=(10, 128, 256))
+        assert result == 128
+
+    def test_pixel_resolution_tuple_dx(self):
+        """dx can be extracted from pixel_resolution tuple."""
+        meta = {"pixel_resolution": (0.5, 0.6)}
+        assert get_param(meta, "dx") == 0.5
+
+    def test_pixel_resolution_tuple_dy(self):
+        """dy can be extracted from pixel_resolution tuple."""
+        meta = {"pixel_resolution": (0.5, 0.6)}
+        assert get_param(meta, "dy") == 0.6
+
+
+class TestVoxelSize:
+    """Test VoxelSize named tuple."""
+
+    def test_creation(self):
+        """Create VoxelSize."""
+        vs = VoxelSize(0.5, 0.5, 5.0)
+        assert vs.dx == 0.5
+        assert vs.dy == 0.5
+        assert vs.dz == 5.0
+
+    def test_pixel_resolution_property(self):
+        """pixel_resolution returns (dx, dy)."""
+        vs = VoxelSize(0.5, 0.6, 5.0)
+        assert vs.pixel_resolution == (0.5, 0.6)
+
+    def test_voxel_size_property(self):
+        """voxel_size returns (dx, dy, dz)."""
+        vs = VoxelSize(0.5, 0.6, 5.0)
+        assert vs.voxel_size == (0.5, 0.6, 5.0)
+
+    def test_to_dict(self):
+        """to_dict returns expected keys."""
+        vs = VoxelSize(0.5, 0.5, 5.0)
+        d = vs.to_dict()
+        assert d["dx"] == 0.5
+        assert d["dy"] == 0.5
+        assert d["dz"] == 5.0
+        assert d["pixel_resolution"] == (0.5, 0.5)
+
+    def test_to_dict_includes_aliases(self):
+        """to_dict includes standard aliases."""
+        vs = VoxelSize(0.5, 0.5, 5.0)
+        d = vs.to_dict(include_aliases=True)
+        assert d["umPerPixX"] == 0.5
+        assert d["PhysicalSizeX"] == 0.5
+        assert d["z_step"] == 5.0
+
+
+class TestGetVoxelSize:
+    """Test get_voxel_size function."""
+
+    def test_from_canonical_keys(self):
+        """Extract from dx, dy, dz keys."""
+        meta = {"dx": 0.5, "dy": 0.5, "dz": 5.0}
+        vs = get_voxel_size(meta)
+        assert vs.dx == 0.5
+        assert vs.dz == 5.0
+
+    def test_from_pixel_resolution(self):
+        """Extract from pixel_resolution tuple."""
+        meta = {"pixel_resolution": (0.5, 0.6)}
+        vs = get_voxel_size(meta)
+        assert vs.dx == 0.5
+        assert vs.dy == 0.6
+
+    def test_from_suite2p_keys(self):
+        """Extract from Suite2p format keys."""
+        meta = {"umPerPixX": 0.5, "umPerPixY": 0.6, "umPerPixZ": 5.0}
+        vs = get_voxel_size(meta)
+        assert vs.dx == 0.5
+        assert vs.dy == 0.6
+        assert vs.dz == 5.0
+
+    def test_override_values(self):
+        """User overrides take precedence."""
+        meta = {"dx": 0.5}
+        vs = get_voxel_size(meta, dx=0.3)
+        assert vs.dx == 0.3
+
+    def test_from_scanimage_nested(self):
+        """Extract dz from ScanImage nested structure."""
+        meta = {
+            "si": {
+                "hStackManager": {
+                    "stackZStepSize": 5.0
+                }
+            }
+        }
+        vs = get_voxel_size(meta)
+        assert vs.dz == 5.0
+
+    def test_defaults_to_1(self):
+        """Missing values default to 1.0."""
+        vs = get_voxel_size({})
+        assert vs.dx == 1.0
+        assert vs.dy == 1.0
+        assert vs.dz == 1.0
+
+
+class TestNormalizeResolution:
+    """Test normalize_resolution function."""
+
+    def test_adds_aliases(self):
+        """normalize_resolution adds all standard aliases."""
+        meta = {"dx": 0.5, "dy": 0.5, "dz": 5.0}
+        normalize_resolution(meta)
+        assert meta["umPerPixX"] == 0.5
+        assert meta["PhysicalSizeX"] == 0.5
+        assert meta["z_step"] == 5.0
+
+
+class TestScanImageDetection:
+    """Test ScanImage-specific detection functions."""
+
+    def test_detect_lbm_stack(self):
+        """LBM stack detected by channelSave length > 2."""
+        meta = {
+            "si": {
+                "hChannels": {
+                    "channelSave": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+                }
+            }
+        }
+        assert detect_stack_type(meta) == "lbm"
+        assert is_lbm_stack(meta) is True
+        assert is_piezo_stack(meta) is False
+
+    def test_detect_piezo_stack(self):
+        """Piezo stack detected by hStackManager.enable."""
+        meta = {
+            "si": {
+                "hStackManager": {"enable": True, "numSlices": 10},
+                "hChannels": {"channelSave": 1}
+            }
+        }
+        assert detect_stack_type(meta) == "piezo"
+        assert is_piezo_stack(meta) is True
+        assert is_lbm_stack(meta) is False
+
+    def test_detect_single_plane(self):
+        """Single plane when neither LBM nor piezo."""
+        meta = {
+            "si": {
+                "hChannels": {"channelSave": 1},
+                "hStackManager": {"enable": False}
+            }
+        }
+        assert detect_stack_type(meta) == "single_plane"
+
+    def test_empty_metadata(self):
+        """Empty metadata defaults to single_plane."""
+        assert detect_stack_type({}) == "single_plane"
+
+
+class TestLbmColorChannels:
+    """Test LBM color channel detection."""
+
+    def test_single_color_channel(self):
+        """Single AI source = 1 color channel."""
+        meta = {
+            "si": {
+                "hChannels": {"channelSave": list(range(1, 15))},
+                "hScan2D": {
+                    "virtualChannelSettings__1": {"source": "AI0"},
+                    "virtualChannelSettings__2": {"source": "AI0"},
+                    "virtualChannelSettings__3": {"source": "AI0"},
+                }
+            }
+        }
+        sources = get_lbm_ai_sources(meta)
+        assert "AI0" in sources
+        assert len(sources) == 1
+        assert get_num_color_channels(meta) == 1
+
+    def test_dual_color_channel(self):
+        """AI0 + AI1 = 2 color channels."""
+        meta = {
+            "si": {
+                "hChannels": {"channelSave": list(range(1, 18))},
+                "hScan2D": {
+                    "virtualChannelSettings__1": {"source": "AI0"},
+                    "virtualChannelSettings__2": {"source": "AI0"},
+                    "virtualChannelSettings__15": {"source": "AI1"},
+                    "virtualChannelSettings__16": {"source": "AI1"},
+                }
+            }
+        }
+        sources = get_lbm_ai_sources(meta)
+        assert "AI0" in sources
+        assert "AI1" in sources
+        assert get_num_color_channels(meta) == 2
+
+
+class TestPiezoStackParams:
+    """Test piezo stack parameter extraction."""
+
+    def test_get_num_zplanes_piezo(self):
+        """numSlices from hStackManager."""
+        meta = {
+            "si": {
+                "hStackManager": {"enable": True, "numSlices": 17},
+                "hChannels": {"channelSave": 1}
+            }
+        }
+        assert get_num_zplanes(meta) == 17
+
+    def test_get_num_zplanes_lbm(self):
+        """channelSave length for LBM."""
+        meta = {
+            "si": {
+                "hChannels": {"channelSave": list(range(1, 15))}
+            }
+        }
+        assert get_num_zplanes(meta) == 14
+
+    def test_get_frames_per_slice(self):
+        """framesPerSlice from hStackManager."""
+        meta = {
+            "si": {
+                "hStackManager": {"framesPerSlice": 10}
+            }
+        }
+        assert get_frames_per_slice(meta) == 10
+
+    def test_get_log_average_factor(self):
+        """logAverageFactor from hScan2D."""
+        meta = {
+            "si": {
+                "hScan2D": {"logAverageFactor": 5}
+            }
+        }
+        assert get_log_average_factor(meta) == 5
+
+    def test_get_z_step_size(self):
+        """stackZStepSize from hStackManager."""
+        meta = {
+            "si": {
+                "hStackManager": {"stackZStepSize": 2.5}
+            }
+        }
+        assert get_z_step_size(meta) == 2.5
+
+
+class TestComputeNumTimepoints:
+    """Test num_timepoints calculation."""
+
+    def test_lbm_timepoints(self):
+        """LBM: each frame is one timepoint."""
+        meta = {
+            "si": {
+                "hChannels": {"channelSave": list(range(1, 15))}
+            }
+        }
+        assert compute_num_timepoints(100, meta) == 100
+
+    def test_piezo_no_averaging(self):
+        """Piezo without averaging."""
+        meta = {
+            "si": {
+                "hStackManager": {
+                    "enable": True,
+                    "numSlices": 10,
+                    "framesPerSlice": 5
+                },
+                "hScan2D": {"logAverageFactor": 1},
+                "hChannels": {"channelSave": 1}
+            }
+        }
+        # 50 frames per volume (10 slices * 5 frames/slice)
+        assert compute_num_timepoints(100, meta) == 2
+
+    def test_piezo_with_averaging(self):
+        """Piezo with frame averaging."""
+        meta = {
+            "si": {
+                "hStackManager": {
+                    "enable": True,
+                    "numSlices": 10,
+                    "framesPerSlice": 5
+                },
+                "hScan2D": {"logAverageFactor": 5},
+                "hChannels": {"channelSave": 1}
+            }
+        }
+        # with averaging: 1 saved frame per slice = 10 frames per volume
+        assert compute_num_timepoints(100, meta) == 10
+
+    def test_single_plane(self):
+        """Single plane: each frame is one timepoint."""
+        meta = {
+            "si": {
+                "hChannels": {"channelSave": 1},
+                "hStackManager": {"enable": False}
+            }
+        }
+        assert compute_num_timepoints(100, meta) == 100
+
+
+class TestGetStackInfo:
+    """Test comprehensive stack info extraction."""
+
+    def test_lbm_stack_info(self):
+        """Full info for LBM stack."""
+        meta = {
+            "si": {
+                "hChannels": {"channelSave": list(range(1, 15))},
+                "hScan2D": {
+                    "virtualChannelSettings__1": {"source": "AI0"},
+                    "logAverageFactor": 1
+                },
+                "hStackManager": {"framesPerSlice": 1}
+            }
+        }
+        info = get_stack_info(meta)
+        assert info["stack_type"] == "lbm"
+        assert info["num_zplanes"] == 14
+        assert info["num_color_channels"] == 1
+
+    def test_piezo_stack_info(self):
+        """Full info for piezo stack."""
+        meta = {
+            "si": {
+                "hChannels": {"channelSave": 1},
+                "hStackManager": {
+                    "enable": True,
+                    "numSlices": 17,
+                    "framesPerSlice": 10,
+                    "stackZStepSize": 2.5
+                },
+                "hScan2D": {"logAverageFactor": 1}
+            }
+        }
+        info = get_stack_info(meta)
+        assert info["stack_type"] == "piezo"
+        assert info["num_zplanes"] == 17
+        assert info["frames_per_slice"] == 10
+        assert info["dz"] == 2.5
