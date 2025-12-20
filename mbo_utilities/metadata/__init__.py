@@ -35,6 +35,8 @@ from .scanimage import (
     get_log_average_factor,
     get_z_step_size,
     compute_num_timepoints,
+    get_roi_info,
+    get_frame_rate,
     get_stack_info,
 )
 
@@ -75,6 +77,8 @@ __all__ = [
     "get_log_average_factor",
     "get_z_step_size",
     "compute_num_timepoints",
+    "get_roi_info",
+    "get_frame_rate",
     "get_stack_info",
     # file I/O
     "has_mbo_metadata",
