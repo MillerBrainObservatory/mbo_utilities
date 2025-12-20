@@ -1,54 +1,5 @@
-import shutil
-
 import numpy as np
-from icecream import ic
 from imgui_bundle import imgui, hello_imgui, implot, ImVec4, ImVec2
-from pathlib import Path
-
-from mbo_utilities.file_io import (
-    get_package_assets_path,
-    get_mbo_dirs,
-)
-
-
-def setup_imgui():
-    """set up imgui assets folder and fonts for hello_imgui windows."""
-    package_assets = get_package_assets_path()
-    mbo_dirs = get_mbo_dirs()
-
-    imgui_path = mbo_dirs["base"].joinpath("imgui")
-    imgui_path.mkdir(exist_ok=True)
-
-    # set ini file path to user's mbo config directory
-    imgui_ini_path = imgui_path / "imgui.ini"
-    imgui.create_context()
-    imgui.get_io().set_ini_filename(str(imgui_ini_path))
-
-    if not package_assets.is_dir():
-        ic("Assets folder not found:", package_assets)
-        return
-
-    # copy package assets to user config for hello_imgui
-    user_assets = imgui_path / "assets"
-    user_assets.mkdir(exist_ok=True)
-    shutil.copytree(package_assets, user_assets, dirs_exist_ok=True)
-
-    # set hello_imgui assets folder (icon.png must be in assets/app_settings/)
-    hello_imgui.set_assets_folder(str(user_assets))
-
-    # load custom font
-    font_path = (
-        user_assets / "fonts" / "JetBrainsMono" / "JetBrainsMonoNerdFont-Bold.ttf"
-    )
-    try:
-        if font_path.is_file():
-            imgui.get_io().fonts.clear()
-            font_path = Path(font_path).expanduser().resolve(strict=True)
-            imgui.get_io().fonts.add_font_from_file_ttf(str(font_path), 16.0)
-        else:
-            ic("Font not found:", font_path)
-    except Exception as e:
-        ic("Error loading font:", e)
 
 
 def begin_popup_size():
