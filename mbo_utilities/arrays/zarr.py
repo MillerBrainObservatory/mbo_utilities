@@ -16,7 +16,7 @@ from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 from mbo_utilities.file_io import HAS_ZARR, logger
 from mbo_utilities.arrays.suite2p import _add_suite2p_labels
-from mbo_utilities.metadata import _build_ome_metadata
+from mbo_utilities.metadata import _build_ome_metadata, get_param, get_voxel_size
 
 logger = log.get("arrays.zarr")
 
@@ -537,21 +537,14 @@ def merge_zarr_zplanes(
     for key, value in ome_attrs.items():
         root.attrs[key] = value
 
-    # Add napari-specific scale metadata to the array for proper volumetric viewing
-    pixel_resolution = metadata.get("pixel_resolution", [1.0, 1.0])
-    frame_rate = metadata.get("frame_rate", metadata.get("fs", 1.0))
-    dz = metadata.get("dz", metadata.get("z_step", 1.0))
-
-    if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
-        pixel_x, pixel_y = float(pixel_resolution[0]), float(pixel_resolution[1])
-    else:
-        pixel_x = pixel_y = 1.0
-
+    # add napari-specific scale metadata using centralized voxel size extraction
+    vs = get_voxel_size(metadata)
+    frame_rate = get_param(metadata, "fs", default=1.0)
     time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
 
     # napari reads scale from array attributes for volumetric viewing
     # Scale order: (T, Z, Y, X) in physical units
-    image.attrs["scale"] = [time_scale, float(dz), pixel_y, pixel_x]
+    image.attrs["scale"] = [time_scale, vs.dz, vs.dy, vs.dx]
 
     logger.info(f"Successfully created merged OME-Zarr at {output_path}")
     logger.info(f"Napari scale (t,z,y,x): {image.attrs['scale']}")

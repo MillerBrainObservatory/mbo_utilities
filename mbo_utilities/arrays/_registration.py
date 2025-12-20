@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities import log
+from mbo_utilities.metadata import get_param
 from mbo_utilities.util import load_npy
 
 logger = log.get("arrays._registration")
@@ -164,10 +165,11 @@ def register_zplanes_s3d(
 
     job_id = metadata.get("job_id", "preprocessed")
 
+    nplanes = get_param(metadata, "nplanes", default=1)
     params = {
-        "fs": metadata["frame_rate"],
-        "planes": np.arange(metadata["num_planes"]),
-        "n_ch_tif": metadata["num_planes"],
+        "fs": get_param(metadata, "fs"),
+        "planes": np.arange(nplanes),
+        "n_ch_tif": nplanes,
         "tau": metadata.get("tau", 1.3),
         "lbm": metadata.get("lbm", True),
         "fuse_strips": metadata.get("fuse_planes", False),

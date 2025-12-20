@@ -19,6 +19,7 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.metadata import get_param
 from mbo_utilities.util import load_npy
 
 logger = log.get("arrays.suite2p")
@@ -89,9 +90,9 @@ class _SinglePlaneReader:
                 f"  - {self.raw_file} (raw)"
             )
 
-        self.Ly = self.metadata["Ly"]
-        self.Lx = self.metadata["Lx"]
-        self.nframes = self.metadata.get("nframes", self.metadata.get("n_frames"))
+        self.Ly = get_param(self.metadata, "Ly")
+        self.Lx = get_param(self.metadata, "Lx")
+        self.nframes = get_param(self.metadata, "nframes")
         self.shape = (self.nframes, self.Ly, self.Lx)
         self.dtype = np.int16
 
@@ -256,9 +257,10 @@ class Suite2pArray(ReductionMixin):
 
         # aggregate metadata from first plane
         self._metadata = dict(self._planes[0].metadata)
-        self._metadata["num_planes"] = self._nz
+        self._metadata["nplanes"] = self._nz
+        self._metadata["num_planes"] = self._nz  # alias for backward compat
         self._metadata["plane_dirs"] = [str(p.ops_path.parent) for p in self._planes]
-        self.num_rois = self._metadata.get("num_rois", 1)
+        self.num_rois = get_param(self._metadata, "num_rois", default=1)
         self.filenames = [p.active_file for p in self._planes]
 
         logger.info(

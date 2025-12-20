@@ -13,7 +13,6 @@ import h5py
 
 from . import log
 from ._parsing import _make_json_serializable, _convert_paths_to_strings
-from .metadata import save_metadata_html
 from .util import load_npy
 
 from tqdm.auto import tqdm
@@ -448,9 +447,6 @@ def _write_plane(
     elif fname.suffix in [".npy"]:
         _close_specific_npy_writer(fname)
 
-    if "cleaned_scanimage_metadata" in metadata:
-        meta_path = filename.parent.joinpath("metadata.html")
-        save_metadata_html(metadata, meta_path)
 
 
 def _get_file_writer(ext, overwrite):
@@ -736,20 +732,20 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
     dict
         OME-Zarr NGFF v0.5 metadata dictionary ready for zarr.attrs.update()
     """
-    from mbo_utilities.metadata import get_voxel_size
+    from mbo_utilities.metadata import get_voxel_size, get_param
 
     ndim = len(shape)
 
-    # Extract spatial scales using standardized resolution getter
+    # extract spatial scales using standardized resolution getter
     vs = get_voxel_size(metadata)
     pixel_x = vs.dx
     pixel_y = vs.dy
     z_scale = vs.dz
 
-    # Extract temporal scale
-    frame_rate = metadata.get("frame_rate") or metadata.get("fs")
+    # extract temporal scale using canonical parameter access
+    frame_rate = get_param(metadata, "fs")
     if frame_rate:
-        time_scale = 1.0 / float(frame_rate)  # seconds per frame
+        time_scale = 1.0 / float(frame_rate)
     else:
         time_scale = 1.0
 

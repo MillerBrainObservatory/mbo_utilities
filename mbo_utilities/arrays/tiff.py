@@ -27,7 +27,7 @@ from mbo_utilities.arrays._base import (
     ReductionMixin,
 )
 from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
-from mbo_utilities.metadata import get_metadata
+from mbo_utilities.metadata import get_metadata, get_param
 from mbo_utilities.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
 from mbo_utilities.util import listify_index, index_length
 
@@ -801,8 +801,8 @@ class MboRawArray(ReductionMixin):
         self._tiff_lock = threading.Lock()
 
         self._metadata = get_metadata(self.filenames)
-        self.num_channels = self._metadata["num_planes"]
-        self.num_rois = self._metadata.get("num_rois", 1)
+        self.num_channels = get_param(self._metadata, "nplanes", default=1)
+        self.num_rois = get_param(self._metadata, "num_rois", default=1)
 
         self._roi = roi
         self.roi = roi
@@ -824,17 +824,17 @@ class MboRawArray(ReductionMixin):
             "roi_array_shape": False,
             "phase_offset": False,
         }
-        self.num_frames = self._metadata["num_frames"]
-        self._source_dtype = self._metadata["dtype"]
+        self.num_frames = get_param(self._metadata, "nframes")
+        self._source_dtype = get_param(self._metadata, "dtype", default="int16")
         self._target_dtype = None
-        self._ndim = self._metadata["ndim"]
+        self._ndim = self._metadata.get("ndim", 3)
 
         self._frames_per_file = self._metadata.get("frames_per_file", None)
 
         self._rois = self._extract_roi_info()
 
     def _extract_roi_info(self):
-        roi_groups = self._metadata["roi_groups"]
+        roi_groups = self._metadata.get("roi_groups", [])
         if isinstance(roi_groups, dict):
             roi_groups = [roi_groups]
 

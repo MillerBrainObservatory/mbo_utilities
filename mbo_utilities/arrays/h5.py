@@ -13,6 +13,7 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.metadata import get_param
 
 logger = log.get("arrays.h5")
 
@@ -120,25 +121,24 @@ class H5Array(ReductionMixin):
     @property
     def num_planes(self) -> int:
         """Number of Z-planes in the dataset."""
-        # Try to get from metadata first
-        metadata = self.metadata
-        if "num_planes" in metadata:
-            return int(metadata["num_planes"])
+        # try to get from metadata first using canonical lookup
+        nplanes = get_param(self.metadata, "nplanes")
+        if nplanes is not None:
+            return int(nplanes)
 
-        # Infer from shape based on data dimensionality
+        # infer from shape based on data dimensionality
         if self.ndim >= 4:  # (T, Z, Y, X) - volumetric time series
             return int(self.shape[1])
         elif self.ndim == 3:  # (T, Y, X) - single plane time series
             return 1
         elif self.ndim == 1:
-            # Special case: pollen scan_corrections (nc,)
+            # special case: pollen scan_corrections (nc,)
             if self.dataset_name == "scan_corrections":
                 return int(self.shape[0])
             return 1
         elif self.ndim == 2:  # (Y, X) - single frame
             return 1
 
-        # Fallback
         return 1
 
     def __len__(self) -> int:

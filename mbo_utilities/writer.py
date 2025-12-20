@@ -23,6 +23,7 @@ from mbo_utilities.arrays import (
     supports_roi,
     validate_s3d_registration,
 )
+from mbo_utilities.metadata import get_param
 from mbo_utilities.util import load_npy
 
 logger = log.get("writer")
@@ -223,7 +224,7 @@ def imwrite(
     s3d_job_dir = None
     if register_z:
         file_metadata["apply_shift"] = True
-        num_planes = file_metadata.get("num_planes")
+        num_planes = get_param(file_metadata, "nplanes")
 
         if shift_vectors is not None:
             file_metadata["shift_vectors"] = shift_vectors
