@@ -14,7 +14,9 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 ## Installation
 
-### Quick Install
+`mbo_utilities` can be installed with pip.
+
+### Installation Scripts
 
 The provided installation scripts will install [UV](https://docs.astral.sh/uv/getting-started/features/) and allow you to choose a set of optional dependencies.
 
