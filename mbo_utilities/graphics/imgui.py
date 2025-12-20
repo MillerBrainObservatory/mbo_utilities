@@ -624,10 +624,10 @@ def draw_saveas_popup(parent):
 
             # Standard metadata fields
             _metadata_row("Frame Rate", "fs", "Hz", "fs, frame_rate, fps", float)
-            _metadata_row("Pixel Size X", "dx", "µm", "dx, Dx, umPerPixX, PhysicalSizeX", float)
-            _metadata_row("Pixel Size Y", "dy", "µm", "dy, Dy, umPerPixY, PhysicalSizeY", float)
-            _metadata_row("Z Step", "dz", "µm", "dz, Dz, z_step, umPerPixZ", float)
-            _metadata_row("Num Planes", "nplanes", "", "nplanes, num_planes, numPlanes", int)
+            _metadata_row("Pixel Size X", "dx", "µm", "dx, Dx, PhysicalSizeX", float)
+            _metadata_row("Pixel Size Y", "dy", "µm", "dy, Dy, PhysicalSizeY", float)
+            _metadata_row("Z Step", "dz", "µm", "dz, Dz, z_step", float)
+            _metadata_row("Num Z-Planes", "num_zplanes", "", "num_zplanes, num_planes, nplanes", int)
             _metadata_row("Num Frames", "nframes", "", "nframes, num_frames, T", int)
 
             imgui.spacing()
