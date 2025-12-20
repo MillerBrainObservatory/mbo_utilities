@@ -155,7 +155,7 @@ package-dir = {"" = "."}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mbo_utilities*", "pollen*"]
-exclude = ["dev*", "gists*", "slurm*", "demos*", "assets*", "docs*", "tests*"]
+exclude = ["dev*", "gists*", "demos*", "assets*", "docs*", "tests*"]
 
 [tool.setuptools.package-data]
 mbo_utilities = ["assets/**/*"]
@@ -179,4 +179,3 @@ dev = [
     "pyautogui>=0.9.54",
     "pytest>=8.4.2",
 ]
-

@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 
 # MBO Utilities Installation Script for Linux/macOS
-# installs uv if not present, installs mbo_utilities, and creates desktop entry
+# installs uv if not present, creates environment at ~/mbo/envs/, installs mbo_utilities
 #
 # usage:
-#   curl -LsSf https://raw.githubusercontent.com/.../install.sh | bash           # CLI-only
-#   curl -LsSf https://raw.githubusercontent.com/.../install.sh | bash -s -- --env  # full environment
-#
-# the full environment installs to ~/mbo_env and can be used with VSCode/Jupyter
+#   curl -LsSf https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
 
 set -euo pipefail
 
-MBO_ENV_PATH="${MBO_ENV_PATH:-$HOME/mbo_env}"
+GITHUB_REPO="MillerBrainObservatory/mbo_utilities"
+MBO_ENV_PATH="$HOME/mbo/envs/mbo_utilities"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -22,8 +20,20 @@ NC='\033[0m'
 
 error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+success() { echo -e "${GREEN}[OK]${NC} $1"; }
+warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+
+show_banner() {
+    echo ""
+    echo -e "${CYAN}  __  __ ____   ___  ${NC}"
+    echo -e "${CYAN} |  \\/  | __ ) / _ \\ ${NC}"
+    echo -e "${CYAN} | |\\/| |  _ \\| | | |${NC}"
+    echo -e "${CYAN} | |  | | |_) | |_| |${NC}"
+    echo -e "${CYAN} |_|  |_|____/ \\___/ ${NC}"
+    echo ""
+    echo "MBO Utilities Installer"
+    echo ""
+}
 
 check_platform() {
     local platform=$(uname -s)
@@ -44,14 +54,12 @@ check_uv_installed() {
         info "uv is already installed: $(uv --version)"
         return 0
     else
-        info "uv is not installed"
         return 1
     fi
 }
 
 install_uv() {
-    info "Installing uv using the official Astral installer..."
-
+    info "Installing uv..."
     if ! command -v curl &> /dev/null; then
         error "curl is required. Please install curl first."
         exit 1
@@ -72,77 +80,344 @@ install_uv() {
     fi
 }
 
-install_mbo() {
-    info "Installing mbo_utilities using uv..."
-    uv tool install mbo_utilities --from git+https://github.com/millerbrainobservatory/mbo_utilities.git
+get_pypi_version() {
+    curl -s "https://pypi.org/pypi/mbo-utilities/json" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['version'])" 2>/dev/null || echo ""
+}
+
+get_github_branches() {
+    curl -s "https://api.github.com/repos/$GITHUB_REPO/branches" 2>/dev/null | python3 -c "import sys,json; [print(b['name']) for b in json.load(sys.stdin)]" 2>/dev/null || echo ""
+}
+
+show_source_selection() {
+    echo ""
+    echo -e "${CYAN}Installation Source${NC}"
+    echo ""
+
+    local pypi_version=$(get_pypi_version)
+    if [[ -n "$pypi_version" ]]; then
+        echo -e "  [1] PyPI (stable)"
+        echo -e "      Version: $pypi_version"
+    else
+        echo -e "  [1] PyPI (stable)"
+        echo -e "      ${YELLOW}Version: unknown (could not fetch)${NC}"
+    fi
+    echo ""
+    echo -e "  [2] GitHub (development)"
+    echo -e "      Install from a specific branch or tag"
+    echo ""
+
+    while true; do
+        read -p "Select source (1-2): " choice
+        case $choice in
+            1)
+                SOURCE="pypi"
+                INSTALL_SPEC="mbo_utilities"
+                BRANCH_REF=""
+                return
+                ;;
+            2)
+                break
+                ;;
+            *)
+                warning "Invalid selection. Enter 1 or 2."
+                ;;
+        esac
+    done
+
+    echo ""
+    info "Fetching available branches..."
+
+    local branches=$(get_github_branches)
+    local branch_array=()
+    local idx=1
+
+    echo ""
+    echo -e "${CYAN}Available Branches:${NC}"
+
+    # show main/master first
+    local main_branch=""
+    if echo "$branches" | grep -q "^master$"; then
+        main_branch="master"
+    elif echo "$branches" | grep -q "^main$"; then
+        main_branch="main"
+    fi
+
+    if [[ -n "$main_branch" ]]; then
+        echo -e "  [$idx] $main_branch (default)"
+        branch_array+=("$main_branch")
+        ((idx++))
+    fi
+
+    # show other branches
+    while IFS= read -r branch; do
+        if [[ -n "$branch" && "$branch" != "master" && "$branch" != "main" ]]; then
+            echo -e "  [$idx] $branch"
+            branch_array+=("$branch")
+            ((idx++))
+            if [[ $idx -gt 10 ]]; then break; fi
+        fi
+    done <<< "$branches"
+
+    echo ""
+    echo -e "  [c] Custom branch/tag name"
+    echo ""
+
+    while true; do
+        read -p "Select branch/tag (1-$((idx-1)) or 'c' for custom): " choice
+        if [[ "$choice" == "c" ]]; then
+            read -p "Enter branch or tag name: " custom_ref
+            SOURCE="github"
+            INSTALL_SPEC="git+https://github.com/$GITHUB_REPO@$custom_ref"
+            BRANCH_REF="$custom_ref"
+            return
+        elif [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -lt "$idx" ]]; then
+            local selected="${branch_array[$((choice-1))]}"
+            SOURCE="github"
+            INSTALL_SPEC="git+https://github.com/$GITHUB_REPO@$selected"
+            BRANCH_REF="$selected"
+            return
+        else
+            warning "Invalid selection."
+        fi
+    done
+}
+
+check_nvidia_gpu() {
+    GPU_AVAILABLE=false
+    GPU_NAME=""
+    CUDA_VERSION=""
+    TOOLKIT_INSTALLED=false
+
+    if command -v nvidia-smi &> /dev/null; then
+        GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo "")
+        if [[ -n "$GPU_NAME" ]]; then
+            GPU_AVAILABLE=true
+
+            # check for cuda toolkit
+            if command -v nvcc &> /dev/null; then
+                CUDA_VERSION=$(nvcc --version 2>/dev/null | grep "release" | sed 's/.*release \([0-9]*\.[0-9]*\).*/\1/' || echo "")
+                if [[ -n "$CUDA_VERSION" ]]; then
+                    TOOLKIT_INSTALLED=true
+                fi
+            elif [[ -n "$CUDA_PATH" ]] && [[ -x "$CUDA_PATH/bin/nvcc" ]]; then
+                CUDA_VERSION=$("$CUDA_PATH/bin/nvcc" --version 2>/dev/null | grep "release" | sed 's/.*release \([0-9]*\.[0-9]*\).*/\1/' || echo "")
+                if [[ -n "$CUDA_VERSION" ]]; then
+                    TOOLKIT_INSTALLED=true
+                fi
+            fi
+        fi
+    fi
+}
+
+get_pytorch_index_url() {
+    local cuda_ver="$1"
+    if [[ -z "$cuda_ver" ]]; then
+        echo ""
+        return
+    fi
+
+    local major=$(echo "$cuda_ver" | cut -d. -f1)
+    local minor=$(echo "$cuda_ver" | cut -d. -f2)
+
+    if [[ "$major" == "11" ]]; then
+        echo "https://download.pytorch.org/whl/cu118"
+    elif [[ "$major" == "12" ]]; then
+        if [[ "$minor" -le 1 ]]; then
+            echo "https://download.pytorch.org/whl/cu121"
+        else
+            echo "https://download.pytorch.org/whl/cu124"
+        fi
+    else
+        echo ""
+    fi
+}
+
+show_optional_dependencies() {
+    echo ""
+    echo -e "${CYAN}Optional Dependencies${NC}"
+    echo ""
+
+    if [[ "$GPU_AVAILABLE" == true ]]; then
+        echo -e "  ${GREEN}GPU detected:${NC} $GPU_NAME"
+        if [[ "$TOOLKIT_INSTALLED" == true ]]; then
+            echo -e "  ${GREEN}CUDA Toolkit:${NC} $CUDA_VERSION"
+        else
+            echo -e "  ${YELLOW}CUDA Toolkit: Not installed (PyTorch will use CPU)${NC}"
+        fi
+    else
+        echo -e "  ${YELLOW}No NVIDIA GPU detected (GPU features will be slower)${NC}"
+    fi
+    echo ""
+
+    echo -e "  [1] Suite2p   - 2D cell extraction (PyTorch + CUDA)"
+    echo -e "  [2] Suite3D   - 3D volumetric registration (CuPy + CUDA)"
+    echo -e "  [3] Rastermap - Dimensionality reduction"
+    echo -e "  [4] All       - Install all processing pipelines"
+    echo -e "  [5] None      - Base installation only (fastest)"
+    echo ""
+
+    while true; do
+        read -p "Select option (1-5, or comma-separated like 1,3): " choice
+        if [[ "$choice" =~ ^[1-5](,[1-5])*$ ]]; then
+            break
+        fi
+        warning "Invalid selection. Enter 1-5 or comma-separated."
+    done
+
+    EXTRAS=()
+    IFS=',' read -ra choices <<< "$choice"
+
+    for c in "${choices[@]}"; do
+        c=$(echo "$c" | tr -d ' ')
+        case $c in
+            1) EXTRAS+=("suite2p") ;;
+            2) EXTRAS+=("suite3d") ;;
+            3) EXTRAS+=("rastermap") ;;
+            4) EXTRAS=("all"); break ;;
+            5) EXTRAS=(); break ;;
+        esac
+    done
+
+    # warn if GPU packages selected without toolkit
+    if [[ ${#EXTRAS[@]} -gt 0 ]]; then
+        local has_gpu_package=false
+        for e in "${EXTRAS[@]}"; do
+            if [[ "$e" == "suite2p" || "$e" == "suite3d" || "$e" == "all" ]]; then
+                has_gpu_package=true
+                break
+            fi
+        done
+
+        if [[ "$has_gpu_package" == true && "$GPU_AVAILABLE" == true && "$TOOLKIT_INSTALLED" == false ]]; then
+            echo ""
+            warning "CUDA Toolkit not installed. PyTorch will use CPU (slower)."
+            warning "Install CUDA Toolkit for GPU acceleration."
+        elif [[ "$has_gpu_package" == true && "$GPU_AVAILABLE" == false ]]; then
+            echo ""
+            warning "No NVIDIA GPU detected. These packages will run in CPU-only mode."
+            read -p "Continue anyway? (y/n): " continue_choice
+            if [[ "$continue_choice" != "y" ]]; then
+                EXTRAS=()
+            fi
+        fi
+    fi
+}
+
+install_mbo_environment() {
+    echo ""
+    info "Creating MBO environment at: $MBO_ENV_PATH"
+
+    # create parent directory
+    local env_parent=$(dirname "$MBO_ENV_PATH")
+    mkdir -p "$env_parent"
+
+    # create virtual environment
+    info "Creating virtual environment..."
+    uv venv "$MBO_ENV_PATH" --python 3.12
+
+    local python_path="$MBO_ENV_PATH/bin/python"
+
+    # build the install spec with extras
+    local spec
+    if [[ "$SOURCE" == "pypi" ]]; then
+        if [[ ${#EXTRAS[@]} -gt 0 ]]; then
+            local extras_str=$(IFS=','; echo "${EXTRAS[*]}")
+            spec="mbo_utilities[$extras_str]"
+        else
+            spec="mbo_utilities"
+        fi
+    else
+        if [[ ${#EXTRAS[@]} -gt 0 ]]; then
+            local extras_str=$(IFS=','; echo "${EXTRAS[*]}")
+            spec="${INSTALL_SPEC}[$extras_str]"
+        else
+            spec="$INSTALL_SPEC"
+        fi
+    fi
+
+    info "Installing mbo_utilities..."
+    info "  Source: $SOURCE"
+    if [[ ${#EXTRAS[@]} -gt 0 ]]; then
+        info "  Extras: ${EXTRAS[*]}"
+    fi
+
+    local needs_pytorch=false
+    for e in "${EXTRAS[@]}"; do
+        if [[ "$e" == "suite2p" || "$e" == "all" ]]; then
+            needs_pytorch=true
+            break
+        fi
+    done
+
+    if [[ "$needs_pytorch" == true && "$TOOLKIT_INSTALLED" == true && -n "$CUDA_VERSION" ]]; then
+        local index_url=$(get_pytorch_index_url "$CUDA_VERSION")
+        if [[ -n "$index_url" ]]; then
+            info "Installing with CUDA-optimized PyTorch for CUDA $CUDA_VERSION..."
+            if uv pip install --python "$python_path" "$spec" torch torchvision \
+                --index-strategy unsafe-best-match \
+                --extra-index-url "$index_url"; then
+                success "Installed with CUDA-optimized PyTorch"
+            else
+                warning "CUDA install failed, falling back to standard install..."
+                uv pip install --python "$python_path" "$spec"
+            fi
+        else
+            uv pip install --python "$python_path" "$spec"
+        fi
+    else
+        uv pip install --python "$python_path" "$spec"
+    fi
+
     success "mbo_utilities installed successfully"
 }
 
-install_mbo_env() {
-    local env_path="${1:-$MBO_ENV_PATH}"
+add_mbo_to_path() {
+    info "Configuring PATH..."
 
-    info "Creating full MBO environment at: $env_path"
+    local bin_path="$MBO_ENV_PATH/bin"
+    local shell_rc=""
 
-    if ! check_uv_installed; then
-        install_uv
+    if [[ -n "${ZSH_VERSION:-}" ]] || [[ "$SHELL" == *"zsh"* ]]; then
+        shell_rc="$HOME/.zshrc"
+    else
+        shell_rc="$HOME/.bashrc"
     fi
 
-    # create venv
-    info "Creating virtual environment..."
-    uv venv "$env_path" --python 3.11
+    # check if already in rc file
+    if grep -q "$bin_path" "$shell_rc" 2>/dev/null; then
+        info "MBO already configured in $shell_rc"
+    else
+        echo "" >> "$shell_rc"
+        echo "# MBO Utilities" >> "$shell_rc"
+        echo "export PATH=\"$bin_path:\$PATH\"" >> "$shell_rc"
+        success "Added $bin_path to PATH in $shell_rc"
+    fi
 
-    # install mbo_utilities with all extras
-    info "Installing mbo_utilities (this may take a few minutes)..."
-    uv pip install --python "$env_path/bin/python" "mbo_utilities[all] @ git+https://github.com/millerbrainobservatory/mbo_utilities.git"
-
-    # install jupyter for notebook support
-    info "Installing Jupyter..."
-    uv pip install --python "$env_path/bin/python" jupyterlab ipykernel
-
-    # register kernel for jupyter
-    info "Registering Jupyter kernel..."
-    "$env_path/bin/python" -m ipykernel install --user --name mbo --display-name "MBO Utilities"
-
-    success "Environment created at: $env_path"
-    echo ""
-    echo "To use this environment:"
-    echo ""
-    echo -e "${CYAN}VSCode:${NC}"
-    echo "  1. Open VSCode"
-    echo "  2. Press Ctrl+Shift+P -> 'Python: Select Interpreter'"
-    echo "  3. Choose: $env_path/bin/python"
-    echo ""
-    echo -e "${CYAN}JupyterLab:${NC}"
-    echo "  $env_path/bin/jupyter-lab"
-    echo ""
-    echo -e "${CYAN}Terminal:${NC}"
-    echo "  source $env_path/bin/activate"
-    echo ""
+    export PATH="$bin_path:$PATH"
 }
 
 create_desktop_entry_linux() {
     info "Creating desktop entry..."
 
     local app_dir="$HOME/.local/share/applications"
-    local icon_dir="$HOME/.local/share/icons"
+    local icon_dir="$HOME/mbo"
     local desktop_file="$app_dir/mbo-utilities.desktop"
     local icon_path="$icon_dir/mbo_icon.png"
 
     mkdir -p "$app_dir" "$icon_dir"
 
-    # download icon (png for linux desktop entries)
-    if curl -LsSf "https://raw.githubusercontent.com/millerbrainobservatory/mbo_utilities/master/docs/_static/mbo_home_icon.png" -o "$icon_path"; then
+    # download icon
+    local download_ref="${BRANCH_REF:-master}"
+    if curl -LsSf "https://raw.githubusercontent.com/$GITHUB_REPO/$download_ref/mbo_utilities/assets/static/mbo_icon.ico" -o "$icon_path" 2>/dev/null; then
+        info "Icon downloaded"
+    elif curl -LsSf "https://raw.githubusercontent.com/$GITHUB_REPO/master/mbo_utilities/assets/static/mbo_icon.ico" -o "$icon_path" 2>/dev/null; then
         info "Icon downloaded"
     else
         warning "Could not download icon"
         icon_path=""
     fi
 
-    # find mbo executable
-    local mbo_path=$(command -v mbo 2>/dev/null || echo "")
-    if [[ -z "$mbo_path" ]]; then
-        mbo_path="$HOME/.local/bin/mbo"
-    fi
+    local mbo_path="$MBO_ENV_PATH/bin/mbo"
 
     cat > "$desktop_file" << EOF
 [Desktop Entry]
@@ -172,18 +447,18 @@ create_desktop_entry_macos() {
 
     local app_dir="$HOME/Applications"
     local app_path="$app_dir/MBO Utilities.app"
+    local icon_dir="$HOME/mbo"
 
-    mkdir -p "$app_dir"
+    mkdir -p "$app_dir" "$icon_dir"
     mkdir -p "$app_path/Contents/MacOS"
     mkdir -p "$app_path/Contents/Resources"
 
-    # find mbo executable
-    local mbo_path=$(command -v mbo 2>/dev/null || echo "$HOME/.local/bin/mbo")
+    local mbo_path="$MBO_ENV_PATH/bin/mbo"
 
     # create launcher script
     cat > "$app_path/Contents/MacOS/MBO Utilities" << EOF
 #!/bin/bash
-export PATH="\$HOME/.local/bin:\$PATH"
+export PATH="$MBO_ENV_PATH/bin:\$PATH"
 open -a Terminal "$mbo_path"
 EOF
     chmod +x "$app_path/Contents/MacOS/MBO Utilities"
@@ -208,8 +483,9 @@ EOF
 </plist>
 EOF
 
-    # download icon (would need conversion to .icns for proper macOS icon)
-    if curl -LsSf "https://raw.githubusercontent.com/millerbrainobservatory/mbo_utilities/master/docs/_static/mbo_home_icon.png" -o "$app_path/Contents/Resources/icon.png"; then
+    # download icon
+    local download_ref="${BRANCH_REF:-master}"
+    if curl -LsSf "https://raw.githubusercontent.com/$GITHUB_REPO/$download_ref/mbo_utilities/assets/static/mbo_icon.ico" -o "$app_path/Contents/Resources/icon.png" 2>/dev/null; then
         info "Icon downloaded (note: .icns format recommended for macOS)"
     fi
 
@@ -222,75 +498,69 @@ EOF
     fi
 }
 
+show_usage_instructions() {
+    echo ""
+    echo -e "${CYAN}Environment Location${NC}"
+    echo "  $MBO_ENV_PATH"
+    echo ""
+    echo -e "${CYAN}Usage${NC}"
+    echo ""
+    echo "  Desktop shortcut:"
+    echo "    Double-click 'MBO Utilities' on your desktop"
+    echo ""
+    echo "  Command line (after restarting terminal):"
+    echo "    mbo"
+    echo ""
+    echo "  Activate environment:"
+    echo "    source $MBO_ENV_PATH/bin/activate"
+    echo ""
+    echo "  VSCode:"
+    echo "    1. Open VSCode"
+    echo "    2. Ctrl+Shift+P -> 'Python: Select Interpreter'"
+    echo "    3. Choose: $MBO_ENV_PATH/bin/python"
+    echo ""
+    echo "  Add packages to environment:"
+    echo "    uv pip install --python \"$MBO_ENV_PATH/bin/python\" <package>"
+    echo ""
+}
+
 main() {
-    local install_env=false
-    local env_path="$MBO_ENV_PATH"
-
-    # parse arguments
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --env)
-                install_env=true
-                shift
-                ;;
-            --env-path)
-                env_path="$2"
-                install_env=true
-                shift 2
-                ;;
-            *)
-                shift
-                ;;
-        esac
-    done
-
-    echo ""
-    echo -e "${CYAN}  __  __ ____   ___  ${NC}"
-    echo -e "${CYAN} |  \\/  | __ ) / _ \\ ${NC}"
-    echo -e "${CYAN} | |\\/| |  _ \\| | | |${NC}"
-    echo -e "${CYAN} | |  | | |_) | |_| |${NC}"
-    echo -e "${CYAN} |_|  |_|____/ \\___/ ${NC}"
-    echo ""
-    echo "MBO Utilities Installer"
-    echo ""
-
+    show_banner
     check_platform
 
+    # check/install uv
     if ! check_uv_installed; then
         install_uv
     fi
 
-    # install CLI tool
-    install_mbo
+    # step 1: choose source
+    show_source_selection
 
+    # step 2: detect GPU
+    check_nvidia_gpu
+
+    # step 3: choose extras
+    show_optional_dependencies
+
+    # step 4: create environment and install
+    install_mbo_environment
+
+    # step 5: add to PATH
+    add_mbo_to_path
+
+    # step 6: create desktop entry
     if [[ "$PLATFORM" == "linux" ]]; then
         create_desktop_entry_linux
     elif [[ "$PLATFORM" == "macos" ]]; then
         create_desktop_entry_macos
     fi
 
-    # optionally install full environment
-    if [[ "$install_env" == true ]]; then
-        echo ""
-        install_mbo_env "$env_path"
-    fi
+    # show instructions
+    show_usage_instructions
 
-    if command -v mbo &> /dev/null; then
-        success "Installation completed successfully!"
-        echo ""
-        echo "You can now:"
-        echo "  - Double-click the 'MBO Utilities' icon on your desktop"
-        echo "  - Or run 'mbo' from any terminal"
-        if [[ "$install_env" == false ]]; then
-            echo ""
-            echo -e "${YELLOW}For VSCode/Jupyter development, re-run with --env:${NC}"
-            echo "  curl -LsSf <url>/install.sh | bash -s -- --env"
-        fi
-        echo ""
-    else
-        warning "Installation completed but 'mbo' command not found"
-        warning "You may need to restart your terminal"
-    fi
+    success "Installation completed!"
+    echo ""
+    echo -e "${YELLOW}You may need to restart your terminal for PATH changes to take effect.${NC}"
 }
 
 main "$@"

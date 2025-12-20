@@ -4,7 +4,7 @@
 
 ---
 
-[![CI](https://github.com/MillerBrainObservatory/mbo_utilities/actions/workflows/test_python.yml)](https://github.com/MillerBrainObservatory/mbo_utilities/actions/workflows/ci.yml)
+[![CI](https://github.com/MillerBrainObservatory/mbo_utilities/actions/workflows/test_python.yml/badge.svg)](https://github.com/MillerBrainObservatory/mbo_utilities/actions/workflows/test_python.yml)
 [![PyPI version](https://badge.fury.io/py/mbo-utilities.svg)](https://badge.fury.io/py/mbo-utilities)
 [![Documentation](https://img.shields.io/badge/docs-online-green)](https://millerbrainobservatory.github.io/mbo_utilities/)
 
@@ -26,9 +26,41 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 ## Installation
 
-### Quick Install
+`mbo_utilities` is available in [pypi](https://pypi.org/project/mbo_utilities/):
 
-The provided installation scripts will install [UV](https://docs.astral.sh/uv/getting-started/features/) and allow you to choose a set of optional dependencies.
+`pip install mbo_utilities`
+
+> For help setting up a virtual environment, see [the MBO guide](https://millerbrainobservatory.github.io/guides/venvs.html).
+
+### Optional Dependencies
+
+```bash
+# with lbm_suite2p_python, suite2p, cellpose
+pip install "mbo_utilities[suite2p]"
+
+# all suite2p deps + rastermap
+pip install "mbo_utilities[rastermap]"
+
+# suite3D for axial (z-plane) registration
+pip install "mbo_utilities[suite3d]"
+
+# all of the above
+pip install "mbo_utilities[all]"
+```
+
+### With [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
+
+After [installing `uv`](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer), you can install `mbo_utilities` as a tool:
+
+```python
+# latest version - base
+uv tool install "mbo_utilities"
+
+# older release with all dependencies
+uv tool install "mbo_utilities[all]==2.4.3"
+```
+
+Or with one of the provided install scripts:
 
 **Windows (PowerShell):**
 
@@ -42,16 +74,46 @@ irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/maste
 curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
 ```
 
-### Pip
-
-We recommend creating a virtual environment to install all python packages with `pip` ([see the MBO guide](https://millerbrainobservatory.github.io/guides/venvs.html)).
+Either of these methods allow you to call `mbo_utilities` from any terminal.
 
 ```bash
-uv venv --python 3.12.9
-uv pip install mbo_utilities
+$ mbo --help
+Usage: mbo [OPTIONS] COMMAND [ARGS]...
 
-# install all optional dependencies
-uv pip install "mbo_utilities[all]"
+  MBO Utilities CLI - data preview and processing tools.
+
+  GUI Mode:
+    mbo                            Open file selection dialog
+    mbo /path/to/data              Open specific file in GUI
+    mbo /path/to/data --metadata   Show only metadata
+
+  Commands:
+    mbo convert INPUT OUTPUT       Convert between formats
+    mbo info INPUT                 Show array information (CLI)
+    mbo download URL               Download file from GitHub
+    mbo formats                    List supported formats
+
+  Utilities:
+    mbo --download-notebook             Download user guide notebook
+    mbo --check-install                 Verify installation
+
+Options:
+  --download-notebook   Download the user guide notebook and exit.
+  --notebook-url TEXT   URL of notebook to download.
+  --download-file TEXT  Download a file from URL (e.g. GitHub).
+  -o, --output TEXT     Output path for --download-file or --download-
+                        notebook.
+  --check-install       Verify the installation of mbo_utilities and
+                        dependencies.
+  --help                Show this message and exit.
+
+Commands:
+  convert    Convert imaging data between formats.
+  download   Download a file from a URL (supports GitHub).
+  formats    List supported file formats.
+  info       Show information about an imaging dataset.
+  scanphase  Scan-phase analysis for bidirectional scanning data.
+  view       Open imaging data in the GUI viewer.
 ```
 
 | Method | Location | Use Case |
@@ -61,13 +123,23 @@ uv pip install "mbo_utilities[all]"
 
 ## Usage
 
-### Launch GUI
+**Launch GUI**
 
 ```bash
-# in a project with .venv
+# uv: in a project with .venv
 uv run mbo
 
-# global installation
+# tool / script installation
+mbo
+```
+
+**Launch Metadata Viewer**
+
+```bash
+# uv: in a project with .venv
+uv run mbo /path/to/data
+
+# tool / script installation
 mbo
 ```
 
@@ -77,22 +149,14 @@ mbo
 |---------|-------------|
 | `uv run mbo` | Launch interactive GUI |
 | `uv run mbo --check-install` | Verify installation and GPU configuration |
+| `uv run mbo /path/to/data.tiff` | View a supported file/folder |
+| `uv run mbo /path/to/data.tiff --metadata` | View metadata for a supported file/folder |
 | `uv run mbo --download-notebook` | Download user guide notebook |
 | `uv run mbo info /path/to/data.tiff` | Show file info |
 | `uv run mbo convert input.tiff output.zarr` | Convert file formats |
 | `uv run mbo scanphase /path/to/data.tiff` | Scan-phase analysis |
 | `uv run mbo formats` | List supported formats |
 | `uv run pollen` | Pollen calibration tool |
-
-### Processing Pipelines
-
-The GUI supports registration/segmentation pipelines. Currently, the only supported pipeline is LBM-Suite2p-Python.
-
-```bash
-uv pip install mbo_utilities[suite2p]
-```
-
-Future prospects include [masknmf](https://github.com/apasarkar/masknmf-toolbox).
 
 ## Uninstall
 
@@ -108,7 +172,7 @@ Remove-Item "$env:USERPROFILE\Desktop\MBO Utilities.lnk" -ErrorAction SilentlyCo
 ```bash
 # Linux/macOS
 uv tool uninstall mbo_utilities
-rm -rf ~/.mbo
+rm -rf ~/mbo
 ```
 
 **If installed in a project venv:**
