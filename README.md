@@ -1,4 +1,6 @@
-# MBO Utilities
+<p align="center">
+<img src="mbo_utilities/assets/static/logo_utilities.png" height="220" alt="MBO Utilities logo">
+</p>
 
 > **Status:** Late-beta stage of active development. There will be bugs that can be addressed quickly, file an [issue](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or reach out on slack.
 
