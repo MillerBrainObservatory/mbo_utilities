@@ -233,11 +233,29 @@ class TestGetVoxelSize:
         assert vs.dz == 5.0
 
     def test_defaults_to_1(self):
-        """Missing values default to 1.0."""
+        """Missing values default to 1.0 for non-LBM."""
         vs = get_voxel_size({})
         assert vs.dx == 1.0
         assert vs.dy == 1.0
         assert vs.dz == 1.0
+
+    def test_lbm_no_default_dz(self):
+        """LBM stacks should not get default dz - must be user-supplied."""
+        # lbm_stack flag
+        meta = {"lbm_stack": True}
+        vs = get_voxel_size(meta)
+        assert vs.dx == 1.0
+        assert vs.dy == 1.0
+        assert vs.dz is None
+
+        # stack_type == "lbm"
+        meta = {"stack_type": "lbm"}
+        vs = get_voxel_size(meta)
+        assert vs.dz is None
+
+        # but user override still works
+        vs = get_voxel_size(meta, dz=20.0)
+        assert vs.dz == 20.0
 
 
 class TestNormalizeResolution:
