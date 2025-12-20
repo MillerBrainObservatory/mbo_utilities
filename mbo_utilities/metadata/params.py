@@ -200,16 +200,17 @@ def get_voxel_size(
             # single value: use for both X and Y
             px_x = px_y = float(pixel_res)
 
-    # try to extract dz from ScanImage nested structure
+    # try to extract dz from ScanImage nested structure (NOT for LBM - user must supply)
     si_dz = None
-    si = metadata.get("si", {})
-    if isinstance(si, dict):
-        # try hStackManager.actualStackZStepSize
-        h_stack = si.get("hStackManager", {})
-        if isinstance(h_stack, dict):
-            si_dz = h_stack.get("actualStackZStepSize")
-            if si_dz is None:
-                si_dz = h_stack.get("stackZStepSize")
+    is_lbm = metadata.get("lbm_stack", False) or metadata.get("stack_type") == "lbm"
+    if not is_lbm:
+        si = metadata.get("si", {})
+        if isinstance(si, dict):
+            h_stack = si.get("hStackManager", {})
+            if isinstance(h_stack, dict):
+                si_dz = h_stack.get("actualStackZStepSize")
+                if si_dz is None:
+                    si_dz = h_stack.get("stackZStepSize")
 
     # resolve dx
     resolved_dx = dx
@@ -244,7 +245,6 @@ def get_voxel_size(
 
     # for LBM stacks, dz must be user-supplied - no default
     # for non-LBM, default to 1.0 if not found
-    is_lbm = metadata.get("lbm_stack", False) or metadata.get("stack_type") == "lbm"
     if resolved_dz is None and not is_lbm:
         resolved_dz = 1.0
 

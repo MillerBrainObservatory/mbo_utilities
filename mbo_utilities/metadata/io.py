@@ -722,6 +722,10 @@ def clean_scanimage_metadata(meta: dict) -> dict:
             if v is not None and k not in result:
                 result[k] = v
 
+    # add all standard aliases for backward compatibility
+    from .params import normalize_metadata
+    normalize_metadata(result)
+
     return result
 
 
