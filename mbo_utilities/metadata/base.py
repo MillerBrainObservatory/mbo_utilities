@@ -132,7 +132,6 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         canonical="dx",
         aliases=(
             "Dx",
-            "umPerPixX",
             "PhysicalSizeX",
             "pixelResolutionX",
             "pixel_size_x",
@@ -148,7 +147,6 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         canonical="dy",
         aliases=(
             "Dy",
-            "umPerPixY",
             "PhysicalSizeY",
             "pixelResolutionY",
             "pixel_size_y",
@@ -163,7 +161,6 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         canonical="dz",
         aliases=(
             "Dz",
-            "umPerPixZ",
             "PhysicalSizeZ",
             "z_step",
             "spacing",

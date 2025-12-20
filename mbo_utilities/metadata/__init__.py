@@ -38,6 +38,7 @@ from .scanimage import (
     get_roi_info,
     get_frame_rate,
     get_stack_info,
+    extract_roi_slices,
 )
 
 # file I/O functions
@@ -80,6 +81,7 @@ __all__ = [
     "get_roi_info",
     "get_frame_rate",
     "get_stack_info",
+    "extract_roi_slices",
     # file I/O
     "has_mbo_metadata",
     "is_raw_scanimage",

@@ -385,12 +385,12 @@ def get_frame_rate(metadata: dict) -> float | None:
     # scanFrameRate is the most reliable source
     fs = roi_mgr.get("scanFrameRate")
     if fs is not None:
-        return float(fs)
+        return round(float(fs), 2)
 
     # fallback to computing from scanFramePeriod
     period = roi_mgr.get("scanFramePeriod")
     if period is not None and period > 0:
-        return 1.0 / float(period)
+        return round(1.0 / float(period), 2)
 
     return None
 
@@ -431,3 +431,100 @@ def get_stack_info(metadata: dict) -> dict:
     info.update(get_roi_info(metadata))
 
     return info
+
+
+def extract_roi_slices(metadata: dict) -> list[dict]:
+    """
+    Extract detailed ROI slice information for array indexing.
+
+    Computes actual pixel boundaries for each ROI, accounting for
+    fly-to lines between strips and any rounding in height distribution.
+
+    Parameters
+    ----------
+    metadata : dict
+        Metadata dict containing roi_groups, page_height, page_width,
+        and num_fly_to_lines.
+
+    Returns
+    -------
+    list[dict]
+        List of ROI info dicts, each containing:
+        - y_start: starting y pixel (inclusive)
+        - y_end: ending y pixel (exclusive)
+        - width: ROI width in pixels
+        - height: ROI height in pixels
+        - x: x offset (always 0 for strip ROIs)
+        - slice: slice object for y-axis indexing
+
+    Notes
+    -----
+    This function consolidates ROI extraction logic that was previously
+    duplicated in MboRawArray._extract_roi_info().
+
+    For multi-ROI acquisitions, the page is divided into strips with
+    fly-to lines (dead space) between them. This function computes
+    the actual boundaries accounting for these gaps.
+    """
+    roi_groups = metadata.get("roi_groups", [])
+    if not roi_groups:
+        return []
+
+    if isinstance(roi_groups, dict):
+        roi_groups = [roi_groups]
+
+    page_width = metadata.get("page_width")
+    page_height = metadata.get("page_height")
+    num_fly_to_lines = metadata.get("num_fly_to_lines", 0)
+
+    if page_width is None or page_height is None:
+        return []
+
+    # extract heights from scanfield metadata
+    heights_from_metadata = []
+    for roi_data in roi_groups:
+        scanfields = roi_data.get("scanfields")
+        if scanfields is None:
+            continue
+        if isinstance(scanfields, list):
+            scanfields = scanfields[0]
+        pixel_res = scanfields.get("pixelResolutionXY")
+        if pixel_res and len(pixel_res) >= 2:
+            heights_from_metadata.append(pixel_res[1])
+
+    if not heights_from_metadata:
+        return []
+
+    # compute actual heights accounting for fly-to lines
+    total_metadata_height = sum(heights_from_metadata)
+    total_available_height = page_height - (len(roi_groups) - 1) * num_fly_to_lines
+
+    actual_heights = []
+    remaining_height = total_available_height
+    for i, metadata_height in enumerate(heights_from_metadata):
+        if i == len(heights_from_metadata) - 1:
+            height = remaining_height
+        else:
+            height = int(
+                round(metadata_height * total_available_height / total_metadata_height)
+            )
+            remaining_height -= height
+        actual_heights.append(height)
+
+    # build ROI slice info
+    rois = []
+    y_offset = 0
+
+    for height in actual_heights:
+        roi_info = {
+            "y_start": y_offset,
+            "y_end": y_offset + height,
+            "width": page_width,
+            "height": height,
+            "x": 0,
+            "slice": slice(y_offset, y_offset + height),
+        }
+        rois.append(roi_info)
+        y_offset += height + num_fly_to_lines
+
+    return rois
