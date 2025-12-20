@@ -75,7 +75,7 @@ class VoxelSize(NamedTuple):
 
     dx: float
     dy: float
-    dz: float
+    dz: float | None
 
     @property
     def pixel_resolution(self) -> tuple[float, float]:
@@ -83,7 +83,7 @@ class VoxelSize(NamedTuple):
         return (self.dx, self.dy)
 
     @property
-    def voxel_size(self) -> tuple[float, float, float]:
+    def voxel_size(self) -> tuple[float, float, float | None]:
         """Return (dx, dy, dz) tuple."""
         return (self.dx, self.dy, self.dz)
 
@@ -172,8 +172,8 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         ),
         dtype=float,
         unit="µm",
-        default=1.0,
-        description="Voxel size in Z dimension (µm/z-step)",
+        default=None,
+        description="Voxel size in Z dimension (µm/z-step). Must be user-supplied for LBM.",
     ),
     # temporal
     "fs": MetadataParameter(

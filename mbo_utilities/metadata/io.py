@@ -705,10 +705,11 @@ def clean_scanimage_metadata(meta: dict) -> dict:
         if "num_zplanes" not in result and "num_planes" not in result:
             result["num_zplanes"] = get_num_zplanes(result)
 
-        # add dz if available from ScanImage
-        dz = get_z_step_size(result)
-        if dz is not None:
-            result["dz"] = dz
+        # add dz if available from ScanImage (but NOT for LBM - user must supply)
+        if stack_type != "lbm":
+            dz = get_z_step_size(result)
+            if dz is not None:
+                result["dz"] = dz
 
         # add frame rate if available
         fs = get_frame_rate(result)

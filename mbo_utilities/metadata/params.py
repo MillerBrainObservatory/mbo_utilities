@@ -214,7 +214,7 @@ def get_voxel_size(
     # resolve dx
     resolved_dx = dx
     if resolved_dx is None:
-        resolved_dx = _get_first(["dx", "umPerPixX", "PhysicalSizeX"], default=None)
+        resolved_dx = _get_first(["dx", "PhysicalSizeX"], default=None)
     if resolved_dx is None and px_x is not None:
         resolved_dx = px_x
     if resolved_dx is None:
@@ -223,7 +223,7 @@ def get_voxel_size(
     # resolve dy
     resolved_dy = dy
     if resolved_dy is None:
-        resolved_dy = _get_first(["dy", "umPerPixY", "PhysicalSizeY"], default=None)
+        resolved_dy = _get_first(["dy", "PhysicalSizeY"], default=None)
     if resolved_dy is None and px_y is not None:
         resolved_dy = px_y
     if resolved_dy is None:
@@ -233,7 +233,7 @@ def get_voxel_size(
     resolved_dz = dz
     if resolved_dz is None:
         resolved_dz = _get_first(
-            ["dz", "z_step", "umPerPixZ", "PhysicalSizeZ", "spacing"],
+            ["dz", "z_step", "PhysicalSizeZ", "spacing"],
             default=None,
         )
     if resolved_dz is None and si_dz is not None:
@@ -241,7 +241,11 @@ def get_voxel_size(
             resolved_dz = float(si_dz)
         except (TypeError, ValueError):
             pass
-    if resolved_dz is None:
+
+    # for LBM stacks, dz must be user-supplied - no default
+    # for non-LBM, default to 1.0 if not found
+    is_lbm = metadata.get("lbm_stack", False) or metadata.get("stack_type") == "lbm"
+    if resolved_dz is None and not is_lbm:
         resolved_dz = 1.0
 
     return VoxelSize(dx=resolved_dx, dy=resolved_dy, dz=resolved_dz)
