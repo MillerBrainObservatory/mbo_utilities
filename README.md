@@ -2,17 +2,19 @@
 <img src="mbo_utilities/assets/static/logo_utilities.png" height="220" alt="MBO Utilities logo">
 </p>
 
----
+<p align="center">
+<a href="https://github.com/MillerBrainObservatory/mbo_utilities/actions/workflows/test_python.yml"><img src="https://github.com/MillerBrainObservatory/mbo_utilities/actions/workflows/test_python.yml/badge.svg" alt="CI"></a>
+<a href="https://badge.fury.io/py/mbo-utilities"><img src="https://badge.fury.io/py/mbo-utilities.svg" alt="PyPI version"></a>
+<a href="https://millerbrainobservatory.github.io/mbo_utilities/"><img src="https://img.shields.io/badge/docs-online-green" alt="Documentation"></a>
+</p>
 
-[![CI](https://github.com/MillerBrainObservatory/mbo_utilities/actions/workflows/test_python.yml/badge.svg)](https://github.com/MillerBrainObservatory/mbo_utilities/actions/workflows/test_python.yml)
-[![PyPI version](https://badge.fury.io/py/mbo-utilities.svg)](https://badge.fury.io/py/mbo-utilities)
-[![Documentation](https://img.shields.io/badge/docs-online-green)](https://millerbrainobservatory.github.io/mbo_utilities/)
-
-[**Installation**](#installation) |
-[**Documentation**](https://millerbrainobservatory.github.io/mbo_utilities/) |
-[**User Guide**](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html) |
-[**Array Types**](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) |
-[**Issues**](https://github.com/MillerBrainObservatory/mbo_utilities/issues)
+<p align="center">
+<a href="#installation"><b>Installation</b></a> ·
+<a href="https://millerbrainobservatory.github.io/mbo_utilities/"><b>Documentation</b></a> ·
+<a href="https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html"><b>User Guide</b></a> ·
+<a href="https://millerbrainobservatory.github.io/mbo_utilities/array_types.html"><b>Array Types</b></a> ·
+<a href="https://github.com/MillerBrainObservatory/mbo_utilities/issues"><b>Issues</b></a>
+</p>
 
 Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO). Fast, lazy I/O with `imread`/`imwrite` for multiple array types (ScanImage and generic TIFFs, Suite2p binaries, Zarr and HDF5), an interactive GUI for data visualization, and processing pipelines for calcium imaging data.
 
@@ -50,31 +52,38 @@ pip install "mbo_utilities[all]"
 
 ### With [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
 
-After [installing `uv`](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer), you can install `mbo_utilities` as a tool:
+After [installing `uv`](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer):
 
-```python
-# latest version - base
-uv tool install "mbo_utilities"
+**For CLI usage only** (global `mbo` command):
 
-# older release with all dependencies
-uv tool install "mbo_utilities[all]==2.4.3"
+```bash
+uv tool install mbo_utilities
 ```
 
-Or with one of the provided install scripts:
+This installs the CLI globally. Not for use as a library in your own code.
 
-**Windows (PowerShell):**
+**For library/development use** (import in your code):
+
+```bash
+uv venv --python 3.12
+uv pip install mbo_utilities
+```
+
+This creates a project-specific virtual environment.
+
+**One-line install scripts** (CLI + desktop shortcut):
 
 ```powershell
+# Windows (PowerShell)
 irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
 ```
 
-**Linux/macOS:**
-
 ```bash
+# Linux/macOS
 curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
 ```
 
-Either of these methods allow you to call `mbo_utilities` from any terminal.
+These scripts install to `~/mbo/envs/mbo_utilities` and add `mbo` to your PATH.
 
 ```bash
 $ mbo --help
@@ -98,7 +107,7 @@ Usage: mbo [OPTIONS] COMMAND [ARGS]...
     mbo --check-install                 Verify installation
 
 Options:
-  --download-notebook   Download the user guide notebook and exit.
+  --download-notebook   Download the mbo_utiltities user guide notebook.
   --notebook-url TEXT   URL of notebook to download.
   --download-file TEXT  Download a file from URL (e.g. GitHub).
   -o, --output TEXT     Output path for --download-file or --download-
@@ -116,34 +125,29 @@ Commands:
   view       Open imaging data in the GUI viewer.
 ```
 
-| Method | Location | Use Case |
-|--------|----------|----------|
-| `uv pip install` in project | `project/.venv/` | Project-specific, use with `uv run mbo` |
-| `uv tool install mbo_utilities` | `~/.local/bin/` | Global `mbo` command |
+### Environment Locations
+
+| Method | Use Case | Run Command |
+|--------|----------|-------------|
+| `uv tool install` | CLI only | `mbo` |
+| `uv pip install` | Scientific Data Processing | `uv run mbo` or activate venv |
+| Install script | CLI + desktop shortcut | `mbo` |
+
+For library use, activate the venv or use `uv run`:
+
+```bash
+# option 1: activate
+.venv\Scripts\activate  # Windows
+source .venv/bin/activate  # Linux/macOS
+mbo --help
+
+# option 2: uv run (no activation needed)
+uv run mbo --help
+```
 
 ## Usage
 
-**Launch GUI**
-
-```bash
-# uv: in a project with .venv
-uv run mbo
-
-# tool / script installation
-mbo
-```
-
-**Launch Metadata Viewer**
-
-```bash
-# uv: in a project with .venv
-uv run mbo /path/to/data
-
-# tool / script installation
-mbo
-```
-
-### Commands
+**CLI Commands:**
 
 | Command | Description |
 |---------|-------------|
@@ -156,7 +160,38 @@ mbo
 | `uv run mbo convert input.tiff output.zarr` | Convert file formats |
 | `uv run mbo scanphase /path/to/data.tiff` | Scan-phase analysis |
 | `uv run mbo formats` | List supported formats |
-| `uv run pollen` | Pollen calibration tool |
+| `uv run pollen` | Pollen calibration tool (WIP) |
+
+**Launch GUI:**
+
+```bash
+# uv: in a project with .venv
+uv run mbo
+
+# tool / script installation
+mbo
+```
+
+**Launch Metadata Viewer**
+
+```bash
+mbo path/to
+```
+
+## Supported ScanImage Configurations
+
+`mbo_utilities` automatically detects and parses metadata from these ScanImage acquisition modes:
+
+| Configuration | Detection | Result |
+|---------------|-----------|--------|
+| LBM single channel | `channelSave=[1..N]`, AI0 only | `lbm=True`, `colors=1` |
+| LBM dual channel | `channelSave=[1..N]`, AI0+AI1 | `lbm=True`, `colors=2` |
+| Piezo (single frame/slice) | `enable=True`, `framesPerSlice=1` | `piezo=True` |
+| Piezo multi-frame (with avg) | `enable=True`, `logAvgFactor>1` | `piezo=True`, averaged frames |
+| Piezo multi-frame (no avg) | `enable=True`, `framesPerSlice>1`, `logAvg=1` | `piezo=True`, raw frames |
+| Single plane | `enable=False` | `zplanes=1` |
+
+> **Note:** Frame-averaging (`logAverageFactor > 1`) is only available for non-LBM acquisitions.
 
 ## Uninstall
 
