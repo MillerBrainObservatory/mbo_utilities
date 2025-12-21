@@ -66,6 +66,12 @@ class TestMetadataParameter:
         assert "num_planes" in num_zplanes.aliases
         assert "nplanes" in num_zplanes.aliases
 
+        # check num_timepoints has nframes, num_frames as aliases (suite2p/legacy compat)
+        num_tp = METADATA_PARAMS["num_timepoints"]
+        assert "nframes" in num_tp.aliases
+        assert "num_frames" in num_tp.aliases
+        assert "T" in num_tp.aliases
+
 
 class TestAliasMap:
     """Test alias resolution."""
@@ -77,6 +83,11 @@ class TestAliasMap:
         assert get_canonical_name("pixel_size_x") == "dx"
         assert get_canonical_name("frame_rate") == "fs"
         assert get_canonical_name("fps") == "fs"
+        # num_timepoints aliases resolve to the canonical name
+        assert get_canonical_name("num_timepoints") == "num_timepoints"
+        assert get_canonical_name("nframes") == "num_timepoints"
+        assert get_canonical_name("num_frames") == "num_timepoints"
+        assert get_canonical_name("T") == "num_timepoints"
 
     def test_unknown_name_returns_none(self):
         """Unknown names return None."""
