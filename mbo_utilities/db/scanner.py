@@ -107,6 +107,28 @@ def _get_files_size(files: list[Path]) -> int:
     return total
 
 
+def _is_inside_discovered(path: Path, discovered: set) -> bool:
+    """check if path is inside any discovered directory."""
+    path_str = str(path)
+    parent_str = str(path.parent)
+    for d in discovered:
+        # skip non-directory entries (like "dir:basename" keys)
+        if ":" in d:
+            continue
+        # check if file's parent is or is inside the discovered dir
+        if parent_str == d or parent_str.startswith(d + os.sep):
+            return True
+    return False
+
+
+# suite2p output files that should not be indexed separately
+SUITE2P_OUTPUT_FILES = {
+    "stat.npy", "ops.npy", "iscell.npy",
+    "F.npy", "Fneu.npy", "spks.npy", "dff.npy",
+    "redcell.npy", "rastermap_model.npy",
+}
+
+
 def _extract_metadata(path: Path, pipeline_name: str) -> dict:
     """extract metadata from a dataset path."""
     metadata = {
@@ -339,11 +361,17 @@ def scan_for_datasets(
     for f in files:
         if str(f) in discovered:
             continue
+        # skip files inside already-discovered directories
+        if _is_inside_discovered(f, discovered):
+            continue
         ext = f.suffix.lower().lstrip(".")
         if ext in ("h5", "hdf5"):
             discovered.add(str(f))
             yield _create_dataset(f, "h5", pipelines)
-        elif ext == "npy" and f.name != "ops.npy":
+        elif ext == "npy":
+            # skip suite2p output files
+            if f.name in SUITE2P_OUTPUT_FILES:
+                continue
             # skip small npy files
             try:
                 if f.stat().st_size < 1 * 1024 * 1024:  # <1MB
