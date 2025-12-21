@@ -1,13 +1,30 @@
 # MBO Utilities Installation Script for Windows
-# installs uv if not present, creates environment at ~/mbo/envs/, installs mbo_utilities
+# installs uv if not present, creates environment, installs mbo_utilities
 #
 # usage:
+#   # default install to ~/mbo/envs/mbo_utilities
 #   irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
+#
+#   # custom install location
+#   $env:MBO_ENV_PATH = "C:\path\to\env"; irm ... | iex
+#
+#   # install into existing environment (skip venv creation)
+#   $env:MBO_ENV_PATH = "C:\existing\.venv"; $env:MBO_USE_EXISTING = "1"; irm ... | iex
+#
+#   # overwrite existing environment
+#   $env:MBO_OVERWRITE = "1"; irm ... | iex
 
 $ErrorActionPreference = "Stop"
 
 $GITHUB_REPO = "MillerBrainObservatory/mbo_utilities"
-$MBO_ENV_PATH = Join-Path $env:USERPROFILE "mbo\envs\mbo_utilities"
+
+# default install path (can be overridden via env var or interactive prompt)
+$DEFAULT_ENV_PATH = Join-Path $env:USERPROFILE "mbo\envs\mbo_utilities"
+$MBO_ENV_PATH = if ($env:MBO_ENV_PATH) { $env:MBO_ENV_PATH } else { $DEFAULT_ENV_PATH }
+
+# check for existing env behavior flags
+$USE_EXISTING_ENV = $env:MBO_USE_EXISTING -eq "1"
+$OVERWRITE_ENV = $env:MBO_OVERWRITE -eq "1"
 
 function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Blue }
 function Write-Success { Write-Host "[OK] $args" -ForegroundColor Green }
@@ -24,6 +41,39 @@ function Show-Banner {
     Write-Host ""
     Write-Host "MBO Utilities Installer" -ForegroundColor White
     Write-Host ""
+}
+
+function Show-InstallLocationPrompt {
+    # skip if env var was explicitly set
+    if ($env:MBO_ENV_PATH) {
+        Write-Info "Install location: $MBO_ENV_PATH (from MBO_ENV_PATH)"
+        return $MBO_ENV_PATH
+    }
+
+    Write-Host ""
+    Write-Host "Install Location" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+    Write-Host $DEFAULT_ENV_PATH -ForegroundColor Cyan
+    Write-Host ""
+    $userInput = Read-Host "Press Enter for default, or enter custom path"
+
+    if ([string]::IsNullOrWhiteSpace($userInput)) {
+        return $DEFAULT_ENV_PATH
+    }
+
+    # expand ~ to user profile
+    $customPath = $userInput.Trim()
+    if ($customPath.StartsWith("~")) {
+        $customPath = $customPath.Replace("~", $env:USERPROFILE)
+    }
+
+    # resolve relative paths
+    if (-not [System.IO.Path]::IsPathRooted($customPath)) {
+        $customPath = [System.IO.Path]::GetFullPath($customPath)
+    }
+
+    return $customPath
 }
 
 function Test-UvInstalled {
@@ -322,23 +372,67 @@ function Install-MboEnvironment {
     )
 
     Write-Host ""
-    Write-Info "Creating MBO environment at: $MBO_ENV_PATH"
-
-    # create parent directory
-    $envParent = Split-Path $MBO_ENV_PATH -Parent
-    if (-not (Test-Path $envParent)) {
-        New-Item -ItemType Directory -Path $envParent -Force | Out-Null
-    }
-
-    # create virtual environment
-    Write-Info "Creating virtual environment..."
-    uv venv $MBO_ENV_PATH --python 3.12
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "Failed to create virtual environment"
-        exit 1
-    }
+    Write-Info "Environment path: $MBO_ENV_PATH"
 
     $pythonPath = Join-Path $MBO_ENV_PATH "Scripts\python.exe"
+    $envExists = Test-Path $pythonPath
+
+    if ($envExists) {
+        if ($USE_EXISTING_ENV) {
+            Write-Info "Using existing environment (MBO_USE_EXISTING=1)"
+        }
+        elseif ($OVERWRITE_ENV) {
+            Write-Warn "Removing existing environment (MBO_OVERWRITE=1)..."
+            Remove-Item -Recurse -Force $MBO_ENV_PATH
+            $envExists = $false
+        }
+        else {
+            Write-Host ""
+            Write-Warn "Environment already exists at: $MBO_ENV_PATH"
+            Write-Host ""
+            Write-Host "  [1] Overwrite - Delete and recreate environment" -ForegroundColor Cyan
+            Write-Host "  [2] Update    - Install into existing environment" -ForegroundColor Cyan
+            Write-Host "  [3] Cancel    - Exit without changes" -ForegroundColor Cyan
+            Write-Host ""
+
+            do {
+                $choice = Read-Host "Select option (1-3)"
+                $valid = $choice -match '^[123]$'
+                if (-not $valid) { Write-Warn "Invalid selection. Enter 1, 2, or 3." }
+            } while (-not $valid)
+
+            switch ($choice) {
+                "1" {
+                    Write-Info "Removing existing environment..."
+                    Remove-Item -Recurse -Force $MBO_ENV_PATH
+                    $envExists = $false
+                }
+                "2" {
+                    Write-Info "Installing into existing environment..."
+                }
+                "3" {
+                    Write-Info "Installation cancelled."
+                    exit 0
+                }
+            }
+        }
+    }
+
+    if (-not $envExists) {
+        # create parent directory
+        $envParent = Split-Path $MBO_ENV_PATH -Parent
+        if (-not (Test-Path $envParent)) {
+            New-Item -ItemType Directory -Path $envParent -Force | Out-Null
+        }
+
+        # create virtual environment
+        Write-Info "Creating virtual environment..."
+        uv venv $MBO_ENV_PATH --python 3.12
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Failed to create virtual environment"
+            exit 1
+        }
+    }
 
     # build the install spec with extras
     if ($Source -eq "pypi") {
@@ -504,22 +598,25 @@ function Main {
         Install-Uv
     }
 
-    # step 1: choose source
+    # step 1: choose install location
+    $script:MBO_ENV_PATH = Show-InstallLocationPrompt
+
+    # step 2: choose source
     $sourceInfo = Show-SourceSelection
 
-    # step 2: detect GPU
+    # step 3: detect GPU
     $gpuInfo = Test-NvidiaGpu
 
-    # step 3: choose extras
+    # step 4: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
-    # step 4: create environment and install
+    # step 5: create environment and install
     Install-MboEnvironment -InstallSpec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -Source $sourceInfo.Source
 
-    # step 5: add to PATH
+    # step 6: add to PATH
     Add-MboToPath
 
-    # step 6: create shortcut
+    # step 7: create shortcut
     New-DesktopShortcut -BranchRef $sourceInfo.Ref
 
     # show instructions

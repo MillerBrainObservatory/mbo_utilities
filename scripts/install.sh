@@ -1,15 +1,32 @@
 #!/usr/bin/env bash
 
 # MBO Utilities Installation Script for Linux/macOS
-# installs uv if not present, creates environment at ~/mbo/envs/, installs mbo_utilities
+# installs uv if not present, creates environment, installs mbo_utilities
 #
 # usage:
+#   # default install to ~/mbo/envs/mbo_utilities
 #   curl -LsSf https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
+#
+#   # custom install location
+#   MBO_ENV_PATH=/path/to/env curl -LsSf ... | bash
+#
+#   # install into existing environment (skip venv creation)
+#   MBO_ENV_PATH=/existing/.venv MBO_USE_EXISTING=1 curl -LsSf ... | bash
+#
+#   # overwrite existing environment
+#   MBO_OVERWRITE=1 curl -LsSf ... | bash
 
 set -euo pipefail
 
 GITHUB_REPO="MillerBrainObservatory/mbo_utilities"
-MBO_ENV_PATH="$HOME/mbo/envs/mbo_utilities"
+
+# default install path (can be overridden via env var or interactive prompt)
+DEFAULT_ENV_PATH="$HOME/mbo/envs/mbo_utilities"
+MBO_ENV_PATH="${MBO_ENV_PATH:-}"
+
+# check for existing env behavior flags
+USE_EXISTING_ENV="${MBO_USE_EXISTING:-0}"
+OVERWRITE_ENV="${MBO_OVERWRITE:-0}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -33,6 +50,30 @@ show_banner() {
     echo ""
     echo "MBO Utilities Installer"
     echo ""
+}
+
+show_install_location_prompt() {
+    # skip if env var was explicitly set
+    if [[ -n "$MBO_ENV_PATH" ]]; then
+        info "Install location: $MBO_ENV_PATH (from MBO_ENV_PATH)"
+        return
+    fi
+
+    echo ""
+    echo -e "${CYAN}Install Location${NC}"
+    echo ""
+    echo -e "  Default: ${CYAN}$DEFAULT_ENV_PATH${NC}"
+    echo ""
+    read -p "Press Enter for default, or enter custom path: " user_input
+
+    if [[ -z "$user_input" ]]; then
+        MBO_ENV_PATH="$DEFAULT_ENV_PATH"
+    else
+        # expand ~ to home directory
+        user_input="${user_input/#\~/$HOME}"
+        # resolve to absolute path
+        MBO_ENV_PATH="$(cd "$(dirname "$user_input")" 2>/dev/null && pwd)/$(basename "$user_input")" || MBO_ENV_PATH="$user_input"
+    fi
 }
 
 check_platform() {
@@ -311,11 +352,67 @@ install_mbo_environment() {
     local env_parent=$(dirname "$MBO_ENV_PATH")
     mkdir -p "$env_parent"
 
-    # create virtual environment
-    info "Creating virtual environment..."
-    uv venv "$MBO_ENV_PATH" --python 3.12
-
     local python_path="$MBO_ENV_PATH/bin/python"
+
+    # check if environment already exists
+    if [[ -d "$MBO_ENV_PATH" ]]; then
+        if [[ "$OVERWRITE_ENV" == "1" ]]; then
+            info "Removing existing environment (MBO_OVERWRITE=1)..."
+            rm -rf "$MBO_ENV_PATH"
+        elif [[ "$USE_EXISTING_ENV" == "1" ]]; then
+            if [[ -x "$python_path" ]]; then
+                info "Using existing environment (MBO_USE_EXISTING=1)..."
+            else
+                error "Existing directory is not a valid Python environment: $MBO_ENV_PATH"
+                exit 1
+            fi
+        else
+            # interactive prompt
+            echo ""
+            warning "Environment already exists at: $MBO_ENV_PATH"
+            echo ""
+            echo "  [O] Overwrite - Delete and recreate environment"
+            echo "  [U] Update    - Install into existing environment"
+            echo "  [C] Cancel    - Exit without changes"
+            echo ""
+            while true; do
+                read -p "Choose action (O/U/C): " choice
+                case $choice in
+                    [Oo])
+                        info "Removing existing environment..."
+                        rm -rf "$MBO_ENV_PATH"
+                        break
+                        ;;
+                    [Uu])
+                        if [[ -x "$python_path" ]]; then
+                            info "Installing into existing environment..."
+                        else
+                            error "Existing directory is not a valid Python environment"
+                            exit 1
+                        fi
+                        # skip venv creation, just install
+                        ;;
+                    [Cc])
+                        info "Installation cancelled."
+                        exit 0
+                        ;;
+                    *)
+                        warning "Invalid choice. Enter O, U, or C."
+                        ;;
+                esac
+                # if we chose Update, break out to skip venv creation
+                if [[ "$choice" =~ [Uu] ]]; then
+                    break
+                fi
+            done
+        fi
+    fi
+
+    # create virtual environment if it doesn't exist
+    if [[ ! -d "$MBO_ENV_PATH" ]]; then
+        info "Creating virtual environment..."
+        uv venv "$MBO_ENV_PATH" --python 3.12
+    fi
 
     # build the install spec with extras
     local spec
@@ -533,22 +630,25 @@ main() {
         install_uv
     fi
 
-    # step 1: choose source
+    # step 1: choose install location
+    show_install_location_prompt
+
+    # step 2: choose source
     show_source_selection
 
-    # step 2: detect GPU
+    # step 3: detect GPU
     check_nvidia_gpu
 
-    # step 3: choose extras
+    # step 4: choose extras
     show_optional_dependencies
 
-    # step 4: create environment and install
+    # step 5: create environment and install
     install_mbo_environment
 
-    # step 5: add to PATH
+    # step 6: add to PATH
     add_mbo_to_path
 
-    # step 6: create desktop entry
+    # step 7: create desktop entry
     if [[ "$PLATFORM" == "linux" ]]; then
         create_desktop_entry_linux
     elif [[ "$PLATFORM" == "macos" ]]; then
