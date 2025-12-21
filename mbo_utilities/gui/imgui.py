@@ -245,17 +245,6 @@ def draw_tabs(parent):
             imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
             imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
 
-            # Add metadata button at top of Preview tab
-            imgui.spacing()
-            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.0, 0.0, 0.0, 1.0))  # Black button
-            imgui.push_style_color(imgui.Col_.border, imgui.ImVec4(1.0, 1.0, 1.0, 1.0))  # White border
-            imgui.push_style_var(imgui.StyleVar_.frame_border_size, 1.0)
-            if imgui.button("Show Metadata"):
-                parent.show_metadata_viewer = not parent.show_metadata_viewer
-            imgui.pop_style_var()
-            imgui.pop_style_color(2)
-            imgui.spacing()
-
             parent.draw_preview_section()
             imgui.pop_style_var()
             imgui.pop_style_var()

@@ -32,8 +32,6 @@ class WindowFunctionsWidget(Widget):
         parent = self.parent
 
         imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Window Functions")
         imgui.spacing()
 

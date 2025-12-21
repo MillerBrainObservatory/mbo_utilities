@@ -36,7 +36,7 @@ class RasterScanWidget(Widget):
         imgui.text_colored(
             imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Scan-Phase Correction"
         )
-        imgui.separator()
+        imgui.spacing()
 
         # fix phase checkbox
         imgui.set_next_item_width(hello_imgui.em_size(10))
