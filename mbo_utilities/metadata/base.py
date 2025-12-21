@@ -35,6 +35,8 @@ class MetadataParameter:
         Default value if parameter is not found in metadata.
     description : str
         Human-readable description of the parameter.
+    label : str, optional
+        Display label for GUI (e.g., "Frame Rate" for "fs").
     """
 
     canonical: str
@@ -43,6 +45,7 @@ class MetadataParameter:
     unit: str | None = None
     default: Any = None
     description: str = ""
+    label: str = ""
 
 
 class VoxelSize(NamedTuple):
@@ -142,6 +145,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         unit="µm",
         default=1.0,
         description="Pixel size in X dimension (µm/pixel)",
+        label="Pixel Size X",
     ),
     "dy": MetadataParameter(
         canonical="dy",
@@ -156,6 +160,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         unit="µm",
         default=1.0,
         description="Pixel size in Y dimension (µm/pixel)",
+        label="Pixel Size Y",
     ),
     "dz": MetadataParameter(
         canonical="dz",
@@ -171,6 +176,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         unit="µm",
         default=None,
         description="Voxel size in Z dimension (µm/z-step). Must be user-supplied for LBM.",
+        label="Z Step",
     ),
     # temporal
     "fs": MetadataParameter(
@@ -188,6 +194,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         unit="Hz",
         default=None,
         description="Frame rate / sampling frequency (Hz)",
+        label="Frame Rate",
     ),
     # image dimensions (pixels)
     "Lx": MetadataParameter(
@@ -241,6 +248,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         dtype=int,
         default=None,
         description="Number of timepoints (T dimension) in the dataset",
+        label="Timepoints",
     ),
     "num_zplanes": MetadataParameter(
         canonical="num_zplanes",
@@ -258,6 +266,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         dtype=int,
         default=1,
         description="Number of z-planes",
+        label="Num Z-Planes",
     ),
     "nchannels": MetadataParameter(
         canonical="nchannels",
@@ -281,13 +290,21 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         default="int16",
         description="Data type of pixel values",
     ),
-    # size (tuple - special handling)
+    # total number of elements
     "size": MetadataParameter(
         canonical="size",
-        aliases=("shape", "array_shape", "data_shape"),
+        aliases=("num_elements", "total_elements"),
+        dtype=int,
+        default=None,
+        description="Total number of elements in the array (product of dimensions)",
+    ),
+    # array shape tuple
+    "shape": MetadataParameter(
+        canonical="shape",
+        aliases=("array_shape", "data_shape"),
         dtype=tuple,
         default=None,
-        description="Array size as tuple (T, Z, Y, X) or (T, Y, X) or (Y, X)",
+        description="Array shape as tuple (T, Z, Y, X) or (T, Y, X) or (Y, X)",
     ),
     # stack detection (ScanImage-derived)
     "stack_type": MetadataParameter(
@@ -381,3 +398,44 @@ def get_canonical_name(name: str) -> str | None:
         Canonical name, or None if not a registered parameter.
     """
     return ALIAS_MAP.get(name.lower())
+
+
+# core imaging metadata keys - always shown in metadata viewers/editors
+# these are the essential parameters for calcium imaging data
+IMAGING_METADATA_KEYS: tuple[str, ...] = (
+    "fs",
+    "dx",
+    "dy",
+    "dz",
+    "num_zplanes",
+    "num_timepoints",
+)
+
+
+def get_imaging_metadata_info() -> list[dict]:
+    """
+    Get display info for core imaging metadata parameters.
+
+    Returns a list of dicts with keys: canonical, label, unit, aliases, dtype.
+    Used by GUI widgets to display/edit imaging metadata.
+
+    Returns
+    -------
+    list[dict]
+        List of metadata info dicts for each imaging parameter.
+    """
+    result = []
+    for key in IMAGING_METADATA_KEYS:
+        param = METADATA_PARAMS.get(key)
+        if param:
+            # format aliases as comma-separated string
+            all_aliases = [param.canonical] + list(param.aliases[:3])  # limit to 3 aliases
+            aliases_str = ", ".join(all_aliases)
+            result.append({
+                "canonical": param.canonical,
+                "label": param.label or param.canonical,
+                "unit": param.unit or "",
+                "aliases": aliases_str,
+                "dtype": param.dtype,
+            })
+    return result

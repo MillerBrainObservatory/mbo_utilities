@@ -14,6 +14,8 @@ from .base import (
     METADATA_PARAMS,
     ALIAS_MAP,
     get_canonical_name,
+    IMAGING_METADATA_KEYS,
+    get_imaging_metadata_info,
 )
 
 from .params import (
@@ -61,6 +63,9 @@ __all__ = [
     "METADATA_PARAMS",
     "ALIAS_MAP",
     "get_canonical_name",
+    # imaging metadata (core params for display/editing)
+    "IMAGING_METADATA_KEYS",
+    "get_imaging_metadata_info",
     # parameter access
     "get_param",
     "get_voxel_size",

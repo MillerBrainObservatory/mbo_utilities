@@ -646,13 +646,16 @@ def draw_saveas_popup(parent):
                         imgui.same_line()
                         imgui.text_colored(imgui.ImVec4(0.3, 1.0, 0.3, 1.0), "set!")
 
-            # Standard metadata fields
-            _metadata_row("Frame Rate", "fs", "Hz", "fs, frame_rate, fps", float)
-            _metadata_row("Pixel Size X", "dx", "µm", "dx, Dx, PhysicalSizeX", float)
-            _metadata_row("Pixel Size Y", "dy", "µm", "dy, Dy, PhysicalSizeY", float)
-            _metadata_row("Z Step", "dz", "µm", "dz, Dz, z_step", float)
-            _metadata_row("Num Z-Planes", "num_zplanes", "", "num_zplanes, num_planes, nplanes", int)
-            _metadata_row("Timepoints", "num_timepoints", "", "num_timepoints, nframes, num_frames, T", int)
+            # Standard imaging metadata fields from registry
+            from mbo_utilities.metadata import get_imaging_metadata_info
+            for info in get_imaging_metadata_info():
+                _metadata_row(
+                    info["label"],
+                    info["canonical"],
+                    info["unit"],
+                    info["aliases"],
+                    info["dtype"],
+                )
 
             imgui.spacing()
             imgui.separator()

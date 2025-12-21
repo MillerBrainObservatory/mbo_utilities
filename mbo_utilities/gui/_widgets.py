@@ -141,7 +141,7 @@ def _matches_filter_recursive(key: str, value, filter_text: str) -> bool:
 def draw_metadata_inspector(metadata: dict):
     """draw metadata with canonical params first, then other fields."""
     global _metadata_search_filter, _metadata_search_active
-    from mbo_utilities.metadata import METADATA_PARAMS
+    from mbo_utilities.metadata import METADATA_PARAMS, IMAGING_METADATA_KEYS
 
     with imgui_ctx.begin_child("Metadata Viewer"):
         imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4))
@@ -189,8 +189,8 @@ def draw_metadata_inspector(metadata: dict):
                 )
 
             imgui.separator()
-            # always show these params even if None
-            always_show = {"dx", "dy", "dz", "fs", "num_zplanes", "num_timepoints"}
+            # always show core imaging params even if None
+            always_show = set(IMAGING_METADATA_KEYS)
             is_lbm = metadata.get("lbm_stack", False) or metadata.get("stack_type") == "lbm"
 
             for name, param in METADATA_PARAMS.items():
