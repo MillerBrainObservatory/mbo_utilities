@@ -214,6 +214,23 @@ def stats_cmd():
     click.echo()
 
 
+@db_cli.command("clear")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
+def clear_cmd(yes: bool):
+    """Clear all datasets from the database."""
+    from mbo_utilities.db.database import get_db_path
+
+    if not yes:
+        click.confirm("This will delete all indexed datasets. Continue?", abort=True)
+
+    db_path = get_db_path()
+    if db_path.exists():
+        db_path.unlink()
+        click.secho("Database cleared", fg="green")
+    else:
+        click.echo("Database does not exist")
+
+
 @db_cli.command("browse")
 def browse_cmd():
     """Launch the dataset browser GUI."""

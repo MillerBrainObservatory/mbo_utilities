@@ -2,9 +2,12 @@
 directory scanner for discovering datasets.
 
 uses pipeline_registry patterns to identify datasets.
+handles scanimage raw tiffs (filename_00001.tif, filename_00002.tif)
+by grouping them into a single acquisition.
 """
 
 import os
+import re
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
@@ -14,6 +17,11 @@ from mbo_utilities import log
 from mbo_utilities.db.models import Dataset, DatasetStatus
 
 logger = log.get("db.scanner")
+
+# pattern to match scanimage numbered suffixes: _00001, _00002, etc.
+# also handles _00001_00001 (acquisition_timepoint) pattern
+# we want to strip the LAST _NNNNN (or _NNNNN_NNNNN) from the name
+SCANIMAGE_SUFFIX_PATTERN = re.compile(r"(_\d{5})+$")
 
 
 def _match_pattern(path: Path, pattern: str) -> bool:
@@ -48,6 +56,54 @@ def _get_directory_size(path: Path) -> int:
                     pass
     except (OSError, PermissionError):
         pass
+    return total
+
+
+def _get_scanimage_base_name(path: Path) -> str | None:
+    """
+    extract base name from scanimage tiff, stripping _00001 suffix.
+
+    returns None if not a scanimage-style filename.
+    examples:
+        pollen_00001.tif -> pollen
+        scan_00001_00001.tif -> scan_00001 (first is acquisition, second is timepoint)
+        plane01.tif -> None (not scanimage style)
+    """
+    stem = path.stem
+    match = SCANIMAGE_SUFFIX_PATTERN.search(stem)
+    if match:
+        return stem[:match.start()]
+    return None
+
+
+def _group_scanimage_files(tiff_files: list[Path]) -> dict[str, list[Path]]:
+    """
+    group scanimage tiff files by their base acquisition name.
+
+    returns dict mapping base_name -> list of files.
+    non-scanimage tiffs are grouped by their full stem.
+    """
+    groups = {}
+    for f in tiff_files:
+        base = _get_scanimage_base_name(f)
+        if base is None:
+            # not a scanimage file, use full stem
+            base = f.stem
+        key = (str(f.parent), base)  # group by directory + base name
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(f)
+    return groups
+
+
+def _get_files_size(files: list[Path]) -> int:
+    """get total size of a list of files."""
+    total = 0
+    for f in files:
+        try:
+            total += f.stat().st_size
+        except (OSError, PermissionError):
+            pass
     return total
 
 
@@ -133,6 +189,7 @@ def scan_for_datasets(
     scan a directory for datasets using pipeline registry patterns.
 
     yields Dataset objects for each discovered dataset.
+    groups scanimage raw tiffs (filename_00001.tif, etc.) into single acquisitions.
 
     Parameters
     ----------
@@ -150,6 +207,7 @@ def scan_for_datasets(
     """
     from mbo_utilities.pipeline_registry import get_all_pipelines
     from mbo_utilities.arrays import register_all_pipelines
+    from mbo_utilities.metadata import is_raw_scanimage
 
     # ensure all pipelines are registered
     register_all_pipelines()
@@ -160,20 +218,9 @@ def scan_for_datasets(
         logger.error(f"path does not exist: {root}")
         return
 
-    # collect all marker files and patterns
-    marker_patterns = {}  # pattern -> pipeline_name
-    for name, info in pipelines.items():
-        for marker in info.marker_files:
-            marker_patterns[marker] = name
-        for pattern in info.input_patterns:
-            # only use specific patterns, not generic ones like **/*.tif
-            if "?" in pattern or pattern.count("*") > 2:
-                marker_patterns[pattern] = name
-
     # track discovered paths to avoid duplicates
     discovered = set()
 
-    # first pass: find marker files (fast)
     logger.info(f"scanning {root} for datasets...")
 
     if recursive:
@@ -183,54 +230,176 @@ def scan_for_datasets(
 
     total_files = len(all_files)
 
-    for idx, path in enumerate(all_files):
-        if progress_callback:
-            progress_callback(idx, total_files, path)
-
-        # check marker files
+    # separate files and directories
+    files = []
+    dirs = []
+    for path in all_files:
         if path.is_file():
-            for marker, pipeline_name in marker_patterns.items():
-                if path.name == marker or _match_pattern(path, marker):
-                    # found a marker - the dataset is the parent directory
-                    dataset_path = path.parent
-                    if str(dataset_path) not in discovered:
-                        discovered.add(str(dataset_path))
-                        yield _create_dataset(dataset_path, pipeline_name, pipelines)
-                    break
-
-        # check directory patterns (e.g. *.zarr)
+            files.append(path)
         elif path.is_dir():
-            for name, info in pipelines.items():
-                for pattern in info.input_patterns:
-                    if pattern.endswith("/") or pattern.endswith(".zarr"):
-                        if _match_pattern(path, pattern.rstrip("/")):
-                            if str(path) not in discovered:
-                                discovered.add(str(path))
-                                yield _create_dataset(path, name, pipelines)
-                            break
+            dirs.append(path)
 
-    # second pass: find files by extension (for files without markers)
-    ext_to_pipeline = {}
-    for name, info in pipelines.items():
-        for ext in info.input_extensions:
-            if ext not in ext_to_pipeline:
-                ext_to_pipeline[ext] = name
+    # pass 1: find suite2p directories (ops.npy marker)
+    for idx, path in enumerate(dirs):
+        if progress_callback:
+            progress_callback(idx, len(dirs), path)
 
-    for idx, path in enumerate(all_files):
-        if path.is_file() and str(path) not in discovered:
-            ext = path.suffix.lstrip(".").lower()
-            if ext in ext_to_pipeline:
-                # skip if this is inside an already-discovered dataset
-                parent_discovered = any(
-                    str(path).startswith(d + os.sep) for d in discovered
-                )
-                if not parent_discovered:
-                    pipeline_name = ext_to_pipeline[ext]
-                    # skip generic tiff files unless they're large (likely raw data)
-                    if ext in ("tif", "tiff") and path.stat().st_size < 10 * 1024 * 1024:
-                        continue
-                    discovered.add(str(path))
-                    yield _create_dataset(path, pipeline_name, pipelines)
+        ops_file = path / "ops.npy"
+        if ops_file.exists():
+            # check if this is a plane subdir or the main suite2p dir
+            parent_ops = path.parent / "ops.npy"
+            if parent_ops.exists():
+                # this is a plane subdir, skip (will be handled by parent)
+                continue
+            if str(path) not in discovered:
+                discovered.add(str(path))
+                yield _create_dataset(path, "suite2p", pipelines)
+
+    # pass 2: find zarr directories
+    for path in dirs:
+        if path.suffix == ".zarr":
+            if str(path) not in discovered:
+                discovered.add(str(path))
+                yield _create_dataset(path, "zarr", pipelines)
+
+    # pass 3: collect tiff files by directory and group scanimage sequences
+    tiff_files = [f for f in files if f.suffix.lower() in (".tif", ".tiff")]
+    tiff_by_dir = {}
+    for f in tiff_files:
+        parent = str(f.parent)
+        if parent not in tiff_by_dir:
+            tiff_by_dir[parent] = []
+        tiff_by_dir[parent].append(f)
+
+    for dir_path, dir_tiffs in tiff_by_dir.items():
+        # skip if inside already-discovered dataset
+        if any(dir_path.startswith(d + os.sep) or dir_path == d for d in discovered):
+            continue
+
+        # check if these are scanimage raw files
+        first_tiff = dir_tiffs[0]
+        try:
+            is_raw = is_raw_scanimage(first_tiff)
+        except Exception:
+            is_raw = False
+
+        if is_raw:
+            # group by base acquisition name
+            groups = _group_scanimage_files(dir_tiffs)
+            for (parent_dir, base_name), group_files in groups.items():
+                group_files = sorted(group_files)
+                # use the directory as the dataset path, with base_name in the name
+                dataset_path = Path(parent_dir)
+                dataset_key = f"{parent_dir}:{base_name}"
+                if dataset_key not in discovered:
+                    discovered.add(dataset_key)
+                    yield _create_dataset_from_files(
+                        group_files, base_name, "scanimage_raw", pipelines
+                    )
+        else:
+            # non-raw tiffs: check for plane structure or treat as generic tiff
+            plane_tiffs = [f for f in dir_tiffs if re.search(r"plane\d+", f.stem, re.I)]
+            if plane_tiffs:
+                # this is a tiff volume directory
+                if dir_path not in discovered:
+                    discovered.add(dir_path)
+                    yield _create_dataset(Path(dir_path), "tiff", pipelines)
+            else:
+                # generic tiff files - create one dataset per file
+                for tf in dir_tiffs:
+                    if str(tf) not in discovered:
+                        # skip small tiffs (thumbnails, etc)
+                        try:
+                            if tf.stat().st_size < 10 * 1024 * 1024:
+                                continue
+                        except OSError:
+                            continue
+                        discovered.add(str(tf))
+                        yield _create_dataset(tf, "tiff", pipelines)
+
+    # pass 4: find binary files (suite2p outputs or standalone)
+    bin_files = [f for f in files if f.suffix.lower() == ".bin"]
+    for bf in bin_files:
+        parent = bf.parent
+        parent_str = str(parent)
+        # skip if parent already discovered (suite2p dir)
+        if any(parent_str.startswith(d) or d.startswith(parent_str) for d in discovered):
+            continue
+        # check for ops.npy in same directory
+        ops_file = parent / "ops.npy"
+        if ops_file.exists():
+            # already handled in pass 1
+            continue
+        # standalone binary file
+        if str(bf) not in discovered:
+            discovered.add(str(bf))
+            yield _create_dataset(bf, "binary", pipelines)
+
+    # pass 5: find other files (h5, npy, etc)
+    for f in files:
+        if str(f) in discovered:
+            continue
+        ext = f.suffix.lower().lstrip(".")
+        if ext in ("h5", "hdf5"):
+            discovered.add(str(f))
+            yield _create_dataset(f, "h5", pipelines)
+        elif ext == "npy" and f.name != "ops.npy":
+            # skip small npy files
+            try:
+                if f.stat().st_size < 1 * 1024 * 1024:  # <1MB
+                    continue
+            except OSError:
+                continue
+            discovered.add(str(f))
+            yield _create_dataset(f, "numpy", pipelines)
+
+
+def _create_dataset_from_files(
+    files: list[Path],
+    name: str,
+    pipeline_name: str,
+    pipelines: dict,
+) -> Dataset:
+    """create a Dataset object from a group of files (e.g. scanimage sequence)."""
+    info = pipelines.get(pipeline_name)
+
+    # use parent directory as path, files for size calculation
+    path = files[0].parent
+    size_bytes = _get_files_size(files)
+
+    # get modification time from most recent file
+    modified_at = None
+    try:
+        mtimes = [f.stat().st_mtime for f in files]
+        modified_at = datetime.fromtimestamp(max(mtimes))
+    except (OSError, PermissionError):
+        pass
+
+    # extract metadata from first file
+    metadata = _extract_metadata(files[0], pipeline_name)
+
+    # update metadata with file count info
+    metadata["num_files"] = len(files)
+
+    return Dataset(
+        path=str(path),
+        name=name,
+        size_bytes=size_bytes,
+        modified_at=modified_at,
+        scanned_at=datetime.now(),
+        pipeline=pipeline_name,
+        category=info.category if info else "",
+        status=metadata.get("status", DatasetStatus.RAW),
+        num_frames=metadata.get("num_frames"),
+        num_zplanes=metadata.get("num_zplanes"),
+        num_rois=metadata.get("num_rois"),
+        shape=metadata.get("shape", ""),
+        dtype=metadata.get("dtype", ""),
+        dx=metadata.get("dx"),
+        dy=metadata.get("dy"),
+        dz=metadata.get("dz"),
+        fs=metadata.get("fs"),
+    )
 
 
 def _create_dataset(path: Path, pipeline_name: str, pipelines: dict) -> Dataset:
