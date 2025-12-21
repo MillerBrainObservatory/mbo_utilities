@@ -162,22 +162,6 @@ uv run mbo --help
 | `uv run mbo formats` | List supported formats |
 | `uv run pollen` | Pollen calibration tool (WIP) |
 
-**Launch GUI:**
-
-```bash
-# uv: in a project with .venv
-uv run mbo
-
-# tool / script installation
-mbo
-```
-
-**Launch Metadata Viewer**
-
-```bash
-mbo path/to
-```
-
 ## Supported ScanImage Configurations
 
 `mbo_utilities` automatically detects and parses metadata from these ScanImage acquisition modes:
