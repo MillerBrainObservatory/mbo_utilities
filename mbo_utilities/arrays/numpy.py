@@ -217,12 +217,14 @@ class NumpyArray(ReductionMixin):
 
     @property
     def metadata(self) -> dict:
-        # Ensure basic metadata is always present
+        # ensure basic metadata is always present
         md = dict(self._metadata)
+        if "num_timepoints" not in md:
+            md["num_timepoints"] = self.shape[0] if self.ndim >= 1 else 1
         if "nframes" not in md:
-            md["nframes"] = self.shape[0] if self.ndim >= 1 else 1
+            md["nframes"] = md["num_timepoints"]  # suite2p alias
         if "num_frames" not in md:
-            md["num_frames"] = md["nframes"]
+            md["num_frames"] = md["num_timepoints"]  # legacy alias
         if "Ly" not in md and self.ndim >= 2:
             md["Ly"] = self.shape[-2]
         if "Lx" not in md and self.ndim >= 2:

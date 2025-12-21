@@ -652,7 +652,7 @@ def draw_saveas_popup(parent):
             _metadata_row("Pixel Size Y", "dy", "µm", "dy, Dy, PhysicalSizeY", float)
             _metadata_row("Z Step", "dz", "µm", "dz, Dz, z_step", float)
             _metadata_row("Num Z-Planes", "num_zplanes", "", "num_zplanes, num_planes, nplanes", int)
-            _metadata_row("Num Frames", "nframes", "", "nframes, num_frames, T", int)
+            _metadata_row("Timepoints", "num_timepoints", "", "num_timepoints, nframes, num_frames, T", int)
 
             imgui.spacing()
             imgui.separator()

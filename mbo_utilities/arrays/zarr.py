@@ -140,11 +140,14 @@ class ZarrArray(ReductionMixin):
         else:
             md = self._metadata[0].copy()
 
-        # Ensure critical keys are present
+        # ensure critical keys are present
         md["dtype"] = self.dtype
-        if "num_frames" not in md and "nframes" not in md:
+        if "num_timepoints" not in md:
             if self.zs:
-                md["num_frames"] = int(self.zs[0].shape[0])
+                tp = int(self.zs[0].shape[0])
+                md["num_timepoints"] = tp
+                md["nframes"] = tp  # suite2p alias
+                md["num_frames"] = tp  # legacy alias
 
         return md
 

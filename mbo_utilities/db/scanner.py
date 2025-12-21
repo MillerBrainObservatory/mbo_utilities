@@ -190,7 +190,7 @@ def _extract_metadata(path: Path, pipeline_name: str) -> dict:
                     metadata["dy"] = vs.dy
                     metadata["dz"] = vs.dz
                     metadata["fs"] = meta.get("fs")
-                    metadata["num_frames"] = meta.get("num_frames")
+                    metadata["num_frames"] = meta.get("num_timepoints", meta.get("num_frames"))
                     metadata["num_zplanes"] = meta.get("num_zplanes")
                     metadata["num_rois"] = meta.get("num_rois")
             except Exception as e:

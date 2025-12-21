@@ -205,8 +205,8 @@ class BinArray(ReductionMixin):
             md = dict(self.metadata) if self.metadata else {}
             md["Ly"] = self.Ly
             md["Lx"] = self.Lx
-            md["nframes"] = self.nframes
-            md["num_frames"] = self.nframes
+            md["num_timepoints"] = self.nframes
+            md["nframes"] = self.nframes  # suite2p alias
 
             if output_name is None:
                 output_name = "data_raw.bin"

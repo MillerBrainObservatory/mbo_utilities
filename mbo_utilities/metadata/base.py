@@ -225,12 +225,22 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         description="Image height in pixels",
     ),
     # frame/plane/channel counts
-    "nframes": MetadataParameter(
-        canonical="nframes",
-        aliases=("num_frames", "n_frames", "frames", "T", "nt"),
+    # note: in suite2p ops.npy, "nframes" means timepoints (post-registration), not per-slice frames
+    "num_timepoints": MetadataParameter(
+        canonical="num_timepoints",
+        aliases=(
+            "nframes",        # suite2p ops.npy compatibility
+            "num_frames",     # legacy alias
+            "n_frames",
+            "frames",
+            "T",
+            "nt",
+            "timepoints",
+            "n_timepoints",
+        ),
         dtype=int,
         default=None,
-        description="Number of frames (time points) in the dataset",
+        description="Number of timepoints (T dimension) in the dataset",
     ),
     "num_zplanes": MetadataParameter(
         canonical="num_zplanes",

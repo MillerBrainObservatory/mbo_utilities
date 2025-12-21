@@ -259,9 +259,11 @@ The canonical names for dx and Lx have been chosen to match suite2p, as that was
 | `fs` | frame_rate, fps, fr | Hz | Frame rate |
 | `Lx` | width, nx, size_x | px | Image width |
 | `Ly` | height, ny, size_y | px | Image height |
-| `nframes` | num_frames, T | - | Frame count |
+| `num_timepoints` | nframes, num_frames, T | - | Timepoint count (T dimension) |
 | `num_zplanes` | num_planes, nplanes, Z | - | Z-plane count |
 | `num_mrois` | num_rois, nrois | - | mROI count |
+
+Note: `num_timepoints` is the canonical name for the T dimension. The alias `nframes` is maintained for Suite2p compatibility (Suite2p's `ops["nframes"]` maps to `num_timepoints`).
 
 ---
 

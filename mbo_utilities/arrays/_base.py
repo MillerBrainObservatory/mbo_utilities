@@ -301,8 +301,9 @@ def _imwrite_base(
     # Update metadata
     md["Ly"] = Ly
     md["Lx"] = Lx
-    md["nframes"] = nframes
-    md["num_frames"] = nframes  # alias for backwards compatibility
+    md["num_timepoints"] = nframes
+    md["nframes"] = nframes  # suite2p alias
+    md["num_frames"] = nframes  # legacy alias
 
     # Normalize planes to 0-indexed list
     planes_list = _normalize_planes(planes, num_planes)

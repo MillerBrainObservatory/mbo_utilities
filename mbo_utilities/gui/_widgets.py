@@ -190,7 +190,7 @@ def draw_metadata_inspector(metadata: dict):
 
             imgui.separator()
             # always show these params even if None
-            always_show = {"dx", "dy", "dz", "fs", "num_zplanes", "nframes"}
+            always_show = {"dx", "dy", "dz", "fs", "num_zplanes", "num_timepoints"}
             is_lbm = metadata.get("lbm_stack", False) or metadata.get("stack_type") == "lbm"
 
             for name, param in METADATA_PARAMS.items():

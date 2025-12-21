@@ -1172,12 +1172,13 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     Lx = arr.shape[-1]
     Ly = arr.shape[-2]
 
-    # Extract only scalar metadata needed for Suite2p - do NOT pass shape arrays
+    # extract only scalar metadata needed for suite2p - do NOT pass shape arrays
     # that could confuse the pipeline when processing 4D data
     md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "num_frames": self.s2p.target_frames,
-        "nframes": self.s2p.target_frames,
+        "num_timepoints": self.s2p.target_frames,
+        "num_frames": self.s2p.target_frames,  # legacy alias
+        "nframes": self.s2p.target_frames,  # suite2p alias
         "n_frames": self.s2p.target_frames,
         "original_file": str(self.fpath),
         "roi_index": arr_idx,
@@ -1201,15 +1202,17 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     # Only update with md dict, not the full lazy_mdata which may have 4D shape
     defaults.update(md)
 
-    # Set the correct 3D shape for the output binary (T, Ly, Lx)
-    # This is needed by write_ops to create ops.npy
-    # CRITICAL: Override any 4D shape from the source array with the correct 3D shape
+    # set the correct 3D shape for the output binary (T, Ly, Lx)
+    # this is needed by write_ops to create ops.npy
+    # CRITICAL: override any 4D shape from the source array with the correct 3D shape
     defaults['shape'] = (self.s2p.target_frames, Ly, Lx)
-    defaults['num_frames'] = self.s2p.target_frames
-    defaults['nframes'] = self.s2p.target_frames
+    defaults['num_timepoints'] = self.s2p.target_frames
+    defaults['num_frames'] = self.s2p.target_frames  # legacy alias
+    defaults['nframes'] = self.s2p.target_frames  # suite2p alias
 
-    # Also clean lazy_mdata to prevent shape contamination from arr.metadata
+    # also clean lazy_mdata to prevent shape contamination from arr.metadata
     lazy_mdata.pop('shape', None)
+    lazy_mdata.pop('num_timepoints', None)
     lazy_mdata.pop('num_frames', None)
     lazy_mdata.pop('nframes', None)
     lazy_mdata.pop('n_frames', None)
@@ -1220,11 +1223,12 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     if hasattr(arr, 'metadata'):
         try:
             arr.metadata.pop('shape', None)
+            arr.metadata.pop('num_timepoints', None)
             arr.metadata.pop('num_frames', None)
             arr.metadata.pop('nframes', None)
             arr.metadata.pop('n_frames', None)
         except (TypeError, AttributeError):
-            # Read-only metadata, skip cleaning
+            # read-only metadata, skip cleaning
             pass
 
     from mbo_utilities.lazy_array import imwrite

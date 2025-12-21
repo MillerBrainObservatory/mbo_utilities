@@ -370,8 +370,9 @@ class IsoviewArray:
             meta['fs'] = float(fps)
 
         # LazyArrayProtocol required fields
-        meta['nframes'] = len(self.tm_folders)
-        meta['num_frames'] = len(self.tm_folders)
+        meta['num_timepoints'] = len(self.tm_folders)
+        meta['nframes'] = len(self.tm_folders)  # suite2p alias
+        meta['num_frames'] = len(self.tm_folders)  # legacy alias
         meta['Ly'] = self._single_shape[1]
         meta['Lx'] = self._single_shape[2]
 
@@ -380,7 +381,6 @@ class IsoviewArray:
         meta['num_planes'] = self._single_shape[0]
 
         # isoview-specific fields
-        meta['num_timepoints'] = len(self.tm_folders)
         meta['views'] = self._views
         meta['shape'] = self.shape
         meta['structure'] = self._structure

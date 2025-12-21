@@ -550,7 +550,7 @@ def info(input_path, metadata):
         md = data.metadata
         if md:
             click.echo(f"\nMetadata:")
-            important_keys = ["nframes", "num_frames", "Ly", "Lx", "fs", "num_rois", "plane"]
+            important_keys = ["num_timepoints", "nframes", "num_frames", "Ly", "Lx", "fs", "num_rois", "plane"]
             for key in important_keys:
                 if key in md:
                     click.echo(f"  {key}: {md[key]}")
@@ -695,7 +695,7 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
         click.echo("")
         click.secho("scan-phase analysis complete", fg="cyan", bold=True)
         click.echo("")
-        click.echo(f"data: {meta.get('num_frames', 0)} frames, "
+        click.echo(f"data: {meta.get('num_timepoints', meta.get('num_frames', 0))} timepoints, "
                    f"{meta.get('num_rois', 1)} ROIs, "
                    f"{meta.get('frame_shape', (0, 0))[1]}x{meta.get('frame_shape', (0, 0))[0]} px")
         click.echo(f"analysis time: {meta.get('analysis_time', 0):.1f}s")

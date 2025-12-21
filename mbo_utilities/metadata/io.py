@@ -259,12 +259,12 @@ def get_metadata_single(file: Path):
 
     Notes
     -----
-    - num_frames represents the number of frames per z-plane
+    - num_timepoints represents the T dimension (sequential timepoints)
 
     Examples
     --------
     >>> mdata = get_metadata("path/to/rawscan_00001.tif")
-    >>> print(mdata["num_frames"])
+    >>> print(mdata["num_timepoints"])
     5345
     >>> mdata = get_metadata("path/to/assembled_data.tif")
     >>> print(mdata["shape"])
@@ -473,8 +473,9 @@ def get_metadata_batch(file_paths: list | tuple):
 
     total_frames = sum(frames_per_file)
     return metadata | {
-        "nframes": total_frames,
-        "num_frames": total_frames,  # alias for backwards compatibility
+        "num_timepoints": total_frames,
+        "nframes": total_frames,  # suite2p alias
+        "num_frames": total_frames,  # legacy alias
         "frames_per_file": frames_per_file,
         "file_paths": [str(fp) for fp in file_paths],
         "num_files": len(file_paths),
@@ -1112,7 +1113,7 @@ def _build_ome_metadata(
     if "file_paths" in metadata or "num_files" in metadata:
         custom_meta["source_files"] = {
             "num_files": metadata.get("num_files"),
-            "num_frames": metadata.get("num_frames"),
+            "num_timepoints": metadata.get("num_timepoints", metadata.get("num_frames")),
             "frames_per_file": metadata.get("frames_per_file"),
         }
 
@@ -1151,7 +1152,9 @@ def _build_ome_metadata(
                 "register_z",
                 "file_paths",
                 "num_files",
+                "num_timepoints",
                 "num_frames",
+                "nframes",
                 "frames_per_file",
             ]
             and key not in result
