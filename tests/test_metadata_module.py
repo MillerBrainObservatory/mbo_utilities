@@ -59,7 +59,7 @@ class TestMetadataParameter:
         # check dx parameter
         dx = METADATA_PARAMS["dx"]
         assert dx.unit == "µm"
-        assert "umPerPixX" in dx.aliases
+        assert "PhysicalSizeX" in dx.aliases
 
         # check num_zplanes has num_planes and nplanes as aliases
         num_zplanes = METADATA_PARAMS["num_zplanes"]
@@ -73,8 +73,8 @@ class TestAliasMap:
     def test_canonical_name_lookup(self):
         """get_canonical_name should resolve aliases."""
         assert get_canonical_name("dx") == "dx"
-        assert get_canonical_name("umPerPixX") == "dx"
         assert get_canonical_name("PhysicalSizeX") == "dx"
+        assert get_canonical_name("pixel_size_x") == "dx"
         assert get_canonical_name("frame_rate") == "fs"
         assert get_canonical_name("fps") == "fs"
 
@@ -98,7 +98,7 @@ class TestGetParam:
 
     def test_alias_key(self):
         """Get param by alias."""
-        meta = {"umPerPixX": 0.5}
+        meta = {"pixel_size_x": 0.5}
         assert get_param(meta, "dx") == 0.5
 
     def test_another_alias(self):
@@ -206,9 +206,9 @@ class TestGetVoxelSize:
         assert vs.dx == 0.5
         assert vs.dy == 0.6
 
-    def test_from_suite2p_keys(self):
-        """Extract from Suite2p format keys."""
-        meta = {"umPerPixX": 0.5, "umPerPixY": 0.6, "umPerPixZ": 5.0}
+    def test_from_ome_keys(self):
+        """Extract from OME format keys."""
+        meta = {"PhysicalSizeX": 0.5, "PhysicalSizeY": 0.6, "PhysicalSizeZ": 5.0}
         vs = get_voxel_size(meta)
         assert vs.dx == 0.5
         assert vs.dy == 0.6
@@ -256,6 +256,21 @@ class TestGetVoxelSize:
         # but user override still works
         vs = get_voxel_size(meta, dz=20.0)
         assert vs.dz == 20.0
+
+    def test_lbm_ignores_scanimage_dz(self):
+        """LBM stacks should not extract dz from ScanImage metadata."""
+        # even if ScanImage has hStackManager.stackZStepSize, LBM should ignore it
+        meta = {
+            "lbm_stack": True,
+            "si": {
+                "hStackManager": {
+                    "stackZStepSize": 5.0,
+                    "actualStackZStepSize": 5.0
+                }
+            }
+        }
+        vs = get_voxel_size(meta)
+        assert vs.dz is None  # should NOT be 5.0
 
 
 class TestNormalizeResolution:
@@ -664,3 +679,62 @@ class TestCleanScanImageMetadata:
         assert result["piezo_stack"] is True
         assert result["num_zplanes"] == 17
         assert result["dz"] == 2.5
+
+
+class TestExtractRoiSlices:
+    """Test extract_roi_slices function."""
+
+    def test_extracts_roi_slices(self):
+        """extract_roi_slices should compute correct slice boundaries."""
+        from mbo_utilities.metadata import extract_roi_slices
+
+        meta = {
+            "page_height": 500,
+            "page_width": 100,
+            "num_fly_to_lines": 10,
+            "roi_groups": [
+                {"scanfields": {"pixelResolutionXY": [100, 200]}},
+                {"scanfields": {"pixelResolutionXY": [100, 280]}},
+            ],
+        }
+        rois = extract_roi_slices(meta)
+
+        assert len(rois) == 2
+        assert rois[0]["y_start"] == 0
+        assert rois[0]["width"] == 100
+        assert rois[1]["y_start"] == rois[0]["y_end"] + 10  # fly-to lines
+        assert rois[1]["y_end"] == 500  # last roi ends at page_height
+
+    def test_empty_roi_groups(self):
+        """extract_roi_slices should return empty list for no roi_groups."""
+        from mbo_utilities.metadata import extract_roi_slices
+
+        assert extract_roi_slices({}) == []
+        assert extract_roi_slices({"roi_groups": []}) == []
+
+    def test_missing_page_dimensions(self):
+        """extract_roi_slices should return empty list if page dims missing."""
+        from mbo_utilities.metadata import extract_roi_slices
+
+        meta = {
+            "roi_groups": [{"scanfields": {"pixelResolutionXY": [100, 200]}}],
+        }
+        assert extract_roi_slices(meta) == []
+
+    def test_single_roi(self):
+        """extract_roi_slices should handle single ROI."""
+        from mbo_utilities.metadata import extract_roi_slices
+
+        meta = {
+            "page_height": 512,
+            "page_width": 512,
+            "num_fly_to_lines": 0,
+            "roi_groups": [{"scanfields": {"pixelResolutionXY": [512, 512]}}],
+        }
+        rois = extract_roi_slices(meta)
+
+        assert len(rois) == 1
+        assert rois[0]["y_start"] == 0
+        assert rois[0]["y_end"] == 512
+        assert rois[0]["height"] == 512
+        assert rois[0]["slice"] == slice(0, 512)
