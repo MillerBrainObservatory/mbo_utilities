@@ -189,6 +189,10 @@ def draw_metadata_inspector(metadata: dict):
                 )
 
             imgui.separator()
+            # always show these params even if None
+            always_show = {"dx", "dy", "dz", "fs", "num_zplanes", "nframes"}
+            is_lbm = metadata.get("lbm_stack", False) or metadata.get("stack_type") == "lbm"
+
             for name, param in METADATA_PARAMS.items():
                 value = metadata.get(param.canonical)
                 if value is None:
@@ -197,12 +201,14 @@ def draw_metadata_inspector(metadata: dict):
                             value = metadata[alias]
                             break
 
-                if value is not None:
+                # show if value exists, or if it's an important param we always show
+                should_show = value is not None or param.canonical in always_show
+                if should_show:
                     shown_keys.add(param.canonical)
                     shown_keys.update(param.aliases)
 
                     # skip if doesn't match filter (recursive check for nested values)
-                    if _metadata_search_filter and not _matches_filter_recursive(param.canonical, value, _metadata_search_filter):
+                    if _metadata_search_filter and not _matches_filter_recursive(param.canonical, value if value is not None else "", _metadata_search_filter):
                         continue
 
                     # parameter name with alias tooltip on hover
@@ -214,11 +220,23 @@ def draw_metadata_inspector(metadata: dict):
                             imgui.bullet_text(alias)
                         imgui.end_tooltip()
                     imgui.same_line(value_col)
-                    # value with optional unit
-                    val_str = _fmt_multivalue(value)
-                    if param.unit:
-                        val_str += f" ({param.unit})"
-                    imgui.text_colored(_VALUE_COLOR, val_str)
+
+                    # value with optional unit, or placeholder for missing
+                    if value is not None:
+                        val_str = _fmt_multivalue(value)
+                        if param.unit:
+                            val_str += f" ({param.unit})"
+                        imgui.text_colored(_VALUE_COLOR, val_str)
+                    elif param.canonical == "dz" and is_lbm:
+                        # LBM stacks require user-supplied dz
+                        imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "User Input Required")
+                        if imgui.is_item_hovered():
+                            imgui.begin_tooltip()
+                            imgui.text("LBM stacks require user-supplied Z step size.")
+                            imgui.text("Set via File > Save As > Metadata section.")
+                            imgui.end_tooltip()
+                    else:
+                        imgui.text_disabled("—")
 
             # section: cameras (if present)
             cameras = metadata.get("cameras")
@@ -389,6 +407,8 @@ def _render_item(name, val, prefix="", depth=0, filter_text=""):
 
 
 def _fmt(x):
+    if x is None:
+        return "—"  # em dash for missing values
     if isinstance(x, (str, bool, int, float)):
         return repr(x)
     if isinstance(x, (bytes, bytearray)):

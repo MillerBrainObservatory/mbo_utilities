@@ -568,7 +568,12 @@ def draw_saveas_popup(parent):
                     imgui.text_colored(imgui.ImVec4(0.6, 0.9, 0.6, 1.0), f"{value} {unit}")
                 elif canonical == "dz" and get_param(current_meta, "lbm_stack", default=False):
                     # LBM stacks require user-supplied dz
-                    imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "User Input")
+                    imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "User Input Required")
+                    if imgui.is_item_hovered():
+                        imgui.begin_tooltip()
+                        imgui.text("LBM stacks require user-supplied Z step size.")
+                        imgui.text("Enter a value and click 'Add' to set.")
+                        imgui.end_tooltip()
                 else:
                     imgui.text_disabled("not found")
 
