@@ -766,7 +766,7 @@ def run_scanphase_analysis(
     from mbo_utilities import imread
 
     if data_path is None:
-        from mbo_utilities.graphics import select_files
+        from mbo_utilities.gui import select_files
         paths = select_files(title="Select data for scan-phase analysis")
         if not paths:
             return None

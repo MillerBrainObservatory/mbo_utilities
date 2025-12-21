@@ -14,7 +14,7 @@ from imgui_bundle import (
     imgui_ctx,
     portable_file_dialogs as pfd,
 )
-from mbo_utilities.graphics._widgets import set_tooltip
+from mbo_utilities.gui._widgets import set_tooltip
 from mbo_utilities.preferences import (
     get_default_open_dir,
     get_last_dir,
@@ -280,8 +280,8 @@ def select_scanphase_file() -> str | None:
     str or None
         Selected file path, or None if cancelled.
     """
-    from mbo_utilities.graphics import _setup  # triggers setup on import
-    from mbo_utilities.graphics._setup import get_default_ini_path
+    from mbo_utilities.gui import _setup  # triggers setup on import
+    from mbo_utilities.gui._setup import get_default_ini_path
     from imgui_bundle import immapp, hello_imgui
 
     dlg = ScanPhaseFileDialog()

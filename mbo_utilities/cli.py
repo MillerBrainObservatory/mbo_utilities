@@ -242,7 +242,7 @@ def main(
         return
 
     if check_install:
-        from mbo_utilities.graphics.run_gui import _check_installation
+        from mbo_utilities.gui.run_gui import _check_installation
         _check_installation()
         return
 
@@ -259,7 +259,7 @@ def main(
     spinner = LoadingSpinner("Loading GUI")
     spinner.start()
     try:
-        from mbo_utilities.graphics.run_gui import run_gui
+        from mbo_utilities.gui.run_gui import run_gui
         spinner.stop()
     except Exception as e:
         spinner.stop()
@@ -310,7 +310,7 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
     spinner = LoadingSpinner("Loading GUI")
     spinner.start()
     try:
-        from mbo_utilities.graphics.run_gui import run_gui
+        from mbo_utilities.gui.run_gui import run_gui
         spinner.stop()
     except Exception as e:
         spinner.stop()

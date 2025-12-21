@@ -440,8 +440,8 @@ def calibrate_xy(xs, ys, III, filepath):
 
 def select_pollen_file() -> str | None:
     from imgui_bundle import immapp, hello_imgui
-    from mbo_utilities.graphics import _setup  # triggers setup on import
-    from mbo_utilities.graphics._setup import get_default_ini_path
+    from mbo_utilities.gui import _setup  # triggers setup on import
+    from mbo_utilities.gui._setup import get_default_ini_path
 
     dlg = PollenDialog()
 
