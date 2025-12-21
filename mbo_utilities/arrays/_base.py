@@ -355,6 +355,10 @@ def _imwrite_base(
                 **kwargs,
             )
 
+    # signal completion
+    if progress_callback:
+        progress_callback(1.0, len(planes_list))
+
     return outpath
 
 

@@ -251,6 +251,10 @@ def imwrite(
 
             if existing_s3d_dir:
                 s3d_job_dir = existing_s3d_dir
+                # notify callback that we're using cached registration
+                if progress_callback:
+                    progress_callback(1.0, "Using cached registration")
+
                 if s3d_job_dir.joinpath("dirs.npy").is_file():
                     dirs = load_npy(s3d_job_dir / "dirs.npy").item()
                     for k, v in dirs.items():

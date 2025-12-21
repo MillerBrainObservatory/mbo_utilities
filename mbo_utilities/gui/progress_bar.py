@@ -379,6 +379,7 @@ def _get_active_progress_items(self) -> list[dict]:
     saveas_running = getattr(self, '_saveas_running', False)
     saveas_progress = getattr(self, '_saveas_progress', 0.0)
     saveas_current = getattr(self, '_saveas_current_index', 0)
+    saveas_done = getattr(self, '_saveas_done', False)
 
     if saveas_running or (0.0 < saveas_progress < 1.0):
         # show "Starting..." if progress is still 0
@@ -389,8 +390,16 @@ def _get_active_progress_items(self) -> list[dict]:
         items.append({
             "key": "saveas",
             "text": text,
-            "progress": max(0.01, saveas_progress),  # show small progress when starting
+            "progress": max(0.01, saveas_progress),
             "done": False,
+        })
+    elif saveas_done:
+        # show completion briefly
+        items.append({
+            "key": "saveas",
+            "text": "Save complete",
+            "progress": 1.0,
+            "done": True,
         })
 
     # Check zstats progress for each graphic - use _running flags
@@ -422,6 +431,7 @@ def _get_active_progress_items(self) -> list[dict]:
     register_running = getattr(self, '_register_z_running', False)
     register_progress = getattr(self, '_register_z_progress', 0.0)
     register_msg = getattr(self, '_register_z_current_msg', None)
+    register_done = getattr(self, '_register_z_done', False)
 
     if register_running or (0.0 < register_progress < 1.0):
         msg = register_msg if register_msg else "Starting..."
@@ -430,6 +440,14 @@ def _get_active_progress_items(self) -> list[dict]:
             "text": f"Z-Reg: {msg}",
             "progress": max(0.01, register_progress),
             "done": False,
+        })
+    elif register_done and register_msg:
+        # show completion message (e.g., "Using cached registration")
+        items.append({
+            "key": "register_z",
+            "text": f"Z-Reg: {register_msg}",
+            "progress": 1.0,
+            "done": True,
         })
 
     return items
@@ -520,23 +538,27 @@ def draw_status_indicator(self):
     items = _get_active_progress_items(self)
 
     # Determine status color and text
+    # use short format to ensure count is always visible
     if items:
         # In progress - orange with count
         text_color = imgui.ImVec4(1.0, 0.6, 0.2, 1.0)  # Orange
-        # Calculate average progress
         avg_progress = sum(item["progress"] for item in items) / len(items)
-        status_text = f"Background tasks ({len(items)} running, {int(avg_progress * 100)}%)"
+        status_text = f"Tasks ({len(items)}) {int(avg_progress * 100)}%"
     else:
         # Idle - green
         text_color = imgui.ImVec4(0.4, 0.8, 0.4, 1.0)  # Green
         status_text = "Background tasks"
 
-    # Draw the status text
+    # Calculate button position first to reserve space on the right
+    window_width = imgui.get_window_width()
+    style = imgui.get_style()
+    button_width = imgui.calc_text_size("Show Metadata").x + style.frame_padding.x * 2
+    button_pos_x = window_width - button_width - style.window_padding.x
+
     imgui.text_colored(text_color, status_text)
 
     # Draw (?) button on same line with transparent style
     imgui.same_line()
-    # Make button background transparent
     imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0, 0, 0, 0))
     imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.3, 0.3, 0.5))
     imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.2, 0.2, 0.2, 0.5))
@@ -551,10 +573,8 @@ def draw_status_indicator(self):
     if imgui.is_item_hovered():
         imgui.set_tooltip("Click to view console output")
 
-    # Show Metadata button on the right side of the same line
-    avail_width = imgui.get_content_region_avail().x
-    button_width = imgui.calc_text_size("Show Metadata").x + imgui.get_style().frame_padding.x * 2
-    imgui.same_line(imgui.get_window_width() - button_width - imgui.get_style().window_padding.x)
+    # Show Metadata button at fixed position on the right
+    imgui.same_line(button_pos_x)
     imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.0, 0.0, 0.0, 1.0))
     imgui.push_style_color(imgui.Col_.border, imgui.ImVec4(1.0, 1.0, 1.0, 1.0))
     imgui.push_style_var(imgui.StyleVar_.frame_border_size, 1.0)

@@ -242,6 +242,7 @@ def draw_menu(parent):
 
         # Draw status indicator below menu bar (in same child window)
         if parent._show_progress_overlay:
+            parent._clear_stale_progress()
             draw_status_indicator(parent)
 
 
@@ -1282,6 +1283,8 @@ class PreviewDataWidget(EdgeWindow):
         Handles both saving progress (z-plane) and Suite3D registration progress.
         The `meta` parameter may be a plane index (int) or message (str).
         """
+        import time
+
         if isinstance(meta, (int, np.integer)):
             # This is standard save progress
             self._saveas_progress = frac
@@ -1289,6 +1292,8 @@ class PreviewDataWidget(EdgeWindow):
             self._saveas_done = frac >= 1.0
             if frac >= 1.0:
                 self._saveas_running = False
+                self._saveas_complete_time = time.time()
+                self.logger.info("Save complete")
 
         elif isinstance(meta, str):
             # Suite3D progress message
@@ -1297,6 +1302,26 @@ class PreviewDataWidget(EdgeWindow):
             self._register_z_done = frac >= 1.0
             if frac >= 1.0:
                 self._register_z_running = False
+                self._register_z_complete_time = time.time()
+
+    def _clear_stale_progress(self):
+        """Clear completed progress indicators after a delay."""
+        import time
+        now = time.time()
+        clear_delay = 5.0  # seconds to show completion message
+
+        if getattr(self, '_saveas_done', False):
+            complete_time = getattr(self, '_saveas_complete_time', 0)
+            if now - complete_time > clear_delay:
+                self._saveas_done = False
+                self._saveas_progress = 0.0
+
+        if getattr(self, '_register_z_done', False):
+            complete_time = getattr(self, '_register_z_complete_time', 0)
+            if now - complete_time > clear_delay:
+                self._register_z_done = False
+                self._register_z_progress = 0.0
+                self._register_z_current_msg = None
 
     @property
     def s2p_dir(self):
