@@ -267,7 +267,7 @@ def download_notebook(
 
     Examples
     --------
-    >>> from mbo_utilities.graphics import download_notebook
+    >>> from mbo_utilities.gui import download_notebook
 
     # Download default user guide to current directory
     >>> download_notebook()
@@ -297,8 +297,8 @@ def _check_installation():
 
 def _select_file() -> tuple[Any, Any, Any, bool]:
     """Show file selection dialog and return user choices."""
-    from mbo_utilities.graphics._file_dialog import FileDialog  # triggers _setup import
-    from mbo_utilities.graphics._setup import get_default_ini_path
+    from mbo_utilities.gui._file_dialog import FileDialog  # triggers _setup import
+    from mbo_utilities.gui._setup import get_default_ini_path
     from imgui_bundle import immapp, hello_imgui
 
     dlg = FileDialog()
@@ -329,8 +329,8 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 def _show_metadata_viewer(metadata: dict) -> None:
     """Show metadata in an ImGui window."""
     from imgui_bundle import immapp, hello_imgui
-    from mbo_utilities.graphics._widgets import draw_metadata_inspector
-    from mbo_utilities.graphics._setup import get_default_ini_path
+    from mbo_utilities.gui._widgets import draw_metadata_inspector
+    from mbo_utilities.gui._setup import get_default_ini_path
 
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "MBO Metadata Viewer"
@@ -431,12 +431,12 @@ def _create_image_widget(data_array, widget: bool = True):
     iw.show()
 
     # set qt window icon after canvas is created
-    from mbo_utilities.graphics._setup import set_qt_icon
+    from mbo_utilities.gui._setup import set_qt_icon
     set_qt_icon()
 
     # Add PreviewDataWidget if requested
     if widget:
-        from mbo_utilities.graphics.imgui import PreviewDataWidget
+        from mbo_utilities.gui.imgui import PreviewDataWidget
 
         gui = PreviewDataWidget(
             iw=iw,
@@ -477,7 +477,7 @@ def _run_gui_impl(
     try:
         # Import heavy dependencies only when actually running GUI
         from mbo_utilities.array_types import normalize_roi
-        from mbo_utilities.graphics import _setup  # triggers setup on import
+        from mbo_utilities.gui import _setup  # triggers setup on import
 
         # close splash before showing file dialog
         if splash:
@@ -570,7 +570,7 @@ def run_gui(
     Examples
     --------
     From Python/Jupyter:
-    >>> from mbo_utilities.graphics import run_gui
+    >>> from mbo_utilities.gui import run_gui
     >>> # Option 1: Just show the GUI
     >>> run_gui("path/to/data.tif")
     >>> # Option 2: Get reference to manipulate it

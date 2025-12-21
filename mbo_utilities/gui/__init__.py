@@ -1,5 +1,5 @@
 """
-Graphics module with lazy imports to avoid loading heavy dependencies
+GUI module with lazy imports to avoid loading heavy dependencies
 (torch, cupy, suite2p, wgpu, imgui_bundle) until actually needed.
 
 The CLI entry point (mbo command) imports this module, so we must keep
@@ -19,7 +19,7 @@ __all__ = [
 
 
 def __getattr__(name):
-    """Lazy import heavy graphics modules only when accessed."""
+    """Lazy import heavy GUI modules only when accessed."""
     if name == "run_gui":
         from .run_gui import run_gui
         return run_gui

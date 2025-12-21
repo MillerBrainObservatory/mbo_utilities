@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING
 
 from imgui_bundle import imgui
 
-from mbo_utilities.graphics.widgets.pipelines._base import PipelineWidget
+from mbo_utilities.gui.widgets.pipelines._base import PipelineWidget
 
 if TYPE_CHECKING:
-    from mbo_utilities.graphics.imgui import PreviewDataWidget
+    from mbo_utilities.gui.imgui import PreviewDataWidget
 
 # registry of available pipeline classes
 _PIPELINE_CLASSES: list[type[PipelineWidget]] = []
@@ -27,7 +27,7 @@ def _register_pipelines() -> None:
 
     # import pipeline widgets - they register themselves based on availability
     try:
-        from mbo_utilities.graphics.widgets.pipelines.suite2p import Suite2pPipelineWidget
+        from mbo_utilities.gui.widgets.pipelines.suite2p import Suite2pPipelineWidget
         _PIPELINE_CLASSES.append(Suite2pPipelineWidget)
     except Exception:
         pass

@@ -12,14 +12,14 @@ import time
 import numpy as np
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
-from mbo_utilities.graphics.widgets.pipelines._base import PipelineWidget
-from mbo_utilities.graphics._availability import HAS_SUITE2P
-from mbo_utilities.graphics.diagnostics_widget import DiagnosticsWidget
-from mbo_utilities.graphics.grid_search_viewer import GridSearchViewer
+from mbo_utilities.gui.widgets.pipelines._base import PipelineWidget
+from mbo_utilities.gui._availability import HAS_SUITE2P
+from mbo_utilities.gui.diagnostics_widget import DiagnosticsWidget
+from mbo_utilities.gui.grid_search_viewer import GridSearchViewer
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 if TYPE_CHECKING:
-    from mbo_utilities.graphics.imgui import PreviewDataWidget
+    from mbo_utilities.gui.imgui import PreviewDataWidget
 
 # Apply PySide6 compatibility fix for suite2p GUI BEFORE any suite2p imports
 # suite2p's RangeSlider uses self.NoTicks which doesn't exist in PySide6
@@ -52,7 +52,7 @@ class Suite2pPipelineWidget(PipelineWidget):
         super().__init__(parent)
 
         # import settings from existing module
-        from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings
+        from mbo_utilities.gui.pipeline_widgets import Suite2pSettings
         self.settings = Suite2pSettings()
 
         # config state
@@ -112,7 +112,7 @@ class Suite2pPipelineWidget(PipelineWidget):
 
     def draw_config(self) -> None:
         """draw suite2p configuration ui."""
-        from mbo_utilities.graphics.pipeline_widgets import draw_section_suite2p
+        from mbo_utilities.gui.pipeline_widgets import draw_section_suite2p
 
         self._draw_diagnostics_button()
         imgui.separator()

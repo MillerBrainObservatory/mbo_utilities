@@ -18,10 +18,10 @@ from typing import TYPE_CHECKING
 
 from imgui_bundle import imgui
 
-from mbo_utilities.graphics.widgets._base import Widget
+from mbo_utilities.gui.widgets._base import Widget
 
 if TYPE_CHECKING:
-    from mbo_utilities.graphics.imgui import PreviewDataWidget
+    from mbo_utilities.gui.imgui import PreviewDataWidget
 
 # registry of all discovered widget classes
 _WIDGET_CLASSES: list[type[Widget]] = []

@@ -541,62 +541,81 @@ def draw_status_indicator(self):
     imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.3, 0.3, 0.5))
     imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.2, 0.2, 0.2, 0.5))
     if imgui.small_button("(?)"):
-        imgui.open_popup("##LogOutputPopup")
+        imgui.open_popup("Console Output")
+        if not hasattr(self, "_log_popup_open"):
+            self._log_popup_open = True
+        self._log_popup_open = True
     imgui.pop_style_color(3)
 
     # Tooltip for the button
     if imgui.is_item_hovered():
         imgui.set_tooltip("Click to view console output")
 
-    # Log output popup
-    if imgui.begin_popup("##LogOutputPopup"):
-        imgui.text_colored(imgui.ImVec4(0.7, 0.9, 1.0, 1.0), "Console Output")
-        imgui.same_line()
-        imgui.text_disabled(f"({len(_output_capture.lines)} lines)")
-        imgui.separator()
+    # Log output popup (resizable with close button)
+    imgui.set_next_window_size(imgui.ImVec2(600, 500), imgui.Cond_.first_use_ever)
 
-        # Show active operations if any
-        if items:
-            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), f"Active Operations ({len(items)})")
-            for item in items:
-                pct = int(item["progress"] * 100)
-                color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
-                imgui.text_colored(color, f"  {item['text']} [{pct}%]")
+    opened, visible = imgui.begin_popup_modal(
+        "Console Output",
+        p_open=True if getattr(self, "_log_popup_open", False) else None,
+        flags=imgui.WindowFlags_.no_saved_settings
+    )
+
+    if opened:
+        if not visible:
+            # user closed via X button
+            self._log_popup_open = False
+            imgui.close_current_popup()
+            imgui.end_popup()
+        else:
+            imgui.text_colored(imgui.ImVec4(0.7, 0.9, 1.0, 1.0), "Console Output")
+            imgui.same_line()
+            imgui.text_disabled(f"({len(_output_capture.lines)} lines)")
             imgui.separator()
 
-        # Scrollable output area - show ALL lines, not just last 100
-        if imgui.begin_child("##LogScroll", imgui.ImVec2(550, 400), imgui.ChildFlags_.borders):
-            # Get captured stdout/stderr - show all lines (up to max_lines in deque)
-            captured_lines = _output_capture.lines
-            if captured_lines:
-                # Show in chronological order (oldest first, scroll to see newest)
-                for timestamp, stream, text in captured_lines:
-                    if stream == "stderr":
-                        col = imgui.ImVec4(1.0, 0.4, 0.4, 1.0)  # Red for stderr
-                    else:
-                        col = imgui.ImVec4(0.4, 0.9, 0.4, 1.0)  # Green for stdout
-                    # Truncate very long lines
-                    display_text = text[:150] + "..." if len(text) > 150 else text
-                    imgui.text_colored(col, f"[{timestamp}] {display_text}")
-                # Auto-scroll to bottom on first open
-                if imgui.get_scroll_y() >= imgui.get_scroll_max_y() - 20:
-                    imgui.set_scroll_here_y(1.0)
-            else:
-                imgui.text_disabled("No console output captured yet.")
-                imgui.text_disabled("Output will appear here when operations run.")
-        imgui.end_child()
+            # Show active operations if any
+            if items:
+                imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), f"Active Operations ({len(items)})")
+                for item in items:
+                    pct = int(item["progress"] * 100)
+                    color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
+                    imgui.text_colored(color, f"  {item['text']} [{pct}%]")
+                imgui.separator()
 
-        # Buttons row
-        if imgui.button("Save to File"):
-            _save_log_to_file()
-        imgui.same_line()
-        if imgui.button("Clear"):
-            _output_capture.clear()
-        imgui.same_line()
-        if imgui.button("Close"):
-            imgui.close_current_popup()
+            # Scrollable output area - show ALL lines, not just last 100
+            # use -35 for button row height
+            if imgui.begin_child("##LogScroll", imgui.ImVec2(-1, -35), imgui.ChildFlags_.borders):
+                # Get captured stdout/stderr - show all lines (up to max_lines in deque)
+                captured_lines = _output_capture.lines
+                if captured_lines:
+                    # Show in chronological order (oldest first, scroll to see newest)
+                    for timestamp, stream, text in captured_lines:
+                        if stream == "stderr":
+                            col = imgui.ImVec4(1.0, 0.4, 0.4, 1.0)  # Red for stderr
+                        else:
+                            col = imgui.ImVec4(0.4, 0.9, 0.4, 1.0)  # Green for stdout
+                        # Truncate very long lines
+                        display_text = text[:150] + "..." if len(text) > 150 else text
+                        imgui.text_colored(col, f"[{timestamp}] {display_text}")
+                    # Auto-scroll to bottom on first open
+                    if imgui.get_scroll_y() >= imgui.get_scroll_max_y() - 20:
+                        imgui.set_scroll_here_y(1.0)
+                else:
+                    imgui.text_disabled("No console output captured yet.")
+                    imgui.text_disabled("Output will appear here when operations run.")
+            imgui.end_child()
 
-        imgui.end_popup()
+            # Buttons row
+            if imgui.button("Save to File"):
+                _save_log_to_file()
+            imgui.same_line()
+            if imgui.button("Clear"):
+                _output_capture.clear()
+            imgui.same_line()
+            if imgui.button("Close"):
+                self._log_popup_open = False
+                imgui.close_current_popup()
+
+            imgui.end_popup()
 
     return len(items) > 0
 

@@ -6,8 +6,8 @@ from imgui_bundle import (
     imgui_ctx,
     portable_file_dialogs as pfd,
 )
-from mbo_utilities.graphics._widgets import set_tooltip
-from mbo_utilities.graphics import _setup  # triggers setup on import
+from mbo_utilities.gui._widgets import set_tooltip
+from mbo_utilities.gui import _setup  # triggers setup on import
 from mbo_utilities.preferences import (
     get_default_open_dir,
     get_last_dir,
@@ -16,7 +16,7 @@ from mbo_utilities.preferences import (
     get_gui_preference,
     set_gui_preference,
 )
-from mbo_utilities.graphics.upgrade_manager import UpgradeManager, CheckStatus, UpgradeStatus
+from mbo_utilities.gui.upgrade_manager import UpgradeManager, CheckStatus, UpgradeStatus
 from mbo_utilities.install_checker import check_installation, Status
 
 # re-export for backwards compatibility

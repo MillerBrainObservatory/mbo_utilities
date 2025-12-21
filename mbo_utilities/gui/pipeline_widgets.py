@@ -8,7 +8,7 @@ import numpy as np
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui
 
-from mbo_utilities.graphics._widgets import set_tooltip, compact_header
+from mbo_utilities.gui._widgets import set_tooltip, compact_header
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities._parsing import _convert_paths_to_strings
 
@@ -333,49 +333,66 @@ def draw_section_suite2p(self):
     # Plane selection popup
     if self._show_plane_popup:
         imgui.open_popup("Select Z-Planes##popup")
+        if not hasattr(self, "_plane_popup_open"):
+            self._plane_popup_open = True
 
-    # Calculate popup size to fit all planes
+    # Calculate popup size to fit all planes (resizable by user)
     popup_height = 130 + num_planes * 24
     popup_height = max(150, min(400, popup_height))
-    imgui.set_next_window_size(imgui.ImVec2(220, popup_height), imgui.Cond_.appearing)
+    imgui.set_next_window_size(imgui.ImVec2(250, popup_height), imgui.Cond_.first_use_ever)
 
-    if imgui.begin_popup_modal("Select Z-Planes##popup", None, imgui.WindowFlags_.always_auto_resize)[0]:
-        imgui.text("Select planes to process:")
-        imgui.spacing()
+    opened, visible = imgui.begin_popup_modal(
+        "Select Z-Planes##popup",
+        p_open=True if getattr(self, "_plane_popup_open", True) else None,
+        flags=imgui.WindowFlags_.no_saved_settings
+    )
 
-        if imgui.button("All"):
-            self._selected_planes = set(range(1, num_planes + 1))
-        imgui.same_line()
-        if imgui.button("None"):
-            self._selected_planes = set()
-        imgui.same_line()
-        if imgui.button("Current"):
-            self._selected_planes = {current_plane}
-
-        imgui.separator()
-        imgui.spacing()
-
-        for i in range(num_planes):
-            plane_num = i + 1
-            checked = plane_num in self._selected_planes
-            label = f"Plane {plane_num}"
-            if plane_num == current_plane:
-                label += " (current)"
-            changed, checked = imgui.checkbox(label, checked)
-            if changed:
-                if checked:
-                    self._selected_planes.add(plane_num)
-                else:
-                    self._selected_planes.discard(plane_num)
-
-        imgui.spacing()
-        imgui.separator()
-
-        if imgui.button("Done", imgui.ImVec2(-1, 0)):
+    if opened:
+        if not visible:
+            # user closed via X button
+            self._plane_popup_open = False
             self._show_plane_popup = False
             imgui.close_current_popup()
+            imgui.end_popup()
+        else:
+            self._plane_popup_open = True
+            imgui.text("Select planes to process:")
+            imgui.spacing()
 
-        imgui.end_popup()
+            if imgui.button("All"):
+                self._selected_planes = set(range(1, num_planes + 1))
+            imgui.same_line()
+            if imgui.button("None"):
+                self._selected_planes = set()
+            imgui.same_line()
+            if imgui.button("Current"):
+                self._selected_planes = {current_plane}
+
+            imgui.separator()
+            imgui.spacing()
+
+            for i in range(num_planes):
+                plane_num = i + 1
+                checked = plane_num in self._selected_planes
+                label = f"Plane {plane_num}"
+                if plane_num == current_plane:
+                    label += " (current)"
+                changed, checked = imgui.checkbox(label, checked)
+                if changed:
+                    if checked:
+                        self._selected_planes.add(plane_num)
+                    else:
+                        self._selected_planes.discard(plane_num)
+
+            imgui.spacing()
+            imgui.separator()
+
+            if imgui.button("Done", imgui.ImVec2(-1, 0)):
+                self._plane_popup_open = False
+                self._show_plane_popup = False
+                imgui.close_current_popup()
+
+            imgui.end_popup()
     else:
         self._show_plane_popup = False
 

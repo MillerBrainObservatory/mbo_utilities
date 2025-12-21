@@ -1,8 +1,8 @@
 from pathlib import Path
 from typing import Optional, Union, Literal
 from imgui_bundle import imgui, immapp, hello_imgui, portable_file_dialogs as pfd
-from mbo_utilities.graphics import _setup  # triggers setup on import
-from mbo_utilities.graphics._setup import get_default_ini_path
+from mbo_utilities.gui import _setup  # triggers setup on import
+from mbo_utilities.gui._setup import get_default_ini_path
 
 
 class SimpleSelector:

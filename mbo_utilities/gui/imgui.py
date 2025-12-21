@@ -43,27 +43,27 @@ from mbo_utilities.preferences import (
     add_recent_file,
 )
 from mbo_utilities.array_types import MboRawArray
-from mbo_utilities.graphics._imgui import (
+from mbo_utilities.gui._imgui import (
     begin_popup_size,
     ndim_to_frame,
     style_seaborn_dark,
 )
-from mbo_utilities.graphics._widgets import (
+from mbo_utilities.gui._widgets import (
     set_tooltip,
     checkbox_with_tooltip,
     draw_scope,
     draw_metadata_inspector
 )
-from mbo_utilities.graphics.progress_bar import (
+from mbo_utilities.gui.progress_bar import (
     draw_status_indicator,
     reset_progress_state,
     start_output_capture,
 )
-from mbo_utilities.graphics.widgets import get_supported_widgets, draw_all_widgets
-from mbo_utilities.graphics._availability import HAS_SUITE2P, HAS_SUITE3D
+from mbo_utilities.gui.widgets import get_supported_widgets, draw_all_widgets
+from mbo_utilities.gui._availability import HAS_SUITE2P, HAS_SUITE3D
 from mbo_utilities.lazy_array import imread, imwrite
 from mbo_utilities.arrays import _sanitize_suffix
-from mbo_utilities.graphics.gui_logger import GuiLogger, GuiLogHandler
+from mbo_utilities.gui.gui_logger import GuiLogger, GuiLogHandler
 from mbo_utilities import log
 
 try:
@@ -275,7 +275,7 @@ def draw_tabs(parent):
         if imgui.begin_tab_item("Run")[0]:
             imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
             imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
-            from mbo_utilities.graphics.widgets.pipelines import draw_run_tab
+            from mbo_utilities.gui.widgets.pipelines import draw_run_tab
             draw_run_tab(parent)
             imgui.pop_style_var()
             imgui.pop_style_var()
@@ -288,7 +288,27 @@ def draw_saveas_popup(parent):
         imgui.open_popup("Save As")
         parent._saveas_popup_open = False
 
-    if imgui.begin_popup_modal("Save As")[0]:
+    # track if popup should remain open
+    if not hasattr(parent, "_saveas_modal_open"):
+        parent._saveas_modal_open = True
+
+    # set initial size (resizable by user)
+    imgui.set_next_window_size(imgui.ImVec2(500, 650), imgui.Cond_.first_use_ever)
+
+    opened, visible = imgui.begin_popup_modal(
+        "Save As",
+        p_open=True if parent._saveas_modal_open else None,
+        flags=imgui.WindowFlags_.no_saved_settings
+    )
+
+    if opened:
+        if not visible:
+            # user closed via X button
+            parent._saveas_modal_open = False
+            imgui.close_current_popup()
+            imgui.end_popup()
+            return
+        parent._saveas_modal_open = True
         imgui.dummy(imgui.ImVec2(0, 5))
 
         imgui.set_next_item_width(hello_imgui.em_size(25))
@@ -914,13 +934,16 @@ def draw_saveas_popup(parent):
                     threading.Thread(
                         target=_save_as_worker, kwargs=save_kwargs, daemon=True
                     ).start()
+                parent._saveas_modal_open = False
                 imgui.close_current_popup()
             except Exception as e:
                 parent.logger.info(f"Error saving data: {e}")
+                parent._saveas_modal_open = False
                 imgui.close_current_popup()
 
         imgui.same_line()
         if imgui.button("Cancel"):
+            parent._saveas_modal_open = False
             imgui.close_current_popup()
 
         imgui.end_popup()
@@ -944,7 +967,7 @@ class PreviewDataWidget(EdgeWindow):
         **kwargs,
     ):
         # ensure assets (fonts + icons) are available for this imgui context
-        from mbo_utilities.graphics import _setup  # triggers setup on import
+        from mbo_utilities.gui import _setup  # triggers setup on import
 
         flags = (
             (imgui.WindowFlags_.no_title_bar if not show_title else 0)
@@ -992,7 +1015,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # Only initialize Suite2p settings if suite2p is installed
         if HAS_SUITE2P:
-            from mbo_utilities.graphics.pipeline_widgets import Suite2pSettings
+            from mbo_utilities.gui.pipeline_widgets import Suite2pSettings
             self.s2p = Suite2pSettings()
         else:
             self.s2p = None
@@ -2525,11 +2548,11 @@ class PreviewDataWidget(EdgeWindow):
         resources like open windows, file handles, and pending operations.
         """
         # Clean up pipeline instances (suite2p window, etc)
-        from mbo_utilities.graphics.widgets.pipelines import cleanup_pipelines
+        from mbo_utilities.gui.widgets.pipelines import cleanup_pipelines
         cleanup_pipelines(self)
 
         # Clean up all widgets
-        from mbo_utilities.graphics.widgets import cleanup_all_widgets
+        from mbo_utilities.gui.widgets import cleanup_all_widgets
         cleanup_all_widgets(self._widgets)
 
         # Clear file dialogs

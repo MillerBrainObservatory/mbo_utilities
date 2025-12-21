@@ -6,10 +6,10 @@ for creating demo videos with real mouse cursor movement.
 
 Example usage:
     # Run demo with automatic screen recording
-    uv run python -m mbo_utilities.graphics.demo_automation "D:/data.zarr" --record
+    uv run python -m mbo_utilities.gui.demo_automation "D:/data.zarr" --record
 
     # Run demo without recording
-    uv run python -m mbo_utilities.graphics.demo_automation "D:/data.zarr"
+    uv run python -m mbo_utilities.gui.demo_automation "D:/data.zarr"
 """
 
 from pathlib import Path
@@ -422,7 +422,7 @@ def run_demo(
             pass
 
     from mbo_utilities.lazy_array import imread
-    from mbo_utilities.graphics.imgui import PreviewDataWidget
+    from mbo_utilities.gui.imgui import PreviewDataWidget
     import fastplotlib as fpl
     import numpy as np
 

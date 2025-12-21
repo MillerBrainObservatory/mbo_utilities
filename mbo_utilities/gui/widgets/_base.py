@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from mbo_utilities.graphics.imgui import PreviewDataWidget
+    from mbo_utilities.gui.imgui import PreviewDataWidget
 
 
 class Widget(ABC):

@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING
 
 from imgui_bundle import imgui, hello_imgui
 
-from mbo_utilities.graphics.widgets._base import Widget
-from mbo_utilities.graphics._widgets import set_tooltip
+from mbo_utilities.gui.widgets._base import Widget
+from mbo_utilities.gui._widgets import set_tooltip
 
 if TYPE_CHECKING:
-    from mbo_utilities.graphics.imgui import PreviewDataWidget
+    from mbo_utilities.gui.imgui import PreviewDataWidget
 
 
 class RasterScanWidget(Widget):
