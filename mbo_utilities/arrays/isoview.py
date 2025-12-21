@@ -680,6 +680,32 @@ class IsoviewArray:
         """Release resources (clear zarr cache)."""
         self._zarr_cache.clear()
 
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite: bool = False,
+        target_chunk_mb: int = 50,
+        ext: str = ".tiff",
+        progress_callback=None,
+        debug: bool = False,
+        planes: list[int] | int | None = None,
+        **kwargs,
+    ):
+        """(WIP) Write IsoviewArray to disk."""
+        from mbo_utilities.arrays._base import _imwrite_base
+
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
+
     def __repr__(self):
         return (
             f"IsoviewArray(shape={self.shape}, dtype={self.dtype}, "
