@@ -17,8 +17,29 @@ from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 from mbo_utilities.file_io import HAS_ZARR, logger
 from mbo_utilities.arrays.suite2p import _add_suite2p_labels
 from mbo_utilities.metadata import _build_ome_metadata, get_param, get_voxel_size
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
 logger = log.get("arrays.zarr")
+
+# register zarr pipeline info
+_ZARR_INFO = PipelineInfo(
+    name="zarr",
+    description="Zarr v3 stores (including OME-Zarr)",
+    input_patterns=[
+        "**/*.zarr",
+        "**/*.zarr/",
+        "**/zarr.json",
+    ],
+    output_patterns=[
+        "**/*.zarr",
+        "**/*.zarr/",
+    ],
+    input_extensions=["zarr"],
+    output_extensions=["zarr"],
+    marker_files=["zarr.json"],
+    category="reader",
+)
+register_pipeline(_ZARR_INFO)
 
 
 class ZarrArray(ReductionMixin):

@@ -31,6 +31,7 @@ from imgui_bundle import (
     imgui_ctx,
     implot,
     portable_file_dialogs as pfd,
+    ImVec2,
 )
 from mbo_utilities.metadata import get_param
 from mbo_utilities.file_io import (
@@ -140,8 +141,16 @@ def draw_menu(parent):
             parent.debug_panel.draw()
         imgui.end()
     if parent.show_metadata_viewer:
-        size = begin_popup_size()
-        imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)
+        # use absolute screen positioning so window is visible even when widget collapsed
+        io = imgui.get_io()
+        screen_w, screen_h = io.display_size.x, io.display_size.y
+        win_w, win_h = min(600, screen_w * 0.5), min(500, screen_h * 0.6)
+        # center on screen
+        imgui.set_next_window_pos(
+            ImVec2((screen_w - win_w) / 2, (screen_h - win_h) / 2),
+            imgui.Cond_.first_use_ever,
+        )
+        imgui.set_next_window_size(ImVec2(win_w, win_h), imgui.Cond_.first_use_ever)
         _, parent.show_metadata_viewer = imgui.begin(
             "Metadata Viewer",
             parent.show_metadata_viewer,
@@ -1696,12 +1705,18 @@ class PreviewDataWidget(EdgeWindow):
                     current_indices[1] = new_z
                     self.image_widget.indices = current_indices
 
-    def update(self):
-        # Handle keyboard shortcuts
+    def draw_window(self):
+        """Override parent to handle keyboard shortcuts even when collapsed."""
+        # always handle keyboard shortcuts regardless of collapsed state
         self._handle_keyboard_shortcuts()
-        # Check for file/folder dialog results (iw-array API)
         self._check_file_dialogs()
 
+        # call parent implementation (handles collapsed state and calls update())
+        super().draw_window()
+
+    def update(self):
+        # keyboard shortcuts and file dialogs are handled in draw_window()
+        # to ensure they work even when the widget is collapsed
         draw_saveas_popup(self)
         draw_menu(self)
         draw_tabs(self)

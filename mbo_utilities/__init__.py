@@ -37,6 +37,12 @@ __all__ = [
     "get_voxel_size",
     "normalize_resolution",
     "VoxelSize",
+    # Pipeline registry
+    "get_all_pipelines",
+    "get_pipeline_info",
+    "get_all_input_patterns",
+    "get_all_output_patterns",
+    "get_all_marker_files",
     # Preferences
     "get_recent_files",
     "add_recent_file",
@@ -136,5 +142,20 @@ def __getattr__(name):
     if name in ("select_folder", "select_files"):
         from . import widgets
         return getattr(widgets, name)
+
+    # Pipeline registry (triggers array module imports to register pipelines)
+    if name in (
+        "get_all_pipelines",
+        "get_pipeline_info",
+        "get_all_input_patterns",
+        "get_all_output_patterns",
+        "get_all_marker_files",
+    ):
+        # first register all pipelines
+        from .arrays import register_all_pipelines
+        register_all_pipelines()
+        # then return the requested function
+        from . import pipeline_registry
+        return getattr(pipeline_registry, name)
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

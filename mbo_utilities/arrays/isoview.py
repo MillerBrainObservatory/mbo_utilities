@@ -8,10 +8,29 @@ import logging
 
 import numpy as np
 
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
+
 if TYPE_CHECKING:
     from numpy.typing import DTypeLike
 
 logger = logging.getLogger(__name__)
+
+# register isoview pipeline info
+_ISOVIEW_INFO = PipelineInfo(
+    name="isoview",
+    description="Isoview lightsheet microscopy data",
+    input_patterns=[
+        "**/data_TM??????_SPM??.zarr",
+        "**/SPM??_TM??????_CM??_CHN??.zarr",
+        "**/TM??????/",
+    ],
+    output_patterns=[],
+    input_extensions=["zarr"],
+    output_extensions=[],
+    marker_files=[],
+    category="reader",
+)
+register_pipeline(_ISOVIEW_INFO)
 
 
 class IsoviewArray:

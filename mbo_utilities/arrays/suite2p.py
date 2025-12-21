@@ -20,7 +20,34 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 from mbo_utilities.metadata import get_param
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import load_npy
+
+# register suite2p pipeline info
+_SUITE2P_INFO = PipelineInfo(
+    name="suite2p",
+    description="Suite2p binary output files (registered/raw)",
+    input_patterns=[
+        "**/ops.npy",
+        "**/data.bin",
+        "**/data_raw.bin",
+    ],
+    output_patterns=[
+        "**/ops.npy",
+        "**/data.bin",
+        "**/data_raw.bin",
+        "**/stat.npy",
+        "**/iscell.npy",
+        "**/spks.npy",
+        "**/F.npy",
+        "**/Fneu.npy",
+    ],
+    input_extensions=["npy", "bin"],
+    output_extensions=["npy", "bin"],
+    marker_files=["ops.npy"],
+    category="segmentation",
+)
+register_pipeline(_SUITE2P_INFO)
 
 logger = log.get("arrays.suite2p")
 

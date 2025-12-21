@@ -29,12 +29,48 @@ from mbo_utilities.arrays._base import (
 from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
 from mbo_utilities.metadata import get_metadata, get_param, extract_roi_slices
 from mbo_utilities.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
 
 if TYPE_CHECKING:
     pass
 
 logger = log.get("arrays.tiff")
+
+# register tiff reader pipeline info
+_TIFF_INFO = PipelineInfo(
+    name="tiff",
+    description="Generic TIFF files (BigTIFF, OME-TIFF)",
+    input_patterns=[
+        "**/*.tif",
+        "**/*.tiff",
+    ],
+    output_patterns=[
+        "**/*.tif",
+        "**/*.tiff",
+    ],
+    input_extensions=["tif", "tiff"],
+    output_extensions=["tif", "tiff"],
+    marker_files=[],
+    category="reader",
+)
+register_pipeline(_TIFF_INFO)
+
+# register scanimage raw tiff reader
+_SCANIMAGE_INFO = PipelineInfo(
+    name="scanimage_raw",
+    description="Raw ScanImage TIFF files with multi-ROI support",
+    input_patterns=[
+        "**/*.tif",
+        "**/*.tiff",
+    ],
+    output_patterns=[],
+    input_extensions=["tif", "tiff"],
+    output_extensions=[],
+    marker_files=[],
+    category="reader",
+)
+register_pipeline(_SCANIMAGE_INFO)
 
 
 def _convert_range_to_slice(k):

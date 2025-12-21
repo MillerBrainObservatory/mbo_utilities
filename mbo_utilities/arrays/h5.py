@@ -14,8 +14,29 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 from mbo_utilities.metadata import get_param
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
 logger = log.get("arrays.h5")
+
+# register hdf5 pipeline info
+_H5_INFO = PipelineInfo(
+    name="hdf5",
+    description="HDF5 datasets",
+    input_patterns=[
+        "**/*.h5",
+        "**/*.hdf5",
+        "**/*.hdf",
+    ],
+    output_patterns=[
+        "**/*.h5",
+        "**/*.hdf5",
+    ],
+    input_extensions=["h5", "hdf5", "hdf"],
+    output_extensions=["h5", "hdf5"],
+    marker_files=[],
+    category="reader",
+)
+register_pipeline(_H5_INFO)
 
 
 class H5Array(ReductionMixin):

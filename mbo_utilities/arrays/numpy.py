@@ -13,8 +13,26 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
 logger = log.get("arrays.numpy")
+
+# register numpy pipeline info
+_NUMPY_INFO = PipelineInfo(
+    name="numpy",
+    description="NumPy .npy files",
+    input_patterns=[
+        "**/*.npy",
+    ],
+    output_patterns=[
+        "**/*.npy",
+    ],
+    input_extensions=["npy"],
+    output_extensions=["npy"],
+    marker_files=[],
+    category="reader",
+)
+register_pipeline(_NUMPY_INFO)
 
 
 class NumpyArray(ReductionMixin):

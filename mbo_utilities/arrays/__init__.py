@@ -106,6 +106,20 @@ def __dir__() -> list[str]:
     return list(__all__)
 
 
+def register_all_pipelines() -> None:
+    """
+    Import all array modules to trigger pipeline registration.
+
+    Call this before using pipeline_registry if you want all
+    array types registered.
+    """
+    from importlib import import_module
+
+    # import all array modules to trigger their pipeline registrations
+    for module_name, _ in set(_LAZY_IMPORTS.values()):
+        import_module(module_name, package="mbo_utilities.arrays")
+
+
 __all__ = [
     # Array classes
     "Suite2pArray",
@@ -138,4 +152,6 @@ __all__ = [
     "_sanitize_suffix",
     "CHUNKS_3D",
     "CHUNKS_4D",
+    # Pipeline registration
+    "register_all_pipelines",
 ]
