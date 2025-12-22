@@ -1,5 +1,13 @@
 /* Custom CSS For MBO Documentation */
 
+/* hide light/dark theme toggle - force dark only */
+button.theme-switch-button,
+.theme-switch-button,
+[data-toggle="tooltip"][title*="theme"],
+.bd-header-article__inner .theme-switch-button {
+  display: none !important;
+}
+
 body {
   font-family: 'Open Sans', sans-serif;
   font-size: medium;
