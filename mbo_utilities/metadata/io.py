@@ -281,12 +281,42 @@ def get_metadata_single(file: Path):
 
     tiff_file = tifffile.TiffFile(file)
     if not is_raw_scanimage(file):
+        # try shaped_metadata first (tifffile shaped format)
         if (
-            not hasattr(tiff_file, "shaped_metadata")
-            or tiff_file.shaped_metadata is None
+            hasattr(tiff_file, "shaped_metadata")
+            and tiff_file.shaped_metadata is not None
+            and len(tiff_file.shaped_metadata) > 0
         ):
-            raise ValueError(f"No metadata found in {file}.")
-        return tiff_file.shaped_metadata[0]
+            return tiff_file.shaped_metadata[0]
+
+        # try reading JSON from custom TIFF tag 50839
+        # (this is where _write_tiff stores full metadata in ImageJ mode)
+        try:
+            page0 = tiff_file.pages.first
+            if page0 and 50839 in page0.tags:
+                import json
+                tag_value = page0.tags[50839].value
+                if isinstance(tag_value, bytes):
+                    tag_value = tag_value.rstrip(b"\x00").decode("utf-8")
+                meta = json.loads(tag_value)
+                if isinstance(meta, dict):
+                    return meta
+        except (json.JSONDecodeError, TypeError, AttributeError, KeyError):
+            pass
+
+        # fallback: try reading JSON from first page description
+        # (this is how _write_tiff stores metadata in non-ImageJ mode)
+        try:
+            page0 = tiff_file.pages.first
+            if page0 and page0.description:
+                import json
+                meta = json.loads(page0.description)
+                if isinstance(meta, dict):
+                    return meta
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass
+
+        raise ValueError(f"No metadata found in {file}.")
 
     elif hasattr(tiff_file, "scanimage_metadata"):
         meta = tiff_file.scanimage_metadata

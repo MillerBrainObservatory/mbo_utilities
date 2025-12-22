@@ -330,14 +330,22 @@ class TiffArray(ReductionMixin):
         self._dtype = reader.dtype
         self.filenames = files
 
-        self._metadata = {
+        # try to read metadata from file first, fall back to basic info
+        try:
+            from mbo_utilities.metadata import get_metadata_single
+            self._metadata = get_metadata_single(files[0])
+        except Exception:
+            self._metadata = {}
+
+        # ensure basic shape info is present
+        self._metadata.update({
             "shape": self.shape,
             "dtype": str(self._dtype),
             "nframes": self._nframes,
             "num_frames": self._nframes,
             "file_paths": [str(p) for p in files],
             "num_files": len(files),
-        }
+        })
         self.num_rois = 1
 
     def _init_volume(self, plane_files: list[Path]):
@@ -365,14 +373,22 @@ class TiffArray(ReductionMixin):
         self._dtype = self._planes[0].dtype
         self.filenames = plane_files
 
-        self._metadata = {
+        # try to read metadata from first plane file, fall back to basic info
+        try:
+            from mbo_utilities.metadata import get_metadata_single
+            self._metadata = get_metadata_single(plane_files[0])
+        except Exception:
+            self._metadata = {}
+
+        # ensure basic shape info is present
+        self._metadata.update({
             "shape": self.shape,
             "dtype": str(self._dtype),
             "nframes": self._nframes,
             "num_frames": self._nframes,
             "num_planes": self._nz,
             "plane_files": [str(p) for p in plane_files],
-        }
+        })
         self.num_rois = 1
 
         logger.info(
