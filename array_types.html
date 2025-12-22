@@ -1,0 +1,1176 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Lazy Array Types &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/togglebutton.css?v=13237357" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=581e03ae" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="_static/togglebutton.js?v=4a39c7ea"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="_static/tippy/array_types.5fc74b44-8f34-4b49-99a3-103e86b19a58.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'array_types';</script>
+    <link rel="icon" href="_static/utilities.png"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Quantifying Cell Activity" href="dff.html" />
+    <link rel="prev" title="GUI User Guide" href="usage/gui_guide.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/gui_guide.html">Graphical User Interface</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Array Types</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/array_types.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/array_types.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Farray_types.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/array_types.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Lazy Array Types</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#quick-reference">Quick Reference</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#array-type-details">Array Type Details</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mborawarray">MboRawArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tiffarray">TiffArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mbotiffarray">MBOTiffArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#binarray">BinArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#suite2parray">Suite2pArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#h5array">H5Array</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#zarrarray">ZarrArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#numpyarray">NumpyArray</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#from-npy-files-memory-mapped">From .npy Files (Memory-Mapped)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#from-in-memory-numpy-arrays">From In-Memory Numpy Arrays</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#d-volumetric-data">4D Volumetric Data</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nwbarray">NWBArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#isoviewarray">IsoviewArray</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#decision-tree-what-will-imread-return">Decision Tree: What Will imread() Return?</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#common-properties-across-all-array-types">Common Properties Across All Array Types</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#api-reference">API Reference</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="lazy-array-types">
+<span id="array-types"></span><h1>Lazy Array Types<a class="headerlink" href="#lazy-array-types" title="Link to this heading">#</a></h1>
+<p>Understanding what <code class="docutils literal notranslate"><span class="pre">imread()</span></code> returns and when to use each array type.</p>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">mbo_utilities.imread()</span></code> is a smart file reader that automatically detects the file type and returns the appropriate lazy array class. All array types provide:</p>
+<ul class="simple">
+<li><p><strong>Lazy loading</strong>: Data is read on-demand, not loaded entirely into memory</p></li>
+<li><p><strong>NumPy-like indexing</strong>: Standard slicing syntax (<code class="docutils literal notranslate"><span class="pre">arr[0]</span></code>, <code class="docutils literal notranslate"><span class="pre">arr[10:20,</span> <span class="pre">:,</span> <span class="pre">100:200]</span></code>)</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">_imwrite()</span></code> support</strong>: All arrays can be written to any output format via <code class="docutils literal notranslate"><span class="pre">imwrite()</span></code></p></li>
+<li><p><strong>Metadata</strong>: Accessible via <code class="docutils literal notranslate"><span class="pre">.metadata</span></code> property</p></li>
+</ul>
+</section>
+<section id="quick-reference">
+<h2>Quick Reference<a class="headerlink" href="#quick-reference" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Input</p></th>
+<th class="head"><p>Returns</p></th>
+<th class="head"><p>Shape</p></th>
+<th class="head"><p>Use Case</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.tif</span></code> (raw ScanImage)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">MboRawArray</span></code></p></td>
+<td><p>(T, Z, Y, X)</p></td>
+<td><p>Multi-ROI volumetric data with phase correction</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">.tif</span></code> (processed, single file)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">TiffArray</span></code></p></td>
+<td><p>(T, 1, Y, X)</p></td>
+<td><p>Standard TIFF files, lazy page access</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.tif</span></code> (processed, multiple files)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">MBOTiffArray</span></code></p></td>
+<td><p>(T, Z, Y, X)</p></td>
+<td><p>Dask-backed multi-file TIFF</p></td>
+</tr>
+<tr class="row-odd"><td><p>Directory with <code class="docutils literal notranslate"><span class="pre">planeXX.tiff</span></code> files</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">TiffArray</span></code></p></td>
+<td><p>(T, Z, Y, X)</p></td>
+<td><p>Multi-plane TIFF volume (auto-detected)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.bin</span></code> (direct path)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">BinArray</span></code></p></td>
+<td><p>(T, Y, X)</p></td>
+<td><p>Direct binary file manipulation</p></td>
+</tr>
+<tr class="row-odd"><td><p>Directory with <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Suite2pArray</span></code></p></td>
+<td><p>(T, Y, X)</p></td>
+<td><p>Suite2p workflow integration</p></td>
+</tr>
+<tr class="row-even"><td><p>Directory with <code class="docutils literal notranslate"><span class="pre">planeXX/</span></code> subdirs</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Suite2pArray</span></code></p></td>
+<td><p>(T, Z, Y, X)</p></td>
+<td><p>Multi-plane Suite2p output (auto-detected)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">.h5</span></code> / <code class="docutils literal notranslate"><span class="pre">.hdf5</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">H5Array</span></code></p></td>
+<td><p>varies</p></td>
+<td><p>HDF5 datasets</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.zarr</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ZarrArray</span></code></p></td>
+<td><p>(T, Z, Y, X)</p></td>
+<td><p>Zarr v3 / OME-Zarr stores</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">.npy</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">NumpyArray</span></code></p></td>
+<td><p>varies</p></td>
+<td><p>NumPy memory-mapped files</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.nwb</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">NWBArray</span></code></p></td>
+<td><p>varies</p></td>
+<td><p>Neurodata Without Borders files</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">np.ndarray</span></code> (in-memory)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">NumpyArray</span></code></p></td>
+<td><p>varies</p></td>
+<td><p>Wrap numpy arrays for imwrite support</p></td>
+</tr>
+<tr class="row-even"><td><p>Isoview lightsheet directory</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">IsoviewArray</span></code></p></td>
+<td><p>(T, Z, V, Y, X)</p></td>
+<td><p>Multi-view lightsheet data</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="array-type-details">
+<h2>Array Type Details<a class="headerlink" href="#array-type-details" title="Link to this heading">#</a></h2>
+<section id="mborawarray">
+<h3>MboRawArray<a class="headerlink" href="#mborawarray" title="Link to this heading">#</a></h3>
+<p><strong>Returned when:</strong> Reading raw ScanImage TIFF files with multi-ROI metadata</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">mbo_utilities</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mbo</span>
+
+<span class="c1"># Raw ScanImage TIFFs</span>
+<span class="n">scan</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/raw/*.tif&quot;</span><span class="p">)</span>
+<span class="c1"># Returns: MboRawArray</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">scan</span><span class="p">))</span>     <span class="c1"># &lt;class &#39;MboRawArray&#39;&gt;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">scan</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>     <span class="c1"># (T, Z, Y, X) - e.g., (10000, 14, 456, 896)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">scan</span><span class="o">.</span><span class="n">num_rois</span><span class="p">)</span>  <span class="c1"># Number of ROIs</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">scan</span><span class="o">.</span><span class="n">num_planes</span><span class="p">)</span>  <span class="c1"># Alias for num_channels (Z planes)</span>
+
+<span class="c1"># ROI handling</span>
+<span class="n">scan</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="kc">None</span>      <span class="c1"># Stitch all ROIs horizontally (default)</span>
+<span class="n">scan</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="mi">0</span>         <span class="c1"># Split into separate ROIs (returns tuple)</span>
+<span class="n">scan</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="mi">1</span>         <span class="c1"># Use only ROI 1 (1-indexed)</span>
+<span class="n">scan</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>    <span class="c1"># Select specific ROIs</span>
+
+<span class="c1"># Phase correction settings</span>
+<span class="n">scan</span><span class="o">.</span><span class="n">fix_phase</span> <span class="o">=</span> <span class="kc">True</span>           <span class="c1"># Enable bidirectional scan-phase correction</span>
+<span class="n">scan</span><span class="o">.</span><span class="n">use_fft</span> <span class="o">=</span> <span class="kc">True</span>             <span class="c1"># Use FFT-based phase correction</span>
+<span class="n">scan</span><span class="o">.</span><span class="n">phasecorr_method</span> <span class="o">=</span> <span class="s2">&quot;mean&quot;</span>  <span class="c1"># &quot;mean&quot;, &quot;median&quot;, &quot;max&quot;</span>
+<span class="n">scan</span><span class="o">.</span><span class="n">border</span> <span class="o">=</span> <span class="mi">3</span>                 <span class="c1"># Border pixels to exclude</span>
+<span class="n">scan</span><span class="o">.</span><span class="n">upsample</span> <span class="o">=</span> <span class="mi">5</span>               <span class="c1"># Subpixel upsampling factor</span>
+<span class="n">scan</span><span class="o">.</span><span class="n">max_offset</span> <span class="o">=</span> <span class="mi">4</span>             <span class="c1"># Maximum phase offset to search</span>
+</pre></div>
+</div>
+<p><strong>Key Features:</strong></p>
+<ul class="simple">
+<li><p>Automatic ROI stitching/splitting via <code class="docutils literal notranslate"><span class="pre">roi</span></code> property</p></li>
+<li><p>Bidirectional scan-phase correction (configurable methods)</p></li>
+<li><p>Multi-plane volumetric data support</p></li>
+<li><p>ROI position extraction from ScanImage metadata</p></li>
+<li><p>Stores all ScanImage-metadata in array.metadata[“si”]</p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="tiffarray">
+<h3>TiffArray<a class="headerlink" href="#tiffarray" title="Link to this heading">#</a></h3>
+<p><strong>Returned when:</strong> Reading processed TIFF file(s) without ScanImage metadata, or a directory with <code class="docutils literal notranslate"><span class="pre">planeXX.tiff</span></code> files</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Single or multiple standard TIFF files</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/processed.tif&quot;</span><span class="p">)</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">([</span><span class="s2">&quot;/path/file1.tif&quot;</span><span class="p">,</span> <span class="s2">&quot;/path/file2.tif&quot;</span><span class="p">])</span>
+<span class="c1"># Returns: TiffArray</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">arr</span><span class="p">))</span>   <span class="c1"># &lt;class &#39;TiffArray&#39;&gt;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>   <span class="c1"># (T, 1, Y, X) - 4D with Z=1 for single files</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>   <span class="c1"># Data type from TIFF</span>
+
+<span class="c1"># Directory with planeXX.tiff files (auto-detected volumetric)</span>
+<span class="n">vol</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/tiff_output/&quot;</span><span class="p">)</span>
+<span class="c1"># Detects plane01.tiff, plane02.tiff, etc.</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">vol</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>         <span class="c1"># (T, Z, Y, X) - e.g., (10000, 14, 512, 512)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">vol</span><span class="o">.</span><span class="n">is_volumetric</span><span class="p">)</span> <span class="c1"># True</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">vol</span><span class="o">.</span><span class="n">num_planes</span><span class="p">)</span>    <span class="c1"># 14</span>
+
+<span class="c1"># Lazy frame reading</span>
+<span class="n">frame</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>        <span class="c1"># Read first frame</span>
+<span class="n">subset</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[</span><span class="mi">10</span><span class="p">:</span><span class="mi">20</span><span class="p">]</span>   <span class="c1"># Read frames 10-19 (only those pages are loaded)</span>
+
+<span class="c1"># Dtype conversion</span>
+<span class="n">arr32</span> <span class="o">=</span> <span class="n">arr</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Key Features:</strong></p>
+<ul class="simple">
+<li><p>Uses <code class="docutils literal notranslate"><span class="pre">TiffFile</span></code> handles for lazy page access</p></li>
+<li><p>Auto-detects volumetric structure from <code class="docutils literal notranslate"><span class="pre">planeXX.tiff</span></code> filename patterns</p></li>
+<li><p>Multi-file support (concatenated along time axis)</p></li>
+<li><p>Thread-safe page reading</p></li>
+<li><p>Always outputs 4D format: (T, Z, Y, X) where Z=1 for single files</p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="mbotiffarray">
+<h3>MBOTiffArray<a class="headerlink" href="#mbotiffarray" title="Link to this heading">#</a></h3>
+<p><strong>Returned when:</strong> Reading TIFFs with MBO-specific metadata (uses Dask backend)</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># MBO-processed TIFFs with metadata</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/processed/*.tif&quot;</span><span class="p">)</span>
+<span class="c1"># Returns: MBOTiffArray if MBO metadata detected</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">arr</span><span class="p">))</span>   <span class="c1"># &lt;class &#39;MBOTiffArray&#39;&gt;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>   <span class="c1"># (T, Z, Y, X) - Dask infers shape</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">dask</span><span class="p">)</span>    <span class="c1"># Access underlying dask.Array</span>
+
+<span class="c1"># Lazy operations via Dask</span>
+<span class="n">mean_proj</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[:</span><span class="mi">100</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">compute</span><span class="p">()</span>
+</pre></div>
+</div>
+<p><strong>Key Features:</strong></p>
+<ul class="simple">
+<li><p>Dask-backed for truly lazy, chunked access</p></li>
+<li><p>Uses <code class="docutils literal notranslate"><span class="pre">tifffile.imread(aszarr=True)</span></code> for memory-mapped access</p></li>
+<li><p>Automatic dimension handling (2D → TZYX, 3D → TZYX, 4D passthrough)</p></li>
+<li><p>Preserves file tags from filenames</p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="binarray">
+<h3>BinArray<a class="headerlink" href="#binarray" title="Link to this heading">#</a></h3>
+<p><strong>Returned when:</strong> Explicitly reading a <code class="docutils literal notranslate"><span class="pre">.bin</span></code> file path</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Reading a specific binary file</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/data_raw.bin&quot;</span><span class="p">)</span>
+<span class="c1"># Returns: BinArray</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">arr</span><span class="p">))</span>   <span class="c1"># &lt;class &#39;BinArray&#39;&gt;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>   <span class="c1"># (nframes, Ly, Lx)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">nframes</span><span class="p">)</span> <span class="c1"># Number of frames</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">Ly</span><span class="p">,</span> <span class="n">arr</span><span class="o">.</span><span class="n">Lx</span><span class="p">)</span>  <span class="c1"># Spatial dimensions</span>
+
+<span class="c1"># Access data like numpy array</span>
+<span class="n">frame</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>      <span class="c1"># First frame</span>
+<span class="n">subset</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">100</span><span class="p">]</span> <span class="c1"># First 100 frames</span>
+
+<span class="c1"># Write access (if opened for writing)</span>
+<span class="n">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">new_frame</span>
+
+<span class="c1"># Context manager support</span>
+<span class="k">with</span> <span class="n">BinArray</span><span class="p">(</span><span class="s2">&quot;data.bin&quot;</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">512</span><span class="p">,</span> <span class="mi">512</span><span class="p">))</span> <span class="k">as</span> <span class="n">arr</span><span class="p">:</span>
+    <span class="n">arr</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">data</span>
+
+<span class="c1"># Close when done</span>
+<span class="n">arr</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre></div>
+</div>
+<p><strong>Key Features:</strong></p>
+<ul class="simple">
+<li><p>Direct binary file access via <code class="docutils literal notranslate"><span class="pre">np.memmap</span></code></p></li>
+<li><p>Auto-infers shape from adjacent <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code> if present</p></li>
+<li><p>Can provide shape manually: <code class="docutils literal notranslate"><span class="pre">BinArray(&quot;file.bin&quot;,</span> <span class="pre">shape=(1000,</span> <span class="pre">512,</span> <span class="pre">512))</span></code></p></li>
+<li><p>Read/write access (supports <code class="docutils literal notranslate"><span class="pre">__setitem__</span></code>)</p></li>
+<li><p>Useful for creating new binary files from scratch</p></li>
+</ul>
+<p><strong>When to use:</strong></p>
+<ul class="simple">
+<li><p>Reading/writing specific binary files in a Suite2p workflow</p></li>
+<li><p>Creating new binary files from scratch</p></li>
+<li><p>When you want to work with the file directly, not through Suite2p’s abstraction</p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="suite2parray">
+<h3>Suite2pArray<a class="headerlink" href="#suite2parray" title="Link to this heading">#</a></h3>
+<p><strong>Returned when:</strong> Reading a directory containing <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code>, or <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code> directly, or a directory with multiple <code class="docutils literal notranslate"><span class="pre">planeXX/</span></code> subdirectories</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Reading a Suite2p single-plane directory</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/suite2p/plane0&quot;</span><span class="p">)</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/suite2p/plane0/ops.npy&quot;</span><span class="p">)</span>
+<span class="c1"># Returns: Suite2pArray</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">arr</span><span class="p">))</span>   <span class="c1"># &lt;class &#39;Suite2pArray&#39;&gt;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>   <span class="c1"># (nframes, Ly, Lx) - 3D for single plane</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">metadata</span><span class="p">)</span>  <span class="c1"># Full ops.npy contents</span>
+
+<span class="c1"># Multi-plane Suite2p output (auto-detected volumetric)</span>
+<span class="n">vol</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/suite2p_output/&quot;</span><span class="p">)</span>
+<span class="c1"># Detects plane01_stitched/, plane02_stitched/, etc.</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">vol</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>         <span class="c1"># (T, Z, Y, X) - e.g., (10000, 14, 512, 512)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">vol</span><span class="o">.</span><span class="n">is_volumetric</span><span class="p">)</span> <span class="c1"># True</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">vol</span><span class="o">.</span><span class="n">num_planes</span><span class="p">)</span>    <span class="c1"># 14</span>
+
+<span class="c1"># File paths (single plane)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">raw_file</span><span class="p">)</span>    <span class="c1"># Path to data_raw.bin (unregistered)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">reg_file</span><span class="p">)</span>    <span class="c1"># Path to data.bin (registered)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">active_file</span><span class="p">)</span> <span class="c1"># Currently active file</span>
+
+<span class="c1"># Switch between raw and registered</span>
+<span class="n">arr</span><span class="o">.</span><span class="n">switch_channel</span><span class="p">(</span><span class="n">use_raw</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>   <span class="c1"># Use data_raw.bin</span>
+<span class="n">arr</span><span class="o">.</span><span class="n">switch_channel</span><span class="p">(</span><span class="n">use_raw</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>  <span class="c1"># Use data.bin (default)</span>
+
+<span class="c1"># Visualization with both channels</span>
+<span class="n">iw</span> <span class="o">=</span> <span class="n">arr</span><span class="o">.</span><span class="n">imshow</span><span class="p">()</span>  <span class="c1"># Shows raw and registered side-by-side if both exist</span>
+</pre></div>
+</div>
+<p><strong>Key Features:</strong></p>
+<ul class="simple">
+<li><p>Full Suite2p context (metadata from <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code>)</p></li>
+<li><p>Auto-detects volumetric structure from <code class="docutils literal notranslate"><span class="pre">planeXX/</span></code> subdirectory patterns</p></li>
+<li><p>Access to both raw (<code class="docutils literal notranslate"><span class="pre">data_raw.bin</span></code>) and registered (<code class="docutils literal notranslate"><span class="pre">data.bin</span></code>) data</p></li>
+<li><p>Memory-mapped via <code class="docutils literal notranslate"><span class="pre">np.memmap</span></code> for lazy loading</p></li>
+<li><p>File size validation against ops metadata</p></li>
+<li><p>For volumes: <code class="docutils literal notranslate"><span class="pre">switch_channel()</span></code> applies to all planes</p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="h5array">
+<h3>H5Array<a class="headerlink" href="#h5array" title="Link to this heading">#</a></h3>
+<p><strong>Returned when:</strong> Reading HDF5 files (<code class="docutils literal notranslate"><span class="pre">.h5</span></code>, <code class="docutils literal notranslate"><span class="pre">.hdf5</span></code>)</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># HDF5 dataset</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/data.h5&quot;</span><span class="p">)</span>
+<span class="c1"># Returns: H5Array</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">arr</span><span class="p">))</span>        <span class="c1"># &lt;class &#39;H5Array&#39;&gt;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>        <span class="c1"># Dataset shape</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">dataset_name</span><span class="p">)</span> <span class="c1"># Auto-detected: &#39;mov&#39;, &#39;data&#39;, or first available</span>
+
+<span class="c1"># Optionally specify dataset name</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/data.h5&quot;</span><span class="p">,</span> <span class="n">dataset</span><span class="o">=</span><span class="s2">&quot;imaging_data&quot;</span><span class="p">)</span>
+
+<span class="c1"># Access data</span>
+<span class="n">frame</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">subset</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[</span><span class="mi">10</span><span class="p">:</span><span class="mi">20</span><span class="p">,</span> <span class="p">:,</span> <span class="mi">100</span><span class="p">:</span><span class="mi">200</span><span class="p">]</span>
+
+<span class="c1"># File-level metadata</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">metadata</span><span class="p">)</span>  <span class="c1"># HDF5 file attributes</span>
+
+<span class="c1"># Close file handle</span>
+<span class="n">arr</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre></div>
+</div>
+<p><strong>Key Features:</strong></p>
+<ul class="simple">
+<li><p>Auto-detects common dataset names: <code class="docutils literal notranslate"><span class="pre">'mov'</span></code>, <code class="docutils literal notranslate"><span class="pre">'data'</span></code>, <code class="docutils literal notranslate"><span class="pre">'scan_corrections'</span></code></p></li>
+<li><p>Lazy loading via <code class="docutils literal notranslate"><span class="pre">h5py.Dataset</span></code></p></li>
+<li><p>Supports ellipsis indexing (<code class="docutils literal notranslate"><span class="pre">arr[...,</span> <span class="pre">100:200]</span></code>)</p></li>
+<li><p>File-level attributes exposed via <code class="docutils literal notranslate"><span class="pre">.metadata</span></code></p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="zarrarray">
+<h3>ZarrArray<a class="headerlink" href="#zarrarray" title="Link to this heading">#</a></h3>
+<p><strong>Returned when:</strong> Reading Zarr stores (<code class="docutils literal notranslate"><span class="pre">.zarr</span></code> directories)</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Zarr store (standard or OME-Zarr)</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/data.zarr&quot;</span><span class="p">)</span>
+<span class="c1"># Returns: ZarrArray</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">arr</span><span class="p">))</span>   <span class="c1"># &lt;class &#39;ZarrArray&#39;&gt;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>   <span class="c1"># (T, Z, Y, X) - always 4D</span>
+
+<span class="c1"># Read multiple zarr stores as z-planes</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">([</span><span class="s2">&quot;/path/plane01.zarr&quot;</span><span class="p">,</span> <span class="s2">&quot;/path/plane02.zarr&quot;</span><span class="p">])</span>
+
+<span class="c1"># Access pre-computed statistics (if available in OME metadata)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">zstats</span><span class="p">)</span>  <span class="c1"># {&#39;mean&#39;: [...], &#39;std&#39;: [...], &#39;snr&#39;: [...]}</span>
+
+<span class="c1"># Access metadata (OME-NGFF attributes if present)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">metadata</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Key Features:</strong></p>
+<ul class="simple">
+<li><p>Supports both standard Zarr arrays and OME-Zarr groups</p></li>
+<li><p>Auto-detects OME-Zarr structure (looks for <code class="docutils literal notranslate"><span class="pre">&quot;0&quot;</span></code> subarray in groups)</p></li>
+<li><p>Multi-store support (stacked along Z axis)</p></li>
+<li><p>Zarr v3 compatible</p></li>
+<li><p>Exposes OME-NGFF metadata via <code class="docutils literal notranslate"><span class="pre">.metadata</span></code></p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="numpyarray">
+<h3>NumpyArray<a class="headerlink" href="#numpyarray" title="Link to this heading">#</a></h3>
+<p><strong>Returned when:</strong> Reading <code class="docutils literal notranslate"><span class="pre">.npy</span></code> files OR passing an in-memory numpy array to <code class="docutils literal notranslate"><span class="pre">imread()</span></code></p>
+<p>This is the most versatile array type - it wraps any numpy array and provides full <code class="docutils literal notranslate"><span class="pre">imwrite()</span></code> support.</p>
+<section id="from-npy-files-memory-mapped">
+<h4>From .npy Files (Memory-Mapped)<a class="headerlink" href="#from-npy-files-memory-mapped" title="Link to this heading">#</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Read .npy file - memory-mapped for lazy loading</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/data.npy&quot;</span><span class="p">)</span>
+<span class="c1"># Returns: NumpyArray</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">arr</span><span class="p">))</span>   <span class="c1"># &lt;class &#39;NumpyArray&#39;&gt;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>   <span class="c1"># (T, Y, X) or (T, Z, Y, X)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">dims</span><span class="p">)</span>    <span class="c1"># &#39;TYX&#39; or &#39;TZYX&#39; (auto-inferred)</span>
+</pre></div>
+</div>
+</section>
+<section id="from-in-memory-numpy-arrays">
+<h4>From In-Memory Numpy Arrays<a class="headerlink" href="#from-in-memory-numpy-arrays" title="Link to this heading">#</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">mbo_utilities</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mbo</span>
+
+<span class="c1"># Create or load a numpy array from anywhere</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">512</span><span class="p">,</span> <span class="mi">512</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+<span class="c1"># Wrap with imread - returns NumpyArray</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="p">)</span>
+<span class="c1"># NumpyArray(shape=(100, 512, 512), dtype=float32, dims=&#39;TYX&#39; (in-memory))</span>
+
+<span class="c1"># Now you have full imwrite support with all features</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.zarr&quot;</span><span class="p">)</span>   <span class="c1"># Zarr v3 with chunking/sharding</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.tiff&quot;</span><span class="p">)</span>   <span class="c1"># BigTIFF</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.bin&quot;</span><span class="p">)</span>    <span class="c1"># Suite2p binary + ops.npy</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.h5&quot;</span><span class="p">)</span>     <span class="c1"># HDF5</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.npy&quot;</span><span class="p">)</span>    <span class="c1"># NumPy format</span>
+</pre></div>
+</div>
+</section>
+<section id="d-volumetric-data">
+<h4>4D Volumetric Data<a class="headerlink" href="#d-volumetric-data" title="Link to this heading">#</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># 4D arrays are automatically detected as (T, Z, Y, X)</span>
+<span class="n">volume</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">15</span><span class="p">,</span> <span class="mi">512</span><span class="p">,</span> <span class="mi">512</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="n">volume</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">dims</span><span class="p">)</span>        <span class="c1"># &#39;TZYX&#39;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">num_planes</span><span class="p">)</span>  <span class="c1"># 15</span>
+
+<span class="c1"># Write specific planes</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.zarr&quot;</span><span class="p">,</span> <span class="n">planes</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">14</span><span class="p">])</span>
+</pre></div>
+</div>
+<p><strong>Key Features:</strong></p>
+<ul class="simple">
+<li><p>Automatic dimension inference (<code class="docutils literal notranslate"><span class="pre">TYX</span></code>, <code class="docutils literal notranslate"><span class="pre">TZYX</span></code>, <code class="docutils literal notranslate"><span class="pre">YX</span></code>, etc.)</p></li>
+<li><p>Memory-mapped for <code class="docutils literal notranslate"><span class="pre">.npy</span></code> files (lazy loading)</p></li>
+<li><p>Full <code class="docutils literal notranslate"><span class="pre">imwrite()</span></code> support with all output formats</p></li>
+<li><p>Chunked reduction operations (<code class="docutils literal notranslate"><span class="pre">mean</span></code>, <code class="docutils literal notranslate"><span class="pre">std</span></code>, <code class="docutils literal notranslate"><span class="pre">max</span></code>, <code class="docutils literal notranslate"><span class="pre">min</span></code>)</p></li>
+<li><p>Metadata auto-generation from array shape</p></li>
+</ul>
+</section>
+</section>
+<hr class="docutils" />
+<section id="nwbarray">
+<h3>NWBArray<a class="headerlink" href="#nwbarray" title="Link to this heading">#</a></h3>
+<p><strong>Returned when:</strong> Reading NWB (Neurodata Without Borders) files</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># NWB file with TwoPhotonSeries</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;/path/to/experiment.nwb&quot;</span><span class="p">)</span>
+<span class="c1"># Returns: NWBArray</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">arr</span><span class="p">))</span>   <span class="c1"># &lt;class &#39;NWBArray&#39;&gt;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>   <span class="c1"># Shape from TwoPhotonSeries data</span>
+
+<span class="c1"># Access data</span>
+<span class="n">frame</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+</pre></div>
+</div>
+<p><strong>Key Features:</strong></p>
+<ul class="simple">
+<li><p>Reads <code class="docutils literal notranslate"><span class="pre">TwoPhotonSeries</span></code> acquisition data from NWB files</p></li>
+<li><p>Requires <code class="docutils literal notranslate"><span class="pre">pynwb</span></code> package (<code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">pynwb</span></code>)</p></li>
+<li><p>Exposes underlying NWB data object</p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="isoviewarray">
+<h3>IsoviewArray<a class="headerlink" href="#isoviewarray" title="Link to this heading">#</a></h3>
+<p><strong>Returned when:</strong> Manually instantiated for isoview lightsheet microscopy data</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays</span><span class="w"> </span><span class="kn">import</span> <span class="n">IsoviewArray</span>
+
+<span class="c1"># Isoview lightsheet data (multi-timepoint)</span>
+<span class="n">arr</span> <span class="o">=</span> <span class="n">IsoviewArray</span><span class="p">(</span><span class="s2">&quot;/path/to/output&quot;</span><span class="p">)</span>
+<span class="c1"># Shape: (T, Z, Views, Y, X) - 5D</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>       <span class="c1"># (10, 543, 4, 2048, 2048)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">views</span><span class="p">)</span>       <span class="c1"># [(0, 0), (1, 0), (2, 1), (3, 1)] - (camera, channel) pairs</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">num_views</span><span class="p">)</span>   <span class="c1"># 4</span>
+
+<span class="c1"># Access specific view</span>
+<span class="n">frame</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>  <span class="c1"># timepoint 0, z=100, view 0 (camera 0, channel 0)</span>
+
+<span class="c1"># Get view index for camera/channel</span>
+<span class="n">idx</span> <span class="o">=</span> <span class="n">arr</span><span class="o">.</span><span class="n">view_index</span><span class="p">(</span><span class="n">camera</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+<span class="c1"># Access labels and projections (consolidated structure only)</span>
+<span class="n">labels</span> <span class="o">=</span> <span class="n">arr</span><span class="o">.</span><span class="n">get_labels</span><span class="p">(</span><span class="n">timepoint</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">camera</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">label_type</span><span class="o">=</span><span class="s1">&#39;segmentation&#39;</span><span class="p">)</span>
+<span class="n">proj</span> <span class="o">=</span> <span class="n">arr</span><span class="o">.</span><span class="n">get_projection</span><span class="p">(</span><span class="n">timepoint</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">camera</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">proj_type</span><span class="o">=</span><span class="s1">&#39;xy&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Key Features:</strong></p>
+<ul class="simple">
+<li><p>Supports two data structures:</p>
+<ul>
+<li><p><strong>Consolidated</strong>: <code class="docutils literal notranslate"><span class="pre">data_TM000000_SPM00.zarr/camera_0/0/</span></code></p></li>
+<li><p><strong>Separate</strong>: <code class="docutils literal notranslate"><span class="pre">SPM00_TM000000_CM00_CHN01.zarr</span></code></p></li>
+</ul>
+</li>
+<li><p>Multi-view (camera/channel combinations)</p></li>
+<li><p>5D shape: <code class="docutils literal notranslate"><span class="pre">(T,</span> <span class="pre">Z,</span> <span class="pre">Views,</span> <span class="pre">Y,</span> <span class="pre">X)</span></code> or 4D <code class="docutils literal notranslate"><span class="pre">(Z,</span> <span class="pre">Views,</span> <span class="pre">Y,</span> <span class="pre">X)</span></code> for single timepoint</p></li>
+<li><p>Access to segmentation labels and projections</p></li>
+<li><p>Lazy loading via Zarr</p></li>
+</ul>
+</section>
+</section>
+<hr class="docutils" />
+<section id="decision-tree-what-will-imread-return">
+<h2>Decision Tree: What Will imread() Return?<a class="headerlink" href="#decision-tree-what-will-imread-return" title="Link to this heading">#</a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>imread(input)
+  │
+  ├─ isinstance(input, np.ndarray)?
+  │   └─ Yes → NumpyArray (in-memory wrapper)
+  │
+  ├─ Is input a Path or string?
+  │   │
+  │   ├─ .npy file?
+  │   │   └─ NumpyArray (memory-mapped)
+  │   │
+  │   ├─ .nwb file?
+  │   │   └─ NWBArray
+  │   │
+  │   ├─ .h5 / .hdf5 file?
+  │   │   └─ H5Array
+  │   │
+  │   ├─ .zarr directory?
+  │   │   └─ ZarrArray
+  │   │
+  │   ├─ .bin file (direct path)?
+  │   │   └─ BinArray
+  │   │
+  │   ├─ .tif / .tiff file(s)?
+  │   │   ├─ Has ScanImage ROI metadata? → MboRawArray
+  │   │   ├─ Has MBO metadata (multiple files)? → MBOTiffArray
+  │   │   └─ Standard TIFF → TiffArray
+  │   │
+  │   ├─ Directory?
+  │   │   ├─ Contains planeXX.tiff files? → TiffArray (volumetric)
+  │   │   ├─ Contains planeXX/ subdirs with ops.npy? → Suite2pArray (volumetric)
+  │   │   ├─ Contains ops.npy? → Suite2pArray
+  │   │   └─ Contains raw ScanImage TIFFs? → MboRawArray
+  │   │
+  │   └─ ops.npy file directly?
+  │       └─ Suite2pArray
+  │
+  └─ List of paths?
+      ├─ All .tif files → TiffArray or MBOTiffArray
+      └─ All .zarr stores → ZarrArray (stacked along Z)
+</pre></div>
+</div>
+</section>
+<section id="common-properties-across-all-array-types">
+<h2>Common Properties Across All Array Types<a class="headerlink" href="#common-properties-across-all-array-types" title="Link to this heading">#</a></h2>
+<p>All lazy array types provide these standard properties:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Property</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.shape</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">tuple[int,</span> <span class="pre">...]</span></code></p></td>
+<td><p>Array dimensions</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">.dtype</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">np.dtype</span></code></p></td>
+<td><p>Data type</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.ndim</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td><p>Number of dimensions</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">.metadata</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">dict</span></code></p></td>
+<td><p>Array/file metadata</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.filenames</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">list[Path]</span></code></p></td>
+<td><p>Source file paths</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">._imwrite()</span></code></p></td>
+<td><p>method</p></td>
+<td><p>Write to any output format</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Most array types also provide:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Property</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.num_planes</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td><p>Number of Z-planes</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">.num_rois</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td><p>Number of ROIs (MboRawArray)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.close()</span></code></p></td>
+<td><p>method</p></td>
+<td><p>Release file handles</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="api-reference">
+<h2>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">mbo_utilities.imread()</span></code> - Smart file reader</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mbo_utilities.imwrite()</span></code> - Universal file writer</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mbo_utilities.arrays</span></code> - Direct access to array classes</p></li>
+</ul>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="usage/gui_guide.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">GUI User Guide</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="dff.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Quantifying Cell Activity</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#quick-reference">Quick Reference</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#array-type-details">Array Type Details</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mborawarray">MboRawArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tiffarray">TiffArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mbotiffarray">MBOTiffArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#binarray">BinArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#suite2parray">Suite2pArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#h5array">H5Array</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#zarrarray">ZarrArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#numpyarray">NumpyArray</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#from-npy-files-memory-mapped">From .npy Files (Memory-Mapped)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#from-in-memory-numpy-arrays">From In-Memory Numpy Arrays</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#d-volumetric-data">4D Volumetric Data</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nwbarray">NWBArray</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#isoviewarray">IsoviewArray</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#decision-tree-what-will-imread-return">Decision Tree: What Will imread() Return?</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#common-properties-across-all-array-types">Common Properties Across All Array Types</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#api-reference">API Reference</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

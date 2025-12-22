@@ -1,0 +1,22 @@
+selector_to_html = {"a[href=\"array_types.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Lazy Array Types<a class=\"headerlink\" href=\"#lazy-array-types\" title=\"Link to this heading\">#</a></h1><p>Understanding what <code class=\"docutils literal notranslate\"><span class=\"pre\">imread()</span></code> returns and when to use each array type.</p>", "a[href=\"#contents\"]": "<h2 class=\"tippy-header\" style=\"margin-top: 0;\">Contents<a class=\"headerlink\" href=\"#contents\" title=\"Link to this heading\">#</a></h2>", "a[href=\"#resources\"]": "<h2 class=\"tippy-header\" style=\"margin-top: 0;\">Resources<a class=\"headerlink\" href=\"#resources\" title=\"Link to this heading\">#</a></h2>", "a[href=\"usage/gui_guide.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">GUI User Guide<a class=\"headerlink\" href=\"#gui-user-guide\" title=\"Link to this heading\">#</a></h1><p>Interactive data preview and processing tools for calcium imaging data.</p>", "a[href=\"development.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Development<a class=\"headerlink\" href=\"#development\" title=\"Link to this heading\">#</a></h1><h2>Setup<a class=\"headerlink\" href=\"#setup\" title=\"Link to this heading\">#</a></h2>", "a[href=\"user_guide.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">mbo_utilities: User Guide<a class=\"headerlink\" href=\"#mbo-utilities-user-guide\" title=\"Link to this heading\">#</a></h1><p><a class=\"reference external\" href=\"https://millerbrainobservatory.github.io/mbo_utilities/installation.html\"><strong>Installation</strong></a> |\n<a class=\"reference external\" href=\"https://millerbrainobservatory.github.io/mbo_utilities/array_types.html\"><strong>Array Types</strong></a> |\n<a class=\"reference external\" href=\"https://millerbrainobservatory.github.io/\"><strong>MBO Hub</strong></a></p><p>An image I/O library with an intuitive GUI for scientific imaging data.</p>", "a[href=\"usage/cli.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Command Line Interface<a class=\"headerlink\" href=\"#command-line-interface\" title=\"Link to this heading\">#</a></h1><p>The <code class=\"docutils literal notranslate\"><span class=\"pre\">mbo</span></code> command provides tools for viewing, converting, and analyzing imaging data.</p>", "a[href=\"#quick-start\"]": "<h2 class=\"tippy-header\" style=\"margin-top: 0;\">Quick Start<a class=\"headerlink\" href=\"#quick-start\" title=\"Link to this heading\">#</a></h2>", "a[href=\"api/index.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">API<a class=\"headerlink\" href=\"#api\" title=\"Link to this heading\">#</a></h1><p>Python API provides helper functions for saving, loading, processing and visualizing mbo datasets.</p>", "a[href=\"dff.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Quantifying Cell Activity<a class=\"headerlink\" href=\"#quantifying-cell-activity\" title=\"Link to this heading\">#</a></h1><p>The gold-standard formula for measuring cellular activity is \u201cDelta F over F\u2080\u201d, or the change in fluorescence intensity normalized by the baseline activity:</p>", "a[href=\"glossary.html\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Glossary<a class=\"headerlink\" href=\"#glossary\" title=\"Link to this heading\">#</a></h1>", "a[href=\"#miller-brain-observatory-utilities\"]": "<h1 class=\"tippy-header\" style=\"margin-top: 0;\">Miller Brain Observatory: Utilities<a class=\"headerlink\" href=\"#miller-brain-observatory-utilities\" title=\"Link to this heading\">#</a></h1><p>Image processing utilities for the <a class=\"reference external\" href=\"https://github.com/MillerBrainObservatory\">Miller Brain Observatory</a> (MBO).</p>"}
+skip_classes = ["headerlink", "sd-stretched-link"]
+
+window.onload = function () {
+    for (const [select, tip_html] of Object.entries(selector_to_html)) {
+        const links = document.querySelectorAll(` ${select}`);
+        for (const link of links) {
+            if (skip_classes.some(c => link.classList.contains(c))) {
+                continue;
+            }
+
+            tippy(link, {
+                content: tip_html,
+                allowHTML: true,
+                arrow: true,
+                placement: 'auto-start', maxWidth: 500, interactive: false,
+
+            });
+        };
+    };
+    console.log("tippy tips loaded!");
+};
