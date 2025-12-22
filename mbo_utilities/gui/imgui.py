@@ -286,6 +286,8 @@ def draw_saveas_popup(parent):
     if getattr(parent, "_saveas_popup_open"):
         imgui.open_popup("Save As")
         parent._saveas_popup_open = False
+        # reset modal open state when reopening popup
+        parent._saveas_modal_open = True
 
     # track if popup should remain open
     if not hasattr(parent, "_saveas_modal_open"):
@@ -886,11 +888,16 @@ def draw_saveas_popup(parent):
                         # Stitching all ROIs - use custom suffix (or default "_stitched")
                         output_suffix = parent._saveas_output_suffix
 
+                    # determine roi_mode based on whether splitting ROIs
+                    from mbo_utilities.metadata import RoiMode
+                    roi_mode = RoiMode.separate if rois else RoiMode.concat_y
+
                     save_kwargs = {
                         "path": parent.fpath,
                         "outpath": parent._saveas_outdir,
                         "planes": save_planes,
                         "roi": rois,
+                        "roi_mode": roi_mode,
                         "overwrite": parent._overwrite,
                         "debug": parent._debug,
                         "ext": parent._ext,
@@ -916,7 +923,8 @@ def draw_saveas_popup(parent):
                         save_kwargs["ome"] = parent._zarr_ome
                         save_kwargs["level"] = parent._zarr_compression_level
                     frames_msg = f"{num_frames} frames" if num_frames else "all frames"
-                    parent.logger.info(f"Saving planes {save_planes} ({frames_msg}) with ROIs {rois if rois else 'stitched'}")
+                    roi_msg = f"ROIs {rois}" if rois else roi_mode.description
+                    parent.logger.info(f"Saving planes {save_planes} ({frames_msg}), {roi_msg}")
                     parent.logger.info(
                         f"Saving to {parent._saveas_outdir} as {parent._ext}"
                     )

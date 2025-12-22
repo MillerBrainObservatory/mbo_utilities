@@ -23,7 +23,7 @@ from mbo_utilities.arrays import (
     supports_roi,
     validate_s3d_registration,
 )
-from mbo_utilities.metadata import get_param
+from mbo_utilities.metadata import get_param, RoiMode
 from mbo_utilities.util import load_npy
 
 logger = log.get("writer")
@@ -36,6 +36,7 @@ def imwrite(
     planes: list | tuple | None = None,
     num_frames: int | None = None,
     register_z: bool = False,
+    roi_mode: RoiMode | str = RoiMode.concat_y,
     roi: int | Sequence[int] | None = None,
     metadata: dict | None = None,
     overwrite: bool = False,
@@ -43,6 +44,7 @@ def imwrite(
     target_chunk_mb: int = 100,
     progress_callback: Callable | None = None,
     debug: bool = False,
+    show_progress: bool = True,
     shift_vectors: np.ndarray | None = None,
     output_name: str | None = None,
     output_suffix: str | None = None,
@@ -87,12 +89,18 @@ def imwrite(
         - int : Single plane, e.g. `planes=7` exports only plane 7
         - list/tuple : Specific planes, e.g. `planes=[1, 7, 14]`
 
+    roi_mode : RoiMode | str, default=RoiMode.concat_y
+        Mode for handling multi-ROI data. Options:
+        - RoiMode.concat_y : Horizontally concatenate ROIs into single FOV (default)
+        - RoiMode.separate : Write each ROI to separate files
+        String values are accepted (case-insensitive): "concat_y", "separate".
+
     roi : int | Sequence[int] | None, optional
-        ROI selection for multi-ROI data. Options:
-        - None (default) : Stitch/fuse all ROIs horizontally into single FOV
-        - 0 : Split all ROIs into separate files (one file per ROI per plane)
+        Specific ROI(s) to export when roi_mode=RoiMode.separate. Options:
+        - None (default) : Export all ROIs
         - int > 0 : Export specific ROI, e.g. `roi=1` exports only ROI 1
         - list/tuple : Export specific ROIs, e.g. `roi=[1, 3]`
+        Note: When roi_mode=RoiMode.concat_y, this parameter is ignored.
 
     num_frames : int, optional
         Number of frames to export. If None (default), exports all frames.
@@ -120,6 +128,10 @@ def imwrite(
 
     debug : bool, default=False
         Enable verbose logging for troubleshooting.
+
+    show_progress : bool, default=True
+        Show tqdm progress bar during writing. Set to False in notebooks
+        when you don't want progress output cluttering the display.
 
     output_name : str, optional
         Filename for binary output when ext=".bin".
@@ -168,6 +180,10 @@ def imwrite(
         logger.setLevel(logging.WARNING)
         logger.propagate = False
 
+    # normalize roi_mode to enum
+    if isinstance(roi_mode, str):
+        roi_mode = RoiMode.from_string(roi_mode)
+
     # save path
     if not isinstance(outpath, (str, Path)):
         raise TypeError(
@@ -182,14 +198,19 @@ def imwrite(
         )
     outpath.mkdir(exist_ok=True)
 
-    if roi is not None:
-        if not supports_roi(lazy_array):
-            logger.debug(
-                f"{type(lazy_array).__name__} does not support ROIs. "
-                f"Ignoring roi={roi}, defaulting to single ROI behavior."
-            )
-        else:
+    # handle roi based on roi_mode
+    if roi_mode == RoiMode.separate:
+        # separate mode: set roi on array if specified
+        if roi is not None and supports_roi(lazy_array):
             lazy_array.roi = roi
+    elif roi_mode == RoiMode.concat_y:
+        # concat mode: roi parameter is ignored, use None (stitch all)
+        if roi is not None:
+            logger.debug(
+                f"roi={roi} ignored when roi_mode=concat_y. "
+                f"All ROIs will be concatenated."
+            )
+        roi = None
 
     if order is not None:
         if len(order) != len(planes):
@@ -210,6 +231,9 @@ def imwrite(
         if not isinstance(metadata, dict):
             raise ValueError(f"metadata must be a dict, got {type(metadata)}")
         file_metadata.update(metadata)
+
+    # store roi_mode in metadata as string
+    file_metadata["roi_mode"] = roi_mode.value
 
     if num_frames is not None:
         file_metadata["num_frames"] = int(num_frames)
@@ -338,8 +362,10 @@ def imwrite(
             progress_callback=progress_callback,
             planes=planes,
             debug=debug,
+            show_progress=show_progress,
             output_name=output_name,
             output_suffix=output_suffix,
+            roi_mode=roi_mode,
             **write_kwargs,
         )
     else:
