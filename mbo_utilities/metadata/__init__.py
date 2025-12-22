@@ -11,6 +11,7 @@ this package provides:
 from .base import (
     MetadataParameter,
     VoxelSize,
+    RoiMode,
     METADATA_PARAMS,
     ALIAS_MAP,
     get_canonical_name,
@@ -60,6 +61,7 @@ __all__ = [
     # base types
     "MetadataParameter",
     "VoxelSize",
+    "RoiMode",
     "METADATA_PARAMS",
     "ALIAS_MAP",
     "get_canonical_name",
