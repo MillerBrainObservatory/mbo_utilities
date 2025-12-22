@@ -233,8 +233,14 @@ div.admonition > .admonition-title {
   color: #bb86fc !important;
   font-weight: 600 !important;
   margin: 0 0 4px 0 !important;
-  padding: 0 !important;
+  padding: 0 0 0 1.5rem !important;
   font-size: 0.85rem !important;
+  position: relative !important;
+}
+
+div.admonition > .admonition-title::before {
+  position: absolute !important;
+  left: 0 !important;
 }
 
 div.admonition > p:last-child {
