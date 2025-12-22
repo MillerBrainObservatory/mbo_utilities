@@ -24,7 +24,7 @@ _ALIAS_COLOR = imgui.ImVec4(0.5, 0.5, 0.5, 0.8)  # muted gray for aliases
 # category-specific colors for metadata
 _IMAGING_COLOR = imgui.ImVec4(0.4, 0.9, 0.6, 1.0)  # bright green for imaging params
 _ACQUISITION_COLOR = imgui.ImVec4(0.9, 0.6, 0.4, 1.0)  # orange for acquisition params
-_OTHER_COLOR = imgui.ImVec4(0.7, 0.7, 0.7, 1.0)  # neutral gray for uncategorized
+_OTHER_COLOR = imgui.ImVec4(0.75, 0.85, 0.95, 1.0)  # light blue for uncategorized
 _DISABLED_COLOR = imgui.ImVec4(0.9, 0.4, 0.4, 1.0)  # red for disabled modules
 
 # custom tooltips for specific metadata keys
