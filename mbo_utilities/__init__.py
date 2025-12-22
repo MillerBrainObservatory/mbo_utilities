@@ -5,7 +5,7 @@ This package uses lazy imports to minimize startup time. Heavy dependencies
 like numpy, dask, and tifffile are only loaded when actually needed.
 
 For fastest CLI startup (e.g., `mbo --download-notebook`), avoid importing
-from this module directly - use `from mbo_utilities.graphics.run_gui import _cli_entry`.
+from this module directly - use `from mbo_utilities.gui.run_gui import _cli_entry`.
 """
 
 from importlib.metadata import version, PackageNotFoundError
@@ -23,7 +23,6 @@ __all__ = [
     "imread",
     "imwrite",
     "SUPPORTED_FTYPES",
-    "describe",
     # File utilities
     "get_mbo_dirs",
     "files_to_dask",
@@ -38,6 +37,12 @@ __all__ = [
     "get_voxel_size",
     "normalize_resolution",
     "VoxelSize",
+    # Pipeline registry
+    "get_all_pipelines",
+    "get_pipeline_info",
+    "get_all_input_patterns",
+    "get_all_output_patterns",
+    "get_all_marker_files",
     # Preferences
     "get_recent_files",
     "add_recent_file",
@@ -70,11 +75,6 @@ def __getattr__(name):
     if name in ("imread", "imwrite", "MBO_SUPPORTED_FTYPES"):
         from . import lazy_array
         return getattr(lazy_array, name)
-
-    # Format detection
-    if name == "describe":
-        from .formats.registry import describe
-        return describe
 
     # File utilities (file_io -> dask, tifffile, zarr)
     if name in (
@@ -142,5 +142,20 @@ def __getattr__(name):
     if name in ("select_folder", "select_files"):
         from . import widgets
         return getattr(widgets, name)
+
+    # Pipeline registry (triggers array module imports to register pipelines)
+    if name in (
+        "get_all_pipelines",
+        "get_pipeline_info",
+        "get_all_input_patterns",
+        "get_all_output_patterns",
+        "get_all_marker_files",
+    ):
+        # first register all pipelines
+        from .arrays import register_all_pipelines
+        register_all_pipelines()
+        # then return the requested function
+        from . import pipeline_registry
+        return getattr(pipeline_registry, name)
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

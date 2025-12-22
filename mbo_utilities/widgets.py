@@ -22,7 +22,7 @@ Examples
 ... )
 """
 
-from mbo_utilities.graphics.simple_selector import (
+from mbo_utilities.gui.simple_selector import (
     SimpleSelector,
     select_folder,
     select_files,

@@ -1,12 +1,30 @@
-# MBO Utilities Installation Script v2 for Windows
-# installs uv if not present, installs mbo_utilities with user-selected version and optional dependencies
+# MBO Utilities Installation Script for Windows
+# installs uv if not present, creates environment, installs mbo_utilities
 #
 # usage:
-#   irm https://raw.githubusercontent.com/.../install_v2.ps1 | iex
+#   # default install to ~/mbo/envs/mbo_utilities
+#   irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
+#
+#   # custom install location
+#   $env:MBO_ENV_PATH = "C:\path\to\env"; irm ... | iex
+#
+#   # install into existing environment (skip venv creation)
+#   $env:MBO_ENV_PATH = "C:\existing\.venv"; $env:MBO_USE_EXISTING = "1"; irm ... | iex
+#
+#   # overwrite existing environment
+#   $env:MBO_OVERWRITE = "1"; irm ... | iex
 
 $ErrorActionPreference = "Stop"
 
 $GITHUB_REPO = "MillerBrainObservatory/mbo_utilities"
+
+# default install path (can be overridden via env var or interactive prompt)
+$DEFAULT_ENV_PATH = Join-Path $env:USERPROFILE "mbo\envs\mbo_utilities"
+$MBO_ENV_PATH = if ($env:MBO_ENV_PATH) { $env:MBO_ENV_PATH } else { $DEFAULT_ENV_PATH }
+
+# check for existing env behavior flags
+$USE_EXISTING_ENV = $env:MBO_USE_EXISTING -eq "1"
+$OVERWRITE_ENV = $env:MBO_OVERWRITE -eq "1"
 
 function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Blue }
 function Write-Success { Write-Host "[OK] $args" -ForegroundColor Green }
@@ -21,8 +39,41 @@ function Show-Banner {
     Write-Host " | |  | | |_) | |_| |" -ForegroundColor Cyan
     Write-Host " |_|  |_|____/ \___/ " -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "MBO Utilities Installer v2" -ForegroundColor White
+    Write-Host "MBO Utilities Installer" -ForegroundColor White
     Write-Host ""
+}
+
+function Show-InstallLocationPrompt {
+    # skip if env var was explicitly set
+    if ($env:MBO_ENV_PATH) {
+        Write-Info "Install location: $MBO_ENV_PATH (from MBO_ENV_PATH)"
+        return $MBO_ENV_PATH
+    }
+
+    Write-Host ""
+    Write-Host "Install Location" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+    Write-Host $DEFAULT_ENV_PATH -ForegroundColor Cyan
+    Write-Host ""
+    $userInput = Read-Host "Press Enter for default, or enter custom path"
+
+    if ([string]::IsNullOrWhiteSpace($userInput)) {
+        return $DEFAULT_ENV_PATH
+    }
+
+    # expand ~ to user profile
+    $customPath = $userInput.Trim()
+    if ($customPath.StartsWith("~")) {
+        $customPath = $customPath.Replace("~", $env:USERPROFILE)
+    }
+
+    # resolve relative paths
+    if (-not [System.IO.Path]::IsPathRooted($customPath)) {
+        $customPath = [System.IO.Path]::GetFullPath($customPath)
+    }
+
+    return $customPath
 }
 
 function Test-UvInstalled {
@@ -56,10 +107,6 @@ function Install-Uv {
 }
 
 function Get-PyPiVersion {
-    <#
-    .SYNOPSIS
-    Get the latest version from PyPI.
-    #>
     try {
         $response = Invoke-RestMethod -Uri "https://pypi.org/pypi/mbo-utilities/json" -TimeoutSec 10
         return $response.info.version
@@ -70,10 +117,6 @@ function Get-PyPiVersion {
 }
 
 function Get-GitHubBranches {
-    <#
-    .SYNOPSIS
-    Get list of branches from GitHub repo.
-    #>
     try {
         $response = Invoke-RestMethod -Uri "https://api.github.com/repos/$GITHUB_REPO/branches" -TimeoutSec 10
         return $response | ForEach-Object { $_.name }
@@ -84,30 +127,11 @@ function Get-GitHubBranches {
     }
 }
 
-function Get-GitHubTags {
-    <#
-    .SYNOPSIS
-    Get list of tags (releases) from GitHub repo.
-    #>
-    try {
-        $response = Invoke-RestMethod -Uri "https://api.github.com/repos/$GITHUB_REPO/tags" -TimeoutSec 10
-        return $response | ForEach-Object { $_.name }
-    }
-    catch {
-        return @()
-    }
-}
-
 function Show-SourceSelection {
-    <#
-    .SYNOPSIS
-    Let user choose installation source: PyPI or GitHub branch.
-    #>
     Write-Host ""
     Write-Host "Installation Source" -ForegroundColor White
     Write-Host ""
 
-    # get pypi version
     $pypiVersion = Get-PyPiVersion
     if ($pypiVersion) {
         Write-Host "  [1] PyPI (stable)" -ForegroundColor Cyan
@@ -134,7 +158,6 @@ function Show-SourceSelection {
         return @{ Source = "pypi"; Spec = "mbo_utilities" }
     }
 
-    # github selection - show branches
     Write-Host ""
     Write-Host "Fetching available branches..." -ForegroundColor Gray
 
@@ -146,7 +169,6 @@ function Show-SourceSelection {
     $options = @()
     $idx = 1
 
-    # add master/main first if exists
     $mainBranch = $branches | Where-Object { $_ -eq "master" -or $_ -eq "main" } | Select-Object -First 1
     if ($mainBranch) {
         Write-Host "  [$idx] $mainBranch" -ForegroundColor Cyan -NoNewline
@@ -155,7 +177,6 @@ function Show-SourceSelection {
         $idx++
     }
 
-    # add other branches (excluding master/main)
     $otherBranches = $branches | Where-Object { $_ -ne "master" -and $_ -ne "main" } | Select-Object -First 10
     foreach ($branch in $otherBranches) {
         Write-Host "  [$idx] $branch" -ForegroundColor Cyan
@@ -171,7 +192,7 @@ function Show-SourceSelection {
         $choice = Read-Host "Select branch/tag (1-$($options.Count) or 'c' for custom)"
         if ($choice -eq "c") {
             $customRef = Read-Host "Enter branch or tag name"
-            return @{ Source = "github"; Spec = "git+https://github.com/$GITHUB_REPO@$customRef" }
+            return @{ Source = "github"; Spec = "git+https://github.com/$GITHUB_REPO@$customRef"; Ref = $customRef }
         }
         $choiceNum = 0
         $valid = [int]::TryParse($choice, [ref]$choiceNum) -and $choiceNum -ge 1 -and $choiceNum -le $options.Count
@@ -314,14 +335,14 @@ function Show-OptionalDependencies {
             "1" { $extras += "suite2p" }
             "2" { $extras += "suite3d" }
             "3" { $extras += "rastermap" }
-            "4" { $extras = @("processing"); break parseLoop }
+            "4" { $extras = @("all"); break parseLoop }
             "5" { $extras = @(); break parseLoop }
         }
     }
 
     # warn if GPU packages selected without toolkit
     if ($extras.Count -gt 0) {
-        $gpuPackages = @("suite2p", "suite3d", "processing")
+        $gpuPackages = @("suite2p", "suite3d", "all")
         $hasGpuPackage = ($extras | Where-Object { $gpuPackages -contains $_ }).Count -gt 0
 
         if ($hasGpuPackage -and $GpuInfo.Available -and -not $GpuInfo.ToolkitInstalled) {
@@ -342,7 +363,7 @@ function Show-OptionalDependencies {
     return $extras
 }
 
-function Install-MboUtilities {
+function Install-MboEnvironment {
     param(
         [string]$InstallSpec,
         [string[]]$Extras = @(),
@@ -351,10 +372,66 @@ function Install-MboUtilities {
     )
 
     Write-Host ""
-    Write-Info "Installing mbo_utilities..."
-    Write-Info "  Source: $Source"
-    if ($Extras.Count -gt 0) {
-        Write-Info "  Extras: $($Extras -join ', ')"
+    Write-Info "Environment path: $MBO_ENV_PATH"
+
+    $pythonPath = Join-Path $MBO_ENV_PATH "Scripts\python.exe"
+    $envExists = Test-Path $pythonPath
+
+    if ($envExists) {
+        if ($USE_EXISTING_ENV) {
+            Write-Info "Using existing environment (MBO_USE_EXISTING=1)"
+        }
+        elseif ($OVERWRITE_ENV) {
+            Write-Warn "Removing existing environment (MBO_OVERWRITE=1)..."
+            Remove-Item -Recurse -Force $MBO_ENV_PATH
+            $envExists = $false
+        }
+        else {
+            Write-Host ""
+            Write-Warn "Environment already exists at: $MBO_ENV_PATH"
+            Write-Host ""
+            Write-Host "  [1] Overwrite - Delete and recreate environment" -ForegroundColor Cyan
+            Write-Host "  [2] Update    - Install into existing environment" -ForegroundColor Cyan
+            Write-Host "  [3] Cancel    - Exit without changes" -ForegroundColor Cyan
+            Write-Host ""
+
+            do {
+                $choice = Read-Host "Select option (1-3)"
+                $valid = $choice -match '^[123]$'
+                if (-not $valid) { Write-Warn "Invalid selection. Enter 1, 2, or 3." }
+            } while (-not $valid)
+
+            switch ($choice) {
+                "1" {
+                    Write-Info "Removing existing environment..."
+                    Remove-Item -Recurse -Force $MBO_ENV_PATH
+                    $envExists = $false
+                }
+                "2" {
+                    Write-Info "Installing into existing environment..."
+                }
+                "3" {
+                    Write-Info "Installation cancelled."
+                    exit 0
+                }
+            }
+        }
+    }
+
+    if (-not $envExists) {
+        # create parent directory
+        $envParent = Split-Path $MBO_ENV_PATH -Parent
+        if (-not (Test-Path $envParent)) {
+            New-Item -ItemType Directory -Path $envParent -Force | Out-Null
+        }
+
+        # create virtual environment
+        Write-Info "Creating virtual environment..."
+        uv venv $MBO_ENV_PATH --python 3.12
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Failed to create virtual environment"
+            exit 1
+        }
     }
 
     # build the install spec with extras
@@ -367,7 +444,6 @@ function Install-MboUtilities {
         }
     }
     else {
-        # github - extras go after the URL
         if ($Extras.Count -gt 0) {
             $spec = "$InstallSpec[" + ($Extras -join ',') + "]"
         }
@@ -376,43 +452,46 @@ function Install-MboUtilities {
         }
     }
 
-    # check if pytorch needed
-    $needsPytorch = ($Extras | Where-Object { $_ -eq "suite2p" -or $_ -eq "processing" }).Count -gt 0
+    Write-Info "Installing mbo_utilities..."
+    Write-Info "  Source: $Source"
+    if ($Extras.Count -gt 0) {
+        Write-Info "  Extras: $($Extras -join ', ')"
+    }
+
+    $needsPytorch = ($Extras | Where-Object { $_ -eq "suite2p" -or $_ -eq "all" }).Count -gt 0
 
     $prevErrorAction = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
 
     try {
-        # install with cuda pytorch if toolkit available
         if ($needsPytorch -and $GpuInfo.ToolkitInstalled -and $GpuInfo.CudaVersion) {
             $indexUrl = Get-PyTorchIndexUrl -CudaVersion $GpuInfo.CudaVersion
             if ($indexUrl) {
-                Write-Info "Installing PyTorch for CUDA $($GpuInfo.CudaVersion)..."
-                # use index-strategy to allow mixing pytorch cuda index with pypi
-                # removed torchaudio due to version conflicts on windows
-                uv tool install $spec `
-                    --reinstall `
-                    --python 3.12 `
-                    --with "torch" --with "torchvision" `
+                Write-Info "Installing with CUDA-optimized PyTorch for CUDA $($GpuInfo.CudaVersion)..."
+                uv pip install --python $pythonPath $spec torch torchvision `
                     --index-strategy unsafe-best-match `
                     --extra-index-url $indexUrl 2>&1 | ForEach-Object { Write-Host $_ }
                 if ($LASTEXITCODE -eq 0) {
                     Write-Success "Installed with CUDA-optimized PyTorch"
-                    return
                 }
-                Write-Warn "CUDA install failed, falling back to standard install..."
+                else {
+                    Write-Warn "CUDA install failed, falling back to standard install..."
+                    uv pip install --python $pythonPath $spec 2>&1 | ForEach-Object { Write-Host $_ }
+                }
+            }
+            else {
+                uv pip install --python $pythonPath $spec 2>&1 | ForEach-Object { Write-Host $_ }
             }
         }
-
-        # standard installation
-        uv tool install $spec --reinstall --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
-
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "mbo_utilities installed successfully"
-        }
         else {
-            throw "uv tool install failed with exit code $LASTEXITCODE"
+            uv pip install --python $pythonPath $spec 2>&1 | ForEach-Object { Write-Host $_ }
         }
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "uv pip install failed with exit code $LASTEXITCODE"
+        }
+
+        Write-Success "mbo_utilities installed successfully"
     }
     catch {
         Write-Err "Failed to install mbo_utilities: $_"
@@ -433,34 +512,82 @@ function New-DesktopShortcut {
     $shortcutPath = Join-Path $desktopPath $shortcutName
 
     # setup icon directory
-    $iconDir = Join-Path $env:LOCALAPPDATA "mbo_utilities"
+    $iconDir = Join-Path $env:USERPROFILE "mbo"
     if (-not (Test-Path $iconDir)) { New-Item -ItemType Directory -Path $iconDir -Force | Out-Null }
 
-    # use branch ref for downloads, fallback to master
     $downloadRef = if ($BranchRef) { $BranchRef } else { "master" }
 
     # download icon
     $iconPath = Join-Path $iconDir "mbo_icon.ico"
     try {
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/$downloadRef/docs/_static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/$downloadRef/mbo_utilities/assets/static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop
     }
     catch {
-        # fallback to master if branch doesn't have icon
-        try { Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/docs/_static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop }
+        try { Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/mbo_utilities/assets/static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop }
         catch { $iconPath = $null }
     }
 
-    # create shortcut that runs mbo via cmd (uv tool makes it globally available)
+    # create launcher script
+    $launcherPath = Join-Path $iconDir "launch_mbo.bat"
+    $pythonPath = Join-Path $MBO_ENV_PATH "Scripts\python.exe"
+    @"
+@echo off
+"$pythonPath" -m mbo_utilities.cli view --splash
+"@ | Set-Content -Path $launcherPath -Encoding ASCII
+
+    # create shortcut
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = "cmd.exe"
-    $shortcut.Arguments = "/c mbo --splash"
+    $shortcut.TargetPath = $launcherPath
     $shortcut.WorkingDirectory = [Environment]::GetFolderPath("UserProfile")
     if ($iconPath -and (Test-Path $iconPath)) { $shortcut.IconLocation = $iconPath }
     $shortcut.Description = "MBO Image Viewer"
     $shortcut.Save()
 
     Write-Success "Desktop shortcut created: $shortcutName"
+}
+
+function Add-MboToPath {
+    Write-Info "Adding MBO to user PATH..."
+
+    $scriptsPath = Join-Path $MBO_ENV_PATH "Scripts"
+    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+
+    if ($currentPath -notlike "*$scriptsPath*") {
+        $newPath = "$scriptsPath;$currentPath"
+        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+        $env:Path = "$scriptsPath;$env:Path"
+        Write-Success "Added $scriptsPath to PATH"
+    }
+    else {
+        Write-Info "MBO already in PATH"
+    }
+}
+
+function Show-UsageInstructions {
+    Write-Host ""
+    Write-Host "Environment Location" -ForegroundColor White
+    Write-Host "  $MBO_ENV_PATH" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Usage" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Desktop shortcut:" -ForegroundColor Gray
+    Write-Host "    Double-click 'MBO Utilities' on your desktop" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Command line (after restarting terminal):" -ForegroundColor Gray
+    Write-Host "    mbo" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Activate environment:" -ForegroundColor Gray
+    Write-Host "    $MBO_ENV_PATH\Scripts\activate" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  VSCode:" -ForegroundColor Gray
+    Write-Host "    1. Open VSCode" -ForegroundColor White
+    Write-Host "    2. Ctrl+Shift+P -> 'Python: Select Interpreter'" -ForegroundColor White
+    Write-Host "    3. Choose: $MBO_ENV_PATH\Scripts\python.exe" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Add packages to environment:" -ForegroundColor Gray
+    Write-Host "    uv pip install --python `"$MBO_ENV_PATH\Scripts\python.exe`" <package>" -ForegroundColor White
+    Write-Host ""
 }
 
 function Main {
@@ -471,39 +598,33 @@ function Main {
         Install-Uv
     }
 
-    # step 1: choose source (pypi vs github)
+    # step 1: choose install location
+    $script:MBO_ENV_PATH = Show-InstallLocationPrompt
+
+    # step 2: choose source
     $sourceInfo = Show-SourceSelection
 
-    # step 2: detect GPU
+    # step 3: detect GPU
     $gpuInfo = Test-NvidiaGpu
 
-    # step 3: choose extras
+    # step 4: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
-    # step 4: install
-    Install-MboUtilities -InstallSpec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -Source $sourceInfo.Source
+    # step 5: create environment and install
+    Install-MboEnvironment -InstallSpec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -Source $sourceInfo.Source
 
-    # step 5: create shortcut
+    # step 6: add to PATH
+    Add-MboToPath
+
+    # step 7: create shortcut
     New-DesktopShortcut -BranchRef $sourceInfo.Ref
 
-    # verify
+    # show instructions
+    Show-UsageInstructions
+
+    Write-Success "Installation completed!"
     Write-Host ""
-    try {
-        $null = Get-Command mbo -ErrorAction Stop
-        Write-Success "Installation completed!"
-        Write-Host ""
-        Write-Host "Source: $($sourceInfo.Source)" -ForegroundColor Cyan
-        if ($sourceInfo.Ref) { Write-Host "Branch/Tag: $($sourceInfo.Ref)" -ForegroundColor Cyan }
-        if ($extras.Count -gt 0) {
-            Write-Host "Extras: $($extras -join ', ')" -ForegroundColor Cyan
-        }
-        Write-Host ""
-        Write-Host "Run 'mbo' or use the desktop shortcut to start." -ForegroundColor Gray
-    }
-    catch {
-        Write-Warn "Installation completed but 'mbo' not found in PATH"
-        Write-Warn "You may need to restart your terminal"
-    }
+    Write-Host "You may need to restart your terminal for PATH changes to take effect." -ForegroundColor Yellow
 }
 
 Main

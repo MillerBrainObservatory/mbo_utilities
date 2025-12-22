@@ -27,14 +27,50 @@ from mbo_utilities.arrays._base import (
     ReductionMixin,
 )
 from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
-from mbo_utilities.metadata import get_metadata
+from mbo_utilities.metadata import get_metadata, get_param, extract_roi_slices
 from mbo_utilities.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
 
 if TYPE_CHECKING:
     pass
 
 logger = log.get("arrays.tiff")
+
+# register tiff reader pipeline info
+_TIFF_INFO = PipelineInfo(
+    name="tiff",
+    description="Generic TIFF files (BigTIFF, OME-TIFF)",
+    input_patterns=[
+        "**/*.tif",
+        "**/*.tiff",
+    ],
+    output_patterns=[
+        "**/*.tif",
+        "**/*.tiff",
+    ],
+    input_extensions=["tif", "tiff"],
+    output_extensions=["tif", "tiff"],
+    marker_files=[],
+    category="reader",
+)
+register_pipeline(_TIFF_INFO)
+
+# register scanimage raw tiff reader
+_SCANIMAGE_INFO = PipelineInfo(
+    name="scanimage_raw",
+    description="Raw ScanImage TIFF files with multi-ROI support",
+    input_patterns=[
+        "**/*.tif",
+        "**/*.tiff",
+    ],
+    output_patterns=[],
+    input_extensions=["tif", "tiff"],
+    output_extensions=[],
+    marker_files=[],
+    category="reader",
+)
+register_pipeline(_SCANIMAGE_INFO)
 
 
 def _convert_range_to_slice(k):
@@ -294,14 +330,22 @@ class TiffArray(ReductionMixin):
         self._dtype = reader.dtype
         self.filenames = files
 
-        self._metadata = {
+        # try to read metadata from file first, fall back to basic info
+        try:
+            from mbo_utilities.metadata import get_metadata_single
+            self._metadata = get_metadata_single(files[0])
+        except Exception:
+            self._metadata = {}
+
+        # ensure basic shape info is present
+        self._metadata.update({
             "shape": self.shape,
             "dtype": str(self._dtype),
             "nframes": self._nframes,
             "num_frames": self._nframes,
             "file_paths": [str(p) for p in files],
             "num_files": len(files),
-        }
+        })
         self.num_rois = 1
 
     def _init_volume(self, plane_files: list[Path]):
@@ -329,14 +373,22 @@ class TiffArray(ReductionMixin):
         self._dtype = self._planes[0].dtype
         self.filenames = plane_files
 
-        self._metadata = {
+        # try to read metadata from first plane file, fall back to basic info
+        try:
+            from mbo_utilities.metadata import get_metadata_single
+            self._metadata = get_metadata_single(plane_files[0])
+        except Exception:
+            self._metadata = {}
+
+        # ensure basic shape info is present
+        self._metadata.update({
             "shape": self.shape,
             "dtype": str(self._dtype),
             "nframes": self._nframes,
             "num_frames": self._nframes,
             "num_planes": self._nz,
             "plane_files": [str(p) for p in plane_files],
-        }
+        })
         self.num_rois = 1
 
         logger.info(
@@ -571,7 +623,7 @@ class MBOTiffArray(ReductionMixin):
             "file_paths": [str(p) for p in self.filenames],
             "num_files": len(self.filenames),
         })
-        self.num_rois = self._metadata.get("num_rois", 1)
+        self.num_rois = get_param(self._metadata, "num_mrois", default=1)
         self.tags = [derive_tag_from_filename(f) for f in self.filenames]
         self._target_dtype = None
 
@@ -801,8 +853,8 @@ class MboRawArray(ReductionMixin):
         self._tiff_lock = threading.Lock()
 
         self._metadata = get_metadata(self.filenames)
-        self.num_channels = self._metadata["num_planes"]
-        self.num_rois = self._metadata.get("num_rois", 1)
+        self.num_channels = get_param(self._metadata, "nplanes", default=1)
+        self.num_rois = get_param(self._metadata, "num_rois", default=1)
 
         self._roi = roi
         self.roi = roi
@@ -824,69 +876,22 @@ class MboRawArray(ReductionMixin):
             "roi_array_shape": False,
             "phase_offset": False,
         }
-        self.num_frames = self._metadata["num_frames"]
-        self._source_dtype = self._metadata["dtype"]
+        self.num_frames = get_param(self._metadata, "nframes")
+        self._source_dtype = get_param(self._metadata, "dtype", default="int16")
         self._target_dtype = None
-        self._ndim = self._metadata["ndim"]
+        self._ndim = self._metadata.get("ndim", 3)
 
         self._frames_per_file = self._metadata.get("frames_per_file", None)
 
         self._rois = self._extract_roi_info()
 
     def _extract_roi_info(self):
-        roi_groups = self._metadata["roi_groups"]
-        if isinstance(roi_groups, dict):
-            roi_groups = [roi_groups]
-
-        actual_page_width = self._page_width
-        actual_page_height = self._page_height
-        num_fly_to_lines = self._metadata.get("num_fly_to_lines", 0)
-
-        heights_from_metadata = []
-        for roi_data in roi_groups:
-            scanfields = roi_data["scanfields"]
-            if isinstance(scanfields, list):
-                scanfields = scanfields[0]
-            heights_from_metadata.append(scanfields["pixelResolutionXY"][1])
-
-        total_metadata_height = sum(heights_from_metadata)
-        total_available_height = (
-            actual_page_height - (len(roi_groups) - 1) * num_fly_to_lines
-        )
-
-        actual_heights = []
-        remaining_height = total_available_height
-        for i, metadata_height in enumerate(heights_from_metadata):
-            if i == len(heights_from_metadata) - 1:
-                height = remaining_height
-            else:
-                height = int(
-                    round(
-                        metadata_height * total_available_height / total_metadata_height
-                    )
-                )
-                remaining_height -= height
-            actual_heights.append(height)
-
-        rois = []
-        y_offset = 0
-
-        for i, (roi_data, height) in enumerate(zip(roi_groups, actual_heights)):
-            roi_info = {
-                "y_start": y_offset,
-                "y_end": y_offset + height,
-                "width": actual_page_width,
-                "height": height,
-                "x": 0,
-                "slice": slice(y_offset, y_offset + height),
-            }
-            rois.append(roi_info)
-            y_offset += height + num_fly_to_lines
-
-        logger.debug(
-            f"ROI structure: {[(r['y_start'], r['y_end'], r['height']) for r in rois]}"
-        )
-
+        """Extract ROI slice information using centralized metadata function."""
+        rois = extract_roi_slices(self._metadata)
+        if rois:
+            logger.debug(
+                f"ROI structure: {[(r['y_start'], r['y_end'], r['height']) for r in rois]}"
+            )
         return rois
 
     @property
@@ -1251,11 +1256,11 @@ class MboRawArray(ReductionMixin):
 
     @property
     def _page_height(self):
-        return self._metadata["page_height"]
+        return self._metadata.get("page_height")
 
     @property
     def _page_width(self):
-        return self._metadata["page_width"]
+        return self._metadata.get("page_width")
 
     def __array__(self, max_frames: int = 100):
         if self.num_frames <= max_frames:

@@ -8,12 +8,11 @@ import numpy as np
 
 import shutil
 from pathlib import Path
-from tifffile import TiffWriter, imwrite
+from tifffile import TiffWriter, imwrite as tiff_imwrite
 import h5py
 
 from . import log
 from ._parsing import _make_json_serializable, _convert_paths_to_strings
-from .metadata import save_metadata_html
 from .util import load_npy
 
 from tqdm.auto import tqdm
@@ -135,6 +134,8 @@ def _close_specific_tiff_writer(filepath):
             _write_tiff._writers.pop(key, None)
             if hasattr(_write_tiff, "_first_write"):
                 _write_tiff._first_write.pop(key, None)
+            if hasattr(_write_tiff, "_imagej_mode"):
+                _write_tiff._imagej_mode.pop(key, None)
 
 
 def _close_all_tiff_writers():
@@ -145,6 +146,8 @@ def _close_all_tiff_writers():
         _write_tiff._writers.clear()
         if hasattr(_write_tiff, "_first_write"):
             _write_tiff._first_write.clear()
+        if hasattr(_write_tiff, "_imagej_mode"):
+            _write_tiff._imagej_mode.clear()
 
 
 def _close_specific_npy_writer(filepath):
@@ -208,6 +211,7 @@ def _write_plane(
     target_chunk_mb=20,
     progress_callback=None,
     debug=False,
+    show_progress=True,
     dshape=None,
     plane_index=None,
     shift_vector=None,
@@ -271,7 +275,7 @@ def _write_plane(
     base = ntime // nchunks
     extra = ntime % nchunks
 
-    if not debug:
+    if show_progress and not debug:
         pbar = tqdm(total=nchunks, desc=f"Saving {fname.name}")
     else:
         pbar = None
@@ -448,9 +452,6 @@ def _write_plane(
     elif fname.suffix in [".npy"]:
         _close_specific_npy_writer(fname)
 
-    if "cleaned_scanimage_metadata" in metadata:
-        meta_path = filename.parent.joinpath("metadata.html")
-        save_metadata_html(metadata, meta_path)
 
 
 def _get_file_writer(ext, overwrite):
@@ -657,7 +658,109 @@ def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
     _write_h5._offsets[filename] = offset + data.shape[0]
 
 
-def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
+def _build_imagej_metadata(metadata: dict, shape: tuple) -> tuple[dict, tuple]:
+    """
+    Build ImageJ-compatible metadata dict and resolution tuple.
+
+    ImageJ expects metadata in a specific format in the ImageDescription tag.
+    The key fields are:
+    - spacing: z-step size in units
+    - unit: physical unit (e.g., 'um')
+    - finterval: frame interval in seconds
+    - axes: dimension order (e.g., 'TYX', 'TZYX')
+    - min/max: display range (optional)
+    - loop: animation loop flag (optional)
+
+    The resolution tuple is (pixels_per_unit_x, pixels_per_unit_y), which is
+    the inverse of micrometers per pixel.
+
+    Parameters
+    ----------
+    metadata : dict
+        Source metadata dict with imaging parameters.
+    shape : tuple
+        Array shape (T, Y, X) or (T, Z, Y, X).
+
+    Returns
+    -------
+    tuple[dict, tuple]
+        (imagej_metadata, resolution) ready for tifffile.imwrite(imagej=True).
+    """
+    from mbo_utilities.metadata import get_voxel_size, get_param
+
+    # get voxel size
+    vs = get_voxel_size(metadata)
+    dx, dy, dz = vs.dx, vs.dy, vs.dz
+
+    # resolution is pixels per unit (inverse of um/pixel)
+    # ImageJ uses these values directly with the 'unit' field
+    # so if dx=0.5 um/pixel, resolution should be 2 pixels/um
+    res_x = 1.0 / dx if dx and dx > 0 else 1.0
+    res_y = 1.0 / dy if dy and dy > 0 else 1.0
+    resolution = (res_x, res_y)
+
+    # build imagej metadata dict
+    ij_meta = {
+        "unit": "um",
+        "loop": False,
+    }
+
+    # imagej hyperstack dimensions: frames (T), slices (Z), channels (C)
+    # we must explicitly set these so imagej doesn't interpret pages as channels
+    ndim = len(shape)
+    if ndim == 4:
+        # TZYX: shape is (T, Z, Y, X)
+        ij_meta["frames"] = shape[0]
+        ij_meta["slices"] = shape[1]
+        ij_meta["channels"] = 1
+    elif ndim == 3:
+        # TYX: shape is (T, Y, X) - all pages are time frames
+        ij_meta["frames"] = shape[0]
+        ij_meta["slices"] = 1
+        ij_meta["channels"] = 1
+    else:
+        # YX: single frame
+        ij_meta["frames"] = 1
+        ij_meta["slices"] = 1
+        ij_meta["channels"] = 1
+
+    # z-spacing (for hyperstacks with Z dimension)
+    if dz is not None:
+        ij_meta["spacing"] = dz
+
+    # frame interval (seconds between frames)
+    fs = get_param(metadata, "fs")
+    if fs and fs > 0:
+        ij_meta["finterval"] = 1.0 / float(fs)
+
+    # optional min/max for display range (if present)
+    if "min" in metadata:
+        ij_meta["min"] = float(metadata["min"])
+    if "max" in metadata:
+        ij_meta["max"] = float(metadata["max"])
+
+    return ij_meta, resolution
+
+
+def _write_tiff(path, data, overwrite=True, metadata=None, imagej=True, **kwargs):
+    """
+    Write data to TIFF file with optional ImageJ hyperstack compatibility.
+
+    Parameters
+    ----------
+    path : str or Path
+        Output file path.
+    data : np.ndarray
+        Image data to write.
+    overwrite : bool
+        Whether to overwrite existing file.
+    metadata : dict
+        Metadata dict containing imaging parameters.
+    imagej : bool
+        If True (default), write ImageJ-compatible TIFF with proper metadata
+        that Fiji/ImageJ can auto-detect (resolution, spacing, frame interval).
+        If False, write standard tifffile format with JSON metadata.
+    """
     if metadata is None:
         metadata = {}
 
@@ -667,6 +770,8 @@ def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
         _write_tiff._writers = {}
     if not hasattr(_write_tiff, "_first_write"):
         _write_tiff._first_write = {}
+    if not hasattr(_write_tiff, "_imagej_mode"):
+        _write_tiff._imagej_mode = {}
 
     # Check if we're starting a new write session (no writer exists yet)
     is_new_session = filename not in _write_tiff._writers
@@ -696,20 +801,71 @@ def _write_tiff(path, data, overwrite=True, metadata=None, **kwargs):
                     else:
                         raise
 
-        # Create new writer
-        _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
+        # Store imagej mode for this file
+        _write_tiff._imagej_mode[filename] = imagej
+
+        # Create new writer - use imagej mode if requested
+        if imagej:
+            _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True, imagej=True)
+        else:
+            _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
         _write_tiff._first_write[filename] = True
 
     writer = _write_tiff._writers[filename]
     is_first = _write_tiff._first_write.get(filename, True)
+    use_imagej = _write_tiff._imagej_mode.get(filename, imagej)
 
-    for frame in data:
-        writer.write(
-            frame,
-            contiguous=True,
-            photometric="minisblack",
-            metadata=_make_json_serializable(metadata) if is_first else {},
-        )
+    if use_imagej:
+        # imagej mode: reshape data and use imagej-compatible metadata
+        ij_meta = None
+        resolution = None
+        extratags = None
+
+        if is_first:
+            # build imagej-compatible metadata only on first write
+            target_shape = metadata.get("shape", data.shape)
+            ij_meta, resolution = _build_imagej_metadata(metadata, target_shape)
+
+            # store full metadata as JSON in custom TIFF tag 50839
+            import json
+            json_meta = _make_json_serializable(metadata)
+            json_bytes = json.dumps(json_meta).encode("utf-8")
+            # extratags format: (code, dtype, count, value, writeonce)
+            # dtype 2 = ASCII string
+            extratags = [(50839, 2, len(json_bytes), json_bytes, True)]
+
+        # always reshape data to TZCYX so tifffile interprets T as frames
+        # 3D (T, Y, X) -> 5D (T, 1, 1, Y, X)
+        # 4D (T, Z, Y, X) -> 5D (T, Z, 1, Y, X)
+        if data.ndim == 3:
+            data_5d = data[:, np.newaxis, np.newaxis, :, :]
+        elif data.ndim == 4:
+            data_5d = data[:, :, np.newaxis, :, :]
+        else:
+            data_5d = data
+
+        for frame in data_5d:
+            # frame is now (Z, C, Y, X) or (1, 1, Y, X)
+            writer.write(
+                frame,
+                contiguous=True,
+                photometric="minisblack",
+                resolution=resolution if is_first else None,
+                metadata=ij_meta if is_first else None,
+                extratags=extratags if is_first else None,
+            )
+            is_first = False
+    else:
+        # standard tifffile mode with JSON metadata
+        for frame in data:
+            writer.write(
+                frame,
+                contiguous=True,
+                photometric="minisblack",
+                metadata=_make_json_serializable(metadata) if is_first else {},
+            )
+            is_first = False
+
     _write_tiff._first_write[filename] = False
 
 
@@ -736,20 +892,20 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
     dict
         OME-Zarr NGFF v0.5 metadata dictionary ready for zarr.attrs.update()
     """
-    from mbo_utilities.metadata import get_voxel_size
+    from mbo_utilities.metadata import get_voxel_size, get_param
 
     ndim = len(shape)
 
-    # Extract spatial scales using standardized resolution getter
+    # extract spatial scales using standardized resolution getter
     vs = get_voxel_size(metadata)
     pixel_x = vs.dx
     pixel_y = vs.dy
     z_scale = vs.dz
 
-    # Extract temporal scale
-    frame_rate = metadata.get("frame_rate") or metadata.get("fs")
+    # extract temporal scale using canonical parameter access
+    frame_rate = get_param(metadata, "fs")
     if frame_rate:
-        time_scale = 1.0 / float(frame_rate)  # seconds per frame
+        time_scale = 1.0 / float(frame_rate)
     else:
         time_scale = 1.0
 
@@ -982,12 +1138,16 @@ def _try_generic_writers(
             # Convert Path objects to strings for cross-platform compatibility
             np.savez(outpath, data=data, metadata=_convert_paths_to_strings(metadata))
     elif outpath.suffix.lower() in {".tif", ".tiff"}:
-        imwrite(
+        # use imagej-compatible format for proper Fiji detection
+        target_shape = metadata.get("shape", data.shape)
+        ij_meta, resolution = _build_imagej_metadata(metadata, target_shape)
+        tiff_imwrite(
             outpath,
             data,
-            metadata=_make_json_serializable(metadata),
+            imagej=True,
+            resolution=resolution,
+            metadata=ij_meta,
             photometric="minisblack",
-            contiguous=True,
         )
     elif outpath.suffix.lower() in {".h5", ".hdf5"}:
         with h5py.File(outpath, "w" if overwrite else "a") as f:

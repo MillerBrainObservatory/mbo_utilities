@@ -16,9 +16,30 @@ from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 from mbo_utilities.file_io import HAS_ZARR, logger
 from mbo_utilities.arrays.suite2p import _add_suite2p_labels
-from mbo_utilities.metadata import _build_ome_metadata
+from mbo_utilities.metadata import _build_ome_metadata, get_param, get_voxel_size
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
 logger = log.get("arrays.zarr")
+
+# register zarr pipeline info
+_ZARR_INFO = PipelineInfo(
+    name="zarr",
+    description="Zarr v3 stores (including OME-Zarr)",
+    input_patterns=[
+        "**/*.zarr",
+        "**/*.zarr/",
+        "**/zarr.json",
+    ],
+    output_patterns=[
+        "**/*.zarr",
+        "**/*.zarr/",
+    ],
+    input_extensions=["zarr"],
+    output_extensions=["zarr"],
+    marker_files=["zarr.json"],
+    category="reader",
+)
+register_pipeline(_ZARR_INFO)
 
 
 class ZarrArray(ReductionMixin):
@@ -119,11 +140,14 @@ class ZarrArray(ReductionMixin):
         else:
             md = self._metadata[0].copy()
 
-        # Ensure critical keys are present
+        # ensure critical keys are present
         md["dtype"] = self.dtype
-        if "num_frames" not in md and "nframes" not in md:
+        if "num_timepoints" not in md:
             if self.zs:
-                md["num_frames"] = int(self.zs[0].shape[0])
+                tp = int(self.zs[0].shape[0])
+                md["num_timepoints"] = tp
+                md["nframes"] = tp  # suite2p alias
+                md["num_frames"] = tp  # legacy alias
 
         return md
 
@@ -537,21 +561,14 @@ def merge_zarr_zplanes(
     for key, value in ome_attrs.items():
         root.attrs[key] = value
 
-    # Add napari-specific scale metadata to the array for proper volumetric viewing
-    pixel_resolution = metadata.get("pixel_resolution", [1.0, 1.0])
-    frame_rate = metadata.get("frame_rate", metadata.get("fs", 1.0))
-    dz = metadata.get("dz", metadata.get("z_step", 1.0))
-
-    if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
-        pixel_x, pixel_y = float(pixel_resolution[0]), float(pixel_resolution[1])
-    else:
-        pixel_x = pixel_y = 1.0
-
+    # add napari-specific scale metadata using centralized voxel size extraction
+    vs = get_voxel_size(metadata)
+    frame_rate = get_param(metadata, "fs", default=1.0)
     time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
 
     # napari reads scale from array attributes for volumetric viewing
     # Scale order: (T, Z, Y, X) in physical units
-    image.attrs["scale"] = [time_scale, float(dz), pixel_y, pixel_x]
+    image.attrs["scale"] = [time_scale, vs.dz, vs.dy, vs.dx]
 
     logger.info(f"Successfully created merged OME-Zarr at {output_path}")
     logger.info(f"Napari scale (t,z,y,x): {image.attrs['scale']}")

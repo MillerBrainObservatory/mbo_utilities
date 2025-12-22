@@ -8,10 +8,29 @@ import logging
 
 import numpy as np
 
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
+
 if TYPE_CHECKING:
     from numpy.typing import DTypeLike
 
 logger = logging.getLogger(__name__)
+
+# register isoview pipeline info
+_ISOVIEW_INFO = PipelineInfo(
+    name="isoview",
+    description="Isoview lightsheet microscopy data",
+    input_patterns=[
+        "**/data_TM??????_SPM??.zarr",
+        "**/SPM??_TM??????_CM??_CHN??.zarr",
+        "**/TM??????/",
+    ],
+    output_patterns=[],
+    input_extensions=["zarr"],
+    output_extensions=[],
+    marker_files=[],
+    category="reader",
+)
+register_pipeline(_ISOVIEW_INFO)
 
 
 class IsoviewArray:
@@ -351,8 +370,9 @@ class IsoviewArray:
             meta['fs'] = float(fps)
 
         # LazyArrayProtocol required fields
-        meta['nframes'] = len(self.tm_folders)
-        meta['num_frames'] = len(self.tm_folders)
+        meta['num_timepoints'] = len(self.tm_folders)
+        meta['nframes'] = len(self.tm_folders)  # suite2p alias
+        meta['num_frames'] = len(self.tm_folders)  # legacy alias
         meta['Ly'] = self._single_shape[1]
         meta['Lx'] = self._single_shape[2]
 
@@ -361,7 +381,6 @@ class IsoviewArray:
         meta['num_planes'] = self._single_shape[0]
 
         # isoview-specific fields
-        meta['num_timepoints'] = len(self.tm_folders)
         meta['views'] = self._views
         meta['shape'] = self.shape
         meta['structure'] = self._structure
@@ -660,6 +679,32 @@ class IsoviewArray:
     def close(self) -> None:
         """Release resources (clear zarr cache)."""
         self._zarr_cache.clear()
+
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite: bool = False,
+        target_chunk_mb: int = 50,
+        ext: str = ".tiff",
+        progress_callback=None,
+        debug: bool = False,
+        planes: list[int] | int | None = None,
+        **kwargs,
+    ):
+        """(WIP) Write IsoviewArray to disk."""
+        from mbo_utilities.arrays._base import _imwrite_base
+
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
 
     def __repr__(self):
         return (

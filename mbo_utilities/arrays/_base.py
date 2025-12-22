@@ -21,6 +21,7 @@ from dask import array as da
 from mbo_utilities import log
 from mbo_utilities._protocols import get_dims, get_num_planes
 from mbo_utilities._writers import _write_plane
+from mbo_utilities.metadata import RoiMode
 
 if TYPE_CHECKING:
     from typing import Callable
@@ -226,8 +227,10 @@ def _imwrite_base(
     target_chunk_mb: int = 50,
     progress_callback: "Callable | None" = None,
     debug: bool = False,
+    show_progress: bool = True,
     roi_iterator=None,
     output_suffix: str | None = None,
+    roi_mode: RoiMode | str | None = None,
     **kwargs,
 ) -> Path:
     """
@@ -301,8 +304,15 @@ def _imwrite_base(
     # Update metadata
     md["Ly"] = Ly
     md["Lx"] = Lx
-    md["nframes"] = nframes
-    md["num_frames"] = nframes  # alias for backwards compatibility
+    md["num_timepoints"] = nframes
+    md["nframes"] = nframes  # suite2p alias
+    md["num_frames"] = nframes  # legacy alias
+
+    # normalize and store roi_mode
+    if roi_mode is not None:
+        if isinstance(roi_mode, str):
+            roi_mode = RoiMode.from_string(roi_mode)
+        md["roi_mode"] = roi_mode.value
 
     # Normalize planes to 0-indexed list
     planes_list = _normalize_planes(planes, num_planes)
@@ -349,10 +359,15 @@ def _imwrite_base(
                 metadata=plane_md,
                 progress_callback=progress_callback,
                 debug=debug,
+                show_progress=show_progress,
                 dshape=(nframes, Ly, Lx),
                 plane_index=plane_idx,
                 **kwargs,
             )
+
+    # signal completion
+    if progress_callback:
+        progress_callback(1.0, len(planes_list))
 
     return outpath
 

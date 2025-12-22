@@ -1,77 +1,197 @@
-# MBO Utilities
+<p align="center">
+<img src="mbo_utilities/assets/static/logo_utilities.png" height="220" alt="MBO Utilities logo">
+</p>
 
-> **Status:** Late-beta stage of active development. There will be bugs that can be addressed quickly, file an [issue](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or reach out on slack.
+<p align="center">
+<a href="https://github.com/MillerBrainObservatory/mbo_utilities/actions/workflows/test_python.yml"><img src="https://github.com/MillerBrainObservatory/mbo_utilities/actions/workflows/test_python.yml/badge.svg" alt="CI"></a>
+<a href="https://badge.fury.io/py/mbo-utilities"><img src="https://badge.fury.io/py/mbo-utilities.svg" alt="PyPI version"></a>
+<a href="https://millerbrainobservatory.github.io/mbo_utilities/"><img src="https://img.shields.io/badge/docs-online-green" alt="Documentation"></a>
+</p>
 
-Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO).
+<p align="center">
+<a href="#installation"><b>Installation</b></a> ·
+<a href="https://millerbrainobservatory.github.io/mbo_utilities/"><b>Documentation</b></a> ·
+<a href="https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html"><b>User Guide</b></a> ·
+<a href="https://millerbrainobservatory.github.io/mbo_utilities/array_types.html"><b>Array Types</b></a> ·
+<a href="https://github.com/MillerBrainObservatory/mbo_utilities/issues"><b>Issues</b></a>
+</p>
 
-## Features
+Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO). Fast, lazy I/O with `imread`/`imwrite` for multiple array types (ScanImage and generic TIFFs, Suite2p binaries, Zarr and HDF5), an interactive GUI for data visualization, and processing pipelines for calcium imaging data.
 
-- **Fast, lazy I/O** with `imread`/`imwrite` for [multiple array types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) (ScanImage and generic TIFFs, Suite2p binaries, Zarr and HDF5)
-- **Interactive GUI** via `uv run mbo` for data visualization and processing
-- **(WIP) Pollen calibration** via `uv run pollen`
+<div align="center">
+  <img src="docs/_images/GUI_Slide1.png" width="45%" />
+  <img src="docs/_images/GUI_Slide2.png" width="45%" />
+</div>
 
-[![Documentation](https://img.shields.io/badge/Documentation-black?style=for-the-badge&logo=readthedocs&logoColor=white)](https://millerbrainobservatory.github.io/mbo_utilities/)
+> **Note:**
+> `mbo_utilities` is in **late-beta** stage of active development. There will be bugs that can be addressed quickly, file an [issue](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or reach out on slack.
 
 ## Installation
 
-### Quick Install
+`mbo_utilities` is available in [pypi](https://pypi.org/project/mbo_utilities/):
 
-The provided installation scripts will install [UV](https://docs.astral.sh/uv/getting-started/features/) and allow you to choose a set of optional dependencies.
+`pip install mbo_utilities`
 
-**Windows (PowerShell-Only):**
+> For help setting up a virtual environment, see [the MBO guide](https://millerbrainobservatory.github.io/guides/venvs.html).
+
+### Optional Dependencies
+
+```bash
+# with lbm_suite2p_python, suite2p, cellpose
+pip install "mbo_utilities[suite2p]"
+
+# all suite2p deps + rastermap
+pip install "mbo_utilities[rastermap]"
+
+# suite3D for axial (z-plane) registration
+pip install "mbo_utilities[suite3d]"
+
+# all of the above
+pip install "mbo_utilities[all]"
+```
+
+### With [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
+
+After [installing `uv`](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer):
+
+**For CLI usage only** (global `mbo` command):
+
+```bash
+uv tool install mbo_utilities
+```
+
+This installs the CLI globally. Not for use as a library in your own code.
+
+**For library/development use** (import in your code):
+
+```bash
+uv venv --python 3.12
+uv pip install mbo_utilities
+```
+
+This creates a project-specific virtual environment.
+
+**One-line install scripts** (CLI + desktop shortcut):
 
 ```powershell
+# Windows (PowerShell)
 irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
 ```
 
-**Linux/macOS:**
-
 ```bash
+# Linux/macOS
 curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
 ```
 
-### Pip
-
-We recommend creating a virtual environment to install all python packages ith `pip` ([see the MBO guide](https://millerbrainobservatory.github.io/guides/venvs.html).
+These scripts install to `~/mbo/envs/mbo_utilities` and add `mbo` to your PATH.
 
 ```bash
-uv venv --python 3.12.9
-uv pip install mbo_utilities
+$ mbo --help
+Usage: mbo [OPTIONS] COMMAND [ARGS]...
 
-# install all optional dependencies
-uv pip install "mbo_utilities[all]"
+  MBO Utilities CLI - data preview and processing tools.
+
+  GUI Mode:
+    mbo                            Open file selection dialog
+    mbo /path/to/data              Open specific file in GUI
+    mbo /path/to/data --metadata   Show only metadata
+
+  Commands:
+    mbo convert INPUT OUTPUT       Convert between formats
+    mbo info INPUT                 Show array information (CLI)
+    mbo download URL               Download file from GitHub
+    mbo formats                    List supported formats
+
+  Utilities:
+    mbo --download-notebook             Download user guide notebook
+    mbo --check-install                 Verify installation
+
+Options:
+  --download-notebook   Download the mbo_utiltities user guide notebook.
+  --notebook-url TEXT   URL of notebook to download.
+  --download-file TEXT  Download a file from URL (e.g. GitHub).
+  -o, --output TEXT     Output path for --download-file or --download-
+                        notebook.
+  --check-install       Verify the installation of mbo_utilities and
+                        dependencies.
+  --help                Show this message and exit.
+
+Commands:
+  convert    Convert imaging data between formats.
+  download   Download a file from a URL (supports GitHub).
+  formats    List supported file formats.
+  info       Show information about an imaging dataset.
+  scanphase  Scan-phase analysis for bidirectional scanning data.
+  view       Open imaging data in the GUI viewer.
 ```
 
-Using the installation scripts will install an isolated environment.
+### Environment Locations
 
-You can also install mbo_utilities into other environments with `pip` and they will not conflict.
+| Method | Use Case | Run Command |
+|--------|----------|-------------|
+| `uv tool install` | CLI only | `mbo` |
+| `uv pip install` | Scientific Data Processing | `uv run mbo` or activate venv |
+| Install script | CLI + desktop shortcut | `mbo` |
 
-| Method | Location | Use Case |
-|--------|----------|----------|
-| `uv pip install` in project | `project/.venv/` | Project-specific, use with `uv run mbo` |
-| `uv tool install mbo_utilities` | `~/.local/bin/` | Global `mbo` command |
+For library use, activate the venv or use `uv run`:
 
-### Uninstall
+```bash
+# option 1: activate
+.venv\Scripts\activate  # Windows
+source .venv/bin/activate  # Linux/macOS
+mbo --help
+
+# option 2: uv run (no activation needed)
+uv run mbo --help
+```
+
+## Usage
+
+**CLI Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `uv run mbo` | Launch interactive GUI |
+| `uv run mbo --check-install` | Verify installation and GPU configuration |
+| `uv run mbo /path/to/data.tiff` | View a supported file/folder |
+| `uv run mbo /path/to/data.tiff --metadata` | View metadata for a supported file/folder |
+| `uv run mbo --download-notebook` | Download user guide notebook |
+| `uv run mbo info /path/to/data.tiff` | Show file info |
+| `uv run mbo convert input.tiff output.zarr` | Convert file formats |
+| `uv run mbo scanphase /path/to/data.tiff` | Scan-phase analysis |
+| `uv run mbo formats` | List supported formats |
+| `uv run pollen` | Pollen calibration tool (WIP) |
+
+## Supported ScanImage Configurations
+
+`mbo_utilities` automatically detects and parses metadata from these ScanImage acquisition modes:
+
+| Configuration | Detection | Result |
+|---------------|-----------|--------|
+| LBM single channel | `channelSave=[1..N]`, AI0 only | `lbm=True`, `colors=1` |
+| LBM dual channel | `channelSave=[1..N]`, AI0+AI1 | `lbm=True`, `colors=2` |
+| Piezo (single frame/slice) | `enable=True`, `framesPerSlice=1` | `piezo=True` |
+| Piezo multi-frame (with avg) | `enable=True`, `logAvgFactor>1` | `piezo=True`, averaged frames |
+| Piezo multi-frame (no avg) | `enable=True`, `framesPerSlice>1`, `logAvg=1` | `piezo=True`, raw frames |
+| Single plane | `enable=False` | `zplanes=1` |
+
+> **Note:** Frame-averaging (`logAverageFactor > 1`) is only available for non-LBM acquisitions.
+
+## Uninstall
 
 **If installed via quick install script:**
- 
-Powershell:
 
 ```powershell
+# Windows
 uv tool uninstall mbo_utilities
-
-# Windows - remove venv and shortcut
 Remove-Item -Recurse -Force "$env:USERPROFILE\.mbo"
 Remove-Item "$env:USERPROFILE\Desktop\MBO Utilities.lnk" -ErrorAction SilentlyContinue
 ```
 
-Linux/macOS:
-
 ```bash
-
+# Linux/macOS
 uv tool uninstall mbo_utilities
-
-rm -rf ~/.mbo
+rm -rf ~/mbo
 ```
 
 **If installed in a project venv:**
@@ -80,230 +200,73 @@ rm -rf ~/.mbo
 uv pip uninstall mbo_utilities
 ```
 
-The GUI allows registration/segmentation for users to quickly process subsets of their datasets.
+## Troubleshooting
 
-These pipelines need to be installed separately.
-
-Currently, the only supported pipeline is LBM-Suite2p-Python.
-
-A few exciting future prospects include [masknmf](https://github.com/apasarkar/masknmf-toolbox).
-
-```bash
-uv pip install mbo_utilities[suite2p]
-```
-
-**Note:** On Windows, you may need to add `$USERPROFILE/.local/bin` to your PATH via environment variables.
-
-## Usage
-
-We encourage users to start with the [user_guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html).
-
-You can run this code as a jupyter notebook or rendered in the [docs](./demos/user_guide.ipynb) and can be downloaded on the top right of the page.
-
-See [array types](https://millerbrainobservatory.github.io/mbo_utilities/array_types.html) for additional information about each file-type and it's associated lazy array.
-
-### Commands
-
-**Launch GUI:**
-
-`uv run mbo`: Works when in a directory with a `.venv` folder
-`mbo`: Calls the global installation, from any terminal.
-
-```bash
-# in a project
-uv run mbo
-```
-
-<p align="center">
-  <img src="docs/_images/GUI_Slide1.png" alt="GUI Screenshot" width="45%">
-  <img src="docs/_images/GUI_Slide2.png" alt="GUI Screenshot" width="45%">
-</p>
-
-**Download User Guide Notebook:**
-
-```bash
-uv run mbo --download-notebook
-```
-
-**Verify Installation:**
-
-Check that all dependencies are correctly installed, including CUDA/GPU configuration for Suite3D z-registration:
-
-```bash
-uv run mbo --check-install
-```
-
-**Pollen Calibration:**
-
-```bash
-uv run pollen
-```
-
-**Download files from GitHub:**
-
-```bash
-# download a notebook from github
-mbo download https://github.com/user/repo/blob/main/notebook.ipynb
-
-# download to specific location
-mbo download https://github.com/user/repo/blob/main/data.npy 
-```
-
-**Scan-phase analysis:**
-
-```bash
-# open file dialog
-uv run mbo scanphase
-
-# analyze specific file
-uv run mbo scanphase /path/to/data.tiff
-
-# use first 5 tiffs from a folder
-uv run mbo scanphase ./folder/ -n 5
-
-# custom output directory
-uv run mbo scanphase data.tiff -o ./results/
-```
-
-**File format conversion:**
-
-```bash
-# convert tiff to zarr
-uv run mbo convert input.tiff output.zarr
-
-# convert to suite2p binary
-uv run mbo convert input.tiff output.bin
-```
-
-**Show file info:**
-
-```bash
-uv run mbo info /path/to/data.tiff
-```
-
-**List supported formats:**
-
-```bash
-uv run mbo formats
-```
-
-## Installation Troubleshooting
-
-
-### GPU/CUDA Errors
+<details>
+<summary><b>GPU/CUDA Errors</b></summary>
 
 **Error: "Failed to auto-detect CUDA root directory"**
 
-This error occurs when using GPU-accelerated features (like Suite3D registration) and CuPy cannot find your CUDA Toolkit installation.
+This occurs when using GPU-accelerated features and CuPy cannot find your CUDA Toolkit.
 
-#### Solution 1: Check if CUDA is installed
+**Check if CUDA is installed:**
 
-**PowerShell (Windows):**
 ```powershell
-# Check for CUDA installations
+# Windows
 dir "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA" -ErrorAction SilentlyContinue
-
-# Check if CUDA_PATH is set
 $env:CUDA_PATH
 ```
 
-**Linux/macOS:**
 ```bash
-# Check for CUDA
+# Linux/macOS
 nvcc --version
-
-# Check CUDA_PATH
 echo $CUDA_PATH
 ```
 
-#### Solution 2: Set CUDA_PATH if CUDA is installed
+**Set CUDA_PATH:**
 
-**PowerShell (Windows):**
 ```powershell
-# Find your CUDA version folder (e.g., v12.1, v11.8, v12.6)
-# Replace with your actual version from the directory listing above
-$cuda_version = "v12.6"
-
-# Temporary (current session)
-$env:CUDA_PATH = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\$cuda_version"
-
-# Permanent (restart terminal after)
-[System.Environment]::SetEnvironmentVariable('CUDA_PATH', "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\$cuda_version", 'User')
+# Windows (replace v12.6 with your version)
+$env:CUDA_PATH = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6"
+[System.Environment]::SetEnvironmentVariable('CUDA_PATH', $env:CUDA_PATH, 'User')
 ```
 
-**Linux/macOS:**
 ```bash
-# Find CUDA installation (common locations)
-ls /usr/local/cuda* 2>/dev/null
-
-# Set CUDA_PATH (add to ~/.bashrc or ~/.zshrc for persistence)
-export CUDA_PATH=/usr/local/cuda-12.6  # Replace with your version
+# Linux/macOS (add to ~/.bashrc or ~/.zshrc)
+export CUDA_PATH=/usr/local/cuda-12.6
 ```
 
-#### Solution 3: Install CUDA Toolkit if not present
+If CUDA is not installed, download from [NVIDIA CUDA Downloads](https://developer.nvidia.com/cuda-downloads).
 
-1. **Check your GPU compatibility**: Ensure you have an NVIDIA GPU
-2. **Download CUDA Toolkit**: Visit [NVIDIA CUDA Downloads](https://developer.nvidia.com/cuda-downloads)
-3. **Install**: Follow the installer instructions
-4. **Restart your terminal** to pick up the new environment variables
+</details>
 
-**Note:** After installing CUDA Toolkit, `CUDA_PATH` should be set automatically by the installer.
-
-#### Alternative: Use CPU-only processing
-
-If you don't have an NVIDIA GPU or prefer not to install CUDA, you can disable GPU processing in Suite3D by modifying the registration parameters (though this will be significantly slower).
-
-### Git LFS Download Errors (when installing directly from Github)
+<details>
+<summary><b>Git LFS Download Errors</b></summary>
 
 There is a [bug in fastplotlib](https://github.com/fastplotlib/fastplotlib/issues/861) causing `git lfs` errors when installed from a git branch.
 
-This should be fixed soon.
+Set `GIT_LFS_SKIP_SMUDGE=1` and restart your terminal:
 
-- In your terminal of choice, set the `GIT_LFS_SKIP_SMUDGE` environment variable to 1
-- **restart your terminal**.
-
-**PowerShell (Windows):**
 ```powershell
-# current session only
-$env:GIT_LFS_SKIP_SMUDGE="1"
-
-# permanent for the current user)
+# Windows
 [System.Environment]::SetEnvironmentVariable('GIT_LFS_SKIP_SMUDGE', '1', 'User')
 ```
 
-**Command Prompt (Windows):**
-```cmd
-REM Temporary (current session only)
-set GIT_LFS_SKIP_SMUDGE=1
-  GIT_LFS_SKIP_SMUDGE=1
-
-REM Permanent (system-wide, requires admin)
-setx GIT_LFS_SKIP_SMUDGE 1
-
-  SUCCESS: Specified value was saved.
-```
-
-**Linux/macOS (bash/zsh):**
 ```bash
-# current session only
-export GIT_LFS_SKIP_SMUDGE=1
-
-# add to .bashrc/.zshrc to be permanent for the current user 
-echo 'export GIT_LFS_SKIP_SMUDGE=1' >> ~/.bashrc  # or ~/.zshrc
-source ~/.bashrc  # or ~/.zshrc
+# Linux/macOS
+echo 'export GIT_LFS_SKIP_SMUDGE=1' >> ~/.bashrc
+source ~/.bashrc
 ```
 
-After setting the variable, restart your terminal and retry the installation.
+</details>
+
+## Built With
+
+- **[Suite2p](https://github.com/MouseLand/suite2p)** - Integration support
+- **[Rastermap](https://github.com/MouseLand/rastermap)** - Visualization
+- **[Suite3D](https://github.com/alihaydaroglu/suite3d)** - Volumetric processing
 
 ## Issues & Support
 
 - **Bug reports:** [GitHub Issues](https://github.com/MillerBrainObservatory/mbo_utilities/issues)
 - **Questions:** See [documentation](https://millerbrainobservatory.github.io/mbo_utilities/) or open a discussion
-
-## Built With
-
-This package integrates several open-source tools:
-
-- **[Suite2p](https://github.com/MouseLand/suite2p)** - Integration support
-- **[Rastermap](https://github.com/MouseLand/rastermap)** - Visualization
-- **[Suite3D](https://github.com/alihaydaroglu/suite3d)** - Volumetric processing

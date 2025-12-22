@@ -14,10 +14,28 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import load_npy
 from mbo_utilities._parsing import _convert_paths_to_strings
 
 logger = log.get("arrays.bin")
+
+# register binary pipeline info
+_BIN_INFO = PipelineInfo(
+    name="binary",
+    description="Raw binary files (.bin)",
+    input_patterns=[
+        "**/*.bin",
+    ],
+    output_patterns=[
+        "**/*.bin",
+    ],
+    input_extensions=["bin"],
+    output_extensions=["bin"],
+    marker_files=[],
+    category="reader",
+)
+register_pipeline(_BIN_INFO)
 
 
 @dataclass
@@ -187,8 +205,8 @@ class BinArray(ReductionMixin):
             md = dict(self.metadata) if self.metadata else {}
             md["Ly"] = self.Ly
             md["Lx"] = self.Lx
-            md["nframes"] = self.nframes
-            md["num_frames"] = self.nframes
+            md["num_timepoints"] = self.nframes
+            md["nframes"] = self.nframes  # suite2p alias
 
             if output_name is None:
                 output_name = "data_raw.bin"

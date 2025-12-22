@@ -139,7 +139,7 @@ Access via **Process** tab.
 ## Python API
 
 ```python
-from mbo_utilities.graphics import run_gui
+from mbo_utilities.gui import run_gui
 
 # from file
 run_gui("/path/to/data")

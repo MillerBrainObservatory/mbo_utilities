@@ -242,7 +242,7 @@ def main(
         return
 
     if check_install:
-        from mbo_utilities.graphics.run_gui import _check_installation
+        from mbo_utilities.gui.run_gui import _check_installation
         _check_installation()
         return
 
@@ -259,7 +259,7 @@ def main(
     spinner = LoadingSpinner("Loading GUI")
     spinner.start()
     try:
-        from mbo_utilities.graphics.run_gui import run_gui
+        from mbo_utilities.gui.run_gui import run_gui
         spinner.stop()
     except Exception as e:
         spinner.stop()
@@ -310,7 +310,7 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
     spinner = LoadingSpinner("Loading GUI")
     spinner.start()
     try:
-        from mbo_utilities.graphics.run_gui import run_gui
+        from mbo_utilities.gui.run_gui import run_gui
         spinner.stop()
     except Exception as e:
         spinner.stop()
@@ -550,7 +550,7 @@ def info(input_path, metadata):
         md = data.metadata
         if md:
             click.echo(f"\nMetadata:")
-            important_keys = ["nframes", "num_frames", "Ly", "Lx", "fs", "num_rois", "plane"]
+            important_keys = ["num_timepoints", "nframes", "num_frames", "Ly", "Lx", "fs", "num_rois", "plane"]
             for key in important_keys:
                 if key in md:
                     click.echo(f"  {key}: {md[key]}")
@@ -597,6 +597,11 @@ def list_formats():
     click.echo("  .bin         - Suite2p binary format")
     click.echo("  .h5          - HDF5 format")
     click.echo("  .npy         - NumPy array")
+
+
+# register db subcommand group
+from mbo_utilities.db.cli import db_cli
+main.add_command(db_cli)
 
 
 @main.command("scanphase")
@@ -690,7 +695,7 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
         click.echo("")
         click.secho("scan-phase analysis complete", fg="cyan", bold=True)
         click.echo("")
-        click.echo(f"data: {meta.get('num_frames', 0)} frames, "
+        click.echo(f"data: {meta.get('num_timepoints', meta.get('num_frames', 0))} timepoints, "
                    f"{meta.get('num_rois', 1)} ROIs, "
                    f"{meta.get('frame_shape', (0, 0))[1]}x{meta.get('frame_shape', (0, 0))[0]} px")
         click.echo(f"analysis time: {meta.get('analysis_time', 0):.1f}s")

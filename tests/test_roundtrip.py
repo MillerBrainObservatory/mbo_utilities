@@ -281,7 +281,7 @@ class TestRoundtripToNpy:
         arr = mbo.imread(out_file)
         assert hasattr(arr, "metadata")
         # Check that our custom keys are present
-        assert arr.metadata.get("experiment") == "test_001" or "nframes" in arr.metadata
+        assert arr.metadata.get("experiment") == "test_001" or "num_timepoints" in arr.metadata or "nframes" in arr.metadata
 
 
 class TestCrossFormatConversion:

@@ -10,8 +10,26 @@ from pathlib import Path
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base
+from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
 logger = log.get("arrays.nwb")
+
+# register nwb pipeline info
+_NWB_INFO = PipelineInfo(
+    name="nwb",
+    description="NWB (Neurodata Without Borders) files",
+    input_patterns=[
+        "**/*.nwb",
+    ],
+    output_patterns=[
+        "**/*.nwb",
+    ],
+    input_extensions=["nwb"],
+    output_extensions=["nwb"],
+    marker_files=[],
+    category="reader",
+)
+register_pipeline(_NWB_INFO)
 
 
 class NWBArray:
