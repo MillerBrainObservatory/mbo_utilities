@@ -334,7 +334,9 @@ def draw_metadata_inspector(metadata: dict):
                     imgui.begin_tooltip()
                     imgui.text("Aliases:")
                     for alias in param.aliases:
-                        imgui.bullet_text(alias)
+                        imgui.bullet()
+                        imgui.same_line()
+                        imgui.text_colored(_IMAGING_COLOR, alias)
                     imgui.end_tooltip()
                 # value with optional unit, or placeholder for missing
                 if value is not None:
