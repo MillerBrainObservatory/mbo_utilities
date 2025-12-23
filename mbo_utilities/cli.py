@@ -779,6 +779,16 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
     help="Number of frames to write in write benchmarks.",
 )
 @click.option(
+    "--write-full",
+    is_flag=True,
+    help="Write full dataset instead of subset.",
+)
+@click.option(
+    "--keep-files",
+    is_flag=True,
+    help="Keep written output files after benchmark.",
+)
+@click.option(
     "--save/--no-save",
     default=True,
     help="Save results to JSON file.",
@@ -793,6 +803,8 @@ def benchmark(
     no_phase_fft,
     write_formats,
     write_frames,
+    write_full,
+    keep_files,
     save,
 ):
     """
@@ -843,6 +855,10 @@ def benchmark(
         config.write_formats = formats
     if write_frames is not None:
         config.write_num_frames = write_frames
+    if write_full:
+        config.write_full_dataset = True
+    if keep_files:
+        config.keep_written_files = True
 
     # generate label if not provided
     if label is None:
@@ -853,7 +869,9 @@ def benchmark(
     click.echo(f"Config: {config_preset}")
     click.echo(f"  Frame counts: {config.frame_counts}")
     click.echo(f"  Phase tests: no_phase={config.test_no_phase}, corr={config.test_phase_corr}, fft={config.test_phase_fft}")
-    click.echo(f"  Write formats: {config.write_formats}")
+    write_info = "full dataset" if config.write_full_dataset else f"{config.write_num_frames} frames"
+    click.echo(f"  Write formats: {config.write_formats} ({write_info})")
+    click.echo(f"  Keep files: {config.keep_written_files}")
     click.echo(f"  Repeats: {config.repeats}")
     click.echo()
 

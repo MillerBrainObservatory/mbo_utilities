@@ -51,6 +51,8 @@ class BenchmarkConfig:
     # write formats to test
     write_formats: tuple[str, ...] = (".zarr", ".tiff", ".h5", ".bin")
     write_num_frames: int = 100
+    write_full_dataset: bool = False  # write entire dataset (no num_frames limit)
+    keep_written_files: bool = False  # keep output files after benchmark
 
     # timing settings
     repeats: int = 3
@@ -291,10 +293,10 @@ def benchmark_indexing(
     if warmup:
         _ = arr[0]
 
-    # frame batch tests
+    # volume batch tests (all z-planes per timepoint)
     for n in frame_counts:
         if n > max_frames:
-            logger.warning(f"skipping {n} frames test (only {max_frames} available)")
+            logger.warning(f"skipping {n} volumes test (only {max_frames} available)")
             continue
 
         times = []
@@ -305,24 +307,24 @@ def benchmark_indexing(
                 _, elapsed = _time_func(lambda: arr[0:n])
             times.append(elapsed)
 
-        results[f"{n}_frames"] = TimingStats.from_times(times)
+        results[f"{n}_volumes"] = TimingStats.from_times(times)
 
-    # z-plane tests
+    # single z-plane tests (subset of volume)
     if test_zplane and num_zplanes > 1:
-        # single frame, single z-plane
+        # single timepoint, single z-plane
         times = []
         for _ in range(repeats):
             _, elapsed = _time_func(lambda: arr[0, 0])
             times.append(elapsed)
-        results["1_frame_1_zplane"] = TimingStats.from_times(times)
+        results["1_frame"] = TimingStats.from_times(times)
 
-        # 10 frames, single z-plane
+        # 10 timepoints, single z-plane
         if max_frames >= 10:
             times = []
             for _ in range(repeats):
                 _, elapsed = _time_func(lambda: arr[0:10, 0])
                 times.append(elapsed)
-            results["10_frames_1_zplane"] = TimingStats.from_times(times)
+            results["10_frames"] = TimingStats.from_times(times)
 
         # single frame, spatial crop
         times = []
@@ -399,9 +401,10 @@ def benchmark_phase_variants(
 def benchmark_writes(
     arr,
     formats: tuple[str, ...] = (".zarr", ".tiff", ".h5", ".bin"),
-    num_frames: int = 100,
+    num_frames: int | None = 100,
     output_dir: Path | None = None,
     repeats: int = 3,
+    keep_files: bool = False,
 ) -> dict[str, TimingStats]:
     """
     benchmark writing to different file formats.
@@ -412,12 +415,14 @@ def benchmark_writes(
         source array to write from
     formats : tuple of str
         file extensions to test
-    num_frames : int
-        frames to write in each test
+    num_frames : int or None
+        frames to write in each test. None = full dataset
     output_dir : Path, optional
         directory for output files (temp dir if None)
     repeats : int
         timing iterations per format
+    keep_files : bool
+        keep output files after benchmark (default: cleanup)
 
     returns
     -------
@@ -427,7 +432,11 @@ def benchmark_writes(
     from mbo_utilities import imwrite
 
     results = {}
-    max_frames = min(num_frames, arr.shape[0])
+    total_frames = arr.shape[0]
+    write_frames = total_frames if num_frames is None else min(num_frames, total_frames)
+    is_full = num_frames is None or write_frames == total_frames
+
+    logger.info(f"writing {write_frames} frames ({'full dataset' if is_full else 'subset'})")
 
     # use temp dir if not specified
     cleanup_temp = False
@@ -452,17 +461,29 @@ def benchmark_writes(
                 arr,
                 out_path,
                 ext=ext,
-                num_frames=max_frames,
+                num_frames=write_frames,
                 overwrite=True,
             )
             times.append(elapsed)
 
-        results[ext] = TimingStats.from_times(times)
+            # cleanup intermediate iterations if not keeping files
+            if not keep_files and i < repeats - 1:
+                import shutil
+                if out_path.exists():
+                    if out_path.is_dir():
+                        shutil.rmtree(out_path, ignore_errors=True)
+                    else:
+                        out_path.unlink(missing_ok=True)
 
-    # cleanup temp dir
-    if cleanup_temp:
+        results[ext] = TimingStats.from_times(times)
+        logger.info(f"  {ext}: {results[ext].mean_ms:.1f} ± {results[ext].std_ms:.1f} ms")
+
+    # cleanup temp dir (unless keeping files)
+    if cleanup_temp and not keep_files:
         import shutil
         shutil.rmtree(output_dir, ignore_errors=True)
+    elif keep_files:
+        logger.info(f"output files saved to: {output_dir}")
 
     return results
 
@@ -561,14 +582,16 @@ def benchmark_mboraw(
     # write benchmarks
     if config.write_formats:
         logger.info("benchmarking writes...")
+        write_frames = None if config.write_full_dataset else config.write_num_frames
         results["writes"] = {
             k: asdict(v) for k, v in
             benchmark_writes(
                 arr,
                 formats=config.write_formats,
-                num_frames=config.write_num_frames,
+                num_frames=write_frames,
                 output_dir=output_dir,
                 repeats=config.repeats,
+                keep_files=config.keep_written_files,
             ).items()
         }
 
