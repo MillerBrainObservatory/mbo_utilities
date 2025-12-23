@@ -53,6 +53,7 @@ class BenchmarkConfig:
     write_num_frames: int = 100
     write_full_dataset: bool = False  # write entire dataset (no num_frames limit)
     keep_written_files: bool = False  # keep output files after benchmark
+    zarr_levels: tuple[int, ...] = (1, 3, 5, 9)  # gzip compression levels for zarr
 
     # timing settings
     repeats: int = 3
@@ -66,6 +67,7 @@ class BenchmarkConfig:
             test_phase_fft=False,
             test_zplane_indexing=False,
             write_formats=(".zarr", ".tiff"),
+            zarr_levels=(1,),  # only test level 1 for quick
             repeats=2,
         )
 
@@ -405,6 +407,7 @@ def benchmark_writes(
     output_dir: Path | None = None,
     repeats: int = 3,
     keep_files: bool = False,
+    zarr_levels: tuple[int, ...] = (1, 3, 5, 9),
 ) -> dict[str, TimingStats]:
     """
     benchmark writing to different file formats.
@@ -423,6 +426,8 @@ def benchmark_writes(
         timing iterations per format
     keep_files : bool
         keep output files after benchmark (default: cleanup)
+    zarr_levels : tuple of int
+        compression levels to test for zarr (gzip 1-9)
 
     returns
     -------
@@ -448,35 +453,62 @@ def benchmark_writes(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for ext in formats:
-        times = []
-        for i in range(repeats):
-            # create fresh output path each iteration
-            out_path = output_dir / f"bench_{ext.lstrip('.')}_{i}"
-            if out_path.exists():
-                import shutil
-                shutil.rmtree(out_path, ignore_errors=True)
-
-            _, elapsed = _time_func(
-                imwrite,
-                arr,
-                out_path,
-                ext=ext,
-                num_frames=write_frames,
-                overwrite=True,
-            )
-            times.append(elapsed)
-
-            # cleanup intermediate iterations if not keeping files
-            if not keep_files and i < repeats - 1:
-                import shutil
-                if out_path.exists():
-                    if out_path.is_dir():
+        # for zarr, test multiple compression levels
+        if ext == ".zarr" and zarr_levels:
+            for level in zarr_levels:
+                times = []
+                for i in range(repeats):
+                    out_path = output_dir / f"bench_zarr_L{level}_{i}"
+                    if out_path.exists():
+                        import shutil
                         shutil.rmtree(out_path, ignore_errors=True)
-                    else:
-                        out_path.unlink(missing_ok=True)
 
-        results[ext] = TimingStats.from_times(times)
-        logger.info(f"  {ext}: {results[ext].mean_ms:.1f} ± {results[ext].std_ms:.1f} ms")
+                    _, elapsed = _time_func(
+                        imwrite,
+                        arr,
+                        out_path,
+                        ext=ext,
+                        num_frames=write_frames,
+                        overwrite=True,
+                        level=level,
+                    )
+                    times.append(elapsed)
+
+                    if not keep_files and i < repeats - 1:
+                        import shutil
+                        if out_path.exists():
+                            shutil.rmtree(out_path, ignore_errors=True)
+
+                results[f".zarr (L{level})"] = TimingStats.from_times(times)
+                logger.info(f"  .zarr L{level}: {results[f'.zarr (L{level})'].mean_ms:.1f} ± {results[f'.zarr (L{level})'].std_ms:.1f} ms")
+        else:
+            times = []
+            for i in range(repeats):
+                out_path = output_dir / f"bench_{ext.lstrip('.')}_{i}"
+                if out_path.exists():
+                    import shutil
+                    shutil.rmtree(out_path, ignore_errors=True)
+
+                _, elapsed = _time_func(
+                    imwrite,
+                    arr,
+                    out_path,
+                    ext=ext,
+                    num_frames=write_frames,
+                    overwrite=True,
+                )
+                times.append(elapsed)
+
+                if not keep_files and i < repeats - 1:
+                    import shutil
+                    if out_path.exists():
+                        if out_path.is_dir():
+                            shutil.rmtree(out_path, ignore_errors=True)
+                        else:
+                            out_path.unlink(missing_ok=True)
+
+            results[ext] = TimingStats.from_times(times)
+            logger.info(f"  {ext}: {results[ext].mean_ms:.1f} ± {results[ext].std_ms:.1f} ms")
 
     # cleanup temp dir (unless keeping files)
     if cleanup_temp and not keep_files:
@@ -592,6 +624,7 @@ def benchmark_mboraw(
                 output_dir=output_dir,
                 repeats=config.repeats,
                 keep_files=config.keep_written_files,
+                zarr_levels=config.zarr_levels,
             ).items()
         }
 
