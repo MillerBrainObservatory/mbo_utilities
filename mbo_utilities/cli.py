@@ -726,5 +726,163 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
         raise click.Abort()
 
 
+@main.command("benchmark")
+@click.argument("input_path", type=click.Path(exists=True))
+@click.option(
+    "-o", "--output",
+    "output_dir",
+    type=click.Path(),
+    default=None,
+    help="Output directory for write tests and results.",
+)
+@click.option(
+    "--config",
+    "config_preset",
+    type=click.Choice(["quick", "full", "read-only", "write-only"]),
+    default="quick",
+    help="Benchmark preset: quick (~1-2min), full (~5-10min), read-only, write-only.",
+)
+@click.option(
+    "--label",
+    type=str,
+    default=None,
+    help="Label for this benchmark run (e.g., machine name).",
+)
+@click.option(
+    "--frames",
+    "frame_counts",
+    multiple=True,
+    type=int,
+    help="Frame counts to test: --frames 10 --frames 200 --frames 1000",
+)
+@click.option(
+    "--repeats",
+    type=int,
+    default=None,
+    help="Number of timing repetitions per test.",
+)
+@click.option(
+    "--no-phase-fft",
+    is_flag=True,
+    help="Skip slow FFT phase correction test.",
+)
+@click.option(
+    "--write-formats",
+    type=str,
+    default=None,
+    help="Comma-separated write formats: zarr,tiff,h5,bin",
+)
+@click.option(
+    "--write-frames",
+    type=int,
+    default=None,
+    help="Number of frames to write in write benchmarks.",
+)
+@click.option(
+    "--save/--no-save",
+    default=True,
+    help="Save results to JSON file.",
+)
+def benchmark(
+    input_path,
+    output_dir,
+    config_preset,
+    label,
+    frame_counts,
+    repeats,
+    no_phase_fft,
+    write_formats,
+    write_frames,
+    save,
+):
+    """
+    Run performance benchmarks on MboRawArray.
+
+    Measures initialization, indexing, phase correction, and write performance.
+
+    \b
+    Presets:
+      quick      - 10, 200 frames, no FFT, zarr+tiff only (~1-2 min)
+      full       - All tests: 1,10,200,1000 frames, all formats (~5-10 min)
+      read-only  - Skip write benchmarks (~3-5 min)
+      write-only - Only write benchmarks (~2-3 min)
+
+    \b
+    Examples:
+      mbo benchmark /path/to/raw                        # Quick benchmark
+      mbo benchmark /path/to/raw --config full          # Full suite
+      mbo benchmark /path/to/raw --label laptop_v1      # With custom label
+      mbo benchmark /path/to/raw --frames 10 --frames 100   # Custom frame counts
+      mbo benchmark /path/to/raw --no-phase-fft         # Skip slow FFT test
+      mbo benchmark /path/to/raw -o ./results/          # Custom output dir
+    """
+    from mbo_utilities.benchmarks import (
+        BenchmarkConfig,
+        benchmark_mboraw,
+        print_summary,
+    )
+
+    # select preset
+    presets = {
+        "quick": BenchmarkConfig.quick,
+        "full": BenchmarkConfig.full,
+        "read-only": BenchmarkConfig.read_only,
+        "write-only": BenchmarkConfig.write_only,
+    }
+    config = presets[config_preset]()
+
+    # apply custom overrides
+    if frame_counts:
+        config.frame_counts = tuple(frame_counts)
+    if repeats is not None:
+        config.repeats = repeats
+    if no_phase_fft:
+        config.test_phase_fft = False
+    if write_formats is not None:
+        formats = tuple(f".{f.strip().lstrip('.')}" for f in write_formats.split(","))
+        config.write_formats = formats
+    if write_frames is not None:
+        config.write_num_frames = write_frames
+
+    # generate label if not provided
+    if label is None:
+        import platform
+        label = platform.node() or "benchmark"
+
+    click.echo(f"Input: {input_path}")
+    click.echo(f"Config: {config_preset}")
+    click.echo(f"  Frame counts: {config.frame_counts}")
+    click.echo(f"  Phase tests: no_phase={config.test_no_phase}, corr={config.test_phase_corr}, fft={config.test_phase_fft}")
+    click.echo(f"  Write formats: {config.write_formats}")
+    click.echo(f"  Repeats: {config.repeats}")
+    click.echo()
+
+    # run benchmarks
+    result = benchmark_mboraw(
+        input_path,
+        config=config,
+        output_dir=Path(output_dir) if output_dir else None,
+        label=label,
+    )
+
+    # print results
+    print_summary(result)
+
+    # save results
+    if save:
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+        if output_dir:
+            results_dir = Path(output_dir) / "results"
+        else:
+            results_dir = Path(input_path).parent / "benchmark_results"
+
+        results_dir.mkdir(parents=True, exist_ok=True)
+        filename = results_dir / f"benchmark_{label}_{timestamp}.json"
+        result.save(filename)
+        click.secho(f"\nResults saved to: {filename}", fg="green")
+
+
 if __name__ == "__main__":
     main()
