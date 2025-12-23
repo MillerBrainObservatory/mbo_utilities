@@ -293,7 +293,7 @@ def benchmark_indexing(
     if warmup:
         _ = arr[0]
 
-    # timepoint batch tests: arr[0:N] reads N timepoints (all z-planes each)
+    # full volume reads: arr[0:N] reads N timepoints with all z-planes
     for n in frame_counts:
         if n > max_frames:
             logger.warning(f"skipping {n} timepoints test (only {max_frames} available)")
@@ -307,16 +307,16 @@ def benchmark_indexing(
                 _, elapsed = _time_func(lambda: arr[0:n])
             times.append(elapsed)
 
-        results[f"{n}t_all_z"] = TimingStats.from_times(times)
+        results[f"arr[:{n}] ({n}t x {num_zplanes}z)"] = TimingStats.from_times(times)
 
-    # single z-plane tests: arr[0:N, z] reads N timepoints but only one z-plane
+    # single z-plane reads: arr[0:N, z] reads N timepoints but only one z-plane
     if test_zplane and num_zplanes > 1:
         # single timepoint, single z-plane
         times = []
         for _ in range(repeats):
             _, elapsed = _time_func(lambda: arr[0, 0])
             times.append(elapsed)
-        results["1t_1z"] = TimingStats.from_times(times)
+        results["arr[0, 0] (1 frame)"] = TimingStats.from_times(times)
 
         # 10 timepoints, single z-plane
         if max_frames >= 10:
@@ -324,14 +324,14 @@ def benchmark_indexing(
             for _ in range(repeats):
                 _, elapsed = _time_func(lambda: arr[0:10, 0])
                 times.append(elapsed)
-            results["10t_1z"] = TimingStats.from_times(times)
+            results["arr[:10, 0] (10 frames)"] = TimingStats.from_times(times)
 
         # single timepoint, single z-plane, spatial crop
         times = []
         for _ in range(repeats):
             _, elapsed = _time_func(lambda: arr[0, 0, 50:150, 50:150])
             times.append(elapsed)
-        results["1t_1z_crop"] = TimingStats.from_times(times)
+        results["arr[0, 0, 50:150, 50:150]"] = TimingStats.from_times(times)
 
     return results
 
