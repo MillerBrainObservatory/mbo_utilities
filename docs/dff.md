@@ -135,7 +135,7 @@ The idea is to track the lower envelope of the signal to get F₀ without being 
 
 **Neuropil/background:** CaImAn handles this as part of its CNMF model {cite:p}`cnmf`.
 
-Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are background subtracted during this [factorization](https://en.wikipedia.org/wiki/Matrix_decomposition) (as was the issue in the above {ref}`example <bg_sub_example>`).
+Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are background subtracted during this matrix-factorization (as was the issue in the above {ref}`example <bg_sub_example>`).
 
 There is a strong argument to be made that a matrix factorization `CNMF` is not complex enough to model the true background and neuropil.
 
