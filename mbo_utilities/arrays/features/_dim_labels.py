@@ -106,7 +106,7 @@ def parse_dims(dims: str | Sequence[str] | None, ndim: int) -> tuple[str, ...]:
     return result
 
 
-def get_slider_dims(dims: tuple[str, ...]) -> tuple[str, ...]:
+def get_slider_dims(arr_or_dims) -> tuple[str, ...] | None:
     """
     Get the dimensions that should have sliders in a viewer.
 
@@ -114,15 +114,28 @@ def get_slider_dims(dims: tuple[str, ...]) -> tuple[str, ...]:
 
     Parameters
     ----------
-    dims : tuple[str, ...]
-        dimension labels
+    arr_or_dims : array-like or tuple[str, ...]
+        array with dims property, or tuple of dimension labels
 
     Returns
     -------
-    tuple[str, ...]
-        dimensions that need sliders (excludes Y, X)
+    tuple[str, ...] | None
+        dimensions that need sliders (excludes Y, X), lowercase for fastplotlib.
+        returns None if dims cannot be determined.
     """
-    return tuple(d for d in dims if d not in ("Y", "X"))
+    # if it's already a tuple of strings, use it directly
+    if isinstance(arr_or_dims, tuple) and all(isinstance(d, str) for d in arr_or_dims):
+        dims = arr_or_dims
+    else:
+        # assume it's an array, try to get dims
+        dims = get_dims(arr_or_dims)
+
+    if dims is None:
+        return None
+
+    # filter out spatial dims and convert to lowercase for fastplotlib
+    slider_dims = tuple(d.lower() for d in dims if d not in ("Y", "X"))
+    return slider_dims if slider_dims else None
 
 
 def get_dim_index(dims: tuple[str, ...], label: str) -> int | None:
