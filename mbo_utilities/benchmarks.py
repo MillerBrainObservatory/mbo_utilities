@@ -1278,7 +1278,8 @@ def benchmark_zarr_chunking(
     """
     import shutil
     import gc
-    from mbo_utilities import imwrite, imread
+    from mbo_utilities import imread
+    from mbo_utilities._writers import _write_zarr
 
     cleanup_temp = output_dir is None
     if output_dir is None:
@@ -1288,42 +1289,67 @@ def benchmark_zarr_chunking(
     h, w = arr.shape[-2:]
     total_available = arr.shape[0]
     write_timepoints = min(num_timepoints, total_available) if num_timepoints else total_available
+
+    # for multi-plane arrays, benchmark uses plane 0 only (single 3D slice)
+    # this avoids multi-file output and tests pure zarr chunking performance
+    is_multiplane = arr.ndim == 4 and arr.shape[1] > 1
+    if is_multiplane:
+        logger.info(f"using plane 0 of {arr.shape[1]} planes for zarr benchmark")
+
     frame_bytes = h * w * 2  # assuming uint16
     total_bytes = write_timepoints * frame_bytes
 
     results = {}
 
     # build configurations dynamically based on num_timepoints
+    # constraint: shard_size must be divisible by chunk_t (zarr requirement)
     # (shard_frames, chunk_shape, label)
     configs = []
 
-    # shard sizes to test (filter to those <= num_timepoints)
-    shard_sizes = [s for s in [1, 10, 50, 100, 200, 500] if s <= write_timepoints]
-    if write_timepoints not in shard_sizes:
-        shard_sizes.append(write_timepoints)
-    shard_sizes = sorted(set(shard_sizes))
+    # candidate shard sizes (filter to those <= num_timepoints)
+    candidate_shards = [s for s in [1, 10, 50, 100, 200, 500] if s <= write_timepoints]
 
-    # 1-frame inner chunks with varying shard sizes
-    for shard in shard_sizes:
+    # 1-frame inner chunks with varying shard sizes (always valid since any N % 1 == 0)
+    for shard in candidate_shards:
         configs.append((shard, (1, h, w), f"shard={shard} chunk=1t"))
 
     # sub-frame chunks (spatial tiling) - only with shard=1
-    if 1 in shard_sizes:
+    if 1 in candidate_shards:
         configs.append((1, (1, h // 2, w // 2), "shard=1 chunk=1t/4tile"))
         configs.append((1, (1, h // 4, w // 4), "shard=1 chunk=1t/16tile"))
 
-    # multi-frame inner chunks (only if we have enough timepoints)
-    # use largest shard size for these tests
-    max_shard = max(shard_sizes)
-    chunk_t_sizes = [t for t in [5, 10, 25, 50, 100] if t <= max_shard and t <= write_timepoints]
-    for chunk_t in chunk_t_sizes:
-        configs.append((max_shard, (chunk_t, h, w), f"shard={max_shard} chunk={chunk_t}t"))
-
-    for shard_frames, chunk_shape, label in configs:
-        # skip configs where chunk > shard
-        if chunk_shape[0] > shard_frames:
+    # multi-frame inner chunks - shard must be divisible by chunk_t
+    # test with shard sizes that are multiples of common chunk sizes
+    chunk_t_candidates = [5, 10, 25, 50, 100]
+    for chunk_t in chunk_t_candidates:
+        if chunk_t > write_timepoints:
             continue
-        shard_frames_actual = min(shard_frames, write_timepoints)
+        # find a shard size that's divisible by chunk_t and <= write_timepoints
+        # prefer 100, then 200, then 500, then exact multiple
+        for shard in [100, 200, 500]:
+            if shard <= write_timepoints and shard % chunk_t == 0:
+                configs.append((shard, (chunk_t, h, w), f"shard={shard} chunk={chunk_t}t"))
+                break
+        else:
+            # use chunk_t as shard (shard == chunk, single chunk per shard)
+            if chunk_t <= write_timepoints:
+                configs.append((chunk_t, (chunk_t, h, w), f"shard={chunk_t} chunk={chunk_t}t"))
+
+    # filter valid configs
+    valid_configs = [
+        (sf, cs, lbl) for sf, cs, lbl in configs if cs[0] <= sf
+    ]
+    total_configs = len(valid_configs)
+
+    try:
+        from tqdm import tqdm
+        config_iter = tqdm(valid_configs, desc="zarr configs", unit="cfg")
+    except ImportError:
+        config_iter = valid_configs
+        print(f"testing {total_configs} zarr configurations...")
+
+    for idx, (shard_frames, chunk_shape, label) in enumerate(config_iter):
+        shard_frames_actual = shard_frames
 
         write_times = []
         read_times = []
@@ -1331,7 +1357,7 @@ def benchmark_zarr_chunking(
         file_size = 0
 
         for i in range(repeats):
-            out_path = output_dir / f"zarr_{label.replace(' ', '_').replace('/', '-')}_{i}.zarr"
+            out_path = output_dir / f"zarr_bench_{idx}.zarr"
             if out_path.exists():
                 shutil.rmtree(out_path, ignore_errors=True)
 
@@ -1339,25 +1365,42 @@ def benchmark_zarr_chunking(
             gc.collect()
             ram_before = get_memory_mb()
 
+            # extract data to write (plane 0 for 4D, full array for 3D)
+            if is_multiplane:
+                write_data = arr[:write_timepoints, 0]
+            else:
+                write_data = arr[:write_timepoints]
+
+            # force load into memory for consistent timing
+            if hasattr(write_data, 'compute'):
+                write_data = write_data.compute()
+            elif not isinstance(write_data, np.ndarray):
+                write_data = np.asarray(write_data)
+
+            # write directly to zarr, bypassing multi-plane logic
             _, write_elapsed = _time_func(
-                imwrite,
-                arr,
+                _write_zarr,
                 out_path,
-                ext=".zarr",
-                num_frames=write_timepoints,
+                write_data,
                 overwrite=True,
+                metadata={"num_frames": write_timepoints},
                 level=level,
                 sharded=True,
                 shard_frames=shard_frames_actual,
                 chunk_shape=chunk_shape,
-                show_progress=False,
             )
             write_times.append(write_elapsed)
+
+            # clear zarr writer cache to flush and close the store
+            if hasattr(_write_zarr, "_arrays"):
+                _write_zarr._arrays.pop(out_path, None)
+                _write_zarr._offsets.pop(out_path, None)
+                _write_zarr._groups.pop(out_path, None)
 
             ram_after = get_memory_mb()
             ram_samples.append(ram_after - ram_before)
 
-            # measure file size
+            # measure file size (first iteration only)
             if i == 0:
                 file_size = sum(f.stat().st_size for f in out_path.rglob("*") if f.is_file())
 
@@ -1368,7 +1411,8 @@ def benchmark_zarr_chunking(
                 read_times.append(read_elapsed)
                 del z
 
-            if not keep_files and i < repeats - 1:
+            # always cleanup after each repeat to save space
+            if not keep_files:
                 shutil.rmtree(out_path, ignore_errors=True)
 
         # compute stats
@@ -1392,13 +1436,20 @@ def benchmark_zarr_chunking(
             "chunk_shape": chunk_shape,
         }
 
-        logger.info(
-            f"  {label:30s}: write {write_mean:7.1f} ms ({fps_write:5.0f} fps), "
-            f"read {read_mean:7.1f} ms ({fps_read:5.0f} fps), "
-            f"size {file_size / (1024 * 1024):6.1f} MB"
-        )
+        # update progress bar description with current result
+        try:
+            config_iter.set_postfix_str(
+                f"w:{fps_write:.0f} r:{fps_read:.0f} fps"
+            )
+        except AttributeError:
+            # no tqdm, print result
+            print(
+                f"  [{idx + 1}/{total_configs}] {label:30s}: "
+                f"write {write_mean:7.1f} ms ({fps_write:5.0f} fps), "
+                f"read {read_mean:7.1f} ms ({fps_read:5.0f} fps)"
+            )
 
-    # cleanup
+    # cleanup temp directory
     if cleanup_temp and not keep_files:
         shutil.rmtree(output_dir, ignore_errors=True)
 
@@ -1422,6 +1473,145 @@ def print_zarr_benchmark(results: dict):
             f"{data['file_size_mb']:>6.1f} MB "
             f"{data['compression_ratio']:>5.2f}x"
         )
+
+
+def plot_zarr_benchmark(
+    results: dict,
+    output_path: Path | str | None = None,
+    show: bool = True,
+    title: str = "Zarr Chunking Benchmark",
+) -> "Figure | None":
+    """
+    generate dark-mode visualization of zarr chunking benchmark.
+
+    creates a 2-panel figure showing:
+    - write/read FPS by configuration (grouped bar chart)
+    - file size and compression ratio
+
+    parameters
+    ----------
+    results : dict
+        benchmark results from benchmark_zarr_chunking()
+    output_path : Path or str, optional
+        save figure to this path
+    show : bool
+        display the figure
+    title : str
+        figure title
+
+    returns
+    -------
+    Figure or None
+        matplotlib figure if available
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.warning("matplotlib not installed, skipping plot")
+        return None
+
+    # lazy import for theme
+    from mbo_utilities.benchmarks import MBO_DARK_THEME, _apply_mbo_style
+    colors = MBO_DARK_THEME
+
+    # separate configs into categories for clearer visualization
+    shard_configs = {}  # shard=X chunk=1t
+    tile_configs = {}   # spatial tiling
+    multi_configs = {}  # multi-frame chunks
+
+    for label, data in results.items():
+        if "tile" in label:
+            tile_configs[label] = data
+        elif "chunk=1t" in label and "tile" not in label:
+            shard_configs[label] = data
+        else:
+            multi_configs[label] = data
+
+    # create figure with 2 rows: FPS comparison, file size
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8))
+    fig.patch.set_facecolor(colors["background"])
+    fig.suptitle(title, color=colors["text"], fontsize=14, fontweight="bold")
+
+    # panel 1: FPS comparison (grouped bar chart)
+    ax1 = axes[0]
+    _apply_mbo_style(ax1, fig)
+
+    all_labels = list(results.keys())
+    x = np.arange(len(all_labels))
+    width = 0.35
+
+    write_fps = [results[l]["fps_write"] for l in all_labels]
+    read_fps = [results[l]["fps_read"] for l in all_labels]
+
+    bars1 = ax1.bar(x - width/2, write_fps, width, label="Write FPS",
+                    color=colors["primary"], edgecolor=colors["border"])
+    bars2 = ax1.bar(x + width/2, read_fps, width, label="Read FPS",
+                    color=colors["success"], edgecolor=colors["border"])
+
+    ax1.set_ylabel("Frames per Second")
+    ax1.set_title("Write vs Read Performance", color=colors["text"])
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(all_labels, rotation=45, ha="right", fontsize=8)
+    ax1.legend(facecolor=colors["surface"], edgecolor=colors["border"],
+               labelcolor=colors["text"])
+    ax1.grid(axis="y", alpha=0.3, color=colors["border"])
+
+    # add value labels on bars
+    for bar, val in zip(bars1, write_fps):
+        if val > 0:
+            ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 50,
+                    f"{val:.0f}", ha="center", va="bottom",
+                    fontsize=7, color=colors["text_muted"])
+    for bar, val in zip(bars2, read_fps):
+        if val > 0:
+            ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 50,
+                    f"{val:.0f}", ha="center", va="bottom",
+                    fontsize=7, color=colors["text_muted"])
+
+    # panel 2: time comparison (stacked bar for write+read)
+    ax2 = axes[1]
+    _apply_mbo_style(ax2, fig)
+
+    write_ms = [results[l]["write_ms"] for l in all_labels]
+    read_ms = [results[l]["read_ms"] for l in all_labels]
+
+    bars1 = ax2.bar(x, write_ms, width * 2, label="Write Time",
+                    color=colors["warning"], edgecolor=colors["border"])
+    bars2 = ax2.bar(x, read_ms, width * 2, bottom=write_ms, label="Read Time",
+                    color=colors["accent"], edgecolor=colors["border"])
+
+    ax2.set_ylabel("Time (ms)")
+    ax2.set_title("Write + Read Time (lower is better)", color=colors["text"])
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(all_labels, rotation=45, ha="right", fontsize=8)
+    ax2.legend(facecolor=colors["surface"], edgecolor=colors["border"],
+               labelcolor=colors["text"])
+    ax2.grid(axis="y", alpha=0.3, color=colors["border"])
+
+    # add total time labels
+    for i, (w, r) in enumerate(zip(write_ms, read_ms)):
+        total = w + r
+        ax2.text(i, total + 20, f"{total:.0f}",
+                ha="center", va="bottom", fontsize=7, color=colors["text_muted"])
+
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.93)  # make room for suptitle
+
+    if output_path:
+        output_path = Path(output_path)
+        fig.savefig(
+            output_path,
+            facecolor=colors["background"],
+            edgecolor="none",
+            dpi=150,
+            bbox_inches="tight",
+        )
+        logger.info(f"saved zarr benchmark plot to {output_path}")
+
+    if show:
+        plt.show()
+
+    return fig
 
 
 def benchmark_mboraw(
