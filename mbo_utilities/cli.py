@@ -738,9 +738,9 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
 @click.option(
     "--config",
     "config_preset",
-    type=click.Choice(["quick", "full", "read-only", "write-only"]),
+    type=click.Choice(["quick", "full", "read-only", "write-only", "analysis"]),
     default="quick",
-    help="Benchmark preset: quick (~1-2min), full (~5-10min), read-only, write-only.",
+    help="Benchmark preset: quick, full, read-only, write-only, analysis.",
 )
 @click.option(
     "--label",
@@ -793,6 +793,11 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
     default=True,
     help="Save results to JSON file.",
 )
+@click.option(
+    "--plot/--no-plot",
+    default=False,
+    help="Generate dark-mode visualization plot.",
+)
 def benchmark(
     input_path,
     output_dir,
@@ -806,23 +811,27 @@ def benchmark(
     write_full,
     keep_files,
     save,
+    plot,
 ):
     """
     Run performance benchmarks on MboRawArray.
 
-    Measures initialization, indexing, phase correction, and write performance.
+    Measures initialization, indexing, phase correction, write performance,
+    throughput, access patterns, and file size comparisons.
 
     \b
     Presets:
-      quick      - 10, 200 frames, no FFT, zarr+tiff only (~1-2 min)
-      full       - All tests: 1,10,200,1000 frames, all formats (~5-10 min)
-      read-only  - Skip write benchmarks (~3-5 min)
-      write-only - Only write benchmarks (~2-3 min)
+      quick      - Basic indexing + writes, minimal tests (~1-2 min)
+      full       - All tests: throughput, scaling, access patterns, writes (~10-15 min)
+      read-only  - All read tests, skip writes (~5-8 min)
+      write-only - Only write benchmarks (~3-5 min)
+      analysis   - Throughput, scaling, access patterns (no phase/writes) (~3-5 min)
 
     \b
     Examples:
       mbo benchmark /path/to/raw                        # Quick benchmark
       mbo benchmark /path/to/raw --config full          # Full suite
+      mbo benchmark /path/to/raw --config analysis      # Performance analysis
       mbo benchmark /path/to/raw --label laptop_v1      # With custom label
       mbo benchmark /path/to/raw --frames 10 --frames 100   # Custom frame counts
       mbo benchmark /path/to/raw --no-phase-fft         # Skip slow FFT test
@@ -840,6 +849,7 @@ def benchmark(
         "full": BenchmarkConfig.full,
         "read-only": BenchmarkConfig.read_only,
         "write-only": BenchmarkConfig.write_only,
+        "analysis": BenchmarkConfig.analysis,
     }
     config = presets[config_preset]()
 
@@ -900,6 +910,18 @@ def benchmark(
         filename = results_dir / f"benchmark_{label}_{timestamp}.json"
         result.save(filename)
         click.secho(f"\nResults saved to: {filename}", fg="green")
+
+        # generate plot if requested
+        if plot:
+            from mbo_utilities.benchmarks import plot_benchmark_results
+            plot_path = results_dir / f"benchmark_{label}_{timestamp}.png"
+            plot_benchmark_results(result, output_path=plot_path, show=False)
+            click.secho(f"Plot saved to: {plot_path}", fg="green")
+
+    elif plot:
+        # plot without saving json
+        from mbo_utilities.benchmarks import plot_benchmark_results
+        plot_benchmark_results(result, show=True)
 
 
 if __name__ == "__main__":
