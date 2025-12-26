@@ -367,21 +367,20 @@ def _create_image_widget(data_array, widget: bool = True):
     else:
         figure_kwargs = {"size": (800, 800)}
 
-    # Determine slider dimension names and window functions based on data dimensionality
-    # MBO data is typically TZYX (4D) or TYX (3D)
-    # window_funcs tuple must match slider_dim_names: (t_func, z_func) for 4D, (t_func,) for 3D
+    # Determine slider dimension names from array's dims property if available
+    # otherwise fall back to defaults based on ndim
+    from mbo_utilities.arrays.features import get_slider_dims
+
+    slider_dim_names = get_slider_dims(data_array)
     ndim = data_array.ndim
-    if ndim == 4:
-        slider_dim_names = ("t", "z")
-        # Apply mean to t-dim only, None for z-dim
-        window_funcs = (np.mean, None)
-        window_sizes = (1, None)
-    elif ndim == 3:
-        slider_dim_names = ("t",)
-        window_funcs = (np.mean,)
-        window_sizes = (1,)
+
+    # window_funcs tuple must match slider_dim_names length
+    if slider_dim_names:
+        n_sliders = len(slider_dim_names)
+        # apply mean to first dim (usually t), None for rest
+        window_funcs = (np.mean,) + (None,) * (n_sliders - 1)
+        window_sizes = (1,) + (None,) * (n_sliders - 1)
     else:
-        slider_dim_names = None
         window_funcs = None
         window_sizes = None
 

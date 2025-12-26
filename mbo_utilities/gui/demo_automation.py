@@ -431,18 +431,17 @@ def run_demo(
     data_array = imread(data_path)
     print(f"Data shape: {data_array.shape}, dtype: {data_array.dtype}")
 
-    # Create ImageWidget
-    ndim = data_array.ndim
-    if ndim == 4:
-        slider_dim_names = ("t", "z")
-        window_funcs = (np.mean, None)
-        window_sizes = (1, None)
-    elif ndim == 3:
-        slider_dim_names = ("t",)
-        window_funcs = (np.mean,)
-        window_sizes = (1,)
+    # Determine slider dimension names from array's dims property if available
+    from mbo_utilities.arrays.features import get_slider_dims
+
+    slider_dim_names = get_slider_dims(data_array)
+
+    # window_funcs tuple must match slider_dim_names length
+    if slider_dim_names:
+        n_sliders = len(slider_dim_names)
+        window_funcs = (np.mean,) + (None,) * (n_sliders - 1)
+        window_sizes = (1,) + (None,) * (n_sliders - 1)
     else:
-        slider_dim_names = None
         window_funcs = None
         window_sizes = None
 
