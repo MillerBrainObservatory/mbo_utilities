@@ -798,6 +798,17 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
     default=False,
     help="Generate dark-mode visualization plot.",
 )
+@click.option(
+    "--zarr",
+    is_flag=True,
+    help="Run zarr chunking benchmark (tests shard/chunk size combinations).",
+)
+@click.option(
+    "--num-timepoints",
+    type=int,
+    default=None,
+    help="Number of timepoints to use for benchmarks (default: all).",
+)
 def benchmark(
     input_path,
     output_dir,
@@ -812,6 +823,8 @@ def benchmark(
     keep_files,
     save,
     plot,
+    zarr,
+    num_timepoints,
 ):
     """
     Run performance benchmarks on MboRawArray.
@@ -828,15 +841,96 @@ def benchmark(
       analysis   - Throughput, scaling, access patterns (no phase/writes) (~3-5 min)
 
     \b
+    Zarr Chunking Benchmark (--zarr):
+      Tests various shard/chunk size combinations to find optimal config.
+      Measures write speed, read speed, FPS, RAM usage, and file size.
+
+    \b
     Examples:
       mbo benchmark /path/to/raw                        # Quick benchmark
       mbo benchmark /path/to/raw --config full          # Full suite
       mbo benchmark /path/to/raw --config analysis      # Performance analysis
       mbo benchmark /path/to/raw --label laptop_v1      # With custom label
+      mbo benchmark /path/to/raw --zarr                 # Zarr chunking test
+      mbo benchmark /path/to/raw --zarr --num-timepoints 500  # Zarr with 500 timepoints
       mbo benchmark /path/to/raw --frames 10 --frames 100   # Custom frame counts
       mbo benchmark /path/to/raw --no-phase-fft         # Skip slow FFT test
       mbo benchmark /path/to/raw -o ./results/          # Custom output dir
     """
+    from mbo_utilities import imread
+
+    # generate label if not provided
+    if label is None:
+        import platform
+        label = platform.node() or "benchmark"
+
+    # zarr-only benchmark mode
+    if zarr:
+        from mbo_utilities.benchmarks import (
+            benchmark_zarr_chunking,
+            print_zarr_benchmark,
+            plot_zarr_benchmark,
+        )
+
+        arr = imread(input_path)
+        total_timepoints = arr.shape[0]
+        test_timepoints = num_timepoints if num_timepoints else total_timepoints
+
+        click.echo(f"Input: {input_path}")
+        click.echo(f"Zarr Chunking Benchmark: {test_timepoints} timepoints (of {total_timepoints})")
+        click.echo(f"  Shape: {arr.shape}, dtype: {arr.dtype}")
+        click.echo()
+
+        zarr_results = benchmark_zarr_chunking(
+            arr,
+            output_dir=Path(output_dir) if output_dir else None,
+            num_timepoints=test_timepoints,
+            level=0,  # no compression for fair comparison
+            repeats=repeats if repeats else 2,
+            keep_files=keep_files,
+        )
+
+        print_zarr_benchmark(zarr_results)
+
+        # save results and/or plot
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+        if output_dir:
+            results_dir = Path(output_dir) / "results"
+        else:
+            results_dir = Path(input_path).parent / "benchmark_results"
+
+        if save:
+            import json
+            results_dir.mkdir(parents=True, exist_ok=True)
+            filename = results_dir / f"zarr_benchmark_{label}_{timestamp}.json"
+
+            with open(filename, "w") as f:
+                json.dump({"label": label, "num_timepoints": test_timepoints, "results": zarr_results}, f, indent=2)
+            click.secho(f"\nResults saved to: {filename}", fg="green")
+
+        if plot:
+            results_dir.mkdir(parents=True, exist_ok=True)
+            plot_path = results_dir / f"zarr_benchmark_{label}_{timestamp}.png"
+            plot_zarr_benchmark(
+                zarr_results,
+                output_path=plot_path,
+                show=False,
+                title=f"Zarr Chunking Benchmark ({test_timepoints} timepoints)",
+            )
+            click.secho(f"Plot saved to: {plot_path}", fg="green")
+        elif not save:
+            # show plot interactively if not saving
+            plot_zarr_benchmark(
+                zarr_results,
+                show=True,
+                title=f"Zarr Chunking Benchmark ({test_timepoints} timepoints)",
+            )
+
+        return
+
+    # standard benchmark mode
     from mbo_utilities.benchmarks import (
         BenchmarkConfig,
         benchmark_mboraw,
@@ -869,11 +963,6 @@ def benchmark(
         config.write_full_dataset = True
     if keep_files:
         config.keep_written_files = True
-
-    # generate label if not provided
-    if label is None:
-        import platform
-        label = platform.node() or "benchmark"
 
     click.echo(f"Input: {input_path}")
     click.echo(f"Config: {config_preset}")
