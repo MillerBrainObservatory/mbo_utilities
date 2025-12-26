@@ -14,7 +14,7 @@ Available features:
 - DataTypeFeature: dtype with lazy conversion
 - CompressionFeature: compression settings
 - ChunkSizeFeature: chunking configuration
-- ZStatsFeature: z-plane statistics
+- StatsFeature: per-slice statistics (z-planes, cameras, rois, etc.)
 - PhaseCorrectionFeature: bidirectional scan correction
 
 Mixins:
@@ -65,7 +65,12 @@ from mbo_utilities.arrays.features._voxel_size import (
     VoxelSizeFeature,
     get_voxel_size_from_metadata,
 )
-from mbo_utilities.arrays.features._zstats import PlaneStats, ZStatsFeature
+from mbo_utilities.arrays.features._stats import (
+    PlaneStats,
+    SliceStats,
+    StatsFeature,
+    ZStatsFeature,
+)
 
 __all__ = [
     # base
@@ -106,7 +111,10 @@ __all__ = [
     "CHUNKS_4D",
     "normalize_chunks",
     "estimate_chunk_memory",
-    # zstats
+    # stats
+    "StatsFeature",
+    "SliceStats",
+    # backwards compat aliases
     "ZStatsFeature",
     "PlaneStats",
     # phase correction
