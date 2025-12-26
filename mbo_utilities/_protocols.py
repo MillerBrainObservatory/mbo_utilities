@@ -10,91 +10,12 @@ if TYPE_CHECKING:
 
 ARRAY_LIKE_ATTRS = ["shape", "ndim", "__getitem__"]
 
-
-def infer_dims(ndim: int) -> tuple[str, ...]:
-    """
-    Infer dimension labels from array dimensionality.
-
-    Parameters
-    ----------
-    ndim : int
-        Number of dimensions.
-
-    Returns
-    -------
-    tuple[str, ...]
-        Dimension labels. Convention:
-        - 2D: ('Y', 'X') - single image
-        - 3D: ('T', 'Y', 'X') - time series
-        - 4D: ('T', 'Z', 'Y', 'X') - volumetric time series
-
-    Notes
-    -----
-    Z and C (channel) are treated as equivalent - both represent
-    the "plane" dimension for multi-plane imaging data.
-    """
-    if ndim == 2:
-        return ("Y", "X")
-    elif ndim == 3:
-        return ("T", "Y", "X")
-    elif ndim == 4:
-        return ("T", "Z", "Y", "X")
-    else:
-        raise ValueError(f"Cannot infer dims for {ndim}D array")
-
-
-def get_dims(arr) -> tuple[str, ...]:
-    """
-    Get dimension labels from an array, using explicit dims if available.
-
-    Parameters
-    ----------
-    arr : array-like
-        Array with shape and optionally dims property.
-
-    Returns
-    -------
-    tuple[str, ...]
-        Dimension labels.
-    """
-    if hasattr(arr, "dims") and arr.dims is not None:
-        return arr.dims
-    return infer_dims(arr.ndim)
-
-
-def get_num_planes(arr) -> int:
-    """
-    Get number of Z-planes from an array.
-
-    Checks in order:
-    1. Explicit num_planes property
-    2. num_channels property (alias for num_planes)
-    3. Shape at Z dimension index (if dims available or inferable)
-
-    Parameters
-    ----------
-    arr : array-like
-        Array with shape and optionally dims/num_planes properties.
-
-    Returns
-    -------
-    int
-        Number of planes (1 if no Z dimension).
-    """
-    # Check explicit properties first
-    if hasattr(arr, "num_planes") and arr.num_planes is not None:
-        return arr.num_planes
-    if hasattr(arr, "num_channels") and arr.num_channels is not None:
-        return arr.num_channels
-
-    # Infer from dims
-    dims = get_dims(arr)
-    if "Z" in dims:
-        return arr.shape[dims.index("Z")]
-    if "C" in dims:
-        return arr.shape[dims.index("C")]
-
-    return 1
+# re-export from features module for backwards compatibility
+from mbo_utilities.arrays.features._dim_labels import (
+    get_dims,
+    get_num_planes,
+    infer_dims,
+)
 
 
 @runtime_checkable
