@@ -179,10 +179,16 @@ class ZarrArray(DimLabelsMixin, ReductionMixin):
         dict | None
             Dictionary with keys 'mean', 'std', 'snr' (each a list of floats),
             or None if not available.
+
+        Notes
+        -----
+        Deprecated: use `stats` property instead which returns a StatsFeature.
         """
         md = self.metadata
         if "zstats" in md:
             return md["zstats"]
+        if "stats" in md:
+            return md["stats"]
         return None
 
     @zstats.setter
@@ -195,6 +201,42 @@ class ZarrArray(DimLabelsMixin, ReductionMixin):
 
         if not self._metadata:
             self._metadata = [{}]
+        self._metadata[0]["zstats"] = value
+        # also store under 'stats' for forward compat
+        self._metadata[0]["stats"] = value
+
+    @property
+    def stats(self) -> dict | None:
+        """
+        Return pre-computed statistics from metadata if available.
+
+        Returns
+        -------
+        dict | None
+            Dictionary with keys 'mean', 'std', 'snr', 'slice_label'
+            (each a list of floats), or None if not available.
+        """
+        md = self.metadata
+        if "stats" in md:
+            return md["stats"]
+        if "zstats" in md:
+            # convert legacy format
+            zs = md["zstats"]
+            return {**zs, "slice_label": "z"}
+        return None
+
+    @stats.setter
+    def stats(self, value: dict):
+        """Store statistics in metadata for persistence."""
+        if not isinstance(value, dict):
+            raise TypeError(f"stats must be a dict, got {type(value)}")
+        if not all(k in value for k in ("mean", "std", "snr")):
+            raise ValueError("stats must contain 'mean', 'std', and 'snr' keys")
+
+        if not self._metadata:
+            self._metadata = [{}]
+        self._metadata[0]["stats"] = value
+        # also store under legacy key for backward compat
         self._metadata[0]["zstats"] = value
 
     @metadata.setter
