@@ -2462,9 +2462,15 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_running[roi - 1] = False
 
     def _compute_zstats_single_array(self, idx, arr):
-        # Check for pre-computed z-stats in zarr metadata (instant loading)
-        if hasattr(arr, "zstats") and arr.zstats is not None:
-            stats = arr.zstats
+        # Check for pre-computed stats in zarr metadata (instant loading)
+        # supports both 'stats' (new) and 'zstats' (legacy) properties
+        pre_stats = None
+        if hasattr(arr, "stats") and arr.stats is not None:
+            pre_stats = arr.stats
+        elif hasattr(arr, "zstats") and arr.zstats is not None:
+            pre_stats = arr.zstats
+        if pre_stats is not None:
+            stats = pre_stats
             self._zstats[idx - 1] = stats
             # Still need to compute mean images for visualization
             means = []
@@ -2518,8 +2524,15 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_done[idx - 1] = True
         self._zstats_running[idx - 1] = False
 
-        # Save z-stats to array metadata for persistence (zarr files)
-        if hasattr(arr, "zstats"):
+        # Save stats to array metadata for persistence (zarr files)
+        # prefer 'stats' property but fall back to 'zstats' for backwards compat
+        if hasattr(arr, "stats"):
+            try:
+                arr.stats = stats
+                self.logger.info(f"Saved stats to array {idx} metadata")
+            except Exception as e:
+                self.logger.debug(f"Could not save stats to array metadata: {e}")
+        elif hasattr(arr, "zstats"):
             try:
                 arr.zstats = stats
                 self.logger.info(f"Saved z-stats to array {idx} metadata")
