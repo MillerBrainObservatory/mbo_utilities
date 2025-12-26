@@ -991,6 +991,10 @@ def _write_zarr(
     sharded = kwargs.get("sharded", True)
     ome = kwargs.get("ome", True)
     level = kwargs.get("level", 1)
+    # chunk configuration: shard_frames is outer (shard) size, chunk_shape is inner
+    # chunk_shape can be tuple (t, y, x) or None for default (1, h, w)
+    shard_frames = kwargs.get("shard_frames", None)  # frames per shard
+    chunk_shape = kwargs.get("chunk_shape", None)  # inner chunk shape (t, y, x)
 
     if metadata is None:
         metadata = {}
@@ -1014,19 +1018,52 @@ def _write_zarr(
         nframes = int(metadata["num_frames"])
         h, w = data.shape[-2:]
 
+        # build codec chain based on compression level
+        if level == 0:
+            # no compression
+            inner_codecs = [BytesCodec()]
+        else:
+            inner_codecs = [BytesCodec(), GzipCodec(level=level)]
+
         if sharded:
-            outer = (min(nframes, 100), h, w)  # 100-frame shards
-            inner = (1, h, w)
+            # determine inner chunk shape first (needed for shard alignment)
+            if chunk_shape is not None:
+                inner = chunk_shape
+            else:
+                inner = (1, h, w)  # default: 1 frame per chunk
+
+            inner_t = inner[0]
+
+            # determine shard size (outer chunks)
+            # shard must be divisible by inner chunk time dimension
+            if shard_frames is not None:
+                shard_t = min(nframes, shard_frames)
+            else:
+                shard_t = min(nframes, 100)  # default: 100-frame shards
+
+            # ensure shard is divisible by inner chunk (zarr requirement)
+            if inner_t > 1 and shard_t % inner_t != 0:
+                # round down to nearest multiple of inner_t
+                shard_t = (shard_t // inner_t) * inner_t
+                if shard_t == 0:
+                    shard_t = inner_t  # minimum: one inner chunk per shard
+
+            outer = (shard_t, h, w)
+
             codec = ShardingCodec(
                 chunk_shape=inner,
-                codecs=[BytesCodec(), GzipCodec(level=level)],
+                codecs=inner_codecs,
                 index_codecs=[BytesCodec(), Crc32cCodec()],
             )
             codecs = [codec]
             chunks = outer
         else:
-            codecs = None
-            chunks = (1, h, w)
+            # non-sharded mode: each chunk is a file
+            codecs = inner_codecs
+            if chunk_shape is not None:
+                chunks = chunk_shape
+            else:
+                chunks = (1, h, w)
 
         if ome:
             # Create OME-Zarr using NGFF v0.5 with Zarr v3
@@ -1035,21 +1072,9 @@ def _write_zarr(
             # Create Zarr v3 group
             root = zarr.open_group(str(filename), mode="w", zarr_format=3)
 
-            # Prepare codecs for v3
-            if sharded:
-                outer = (min(nframes, 100), h, w)  # 100-frame shards
-                inner = (1, h, w)
-                codec = ShardingCodec(
-                    chunk_shape=inner,
-                    codecs=[BytesCodec(), GzipCodec(level=level)],
-                    index_codecs=[BytesCodec(), Crc32cCodec()],
-                )
-                array_codecs = [codec]
-                array_chunks = outer
-            else:
-                # Use default v3 codecs (no compression)
-                array_codecs = None
-                array_chunks = chunks
+            # use the codecs/chunks computed above
+            array_codecs = codecs
+            array_chunks = chunks
 
             # Create the array as "0" (full resolution level)
             z = zarr.create(
