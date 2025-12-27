@@ -289,7 +289,7 @@ def download_notebook(
 
 def _check_installation():
     """Verify that mbo_utilities and key dependencies are properly installed."""
-    from mbo_utilities.install_checker import check_installation, print_status_cli
+    from mbo_utilities.install import check_installation, print_status_cli
     status = check_installation()
     print_status_cli(status)
     return status.all_ok
@@ -351,7 +351,7 @@ def _create_image_widget(data_array, widget: bool = True):
     import copy
     import numpy as np
     import fastplotlib as fpl
-    from mbo_utilities.array_types import iter_rois
+    from mbo_utilities.arrays import iter_rois
 
     try:
         from rendercanvas.pyside6 import RenderCanvas
@@ -475,7 +475,7 @@ def _run_gui_impl(
 
     try:
         # Import heavy dependencies only when actually running GUI
-        from mbo_utilities.array_types import normalize_roi
+        from mbo_utilities.arrays import normalize_roi
         from mbo_utilities.gui import _setup  # triggers setup on import
 
         # close splash before showing file dialog
@@ -501,7 +501,7 @@ def _run_gui_impl(
         roi = normalize_roi(roi)
 
         # Load data
-        from mbo_utilities.lazy_array import imread
+        from mbo_utilities.reader import imread
         data_array = imread(data_in, roi=roi)
 
         # Show metadata viewer if requested

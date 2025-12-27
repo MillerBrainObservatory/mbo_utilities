@@ -28,7 +28,7 @@ from mbo_utilities.arrays._base import (
 )
 from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
 from mbo_utilities.metadata import get_metadata, get_param, extract_roi_slices
-from mbo_utilities.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
+from mbo_utilities.analysis.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
 

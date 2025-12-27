@@ -2,12 +2,47 @@
 
 checks for proper GPU configuration of suite2p (pytorch), suite3d (cupy),
 and rastermap. provides structured data for CLI and GUI display.
+
+also provides HAS_* flags for quick import checks without actually importing.
 """
 
 from dataclasses import dataclass, field
 from enum import Enum
+import importlib.util
 import subprocess
 import sys
+
+
+# quick import availability checks (no actual imports)
+def _check_import(module_name: str) -> bool:
+    """check if a module can be imported without actually importing it."""
+    return importlib.util.find_spec(module_name) is not None
+
+
+# suite2p pipeline (lbm_suite2p_python is the main entry point)
+HAS_SUITE2P: bool = _check_import("lbm_suite2p_python")
+
+# suite3d volumetric registration (requires both suite3d AND cupy for GPU)
+HAS_SUITE3D: bool = _check_import("suite3d") and _check_import("cupy")
+
+# cupy for GPU acceleration (used by suite3d and cusignal)
+HAS_CUPY: bool = _check_import("cupy")
+
+# pytorch for neural network operations
+HAS_TORCH: bool = _check_import("torch")
+
+# rastermap for dimensionality reduction
+HAS_RASTERMAP: bool = _check_import("rastermap")
+
+# gui dependencies
+# imgui bundle - core GUI framework
+HAS_IMGUI: bool = _check_import("imgui_bundle")
+
+# fastplotlib - visualization
+HAS_FASTPLOTLIB: bool = _check_import("fastplotlib")
+
+# pyside6 - optional Qt backend (forces Qt over glfw if available)
+HAS_PYSIDE6: bool = _check_import("PySide6")
 
 
 class Status(Enum):

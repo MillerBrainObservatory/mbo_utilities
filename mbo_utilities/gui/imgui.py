@@ -43,7 +43,7 @@ from mbo_utilities.preferences import (
     set_last_dir,
     add_recent_file,
 )
-from mbo_utilities.array_types import MboRawArray
+from mbo_utilities.arrays import MboRawArray
 from mbo_utilities.gui._imgui import (
     begin_popup_size,
     ndim_to_frame,
@@ -62,7 +62,8 @@ from mbo_utilities.gui.progress_bar import (
 )
 from mbo_utilities.gui.widgets import get_supported_widgets, draw_all_widgets
 from mbo_utilities.gui._availability import HAS_SUITE2P, HAS_SUITE3D
-from mbo_utilities.lazy_array import imread, imwrite
+from mbo_utilities.reader import imread
+from mbo_utilities.writer import imwrite
 from mbo_utilities.arrays import _sanitize_suffix
 from mbo_utilities.gui.gui_logger import GuiLogger, GuiLogHandler
 from mbo_utilities import log
@@ -1796,7 +1797,7 @@ class PreviewDataWidget(EdgeWindow):
 
         Uses iw.set_data() to swap data arrays, which handles shape changes.
         """
-        from mbo_utilities.lazy_array import imread
+        from mbo_utilities.reader import imread
 
         path_obj = Path(path)
         if not path_obj.exists():

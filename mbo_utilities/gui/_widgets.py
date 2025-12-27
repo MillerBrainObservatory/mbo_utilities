@@ -378,18 +378,20 @@ def draw_metadata_inspector(metadata: dict):
                 acq_fields.append(("num_mrois", "Number of multi-ROI scan regions (LBM only)"))
 
             # extract scanimage version and imaging system (check multiple key formats)
-            si_data = metadata.get("SI", {}) if isinstance(metadata.get("SI"), dict) else {}
+            # metadata["si"] is the raw FrameData dict with keys like "SI.VERSION_MAJOR"
+            si_data = metadata.get("si", {}) if isinstance(metadata.get("si"), dict) else {}
             si_version_major = (
-                si_data.get("VERSION_MAJOR") or si_data.get("version_major") or
+                si_data.get("SI.VERSION_MAJOR") or si_data.get("VERSION_MAJOR") or
                 metadata.get("SI.VERSION_MAJOR") or metadata.get("si.version_major")
             )
             si_version_minor = (
-                si_data.get("VERSION_MINOR") or si_data.get("version_minor") or
+                si_data.get("SI.VERSION_MINOR") or si_data.get("VERSION_MINOR") or
                 metadata.get("SI.VERSION_MINOR") or metadata.get("si.version_minor")
             )
             si_imaging_system = (
-                si_data.get("imagingSystem") or si_data.get("imagingsystem") or
-                metadata.get("SI.imagingSystem") or metadata.get("si.imagingsystem")
+                si_data.get("SI.imagingSystem") or si_data.get("imagingSystem") or
+                metadata.get("SI.imagingSystem") or metadata.get("si.imagingsystem") or
+                metadata.get("imaging_system")
             )
 
             # always mark acquisition fields as shown to avoid duplicates
@@ -412,38 +414,46 @@ def draw_metadata_inspector(metadata: dict):
                 shown_keys.add(alias)
             # hide SI version keys from Other section (but not the whole SI dict - that stays visible)
             shown_keys.update({"SI.VERSION_MAJOR", "SI.VERSION_MINOR", "SI.imagingSystem",
-                               "si.version_major", "si.version_minor", "si.imagingsystem"})
+                               "si.version_major", "si.version_minor", "si.imagingsystem",
+                               "imaging_system"})
 
-            # check if any acquisition fields have values (including SI version)
+            # check if any acquisition fields have values (including SI version/imaging system)
             acq_values = {k: metadata.get(k) for k, _ in acq_fields}
             has_si_version = si_version_major is not None and si_version_minor is not None
-            has_acq_data = any(v is not None for v in acq_values.values()) or has_si_version
+            has_acq_data = any(v is not None for v in acq_values.values()) or has_si_version or si_imaging_system
 
-            # filter check: show if no filter, or if any acq field matches, or if SI version matches
+            # filter check: show if no filter, or if any acq field matches, or if SI version/system matches
             acq_matches_filter = True
             if _metadata_search_filter:
                 acq_field_matches = any(
                     _matches_filter_recursive(k, v, _metadata_search_filter)
                     for k, v in acq_values.items() if v is not None
                 )
-                si_matches = has_si_version and _matches_filter_shallow("scanimage", f"{si_version_major}.{si_version_minor}", _metadata_search_filter)
-                acq_matches_filter = acq_field_matches or si_matches
+                si_version_matches = has_si_version and _matches_filter_shallow("scanimage_version", f"{si_version_major}.{si_version_minor}", _metadata_search_filter)
+                si_system_matches = si_imaging_system and _matches_filter_shallow("imaging_system", si_imaging_system, _metadata_search_filter)
+                acq_matches_filter = acq_field_matches or si_version_matches or si_system_matches
 
             if has_acq_data and acq_matches_filter:
                 imgui.spacing()
                 imgui.text_colored(_TREE_NODE_COLOR, "Acquisition")
                 imgui.separator()
 
-                # show scanimage version first if available
+                # show imaging system if available
+                if si_imaging_system:
+                    if not _metadata_search_filter or _matches_filter_shallow("imaging_system", si_imaging_system, _metadata_search_filter):
+                        imgui.text_colored(_ACQUISITION_COLOR, "imaging_system")
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("ScanImage imaging system identifier")
+                        _clickable_value("imaging_system", si_imaging_system, value_col)
+
+                # show scanimage version if available
                 if has_si_version:
                     si_version_str = f"{si_version_major}.{si_version_minor}"
-                    if si_imaging_system:
-                        si_version_str = f"{si_imaging_system} {si_version_str}"
-                    if not _metadata_search_filter or _matches_filter_shallow("scanimage", si_version_str, _metadata_search_filter):
-                        imgui.text_colored(_ACQUISITION_COLOR, "ScanImage")
+                    if not _metadata_search_filter or _matches_filter_shallow("scanimage_version", si_version_str, _metadata_search_filter):
+                        imgui.text_colored(_ACQUISITION_COLOR, "scanimage_version")
                         if imgui.is_item_hovered():
-                            imgui.set_tooltip("ScanImage version and imaging system")
-                        _clickable_value("ScanImage", si_version_str, value_col)
+                            imgui.set_tooltip("ScanImage software version")
+                        _clickable_value("scanimage_version", si_version_str, value_col)
 
                 for key, tooltip in acq_fields:
                     value = metadata.get(key)
