@@ -1,4 +1,6 @@
 mbo_utilities/_version.py export-subst
-
 # exclude notebooks from language statistics (they inflate due to output size)
 *.ipynb linguist-documentation
+*.png filter=lfs diff=lfs merge=lfs -text
+*.svg filter=lfs diff=lfs merge=lfs -text
+*.ico filter=lfs diff=lfs merge=lfs -text
