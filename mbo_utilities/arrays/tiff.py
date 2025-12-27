@@ -4,7 +4,14 @@ TIFF array readers.
 This module provides array readers for TIFF files:
 - TiffArray: Lazy TIFF reader, auto-detects single file vs volume directory
 - MBOTiffArray: Lazy TIFF reader for MBO processed TIFFs
-- MboRawArray: Raw ScanImage TIFF reader with phase correction
+- ScanImageArray: Base class for raw ScanImage TIFFs with phase correction
+- LBMArray: LBM (Light Beads Microscopy) stacks, z-planes as channels
+- PiezoArray: Piezo z-stacks with optional frame averaging
+- SinglePlaneArray: Single-plane time series
+- open_scanimage: Factory function that auto-detects stack type
+
+Legacy alias:
+- MboRawArray: Alias for ScanImageArray (backwards compatibility)
 """
 
 from __future__ import annotations
@@ -28,6 +35,12 @@ from mbo_utilities.arrays._base import (
 )
 from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
 from mbo_utilities.metadata import get_metadata, get_param, extract_roi_slices
+from mbo_utilities.metadata.scanimage import (
+    StackType,
+    detect_stack_type,
+    get_frames_per_slice,
+    get_log_average_factor,
+)
 from mbo_utilities.analysis.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
@@ -795,12 +808,15 @@ class MBOTiffArray(ReductionMixin):
         )
 
 
-class MboRawArray(ReductionMixin):
+class ScanImageArray(ReductionMixin):
     """
-    Raw ScanImage TIFF reader with phase correction support.
+    Base class for raw ScanImage TIFF readers with phase correction support.
 
     Handles multi-ROI ScanImage data with bidirectional scanning phase correction.
     Supports ROI stitching, splitting, and individual ROI access.
+
+    For automatic stack type detection, use the `open_scanimage()` factory function
+    which returns the appropriate subclass (LBMArray, PiezoArray, or SinglePlaneArray).
 
     Parameters
     ----------
@@ -835,7 +851,45 @@ class MboRawArray(ReductionMixin):
         Number of Z-planes/channels.
     num_rois : int
         Number of ROIs in the data.
+    stack_type : StackType
+        Detected stack type: "lbm", "piezo", or "single_plane".
     """
+
+    # contextual descriptions for metadata params (shown in GUI tooltips)
+    # subclasses can override to provide array-type-specific context
+    METADATA_CONTEXT: dict[str, str] = {
+        "Ly": "Raw TIFF page height in pixels.",
+        "Lx": "Raw TIFF page width in pixels.",
+        "num_zplanes": "Number of z-planes in the stack.",
+        "dz": "Z-step size in micrometers.",
+    }
+
+    def get_param_description(self, param: str) -> str:
+        """
+        Get description for a metadata parameter with array-type context.
+
+        Searches the class hierarchy for contextual descriptions, falling back
+        to the global METADATA_PARAMS registry if no context is found.
+
+        Parameters
+        ----------
+        param : str
+            Parameter name (e.g., "Ly", "dz", "num_zplanes").
+
+        Returns
+        -------
+        str
+            Contextual description for the parameter.
+        """
+        # check class hierarchy for context
+        for cls in type(self).__mro__:
+            ctx = getattr(cls, "METADATA_CONTEXT", None)
+            if ctx and param in ctx:
+                return ctx[param]
+        # fallback to METADATA_PARAMS
+        from mbo_utilities.metadata import METADATA_PARAMS
+        mp = METADATA_PARAMS.get(param)
+        return mp.description if mp else ""
 
     def __init__(
         self,
@@ -897,6 +951,11 @@ class MboRawArray(ReductionMixin):
     @property
     def ndim(self):
         return len(self.shape)
+
+    @property
+    def stack_type(self) -> StackType:
+        """Detected stack type: 'lbm', 'piezo', or 'single_plane'."""
+        return detect_stack_type(self._metadata)
 
     @property
     def dtype(self):
@@ -1324,3 +1383,290 @@ class MboRawArray(ReductionMixin):
             graphic_kwargs={"vmin": vmin, "vmax": vmax},
             window_funcs=window_funcs,
         )
+
+
+# backwards compatibility alias
+MboRawArray = ScanImageArray
+
+
+class LBMArray(ScanImageArray):
+    """
+    LBM (Light Beads Microscopy) array reader.
+
+    For LBM stacks, z-planes are interleaved as channels in ScanImage.
+    Each TIFF frame represents one timepoint with all z-planes.
+
+    This class validates that the data is actually an LBM stack and
+    provides LBM-specific defaults.
+
+    Parameters
+    ----------
+    files : str, Path, or list
+        TIFF file path(s).
+    **kwargs
+        Additional arguments passed to ScanImageArray.
+
+    Raises
+    ------
+    ValueError
+        If the data is not an LBM stack.
+    """
+
+    METADATA_CONTEXT: dict[str, str] = {
+        "Ly": (
+            "For LBM with multi-ROIs, this is the total vertical height of all ROI strips "
+            "including fly-to deadspace between them (num_fly_to_lines pixels)."
+        ),
+        "Lx": "ROI width in pixels (same for all mROIs in the scan).",
+        "num_zplanes": "Number of z-planes encoded as ScanImage channels for LBM.",
+        "dz": "Z-step size (µm). Must be user-supplied for LBM - not in ScanImage metadata.",
+        "fs": "Volume rate in Hz (frame rate / num_zplanes for LBM).",
+    }
+
+    def __init__(self, files: str | Path | list, **kwargs):
+        super().__init__(files, **kwargs)
+        if self.stack_type != "lbm":
+            raise ValueError(
+                f"LBMArray requires LBM stack data, but detected '{self.stack_type}'. "
+                f"Use open_scanimage() for automatic detection or ScanImageArray directly."
+            )
+
+
+class PiezoArray(ScanImageArray):
+    """
+    Piezo z-stack array reader with optional frame averaging.
+
+    For piezo stacks, the z-piezo moves sequentially through slices.
+    May have multiple frames per slice (framesPerSlice > 1) that can
+    optionally be averaged together.
+
+    Parameters
+    ----------
+    files : str, Path, or list
+        TIFF file path(s).
+    average_frames : bool, default False
+        If True and framesPerSlice > 1, average frames at each z-slice.
+        Only applies when logAverageFactor == 1 (not pre-averaged).
+    **kwargs
+        Additional arguments passed to ScanImageArray.
+
+    Raises
+    ------
+    ValueError
+        If the data is not a piezo stack.
+
+    Attributes
+    ----------
+    frames_per_slice : int
+        Number of frames acquired per z-slice.
+    log_average_factor : int
+        Averaging factor from acquisition (>1 means pre-averaged).
+    average_frames : bool
+        Whether to average frames per slice.
+    can_average : bool
+        True if frame averaging is possible (not pre-averaged, >1 frame/slice).
+    """
+
+    METADATA_CONTEXT: dict[str, str] = {
+        "Ly": "Frame height in pixels.",
+        "Lx": "Frame width in pixels.",
+        "num_zplanes": "Number of z-slices per volume (from hStackManager.numSlices).",
+        "dz": "Z-step size in µm (from hStackManager.stackZStepSize).",
+        "frames_per_slice": "Frames acquired at each z-position before piezo moves.",
+        "log_average_factor": "If >1, frames were averaged during acquisition.",
+        "fs": "Frame rate in Hz.",
+    }
+
+    def __init__(
+        self,
+        files: str | Path | list,
+        average_frames: bool = False,
+        **kwargs
+    ):
+        super().__init__(files, **kwargs)
+        if self.stack_type != "piezo":
+            raise ValueError(
+                f"PiezoArray requires piezo stack data, but detected '{self.stack_type}'. "
+                f"Use open_scanimage() for automatic detection or ScanImageArray directly."
+            )
+        self._average_frames = average_frames
+
+    @property
+    def frames_per_slice(self) -> int:
+        """Number of frames acquired per z-slice (from hStackManager.framesPerSlice)."""
+        return get_frames_per_slice(self._metadata)
+
+    @property
+    def log_average_factor(self) -> int:
+        """Averaging factor from acquisition (>1 means frames were pre-averaged)."""
+        return get_log_average_factor(self._metadata)
+
+    @property
+    def can_average(self) -> bool:
+        """True if frame averaging is possible (not pre-averaged, >1 frame/slice)."""
+        return self.log_average_factor == 1 and self.frames_per_slice > 1
+
+    @property
+    def average_frames(self) -> bool:
+        """Whether to average frames per slice when reading data."""
+        return self._average_frames
+
+    @average_frames.setter
+    def average_frames(self, value: bool):
+        if not isinstance(value, bool):
+            raise ValueError("average_frames must be a boolean value.")
+        if value and not self.can_average:
+            if self.log_average_factor > 1:
+                logger.warning(
+                    f"Frame averaging disabled: data was pre-averaged at acquisition "
+                    f"(logAverageFactor={self.log_average_factor})."
+                )
+            elif self.frames_per_slice <= 1:
+                logger.warning(
+                    f"Frame averaging disabled: only 1 frame per slice "
+                    f"(framesPerSlice={self.frames_per_slice})."
+                )
+            value = False
+        self._average_frames = value
+
+    @property
+    def shape(self):
+        base_shape = super().shape
+        if self.average_frames and self.can_average:
+            # when averaging, we have fewer timepoints
+            # original: (total_frames, num_planes, H, W)
+            # where total_frames = num_volumes * frames_per_slice
+            # after averaging: (num_volumes, num_planes, H, W)
+            n_frames, n_planes, h, w = base_shape
+            n_volumes = n_frames // self.frames_per_slice
+            return (n_volumes, n_planes, h, w)
+        return base_shape
+
+    def __getitem__(self, key):
+        if not self.average_frames or not self.can_average:
+            return super().__getitem__(key)
+
+        # frame averaging mode: need to read multiple frames and average
+        if not isinstance(key, tuple):
+            key = (key,)
+
+        t_key = key[0] if len(key) > 0 else slice(None)
+        rest_key = key[1:] if len(key) > 1 else ()
+
+        # convert t_key to list of volume indices
+        n_volumes = self.shape[0]
+        frames = listify_index(t_key, n_volumes)
+
+        if not frames:
+            return np.empty((0,) + self.shape[1:], dtype=self.dtype)
+
+        fps = self.frames_per_slice
+        results = []
+
+        for vol_idx in frames:
+            # read all frames for this volume and average
+            start_frame = vol_idx * fps
+            end_frame = start_frame + fps
+            # get data for all frames in this volume
+            vol_data = super().__getitem__((slice(start_frame, end_frame),) + rest_key)
+            # average over the first axis (frames within volume)
+            averaged = np.mean(vol_data, axis=0, keepdims=True)
+            results.append(averaged)
+
+        out = np.concatenate(results, axis=0)
+
+        # handle integer indexing (squeeze first dim)
+        if isinstance(t_key, int):
+            out = out[0]
+
+        return out
+
+
+class SinglePlaneArray(ScanImageArray):
+    """
+    Single-plane time series array reader.
+
+    For single-plane acquisitions without z-stack.
+
+    Parameters
+    ----------
+    files : str, Path, or list
+        TIFF file path(s).
+    **kwargs
+        Additional arguments passed to ScanImageArray.
+
+    Raises
+    ------
+    ValueError
+        If the data is not a single-plane acquisition.
+    """
+
+    METADATA_CONTEXT: dict[str, str] = {
+        "Ly": "Frame height in pixels.",
+        "Lx": "Frame width in pixels.",
+        "num_zplanes": "Single plane (no z-stack).",
+        "fs": "Frame rate in Hz.",
+    }
+
+    def __init__(self, files: str | Path | list, **kwargs):
+        super().__init__(files, **kwargs)
+        if self.stack_type != "single_plane":
+            raise ValueError(
+                f"SinglePlaneArray requires single-plane data, but detected '{self.stack_type}'. "
+                f"Use open_scanimage() for automatic detection or ScanImageArray directly."
+            )
+
+
+def open_scanimage(
+    files: str | Path | list,
+    **kwargs
+) -> ScanImageArray:
+    """
+    Open ScanImage TIFF file(s), automatically detecting stack type.
+
+    Factory function that returns the appropriate array subclass based on
+    the detected acquisition type (LBM, piezo, or single-plane).
+
+    Parameters
+    ----------
+    files : str, Path, or list
+        TIFF file path(s).
+    **kwargs
+        Additional arguments passed to the array class.
+        For PiezoArray, can include `average_frames=True`.
+
+    Returns
+    -------
+    ScanImageArray
+        One of LBMArray, PiezoArray, or SinglePlaneArray.
+
+    Examples
+    --------
+    >>> arr = open_scanimage("data.tif")
+    >>> print(arr.stack_type)
+    'piezo'
+    >>> print(type(arr).__name__)
+    'PiezoArray'
+
+    >>> # with frame averaging for piezo stacks
+    >>> arr = open_scanimage("piezo_data.tif", average_frames=True)
+    >>> if hasattr(arr, 'can_average') and arr.can_average:
+    ...     print("Frames will be averaged per slice")
+    """
+    # get metadata to detect type
+    file_list = [files] if isinstance(files, (str, Path)) else list(files)
+    metadata = get_metadata(file_list)
+    stack_type = detect_stack_type(metadata)
+
+    logger.debug(f"open_scanimage: detected stack_type='{stack_type}'")
+
+    if stack_type == "lbm":
+        # LBMArray doesn't use average_frames
+        kwargs.pop("average_frames", None)
+        return LBMArray(files, **kwargs)
+    elif stack_type == "piezo":
+        return PiezoArray(files, **kwargs)
+    else:
+        # single_plane
+        kwargs.pop("average_frames", None)
+        return SinglePlaneArray(files, **kwargs)

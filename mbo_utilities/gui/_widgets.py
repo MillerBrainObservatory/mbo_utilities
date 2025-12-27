@@ -206,8 +206,18 @@ def _is_disabled_si_module(value) -> bool:
     return False
 
 
-def draw_metadata_inspector(metadata: dict):
-    """draw metadata with canonical params first, then other fields."""
+def draw_metadata_inspector(metadata: dict, data_array=None):
+    """draw metadata with canonical params first, then other fields.
+
+    Parameters
+    ----------
+    metadata : dict
+        Metadata dictionary to display.
+    data_array : object, optional
+        Data array object that may provide contextual descriptions via
+        get_param_description(). If provided, tooltips will show array-specific
+        context for metadata parameters.
+    """
     global _metadata_search_filter, _metadata_search_active, _metadata_search_focus_requested
     from mbo_utilities.metadata import METADATA_PARAMS, IMAGING_METADATA_KEYS, ALIAS_MAP
 
@@ -328,15 +338,26 @@ def draw_metadata_inspector(metadata: dict):
                 if _metadata_search_filter and not _matches_filter_recursive(param.canonical, value if value is not None else "", _metadata_search_filter):
                     continue
 
-                # parameter name with alias tooltip on hover
+                # parameter name with tooltip on hover
                 imgui.text_colored(_IMAGING_COLOR, param.canonical)
-                if param.aliases and imgui.is_item_hovered():
+                if imgui.is_item_hovered():
                     imgui.begin_tooltip()
-                    imgui.text("Aliases:")
-                    for alias in param.aliases:
-                        imgui.bullet()
-                        imgui.same_line()
-                        imgui.text_colored(_IMAGING_COLOR, alias)
+                    # show contextual description if data_array provides it
+                    if data_array and hasattr(data_array, 'get_param_description'):
+                        desc = data_array.get_param_description(param.canonical)
+                        if desc:
+                            imgui.text_wrapped(desc)
+                            imgui.separator()
+                    elif param.description:
+                        imgui.text_wrapped(param.description)
+                        imgui.separator()
+                    # show aliases
+                    if param.aliases:
+                        imgui.text("Aliases:")
+                        for alias in param.aliases:
+                            imgui.bullet()
+                            imgui.same_line()
+                            imgui.text_colored(_IMAGING_COLOR, alias)
                     imgui.end_tooltip()
                 # value with optional unit, or placeholder for missing
                 if value is not None:

@@ -43,7 +43,7 @@ from mbo_utilities.preferences import (
     set_last_dir,
     add_recent_file,
 )
-from mbo_utilities.arrays import MboRawArray
+from mbo_utilities.arrays import ScanImageArray
 from mbo_utilities.gui._imgui import (
     begin_popup_size,
     ndim_to_frame,
@@ -99,7 +99,7 @@ def _save_as_worker(path, **imwrite_kwargs):
     data = imread(path)
 
     # Apply scan-phase correction settings to the array before writing
-    # These must be set on the array object for MboRawArray phase correction
+    # These must be set on the array object for ScanImageArray phase correction
     fix_phase = imwrite_kwargs.pop("fix_phase", False)
     use_fft = imwrite_kwargs.pop("use_fft", False)
     phase_upsample = imwrite_kwargs.pop("phase_upsample", 10)
@@ -157,8 +157,9 @@ def draw_menu(parent):
             parent.show_metadata_viewer,
         )
         if parent.image_widget and parent.image_widget.data:
-            metadata = parent.image_widget.data[0].metadata
-            draw_metadata_inspector(metadata)
+            data_arr = parent.image_widget.data[0]
+            metadata = data_arr.metadata
+            draw_metadata_inspector(metadata, data_array=data_arr)
         else:
             imgui.text("No data loaded")
         imgui.end()
@@ -855,7 +856,7 @@ def draw_saveas_popup(parent):
                             except Exception:
                                 mroi_count = 1
                             parent._saveas_selected_roi = set(range(mroi_count))
-                        # Convert 0-indexed UI values to 1-indexed ROI values for MboRawArray
+                        # Convert 0-indexed UI values to 1-indexed ROI values for ScanImageArray
                         rois = sorted([r + 1 for r in parent._saveas_selected_roi])
                     else:
                         rois = None
@@ -1073,7 +1074,7 @@ class PreviewDataWidget(EdgeWindow):
         self.num_graphics = len(self.image_widget.graphics)
         self.shape = self.image_widget.data[0].shape
         self.is_mbo_scan = (
-            True if isinstance(self.image_widget.data[0], MboRawArray) else False
+            True if isinstance(self.image_widget.data[0], ScanImageArray) else False
         )
         self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
@@ -1360,7 +1361,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @property
     def current_offset(self) -> list[float]:
-        """Get current phase offset from each data array (MboRawArray)."""
+        """Get current phase offset from each data array (ScanImageArray)."""
         offsets = []
         for arr in self._get_data_arrays():
             if hasattr(arr, 'offset'):
@@ -1381,6 +1382,15 @@ class PreviewDataWidget(EdgeWindow):
         for arr in arrays:
             self.logger.debug(f"  Array type: {type(arr).__name__}, has fix_phase: {hasattr(arr, 'fix_phase')}, has use_fft: {hasattr(arr, 'use_fft')}")
             if hasattr(arr, 'fix_phase') and hasattr(arr, 'use_fft'):
+                return True
+        return False
+
+    @property
+    def has_frame_averaging_support(self) -> bool:
+        """Check if any data array supports frame averaging (PiezoArray)."""
+        arrays = self._get_data_arrays()
+        for arr in arrays:
+            if hasattr(arr, 'frames_per_slice') and hasattr(arr, 'can_average'):
                 return True
         return False
 
@@ -1839,7 +1849,7 @@ class PreviewDataWidget(EdgeWindow):
             # Update internal state
             self.fpath = path
             self.shape = new_data.shape
-            self.is_mbo_scan = isinstance(new_data, MboRawArray)
+            self.is_mbo_scan = isinstance(new_data, ScanImageArray)
 
             # Update nz for z-plane count
             if len(self.shape) == 4:

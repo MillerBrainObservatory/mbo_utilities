@@ -809,6 +809,17 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
     default=None,
     help="Number of timepoints to use for benchmarks (default: all).",
 )
+@click.option(
+    "--release",
+    is_flag=True,
+    help="Run release benchmark with markdown-formatted outputs.",
+)
+@click.option(
+    "--version-tag",
+    type=str,
+    default="",
+    help="Version tag for release benchmark markdown (e.g., 'v2.5.0').",
+)
 def benchmark(
     input_path,
     output_dir,
@@ -825,6 +836,8 @@ def benchmark(
     plot,
     zarr,
     num_timepoints,
+    release,
+    version_tag,
 ):
     """
     Run performance benchmarks on MboRawArray.
@@ -863,6 +876,77 @@ def benchmark(
     if label is None:
         import platform
         label = platform.node() or "benchmark"
+
+    # release benchmark mode
+    if release:
+        from mbo_utilities.benchmarks import (
+            benchmark_release,
+            format_release_markdown,
+            print_release_summary,
+            plot_release_benchmark,
+        )
+
+        click.echo(f"Input: {input_path}")
+        click.echo("Running release benchmark...")
+        click.echo()
+
+        result = benchmark_release(
+            input_path,
+            label=label,
+            repeats=repeats if repeats else 5,
+        )
+
+        # print summary to console
+        print_release_summary(result)
+
+        # print markdown for copy-paste
+        markdown = format_release_markdown(result, version=version_tag)
+        click.echo("\n" + "=" * 60)
+        click.echo("MARKDOWN (copy-paste for release notes):")
+        click.echo("=" * 60)
+        click.echo(markdown)
+
+        # save results and/or plot
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+        if output_dir:
+            results_dir = Path(output_dir) / "results"
+        else:
+            results_dir = Path(input_path).parent / "benchmark_results"
+
+        if save:
+            results_dir.mkdir(parents=True, exist_ok=True)
+
+            # save json
+            json_path = results_dir / f"release_benchmark_{label}_{timestamp}.json"
+            result.save(json_path)
+            click.secho(f"\nResults saved to: {json_path}", fg="green")
+
+            # save markdown
+            md_path = results_dir / f"release_benchmark_{label}_{timestamp}.md"
+            md_path.write_text(markdown)
+            click.secho(f"Markdown saved to: {md_path}", fg="green")
+
+        if plot:
+            results_dir.mkdir(parents=True, exist_ok=True)
+            plot_path = results_dir / f"release_benchmark_{label}_{timestamp}.png"
+            plot_release_benchmark(
+                result,
+                output_path=plot_path,
+                show=False,
+                title=f"{version_tag} Benchmarks" if version_tag else "MboRawArray Benchmarks",
+            )
+            click.secho(f"Plot saved to: {plot_path}", fg="green")
+        elif not save:
+            # show plot interactively if not saving
+            plot_release_benchmark(
+                result,
+                show=True,
+                title=f"{version_tag} Benchmarks" if version_tag else "MboRawArray Benchmarks",
+            )
+
+        return
 
     # zarr-only benchmark mode
     if zarr:

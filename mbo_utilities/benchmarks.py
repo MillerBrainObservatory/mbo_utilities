@@ -2372,3 +2372,447 @@ def plot_comparison(
         plt.show()
 
     return fig
+
+
+# --- release benchmark functions ---
+
+
+def benchmark_tifffile_baseline(
+    files: str | Path | list,
+    repeats: int = 5,
+) -> dict[str, TimingStats]:
+    """
+    benchmark raw TiffFile page read as baseline comparison.
+
+    this shows the theoretical minimum read time without any mbo overhead.
+    """
+    from tifffile import TiffFile
+
+    results = {}
+
+    # get first file
+    if isinstance(files, (str, Path)):
+        path = Path(files)
+        if path.is_dir():
+            tiff_files = sorted(path.glob("*.tif*"))
+            if not tiff_files:
+                return results
+            first_file = tiff_files[0]
+        else:
+            first_file = path
+    elif hasattr(files, "__iter__"):
+        files_list = list(files)
+        first_file = Path(files_list[0]) if files_list else None
+    else:
+        return results
+
+    if first_file is None or not first_file.exists():
+        return results
+
+    # time raw page read
+    times = []
+    with TiffFile(first_file) as tif:
+        if len(tif.pages) == 0:
+            return results
+
+        # warmup
+        _ = tif.pages[0].asarray()
+
+        for _ in range(repeats):
+            _, elapsed = _time_func(lambda: tif.pages[0].asarray())
+            times.append(elapsed)
+
+    results["tifffile page read (baseline)"] = TimingStats.from_times(times)
+
+    return results
+
+
+@dataclass
+class ReleaseBenchmarkResult:
+    """structured results for release benchmark."""
+
+    timestamp: str
+    git_commit: str
+    label: str
+    system_info: dict
+    data_info: dict
+    results: dict
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def save(self, path: str | Path) -> Path:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(self.to_dict(), f, indent=2, default=str)
+        return path
+
+
+def benchmark_release(
+    data_path: str | Path,
+    label: str = "",
+    repeats: int = 5,
+) -> ReleaseBenchmarkResult:
+    """
+    run release-focused benchmarks matching v2.4.0 format.
+
+    measures the operations users care about most:
+    - array initialization
+    - single frame read (no phase correction)
+    - single frame read (FFT phase correction)
+    - all z-planes read
+    - max projection (50 frames)
+    - mean projection (50 frames)
+    - multi-frame batch (100 frames)
+    - direct TiffFile baseline
+    """
+    from mbo_utilities import imread
+
+    logger.info("running release benchmark...")
+
+    # load array to get info
+    arr = imread(data_path, fix_phase=False)
+    shape = arr.shape
+    num_zplanes = shape[1] if arr.ndim >= 4 else 1
+    num_files = len(arr.filenames) if hasattr(arr, "filenames") else 1
+
+    data_info = {
+        "path": str(data_path),
+        "shape": shape,
+        "dtype": str(arr.dtype),
+        "num_files": num_files,
+        "num_frames": shape[0],
+        "num_zplanes": num_zplanes,
+        "frame_size": f"{shape[-2]}×{shape[-1]}",
+    }
+
+    results = {}
+
+    # 1. initialization
+    logger.info("  init...")
+    init_times = []
+    for _ in range(repeats):
+        _, elapsed = _time_func(imread, data_path, fix_phase=False)
+        init_times.append(elapsed)
+    results["init"] = TimingStats.from_times(init_times)
+
+    # 2. single frame (no phase)
+    logger.info("  single frame (no phase)...")
+    times = []
+    arr_no_phase = imread(data_path, fix_phase=False)
+    _ = arr_no_phase[0]  # warmup
+    for _ in range(repeats):
+        if num_zplanes > 1:
+            _, elapsed = _time_func(lambda: arr_no_phase[0, 0])
+        else:
+            _, elapsed = _time_func(lambda: arr_no_phase[0])
+        times.append(elapsed)
+    results["single_frame_no_phase"] = TimingStats.from_times(times)
+
+    # 3. single frame (FFT phase correction)
+    logger.info("  single frame (FFT phase)...")
+    times = []
+    arr_fft = imread(data_path, fix_phase=True, use_fft=True)
+    _ = arr_fft[0]  # warmup
+    for _ in range(repeats):
+        if num_zplanes > 1:
+            _, elapsed = _time_func(lambda: arr_fft[0, 0])
+        else:
+            _, elapsed = _time_func(lambda: arr_fft[0])
+        times.append(elapsed)
+    results["single_frame_fft_phase"] = TimingStats.from_times(times)
+
+    # 4. all z-planes (single timepoint)
+    if num_zplanes > 1:
+        logger.info("  all z-planes...")
+        times = []
+        for _ in range(repeats):
+            _, elapsed = _time_func(lambda: arr_no_phase[0])
+            times.append(elapsed)
+        results["all_zplanes"] = TimingStats.from_times(times)
+
+    # 5. max projection (50 frames)
+    proj_frames = min(50, shape[0])
+    logger.info(f"  max projection ({proj_frames} frames)...")
+    times = []
+    for _ in range(repeats):
+        if num_zplanes > 1:
+            _, elapsed = _time_func(lambda: arr_no_phase[:proj_frames, 0].max(axis=0))
+        else:
+            _, elapsed = _time_func(lambda: arr_no_phase[:proj_frames].max(axis=0))
+        times.append(elapsed)
+    results["max_projection"] = TimingStats.from_times(times)
+
+    # 6. mean projection (50 frames)
+    logger.info(f"  mean projection ({proj_frames} frames)...")
+    times = []
+    for _ in range(repeats):
+        if num_zplanes > 1:
+            _, elapsed = _time_func(lambda: arr_no_phase[:proj_frames, 0].mean(axis=0))
+        else:
+            _, elapsed = _time_func(lambda: arr_no_phase[:proj_frames].mean(axis=0))
+        times.append(elapsed)
+    results["mean_projection"] = TimingStats.from_times(times)
+
+    # 7. multi-frame batch (100 frames)
+    batch_frames = min(100, shape[0])
+    logger.info(f"  batch read ({batch_frames} frames)...")
+    times = []
+    for _ in range(repeats):
+        if num_zplanes > 1:
+            _, elapsed = _time_func(lambda: arr_no_phase[:batch_frames, 0])
+        else:
+            _, elapsed = _time_func(lambda: arr_no_phase[:batch_frames])
+        times.append(elapsed)
+    results["batch_read"] = TimingStats.from_times(times)
+
+    # 8. tifffile baseline
+    logger.info("  tifffile baseline...")
+    baseline = benchmark_tifffile_baseline(data_path, repeats=repeats)
+    if baseline:
+        results["tifffile_baseline"] = list(baseline.values())[0]
+
+    logger.info("release benchmark complete")
+
+    return ReleaseBenchmarkResult(
+        timestamp=datetime.now().isoformat(),
+        git_commit=get_git_commit(),
+        label=label,
+        system_info=get_system_info(),
+        data_info=data_info,
+        results={k: asdict(v) for k, v in results.items()},
+    )
+
+
+def format_release_markdown(result: ReleaseBenchmarkResult, version: str = "") -> str:
+    """
+    format release benchmark results as markdown for copy-paste.
+
+    produces a table matching the v2.4.0 release notes format.
+    """
+    info = result.data_info
+    res = result.results
+
+    # build data description
+    num_frames = info.get("num_frames", "?")
+    num_zplanes = info.get("num_zplanes", 1)
+    frame_size = info.get("frame_size", "?×?")
+    num_files = info.get("num_files", 1)
+
+    # format header
+    header = f"## {version} Benchmarks\n\n" if version else "## Benchmarks\n\n"
+    data_desc = f"**Test Data:** {num_frames:,} frames × {num_zplanes} z-planes × {frame_size}"
+    if num_files > 1:
+        data_desc += f" ({num_files} ScanImage TIFFs)"
+    data_desc += "\n\n"
+
+    # build table rows
+    rows = []
+    rows.append("| Operation | Time | Notes |")
+    rows.append("|-----------|------|-------|")
+
+    # helper to format time
+    def fmt_time(ms: float) -> str:
+        if ms >= 1000:
+            return f"{ms/1000:.2f} s"
+        return f"{ms:.1f} ms"
+
+    # init
+    if "init" in res:
+        mean = res["init"]["mean_ms"]
+        rows.append(f"| Array initialization | {fmt_time(mean)} | Counting frames-per-file |")
+
+    # single frame no phase
+    if "single_frame_no_phase" in res:
+        mean = res["single_frame_no_phase"]["mean_ms"]
+        note = "arr[i, 0]" if num_zplanes > 1 else "arr[i]"
+        rows.append(f"| Single frame read (no phase corr) | {fmt_time(mean)} | `{note}` |")
+
+    # single frame fft phase
+    if "single_frame_fft_phase" in res:
+        mean = res["single_frame_fft_phase"]["mean_ms"]
+        rows.append(f"| Single frame read (FFT phase corr) | {fmt_time(mean)} | Higher quality correction |")
+
+    # all z-planes
+    if "all_zplanes" in res:
+        mean = res["all_zplanes"]["mean_ms"]
+        rows.append(f"| All z-planes ({num_zplanes}) read | {fmt_time(mean)} | `arr[i]` |")
+
+    # max projection
+    if "max_projection" in res:
+        mean = res["max_projection"]["mean_ms"]
+        rows.append(f"| Max projection (50 frames) | {fmt_time(mean)} | `arr[:50, 0].max(axis=0)` |")
+
+    # mean projection
+    if "mean_projection" in res:
+        mean = res["mean_projection"]["mean_ms"]
+        rows.append(f"| Mean projection (50 frames) | {fmt_time(mean)} | `arr[:50, 0].mean(axis=0)` |")
+
+    # batch read
+    if "batch_read" in res:
+        mean = res["batch_read"]["mean_ms"]
+        rows.append(f"| Multi-frame batch (100 frames) | {fmt_time(mean)} | `arr[:100, 0]` |")
+
+    # tifffile baseline
+    if "tifffile_baseline" in res:
+        mean = res["tifffile_baseline"]["mean_ms"]
+        rows.append(f"| Direct TiffFile baseline | {fmt_time(mean)} | Raw page read |")
+
+    table = "\n".join(rows)
+
+    return header + data_desc + table + "\n"
+
+
+def print_release_summary(result: ReleaseBenchmarkResult) -> None:
+    """print release benchmark summary to console."""
+    print("\n" + "=" * 60)
+    print("RELEASE BENCHMARK RESULTS")
+    print("=" * 60)
+
+    info = result.data_info
+    print(f"\nData: {info.get('num_frames', '?'):,} frames × {info.get('num_zplanes', 1)} z-planes × {info.get('frame_size', '?')}")
+    print(f"Files: {info.get('num_files', 1)} ScanImage TIFFs")
+    print()
+
+    res = result.results
+
+    def fmt_time(ms: float) -> str:
+        if ms >= 1000:
+            return f"{ms/1000:.2f} s"
+        return f"{ms:.1f} ms"
+
+    print(f"{'Operation':<40} {'Time':>12}")
+    print("-" * 54)
+
+    if "init" in res:
+        print(f"{'Array initialization':<40} {fmt_time(res['init']['mean_ms']):>12}")
+    if "single_frame_no_phase" in res:
+        print(f"{'Single frame (no phase)':<40} {fmt_time(res['single_frame_no_phase']['mean_ms']):>12}")
+    if "single_frame_fft_phase" in res:
+        print(f"{'Single frame (FFT phase)':<40} {fmt_time(res['single_frame_fft_phase']['mean_ms']):>12}")
+    if "all_zplanes" in res:
+        print(f"{'All z-planes read':<40} {fmt_time(res['all_zplanes']['mean_ms']):>12}")
+    if "max_projection" in res:
+        print(f"{'Max projection (50 frames)':<40} {fmt_time(res['max_projection']['mean_ms']):>12}")
+    if "mean_projection" in res:
+        print(f"{'Mean projection (50 frames)':<40} {fmt_time(res['mean_projection']['mean_ms']):>12}")
+    if "batch_read" in res:
+        print(f"{'Batch read (100 frames)':<40} {fmt_time(res['batch_read']['mean_ms']):>12}")
+    if "tifffile_baseline" in res:
+        print(f"{'TiffFile baseline':<40} {fmt_time(res['tifffile_baseline']['mean_ms']):>12}")
+
+    print("=" * 60)
+
+
+def plot_release_benchmark(
+    result: ReleaseBenchmarkResult,
+    output_path: Path | str | None = None,
+    show: bool = True,
+    title: str = "",
+) -> "Figure | None":
+    """
+    generate dark-mode bar chart for release benchmarks.
+
+    creates a horizontal bar chart showing operation times, suitable
+    for including in release notes or documentation.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.warning("matplotlib not installed, skipping plot")
+        return None
+
+    colors = MBO_DARK_THEME
+
+    res = result.results
+    info = result.data_info
+
+    # collect metrics in display order
+    metrics = []
+    values = []
+    bar_colors = []
+
+    color_map = {
+        "init": colors["primary"],
+        "single_frame_no_phase": colors["success"],
+        "single_frame_fft_phase": colors["warning"],
+        "all_zplanes": colors["accent"],
+        "max_projection": colors["secondary"],
+        "mean_projection": colors["orange"],
+        "batch_read": colors["primary"],
+        "tifffile_baseline": colors["text_muted"],
+    }
+
+    labels = {
+        "init": "Initialization",
+        "single_frame_no_phase": "Single frame (no phase)",
+        "single_frame_fft_phase": "Single frame (FFT phase)",
+        "all_zplanes": f"All z-planes ({info.get('num_zplanes', '?')})",
+        "max_projection": "Max projection (50f)",
+        "mean_projection": "Mean projection (50f)",
+        "batch_read": "Batch read (100f)",
+        "tifffile_baseline": "TiffFile baseline",
+    }
+
+    for key in ["init", "single_frame_no_phase", "single_frame_fft_phase",
+                "all_zplanes", "max_projection", "mean_projection",
+                "batch_read", "tifffile_baseline"]:
+        if key in res:
+            metrics.append(labels.get(key, key))
+            values.append(res[key]["mean_ms"])
+            bar_colors.append(color_map.get(key, colors["primary"]))
+
+    if not metrics:
+        return None
+
+    # create horizontal bar chart
+    fig, ax = plt.subplots(figsize=(10, 6))
+    fig.patch.set_facecolor(colors["background"])
+    _apply_mbo_style(ax, fig)
+
+    y = np.arange(len(metrics))
+    bars = ax.barh(y, values, color=bar_colors, edgecolor=colors["border"], alpha=0.9)
+
+    # add value labels
+    for bar, val in zip(bars, values):
+        if val >= 1000:
+            label = f"{val/1000:.2f} s"
+        else:
+            label = f"{val:.1f} ms"
+        ax.text(bar.get_width() + max(values) * 0.02, bar.get_y() + bar.get_height()/2,
+                label, va="center", ha="left", fontsize=9, color=colors["text"])
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(metrics, fontsize=10)
+    ax.set_xlabel("Time (ms)", fontsize=11)
+    ax.invert_yaxis()  # top-to-bottom order
+
+    # title
+    if not title:
+        title = "MboRawArray Benchmarks"
+    ax.set_title(title, fontsize=12, fontweight="bold", color=colors["text"])
+
+    # add data info as subtitle
+    subtitle = f"{info.get('num_frames', '?'):,} frames × {info.get('num_zplanes', 1)} z-planes × {info.get('frame_size', '?')}"
+    ax.text(0.5, 1.02, subtitle, transform=ax.transAxes, ha="center",
+            fontsize=9, color=colors["text_muted"])
+
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.92)
+
+    if output_path:
+        output_path = Path(output_path)
+        fig.savefig(
+            output_path,
+            facecolor=colors["background"],
+            edgecolor="none",
+            dpi=150,
+            bbox_inches="tight",
+        )
+        logger.info(f"saved release benchmark plot to {output_path}")
+
+    if show:
+        plt.show()
+
+    return fig
