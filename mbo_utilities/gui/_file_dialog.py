@@ -17,7 +17,7 @@ from mbo_utilities.preferences import (
     set_gui_preference,
 )
 from mbo_utilities.gui.upgrade_manager import UpgradeManager, CheckStatus, UpgradeStatus
-from mbo_utilities.install_checker import check_installation, Status
+from mbo_utilities.install import check_installation, Status
 
 # re-export for backwards compatibility
 setup_imgui = _setup.setup_imgui

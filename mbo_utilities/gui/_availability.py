@@ -1,11 +1,8 @@
 """
-Re-export availability flags from the root _installation module.
-
-This module exists for backwards compatibility - imports should
-preferably use `from mbo_utilities._installation import HAS_*`.
+Re-export availability flags from install module.
 """
 
-from mbo_utilities._installation import (
+from mbo_utilities.install import (
     HAS_SUITE2P,
     HAS_SUITE3D,
     HAS_CUPY,

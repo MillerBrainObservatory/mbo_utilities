@@ -1231,7 +1231,7 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
             # read-only metadata, skip cleaning
             pass
 
-    from mbo_utilities.lazy_array import imwrite
+    from mbo_utilities.writer import imwrite
 
     # Ensure plane_dir exists
     plane_dir.mkdir(parents=True, exist_ok=True)

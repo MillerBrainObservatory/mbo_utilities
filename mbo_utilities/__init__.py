@@ -22,7 +22,7 @@ __all__ = [
     # Core I/O
     "imread",
     "imwrite",
-    "SUPPORTED_FTYPES",
+    "MBO_SUPPORTED_FTYPES",
     # File utilities
     "get_mbo_dirs",
     "files_to_dask",
@@ -69,10 +69,16 @@ __all__ = [
 
 def __getattr__(name):
     """Lazy import attributes to avoid loading heavy dependencies at startup."""
-    # Core I/O (lazy_array -> array_types -> numpy, dask, tifffile)
-    if name in ("imread", "imwrite", "MBO_SUPPORTED_FTYPES"):
-        from . import lazy_array
-        return getattr(lazy_array, name)
+    # Core I/O
+    if name == "imread":
+        from .reader import imread
+        return imread
+    if name == "imwrite":
+        from .writer import imwrite
+        return imwrite
+    if name == "MBO_SUPPORTED_FTYPES":
+        from .reader import MBO_SUPPORTED_FTYPES
+        return MBO_SUPPORTED_FTYPES
 
     # File utilities (file_io -> dask, tifffile, zarr)
     if name in (
@@ -133,8 +139,8 @@ def __getattr__(name):
 
     # File/folder selection (widgets -> imgui, wgpu)
     if name in ("select_folder", "select_files"):
-        from . import widgets
-        return getattr(widgets, name)
+        from .gui.simple_selector import select_folder, select_files
+        return select_folder if name == "select_folder" else select_files
 
     # Pipeline registry (triggers array module imports to register pipelines)
     if name in (
