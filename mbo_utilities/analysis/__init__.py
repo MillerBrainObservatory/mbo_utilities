@@ -2,6 +2,13 @@
 Analysis tools for mbo_utilities.
 """
 
+from mbo_utilities.analysis.phasecorr import (
+    bidir_phasecorr,
+    ALL_PHASECORR_METHODS,
+    TWO_DIM_PHASECORR_METHODS,
+    THREE_DIM_PHASECORR_METHODS,
+)
+
 from mbo_utilities.analysis.scanphase import (
     ScanPhaseAnalyzer,
     ScanPhaseResults,
@@ -9,12 +16,33 @@ from mbo_utilities.analysis.scanphase import (
     run_scanphase_analysis,
 )
 
+from mbo_utilities.analysis.metrics import (
+    snr_roi,
+    mean_row_misalignment,
+    temporal_corr,
+    sharpness_metric,
+    avg_sharpness,
+    frame_correlations,
+)
+
 __all__ = [
+    # phasecorr
+    "bidir_phasecorr",
+    "ALL_PHASECORR_METHODS",
+    "TWO_DIM_PHASECORR_METHODS",
+    "THREE_DIM_PHASECORR_METHODS",
     # scanphase
     "ScanPhaseAnalyzer",
     "ScanPhaseResults",
     "analyze_scanphase",
     "run_scanphase_analysis",
+    # metrics
+    "snr_roi",
+    "mean_row_misalignment",
+    "temporal_corr",
+    "sharpness_metric",
+    "avg_sharpness",
+    "frame_correlations",
 ]
 
 

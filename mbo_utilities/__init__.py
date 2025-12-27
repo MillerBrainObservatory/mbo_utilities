@@ -58,8 +58,6 @@ __all__ = [
     "subsample_array",
     # Visualization
     "to_video",
-    "save_mp4",
-    "save_png",
     # CLI utilities
     "download_file",
     "download_notebook",
@@ -122,11 +120,6 @@ def __getattr__(name):
     ):
         from . import util
         return getattr(util, name)
-
-    # Visualization (plot_util -> matplotlib, imageio)
-    if name in ("save_mp4", "save_png"):
-        from . import plot_util
-        return getattr(plot_util, name)
 
     # Video export (_writers -> imageio)
     if name == "to_video":

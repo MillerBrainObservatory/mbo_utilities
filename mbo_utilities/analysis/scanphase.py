@@ -12,7 +12,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from mbo_utilities import log
-from mbo_utilities.phasecorr import _phase_corr_2d
+from mbo_utilities.analysis.phasecorr import _phase_corr_2d
 from mbo_utilities.metadata import get_param
 
 logger = log.get("analysis.scanphase")

@@ -275,7 +275,7 @@ class PhaseCorrectionFeature(ArrayFeature):
         float
             computed shift value
         """
-        from mbo_utilities.phasecorr import bidir_phasecorr
+        from mbo_utilities.analysis.phasecorr import bidir_phasecorr
 
         # get a window of frames
         n_frames = len(array)
@@ -320,7 +320,7 @@ class PhaseCorrectionFeature(ArrayFeature):
         if shift is None or abs(shift) < 0.01:
             return frame
 
-        from mbo_utilities.phasecorr import _apply_offset
+        from mbo_utilities.analysis.phasecorr import _apply_offset
 
         return _apply_offset(frame, shift, use_fft=self._use_fft)
 
