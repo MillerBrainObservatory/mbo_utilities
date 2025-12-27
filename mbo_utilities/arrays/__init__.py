@@ -16,6 +16,7 @@ This package provides lazy array readers for various imaging data formats:
 Also provides:
 - Registration utilities (validate_s3d_registration, register_zplanes_s3d)
 - Common helpers (supports_roi, normalize_roi, iter_rois, etc.)
+- Features (DimLabels, DimLabelsMixin for dimension labeling)
 
 Array classes are lazy-loaded on first access to improve startup time.
 """
@@ -80,6 +81,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     # registration
     "validate_s3d_registration": ("._registration", "validate_s3d_registration"),
     "register_zplanes_s3d": ("._registration", "register_zplanes_s3d"),
+    # features subpackage
+    "features": (".features", None),
 }
 
 # cache loaded modules
@@ -95,7 +98,8 @@ def __getattr__(name: str) -> object:
         from importlib import import_module
 
         module = import_module(module_name, package="mbo_utilities.arrays")
-        obj = getattr(module, attr_name)
+        # if attr_name is None, return the module itself (for subpackages)
+        obj = module if attr_name is None else getattr(module, attr_name)
         _loaded[name] = obj
         return obj
 
@@ -154,4 +158,6 @@ __all__ = [
     "CHUNKS_4D",
     # Pipeline registration
     "register_all_pipelines",
+    # Features subpackage
+    "features",
 ]

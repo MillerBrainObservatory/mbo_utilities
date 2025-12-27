@@ -14,6 +14,7 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.arrays.features import DimLabelsMixin
 from mbo_utilities.file_io import HAS_ZARR, logger
 from mbo_utilities.arrays.suite2p import _add_suite2p_labels
 from mbo_utilities.metadata import _build_ome_metadata, get_param, get_voxel_size
@@ -42,7 +43,7 @@ _ZARR_INFO = PipelineInfo(
 register_pipeline(_ZARR_INFO)
 
 
-class ZarrArray(ReductionMixin):
+class ZarrArray(DimLabelsMixin, ReductionMixin):
     """
     Reader for Zarr stores (including OME-Zarr).
 
@@ -57,6 +58,9 @@ class ZarrArray(ReductionMixin):
         Compressor name (not currently used for reading).
     rois : list[int] or int, optional
         ROI filter (not currently used).
+    dims : str | tuple | None, optional
+        Dimension labels. Defaults to "TZYX" for 4D data.
+        Supports custom orderings like "ZTYX", "sTZYX", etc.
 
     Attributes
     ----------
@@ -64,6 +68,8 @@ class ZarrArray(ReductionMixin):
         Shape as (T, Z, H, W).
     dtype : np.dtype
         Data type.
+    dims : tuple[str, ...]
+        Dimension labels (e.g., ('T', 'Z', 'Y', 'X')).
     zs : list
         List of zarr arrays.
 
@@ -72,7 +78,14 @@ class ZarrArray(ReductionMixin):
     >>> arr = ZarrArray("data.zarr")
     >>> arr.shape
     (10000, 1, 512, 512)
+    >>> arr.dims
+    ('T', 'Z', 'Y', 'X')
     >>> frame = arr[0, 0]  # Get first frame of first z-plane
+
+    >>> # custom dimension ordering
+    >>> arr = ZarrArray("data.zarr", dims="ZTYX")
+    >>> arr.dims
+    ('Z', 'T', 'Y', 'X')
     """
 
     def __init__(
@@ -80,6 +93,7 @@ class ZarrArray(ReductionMixin):
         filenames: str | Path | Sequence[str | Path],
         compressor: str | None = "default",
         rois: list[int] | int | None = None,
+        dims: str | tuple | None = None,
     ):
         try:
             import zarr
@@ -132,6 +146,10 @@ class ZarrArray(ReductionMixin):
         self.compressor = compressor
         self._target_dtype = None
 
+        # initialize dimension labels feature
+        # defer until shape is accessible (after self.zs is set)
+        self._init_dim_labels(dims)
+
     @property
     def metadata(self):
         """Return metadata as a dict."""
@@ -161,10 +179,16 @@ class ZarrArray(ReductionMixin):
         dict | None
             Dictionary with keys 'mean', 'std', 'snr' (each a list of floats),
             or None if not available.
+
+        Notes
+        -----
+        Deprecated: use `stats` property instead which returns a StatsFeature.
         """
         md = self.metadata
         if "zstats" in md:
             return md["zstats"]
+        if "stats" in md:
+            return md["stats"]
         return None
 
     @zstats.setter
@@ -177,6 +201,42 @@ class ZarrArray(ReductionMixin):
 
         if not self._metadata:
             self._metadata = [{}]
+        self._metadata[0]["zstats"] = value
+        # also store under 'stats' for forward compat
+        self._metadata[0]["stats"] = value
+
+    @property
+    def stats(self) -> dict | None:
+        """
+        Return pre-computed statistics from metadata if available.
+
+        Returns
+        -------
+        dict | None
+            Dictionary with keys 'mean', 'std', 'snr', 'slice_label'
+            (each a list of floats), or None if not available.
+        """
+        md = self.metadata
+        if "stats" in md:
+            return md["stats"]
+        if "zstats" in md:
+            # convert legacy format
+            zs = md["zstats"]
+            return {**zs, "slice_label": "z"}
+        return None
+
+    @stats.setter
+    def stats(self, value: dict):
+        """Store statistics in metadata for persistence."""
+        if not isinstance(value, dict):
+            raise TypeError(f"stats must be a dict, got {type(value)}")
+        if not all(k in value for k in ("mean", "std", "snr")):
+            raise ValueError("stats must contain 'mean', 'std', and 'snr' keys")
+
+        if not self._metadata:
+            self._metadata = [{}]
+        self._metadata[0]["stats"] = value
+        # also store under legacy key for backward compat
         self._metadata[0]["zstats"] = value
 
     @metadata.setter

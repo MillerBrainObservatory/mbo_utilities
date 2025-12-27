@@ -19,7 +19,7 @@ import numpy as np
 from dask import array as da
 
 from mbo_utilities import log
-from mbo_utilities._protocols import get_dims, get_num_planes
+from mbo_utilities.arrays.features._dim_labels import get_dims, get_num_planes
 from mbo_utilities._writers import _write_plane
 from mbo_utilities.metadata import RoiMode
 
