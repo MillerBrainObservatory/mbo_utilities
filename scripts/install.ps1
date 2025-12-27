@@ -1,30 +1,18 @@
 # MBO Utilities Installation Script for Windows
-# installs uv if not present, creates environment, installs mbo_utilities
+# installs mbo CLI via uv tool, optionally creates a dev environment
 #
 # usage:
-#   # default install to ~/mbo/envs/mbo_utilities
 #   irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
 #
-#   # custom install location
-#   $env:MBO_ENV_PATH = "C:\path\to\env"; irm ... | iex
-#
-#   # install into existing environment (skip venv creation)
-#   $env:MBO_ENV_PATH = "C:\existing\.venv"; $env:MBO_USE_EXISTING = "1"; irm ... | iex
-#
-#   # overwrite existing environment
-#   $env:MBO_OVERWRITE = "1"; irm ... | iex
+# environment variables:
+#   MBO_ENV_PATH     - custom path for dev environment (default: ~/mbo/envs/mbo_utilities)
+#   MBO_SKIP_ENV     - set to "1" to skip dev environment creation
+#   MBO_OVERWRITE    - set to "1" to overwrite existing installations
 
 $ErrorActionPreference = "Stop"
 
 $GITHUB_REPO = "MillerBrainObservatory/mbo_utilities"
-
-# default install path (can be overridden via env var or interactive prompt)
 $DEFAULT_ENV_PATH = Join-Path $env:USERPROFILE "mbo\envs\mbo_utilities"
-$MBO_ENV_PATH = if ($env:MBO_ENV_PATH) { $env:MBO_ENV_PATH } else { $DEFAULT_ENV_PATH }
-
-# check for existing env behavior flags
-$USE_EXISTING_ENV = $env:MBO_USE_EXISTING -eq "1"
-$OVERWRITE_ENV = $env:MBO_OVERWRITE -eq "1"
 
 function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Blue }
 function Write-Success { Write-Host "[OK] $args" -ForegroundColor Green }
@@ -41,39 +29,6 @@ function Show-Banner {
     Write-Host ""
     Write-Host "MBO Utilities Installer" -ForegroundColor White
     Write-Host ""
-}
-
-function Show-InstallLocationPrompt {
-    # skip if env var was explicitly set
-    if ($env:MBO_ENV_PATH) {
-        Write-Info "Install location: $MBO_ENV_PATH (from MBO_ENV_PATH)"
-        return $MBO_ENV_PATH
-    }
-
-    Write-Host ""
-    Write-Host "Install Location" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-    Write-Host $DEFAULT_ENV_PATH -ForegroundColor Cyan
-    Write-Host ""
-    $userInput = Read-Host "Press Enter for default, or enter custom path"
-
-    if ([string]::IsNullOrWhiteSpace($userInput)) {
-        return $DEFAULT_ENV_PATH
-    }
-
-    # expand ~ to user profile
-    $customPath = $userInput.Trim()
-    if ($customPath.StartsWith("~")) {
-        $customPath = $customPath.Replace("~", $env:USERPROFILE)
-    }
-
-    # resolve relative paths
-    if (-not [System.IO.Path]::IsPathRooted($customPath)) {
-        $customPath = [System.IO.Path]::GetFullPath($customPath)
-    }
-
-    return $customPath
 }
 
 function Test-UvInstalled {
@@ -155,7 +110,7 @@ function Show-SourceSelection {
     } while (-not $valid)
 
     if ($choice -eq "1") {
-        return @{ Source = "pypi"; Spec = "mbo_utilities" }
+        return @{ Source = "pypi"; Spec = "mbo_utilities"; Ref = $null }
     }
 
     Write-Host ""
@@ -192,7 +147,7 @@ function Show-SourceSelection {
         $choice = Read-Host "Select branch/tag (1-$($options.Count) or 'c' for custom)"
         if ($choice -eq "c") {
             $customRef = Read-Host "Enter branch or tag name"
-            return @{ Source = "github"; Spec = "git+https://github.com/$GITHUB_REPO@$customRef"; Ref = $customRef }
+            return @{ Source = "github"; Spec = "mbo_utilities @ git+https://github.com/$GITHUB_REPO@$customRef"; Ref = $customRef }
         }
         $choiceNum = 0
         $valid = [int]::TryParse($choice, [ref]$choiceNum) -and $choiceNum -ge 1 -and $choiceNum -le $options.Count
@@ -203,7 +158,7 @@ function Show-SourceSelection {
 
     $selected = $options[$choiceNum - 1]
     $ref = $selected.Name
-    return @{ Source = "github"; Spec = "git+https://github.com/$GITHUB_REPO@$ref"; Ref = $ref }
+    return @{ Source = "github"; Spec = "mbo_utilities @ git+https://github.com/$GITHUB_REPO@$ref"; Ref = $ref }
 }
 
 function Test-CudaToolkit {
@@ -274,22 +229,6 @@ function Test-NvidiaGpu {
     return @{ Available = $false; GpuName = $null; CudaVersion = $null; ToolkitInstalled = $false }
 }
 
-function Get-PyTorchIndexUrl {
-    param([string]$CudaVersion)
-    if (-not $CudaVersion) { return $null }
-
-    $parts = $CudaVersion -split '\.'
-    $major = [int]$parts[0]
-    $minor = [int]$parts[1]
-
-    if ($major -eq 11) { return "https://download.pytorch.org/whl/cu118" }
-    elseif ($major -eq 12) {
-        if ($minor -le 1) { return "https://download.pytorch.org/whl/cu121" }
-        else { return "https://download.pytorch.org/whl/cu124" }
-    }
-    return $null
-}
-
 function Show-OptionalDependencies {
     param([hashtable]$GpuInfo)
 
@@ -306,7 +245,7 @@ function Show-OptionalDependencies {
         }
         else {
             Write-Host "  CUDA Toolkit: " -NoNewline -ForegroundColor Yellow
-            Write-Host "Not installed (PyTorch will use CPU)" -ForegroundColor Yellow
+            Write-Host "Not installed (GPU packages will use CPU)" -ForegroundColor Yellow
         }
     }
     else {
@@ -347,7 +286,7 @@ function Show-OptionalDependencies {
 
         if ($hasGpuPackage -and $GpuInfo.Available -and -not $GpuInfo.ToolkitInstalled) {
             Write-Host ""
-            Write-Warn "CUDA Toolkit not installed. PyTorch will use CPU (slower)."
+            Write-Warn "CUDA Toolkit not installed. GPU packages will use CPU (slower)."
             Write-Warn "Install CUDA Toolkit for GPU acceleration."
         }
         elseif ($hasGpuPackage -and -not $GpuInfo.Available) {
@@ -363,149 +302,276 @@ function Show-OptionalDependencies {
     return $extras
 }
 
-function Install-MboEnvironment {
+function Install-MboTool {
     param(
-        [string]$InstallSpec,
-        [string[]]$Extras = @(),
-        [hashtable]$GpuInfo = @{},
-        [string]$Source = "pypi"
+        [string]$Spec,
+        [string[]]$Extras = @()
     )
 
     Write-Host ""
-    Write-Info "Environment path: $MBO_ENV_PATH"
+    Write-Info "Installing mbo CLI tool via uv tool install..."
 
-    $pythonPath = Join-Path $MBO_ENV_PATH "Scripts\python.exe"
-    $envExists = Test-Path $pythonPath
-
-    if ($envExists) {
-        if ($USE_EXISTING_ENV) {
-            Write-Info "Using existing environment (MBO_USE_EXISTING=1)"
-        }
-        elseif ($OVERWRITE_ENV) {
-            Write-Warn "Removing existing environment (MBO_OVERWRITE=1)..."
-            Remove-Item -Recurse -Force $MBO_ENV_PATH
-            $envExists = $false
-        }
-        else {
-            Write-Host ""
-            Write-Warn "Environment already exists at: $MBO_ENV_PATH"
-            Write-Host ""
-            Write-Host "  [1] Overwrite - Delete and recreate environment" -ForegroundColor Cyan
-            Write-Host "  [2] Update    - Install into existing environment" -ForegroundColor Cyan
-            Write-Host "  [3] Cancel    - Exit without changes" -ForegroundColor Cyan
-            Write-Host ""
-
-            do {
-                $choice = Read-Host "Select option (1-3)"
-                $valid = $choice -match '^[123]$'
-                if (-not $valid) { Write-Warn "Invalid selection. Enter 1, 2, or 3." }
-            } while (-not $valid)
-
-            switch ($choice) {
-                "1" {
-                    Write-Info "Removing existing environment..."
-                    Remove-Item -Recurse -Force $MBO_ENV_PATH
-                    $envExists = $false
-                }
-                "2" {
-                    Write-Info "Installing into existing environment..."
-                }
-                "3" {
-                    Write-Info "Installation cancelled."
-                    exit 0
-                }
-            }
-        }
-    }
-
-    if (-not $envExists) {
-        # create parent directory
-        $envParent = Split-Path $MBO_ENV_PATH -Parent
-        if (-not (Test-Path $envParent)) {
-            New-Item -ItemType Directory -Path $envParent -Force | Out-Null
-        }
-
-        # create virtual environment
-        Write-Info "Creating virtual environment..."
-        uv venv $MBO_ENV_PATH --python 3.12
-        if ($LASTEXITCODE -ne 0) {
-            Write-Err "Failed to create virtual environment"
-            exit 1
-        }
-    }
-
-    # build the install spec with extras
-    if ($Source -eq "pypi") {
-        if ($Extras.Count -gt 0) {
-            $spec = "mbo_utilities[$($Extras -join ',')]"
-        }
-        else {
-            $spec = "mbo_utilities"
-        }
+    # build spec with extras
+    if ($Extras.Count -gt 0) {
+        $fullSpec = "$Spec[" + ($Extras -join ',') + "]"
     }
     else {
-        if ($Extras.Count -gt 0) {
-            $spec = "$InstallSpec[" + ($Extras -join ',') + "]"
-        }
-        else {
-            $spec = $InstallSpec
-        }
+        $fullSpec = $Spec
     }
 
-    Write-Info "Installing mbo_utilities..."
-    Write-Info "  Source: $Source"
-    if ($Extras.Count -gt 0) {
-        Write-Info "  Extras: $($Extras -join ', ')"
-    }
-
-    $needsPytorch = ($Extras | Where-Object { $_ -eq "suite2p" -or $_ -eq "all" }).Count -gt 0
+    Write-Info "  Spec: $fullSpec"
 
     $prevErrorAction = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
 
     try {
-        if ($needsPytorch -and $GpuInfo.ToolkitInstalled -and $GpuInfo.CudaVersion) {
-            $indexUrl = Get-PyTorchIndexUrl -CudaVersion $GpuInfo.CudaVersion
-            if ($indexUrl) {
-                Write-Info "Installing with CUDA-optimized PyTorch for CUDA $($GpuInfo.CudaVersion)..."
-                uv pip install --python $pythonPath $spec torch torchvision `
-                    --index-strategy unsafe-best-match `
-                    --extra-index-url $indexUrl 2>&1 | ForEach-Object { Write-Host $_ }
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Success "Installed with CUDA-optimized PyTorch"
-                }
-                else {
-                    Write-Warn "CUDA install failed, falling back to standard install..."
-                    uv pip install --python $pythonPath $spec 2>&1 | ForEach-Object { Write-Host $_ }
-                }
+        # check if already installed
+        $existingTools = uv tool list 2>$null | Out-String
+        if ($existingTools -match "mbo[_-]utilities") {
+            if ($env:MBO_OVERWRITE -eq "1") {
+                Write-Info "Uninstalling existing mbo_utilities..."
+                uv tool uninstall mbo_utilities 2>&1 | Out-Null
             }
             else {
-                uv pip install --python $pythonPath $spec 2>&1 | ForEach-Object { Write-Host $_ }
+                Write-Host ""
+                Write-Warn "mbo_utilities is already installed as a tool."
+                Write-Host ""
+                Write-Host "  [1] Reinstall - Uninstall and reinstall" -ForegroundColor Cyan
+                Write-Host "  [2] Skip      - Keep existing installation" -ForegroundColor Cyan
+                Write-Host "  [3] Cancel    - Exit" -ForegroundColor Cyan
+                Write-Host ""
+
+                do {
+                    $choice = Read-Host "Select option (1-3)"
+                    $valid = $choice -match '^[123]$'
+                    if (-not $valid) { Write-Warn "Invalid selection." }
+                } while (-not $valid)
+
+                switch ($choice) {
+                    "1" {
+                        Write-Info "Uninstalling existing mbo_utilities..."
+                        uv tool uninstall mbo_utilities 2>&1 | Out-Null
+                    }
+                    "2" {
+                        Write-Info "Keeping existing installation."
+                        return $true
+                    }
+                    "3" {
+                        Write-Info "Installation cancelled."
+                        exit 0
+                    }
+                }
             }
         }
-        else {
-            uv pip install --python $pythonPath $spec 2>&1 | ForEach-Object { Write-Host $_ }
-        }
+
+        # install tool
+        uv tool install $fullSpec --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
 
         if ($LASTEXITCODE -ne 0) {
-            throw "uv pip install failed with exit code $LASTEXITCODE"
+            throw "uv tool install failed with exit code $LASTEXITCODE"
         }
 
-        Write-Success "mbo_utilities installed successfully"
+        Write-Success "mbo CLI tool installed successfully"
+        return $true
     }
     catch {
-        Write-Err "Failed to install mbo_utilities: $_"
-        exit 1
+        Write-Err "Failed to install mbo tool: $_"
+        return $false
     }
     finally {
         $ErrorActionPreference = $prevErrorAction
     }
 }
 
+function Show-DevEnvPrompt {
+    Write-Host ""
+    Write-Host "Development Environment" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  The CLI tool is now installed. You can also create a Python" -ForegroundColor Gray
+    Write-Host "  environment for importing mbo_utilities in your own scripts." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  [1] Yes  - Create development environment" -ForegroundColor Cyan
+    Write-Host "  [2] No   - CLI only (recommended for most users)" -ForegroundColor Cyan
+    Write-Host ""
+
+    do {
+        $choice = Read-Host "Create development environment? (1-2)"
+        $valid = $choice -match '^[12]$'
+        if (-not $valid) { Write-Warn "Invalid selection." }
+    } while (-not $valid)
+
+    return $choice -eq "1"
+}
+
+function Show-EnvLocationPrompt {
+    if ($env:MBO_ENV_PATH) {
+        Write-Info "Environment location: $($env:MBO_ENV_PATH) (from MBO_ENV_PATH)"
+        return $env:MBO_ENV_PATH
+    }
+
+    Write-Host ""
+    Write-Host "Environment Location" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+    Write-Host $DEFAULT_ENV_PATH -ForegroundColor Cyan
+    Write-Host ""
+    $userInput = Read-Host "Press Enter for default, or enter custom path"
+
+    if ([string]::IsNullOrWhiteSpace($userInput)) {
+        return $DEFAULT_ENV_PATH
+    }
+
+    $customPath = $userInput.Trim()
+    if ($customPath.StartsWith("~")) {
+        $customPath = $customPath.Replace("~", $env:USERPROFILE)
+    }
+    if (-not [System.IO.Path]::IsPathRooted($customPath)) {
+        $customPath = [System.IO.Path]::GetFullPath($customPath)
+    }
+
+    return $customPath
+}
+
+function Install-DevEnvironment {
+    param(
+        [string]$EnvPath,
+        [string]$Spec,
+        [string[]]$Extras = @(),
+        [hashtable]$GpuInfo = @{}
+    )
+
+    Write-Host ""
+    Write-Info "Creating development environment at: $EnvPath"
+
+    $pythonPath = Join-Path $EnvPath "Scripts\python.exe"
+    $envExists = Test-Path $pythonPath
+
+    if ($envExists) {
+        if ($env:MBO_OVERWRITE -eq "1") {
+            Write-Warn "Removing existing environment..."
+            Remove-Item -Recurse -Force $EnvPath
+            $envExists = $false
+        }
+        else {
+            Write-Host ""
+            Write-Warn "Environment already exists at: $EnvPath"
+            Write-Host ""
+            Write-Host "  [1] Overwrite - Delete and recreate" -ForegroundColor Cyan
+            Write-Host "  [2] Update    - Install into existing" -ForegroundColor Cyan
+            Write-Host "  [3] Skip      - Don't create dev environment" -ForegroundColor Cyan
+            Write-Host ""
+
+            do {
+                $choice = Read-Host "Select option (1-3)"
+                $valid = $choice -match '^[123]$'
+                if (-not $valid) { Write-Warn "Invalid selection." }
+            } while (-not $valid)
+
+            switch ($choice) {
+                "1" {
+                    Write-Info "Removing existing environment..."
+                    Remove-Item -Recurse -Force $EnvPath
+                    $envExists = $false
+                }
+                "2" {
+                    Write-Info "Updating existing environment..."
+                }
+                "3" {
+                    Write-Info "Skipping dev environment."
+                    return $null
+                }
+            }
+        }
+    }
+
+    if (-not $envExists) {
+        $envParent = Split-Path $EnvPath -Parent
+        if (-not (Test-Path $envParent)) {
+            New-Item -ItemType Directory -Path $envParent -Force | Out-Null
+        }
+
+        Write-Info "Creating virtual environment with Python 3.12..."
+        uv venv $EnvPath --python 3.12
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Failed to create virtual environment"
+            return $null
+        }
+    }
+
+    # build spec with extras
+    if ($Extras.Count -gt 0) {
+        $fullSpec = "$Spec[" + ($Extras -join ',') + "]"
+    }
+    else {
+        $fullSpec = $Spec
+    }
+
+    Write-Info "Installing mbo_utilities into environment..."
+    Write-Info "  Spec: $fullSpec"
+
+    $prevErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+
+    try {
+        uv pip install --python $pythonPath $fullSpec 2>&1 | ForEach-Object { Write-Host $_ }
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "uv pip install failed"
+        }
+
+        Write-Success "Development environment created successfully"
+        return $EnvPath
+    }
+    catch {
+        Write-Err "Failed to install into environment: $_"
+        return $null
+    }
+    finally {
+        $ErrorActionPreference = $prevErrorAction
+    }
+}
+
+function Get-UvToolBinDir {
+    try {
+        $binDir = uv tool bin-dir 2>$null
+        if ($binDir) {
+            return $binDir.Trim()
+        }
+    }
+    catch {}
+
+    # fallback to common locations
+    $fallbacks = @(
+        (Join-Path $env:USERPROFILE ".local\bin"),
+        (Join-Path $env:LOCALAPPDATA "uv\bin")
+    )
+    foreach ($path in $fallbacks) {
+        $mboExe = Join-Path $path "mbo.exe"
+        if (Test-Path $mboExe) {
+            return $path
+        }
+    }
+
+    return $null
+}
+
 function New-DesktopShortcut {
     param([string]$BranchRef = $null)
 
     Write-Info "Creating desktop shortcut..."
+
+    # get uv tool bin directory
+    $binDir = Get-UvToolBinDir
+    if (-not $binDir) {
+        Write-Warn "Could not find uv tool bin directory. Skipping shortcut."
+        return
+    }
+
+    $mboExePath = Join-Path $binDir "mbo.exe"
+    if (-not (Test-Path $mboExePath)) {
+        Write-Warn "mbo.exe not found at $mboExePath. Skipping shortcut."
+        return
+    }
 
     $desktopPath = [Environment]::GetFolderPath("Desktop")
     $shortcutName = if ($BranchRef -and $BranchRef -ne "master") { "MBO Utilities ($BranchRef).lnk" } else { "MBO Utilities.lnk" }
@@ -527,67 +593,53 @@ function New-DesktopShortcut {
         catch { $iconPath = $null }
     }
 
-    # create launcher script
-    $launcherPath = Join-Path $iconDir "launch_mbo.bat"
-    $pythonPath = Join-Path $MBO_ENV_PATH "Scripts\python.exe"
-    @"
-@echo off
-"$pythonPath" -m mbo_utilities.cli view --splash
-"@ | Set-Content -Path $launcherPath -Encoding ASCII
-
-    # create shortcut
+    # create shortcut pointing to uv-managed mbo.exe
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $launcherPath
+    $shortcut.TargetPath = $mboExePath
     $shortcut.WorkingDirectory = [Environment]::GetFolderPath("UserProfile")
     if ($iconPath -and (Test-Path $iconPath)) { $shortcut.IconLocation = $iconPath }
     $shortcut.Description = "MBO Image Viewer"
     $shortcut.Save()
 
     Write-Success "Desktop shortcut created: $shortcutName"
-}
-
-function Add-MboToPath {
-    Write-Info "Adding MBO to user PATH..."
-
-    $scriptsPath = Join-Path $MBO_ENV_PATH "Scripts"
-    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-
-    if ($currentPath -notlike "*$scriptsPath*") {
-        $newPath = "$scriptsPath;$currentPath"
-        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-        $env:Path = "$scriptsPath;$env:Path"
-        Write-Success "Added $scriptsPath to PATH"
-    }
-    else {
-        Write-Info "MBO already in PATH"
-    }
+    Write-Info "  Target: $mboExePath"
 }
 
 function Show-UsageInstructions {
+    param(
+        [string]$EnvPath = $null
+    )
+
+    $binDir = Get-UvToolBinDir
+
     Write-Host ""
-    Write-Host "Environment Location" -ForegroundColor White
-    Write-Host "  $MBO_ENV_PATH" -ForegroundColor Cyan
+    Write-Host "Installation Complete" -ForegroundColor White
     Write-Host ""
-    Write-Host "Usage" -ForegroundColor White
+    Write-Host "  CLI Location:" -ForegroundColor Gray
+    Write-Host "    $binDir\mbo.exe" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  Desktop shortcut:" -ForegroundColor Gray
-    Write-Host "    Double-click 'MBO Utilities' on your desktop" -ForegroundColor White
+    Write-Host "  Usage:" -ForegroundColor Gray
+    Write-Host "    mbo                    # Open GUI" -ForegroundColor White
+    Write-Host "    mbo /path/to/data      # Open specific file" -ForegroundColor White
+    Write-Host "    mbo --help             # Show all commands" -ForegroundColor White
     Write-Host ""
-    Write-Host "  Command line (after restarting terminal):" -ForegroundColor Gray
-    Write-Host "    mbo" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  Activate environment:" -ForegroundColor Gray
-    Write-Host "    $MBO_ENV_PATH\Scripts\activate" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  VSCode:" -ForegroundColor Gray
-    Write-Host "    1. Open VSCode" -ForegroundColor White
-    Write-Host "    2. Ctrl+Shift+P -> 'Python: Select Interpreter'" -ForegroundColor White
-    Write-Host "    3. Choose: $MBO_ENV_PATH\Scripts\python.exe" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  Add packages to environment:" -ForegroundColor Gray
-    Write-Host "    uv pip install --python `"$MBO_ENV_PATH\Scripts\python.exe`" <package>" -ForegroundColor White
-    Write-Host ""
+
+    if ($EnvPath) {
+        Write-Host "  Development Environment:" -ForegroundColor Gray
+        Write-Host "    $EnvPath" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Activate:" -ForegroundColor Gray
+        Write-Host "    $EnvPath\Scripts\activate" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Use in VSCode:" -ForegroundColor Gray
+        Write-Host "    Ctrl+Shift+P -> 'Python: Select Interpreter'" -ForegroundColor White
+        Write-Host "    Choose: $EnvPath\Scripts\python.exe" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Add packages:" -ForegroundColor Gray
+        Write-Host "    uv pip install --python `"$EnvPath\Scripts\python.exe`" <package>" -ForegroundColor White
+        Write-Host ""
+    }
 }
 
 function Main {
@@ -598,29 +650,37 @@ function Main {
         Install-Uv
     }
 
-    # step 1: choose install location
-    $script:MBO_ENV_PATH = Show-InstallLocationPrompt
-
-    # step 2: choose source
+    # step 1: choose source (pypi or github branch)
     $sourceInfo = Show-SourceSelection
 
-    # step 3: detect GPU
+    # step 2: detect GPU
     $gpuInfo = Test-NvidiaGpu
 
-    # step 4: choose extras
+    # step 3: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
-    # step 5: create environment and install
-    Install-MboEnvironment -InstallSpec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -Source $sourceInfo.Source
+    # step 4: install CLI tool via uv tool install
+    $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras
+    if (-not $toolInstalled) {
+        Write-Err "CLI installation failed."
+        exit 1
+    }
 
-    # step 6: add to PATH
-    Add-MboToPath
+    # step 5: optionally create dev environment
+    $envPath = $null
+    if ($env:MBO_SKIP_ENV -ne "1") {
+        $createEnv = Show-DevEnvPrompt
+        if ($createEnv) {
+            $envLocation = Show-EnvLocationPrompt
+            $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo
+        }
+    }
 
-    # step 7: create shortcut
+    # step 6: create desktop shortcut
     New-DesktopShortcut -BranchRef $sourceInfo.Ref
 
-    # show instructions
-    Show-UsageInstructions
+    # show usage instructions
+    Show-UsageInstructions -EnvPath $envPath
 
     Write-Success "Installation completed!"
     Write-Host ""
