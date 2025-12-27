@@ -112,15 +112,16 @@ class ScanPhaseFileDialog:
 
             imgui.set_cursor_pos_x(btn_x)
             push_button_style(primary=True)
-            if imgui.button("Select File", imgui.ImVec2(btn_w, btn_h)):
+            if imgui.button("Select File(s)", imgui.ImVec2(btn_w, btn_h)):
                 self._open_file = pfd.open_file(
                     "Select imaging data for scan-phase analysis",
                     self._default_dir,
                     ["Image Files", "*.tif *.tiff *.zarr *.npy *.bin",
                      "All Files", "*"],
+                    pfd.opt.multiselect
                 )
             pop_button_style()
-            set_tooltip("Select a ScanImage TIFF or other imaging data file")
+            set_tooltip("Select one or more ScanImage TIFFs or imaging data files")
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 

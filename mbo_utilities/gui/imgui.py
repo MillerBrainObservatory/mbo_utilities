@@ -181,8 +181,10 @@ def draw_menu(parent):
                         # Use open_file context-specific preference
                         start_dir = str(get_last_dir("open_file") or Path.home())
                     parent._file_dialog = pfd.open_file(
-                        "Select Data File",
-                        start_dir
+                        "Select Data File(s)",
+                        start_dir,
+                        ["Image Files", "*.tif *.tiff *.zarr *.npy *.bin", "All Files", "*"],
+                        pfd.opt.multiselect
                     )
                 # Open Folder - iw-array API
                 if imgui.menu_item("Open Folder", "Ctrl+Shift+O", p_selected=False, enabled=True)[0]:
@@ -1671,7 +1673,12 @@ class PreviewDataWidget(EdgeWindow):
                 start_dir = str(Path(fpath).parent)
             else:
                 start_dir = str(get_last_dir("open_file") or Path.home())
-            self._file_dialog = pfd.open_file("Select Data File", start_dir)
+            self._file_dialog = pfd.open_file(
+                "Select Data File(s)",
+                start_dir,
+                ["Image Files", "*.tif *.tiff *.zarr *.npy *.bin", "All Files", "*"],
+                pfd.opt.multiselect
+            )
 
         # ctrl+shift+o: open folder
         if io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.o):
