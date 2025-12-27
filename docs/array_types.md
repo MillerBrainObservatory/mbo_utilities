@@ -29,7 +29,10 @@ Understanding what `imread()` returns and when to use each array type.
 
 | Input | Returns | Shape | Use Case |
 |-------|---------|-------|----------|
-| `.tif` (raw ScanImage) | `MboRawArray` | (T, Z, Y, X) | Multi-ROI volumetric data with phase correction |
+| `.tif` (raw ScanImage) | `ScanImageArray` | (T, Z, Y, X) | Multi-ROI volumetric data with phase correction |
+| `.tif` (raw ScanImage, LBM) | `LBMArray` | (T, Z, Y, X) | Light Beads Microscopy stacks |
+| `.tif` (raw ScanImage, piezo) | `PiezoArray` | (T, Z, Y, X) | Piezo z-stacks with optional frame averaging |
+| `.tif` (raw ScanImage, single-plane) | `SinglePlaneArray` | (T, 1, Y, X) | Single-plane time series |
 | `.tif` (processed, single file) | `TiffArray` | (T, 1, Y, X) | Standard TIFF files, lazy page access |
 | `.tif` (processed, multiple files) | `MBOTiffArray` | (T, Z, Y, X) | Dask-backed multi-file TIFF |
 | Directory with `planeXX.tiff` files | `TiffArray` | (T, Z, Y, X) | Multi-plane TIFF volume (auto-detected) |
@@ -45,21 +48,38 @@ Understanding what `imread()` returns and when to use each array type.
 
 ## Array Type Details
 
-### MboRawArray
+### ScanImage Arrays
 
-**Returned when:** Reading raw ScanImage TIFF files with multi-ROI metadata
+**Returned when:** Reading raw ScanImage TIFF files
+
+The ScanImage array hierarchy handles different acquisition types from ScanImage:
+
+```text
+ScanImageArray (base class)
+    ├── LBMArray        # Light Beads Microscopy (z-planes as channels)
+    ├── PiezoArray      # Piezo z-stacks with optional frame averaging
+    └── SinglePlaneArray # Single-plane time series
+```
+
+Use `open_scanimage()` for automatic stack type detection, or instantiate the specific class directly.
+
+#### ScanImageArray (Base Class)
 
 ```python
 import mbo_utilities as mbo
+from mbo_utilities.arrays import open_scanimage, ScanImageArray
 
-# Raw ScanImage TIFFs
+# Auto-detect stack type
+scan = open_scanimage("/path/to/raw/*.tif")
+print(type(scan).__name__)  # 'LBMArray', 'PiezoArray', or 'SinglePlaneArray'
+print(scan.stack_type)      # 'lbm', 'piezo', or 'single_plane'
+
+# Or use imread (returns ScanImageArray base class)
 scan = mbo.imread("/path/to/raw/*.tif")
-# Returns: MboRawArray
 
-print(type(scan))     # <class 'MboRawArray'>
-print(scan.shape)     # (T, Z, Y, X) - e.g., (10000, 14, 456, 896)
-print(scan.num_rois)  # Number of ROIs
-print(scan.num_planes)  # Alias for num_channels (Z planes)
+print(scan.shape)      # (T, Z, Y, X) - e.g., (10000, 14, 456, 896)
+print(scan.num_rois)   # Number of ROIs
+print(scan.num_planes) # Alias for num_channels (Z planes)
 
 # ROI handling
 scan.roi = None      # Stitch all ROIs horizontally (default)
@@ -76,13 +96,69 @@ scan.upsample = 5               # Subpixel upsampling factor
 scan.max_offset = 4             # Maximum phase offset to search
 ```
 
-**Key Features:**
+#### LBMArray
+
+For Light Beads Microscopy stacks where z-planes are interleaved as ScanImage channels.
+
+```python
+from mbo_utilities.arrays import LBMArray, open_scanimage
+
+# Auto-detect and get LBMArray
+arr = open_scanimage("/path/to/lbm_data.tif")
+# arr is LBMArray if detected as LBM
+
+# Key metadata context (shown in GUI tooltips):
+# - Ly: Total height including fly-to lines between mROIs
+# - dz: Must be user-supplied (not in ScanImage metadata for LBM)
+# - fs: Volume rate (frame rate / num_zplanes)
+```
+
+#### PiezoArray
+
+For piezo z-stacks with optional frame averaging.
+
+```python
+from mbo_utilities.arrays import PiezoArray, open_scanimage
+
+# With frame averaging enabled
+arr = open_scanimage("/path/to/piezo_data.tif", average_frames=True)
+
+# Piezo-specific properties
+print(arr.frames_per_slice)    # Frames acquired per z-slice
+print(arr.log_average_factor)  # >1 if pre-averaged at acquisition
+print(arr.can_average)         # True if averaging is possible
+
+# Toggle averaging (changes shape)
+arr.average_frames = True
+print(arr.shape)  # Reduced T dimension when averaging
+
+# Key metadata context:
+# - frames_per_slice: Frames at each z-position before piezo moves
+# - log_average_factor: If >1, frames were pre-averaged during acquisition
+# - dz: Z-step size from hStackManager.stackZStepSize
+```
+
+#### SinglePlaneArray
+
+For single-plane time series without z-stack.
+
+```python
+from mbo_utilities.arrays import SinglePlaneArray, open_scanimage
+
+arr = open_scanimage("/path/to/single_plane.tif")
+# arr is SinglePlaneArray if no z-stack detected
+```
+
+**Key Features (all ScanImage arrays):**
 
 - Automatic ROI stitching/splitting via `roi` property
 - Bidirectional scan-phase correction (configurable methods)
-- Multi-plane volumetric data support
+- Stack type detection via `stack_type` property
 - ROI position extraction from ScanImage metadata
-- Stores all ScanImage-metadata in array.metadata["si"]
+- Contextual metadata descriptions via `get_param_description()`
+- Stores all ScanImage-metadata in `array.metadata["si"]`
+
+**Legacy alias:** `MboRawArray` is an alias for `ScanImageArray` for backwards compatibility.
 
 ---
 
@@ -462,7 +538,8 @@ imread(input)
   │   │   └─ BinArray
   │   │
   │   ├─ .tif / .tiff file(s)?
-  │   │   ├─ Has ScanImage ROI metadata? → MboRawArray
+  │   │   ├─ Has ScanImage ROI metadata? → ScanImageArray
+  │   │   │   (use open_scanimage() for auto-detection of LBM/Piezo/SinglePlane)
   │   │   ├─ Has MBO metadata (multiple files)? → MBOTiffArray
   │   │   └─ Standard TIFF → TiffArray
   │   │
@@ -470,7 +547,7 @@ imread(input)
   │   │   ├─ Contains planeXX.tiff files? → TiffArray (volumetric)
   │   │   ├─ Contains planeXX/ subdirs with ops.npy? → Suite2pArray (volumetric)
   │   │   ├─ Contains ops.npy? → Suite2pArray
-  │   │   └─ Contains raw ScanImage TIFFs? → MboRawArray
+  │   │   └─ Contains raw ScanImage TIFFs? → ScanImageArray
   │   │
   │   └─ ops.npy file directly?
   │       └─ Suite2pArray
@@ -478,6 +555,15 @@ imread(input)
   └─ List of paths?
       ├─ All .tif files → TiffArray or MBOTiffArray
       └─ All .zarr stores → ZarrArray (stacked along Z)
+```
+
+For ScanImage data, use `open_scanimage()` to get the specific subclass:
+
+```python
+from mbo_utilities.arrays import open_scanimage
+
+arr = open_scanimage("/path/to/data.tif")
+# Returns LBMArray, PiezoArray, or SinglePlaneArray based on detection
 ```
 
 ## Common Properties Across All Array Types
@@ -498,8 +584,18 @@ Most array types also provide:
 | Property | Type | Description |
 |----------|------|-------------|
 | `.num_planes` | `int` | Number of Z-planes |
-| `.num_rois` | `int` | Number of ROIs (MboRawArray) |
+| `.num_rois` | `int` | Number of ROIs (ScanImage arrays) |
+| `.stack_type` | `str` | Stack type: 'lbm', 'piezo', or 'single_plane' (ScanImage arrays) |
 | `.close()` | method | Release file handles |
+
+PiezoArray-specific properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `.frames_per_slice` | `int` | Frames acquired per z-slice |
+| `.log_average_factor` | `int` | Averaging factor from acquisition |
+| `.can_average` | `bool` | True if frame averaging is possible |
+| `.average_frames` | `bool` | Toggle frame averaging on/off |
 
 ## API Reference
 
