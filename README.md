@@ -19,8 +19,7 @@
 Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO). Fast, lazy I/O with `imread`/`imwrite` for multiple array types (ScanImage and generic TIFFs, Suite2p binaries, Zarr and HDF5), an interactive GUI for data visualization, and processing pipelines for calcium imaging data.
 
 <div align="center">
-  <img src="docs/_images/GUI_Slide1.png" width="45%" />
-  <img src="docs/_images/GUI_Slide2.png" width="45%" />
+  <img src="docs/_images/gui/2_mbo_main_full.png" width="80%" />
 </div>
 
 > **Note:**

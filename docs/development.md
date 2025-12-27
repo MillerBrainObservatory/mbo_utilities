@@ -2,22 +2,10 @@
 
 ## Setup
 
-This repository uses Git LFS for images. Install it before cloning:
-
 ```bash
-# install git lfs (one-time per machine)
-git lfs install
-
-# clone normally - lfs files download automatically
 git clone https://github.com/MillerBrainObservatory/mbo_utilities.git
 cd mbo_utilities
 uv sync --all-extras
-```
-
-If you already cloned without LFS, fetch the actual files:
-
-```bash
-git lfs pull
 ```
 
 ## Testing
