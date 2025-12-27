@@ -180,3 +180,6 @@ __marimo__
 .claude/
 [Cc][Ll][Aa][Uu][Dd][Ee]*
 *[Cc][Ll][Aa][Uu][Dd][Ee]*
+
+# backup images (pruned from repo)
+_backup_images/
