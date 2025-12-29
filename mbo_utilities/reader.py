@@ -23,6 +23,8 @@ from mbo_utilities.arrays import (
     Suite2pArray,
     TiffArray,
     ZarrArray,
+    _extract_tiff_plane_number,
+    open_scanimage,
 )
 from mbo_utilities.metadata import has_mbo_metadata, is_raw_scanimage
 
@@ -228,8 +230,18 @@ def imread(
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            logger.debug(f"Detected raw ScanImage TIFFs, loading as MboRawArray.")
-            return MboRawArray(files=paths, **_filter_kwargs(MboRawArray, kwargs))
+            logger.debug(f"Detected raw ScanImage TIFFs, using open_scanimage for auto-detection.")
+            return open_scanimage(files=paths, **_filter_kwargs(MboRawArray, kwargs))
+
+        # Check if list of files represents multiple distinct planes
+        if len(paths) > 1:
+            plane_nums = { _extract_tiff_plane_number(p.name) for p in paths }
+            plane_nums.discard(None)
+            if len(plane_nums) > 1:
+                logger.debug(f"Detected multiple planes in file list, loading as volumetric TiffArray.")
+                # We use TiffArray because it handles Z-plane assembly from grouped files
+                return TiffArray(paths, **_filter_kwargs(TiffArray, kwargs))
+
         if has_mbo_metadata(first):
             logger.debug(f"Detected MBO TIFFs, loading as MBOTiffArray.")
             return MBOTiffArray(paths, **_filter_kwargs(MBOTiffArray, kwargs))
