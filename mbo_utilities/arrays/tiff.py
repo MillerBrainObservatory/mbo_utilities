@@ -44,6 +44,8 @@ from mbo_utilities.metadata.scanimage import (
 from mbo_utilities.analysis.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
+from mbo_utilities.arrays.features import PhaseCorrectionFeature
+from mbo_utilities.arrays.features._phase_correction import PhaseCorrMethod
 
 if TYPE_CHECKING:
     pass
@@ -328,7 +330,72 @@ class TiffArray(ReductionMixin):
             else:
                 self._init_single_plane(expand_paths(files))
         else:
-            self._init_single_plane([Path(f) for f in files])
+            paths = [Path(f) for f in files]
+
+            # Try to group by plane number
+            plane_groups = {}
+            for p in paths:
+                pnum = _extract_tiff_plane_number(p.name)
+                if pnum is not None:
+                    plane_groups.setdefault(pnum, []).append(p)
+
+            if len(plane_groups) > 1:
+                # Multiple planes detected in file list! Load as volume.
+                # Sort planes and ensure files within each plane are sorted
+                sorted_pnums = sorted(plane_groups.keys())
+                plane_files_list = []
+                for pnum in sorted_pnums:
+                    files_for_plane = sorted(plane_groups[pnum])
+                    plane_files_list.append(files_for_plane)
+
+                # Check if each plane has the same number of files (optional, but safer)
+                # For now, let's just use _init_volume logic but handle lists of files
+                self._init_volume_from_groups(plane_files_list)
+            else:
+                self._init_single_plane(paths)
+
+    def _init_volume_from_groups(self, plane_groups: list[list[Path]]):
+        """Initialize as volumetric array from groups of files (one group per plane)."""
+        self._is_volumetric = True
+        self._planes = []
+
+        for files in plane_groups:
+            reader = _SingleTiffPlaneReader(files)
+            self._planes.append(reader)
+
+        shapes = [(p.Ly, p.Lx) for p in self._planes]
+        if len(set(shapes)) != 1:
+            raise ValueError(f"Inconsistent spatial shapes across planes: {shapes}")
+
+        nframes = [p.nframes for p in self._planes]
+        if len(set(nframes)) != 1:
+            logger.warning(
+                f"Inconsistent frame counts across planes: {nframes}. "
+                f"Using minimum: {min(nframes)}"
+            )
+
+        self._nframes = min(nframes)
+        self._nz = len(self._planes)
+        self._ly, self._lx = shapes[0]
+        self._dtype = self._planes[0].dtype
+        self.filenames = [f for group in plane_groups for f in group]
+
+        # Use metadata from first plane
+        try:
+            from mbo_utilities.metadata import get_metadata_single
+            self._metadata = get_metadata_single(plane_groups[0][0])
+        except Exception:
+            self._metadata = {}
+
+        self._metadata.update({
+            "shape": self.shape,
+            "dtype": str(self._dtype),
+            "nframes": self._nframes,
+            "num_frames": self._nframes,
+            "num_planes": self._nz,
+            "file_paths": [str(p) for p in self.filenames],
+        })
+        self.num_rois = 1
 
     def _init_single_plane(self, files: list[Path]):
         """Initialize as single-plane array."""
@@ -864,6 +931,35 @@ class ScanImageArray(ReductionMixin):
         "dz": "Z-step size in micrometers.",
     }
 
+    # metadata fields that require user input (not available in file metadata)
+    # subclasses override this to specify required fields
+    # format: list of canonical param names
+    REQUIRED_METADATA: list[str] = []
+
+    def get_required_metadata(self) -> list[dict]:
+        """
+        Get list of required metadata fields with their current values.
+
+        Returns a list of dicts with 'canonical', 'description', 'label',
+        'unit', 'dtype', and 'value' for each required field.
+        """
+        from mbo_utilities.metadata import METADATA_PARAMS, get_param
+
+        fields = []
+        for param in self.REQUIRED_METADATA:
+            value = get_param(self._metadata, param, default=None)
+            mp = METADATA_PARAMS.get(param)
+            desc = self.get_param_description(param)
+            fields.append({
+                "canonical": param,
+                "description": desc,
+                "label": mp.label if mp else param,
+                "unit": mp.unit if mp else "",
+                "dtype": mp.dtype if mp else float,
+                "value": value,
+            })
+        return fields
+
     def get_param_description(self, param: str) -> str:
         """
         Get description for a metadata parameter with array-type context.
@@ -901,25 +997,26 @@ class ScanImageArray(ReductionMixin):
         upsample: int = 5,
         max_offset: int = 4,
         use_fft: bool = False,
+        metadata: dict | None = None,
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
         self._tiff_lock = threading.Lock()
 
-        self._metadata = get_metadata(self.filenames)
+        # Use provided metadata if available to avoid re-scanning
+        if metadata is not None:
+            self._metadata = metadata
+        else:
+            self._metadata = get_metadata(self.filenames)
+
         self.num_channels = get_param(self._metadata, "nplanes", default=1)
         self.num_rois = get_param(self._metadata, "num_rois", default=1)
 
         self._roi = roi
         self.roi = roi
 
-        self._fix_phase = fix_phase
-        self._use_fft = use_fft
-        self._phasecorr_method = phasecorr_method
-        self._border = border
-        self._max_offset = max_offset
-        self._upsample = upsample
         self._offset = 0.0
+        self._mean_subtraction = False
         self._mean_subtraction = False
         self.pbar = None
         self.show_pbar = False
@@ -936,8 +1033,23 @@ class ScanImageArray(ReductionMixin):
         self._ndim = self._metadata.get("ndim", 3)
 
         self._frames_per_file = self._metadata.get("frames_per_file", None)
-
         self._rois = self._extract_roi_info()
+
+        # Initialize PhaseCorrectionFeature
+        self.phase_correction = PhaseCorrectionFeature(
+            enabled=fix_phase,
+            method=phasecorr_method,
+            shift=None, # auto-compute by default
+            use_fft=use_fft,
+            upsample=upsample,
+            border=border if isinstance(border, int) else 3, # feature checks int
+            max_offset=max_offset,
+        )
+        self.phase_correction.add_event_handler(self._on_feature_change)
+
+    def _on_feature_change(self, event):
+        # Optional: handle feature changes (log, etc)
+        pass
 
     def _extract_roi_info(self):
         """Extract ROI slice information using centralized metadata function."""
@@ -1008,72 +1120,65 @@ class ScanImageArray(ReductionMixin):
 
     @property
     def offset(self):
-        return self._offset
+        return self.phase_correction.effective_shift or self._offset
 
     @offset.setter
     def offset(self, value: float | np.ndarray):
-        if isinstance(value, int):
-            self._offset = float(value)
+        # If user manually sets offset, treat it as setting fixed shift
+        if isinstance(value, (int, float)):
+            self.phase_correction.shift = float(value)
         self._offset = value
 
     @property
     def use_fft(self):
-        return self._use_fft
+        return self.phase_correction.use_fft
 
     @use_fft.setter
     def use_fft(self, value: bool):
-        if not isinstance(value, bool):
-            raise ValueError("use_fft must be a boolean value.")
-        self._use_fft = value
+        self.phase_correction.use_fft = value
 
     @property
     def phasecorr_method(self):
-        return self._phasecorr_method
+        return self.phase_correction.method.value
 
     @phasecorr_method.setter
     def phasecorr_method(self, value: str | None):
-        if value not in ALL_PHASECORR_METHODS:
-            raise ValueError(
-                f"Unsupported phase correction method: {value}. "
-                f"Supported methods are: {ALL_PHASECORR_METHODS}"
-            )
         if value is None:
-            self.fix_phase = False
-        self._phasecorr_method = value
+            self.phase_correction.enabled = False
+        else:
+            self.phase_correction.method = value
 
     @property
     def fix_phase(self):
-        return self._fix_phase
+        return self.phase_correction.enabled
 
     @fix_phase.setter
     def fix_phase(self, value: bool):
-        if not isinstance(value, bool):
-            raise ValueError("do_phasecorr must be a boolean value.")
-        self._fix_phase = value
+        self.phase_correction.enabled = value
 
     @property
     def border(self):
-        return self._border
+        return self.phase_correction.border
 
     @border.setter
     def border(self, value: int):
-        self._border = value
+        self.phase_correction.border = value
 
     @property
     def max_offset(self):
-        return self._max_offset
+        return self.phase_correction.max_offset
 
     @max_offset.setter
     def max_offset(self, value: int):
-        self._max_offset = value
+        self.phase_correction.max_offset = value
 
     @property
     def upsample(self):
-        return self._upsample
+        return self.phase_correction.upsample
 
     @upsample.setter
     def upsample(self, value: int):
-        self._upsample = value
+        self.phase_correction.upsample = value
 
     @property
     def mean_subtraction(self):
@@ -1185,14 +1290,36 @@ class ScanImageArray(ReductionMixin):
             if self.fix_phase:
                 import time as _t
                 _t0 = _t.perf_counter()
-                corrected, offset = bidir_phasecorr(
-                    chunk,
-                    method=self.phasecorr_method,
-                    upsample=self.upsample,
-                    max_offset=self.max_offset,
-                    border=self.border,
-                    use_fft=self.use_fft,
-                )
+
+                # If we have a fixed shift, use it
+                shift = self.phase_correction.effective_shift
+
+                if shift is not None:
+                     from mbo_utilities.analysis.phasecorr import _apply_offset
+                     # Use _apply_offset directly or feature.apply
+                     # Note: feature.apply returns 2D, but we have 3D (Z/T) chunk (N, Y, X)
+                     # Bidirectional phase correction applies to rows (X axis)
+                     # _apply_offset handles N-D arrays if applied along last axis?
+                     # Let's inspect source or assume it works like bidir_phasecorr
+
+                     # Fallback to applying manually using computed shift
+                     corrected = _apply_offset(
+                         chunk,
+                         shift,
+                         use_fft=self.use_fft
+                     )
+                     offset = shift
+                else:
+                    # No fixed shift, compute on this chunk (Legacy behavior)
+                    corrected, offset = bidir_phasecorr(
+                        chunk,
+                        method=self.phasecorr_method,
+                        upsample=self.upsample,
+                        max_offset=self.max_offset,
+                        border=self.border,
+                        use_fft=self.use_fft,
+                    )
+
                 buf[idxs] = corrected
                 self._offset = offset
                 _t1 = _t.perf_counter()
@@ -1361,8 +1488,11 @@ class ScanImageArray(ReductionMixin):
         for roi in iter_rois(self):
             arr = copy.copy(self)
             arr.roi = roi
+            # Need to disable feature on copies to show raw? Or valid?
+            # Original code disabled correction.
             arr.fix_phase = False
-            arr.use_fft = False
+            # Note: setting fix_phase=False on copy also sets feature.enabled=False
+            # due to property delegation.
             arrays.append(arr)
             names.append(f"ROI {roi}" if roi else "Stitched mROIs")
 
@@ -1423,8 +1553,11 @@ class LBMArray(ScanImageArray):
         "fs": "Volume rate in Hz (frame rate / num_zplanes for LBM).",
     }
 
-    def __init__(self, files: str | Path | list, **kwargs):
-        super().__init__(files, **kwargs)
+    # dz is not stored in ScanImage metadata for LBM, must be user-supplied
+    REQUIRED_METADATA: list[str] = ["dz"]
+
+    def __init__(self, files: str | Path | list, metadata: dict | None = None, **kwargs):
+        super().__init__(files, metadata=metadata, **kwargs)
         if self.stack_type != "lbm":
             raise ValueError(
                 f"LBMArray requires LBM stack data, but detected '{self.stack_type}'. "
@@ -1481,25 +1614,29 @@ class PiezoArray(ScanImageArray):
         self,
         files: str | Path | list,
         average_frames: bool = False,
+        metadata: dict | None = None,
         **kwargs
     ):
-        super().__init__(files, **kwargs)
+        super().__init__(files, metadata=metadata, **kwargs)
         if self.stack_type != "piezo":
             raise ValueError(
                 f"PiezoArray requires piezo stack data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
-        self._average_frames = average_frames
+
+        self.frames_per_slice = get_frames_per_slice(self._metadata)
+        self.log_average_factor = get_log_average_factor(self._metadata)
+        self._average_frames = average_frames and self.can_average
 
     @property
     def frames_per_slice(self) -> int:
         """Number of frames acquired per z-slice (from hStackManager.framesPerSlice)."""
-        return get_frames_per_slice(self._metadata)
+        return self._frames_per_slice
 
     @property
     def log_average_factor(self) -> int:
         """Averaging factor from acquisition (>1 means frames were pre-averaged)."""
-        return get_log_average_factor(self._metadata)
+        return self._log_average_factor
 
     @property
     def can_average(self) -> bool:
@@ -1608,8 +1745,8 @@ class SinglePlaneArray(ScanImageArray):
         "fs": "Frame rate in Hz.",
     }
 
-    def __init__(self, files: str | Path | list, **kwargs):
-        super().__init__(files, **kwargs)
+    def __init__(self, files: str | Path | list, metadata: dict | None = None, **kwargs):
+        super().__init__(files, metadata=metadata, **kwargs)
         if self.stack_type != "single_plane":
             raise ValueError(
                 f"SinglePlaneArray requires single-plane data, but detected '{self.stack_type}'. "
@@ -1660,13 +1797,25 @@ def open_scanimage(
 
     logger.debug(f"open_scanimage: detected stack_type='{stack_type}'")
 
-    if stack_type == "lbm":
-        # LBMArray doesn't use average_frames
-        kwargs.pop("average_frames", None)
-        return LBMArray(files, **kwargs)
-    elif stack_type == "piezo":
-        return PiezoArray(files, **kwargs)
-    else:
-        # single_plane
-        kwargs.pop("average_frames", None)
-        return SinglePlaneArray(files, **kwargs)
+    # Pass metadata to prevent re-fetching/counting
+    try:
+        if stack_type == "lbm":
+            # LBMArray doesn't use average_frames
+            kwargs.pop("average_frames", None)
+            return LBMArray(files, metadata=metadata, **kwargs)
+        elif stack_type == "piezo":
+            return PiezoArray(files, metadata=metadata, **kwargs)
+        else:
+            # single_plane
+            kwargs.pop("average_frames", None)
+            return SinglePlaneArray(files, metadata=metadata, **kwargs)
+    except TypeError:
+        # Fallback if subclasses don't support metadata arg (safety)
+        if stack_type == "lbm":
+            kwargs.pop("average_frames", None)
+            return LBMArray(files, **kwargs)
+        elif stack_type == "piezo":
+            return PiezoArray(files, **kwargs)
+        else:
+            kwargs.pop("average_frames", None)
+            return SinglePlaneArray(files, **kwargs)

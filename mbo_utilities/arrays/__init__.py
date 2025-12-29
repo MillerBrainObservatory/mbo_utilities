@@ -95,6 +95,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "ZarrArray": (".zarr", "ZarrArray"),
     "BinArray": (".bin", "BinArray"),
     "IsoviewArray": (".isoview", "IsoviewArray"),
+    "_extract_tiff_plane_number": (".tiff", "_extract_tiff_plane_number"),
     # registration
     "validate_s3d_registration": ("._registration", "validate_s3d_registration"),
     "register_zplanes_s3d": ("._registration", "register_zplanes_s3d"),
@@ -162,6 +163,7 @@ __all__ = [
     # TIFF helpers
     "find_tiff_plane_files",
     "open_scanimage",
+    "_extract_tiff_plane_number",
     # Registration
     "validate_s3d_registration",
     "register_zplanes_s3d",
