@@ -38,6 +38,7 @@ from mbo_utilities.file_io import (
     get_mbo_dirs,
 )
 from mbo_utilities.reader import MBO_SUPPORTED_FTYPES
+from mbo_utilities.arrays.features import PhaseCorrectionFeature
 from mbo_utilities.preferences import (
     get_last_dir,
     set_last_dir,
@@ -53,8 +54,10 @@ from mbo_utilities.gui._widgets import (
     set_tooltip,
     checkbox_with_tooltip,
     draw_scope,
-    draw_metadata_inspector
+    draw_metadata_inspector,
+    draw_checkbox_grid,
 )
+from mbo_utilities.gui.process_manager import get_process_manager
 from mbo_utilities.gui.progress_bar import (
     draw_status_indicator,
     reset_progress_state,
@@ -120,8 +123,8 @@ def _save_as_worker(path, **imwrite_kwargs):
     imwrite(data, **imwrite_kwargs)
 
 
-def draw_menu(parent):
-    # (accessible from the "Tools" menu)
+def draw_tools_popups(parent):
+    """Draw independent popup windows (Scope, Debug, Metadata)."""
     if parent.show_scope_window:
         size = begin_popup_size()
         imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)  # type: ignore # noqa
@@ -130,16 +133,6 @@ def draw_menu(parent):
             parent.show_scope_window,
         )
         draw_scope()
-        imgui.end()
-    if parent.show_debug_panel:
-        size = begin_popup_size()
-        imgui.set_next_window_size(size, imgui.Cond_.first_use_ever)  # type: ignore # noqa
-        opened, _ = imgui.begin(
-            "MBO Debug Panel",
-            parent.show_debug_panel,
-        )
-        if opened:
-            parent.debug_panel.draw()
         imgui.end()
     if parent.show_metadata_viewer:
         # use absolute screen positioning so window is visible even when widget collapsed
@@ -163,6 +156,10 @@ def draw_menu(parent):
         else:
             imgui.text("No data loaded")
         imgui.end()
+
+
+def draw_menu_bar(parent):
+    """Draw the menu bar within the current window/child scope."""
     with imgui_ctx.begin_child(
         "menu",
         window_flags=imgui.WindowFlags_.menu_bar,  # noqa,
@@ -203,7 +200,7 @@ def draw_menu(parent):
                     arr = parent.image_widget.data[0]
                     can_save = hasattr(arr, "_imwrite")
                 if imgui.menu_item(
-                    "Save as", "Ctrl+S", p_selected=False, enabled=can_save
+                    "Save as", "s", p_selected=False, enabled=can_save
                 )[0]:
                     parent._saveas_popup_open = True
                 if not can_save and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
@@ -224,12 +221,6 @@ def draw_menu(parent):
                 imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
                 imgui.separator()
                 imgui.spacing()
-                _, parent.show_debug_panel = imgui.menu_item(
-                    "Debug Panel",
-                    "",
-                    p_selected=parent.show_debug_panel,
-                    enabled=True,
-                )
                 _, parent.show_scope_window = imgui.menu_item(
                     "Scope Inspector", "", parent.show_scope_window, True
                 )
@@ -244,10 +235,13 @@ def draw_menu(parent):
                 imgui.end_menu()
         imgui.end_menu_bar()
 
-        # Draw status indicator below menu bar (in same child window)
+        # Draw process status indicator (consolidated)
+        draw_process_status_indicator(parent)
         if parent._show_progress_overlay:
             parent._clear_stale_progress()
-            draw_status_indicator(parent)
+            # Overlay is deprecated/merged into status indicator, but keeping logic if needed internally
+            # but NOT drawing the second text-based indicator
+            pass
 
 
 def draw_tabs(parent):
@@ -263,8 +257,9 @@ def draw_tabs(parent):
             imgui.pop_style_var()
             imgui.pop_style_var()
             imgui.end_tab_item()
+
         imgui.begin_disabled(not all(parent._zstats_done))
-        if imgui.begin_tab_item("Summary Stats")[0]:
+        if imgui.begin_tab_item("Signal Quality")[0]:
             imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
             imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
             # Create scrollable child for stats content
@@ -274,6 +269,7 @@ def draw_tabs(parent):
             imgui.pop_style_var()
             imgui.end_tab_item()
         imgui.end_disabled()
+
         # Run tab for processing pipelines
         if imgui.begin_tab_item("Run")[0]:
             imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
@@ -286,12 +282,226 @@ def draw_tabs(parent):
         imgui.end_tab_bar()
 
 
+def draw_process_status_indicator(parent):
+    """Draw compact process status indicator in top-left with color coding."""
+    # Import icons
+    try:
+        from imgui_bundle import icons_fontawesome as fa
+        ICON_IDLE = fa.ICON_FA_CIRCLE
+        ICON_RUNNING = fa.ICON_FA_SPINNER
+        ICON_ERROR = fa.ICON_FA_EXCLAMATION_TRIANGLE
+    except (ImportError, AttributeError):
+        # Fallback to unicode
+        ICON_IDLE = "\uf111"  # circle
+        ICON_RUNNING = "\uf110"  # spinner
+        ICON_ERROR = "\uf071"  # exclamation-triangle
+
+    pm = get_process_manager()
+    pm.cleanup_finished()
+    running_procs = pm.get_running()
+
+    # Get in-app progress items
+    from mbo_utilities.gui.progress_bar import _get_active_progress_items
+    progress_items = _get_active_progress_items(parent)
+
+    total_active = len(running_procs) + len(progress_items)
+
+    # Determine status color and icon
+    if total_active == 0:
+        status_color = imgui.ImVec4(0.15, 0.55, 0.15, 1.0)  # Dark Green - idle
+        status_text = f"{ICON_IDLE} Idle"
+    else:
+        # Check if any have errors (only relevant for procs currently)
+        has_error = any(p.status == "error" for p in running_procs)
+
+        if has_error:
+            status_color = imgui.ImVec4(0.8, 0.2, 0.2, 1.0)  # Dark Red - error
+            status_text = f"{ICON_ERROR} {total_active} Error"
+        else:
+            status_color = imgui.ImVec4(0.85, 0.45, 0.0, 1.0)  # Dark Orange - running
+
+            # Add percentage if we have progress items
+            if progress_items:
+                avg_progress = sum(item["progress"] for item in progress_items) / len(progress_items)
+                status_text = f"{ICON_RUNNING} Running ({total_active}) {int(avg_progress * 100)}%"
+            else:
+                status_text = f"{ICON_RUNNING} Running ({total_active})"
+
+    # Draw rounded buttons
+    imgui.push_style_var(imgui.StyleVar_.frame_rounding, 5.0)
+
+    # 1. Status Button
+    # Use distinct background color based on status
+    imgui.push_style_color(imgui.Col_.button, status_color)
+    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1, 1, 1, 1)) # Always white text
+
+    # Slightly lighter hover color
+    hover_col = imgui.ImVec4(
+        min(status_color.x + 0.1, 1.0),
+        min(status_color.y + 0.1, 1.0),
+        min(status_color.z + 0.1, 1.0),
+        status_color.w
+    )
+    imgui.push_style_color(imgui.Col_.button_hovered, hover_col)
+    imgui.push_style_color(imgui.Col_.button_active, status_color)
+
+    if imgui.button(status_text + "##process_status"):
+        parent._show_process_console = True
+
+    imgui.pop_style_color(4) # button, text, hovered, active
+
+    if imgui.is_item_hovered():
+        imgui.set_mouse_cursor(imgui.MouseCursor_.hand)
+        imgui.set_tooltip("Click to view process console")
+
+    # 2. Metadata Button
+    imgui.same_line()
+    # Dark grey background
+    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.2, 0.2, 1.0))
+    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.3, 0.3, 1.0))
+    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.15, 0.15, 0.15, 1.0))
+    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(0.9, 0.9, 0.9, 1.0))
+
+    if imgui.button("Metadata (m)"):
+        parent.show_metadata_viewer = not parent.show_metadata_viewer
+
+    imgui.pop_style_color(4)
+    imgui.pop_style_var() # frame_rounding
+
+
+def draw_process_console_popup(parent):
+    """Draw popup showing process outputs and debug logs."""
+    if not hasattr(parent, '_show_process_console'):
+        parent._show_process_console = False
+
+    if parent._show_process_console:
+        imgui.open_popup("Process Console")
+        parent._show_process_console = False
+
+    center = imgui.get_main_viewport().get_center()
+    imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
+    imgui.set_next_window_size(imgui.ImVec2(900, 600), imgui.Cond_.first_use_ever)
+
+    if imgui.begin_popup_modal("Process Console")[0]:
+        pm = get_process_manager()
+        pm.cleanup_finished()
+        running = pm.get_running()
+
+        # Use tabs instead of collapsible headers
+        if imgui.begin_tab_bar("ProcessConsoleTabs"):
+            # Tab 1: Processes
+            if imgui.begin_tab_item("Processes")[0]:
+                with imgui_ctx.begin_child("##BGTasksContent", imgui.ImVec2(0, -30), imgui.ChildFlags_.none):
+                    from mbo_utilities.gui.progress_bar import _get_active_progress_items
+                    progress_items = _get_active_progress_items(parent)
+
+                    if progress_items:
+                        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), f"Active Tasks ({len(progress_items)})")
+                        imgui.separator()
+                        for item in progress_items:
+                            pct = int(item["progress"] * 100)
+                            if item.get("done", False):
+                                imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), f"{item['text']} [Done]")
+                            else:
+                                imgui.text(f"{item['text']} [{pct}%]")
+
+                            imgui.progress_bar(item["progress"], imgui.ImVec2(-1, 0), "")
+                            imgui.spacing()
+                        imgui.separator()
+                        imgui.spacing()
+
+                    if not running and not progress_items:
+                        imgui.text_disabled("No active tasks or background processes.")
+                    elif running:
+                        if progress_items:
+                            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), f"Background Processes ({len(running)})")
+                            imgui.separator()
+
+                        for proc in running:
+                            imgui.push_id(f"proc_{proc.pid}")
+                            imgui.bullet()
+
+                            # Color code status
+                            if proc.status == "error":
+                                imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), f"[ERROR] {proc.description}")
+                            elif proc.status == "completed":
+                                imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), f"[DONE] {proc.description}")
+                            else:
+                                imgui.text(proc.description)
+
+                            imgui.indent()
+                            imgui.text_disabled(f"PID: {proc.pid} | Started: {proc.elapsed_str()}")
+
+                            # Move Kill button here (next to PID) if active
+                            if proc.is_alive():
+                                imgui.same_line()
+                                if imgui.small_button(f"Kill##{proc.pid}"):
+                                    pm.kill(proc.pid)
+
+                            # Show process output (tail of log)
+                            if proc.output_path and Path(proc.output_path).is_file():
+                                if imgui.tree_node(f"Output##proc_{proc.pid}"):
+                                    lines = proc.tail_log(20)
+                                    if imgui.begin_child(f"##proc_output_{proc.pid}", imgui.ImVec2(0, 150), imgui.ChildFlags_.borders):
+                                        for line in lines:
+                                            line_stripped = line.strip()
+                                            if "error" in line_stripped.lower():
+                                                imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), line_stripped)
+                                            elif "warning" in line_stripped.lower():
+                                                imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.2, 1.0), line_stripped)
+                                            else:
+                                                imgui.text(line_stripped)
+                                        # Removed auto-scroll to allow reading history
+                                        imgui.end_child()
+                                    imgui.tree_pop()
+
+                            # Control buttons (Dismiss / Copy)
+                            if not proc.is_alive():
+                                if imgui.small_button(f"Dismiss##{proc.pid}"):
+                                    if proc.pid in pm._processes:
+                                        del pm._processes[proc.pid]
+                                        pm._save()
+                                imgui.same_line()
+
+                            # Copy Log Button (always available if log exists)
+                            if proc.output_path and Path(proc.output_path).is_file():
+                                if imgui.small_button(f"Copy Log##{proc.pid}"):
+                                    try:
+                                        with open(proc.output_path, "r", encoding="utf-8") as f:
+                                            full_log = f.read()
+                                        imgui.set_clipboard_text(full_log)
+                                    except Exception:
+                                        pass
+
+                            imgui.unindent()
+                            imgui.spacing()
+                            imgui.pop_id()
+                imgui.end_tab_item()
+
+            # Tab 2: System Logs
+            if imgui.begin_tab_item("System Logs")[0]:
+                with imgui_ctx.begin_child("##SysLogsContent", imgui.ImVec2(0, -30), imgui.ChildFlags_.none):
+                    parent.debug_panel.draw()
+                imgui.end_tab_item()
+
+            imgui.end_tab_bar()
+
+        # Close button
+        imgui.separator()
+        if imgui.button("Close", imgui.ImVec2(100, 0)):
+            imgui.close_current_popup()
+
+        imgui.end_popup()
+
+
 def draw_saveas_popup(parent):
+    just_opened = False
     if getattr(parent, "_saveas_popup_open"):
         imgui.open_popup("Save As")
         parent._saveas_popup_open = False
         # reset modal open state when reopening popup
         parent._saveas_modal_open = True
+        just_opened = True
 
     # track if popup should remain open
     if not hasattr(parent, "_saveas_modal_open"):
@@ -300,19 +510,31 @@ def draw_saveas_popup(parent):
     # set initial size (resizable by user)
     imgui.set_next_window_size(imgui.ImVec2(500, 650), imgui.Cond_.first_use_ever)
 
+    # modal_open is a bool, so we handle the 'X' button manually
+    # by checking the second return value of begin_popup_modal.
     opened, visible = imgui.begin_popup_modal(
         "Save As",
-        p_open=True if parent._saveas_modal_open else None,
+        p_open=parent._saveas_modal_open,
         flags=imgui.WindowFlags_.no_saved_settings
     )
 
     if opened:
         if not visible:
-            # user closed via X button
+            # user closed via X button or Escape
             parent._saveas_modal_open = False
             imgui.close_current_popup()
             imgui.end_popup()
             return
+    else:
+        # If not opened, and we didn't just try to open it, ensure state is synced
+        if not just_opened:
+            parent._saveas_modal_open = False
+        return
+
+    # If we are here, popup is open and visible
+    if opened:
+        # We need to ensure we set modal_open=True while it's open,
+        # but we rely on ImGui keeping it open via p_open ref (handled via visible)
         parent._saveas_modal_open = True
         imgui.dummy(imgui.ImVec2(0, 5))
 
@@ -565,173 +787,157 @@ def draw_saveas_popup(parent):
         imgui.spacing()
         imgui.separator()
 
-        # Metadata Section (collapsible)
-        imgui.spacing()
-        if imgui.collapsing_header("Metadata"):
-            imgui.dummy(imgui.ImVec2(0, 5))
+        # Metadata section
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Metadata")
+        imgui.dummy(imgui.ImVec2(0, 5))
 
-            # Get current metadata and data source
-            try:
-                current_data = parent.image_widget.data[0]
-                current_meta = current_data.metadata or {}
-            except (IndexError, AttributeError):
-                current_data = None
-                current_meta = {}
+        # get array data and metadata
+        try:
+            current_data = parent.image_widget.data[0]
+            current_meta = current_data.metadata or {}
+        except (IndexError, AttributeError):
+            current_data = None
+            current_meta = {}
 
+        # check for required metadata fields from the array
+        required_fields = []
+        if current_data and hasattr(current_data, 'get_required_metadata'):
+            required_fields = current_data.get_required_metadata()
 
-            # Helper to display a metadata field with edit capability
-            def _metadata_row(label, canonical, unit, aliases, dtype=float):
-                """Display metadata row: label | value or 'not found' | input | Add button"""
-                value = get_param(current_meta, canonical, default=None)
+        # track which required fields are missing (not in source metadata or custom)
+        missing_required = []
+        for field in required_fields:
+            canonical = field["canonical"]
+            # check if value exists in custom metadata or source
+            custom_val = parent._saveas_custom_metadata.get(canonical)
+            source_val = field.get("value")  # from get_required_metadata
+            if custom_val is None and source_val is None:
+                missing_required.append(field)
 
-                # Row layout
-                imgui.text(f"{label}")
-                imgui.same_line(hello_imgui.em_size(10))
+        # show required metadata fields (always visible, red/green status)
+        if required_fields:
+            imgui.text("Required:")
+            imgui.dummy(imgui.ImVec2(0, 2))
 
-                # Show current value or appropriate placeholder
-                if value is not None:
-                    imgui.text_colored(imgui.ImVec4(0.6, 0.9, 0.6, 1.0), f"{value} {unit}")
-                elif canonical == "dz" and get_param(current_meta, "lbm_stack", default=False):
-                    # LBM stacks require user-supplied dz
-                    imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "User Input Required")
-                    if imgui.is_item_hovered():
-                        imgui.begin_tooltip()
-                        imgui.text("LBM stacks require user-supplied Z step size.")
-                        imgui.text("Enter a value and click 'Add' to set.")
-                        imgui.end_tooltip()
+            for field in required_fields:
+                canonical = field["canonical"]
+                label = field["label"]
+                unit = field["unit"]
+                dtype = field["dtype"]
+                desc = field["description"]
+
+                # check current value (custom overrides source)
+                custom_val = parent._saveas_custom_metadata.get(canonical)
+                source_val = field.get("value")
+                value = custom_val if custom_val is not None else source_val
+
+                # row: label | value/input | set button
+                is_set = value is not None
+                label_color = imgui.ImVec4(0.4, 0.9, 0.4, 1.0) if is_set else imgui.ImVec4(1.0, 0.4, 0.4, 1.0)
+                imgui.text_colored(label_color, f"{label}")
+                imgui.same_line(hello_imgui.em_size(8))
+
+                if is_set:
+                    imgui.text_colored(imgui.ImVec4(0.4, 0.9, 0.4, 1.0), f"{value} {unit}")
                 else:
-                    imgui.text_disabled("not found")
+                    imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), "required")
 
-                # Tooltip with aliases
+                # tooltip with description
                 imgui.same_line()
                 imgui.text_disabled("(?)")
                 if imgui.is_item_hovered():
                     imgui.begin_tooltip()
-                    imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-                    imgui.text_unformatted(f"Aliases: {aliases}")
+                    imgui.push_text_wrap_pos(imgui.get_font_size() * 25.0)
+                    imgui.text_unformatted(desc)
                     imgui.pop_text_wrap_pos()
                     imgui.end_tooltip()
 
-                # Input field for adding/editing
-                imgui.same_line(hello_imgui.em_size(22))
+                # input field
+                imgui.same_line(hello_imgui.em_size(18))
                 input_key = f"_meta_input_{canonical}"
                 if not hasattr(parent, input_key):
                     setattr(parent, input_key, "")
 
-                imgui.set_next_item_width(hello_imgui.em_size(8))
+                imgui.set_next_item_width(hello_imgui.em_size(6))
                 flags = imgui.InputTextFlags_.chars_decimal if dtype in (float, int) else 0
                 _, new_val = imgui.input_text(f"##{canonical}_input", getattr(parent, input_key), flags=flags)
                 setattr(parent, input_key, new_val)
 
-                # Add button
+                # set button
                 imgui.same_line()
                 if imgui.small_button(f"Set##{canonical}"):
                     input_val = getattr(parent, input_key).strip()
                     if input_val:
                         try:
                             parsed = dtype(input_val)
-                            # Add to custom metadata for saving
                             parent._saveas_custom_metadata[canonical] = parsed
-                            # Try to update source metadata if supported
-                            if current_data is not None and hasattr(current_data, 'metadata'):
+                            if current_data and hasattr(current_data, 'metadata'):
                                 if isinstance(current_data.metadata, dict):
                                     current_data.metadata[canonical] = parsed
-                                    # Show saved indicator
-                                    if not hasattr(parent, '_meta_saved_time'):
-                                        parent._meta_saved_time = {}
-                                    import time
-                                    parent._meta_saved_time[canonical] = time.time()
                             setattr(parent, input_key, "")
                         except (ValueError, TypeError):
                             pass
 
-                # Show "saved!" indicator briefly
-                if hasattr(parent, '_meta_saved_time') and canonical in parent._meta_saved_time:
-                    import time
-                    elapsed = time.time() - parent._meta_saved_time[canonical]
-                    if elapsed < 2.0:
-                        imgui.same_line()
-                        imgui.text_colored(imgui.ImVec4(0.3, 1.0, 0.3, 1.0), "set!")
-
-            # Standard imaging metadata fields from registry
-            from mbo_utilities.metadata import get_imaging_metadata_info
-            for info in get_imaging_metadata_info():
-                _metadata_row(
-                    info["label"],
-                    info["canonical"],
-                    info["unit"],
-                    info["aliases"],
-                    info["dtype"],
-                )
-
             imgui.spacing()
-            imgui.separator()
 
-            # Custom metadata key-value pairs
-            imgui.text("Custom Metadata")
+        # custom metadata section (always visible, no dropdown)
+        imgui.text("Custom:")
+        imgui.dummy(imgui.ImVec2(0, 2))
+
+        # show existing custom metadata entries
+        to_remove = None
+        for key, value in list(parent._saveas_custom_metadata.items()):
+            # skip required fields (shown above)
+            if any(f["canonical"] == key for f in required_fields):
+                continue
+            imgui.push_id(f"custom_{key}")
+            imgui.text(f"  {key}:")
             imgui.same_line()
-            imgui.text_disabled("(?)")
-            if imgui.is_item_hovered():
-                imgui.begin_tooltip()
-                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-                imgui.text_unformatted(
-                    "Add custom key-value pairs to the output metadata.\n"
-                    "Values will be stored as strings unless they parse as numbers."
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.end_tooltip()
-
-            imgui.dummy(imgui.ImVec2(0, 3))
-
-            # Show existing custom metadata entries
-            to_remove = None
-            for key, value in list(parent._saveas_custom_metadata.items()):
-                imgui.push_id(f"custom_{key}")
-                imgui.text(f"  {key}:")
-                imgui.same_line()
-                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), str(value))
-                imgui.same_line()
-                if imgui.small_button("X"):
-                    to_remove = key
-                imgui.pop_id()
-            if to_remove:
-                del parent._saveas_custom_metadata[to_remove]
-
-            # Add new key-value pair
-            imgui.set_next_item_width(hello_imgui.em_size(8))
-            _, parent._saveas_custom_key = imgui.input_text(
-                "##custom_key", parent._saveas_custom_key
-            )
+            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), str(value))
             imgui.same_line()
-            imgui.text("=")
-            imgui.same_line()
-            imgui.set_next_item_width(hello_imgui.em_size(10))
-            _, parent._saveas_custom_value = imgui.input_text(
-                "##custom_value", parent._saveas_custom_value
-            )
-            imgui.same_line()
-            if imgui.button("Add"):
-                if parent._saveas_custom_key.strip():
-                    # Try to parse value as number
-                    val = parent._saveas_custom_value
-                    try:
-                        if "." in val:
-                            val = float(val)
-                        else:
-                            val = int(val)
-                    except ValueError:
-                        pass  # Keep as string
-                    parent._saveas_custom_metadata[parent._saveas_custom_key.strip()] = val
-                    parent._saveas_custom_key = ""
-                    parent._saveas_custom_value = ""
+            if imgui.small_button("X"):
+                to_remove = key
+            imgui.pop_id()
+        if to_remove:
+            del parent._saveas_custom_metadata[to_remove]
 
-            imgui.spacing()
+        # add new key-value pair
+        imgui.set_next_item_width(hello_imgui.em_size(8))
+        _, parent._saveas_custom_key = imgui.input_text(
+            "##custom_key", parent._saveas_custom_key
+        )
+        imgui.same_line()
+        imgui.text("=")
+        imgui.same_line()
+        imgui.set_next_item_width(hello_imgui.em_size(10))
+        _, parent._saveas_custom_value = imgui.input_text(
+            "##custom_value", parent._saveas_custom_value
+        )
+        imgui.same_line()
+        if imgui.button("Add"):
+            if parent._saveas_custom_key.strip():
+                val = parent._saveas_custom_value
+                try:
+                    if "." in val:
+                        val = float(val)
+                    else:
+                        val = int(val)
+                except ValueError:
+                    pass
+                parent._saveas_custom_metadata[parent._saveas_custom_key.strip()] = val
+                parent._saveas_custom_key = ""
+                parent._saveas_custom_value = ""
+
+        imgui.spacing()
+
+        # store missing required state for save button validation
+        parent._saveas_missing_required = missing_required
 
         imgui.spacing()
         imgui.separator()
 
-        # Num frames slider
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Frames")
+        # Timepoints section
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Timepoints")
         imgui.dummy(imgui.ImVec2(0, 5))
 
         # Get max frames from data
@@ -741,49 +947,47 @@ def draw_saveas_popup(parent):
         except (IndexError, AttributeError):
             max_frames = 1000
 
-        # Initialize num_frames if not set or if max changed
-        if not hasattr(parent, '_saveas_num_frames') or parent._saveas_num_frames is None:
-            parent._saveas_num_frames = max_frames
-        if not hasattr(parent, '_saveas_last_max_frames'):
-            parent._saveas_last_max_frames = max_frames
-        elif parent._saveas_last_max_frames != max_frames:
-            parent._saveas_last_max_frames = max_frames
-            parent._saveas_num_frames = max_frames
+        # initialize num_timepoints if not set or if max changed
+        if not hasattr(parent, '_saveas_num_timepoints') or parent._saveas_num_timepoints is None:
+            parent._saveas_num_timepoints = max_frames
+        if not hasattr(parent, '_saveas_last_max_timepoints'):
+            parent._saveas_last_max_timepoints = max_frames
+        elif parent._saveas_last_max_timepoints != max_frames:
+            parent._saveas_last_max_timepoints = max_frames
+            parent._saveas_num_timepoints = max_frames
 
         imgui.set_next_item_width(hello_imgui.em_size(8))
-        changed, new_value = imgui.input_int("##frames_input", parent._saveas_num_frames, step=1, step_fast=100)
+        changed, new_value = imgui.input_int("##timepoints_input", parent._saveas_num_timepoints, step=1, step_fast=100)
         if changed:
-            parent._saveas_num_frames = max(1, min(new_value, max_frames))
+            parent._saveas_num_timepoints = max(1, min(new_value, max_frames))
         imgui.same_line()
         imgui.text(f"/ {max_frames}")
         set_tooltip(
-            f"Number of frames to save (1-{max_frames}). "
+            f"Number of timepoints to save (1-{max_frames}). "
             "Useful for testing on subsets before full conversion."
         )
 
         imgui.set_next_item_width(hello_imgui.em_size(20))
         slider_changed, slider_value = imgui.slider_int(
-            "##frames_slider", parent._saveas_num_frames, 1, max_frames
+            "##timepoints_slider", parent._saveas_num_timepoints, 1, max_frames
         )
         if slider_changed:
-            parent._saveas_num_frames = slider_value
+            parent._saveas_num_timepoints = slider_value
 
         imgui.spacing()
         imgui.separator()
 
-        # Z-plane selection
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose z-planes:")
+        # Z-Plane Selection section
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Z-Plane Selection")
         imgui.dummy(imgui.ImVec2(0, 5))
 
         try:
             data = parent.image_widget.data[0]
-            # Try various attributes for plane count
             if hasattr(data, "num_planes"):
                 num_planes = data.num_planes
             elif hasattr(data, "num_channels"):
                 num_planes = data.num_channels
             elif len(data.shape) == 4:
-                # 4D array: shape is (T, Z, Y, X)
                 num_planes = data.shape[1]
             else:
                 num_planes = 1
@@ -794,48 +998,108 @@ def draw_saveas_popup(parent):
                 f"Could not read number of planes: {e}",
             )
 
-        # Auto-select current z-plane if none selected
-        if not parent._selected_planes:
-            # Get current z index from image widget
-            names = parent.image_widget._slider_dim_names or ()
-            try:
-                current_z = parent.image_widget.indices["z"] if "z" in names else 0
-            except (IndexError, KeyError):
-                current_z = 0
-            parent._selected_planes = {current_z}
-
-        if imgui.button("All"):
+        # default to all planes selected (only on first open, not when user selects "None")
+        if parent._selected_planes is None:
             parent._selected_planes = set(range(num_planes))
+
+        # show summary and button to open selector popup
+        n_selected = len(parent._selected_planes)
+        if n_selected == num_planes:
+            summary = "All planes"
+        elif n_selected == 0:
+            summary = "None"
+        elif n_selected <= 3:
+            summary = ", ".join(str(p + 1) for p in sorted(parent._selected_planes))
+        else:
+            summary = f"{n_selected} of {num_planes}"
+
+        imgui.text(f"Z-planes: {summary}")
         imgui.same_line()
-        if imgui.button("None"):
-            parent._selected_planes = set()
-        imgui.same_line()
-        if imgui.button("Current"):
+        if imgui.button("Select...##zplanes"):
+            imgui.open_popup("Select Z-Planes##saveas")
+
+        # plane selection popup
+        popup_height = min(400, 130 + num_planes * 24)
+        imgui.set_next_window_size(imgui.ImVec2(300, popup_height), imgui.Cond_.first_use_ever)
+        if imgui.begin_popup_modal("Select Z-Planes##saveas", flags=imgui.WindowFlags_.no_saved_settings)[0]:
+            # get current z for highlighting
             names = parent.image_widget._slider_dim_names or ()
             try:
                 current_z = parent.image_widget.indices["z"] if "z" in names else 0
             except (IndexError, KeyError):
                 current_z = 0
-            parent._selected_planes = {current_z}
 
-        imgui.columns(2, borders=False)
-        for i in range(num_planes):
-            imgui.push_id(i)
-            selected = i in parent._selected_planes
-            _, selected = imgui.checkbox(f"Plane {i + 1}", selected)
-            if selected:
-                parent._selected_planes.add(i)
-            else:
-                parent._selected_planes.discard(i)
-            imgui.pop_id()
-            imgui.next_column()
-        imgui.columns(1)
+            imgui.text("Select planes to save:")
+            imgui.spacing()
+
+            if imgui.button("All"):
+                parent._selected_planes = set(range(num_planes))
+            imgui.same_line()
+            if imgui.button("None"):
+                parent._selected_planes = set()
+            imgui.same_line()
+            if imgui.button("Current"):
+                parent._selected_planes = {current_z}
+
+            imgui.separator()
+            imgui.spacing()
+
+            # adaptive grid of checkboxes
+            items = [(f"Plane {i + 1}", i in parent._selected_planes) for i in range(num_planes)]
+
+            def on_plane_change(idx, checked):
+                if checked:
+                    parent._selected_planes.add(idx)
+                else:
+                    parent._selected_planes.discard(idx)
+
+            draw_checkbox_grid(items, "saveas_plane", on_plane_change)
+
+            imgui.spacing()
+            imgui.separator()
+            if imgui.button("Done", imgui.ImVec2(-1, 0)):
+                imgui.close_current_popup()
+
+            imgui.end_popup()
 
         imgui.spacing()
         imgui.separator()
+
+        # run in background option (default to True)
+        if not hasattr(parent, '_saveas_background'):
+            parent._saveas_background = True
+        _, parent._saveas_background = imgui.checkbox(
+            "Run in background", parent._saveas_background
+        )
+        set_tooltip(
+            "Run save operation as a separate process that continues after closing the GUI. "
+            "Progress will be logged to a file in the output directory."
+        )
+
         imgui.spacing()
 
-        if imgui.button("Save", imgui.ImVec2(100, 0)):
+        # disable save button if required metadata is missing or no z-planes selected
+        missing_fields = getattr(parent, '_saveas_missing_required', None)
+        no_planes = parent._selected_planes is not None and len(parent._selected_planes) == 0
+
+        if missing_fields or no_planes:
+            imgui.begin_disabled()
+            imgui.button("Save", imgui.ImVec2(100, 0))
+            imgui.end_disabled()
+            imgui.same_line()
+            # show error message
+            if no_planes:
+                imgui.text_colored(
+                    imgui.ImVec4(1.0, 0.4, 0.4, 1.0),
+                    "Select at least one z-plane"
+                )
+            elif missing_fields:
+                missing_names = ", ".join(f["label"] for f in missing_fields)
+                imgui.text_colored(
+                    imgui.ImVec4(1.0, 0.4, 0.4, 1.0),
+                    f"Please set required metadata: {missing_names}"
+                )
+        elif imgui.button("Save", imgui.ImVec2(100, 0)):
             if not parent._saveas_outdir:
                 last_dir = get_last_dir("save_as") or Path().home()
                 parent._saveas_outdir = str(last_dir)
@@ -867,24 +1131,18 @@ def draw_saveas_popup(parent):
                     if not outdir.exists():
                         outdir.mkdir(parents=True, exist_ok=True)
 
-                    # Get num_frames (None means all frames)
-                    num_frames = getattr(parent, '_saveas_num_frames', None)
+                    # Get num_timepoints (None means all timepoints)
+                    num_timepoints = getattr(parent, '_saveas_num_timepoints', None)
                     try:
-                        max_frames = parent.image_widget.data[0].shape[0]
-                        if num_frames is not None and num_frames >= max_frames:
-                            num_frames = None  # All frames, don't limit
+                        max_timepoints = parent.image_widget.data[0].shape[0]
+                        if num_timepoints is not None and num_timepoints >= max_timepoints:
+                            num_timepoints = None  # All timepoints, don't limit
                     except (IndexError, AttributeError):
                         pass
 
                     # Build metadata overrides dict from custom metadata
                     # (all standard fields are added via the Set buttons in the Metadata section)
                     metadata_overrides = dict(parent._saveas_custom_metadata)
-
-                    # Determine output_suffix: only use custom suffix for multi-ROI stitched data
-                    output_suffix = None
-                    if rois is None:
-                        # Stitching all ROIs - use custom suffix (or default "_stitched")
-                        output_suffix = parent._saveas_output_suffix
 
                     # Determine output_suffix: only use custom suffix for multi-ROI stitched data
                     output_suffix = None
@@ -906,7 +1164,7 @@ def draw_saveas_popup(parent):
                         "debug": parent._debug,
                         "ext": parent._ext,
                         "target_chunk_mb": parent._saveas_chunk_mb,
-                        "num_frames": num_frames,
+                        "num_timepoints": num_timepoints,
                         # scan-phase correction settings
                         "fix_phase": parent.fix_phase,
                         "use_fft": parent.use_fft,
@@ -926,28 +1184,72 @@ def draw_saveas_popup(parent):
                         save_kwargs["sharded"] = parent._zarr_sharded
                         save_kwargs["ome"] = parent._zarr_ome
                         save_kwargs["level"] = parent._zarr_compression_level
-                    frames_msg = f"{num_frames} frames" if num_frames else "all frames"
+
+                    frames_msg = f"{num_timepoints} timepoints" if num_timepoints else "all timepoints"
                     roi_msg = f"ROIs {rois}" if rois else roi_mode.description
                     parent.logger.info(f"Saving planes {save_planes} ({frames_msg}), {roi_msg}")
                     parent.logger.info(
                         f"Saving to {parent._saveas_outdir} as {parent._ext}"
                     )
-                    # Reset progress state to allow new progress display
-                    reset_progress_state("saveas")
-                    parent._saveas_progress = 0.0
-                    parent._saveas_done = False
-                    parent._saveas_running = True
-                    parent.logger.info("Starting save operation...")
-                    # Also reset register_z progress if enabled
-                    if parent._register_z:
-                        reset_progress_state("register_z")
-                        parent._register_z_progress = 0.0
-                        parent._register_z_done = False
-                        parent._register_z_running = True
-                        parent._register_z_current_msg = "Starting..."
-                    threading.Thread(
-                        target=_save_as_worker, kwargs=save_kwargs, daemon=True
-                    ).start()
+
+                    # check if running as background process
+                    if parent._saveas_background:
+                        # spawn as detached subprocess via process manager
+                        pm = get_process_manager()
+                        # handle fpath being a list (from directory) or single path
+                        if isinstance(parent.fpath, (list, tuple)):
+                            input_path = str(parent.fpath[0]) if parent.fpath else ""
+                            # use parent directory for display name
+                            fname = Path(parent.fpath[0]).parent.name if parent.fpath else "data"
+                        else:
+                            input_path = str(parent.fpath) if parent.fpath else ""
+                            fname = Path(parent.fpath).name if parent.fpath else "data"
+                            name = Path(parent.fpath).name if parent.fpath else "data"
+                        worker_args = {
+                            "input_path": input_path,
+                            "output_path": str(parent._saveas_outdir),
+                            "ext": parent._ext,
+                            "planes": save_planes,
+                            "num_timepoints": num_timepoints,
+                            "rois": rois,
+                            "fix_phase": parent.fix_phase,
+                            "use_fft": parent.use_fft,
+                            "register_z": parent._register_z,
+                            "metadata": metadata_overrides if metadata_overrides else {},
+                            "kwargs": {
+                                "sharded": parent._zarr_sharded if parent._ext == ".zarr" else False,
+                                "ome": parent._zarr_ome if parent._ext == ".zarr" else False,
+                                "output_suffix": output_suffix
+                            }
+                        }
+                        pid = pm.spawn(
+                            task_type="save_as",
+                            args=worker_args,
+                            description=f"Saving {fname} to {parent._ext}",
+                            output_path=str(parent._saveas_outdir),
+                        )
+                        if pid:
+                            parent.logger.info(f"Started background save process (PID {pid})")
+                            parent.logger.info("You can close the GUI - the save will continue.")
+                        else:
+                            parent.logger.error("Failed to start background process")
+                    else:
+                        # run in foreground thread (existing behavior)
+                        reset_progress_state("saveas")
+                        parent._saveas_progress = 0.0
+                        parent._saveas_done = False
+                        parent._saveas_running = True
+                        parent.logger.info("Starting save operation...")
+                        # Also reset register_z progress if enabled
+                        if parent._register_z:
+                            reset_progress_state("register_z")
+                            parent._register_z_progress = 0.0
+                            parent._register_z_done = False
+                            parent._register_z_running = True
+                            parent._register_z_current_msg = "Starting..."
+                        threading.Thread(
+                            target=_save_as_worker, kwargs=save_kwargs, daemon=True
+                        ).start()
                 parent._saveas_modal_open = False
                 imgui.close_current_popup()
             except Exception as e:
@@ -1075,8 +1377,12 @@ class PreviewDataWidget(EdgeWindow):
         # num_graphics matches len(iw.graphics)
         self.num_graphics = len(self.image_widget.graphics)
         self.shape = self.image_widget.data[0].shape
+
+        from mbo_utilities.metadata import has_mbo_metadata
+        # Check if raw ScanImage OR has MBO metadata tagged tiff/zarr
         self.is_mbo_scan = (
-            True if isinstance(self.image_widget.data[0], ScanImageArray) else False
+            isinstance(self.image_widget.data[0], ScanImageArray) or
+            has_mbo_metadata(self.fpath) if self.fpath else False
         )
         self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
@@ -1129,7 +1435,7 @@ class PreviewDataWidget(EdgeWindow):
 
         self._selected_pipelines = None
         self._selected_array = 0
-        self._selected_planes = set()
+        self._selected_planes = None  # None = uninitialized, empty set = user selected "None"
         self._planes_str = str(getattr(self, "_planes_str", ""))
 
         # properties for saving to another filetype
@@ -1171,6 +1477,9 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_custom_key = ""  # temp input for new key
         self._saveas_custom_value = ""  # temp input for new value
 
+        # Process monitoring state
+        self._viewing_process_pid = None  # selected process for log viewing
+
         # Output suffix for filename customization (default: "_stitched" for multi-ROI)
         self._saveas_output_suffix = "_stitched"
 
@@ -1196,13 +1505,127 @@ class PreviewDataWidget(EdgeWindow):
             threading.Thread(target=self.compute_zstats, daemon=True).start()
 
     def set_context_info(self):
-        if self.fpath is None:
-            title = "Test Data"
-        elif isinstance(self.fpath, list):
-            title = f"{[Path(f).stem for f in self.fpath]}"
-        else:
-            title = f"Filepath: {Path(self.fpath).stem}"
-        self.image_widget.figure.canvas.set_title(str(title))
+        # Update app title with dataset name for easier identification in task manager/OS
+        try:
+            name = Path(self.fpath[0]).parent.name if isinstance(self.fpath, list) else Path(self.fpath).name
+            hello_imgui.get_runner_params().app_shallow_settings.window_title = f"MBO Utilities - {name}"
+        except RuntimeError:
+            # HelloImGui runner not yet initialized (called during __init__)
+            pass
+
+    def draw_background_processes_section(self):
+        """Draw listing of background processes and their logs."""
+        pm = get_process_manager()
+        pm.cleanup_finished()  # clean up dead processes
+        running = pm.get_running()
+
+        if not running:
+            imgui.text_disabled("No background processes running.")
+            return
+
+        imgui.text_colored(
+            imgui.ImVec4(0.9, 0.8, 0.3, 1.0),
+            f"{len(running)} active process(es):"
+        )
+        imgui.separator()
+        imgui.spacing()
+
+        for proc in running:
+            imgui.push_id(f"proc_{proc.pid}")
+
+            # process description
+            imgui.bullet()
+
+            # Color code status
+            if proc.status == "error":
+                 imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), f"[ERROR] {proc.description}")
+            elif proc.status == "completed":
+                 imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), f"[DONE] {proc.description}")
+            else:
+                 imgui.text(proc.description)
+
+            # details
+            imgui.indent()
+            imgui.text_disabled(f"PID: {proc.pid} | Started: {proc.elapsed_str()}")
+
+            # last log line
+            last_line = proc.get_last_log_line()
+            if last_line:
+                if len(last_line) > 100:
+                    last_line = last_line[:97] + "..."
+                imgui.text_colored(imgui.ImVec4(0.5, 0.7, 1.0, 0.8), f"> {last_line}")
+
+            # Buttons (Kill/Dismiss and Show console)
+            # Use small buttons to fit in the list
+            if imgui.small_button("Show Console"):
+                self._viewing_process_pid = proc.pid
+
+            imgui.same_line()
+
+            if proc.is_alive():
+                if imgui.small_button("Kill"):
+                    if pm.kill(proc.pid):
+                        self.logger.info(f"Killed process {proc.pid}")
+                        if self._viewing_process_pid == proc.pid:
+                            self._viewing_process_pid = None
+                    else:
+                        self.logger.warning(f"Failed to kill process {proc.pid}")
+            else:
+                if imgui.small_button("Dismiss"):
+                     if proc.pid in pm._processes:
+                         if self._viewing_process_pid == proc.pid:
+                             self._viewing_process_pid = None
+                         del pm._processes[proc.pid]
+                         pm._save()
+
+            imgui.unindent()
+            imgui.spacing()
+            imgui.pop_id()
+
+        # console output area for selected process
+        if self._viewing_process_pid is not None:
+            # find the process
+            v_proc = next((p for p in running if p.pid == self._viewing_process_pid), None)
+            if v_proc:
+                imgui.dummy(imgui.ImVec2(0, 10))
+                imgui.text_colored(imgui.ImVec4(0.3, 0.6, 1.0, 1.0), f"Console: {v_proc.description} (PID {v_proc.pid})")
+                imgui.same_line(imgui.get_content_region_avail().x - 20)
+                if imgui.small_button("x##close_console"):
+                    self._viewing_process_pid = None
+
+                # tail log
+                lines = v_proc.tail_log(30)
+                # Ensure we have a reasonable height for the console
+                if imgui.begin_child("##proc_console", imgui.ImVec2(0, 250), imgui.ChildFlags_.borders):
+                    for line in lines:
+                        line_stripped = line.strip()
+                        if "error" in line_stripped.lower():
+                            imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), line_stripped)
+                        elif "warning" in line_stripped.lower():
+                            imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.2, 1.0), line_stripped)
+                        elif "success" in line_stripped.lower() or "complete" in line_stripped.lower():
+                            imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), line_stripped)
+                        else:
+                            imgui.text(line_stripped)
+                    # auto-scroll
+                    imgui.set_scroll_here_y(1.0)
+                    imgui.end_child()
+            else:
+                self._viewing_process_pid = None
+
+        imgui.spacing()
+        if running:
+            any_alive = any(p.is_alive() for p in running)
+            if any_alive:
+                if imgui.button("Kill All Processes", imgui.ImVec2(-1, 0)):
+                    killed = pm.kill_all()
+                    self.logger.info(f"Killed {killed} processes")
+            else:
+                if imgui.button("Clear Finished Processes", imgui.ImVec2(-1, 0)):
+                    to_remove = [p.pid for p in running if not p.is_alive()]
+                    for pid in to_remove:
+                        del pm._processes[pid]
+                    pm._save()
 
     def _refresh_image_widget(self):
         """
@@ -1382,7 +1805,11 @@ class PreviewDataWidget(EdgeWindow):
         arrays = self._get_data_arrays()
         self.logger.debug(f"Checking raster scan support for {len(arrays)} arrays")
         for arr in arrays:
-            self.logger.debug(f"  Array type: {type(arr).__name__}, has fix_phase: {hasattr(arr, 'fix_phase')}, has use_fft: {hasattr(arr, 'use_fft')}")
+            self.logger.debug(f"  Array type: {type(arr).__name__}, has feature: {hasattr(arr, 'phase_correction')}")
+            # Check for feature first
+            if hasattr(arr, 'phase_correction') and isinstance(arr.phase_correction, PhaseCorrectionFeature):
+                return True
+            # Legacy fallback
             if hasattr(arr, 'fix_phase') and hasattr(arr, 'use_fft'):
                 return True
         return False
@@ -1400,13 +1827,20 @@ class PreviewDataWidget(EdgeWindow):
     def fix_phase(self) -> bool:
         """Whether bidirectional phase correction is enabled."""
         arrays = self._get_data_arrays()
-        return getattr(arrays[0], 'fix_phase', False) if arrays else False
+        if not arrays:
+            return False
+        arr = arrays[0]
+        if hasattr(arr, 'phase_correction') and isinstance(arr.phase_correction, PhaseCorrectionFeature):
+            return arr.phase_correction.enabled
+        return getattr(arr, 'fix_phase', False)
 
     @fix_phase.setter
     def fix_phase(self, value: bool):
         self.logger.info(f"Setting fix_phase to {value}.")
         for arr in self._get_data_arrays():
-            if hasattr(arr, 'fix_phase'):
+            if hasattr(arr, 'phase_correction') and isinstance(arr.phase_correction, PhaseCorrectionFeature):
+                arr.phase_correction.enabled = value
+            elif hasattr(arr, 'fix_phase'):
                 arr.fix_phase = value
         self._refresh_image_widget()
 
@@ -1414,13 +1848,20 @@ class PreviewDataWidget(EdgeWindow):
     def use_fft(self) -> bool:
         """Whether FFT-based phase correlation is used."""
         arrays = self._get_data_arrays()
-        return getattr(arrays[0], 'use_fft', False) if arrays else False
+        if not arrays:
+            return False
+        arr = arrays[0]
+        if hasattr(arr, 'phase_correction') and isinstance(arr.phase_correction, PhaseCorrectionFeature):
+            return arr.phase_correction.use_fft
+        return getattr(arr, 'use_fft', False)
 
     @use_fft.setter
     def use_fft(self, value: bool):
         self.logger.info(f"Setting use_fft to {value}.")
         for arr in self._get_data_arrays():
-            if hasattr(arr, 'use_fft'):
+            if hasattr(arr, 'phase_correction') and isinstance(arr.phase_correction, PhaseCorrectionFeature):
+                arr.phase_correction.use_fft = value
+            elif hasattr(arr, 'use_fft'):
                 arr.use_fft = value
         self._refresh_image_widget()
 
@@ -1428,13 +1869,20 @@ class PreviewDataWidget(EdgeWindow):
     def border(self) -> int:
         """Border pixels to exclude from phase correlation."""
         arrays = self._get_data_arrays()
-        return getattr(arrays[0], 'border', 3) if arrays else 3
+        if not arrays:
+            return 3
+        arr = arrays[0]
+        if hasattr(arr, 'phase_correction') and isinstance(arr.phase_correction, PhaseCorrectionFeature):
+            return arr.phase_correction.border
+        return getattr(arr, 'border', 3)
 
     @border.setter
     def border(self, value: int):
         self.logger.info(f"Setting border to {value}.")
         for arr in self._get_data_arrays():
-            if hasattr(arr, 'border'):
+            if hasattr(arr, 'phase_correction') and isinstance(arr.phase_correction, PhaseCorrectionFeature):
+                arr.phase_correction.border = value
+            elif hasattr(arr, 'border'):
                 arr.border = value
         self._refresh_image_widget()
 
@@ -1478,6 +1926,9 @@ class PreviewDataWidget(EdgeWindow):
         # Rebuild spatial_func which combines mean subtraction and gaussian blur
         self._rebuild_spatial_func()
         self._refresh_image_widget()
+        # Automatically reset vmin/vmax to handle signal changes from blur
+        if self.image_widget:
+            self.image_widget.reset_vmin_vmax_frame()
 
     @property
     def proj(self) -> str:
@@ -1505,6 +1956,9 @@ class PreviewDataWidget(EdgeWindow):
         """Update spatial_func to apply mean subtraction."""
         self._rebuild_spatial_func()
         self._refresh_image_widget()
+        # Automatically reset vmin/vmax to handle scaled signal
+        if self.image_widget:
+            self.image_widget.reset_vmin_vmax_frame()
 
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function (mean subtraction + gaussian blur)."""
@@ -1599,6 +2053,9 @@ class PreviewDataWidget(EdgeWindow):
 
         self.logger.debug(f"Updating window_funcs to {self._proj} with {n_slider_dims} slider dims")
         self._set_processor_attr("window_funcs", window_funcs)
+        # Automatically reset vmin/vmax for new projection scale
+        if self.image_widget:
+            self.image_widget.reset_vmin_vmax_frame()
 
     @property
     def window_size(self) -> int:
@@ -1619,26 +2076,16 @@ class PreviewDataWidget(EdgeWindow):
             self.logger.warning("No processors available to set window size")
             return
 
-        # Use fastplotlib's window_sizes API
-        # ImageWidget.window_sizes expects a list with one entry per processor
-        # Each entry is a tuple with one value per slider dim
-        # For 4D data (t, z, y, x) we have 2 slider dims: (t_window, z_window)
-        # For 3D data (t, y, x) we have 1 slider dim: (t_window,)
         n_slider_dims = self.processors[0].n_slider_dims if self.processors else 1
 
-        if n_slider_dims == 1:
-            # Only temporal dimension
-            per_processor_sizes = (value,)
-        elif n_slider_dims == 2:
-            # Temporal and z dimensions - only apply window to temporal (first dim)
-            per_processor_sizes = (value, None)
-        else:
-            # More dimensions - apply to first, None for rest
-            per_processor_sizes = (value,) + (None,) * (n_slider_dims - 1)
-
+        # Per-processor window sizes tuple
+        per_processor_sizes = (self._window_size,) + (None,) * (n_slider_dims - 1)
         # Set directly on processors with histogram computation disabled
         # to avoid expensive full-array histogram recomputation
         self._set_processor_attr("window_sizes", per_processor_sizes)
+        # Automatically reset vmin/vmax for new window integration
+        if self.image_widget:
+            self.image_widget.reset_vmin_vmax_frame()
 
     @property
     def phase_upsample(self) -> int:
@@ -1663,38 +2110,65 @@ class PreviewDataWidget(EdgeWindow):
         io = imgui.get_io()
 
         # skip if any widget has focus (typing in text field)
+        # single-key shortcuts MUST be blocked when typing
         if io.want_text_input:
             return
 
-        # ctrl+o: open file
-        if io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.o):
-            fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
-            if fpath and Path(fpath).exists():
-                start_dir = str(Path(fpath).parent)
-            else:
-                start_dir = str(get_last_dir("open_file") or Path.home())
-            self._file_dialog = pfd.open_file(
-                "Select Data File(s)",
-                start_dir,
-                ["Image Files", "*.tif *.tiff *.zarr *.npy *.bin", "All Files", "*"],
-                pfd.opt.multiselect
-            )
+        # o: open file (no modifiers)
+        if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.o, False):
+            if self._file_dialog is None and self._folder_dialog is None:
+                self.logger.info("Shortcut: 'o' (Open File) triggered.")
+                fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
+                if fpath and Path(fpath).exists():
+                    start_dir = str(Path(fpath).parent)
+                else:
+                    from mbo_utilities.preferences import get_last_dir
+                    start_dir = str(get_last_dir("open_file") or Path.home())
+                self._file_dialog = pfd.open_file(
+                    "Select Data File(s)",
+                    start_dir,
+                    ["Image Files", "*.tif *.tiff *.zarr *.npy *.bin", "All Files", "*"],
+                    pfd.opt.multiselect
+                )
 
-        # ctrl+shift+o: open folder
-        if io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.o):
-            fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
-            if fpath and Path(fpath).exists():
-                start_dir = str(Path(fpath).parent)
-            else:
-                start_dir = str(get_last_dir("open_folder") or Path.home())
-            self._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
+        # O (Shift + O): open folder (no ctrl)
+        if not io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.o, False):
+            if self._folder_dialog is None and self._file_dialog is None:
+                self.logger.info("Shortcut: 'Shift+O' (Open Folder) triggered.")
+                fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
+                if fpath and Path(fpath).exists():
+                    start_dir = str(Path(fpath).parent)
+                else:
+                    from mbo_utilities.preferences import get_last_dir
+                    start_dir = str(get_last_dir("open_folder") or Path.home())
+                self._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
 
-        # m: toggle metadata viewer (no modifier)
-        if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.m):
+        # s: toggle save as popup (no modifiers)
+        if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.s, False):
+            self.logger.info("Shortcut: 's' (Save As) triggered.")
+            if getattr(self, "_saveas_modal_open", False):
+                self._saveas_modal_open = False
+            else:
+                self._saveas_popup_open = True
+
+        # m: toggle metadata viewer (no modifiers)
+        if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.m, False):
             self.show_metadata_viewer = not self.show_metadata_viewer
 
+        # [: toggle side panel collapse (no modifiers)
+        if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.left_bracket, False):
+            self.collapsed = not self.collapsed
+
+        # v: reset vmin/vmax (no modifiers)
+        if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.v, False):
+            if self.image_widget:
+                try:
+                    self.image_widget.reset_vmin_vmax_frame()
+                except Exception:
+                    pass
+
         # enter: reset vmin/vmax for current frame
-        if imgui.is_key_pressed(imgui.Key.enter) or imgui.is_key_pressed(imgui.Key.keypad_enter):
+        if imgui.is_key_pressed(imgui.Key.enter, False) or imgui.is_key_pressed(imgui.Key.keypad_enter, False):
             if self.image_widget:
                 try:
                     self.image_widget.reset_vmin_vmax_frame()
@@ -1760,31 +2234,42 @@ class PreviewDataWidget(EdgeWindow):
                     self.image_widget.indices = current_indices
 
     def draw_window(self):
-        """Override parent to handle keyboard shortcuts even when collapsed."""
+        """Override parent to handle keyboard shortcuts and global popups even when collapsed."""
         # always handle keyboard shortcuts regardless of collapsed state
         self._handle_keyboard_shortcuts()
         self._check_file_dialogs()
+
+        # Draw independent floating windows (must be outside super().draw_window() path)
+        draw_tools_popups(self)
+        draw_saveas_popup(self)
+        draw_process_console_popup(self)
 
         # call parent implementation (handles collapsed state and calls update())
         super().draw_window()
 
     def update(self):
-        # keyboard shortcuts and file dialogs are handled in draw_window()
-        # to ensure they work even when the widget is collapsed
-        draw_saveas_popup(self)
-        draw_menu(self)
+        # keyboard shortcuts, file dialogs, and tools popups are handled in draw_window()
+        # to ensure they work even when the widget is collapsed.
+        # Inside update(), we draw things that belong inside the panel.
+        draw_menu_bar(self)
         draw_tabs(self)
 
-        # Update mean subtraction when z-plane changes
-        if self._mean_subtraction:
-            names = self.image_widget._slider_dim_names or ()
-            try:
-                z_idx = self.image_widget.indices["z"] if "z" in names else 0
-            except (IndexError, KeyError):
-                z_idx = 0
-            if z_idx != self._last_z_idx:
-                self._last_z_idx = z_idx
+        # Update mean subtraction or reset vmin/vmax when z-plane changes
+        names = self.image_widget._slider_dim_names or ()
+        try:
+            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+        except (IndexError, KeyError):
+            z_idx = 0
+
+        if z_idx != self._last_z_idx:
+            self._last_z_idx = z_idx
+            if self._mean_subtraction:
+                # This already triggers a reset inside _update_mean_subtraction
                 self._update_mean_subtraction()
+            else:
+                # Just reset for the new plane if not doing mean subtraction
+                if self.image_widget:
+                    self.image_widget.reset_vmin_vmax_frame()
 
     def _check_file_dialogs(self):
         """Check if file/folder dialogs have results and load data if so."""
@@ -1856,7 +2341,17 @@ class PreviewDataWidget(EdgeWindow):
             # Update internal state
             self.fpath = path
             self.shape = new_data.shape
-            self.is_mbo_scan = isinstance(new_data, ScanImageArray)
+
+            from mbo_utilities.metadata import has_mbo_metadata
+            self.is_mbo_scan = (
+                isinstance(new_data, ScanImageArray) or
+                has_mbo_metadata(path)
+            )
+
+            # Suggest s2p output directory if not set
+            if not self._s2p_outdir:
+                path_obj = Path(path[0] if isinstance(path, (list, tuple)) else path)
+                self._s2p_outdir = str(path_obj.parent / "suite2p")
 
             # Update nz for z-plane count
             if len(self.shape) == 4:
@@ -1880,6 +2375,10 @@ class PreviewDataWidget(EdgeWindow):
 
             # Automatically recompute z-stats for new data
             self.refresh_zstats()
+
+            # Automatically reset vmin/vmax for initial view of new data
+            if self.image_widget:
+                self.image_widget.reset_vmin_vmax_frame()
 
         except Exception as e:
             self.logger.error(f"Error loading data: {e}")

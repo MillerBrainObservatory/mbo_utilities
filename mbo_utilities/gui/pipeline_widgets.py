@@ -36,7 +36,7 @@ class Suite2pSettings:
     # main settings
     tau: float = 1.3  # Timescale of sensor (LBM default for GCaMP6m-like)
     frames_include: int = -1
-    target_frames: int = -1
+    target_timepoints: int = -1
 
     # processing control
     keep_raw: bool = False  # keep raw binary (data_raw.bin) after processing
@@ -240,35 +240,35 @@ def draw_section_suite2p(self):
 
     # Frames to process slider
     imgui.spacing()
-    # Initialize target_frames only once, or when max_frames changes
-    if not hasattr(self, '_frames_initialized'):
-        self._frames_initialized = True
-        self._last_max_frames = max_frames
-        if self.s2p.target_frames == -1:
-            self.s2p.target_frames = max_frames
-    elif hasattr(self, '_last_max_frames') and self._last_max_frames != max_frames:
-        # Max frames changed (different data loaded), reset to new max
-        self._last_max_frames = max_frames
-        self.s2p.target_frames = max_frames
+    # Initialize target_timepoints only once, or when max changes
+    if not hasattr(self, '_timepoints_initialized'):
+        self._timepoints_initialized = True
+        self._last_max_timepoints = max_frames
+        if self.s2p.target_timepoints == -1:
+            self.s2p.target_timepoints = max_frames
+    elif hasattr(self, '_last_max_timepoints') and self._last_max_timepoints != max_frames:
+        # max timepoints changed (different data loaded), reset to new max
+        self._last_max_timepoints = max_frames
+        self.s2p.target_timepoints = max_frames
 
-    # frames input with slider
+    # timepoints input with slider
     imgui.set_next_item_width(INPUT_WIDTH)
-    changed, new_value = imgui.input_int("##frames_input", self.s2p.target_frames, step=1, step_fast=100)
+    changed, new_value = imgui.input_int("##timepoints_input", self.s2p.target_timepoints, step=1, step_fast=100)
     if changed:
-        self.s2p.target_frames = max(1, min(new_value, max_frames))
+        self.s2p.target_timepoints = max(1, min(new_value, max_frames))
     imgui.same_line()
-    imgui.text("Frames")
+    imgui.text("Timepoints")
     set_tooltip(
-        f"Number of frames to process (1-{max_frames}). "
+        f"Number of timepoints to process (1-{max_frames}). "
         "Use arrows or type exact value. Useful for testing on subsets."
     )
 
     imgui.set_next_item_width(INPUT_WIDTH)
     slider_changed, slider_value = imgui.slider_int(
-        "##frames_slider", self.s2p.target_frames, 1, max_frames
+        "##timepoints_slider", self.s2p.target_timepoints, 1, max_frames
     )
     if slider_changed:
-        self.s2p.target_frames = slider_value
+        self.s2p.target_timepoints = slider_value
 
     # Get current z index and total planes from image widget
     # iw-array API: use indices property with named dimension access
@@ -447,6 +447,17 @@ def draw_section_suite2p(self):
 
     imgui.spacing()
 
+    # Run in background checkbox
+    if not hasattr(self, '_s2p_background'):
+        self._s2p_background = True  # default to background
+    _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
+    set_tooltip(
+        "Run Suite2p as a separate process that continues even if the GUI is closed.\n"
+        "Click the process status indicator to monitor progress."
+    )
+
+    imgui.spacing()
+
     # Green Run button - disabled if no output path
     s2p_path = getattr(self, '_s2p_outdir', '') or getattr(self, '_saveas_outdir', '')
     has_save_path = bool(s2p_path)
@@ -475,7 +486,10 @@ def draw_section_suite2p(self):
     if button_clicked and has_save_path:
         self.logger.info(f"Running Suite2p pipeline on {len(self._selected_planes)} planes...")
         run_process(self)
-        self.logger.info("Suite2p processing submitted (running in background).")
+        if self._s2p_background:
+            self.logger.info("Suite2p processing started in background. Click the process status indicator to monitor.")
+        else:
+            self.logger.info("Suite2p processing submitted (running in background thread).")
 
     if self._install_error:
         imgui.same_line()
@@ -1077,50 +1091,108 @@ def run_process(self):
 
         self.logger.info(f"Running Suite2p pipeline on {len(selected_planes)} plane(s)...")
 
-        # Build list of all (arr_idx, z_plane) pairs to process
-        jobs = []
-        for i, arr in enumerate(self.image_widget.data):
-            for plane in sorted(selected_planes):
-                jobs.append((i, plane - 1))  # Convert to 0-indexed
+        # Check if running in background subprocess
+        use_background = getattr(self, "_s2p_background", True)
 
-        # Check if parallel processing is enabled
-        use_parallel = getattr(self, "_parallel_processing", False)
-        max_jobs = getattr(self, "_max_parallel_jobs", 2)
+        if use_background:
+            # Use ProcessManager to spawn detached subprocesses
+            from mbo_utilities.gui.process_manager import get_process_manager
 
-        if use_parallel and len(jobs) > 1:
-            # Parallel processing with limited concurrency
-            from concurrent.futures import ThreadPoolExecutor
+            pm = get_process_manager()
 
-            def run_parallel():
-                self.logger.info(f"Starting parallel processing with max {max_jobs} concurrent jobs...")
-                with ThreadPoolExecutor(max_workers=max_jobs) as executor:
-                    futures = {}
+            # get input path (full list or single path)
+            if isinstance(self.fpath, (list, tuple)):
+                input_path = [str(f) for f in self.fpath]
+            else:
+                input_path = str(self.fpath) if self.fpath else ""
+
+            # get output path
+            s2p_path = getattr(self, '_s2p_outdir', '') or getattr(self, '_saveas_outdir', '')
+
+            # determine roi
+            num_rois = len(self.image_widget.graphics) if hasattr(self.image_widget, 'graphics') else 1
+            roi = 1 if num_rois > 1 else None
+
+            # Spawn a SINGLE subprocess for ALL selected planes (more efficient extraction)
+            worker_args = {
+                "input_path": input_path,
+                "output_dir": s2p_path,
+                "planes": sorted(list(selected_planes)), # Pass list of planes
+                "roi": roi,
+                "num_timepoints": self.s2p.target_timepoints,
+                "ops": self.s2p.to_dict(),
+                "s2p_settings": {
+                    "keep_raw": self.s2p.keep_raw,
+                    "keep_reg": self.s2p.keep_reg,
+                    "force_reg": self.s2p.force_reg,
+                    "force_detect": self.s2p.force_detect,
+                    "dff_window_size": self.s2p.dff_window_size,
+                    "dff_percentile": self.s2p.dff_percentile,
+                    "dff_smooth_window": self.s2p.dff_smooth_window,
+                },
+            }
+
+            description = f"Suite2p: {len(selected_planes)} plane(s)"
+            if roi:
+                description += f" ROI {roi}"
+
+            pid = pm.spawn(
+                task_type="suite2p",
+                args=worker_args,
+                description=description,
+                output_path=s2p_path,
+            )
+
+            if pid:
+                self.logger.info(f"Started background process {pid} for {description}")
+            else:
+                self.logger.error(f"Failed to start background process for {description}")
+        else:
+            # Use daemon threads (original behavior)
+            # Build list of all (arr_idx, z_plane) pairs to process
+            jobs = []
+            for i, arr in enumerate(self.image_widget.data):
+                for plane in sorted(selected_planes):
+                    jobs.append((i, plane - 1))  # Convert to 0-indexed
+
+            # Check if parallel processing is enabled
+            use_parallel = getattr(self, "_parallel_processing", False)
+            max_jobs = getattr(self, "_max_parallel_jobs", 2)
+
+            if use_parallel and len(jobs) > 1:
+                # Parallel processing with limited concurrency
+                from concurrent.futures import ThreadPoolExecutor
+
+                def run_parallel():
+                    self.logger.info(f"Starting parallel processing with max {max_jobs} concurrent jobs...")
+                    with ThreadPoolExecutor(max_workers=max_jobs) as executor:
+                        futures = {}
+                        for job_idx, (arr_idx, z_plane) in enumerate(jobs):
+                            future = executor.submit(run_plane_from_data, self, arr_idx, z_plane)
+                            futures[future] = (z_plane, job_idx)
+
+                        for future in futures:
+                            z_plane, job_idx = futures[future]
+                            try:
+                                future.result()
+                                self.logger.info(f"Plane {z_plane + 1} completed ({job_idx + 1}/{len(jobs)})")
+                            except Exception as e:
+                                self.logger.error(f"Error processing plane {z_plane + 1}: {e}")
+                    self.logger.info("Suite2p parallel processing complete.")
+
+                threading.Thread(target=run_parallel, daemon=True).start()
+            else:
+                # Sequential processing in a single background thread
+                def run_all_planes_sequential():
                     for job_idx, (arr_idx, z_plane) in enumerate(jobs):
-                        future = executor.submit(run_plane_from_data, self, arr_idx, z_plane)
-                        futures[future] = (z_plane, job_idx)
-
-                    for future in futures:
-                        z_plane, job_idx = futures[future]
+                        self.logger.info(f"Processing plane {z_plane + 1} ({job_idx + 1}/{len(jobs)})...")
                         try:
-                            future.result()
-                            self.logger.info(f"Plane {z_plane + 1} completed ({job_idx + 1}/{len(jobs)})")
+                            run_plane_from_data(self, arr_idx, z_plane)
                         except Exception as e:
                             self.logger.error(f"Error processing plane {z_plane + 1}: {e}")
-                self.logger.info("Suite2p parallel processing complete.")
+                    self.logger.info("Suite2p processing complete.")
 
-            threading.Thread(target=run_parallel, daemon=True).start()
-        else:
-            # Sequential processing in a single background thread
-            def run_all_planes_sequential():
-                for job_idx, (arr_idx, z_plane) in enumerate(jobs):
-                    self.logger.info(f"Processing plane {z_plane + 1} ({job_idx + 1}/{len(jobs)})...")
-                    try:
-                        run_plane_from_data(self, arr_idx, z_plane)
-                    except Exception as e:
-                        self.logger.error(f"Error processing plane {z_plane + 1}: {e}")
-                self.logger.info("Suite2p processing complete.")
-
-            threading.Thread(target=run_all_planes_sequential, daemon=True).start()
+                threading.Thread(target=run_all_planes_sequential, daemon=True).start()
 
 def run_plane_from_data(self, arr_idx, z_plane=None):
     if not HAS_LSP:
@@ -1172,23 +1244,28 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     Lx = arr.shape[-1]
     Ly = arr.shape[-2]
 
+    # Use standard metadata accessors to ensure we get correct values from any alias
+    from mbo_utilities.metadata import get_param, get_voxel_size
+    vs = get_voxel_size(lazy_mdata)
+
     # extract only scalar metadata needed for suite2p - do NOT pass shape arrays
     # that could confuse the pipeline when processing 4D data
     md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "num_timepoints": self.s2p.target_frames,
-        "num_frames": self.s2p.target_frames,  # legacy alias
-        "nframes": self.s2p.target_frames,  # suite2p alias
-        "n_frames": self.s2p.target_frames,
+        "num_timepoints": self.s2p.target_timepoints,
+        "num_frames": self.s2p.target_timepoints,  # legacy alias
+        "nframes": self.s2p.target_timepoints,  # suite2p alias
+        "n_frames": self.s2p.target_timepoints,
         "original_file": str(self.fpath),
         "roi_index": arr_idx,
         "z_index": current_z,
         "plane": plane,
         "Ly": Ly,
         "Lx": Lx,
-        "fs": lazy_mdata.get("frame_rate", 15.0),
-        "dx": lazy_mdata.get("pixel_size_xy", 1.0),
-        "dz": lazy_mdata.get("z_step", 1.0),
+        "fs": get_param(lazy_mdata, "fs", 15.0),
+        "dx": vs.dx,
+        "dy": vs.dy,
+        "dz": vs.dz,
         "ops_path": str(ops_path),
         "save_path": str(plane_dir),
         "raw_file": str((plane_dir / "data_raw.bin").resolve()),
@@ -1205,10 +1282,10 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     # set the correct 3D shape for the output binary (T, Ly, Lx)
     # this is needed by write_ops to create ops.npy
     # CRITICAL: override any 4D shape from the source array with the correct 3D shape
-    defaults['shape'] = (self.s2p.target_frames, Ly, Lx)
-    defaults['num_timepoints'] = self.s2p.target_frames
-    defaults['num_frames'] = self.s2p.target_frames  # legacy alias
-    defaults['nframes'] = self.s2p.target_frames  # suite2p alias
+    defaults['shape'] = (self.s2p.target_timepoints, Ly, Lx)
+    defaults['num_timepoints'] = self.s2p.target_timepoints
+    defaults['num_frames'] = self.s2p.target_timepoints  # legacy alias
+    defaults['nframes'] = self.s2p.target_timepoints  # suite2p alias
 
     # also clean lazy_mdata to prevent shape contamination from arr.metadata
     lazy_mdata.pop('shape', None)
@@ -1246,7 +1323,7 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
         output_name="data_raw.bin",
         roi=roi,
         metadata=defaults,
-        num_frames=self.s2p.target_frames,
+        num_frames=self.s2p.target_timepoints,
     )
 
     # Use run_plane instead of run_plane_bin - it handles initialization properly

@@ -14,39 +14,48 @@ from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from mbo_utilities.gui.widgets.pipelines._base import PipelineWidget
 from mbo_utilities.gui._availability import HAS_SUITE2P
-from mbo_utilities.gui.diagnostics_widget import DiagnosticsWidget
-from mbo_utilities.gui.grid_search_viewer import GridSearchViewer
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 if TYPE_CHECKING:
     from mbo_utilities.gui.imgui import PreviewDataWidget
 
-# Apply PySide6 compatibility fix for suite2p GUI BEFORE any suite2p imports
-# suite2p's RangeSlider uses self.NoTicks which doesn't exist in PySide6
-try:
-    from PySide6.QtWidgets import QSlider
-    if not hasattr(QSlider, 'NoTicks'):
-        QSlider.NoTicks = QSlider.TickPosition.NoTicks
-except ImportError:
-    QSlider = None
-    pass  # PySide6 not available
 
-# check if lbm_suite2p_python is available
-try:
-    from lbm_suite2p_python import load_planar_results
-    HAS_LSP = True
-except ImportError:
-    HAS_LSP = False
-    run_plane = None
-    load_planar_results = None
+# lazy availability check cache
+_HAS_LSP: bool | None = None
+
+
+def _check_lsp_available() -> bool:
+    """check if lbm_suite2p_python is available (lazy, cached)."""
+    global _HAS_LSP
+    if _HAS_LSP is None:
+        try:
+            import lbm_suite2p_python
+            _HAS_LSP = True
+        except ImportError:
+            _HAS_LSP = False
+    return _HAS_LSP
+
+
+def _patch_pyside6_slider():
+    """apply PySide6 compatibility fix for suite2p GUI (call before opening GUI)."""
+    try:
+        from PySide6.QtWidgets import QSlider
+        if not hasattr(QSlider, 'NoTicks'):
+            QSlider.NoTicks = QSlider.TickPosition.NoTicks
+    except ImportError:
+        pass
 
 
 class Suite2pPipelineWidget(PipelineWidget):
     """suite2p processing and results widget."""
 
     name = "Suite2p"
-    is_available = HAS_SUITE2P and HAS_LSP
     install_command = "uv pip install mbo_utilities[all]"
+
+    @property
+    def is_available(self) -> bool:
+        """check availability lazily to avoid slow imports at module load."""
+        return HAS_SUITE2P and _check_lsp_available()
 
     def __init__(self, parent: "PreviewDataWidget"):
         super().__init__(parent)
@@ -68,14 +77,14 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._savepath_flash_start = None
         self._show_savepath_popup = False
 
-        # diagnostics popup state
-        self._diagnostics_widget = DiagnosticsWidget()
+        # diagnostics popup state (lazy init)
+        self._diagnostics_widget = None
         self._show_diagnostics_popup = False
         self._diagnostics_popup_open = False
         self._file_dialog = None
 
-        # grid search viewer state
-        self._grid_search_widget = GridSearchViewer()
+        # grid search viewer state (lazy init)
+        self._grid_search_widget = None
         self._show_grid_search_popup = False
         self._grid_search_popup_open = False
         self._grid_search_dialog = None
@@ -89,26 +98,36 @@ class Suite2pPipelineWidget(PipelineWidget):
 
         # gui choice: 0 = suite2p, 1 = cellpose
         self._gui_choice = 0
-        self._suite2p_available = self._check_suite2p_gui()
-        self._cellpose_available = self._check_cellpose_gui()
 
-    @staticmethod
-    def _check_suite2p_gui() -> bool:
+    def _get_diagnostics_widget(self):
+        """get diagnostics widget (lazy init)."""
+        if self._diagnostics_widget is None:
+            from mbo_utilities.gui.diagnostics_widget import DiagnosticsWidget
+            self._diagnostics_widget = DiagnosticsWidget()
+        return self._diagnostics_widget
+
+    def _get_grid_search_widget(self):
+        """get grid search widget (lazy init)."""
+        if self._grid_search_widget is None:
+            from mbo_utilities.gui.grid_search_viewer import GridSearchViewer
+            self._grid_search_widget = GridSearchViewer()
+        return self._grid_search_widget
+
+    def _check_suite2p_gui(self) -> bool:
         """check if suite2p GUI is available (requires rastermap)."""
-        try:
-            from suite2p.gui.gui2p import MainWindow
-            return True
-        except ImportError:
-            return False
+        # always re-check using find_spec (fast, no actual import)
+        import importlib.util
+        # suite2p GUI requires rastermap
+        return (
+            importlib.util.find_spec("suite2p.gui") is not None
+            and importlib.util.find_spec("rastermap") is not None
+        )
 
-    @staticmethod
-    def _check_cellpose_gui() -> bool:
+    def _check_cellpose_gui(self) -> bool:
         """check if cellpose GUI is available."""
-        try:
-            from cellpose import gui
-            return True
-        except ImportError:
-            return False
+        # always re-check using find_spec (fast, no actual import)
+        import importlib.util
+        return importlib.util.find_spec("cellpose.gui") is not None
 
     def draw_config(self) -> None:
         """draw suite2p configuration ui."""
@@ -181,11 +200,12 @@ class Suite2pPipelineWidget(PipelineWidget):
         imgui.same_line()
 
         # suite2p option
-        if not self._suite2p_available:
+        suite2p_available = self._check_suite2p_gui()
+        if not suite2p_available:
             imgui.begin_disabled()
         if imgui.radio_button("suite2p", self._gui_choice == 0):
             self._gui_choice = 0
-        if not self._suite2p_available:
+        if not suite2p_available:
             imgui.end_disabled()
             if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
                 imgui.set_tooltip("suite2p GUI requires rastermap.\nInstall with: uv pip install rastermap")
@@ -193,11 +213,12 @@ class Suite2pPipelineWidget(PipelineWidget):
         imgui.same_line()
 
         # cellpose option
-        if not self._cellpose_available:
+        cellpose_available = self._check_cellpose_gui()
+        if not cellpose_available:
             imgui.begin_disabled()
         if imgui.radio_button("cellpose", self._gui_choice == 1):
             self._gui_choice = 1
-        if not self._cellpose_available:
+        if not cellpose_available:
             imgui.end_disabled()
             if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
                 imgui.set_tooltip("cellpose GUI not available.\nInstall with: uv pip install cellpose[gui]")
@@ -278,12 +299,13 @@ class Suite2pPipelineWidget(PipelineWidget):
 
         # Update diagnostics widget selection
         # Map the global cell index to visible index if showing only cells
-        visible = self._diagnostics_widget.visible_indices
+        diag = self._get_diagnostics_widget()
+        visible = diag.visible_indices
         if len(visible) > 0:
             # Find where cell_idx is in visible indices
             matches = np.where(visible == cell_idx)[0]
             if len(matches) > 0:
-                self._diagnostics_widget.selected_roi = int(matches[0])
+                diag.selected_roi = int(matches[0])
 
     def _draw_diagnostics_popup(self):
         """Draw the diagnostics popup window if open."""
@@ -298,7 +320,7 @@ class Suite2pPipelineWidget(PipelineWidget):
                     try:
                         # Load results from the directory containing stat.npy
                         plane_dir = stat_path.parent
-                        self._diagnostics_widget.load_results(plane_dir)
+                        self._get_diagnostics_widget().load_results(plane_dir)
                         self._show_diagnostics_popup = True
 
                         # Open external GUI based on user choice (optional)
@@ -334,7 +356,7 @@ class Suite2pPipelineWidget(PipelineWidget):
             else:
                 # Draw the diagnostics content
                 try:
-                    self._diagnostics_widget.draw()
+                    self._get_diagnostics_widget().draw()
                 except Exception as e:
                     imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), f"Error: {e}")
 
@@ -356,12 +378,12 @@ class Suite2pPipelineWidget(PipelineWidget):
             Path to stat.npy file
         """
         if self._gui_choice == 0:
-            if self._suite2p_available:
+            if self._check_suite2p_gui():
                 self._open_suite2p_gui(statfile)
             else:
                 print("suite2p GUI not available (requires rastermap). Install with: uv pip install rastermap")
         elif self._gui_choice == 1:
-            if self._cellpose_available:
+            if self._check_cellpose_gui():
                 self._open_cellpose_gui(statfile)
             else:
                 print("cellpose GUI not available. Install with: uv pip install cellpose[gui]")
@@ -369,6 +391,8 @@ class Suite2pPipelineWidget(PipelineWidget):
     def _open_suite2p_gui(self, statfile: Path):
         """Open suite2p GUI with the given stat.npy file."""
         try:
+            # apply PySide6 compatibility fix before importing suite2p GUI
+            _patch_pyside6_slider()
             from suite2p.gui.gui2p import MainWindow as Suite2pMainWindow
             from PySide6.QtWidgets import QApplication
             from PySide6.QtCore import QRect
@@ -412,7 +436,11 @@ class Suite2pPipelineWidget(PipelineWidget):
         try:
             import tempfile
             import tifffile
-            from mbo_utilities.analysis import stat_to_masks
+            # try lbm_suite2p_python first (primary source), fallback to mbo_utilities.analysis
+            try:
+                from lbm_suite2p_python import stat_to_masks
+            except ImportError:
+                from mbo_utilities.analysis import stat_to_masks
             from cellpose.gui.gui import MainW
             from cellpose.gui import io as cellpose_io
             from PySide6.QtWidgets import QApplication
@@ -548,7 +576,7 @@ class Suite2pPipelineWidget(PipelineWidget):
             if result:
                 try:
                     set_last_dir("grid_search", result)
-                    self._grid_search_widget.load_results(Path(result))
+                    self._get_grid_search_widget().load_results(Path(result))
                     self._show_grid_search_popup = True
                 except Exception as e:
                     print(f"Error loading grid search results: {e}")
@@ -577,7 +605,7 @@ class Suite2pPipelineWidget(PipelineWidget):
                 imgui.close_current_popup()
             else:
                 try:
-                    self._grid_search_widget.draw()
+                    self._get_grid_search_widget().draw()
                 except Exception as e:
                     imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), f"Error: {e}")
 
