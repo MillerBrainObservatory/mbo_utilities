@@ -88,6 +88,37 @@ def get_default_ini_path(name: str = "imgui_settings") -> str:
     return str(settings_dir / f"{name}.ini")
 
 
+def _install_qt_icon_hook():
+    """Install a hook to set Qt icon as soon as QApplication is created."""
+    try:
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtGui import QIcon
+        from mbo_utilities.file_io import get_package_assets_path
+        from mbo_utilities import get_mbo_dirs
+
+        # Store original __init__
+        _original_init = QApplication.__init__
+
+        def _hooked_init(self, *args, **kwargs):
+            # Call original init
+            _original_init(self, *args, **kwargs)
+
+            # Set icon immediately after QApplication is created
+            try:
+                icon_path = get_package_assets_path() / "app_settings" / "icon.png"
+                if not icon_path.exists():
+                    icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
+                if icon_path.exists():
+                    self.setWindowIcon(QIcon(str(icon_path)))
+            except Exception:
+                pass
+
+        # Monkey-patch QApplication.__init__
+        QApplication.__init__ = _hooked_init
+    except Exception:
+        pass
+
+
 def _configure_qt_backend():
     """set up qt backend for rendercanvas if pyside6 is available.
 
@@ -101,6 +132,55 @@ def _configure_qt_backend():
         from PySide6.QtWidgets import QSlider
         if not hasattr(QSlider, "NoTicks"):
             QSlider.NoTicks = QSlider.TickPosition.NoTicks
+
+        # Install hook to set icon when QApplication is created
+        _install_qt_icon_hook()
+
+        # Also monkey-patch rendercanvas Qt window creation
+        try:
+            from rendercanvas.qt import QWgpuCanvas
+            from PySide6.QtGui import QIcon
+            from mbo_utilities.file_io import get_package_assets_path
+            from mbo_utilities import get_mbo_dirs
+
+            # Store original __init__
+            _original_canvas_init = QWgpuCanvas.__init__
+
+            def _hooked_canvas_init(self, *args, **kwargs):
+                # Call original init
+                _original_canvas_init(self, *args, **kwargs)
+
+                # Set icon on this window
+                try:
+                    icon_path = get_package_assets_path() / "app_settings" / "icon.png"
+                    if not icon_path.exists():
+                        icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
+                    if icon_path.exists():
+                        self.setWindowIcon(QIcon(str(icon_path)))
+                except Exception:
+                    pass
+
+            # Monkey-patch QWgpuCanvas.__init__
+            QWgpuCanvas.__init__ = _hooked_canvas_init
+        except Exception:
+            pass
+
+        # Also set icon immediately if QApplication already exists
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtGui import QIcon
+            from mbo_utilities.file_io import get_package_assets_path
+            from mbo_utilities import get_mbo_dirs
+
+            app = QApplication.instance()
+            if app is not None:
+                icon_path = get_package_assets_path() / "app_settings" / "icon.png"
+                if not icon_path.exists():
+                    icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
+                if icon_path.exists():
+                    app.setWindowIcon(QIcon(str(icon_path)))
+        except Exception:
+            pass
 
 
 def _configure_wgpu_backend():
@@ -129,12 +209,65 @@ def set_qt_icon():
         from mbo_utilities import get_mbo_dirs
 
         app = QApplication.instance()
-        if app is not None:
+        if app is not None:  # Only set if QApplication already exists
             icon_path = get_package_assets_path() / "app_settings" / "icon.png"
             if not icon_path.exists():
                 icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
             if icon_path.exists():
                 app.setWindowIcon(QIcon(str(icon_path)))
+    except Exception:
+        pass
+
+
+def set_window_icon():
+    """set window icon for both Qt and GLFW backends."""
+    # Try Qt first - set on QApplication
+    set_qt_icon()
+
+    # Also set on all Qt windows
+    try:
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtGui import QIcon
+        from mbo_utilities.file_io import get_package_assets_path
+        from mbo_utilities import get_mbo_dirs
+
+        app = QApplication.instance()
+        if app is not None:
+            icon_path = get_package_assets_path() / "app_settings" / "icon.png"
+            if not icon_path.exists():
+                icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
+
+            if icon_path.exists():
+                icon = QIcon(str(icon_path))
+                # Set on all top-level windows
+                for window in app.topLevelWidgets():
+                    window.setWindowIcon(icon)
+    except Exception:
+        pass
+
+    # Try GLFW
+    try:
+        import glfw
+        from PIL import Image
+        from mbo_utilities.file_io import get_package_assets_path
+        from mbo_utilities import get_mbo_dirs
+
+        # Get the icon path
+        icon_path = get_package_assets_path() / "app_settings" / "icon.png"
+        if not icon_path.exists():
+            icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
+
+        if icon_path.exists():
+            # Load icon image
+            img = Image.open(icon_path)
+            img = img.convert("RGBA")
+
+            # Get all GLFW windows and set icon
+            # Note: This requires the window to be created first
+            # We'll set it on the current context window if available
+            window = glfw.get_current_context()
+            if window:
+                glfw.set_window_icon(window, 1, img)
     except Exception:
         pass
 
