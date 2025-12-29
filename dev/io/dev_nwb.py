@@ -10,7 +10,7 @@ from neuroconv.datainterfaces.ophys.tiff.tiffdatainterface import (
     GeneralTiffImagingInterface,
 )
 from neuroconv.tools import configure_and_write_nwbfile
-from mbo_utilities.array_types import NWBArray
+from mbo_utilities.arrays import NWBArray
 
 
 def reader():

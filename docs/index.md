@@ -11,7 +11,7 @@ maxdepth: 1
 User Guide <user_guide>
 Command Line Interface <usage/cli>
 Graphical User Interface <usage/gui_guide>
-Array Types <array_types>
+Supported File Formats <file_formats>
 DF/F Analysis <dff>
 API <api/index>
 development

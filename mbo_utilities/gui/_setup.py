@@ -93,14 +93,16 @@ def _configure_qt_backend():
 
     must happen before importing fastplotlib to avoid glfw selection.
     """
-    if importlib.util.find_spec("PySide6") is not None:
-        os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
-        import PySide6  # noqa: F401
+    if importlib.util.find_spec("PySide6") is None:
+        return
 
-        # fix suite2p pyside6 compatibility
-        from PySide6.QtWidgets import QSlider
-        if not hasattr(QSlider, "NoTicks"):
-            QSlider.NoTicks = QSlider.TickPosition.NoTicks
+    os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
+    import PySide6  # noqa: F401
+
+    # fix suite2p pyside6 compatibility
+    from PySide6.QtWidgets import QSlider
+    if not hasattr(QSlider, "NoTicks"):
+        QSlider.NoTicks = QSlider.TickPosition.NoTicks
 
 
 def _configure_wgpu_backend():
@@ -117,25 +119,6 @@ def _configure_wgpu_backend():
         else:
             set_instance_extras(backends=["Vulkan"])
     except ImportError:
-        pass
-
-
-def set_qt_icon():
-    """set the qt application window icon. call after qapplication is created."""
-    try:
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtGui import QIcon
-        from mbo_utilities.file_io import get_package_assets_path
-        from mbo_utilities import get_mbo_dirs
-
-        app = QApplication.instance()
-        if app is not None:
-            icon_path = get_package_assets_path() / "app_settings" / "icon.png"
-            if not icon_path.exists():
-                icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
-            if icon_path.exists():
-                app.setWindowIcon(QIcon(str(icon_path)))
-    except Exception:
         pass
 
 

@@ -487,8 +487,8 @@ def _get_file_writer(ext, overwrite):
 
 
 def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
-    # Import here to avoid circular import
-    from .array_types import BinArray
+    # import here to avoid circular import
+    from .arrays.bin import BinArray
 
     if metadata is None:
         metadata = {}

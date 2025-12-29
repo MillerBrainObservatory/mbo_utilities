@@ -17,6 +17,14 @@ import time
 from pathlib import Path
 from typing import Optional, Union
 
+# set windows appusermodelid immediately for taskbar icon grouping
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('mbo.utilities.gui.1.0')
+    except Exception:
+        pass
+
 import click
 
 
@@ -809,6 +817,17 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
     default=None,
     help="Number of timepoints to use for benchmarks (default: all).",
 )
+@click.option(
+    "--release",
+    is_flag=True,
+    help="Run release benchmark with markdown-formatted outputs.",
+)
+@click.option(
+    "--version-tag",
+    type=str,
+    default="",
+    help="Version tag for release benchmark markdown (e.g., 'v2.5.0').",
+)
 def benchmark(
     input_path,
     output_dir,
@@ -825,6 +844,8 @@ def benchmark(
     plot,
     zarr,
     num_timepoints,
+    release,
+    version_tag,
 ):
     """
     Run performance benchmarks on MboRawArray.
@@ -863,6 +884,77 @@ def benchmark(
     if label is None:
         import platform
         label = platform.node() or "benchmark"
+
+    # release benchmark mode
+    if release:
+        from mbo_utilities.benchmarks import (
+            benchmark_release,
+            format_release_markdown,
+            print_release_summary,
+            plot_release_benchmark,
+        )
+
+        click.echo(f"Input: {input_path}")
+        click.echo("Running release benchmark...")
+        click.echo()
+
+        result = benchmark_release(
+            input_path,
+            label=label,
+            repeats=repeats if repeats else 5,
+        )
+
+        # print summary to console
+        print_release_summary(result)
+
+        # print markdown for copy-paste
+        markdown = format_release_markdown(result, version=version_tag)
+        click.echo("\n" + "=" * 60)
+        click.echo("MARKDOWN (copy-paste for release notes):")
+        click.echo("=" * 60)
+        click.echo(markdown)
+
+        # save results and/or plot
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+        if output_dir:
+            results_dir = Path(output_dir) / "results"
+        else:
+            results_dir = Path(input_path).parent / "benchmark_results"
+
+        if save:
+            results_dir.mkdir(parents=True, exist_ok=True)
+
+            # save json
+            json_path = results_dir / f"release_benchmark_{label}_{timestamp}.json"
+            result.save(json_path)
+            click.secho(f"\nResults saved to: {json_path}", fg="green")
+
+            # save markdown
+            md_path = results_dir / f"release_benchmark_{label}_{timestamp}.md"
+            md_path.write_text(markdown)
+            click.secho(f"Markdown saved to: {md_path}", fg="green")
+
+        if plot:
+            results_dir.mkdir(parents=True, exist_ok=True)
+            plot_path = results_dir / f"release_benchmark_{label}_{timestamp}.png"
+            plot_release_benchmark(
+                result,
+                output_path=plot_path,
+                show=False,
+                title=f"{version_tag} Benchmarks" if version_tag else "MboRawArray Benchmarks",
+            )
+            click.secho(f"Plot saved to: {plot_path}", fg="green")
+        elif not save:
+            # show plot interactively if not saving
+            plot_release_benchmark(
+                result,
+                show=True,
+                title=f"{version_tag} Benchmarks" if version_tag else "MboRawArray Benchmarks",
+            )
+
+        return
 
     # zarr-only benchmark mode
     if zarr:
@@ -1011,6 +1103,84 @@ def benchmark(
         # plot without saving json
         from mbo_utilities.benchmarks import plot_benchmark_results
         plot_benchmark_results(result, show=True)
+
+
+@main.command("processes")
+@click.option(
+    "--kill-all",
+    is_flag=True,
+    help="Kill all tracked background processes.",
+)
+@click.option(
+    "--kill",
+    type=int,
+    default=None,
+    help="Kill a specific process by PID.",
+)
+@click.option(
+    "--cleanup",
+    is_flag=True,
+    help="Remove entries for finished processes.",
+)
+def processes(kill_all, kill, cleanup):
+    """
+    Manage background processes (suite2p, save operations, etc.).
+
+    \b
+    Examples:
+      mbo processes                  # List all tracked processes
+      mbo processes --cleanup        # Remove finished process entries
+      mbo processes --kill 12345     # Kill specific process
+      mbo processes --kill-all       # Kill all background processes
+    """
+    from mbo_utilities.gui.process_manager import get_process_manager
+
+    pm = get_process_manager()
+
+    if cleanup:
+        count = pm.cleanup_finished()
+        click.echo(f"Cleaned up {count} finished processes.")
+        return
+
+    if kill_all:
+        running = pm.get_running()
+        if not running:
+            click.echo("No running processes to kill.")
+            return
+        count = pm.kill_all()
+        click.secho(f"Killed {count} processes.", fg="yellow")
+        return
+
+    if kill is not None:
+        if pm.kill(kill):
+            click.secho(f"Killed process {kill}.", fg="yellow")
+        else:
+            click.secho(f"Process {kill} not found or could not be killed.", fg="red")
+        return
+
+    # list all processes
+    all_procs = pm.get_all()
+    if not all_procs:
+        click.echo("No tracked background processes.")
+        return
+
+    click.echo(f"\nTracked processes ({len(all_procs)}):")
+    click.echo("-" * 60)
+
+    for p in all_procs:
+        alive = p.is_alive()
+        status = click.style("RUNNING", fg="green") if alive else click.style("FINISHED", fg="bright_black")
+        click.echo(f"  PID {p.pid:>6}  {status}  {p.description}")
+        click.echo(f"           Started: {p.elapsed_str()}")
+        if p.output_path:
+            click.echo(f"           Output:  {p.output_path}")
+
+    click.echo("-" * 60)
+    running = [p for p in all_procs if p.is_alive()]
+    click.echo(f"Running: {len(running)}, Finished: {len(all_procs) - len(running)}")
+
+    if len(all_procs) > len(running):
+        click.echo("\nTip: Run 'mbo processes --cleanup' to remove finished entries.")
 
 
 if __name__ == "__main__":

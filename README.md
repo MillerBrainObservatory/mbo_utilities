@@ -12,15 +12,14 @@
 <a href="#installation"><b>Installation</b></a> ·
 <a href="https://millerbrainobservatory.github.io/mbo_utilities/"><b>Documentation</b></a> ·
 <a href="https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html"><b>User Guide</b></a> ·
-<a href="https://millerbrainobservatory.github.io/mbo_utilities/array_types.html"><b>Array Types</b></a> ·
+<a href="https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html"><b>Supported Formats</b></a> ·
 <a href="https://github.com/MillerBrainObservatory/mbo_utilities/issues"><b>Issues</b></a>
 </p>
 
 Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO). Fast, lazy I/O with `imread`/`imwrite` for multiple array types (ScanImage and generic TIFFs, Suite2p binaries, Zarr and HDF5), an interactive GUI for data visualization, and processing pipelines for calcium imaging data.
 
 <div align="center">
-  <img src="docs/_images/GUI_Slide1.png" width="45%" />
-  <img src="docs/_images/GUI_Slide2.png" width="45%" />
+  <img src="docs/_images/gui/2_mbo_main_full.png" width="80%" />
 </div>
 
 > **Note:**

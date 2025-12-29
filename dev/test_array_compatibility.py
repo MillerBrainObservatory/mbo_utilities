@@ -45,7 +45,7 @@ class TestResult:
 
 def test_conversion(source_arr, source_type: str, target_ext: str, work_dir: Path) -> TestResult:
     """Test writing and re-reading an array."""
-    from mbo_utilities.lazy_array import imread, imwrite
+    from mbo_utilities import imread, imwrite
 
     result = TestResult(
         source_type=source_type,
@@ -124,8 +124,8 @@ def test_conversion(source_arr, source_type: str, target_ext: str, work_dir: Pat
 
 def create_test_arrays(source_arr, work_dir: Path) -> dict:
     """Create test arrays of each type - minimal data, first/last z-plane only."""
-    from mbo_utilities.lazy_array import imread
-    from mbo_utilities.array_types import NumpyArray, BinArray
+    from mbo_utilities import imread
+    from mbo_utilities.arrays import NumpyArray, BinArray
 
     arrays = {}
 
@@ -345,7 +345,7 @@ def save_matrix_image(results: list[TestResult], output_dir: Path):
 
 
 def main():
-    from mbo_utilities.lazy_array import imread
+    from mbo_utilities import imread
 
     print("=" * 60)
     print("FAST ARRAY COMPATIBILITY TEST")
