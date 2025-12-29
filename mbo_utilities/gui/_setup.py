@@ -12,31 +12,6 @@ from pathlib import Path
 
 # track initialization state
 _initialized = False
-_icon_path = None  # cached icon path
-_qt_icon_path = None  # for qt icon setup
-
-
-def _get_icon_path() -> Path | None:
-    """get the application icon path, caching for reuse."""
-    global _icon_path
-    if _icon_path is not None:
-        return _icon_path if _icon_path.exists() else None
-
-    try:
-        from mbo_utilities.file_io import get_package_assets_path
-        from mbo_utilities import get_mbo_dirs
-
-        # try package assets first, then user assets
-        icon_path = get_package_assets_path() / "app_settings" / "icon.png"
-        if not icon_path.exists():
-            icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
-
-        if icon_path.exists():
-            _icon_path = icon_path
-            return _icon_path
-    except Exception:
-        pass
-    return None
 
 
 def _copy_assets():
@@ -123,15 +98,11 @@ def _configure_qt_backend():
 
     os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
     import PySide6  # noqa: F401
-    from PySide6.QtWidgets import QSlider
 
     # fix suite2p pyside6 compatibility
+    from PySide6.QtWidgets import QSlider
     if not hasattr(QSlider, "NoTicks"):
         QSlider.NoTicks = QSlider.TickPosition.NoTicks
-
-    # store icon path for use in set_qt_icon
-    global _qt_icon_path
-    _qt_icon_path = _get_icon_path()
 
 
 def _configure_wgpu_backend():
@@ -148,27 +119,6 @@ def _configure_wgpu_backend():
         else:
             set_instance_extras(backends=["Vulkan"])
     except ImportError:
-        pass
-
-
-def set_qt_icon():
-    """set the qt application window icon. call after qapplication is created."""
-    try:
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtGui import QIcon
-
-        icon_path = _get_icon_path()
-        if icon_path is None:
-            return
-
-        app = QApplication.instance()
-        if app is not None:
-            icon = QIcon(str(icon_path))
-            app.setWindowIcon(icon)
-            # also set on all existing windows
-            for window in app.topLevelWidgets():
-                window.setWindowIcon(icon)
-    except Exception:
         pass
 
 

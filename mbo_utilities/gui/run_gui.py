@@ -12,11 +12,52 @@ from typing import Any, Optional, Union
 
 import click
 
-# set windows appusermodelid immediately for taskbar icon grouping
-if sys.platform == 'win32':
+# Set AppUserModelID immediately for Windows
+try:
+    import ctypes
+    import sys
+    if sys.platform == 'win32':
+        myappid = 'mbo.utilities.gui.1.0'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+except Exception:
+    pass
+
+
+def _set_qt_icon():
+    """Set the Qt application window icon.
+
+    Must be called AFTER the canvas/window is created and shown.
+    Sets the icon on QApplication and all top-level windows including
+    native window handles for proper Windows taskbar display.
+    """
     try:
-        import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('mbo.utilities.gui.1.0')
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtGui import QIcon
+        from mbo_utilities.file_io import get_package_assets_path
+        from mbo_utilities import get_mbo_dirs
+
+        app = QApplication.instance()
+        if app is None:
+            return
+
+        # try package assets first, then user assets
+        icon_path = get_package_assets_path() / "app_settings" / "icon.png"
+        if not icon_path.exists():
+            icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
+
+        if not icon_path.exists():
+            return
+
+        icon = QIcon(str(icon_path))
+        app.setWindowIcon(icon)
+
+        # set on all top-level windows including native handles
+        for window in app.topLevelWidgets():
+            window.setWindowIcon(icon)
+            handle = window.windowHandle()
+            if handle:
+                handle.setIcon(icon)
+            app.processEvents()
     except Exception:
         pass
 
@@ -358,19 +399,21 @@ def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
     import copy
     import numpy as np
+    import fastplotlib as fpl
     from mbo_utilities.arrays import iter_rois
 
-    import fastplotlib as fpl
-
-    # use our custom canvas that sets icon before show()
     try:
-        from mbo_utilities.gui._canvas import MboRenderCanvas
-        canvas = MboRenderCanvas(present_method="bitmap")
+        from rendercanvas.pyside6 import RenderCanvas
+    except (ImportError, RuntimeError): # RuntimeError if qt is already selected
+        RenderCanvas = None
+
+    if RenderCanvas is not None:
         figure_kwargs = {
-            "canvas": canvas,
+            "canvas": "pyside6",
+            "canvas_kwargs": {"present_method": "bitmap"},
             "size": (800, 800)
         }
-    except ImportError:
+    else:
         figure_kwargs = {"size": (800, 800)}
 
     # Determine slider dimension names from array's dims property if available
@@ -434,6 +477,9 @@ def _create_image_widget(data_array, widget: bool = True):
         )
 
     iw.show()
+
+    # set qt window icon after canvas is created
+    _set_qt_icon()
 
     # Add PreviewDataWidget if requested
     if widget:
