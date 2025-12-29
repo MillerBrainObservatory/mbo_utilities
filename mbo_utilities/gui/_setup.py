@@ -154,6 +154,7 @@ def _configure_qt_backend():
         from rendercanvas.qt import QWgpuCanvas
 
         _original_canvas_init = QWgpuCanvas.__init__
+        _original_canvas_show = QWgpuCanvas.show
 
         def _hooked_canvas_init(self, *args, **kwargs):
             _original_canvas_init(self, *args, **kwargs)
@@ -162,7 +163,16 @@ def _configure_qt_backend():
             except Exception:
                 pass
 
+        def _hooked_canvas_show(self):
+            # set icon right before show to ensure it's set
+            try:
+                self.setWindowIcon(icon)
+            except Exception:
+                pass
+            return _original_canvas_show(self)
+
         QWgpuCanvas.__init__ = _hooked_canvas_init
+        QWgpuCanvas.show = _hooked_canvas_show
     except Exception:
         pass
 
