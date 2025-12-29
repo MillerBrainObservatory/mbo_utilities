@@ -435,10 +435,13 @@ def _create_image_widget(data_array, widget: bool = True):
             graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
 
+    # set qt window icon before showing
+    from mbo_utilities.gui._setup import set_qt_icon
+    set_qt_icon()
+
     iw.show()
 
-    # set qt window icon after canvas is created
-    from mbo_utilities.gui._setup import set_qt_icon
+    # set again after show in case window was realized
     set_qt_icon()
 
     # Add PreviewDataWidget if requested

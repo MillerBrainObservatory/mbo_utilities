@@ -13,6 +13,7 @@ from pathlib import Path
 # track initialization state
 _initialized = False
 _icon_path = None  # cached icon path
+_qt_icon_path = None  # for qt icon setup
 
 
 def _get_icon_path() -> Path | None:
@@ -116,77 +117,21 @@ def _configure_qt_backend():
     """set up qt backend for rendercanvas if pyside6 is available.
 
     must happen before importing fastplotlib to avoid glfw selection.
-    also installs hooks to set window icon on all qt windows.
     """
     if importlib.util.find_spec("PySide6") is None:
         return
 
     os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
     import PySide6  # noqa: F401
-    from PySide6.QtWidgets import QApplication, QSlider
-    from PySide6.QtGui import QIcon
+    from PySide6.QtWidgets import QSlider
 
     # fix suite2p pyside6 compatibility
     if not hasattr(QSlider, "NoTicks"):
         QSlider.NoTicks = QSlider.TickPosition.NoTicks
 
-    # get icon path once - but don't create QIcon yet (needs QApplication)
-    icon_path = _get_icon_path()
-    if icon_path is None:
-        return
-
-    # cache for lazy icon creation
-    _icon_cache = {}
-
-    def _get_icon():
-        """get or create QIcon (must be called after QApplication exists)."""
-        if "icon" not in _icon_cache:
-            _icon_cache["icon"] = QIcon(str(icon_path))
-        return _icon_cache["icon"]
-
-    # hook QApplication.__init__ to set icon immediately on creation
-    _original_app_init = QApplication.__init__
-
-    def _hooked_app_init(self, *args, **kwargs):
-        _original_app_init(self, *args, **kwargs)
-        try:
-            self.setWindowIcon(_get_icon())
-        except Exception:
-            pass
-
-    QApplication.__init__ = _hooked_app_init
-
-    # hook rendercanvas QWgpuCanvas to set icon on each window
-    try:
-        from rendercanvas.qt import QWgpuCanvas
-
-        _original_canvas_init = QWgpuCanvas.__init__
-        _original_canvas_show = QWgpuCanvas.show
-
-        def _hooked_canvas_init(self, *args, **kwargs):
-            _original_canvas_init(self, *args, **kwargs)
-            try:
-                self.setWindowIcon(_get_icon())
-            except Exception:
-                pass
-
-        def _hooked_canvas_show(self):
-            # set icon right before show to ensure it's set
-            try:
-                self.setWindowIcon(_get_icon())
-            except Exception:
-                pass
-            return _original_canvas_show(self)
-
-        QWgpuCanvas.__init__ = _hooked_canvas_init
-        QWgpuCanvas.show = _hooked_canvas_show
-    except Exception:
-        pass
-
-    # if QApplication already exists, set icon now
-    app = QApplication.instance()
-    if app is not None:
-        app.setWindowIcon(_get_icon())
+    # store icon path for use in set_qt_icon
+    global _qt_icon_path
+    _qt_icon_path = _get_icon_path()
 
 
 def _configure_wgpu_backend():
