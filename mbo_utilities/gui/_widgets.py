@@ -68,6 +68,80 @@ def set_tooltip(_tooltip, _show_mark=True):
         imgui.end_tooltip()
 
 
+def draw_checkbox_grid(
+    items: list[tuple[str, bool]],
+    id_prefix: str,
+    on_change: callable,
+    item_width: float | None = None,
+    min_columns: int = 1,
+    max_columns: int = 6,
+) -> None:
+    """
+    draw a grid of checkboxes that adapts column count to available width.
+
+    dynamically calculates how many columns fit based on:
+    1. available content width from imgui
+    2. item width (checkbox + label + padding)
+
+    columns are added until items no longer fit, maximizing space usage
+    while keeping the layout readable.
+
+    parameters
+    ----------
+    items : list[tuple[str, bool]]
+        list of (label, checked) tuples for each checkbox
+    id_prefix : str
+        unique prefix for imgui IDs (e.g., "saveas" -> "##saveas0")
+    on_change : callable
+        callback(index, new_value) called when a checkbox changes
+    item_width : float, optional
+        width per item in pixels. if None, calculated from longest label
+    min_columns : int
+        minimum columns to show (default 1)
+    max_columns : int
+        maximum columns to allow (default 6)
+
+    example
+    -------
+    >>> items = [(f"Plane {i+1}", i in selected) for i in range(num_planes)]
+    >>> def on_change(idx, checked):
+    ...     if checked:
+    ...         selected.add(idx)
+    ...     else:
+    ...         selected.discard(idx)
+    >>> draw_checkbox_grid(items, "planes", on_change)
+    """
+    if not items:
+        return
+
+    # calculate item width if not provided
+    if item_width is None:
+        # checkbox width (~20px) + spacing + text width + padding
+        checkbox_width = 20
+        padding = 16
+        longest_label = max(len(label) for label, _ in items)
+        char_width = imgui.get_font_size() * 0.5  # approximate char width
+        item_width = checkbox_width + (longest_label * char_width) + padding
+
+    # get available width and calculate column count
+    available_width = imgui.get_content_region_avail().x
+    num_columns = max(min_columns, min(max_columns, int(available_width / item_width)))
+
+    # draw table with calculated columns
+    if imgui.begin_table(f"##{id_prefix}_grid", num_columns, imgui.TableFlags_.none):
+        for i, (label, checked) in enumerate(items):
+            col = i % num_columns
+            if col == 0:
+                imgui.table_next_row()
+            imgui.table_next_column()
+
+            changed, new_checked = imgui.checkbox(f"{label}##{id_prefix}{i}", checked)
+            if changed:
+                on_change(i, new_checked)
+
+        imgui.end_table()
+
+
 def compact_header(label: str, default_open: bool = False) -> bool:
     """
     draw a compact collapsing header with reduced padding.
