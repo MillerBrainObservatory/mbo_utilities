@@ -130,12 +130,19 @@ def _configure_qt_backend():
     if not hasattr(QSlider, "NoTicks"):
         QSlider.NoTicks = QSlider.TickPosition.NoTicks
 
-    # get icon path once
+    # get icon path once - but don't create QIcon yet (needs QApplication)
     icon_path = _get_icon_path()
     if icon_path is None:
         return
 
-    icon = QIcon(str(icon_path))
+    # cache for lazy icon creation
+    _icon_cache = {}
+
+    def _get_icon():
+        """get or create QIcon (must be called after QApplication exists)."""
+        if "icon" not in _icon_cache:
+            _icon_cache["icon"] = QIcon(str(icon_path))
+        return _icon_cache["icon"]
 
     # hook QApplication.__init__ to set icon immediately on creation
     _original_app_init = QApplication.__init__
@@ -143,7 +150,7 @@ def _configure_qt_backend():
     def _hooked_app_init(self, *args, **kwargs):
         _original_app_init(self, *args, **kwargs)
         try:
-            self.setWindowIcon(icon)
+            self.setWindowIcon(_get_icon())
         except Exception:
             pass
 
@@ -159,14 +166,14 @@ def _configure_qt_backend():
         def _hooked_canvas_init(self, *args, **kwargs):
             _original_canvas_init(self, *args, **kwargs)
             try:
-                self.setWindowIcon(icon)
+                self.setWindowIcon(_get_icon())
             except Exception:
                 pass
 
         def _hooked_canvas_show(self):
             # set icon right before show to ensure it's set
             try:
-                self.setWindowIcon(icon)
+                self.setWindowIcon(_get_icon())
             except Exception:
                 pass
             return _original_canvas_show(self)
@@ -179,7 +186,7 @@ def _configure_qt_backend():
     # if QApplication already exists, set icon now
     app = QApplication.instance()
     if app is not None:
-        app.setWindowIcon(icon)
+        app.setWindowIcon(_get_icon())
 
 
 def _configure_wgpu_backend():
