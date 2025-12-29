@@ -1097,5 +1097,83 @@ def benchmark(
         plot_benchmark_results(result, show=True)
 
 
+@main.command("processes")
+@click.option(
+    "--kill-all",
+    is_flag=True,
+    help="Kill all tracked background processes.",
+)
+@click.option(
+    "--kill",
+    type=int,
+    default=None,
+    help="Kill a specific process by PID.",
+)
+@click.option(
+    "--cleanup",
+    is_flag=True,
+    help="Remove entries for finished processes.",
+)
+def processes(kill_all, kill, cleanup):
+    """
+    Manage background processes (suite2p, save operations, etc.).
+
+    \b
+    Examples:
+      mbo processes                  # List all tracked processes
+      mbo processes --cleanup        # Remove finished process entries
+      mbo processes --kill 12345     # Kill specific process
+      mbo processes --kill-all       # Kill all background processes
+    """
+    from mbo_utilities.gui.process_manager import get_process_manager
+
+    pm = get_process_manager()
+
+    if cleanup:
+        count = pm.cleanup_finished()
+        click.echo(f"Cleaned up {count} finished processes.")
+        return
+
+    if kill_all:
+        running = pm.get_running()
+        if not running:
+            click.echo("No running processes to kill.")
+            return
+        count = pm.kill_all()
+        click.secho(f"Killed {count} processes.", fg="yellow")
+        return
+
+    if kill is not None:
+        if pm.kill(kill):
+            click.secho(f"Killed process {kill}.", fg="yellow")
+        else:
+            click.secho(f"Process {kill} not found or could not be killed.", fg="red")
+        return
+
+    # list all processes
+    all_procs = pm.get_all()
+    if not all_procs:
+        click.echo("No tracked background processes.")
+        return
+
+    click.echo(f"\nTracked processes ({len(all_procs)}):")
+    click.echo("-" * 60)
+
+    for p in all_procs:
+        alive = p.is_alive()
+        status = click.style("RUNNING", fg="green") if alive else click.style("FINISHED", fg="bright_black")
+        click.echo(f"  PID {p.pid:>6}  {status}  {p.description}")
+        click.echo(f"           Started: {p.elapsed_str()}")
+        if p.output_path:
+            click.echo(f"           Output:  {p.output_path}")
+
+    click.echo("-" * 60)
+    running = [p for p in all_procs if p.is_alive()]
+    click.echo(f"Running: {len(running)}, Finished: {len(all_procs) - len(running)}")
+
+    if len(all_procs) > len(running):
+        click.echo("\nTip: Run 'mbo processes --cleanup' to remove finished entries.")
+
+
 if __name__ == "__main__":
     main()
