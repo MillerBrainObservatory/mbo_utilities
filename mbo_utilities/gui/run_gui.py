@@ -358,12 +358,30 @@ def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
     import copy
     import numpy as np
-    import fastplotlib as fpl
     from mbo_utilities.arrays import iter_rois
+
+    # create QApplication and set icon BEFORE importing fastplotlib
+    # because QRenderCanvas.__init__ calls show() internally
+    try:
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtGui import QIcon
+        from mbo_utilities.gui._setup import _get_icon_path
+
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication([])
+
+        icon_path = _get_icon_path()
+        if icon_path:
+            app.setWindowIcon(QIcon(str(icon_path)))
+    except ImportError:
+        pass
+
+    import fastplotlib as fpl
 
     try:
         from rendercanvas.pyside6 import RenderCanvas
-    except (ImportError, RuntimeError): # RuntimeError if qt is already selected
+    except (ImportError, RuntimeError):
         RenderCanvas = None
 
     if RenderCanvas is not None:
@@ -435,14 +453,7 @@ def _create_image_widget(data_array, widget: bool = True):
             graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
 
-    # set qt window icon before showing
-    from mbo_utilities.gui._setup import set_qt_icon
-    set_qt_icon()
-
     iw.show()
-
-    # set again after show in case window was realized
-    set_qt_icon()
 
     # Add PreviewDataWidget if requested
     if widget:
