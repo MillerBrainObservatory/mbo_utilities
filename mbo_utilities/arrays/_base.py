@@ -283,6 +283,12 @@ def _imwrite_base(
     # Get metadata
     md = dict(arr.metadata) if arr.metadata else {}
 
+    # Merge metadata overrides if present
+    if "metadata_overrides" in kwargs:
+        overrides = kwargs.get("metadata_overrides")
+        if overrides and isinstance(overrides, dict):
+            md.update(overrides)
+
     # Get dimensions using protocol helpers
     dims = get_dims(arr)
     num_planes = get_num_planes(arr)
