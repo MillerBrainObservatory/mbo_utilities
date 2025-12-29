@@ -17,6 +17,14 @@ import time
 from pathlib import Path
 from typing import Optional, Union
 
+# set windows appusermodelid immediately for taskbar icon grouping
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('mbo.utilities.gui.1.0')
+    except Exception:
+        pass
+
 import click
 
 

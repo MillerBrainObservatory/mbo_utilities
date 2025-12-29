@@ -303,7 +303,7 @@ class FileDialog:
                 push_button_style(primary=False)
                 if imgui.small_button("docs"):
                     import webbrowser
-                    webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/array_types.html")
+                    webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html")
                 pop_button_style()
 
                 imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))

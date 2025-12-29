@@ -12,7 +12,7 @@
 <a href="#installation"><b>Installation</b></a> ·
 <a href="https://millerbrainobservatory.github.io/mbo_utilities/"><b>Documentation</b></a> ·
 <a href="https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html"><b>User Guide</b></a> ·
-<a href="https://millerbrainobservatory.github.io/mbo_utilities/array_types.html"><b>Array Types</b></a> ·
+<a href="https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html"><b>Supported Formats</b></a> ·
 <a href="https://github.com/MillerBrainObservatory/mbo_utilities/issues"><b>Issues</b></a>
 </p>
 

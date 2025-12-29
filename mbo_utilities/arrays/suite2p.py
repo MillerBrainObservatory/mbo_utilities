@@ -19,6 +19,8 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.arrays.features import DimLabels
+
 from mbo_utilities.metadata import get_param
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import load_npy
@@ -172,6 +174,8 @@ class Suite2pArray(ReductionMixin):
         Path to ops.npy, a .bin file, or a directory containing plane subdirs.
     use_raw : bool, optional
         If True, prefer data_raw.bin over data.bin. Default False.
+    dims : str | Sequence[str] | None, optional
+        Dimension labels. If None, inferred from shape (TZYX or TYX).
 
     Attributes
     ----------
@@ -185,6 +189,8 @@ class Suite2pArray(ReductionMixin):
         True if this represents multi-plane data.
     num_planes : int
         Number of Z-planes (1 for single plane).
+    dims : tuple[str, ...]
+        Dimension labels.
 
     Examples
     --------
@@ -201,7 +207,12 @@ class Suite2pArray(ReductionMixin):
     True
     """
 
-    def __init__(self, filename: str | Path, use_raw: bool = False):
+    def __init__(
+        self,
+        filename: str | Path,
+        use_raw: bool = False,
+        dims: str | Sequence[str] | None = None,
+    ):
         path = Path(filename)
         if not path.exists():
             raise FileNotFoundError(path)
@@ -241,6 +252,16 @@ class Suite2pArray(ReductionMixin):
             self._init_single_plane(ops_path, use_raw)
         else:
             raise ValueError(f"Unsupported input: {path}")
+
+        # initialize dimension labels
+        self._dim_labels = DimLabels(dims, ndim=self.ndim)
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        """Dimension labels."""
+        return self._dim_labels.value
+
+
 
     def _init_single_plane(self, ops_path: Path, use_raw: bool):
         """Initialize as single-plane array."""

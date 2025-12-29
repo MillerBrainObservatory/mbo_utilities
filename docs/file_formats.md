@@ -11,16 +11,16 @@ kernelspec:
   name: python3
 ---
 
-(array_types)=
-# Lazy Array Types
+(file_formats)=
+# File Formats
 
-Understanding what `imread()` returns and when to use each array type.
+File formats that `imread()` can read with full lazy loading and metadata support.
 
 ## Overview
 
 `mbo_utilities.imread()` is a smart file reader that automatically detects the file type and returns the appropriate lazy array class. All array types provide:
 
-- **Lazy loading**: Data is read on-demand, not loaded entirely into memory
+- **Lazy loading**: Reading/writing is chunked, not loaded entirely into memory
 - **NumPy-like indexing**: Standard slicing syntax (`arr[0]`, `arr[10:20, :, 100:200]`)
 - **`_imwrite()` support**: All arrays can be written to any output format via `imwrite()`
 - **Metadata**: Accessible via `.metadata` property

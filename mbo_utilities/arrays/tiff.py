@@ -44,7 +44,7 @@ from mbo_utilities.metadata.scanimage import (
 from mbo_utilities.analysis.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
-from mbo_utilities.arrays.features import PhaseCorrectionFeature
+from mbo_utilities.arrays.features import PhaseCorrectionFeature, DimLabels
 from mbo_utilities.arrays.features._phase_correction import PhaseCorrMethod
 
 if TYPE_CHECKING:
@@ -282,6 +282,8 @@ class TiffArray(ReductionMixin):
     ----------
     files : str, Path, or list
         TIFF file path(s), or a directory containing plane TIFF files.
+    dims : str | Sequence[str] | None, optional
+        Dimension labels. If None, inferred from shape (TZYX).
 
     Attributes
     ----------
@@ -293,6 +295,8 @@ class TiffArray(ReductionMixin):
         True if multiple planes were detected.
     num_planes : int
         Number of Z-planes.
+    dims : tuple[str, ...]
+        Dimension labels.
 
     Examples
     --------
@@ -309,7 +313,11 @@ class TiffArray(ReductionMixin):
     True
     """
 
-    def __init__(self, files: str | Path | List[str] | List[Path]):
+    def __init__(
+        self,
+        files: str | Path | List[str] | List[Path],
+        dims: str | Sequence[str] | None = None,
+    ):
         self._planes: list[_SingleTiffPlaneReader] = []
         self._is_volumetric = False
         self._target_dtype = None
@@ -353,6 +361,12 @@ class TiffArray(ReductionMixin):
                 self._init_volume_from_groups(plane_files_list)
             else:
                 self._init_single_plane(paths)
+
+        self._dim_labels = DimLabels(dims, ndim=self.ndim)
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        return self._dim_labels.value
 
     def _init_volume_from_groups(self, plane_groups: list[list[Path]]):
         """Initialize as volumetric array from groups of files (one group per plane)."""
@@ -632,6 +646,8 @@ class MBOTiffArray(ReductionMixin):
         List of TIFF file paths.
     roi : int, optional
         ROI index (not used for processed TIFFs).
+    dims : str | Sequence[str] | None, optional
+        Dimension labels. If None, inferred from shape (TZYX).
 
     Attributes
     ----------
@@ -639,9 +655,16 @@ class MBOTiffArray(ReductionMixin):
         Array shape in TZYX format.
     dtype : np.dtype
         Data type.
+    dims : tuple[str, ...]
+        Dimension labels.
     """
 
-    def __init__(self, filenames: list[Path], roi: int | None = None):
+    def __init__(
+        self,
+        filenames: list[Path],
+        roi: int | None = None,
+        dims: str | Sequence[str] | None = None,
+    ):
         from mbo_utilities.metadata import query_tiff_pages
 
         if not filenames:
@@ -706,6 +729,11 @@ class MBOTiffArray(ReductionMixin):
         self.num_rois = get_param(self._metadata, "num_mrois", default=1)
         self.tags = [derive_tag_from_filename(f) for f in self.filenames]
         self._target_dtype = None
+        self._dim_labels = DimLabels(dims, ndim=self.ndim)
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        return self._dim_labels.value
 
     @property
     def metadata(self) -> dict:
@@ -997,7 +1025,9 @@ class ScanImageArray(ReductionMixin):
         upsample: int = 5,
         max_offset: int = 4,
         use_fft: bool = False,
+
         metadata: dict | None = None,
+        dims: str | Sequence[str] | None = None,
     ):
         self.filenames = [files] if isinstance(files, (str, Path)) else list(files)
         self.tiff_files = [TiffFile(f) for f in self.filenames]
@@ -1045,7 +1075,14 @@ class ScanImageArray(ReductionMixin):
             border=border if isinstance(border, int) else 3, # feature checks int
             max_offset=max_offset,
         )
+
         self.phase_correction.add_event_handler(self._on_feature_change)
+
+        self._dim_labels = DimLabels(dims, ndim=self.ndim)
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        return self._dim_labels.value
 
     def _on_feature_change(self, event):
         # Optional: handle feature changes (log, etc)

@@ -1288,6 +1288,7 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     defaults['nframes'] = self.s2p.target_timepoints  # suite2p alias
 
     # also clean lazy_mdata to prevent shape contamination from arr.metadata
+    # TODO: Do we need this?
     lazy_mdata.pop('shape', None)
     lazy_mdata.pop('num_timepoints', None)
     lazy_mdata.pop('num_frames', None)
