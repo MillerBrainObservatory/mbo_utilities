@@ -12,45 +12,13 @@ from typing import Any, Optional, Union
 
 import click
 
-# Set AppUserModelID immediately for Windows
-try:
-    import ctypes
-    import sys
-    if sys.platform == 'win32':
-        myappid = 'mbo.utilities.gui.1.0'
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-except Exception:
-    pass
-
-
-def _set_qt_icon():
-    """Set the Qt application window icon. Call after QApplication is created."""
+# set windows appusermodelid immediately for taskbar icon grouping
+if sys.platform == 'win32':
     try:
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtGui import QIcon
-        from mbo_utilities.file_io import get_package_assets_path
-        from mbo_utilities import get_mbo_dirs
-
-        app = QApplication.instance()
-        if app is not None:
-            # try package assets first, then user assets
-            icon_path = get_package_assets_path() / "app_settings" / "icon.png"
-            if not icon_path.exists():
-                icon_path = Path(get_mbo_dirs()["assets"]) / "app_settings" / "icon.png"
-
-            if icon_path.exists():
-                icon = QIcon(str(icon_path))
-                app.setWindowIcon(icon)
-
-                # Set on all top-level windows
-                for window in app.topLevelWidgets():
-                    window.setWindowIcon(icon)
-                    # Also set on window handle if available (native window)
-                    handle = window.windowHandle()
-                    if handle:
-                        handle.setIcon(icon)
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('mbo.utilities.gui.1.0')
     except Exception:
-        pass  # icon is non-critical
+        pass
 
 
 class SplashScreen:
@@ -470,7 +438,8 @@ def _create_image_widget(data_array, widget: bool = True):
     iw.show()
 
     # set qt window icon after canvas is created
-    _set_qt_icon()
+    from mbo_utilities.gui._setup import set_qt_icon
+    set_qt_icon()
 
     # Add PreviewDataWidget if requested
     if widget:
