@@ -354,8 +354,13 @@ def _show_metadata_viewer(metadata: dict) -> None:
     immapp.run(runner_params=params, add_ons_params=addons)
 
 
+# module-level reference to keep QApplication alive
+_qapp = None
+
+
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
+    global _qapp
     import copy
     import numpy as np
     from mbo_utilities.arrays import iter_rois
@@ -369,7 +374,8 @@ def _create_image_widget(data_array, widget: bool = True):
 
         app = QApplication.instance()
         if app is None:
-            app = QApplication([])
+            _qapp = QApplication([])
+            app = _qapp
 
         icon_path = _get_icon_path()
         if icon_path:
