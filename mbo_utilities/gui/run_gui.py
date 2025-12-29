@@ -354,32 +354,32 @@ def _show_metadata_viewer(metadata: dict) -> None:
     immapp.run(runner_params=params, add_ons_params=addons)
 
 
-# module-level reference to keep QApplication alive
-_qapp = None
-
-
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
-    global _qapp
     import copy
     import numpy as np
     from mbo_utilities.arrays import iter_rois
 
-    # create QApplication and set icon BEFORE importing fastplotlib
-    # because QRenderCanvas.__init__ calls show() internally
+    # monkey-patch QRenderCanvas.show() to set icon before showing
+    # QRenderCanvas.__init__ calls show() internally, so we intercept show()
     try:
-        from PySide6.QtWidgets import QApplication
+        from rendercanvas.qt import QRenderCanvas
         from PySide6.QtGui import QIcon
         from mbo_utilities.gui._setup import _get_icon_path
 
-        app = QApplication.instance()
-        if app is None:
-            _qapp = QApplication([])
-            app = _qapp
+        if not hasattr(QRenderCanvas, '_mbo_patched'):
+            icon_path = _get_icon_path()
+            if icon_path:
+                _original_show = QRenderCanvas.show
 
-        icon_path = _get_icon_path()
-        if icon_path:
-            app.setWindowIcon(QIcon(str(icon_path)))
+                def _patched_show(self):
+                    # set icon right before show
+                    self.setWindowIcon(QIcon(str(icon_path)))
+                    return _original_show(self)
+
+                QRenderCanvas.show = _patched_show
+                QRenderCanvas._mbo_patched = True
+
     except ImportError:
         pass
 
