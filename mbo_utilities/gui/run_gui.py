@@ -360,43 +360,17 @@ def _create_image_widget(data_array, widget: bool = True):
     import numpy as np
     from mbo_utilities.arrays import iter_rois
 
-    # monkey-patch QRenderCanvas.show() to set icon before showing
-    # QRenderCanvas.__init__ calls show() internally, so we intercept show()
-    try:
-        from rendercanvas.qt import QRenderCanvas
-        from PySide6.QtGui import QIcon
-        from mbo_utilities.gui._setup import _get_icon_path
-
-        if not hasattr(QRenderCanvas, '_mbo_patched'):
-            icon_path = _get_icon_path()
-            if icon_path:
-                _original_show = QRenderCanvas.show
-
-                def _patched_show(self):
-                    # set icon right before show
-                    self.setWindowIcon(QIcon(str(icon_path)))
-                    return _original_show(self)
-
-                QRenderCanvas.show = _patched_show
-                QRenderCanvas._mbo_patched = True
-
-    except ImportError:
-        pass
-
     import fastplotlib as fpl
 
+    # use our custom canvas class that sets icon before show()
     try:
-        from rendercanvas.pyside6 import RenderCanvas
-    except (ImportError, RuntimeError):
-        RenderCanvas = None
-
-    if RenderCanvas is not None:
+        from mbo_utilities.gui._canvas import MboRenderCanvas
         figure_kwargs = {
-            "canvas": "pyside6",
+            "canvas": MboRenderCanvas,
             "canvas_kwargs": {"present_method": "bitmap"},
             "size": (800, 800)
         }
-    else:
+    except ImportError:
         figure_kwargs = {"size": (800, 800)}
 
     # Determine slider dimension names from array's dims property if available
