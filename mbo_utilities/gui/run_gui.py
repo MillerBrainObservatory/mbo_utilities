@@ -362,12 +362,12 @@ def _create_image_widget(data_array, widget: bool = True):
 
     import fastplotlib as fpl
 
-    # use our custom canvas class that sets icon before show()
+    # use our custom canvas that sets icon before show()
     try:
         from mbo_utilities.gui._canvas import MboRenderCanvas
+        canvas = MboRenderCanvas(present_method="bitmap")
         figure_kwargs = {
-            "canvas": MboRenderCanvas,
-            "canvas_kwargs": {"present_method": "bitmap"},
+            "canvas": canvas,
             "size": (800, 800)
         }
     except ImportError:
