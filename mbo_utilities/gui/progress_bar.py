@@ -538,16 +538,17 @@ def draw_status_indicator(self):
     items = _get_active_progress_items(self)
 
     # Determine status color and text
-    # use short format to ensure count is always visible
     if items:
         # In progress - orange with count
         text_color = imgui.ImVec4(1.0, 0.6, 0.2, 1.0)  # Orange
         avg_progress = sum(item["progress"] for item in items) / len(items)
         status_text = f"Tasks ({len(items)}) {int(avg_progress * 100)}%"
+        icon = "| "  # Simple text icon or utf-8 if font supports it
     else:
         # Idle - green
         text_color = imgui.ImVec4(0.4, 0.8, 0.4, 1.0)  # Green
-        status_text = "Background tasks"
+        status_text = "Idle"
+        icon = "\u25cf "  # Circle
 
     # Calculate button position first to reserve space on the right
     window_width = imgui.get_window_width()
@@ -555,23 +556,19 @@ def draw_status_indicator(self):
     button_width = imgui.calc_text_size("Show Metadata").x + style.frame_padding.x * 2
     button_pos_x = window_width - button_width - style.window_padding.x
 
-    imgui.text_colored(text_color, status_text)
-
-    # Draw (?) button on same line with transparent style
-    imgui.same_line()
-    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0, 0, 0, 0))
-    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.3, 0.3, 0.5))
-    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.2, 0.2, 0.2, 0.5))
-    if imgui.small_button("(?)"):
+    # Draw clickable status text
+    imgui.push_style_color(imgui.Col_.text, text_color)
+    # Using Selectable for better hover/click behavior than raw text
+    if imgui.selectable(f"{icon}{status_text}", False, imgui.SelectableFlags_.no_auto_close_popups):
         imgui.open_popup("Console Output")
         if not hasattr(self, "_log_popup_open"):
             self._log_popup_open = True
         self._log_popup_open = True
-    imgui.pop_style_color(3)
+    imgui.pop_style_color()
 
-    # Tooltip for the button
+    # Tooltip for the indicator
     if imgui.is_item_hovered():
-        imgui.set_tooltip("Click to view console output")
+        imgui.set_tooltip("Click to view console output and logs")
 
     # Show Metadata button at fixed position on the right
     imgui.same_line(button_pos_x)
