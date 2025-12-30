@@ -7,7 +7,6 @@ The `mbo` command provides tools for viewing, converting, and analyzing imaging 
 | Command | Description |
 |---------|-------------|
 | `mbo` | Launch GUI with file dialog |
-| `mbo view` | View data in GUI |
 | `mbo convert` | Convert between formats |
 | `mbo info` | Show array info |
 | `mbo scanphase` | Analyze scan-phase offset |
@@ -17,16 +16,15 @@ The `mbo` command provides tools for viewing, converting, and analyzing imaging 
 ## GUI Mode
 
 ```bash
-mbo                            # file dialog
-mbo /path/to/data              # open specific file
-mbo /path/to/data --metadata   # show only metadata
-mbo view /data --roi 0 --roi 2 # view specific ROIs
+mbo                          # file dialog
+mbo /path/to/data            # open specific file
+mbo /path/to/data --metadata # show only metadata
 ```
 
-```{image} /_images/gui/readme/01_step_file_dialog.png
-:width: 340px
-:align: center
-```
+<p align="center">
+  <img src="/_images/gui/readme/01_step_file_dialog.png" height="360" alt="File Selection" />
+  <img src="/_images/gui/readme/02_step_data_view.png" height="360" alt="Data Viewer" />
+</p>
 
 ## Convert
 
