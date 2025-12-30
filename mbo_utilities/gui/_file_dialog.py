@@ -1,4 +1,6 @@
 from pathlib import Path
+import threading
+import math
 
 from imgui_bundle import (
     hello_imgui,
@@ -75,6 +77,7 @@ class FileDialog:
         self.upgrade_manager.check_for_upgrade()
         # cached install status (computed on first render)
         self._install_status = None
+        self._check_thread = None
 
     @property
     def widget_enabled(self):
@@ -205,6 +208,123 @@ class FileDialog:
             if tooltip_parts:
                 imgui.set_tooltip("\n".join(tooltip_parts))
 
+    def _draw_formats_card_content(self):
+        if self._install_status is None:
+            # Vertical spacing
+            imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + hello_imgui.em_size(1.0))
+
+            # Progress text from callback (or default)
+            msg = getattr(self, "_check_message", "Checking system configuration...")
+            text_w = imgui.calc_text_size(msg).x
+            avail_w = imgui.get_content_region_avail().x
+            
+            imgui.set_cursor_pos_x(max(0.0, (avail_w - text_w) * 0.5))
+            imgui.text_colored(COL_TEXT_DIM, msg)
+
+            # Vertical spacing
+            imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + hello_imgui.em_size(0.5))
+
+            # Progress bar from callback
+            p = getattr(self, "_check_progress", 0.0)
+            imgui.progress_bar(p)
+            return
+
+        # version line
+        self._draw_version_status()
+
+        imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+        # supported formats section
+        imgui.text_colored(COL_ACCENT, "Supported Formats")
+        imgui.same_line()
+        push_button_style(primary=False)
+        if imgui.small_button("docs"):
+            import webbrowser
+            webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html")
+        pop_button_style()
+
+        imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
+
+        # calculate table width to fit content (not full available width)
+        col1_width = hello_imgui.em_size(6)
+        col2_width = hello_imgui.em_size(9)
+        table_width = col1_width + col2_width
+
+        table_flags = (
+            imgui.TableFlags_.borders_inner_v
+            | imgui.TableFlags_.row_bg
+            | imgui.TableFlags_.no_host_extend_x
+        )
+        if imgui.begin_table("##array_types", 2, table_flags, imgui.ImVec2(table_width, 0)):
+            imgui.table_setup_column("Format", imgui.TableColumnFlags_.width_fixed, col1_width)
+            imgui.table_setup_column("Extensions", imgui.TableColumnFlags_.width_fixed, col2_width)
+            imgui.table_headers_row()
+
+            array_types = [
+                ("ScanImage", ".tif, .tiff"),
+                ("TIFF", ".tif, .tiff"),
+                ("Zarr", ".zarr/"),
+                ("HDF5", ".h5, .hdf5"),
+                ("Suite2p", ".bin, ops.npy"),
+                ("NumPy", ".npy"),
+                ("NWB", ".nwb"),
+            ]
+            for name, ext in array_types:
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.text(name)
+                imgui.table_next_column()
+                imgui.text_colored(COL_TEXT_DIM, ext)
+            imgui.end_table()
+
+        imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+        imgui.separator()
+        imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+
+        # optional dependencies section
+        imgui.text_colored(COL_ACCENT, "Optional Dependencies")
+        imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+        # suite2p group
+        self._draw_dependency_group(
+            "Suite2p",
+            "Suite2p",
+            [("PyTorch", "PyTorch")]
+        )
+
+        # suite3d group
+        self._draw_dependency_group(
+            "Suite3D",
+            "Suite3D",
+            [("CuPy", "CuPy")]
+        )
+
+        # rastermap (no additional requirements)
+        rastermap = self._get_feature("Rastermap")
+        if rastermap is None or rastermap.status == Status.MISSING:
+            imgui.text_colored(COL_NA, "Rastermap - not installed")
+        else:
+            ver = f" v{rastermap.version}" if rastermap.version and rastermap.version != "installed" else ""
+            if rastermap.status == Status.OK:
+                imgui.text_colored(COL_OK, f"Rastermap{ver}")
+            else:
+                imgui.text_colored(COL_WARN, f"Rastermap{ver}")
+
+    def _center_text(self, text, color=None):
+        """Draw centered text."""
+        avail_w = imgui.get_content_region_avail().x
+        text_sz = imgui.calc_text_size(text)
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_w - text_sz.x) * 0.5)
+        if color:
+            imgui.text_colored(color, text)
+        else:
+            imgui.text(text)
+
+    def _center_widget(self, widget_width):
+        """Set cursor to center a widget of given width."""
+        avail_w = imgui.get_content_region_avail().x
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_w - widget_width) * 0.5)
+
     def render(self):
         # global style
         imgui.push_style_color(imgui.Col_.window_bg, COL_BG)
@@ -220,33 +340,24 @@ class FileDialog:
         imgui.push_style_var(imgui.StyleVar_.item_spacing, hello_imgui.em_to_vec2(0.6, 0.4))
         imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
 
-        win_w = imgui.get_window_width()
-
         with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0)):
             imgui.push_id("pfd")
 
             # header
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-            title = "Miller Brain Observatory"
-            title_sz = imgui.calc_text_size(title)
-            imgui.set_cursor_pos_x((win_w - title_sz.x) * 0.5)
-            imgui.text_colored(COL_ACCENT, title)
-
-            subtitle = "Data Preview & Utilities"
-            sub_sz = imgui.calc_text_size(subtitle)
-            imgui.set_cursor_pos_x((win_w - sub_sz.x) * 0.5)
-            imgui.text_colored(COL_TEXT_DIM, subtitle)
+            self._center_text("Miller Brain Observatory", COL_ACCENT)
+            self._center_text("Data Preview & Utilities", COL_TEXT_DIM)
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
             imgui.separator()
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
 
-            # action buttons
-            btn_w = hello_imgui.em_size(16)
+            # action buttons - use full available width minus padding
+            avail_w = imgui.get_content_region_avail().x
+            btn_w = min(avail_w - hello_imgui.em_size(2), hello_imgui.em_size(16))
             btn_h = hello_imgui.em_size(1.8)
-            btn_x = (win_w - btn_w) * 0.5
 
-            imgui.set_cursor_pos_x(btn_x)
+            self._center_widget(btn_w)
             push_button_style(primary=True)
             if imgui.button("Open File(s)", imgui.ImVec2(btn_w, btn_h)):
                 self._open_multi = pfd.open_file(
@@ -261,7 +372,7 @@ class FileDialog:
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
-            imgui.set_cursor_pos_x(btn_x)
+            self._center_widget(btn_w)
             push_button_style(primary=True)
             if imgui.button("Select Folder", imgui.ImVec2(btn_w, btn_h)):
                 self._select_folder = pfd.select_folder("Select folder", self._default_dir)
@@ -271,14 +382,24 @@ class FileDialog:
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.4))
 
             # lazy load install status
-            if self._install_status is None:
-                self._install_status = check_installation()
+            if self._install_status is None and self._check_thread is None:
+                self._check_progress = 0.0
+                self._check_message = "Starting..."
 
-            # card width based on window, auto-height to fit content
-            min_card_width = hello_imgui.em_size(24)
-            card_w = max(win_w - hello_imgui.em_size(2), min_card_width)
-            card_x = (win_w - card_w) * 0.5
-            imgui.set_cursor_pos_x(card_x)
+                def _progress_cb(p: float, msg: str):
+                    self._check_progress = p
+                    self._check_message = msg
+
+                def _run_check():
+                    self._install_status = check_installation(callback=_progress_cb)
+
+                self._check_thread = threading.Thread(target=_run_check, daemon=True)
+                self._check_thread.start()
+
+            # card - use available width minus small margin
+            avail_w = imgui.get_content_region_avail().x
+            card_w = avail_w - hello_imgui.em_size(1)
+            self._center_widget(card_w)
 
             imgui.push_style_color(imgui.Col_.child_bg, COL_BG_CARD)
             imgui.push_style_var(imgui.StyleVar_.child_rounding, 6.0)
@@ -292,87 +413,7 @@ class FileDialog:
                 imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
                 imgui.indent(hello_imgui.em_size(0.6))
 
-                # version line
-                self._draw_version_status()
-
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
-
-                # supported formats section
-                imgui.text_colored(COL_ACCENT, "Supported Formats")
-                imgui.same_line()
-                push_button_style(primary=False)
-                if imgui.small_button("docs"):
-                    import webbrowser
-                    webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html")
-                pop_button_style()
-
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
-
-                # calculate table width to fit content
-                available_width = imgui.get_content_region_avail().x - hello_imgui.em_size(1)
-                col1_width = hello_imgui.em_size(6)
-                col2_width = available_width - col1_width
-
-                # the color is set via table flags?
-                table_flags = (
-                    imgui.TableFlags_.borders_inner_v
-                    | imgui.TableFlags_.row_bg
-                    | imgui.TableFlags_.no_host_extend_x
-                )
-                if imgui.begin_table("##array_types", 2, table_flags, imgui.ImVec2(available_width, 0)):
-                    imgui.table_setup_column("Format", imgui.TableColumnFlags_.width_fixed, col1_width)
-                    imgui.table_setup_column("Extensions", imgui.TableColumnFlags_.width_fixed, col2_width)
-                    imgui.table_headers_row()
-
-                    array_types = [
-                        ("ScanImage", ".tif, .tiff"),
-                        ("TIFF", ".tif, .tiff"),
-                        ("Zarr", ".zarr/"),
-                        ("HDF5", ".h5, .hdf5"),
-                        ("Suite2p", ".bin, ops.npy"),
-                        ("NumPy", ".npy"),
-                        ("NWB", ".nwb"),
-                    ]
-                    for name, ext in array_types:
-                        imgui.table_next_row()
-                        imgui.table_next_column()
-                        imgui.text(name)
-                        imgui.table_next_column()
-                        imgui.text_colored(COL_TEXT_DIM, ext)
-                    imgui.end_table()
-
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-                imgui.separator()
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-
-                # optional dependencies section
-                imgui.text_colored(COL_ACCENT, "Optional Dependencies")
-                imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
-
-                # suite2p group
-                self._draw_dependency_group(
-                    "Suite2p",
-                    "Suite2p",
-                    [("PyTorch", "PyTorch")]
-                )
-
-                # suite3d group
-                self._draw_dependency_group(
-                    "Suite3D",
-                    "Suite3D",
-                    [("CuPy", "CuPy")]
-                )
-
-                # rastermap (no additional requirements)
-                rastermap = self._get_feature("Rastermap")
-                if rastermap is None or rastermap.status == Status.MISSING:
-                    imgui.text_colored(COL_NA, "Rastermap - not installed")
-                else:
-                    ver = f" v{rastermap.version}" if rastermap.version and rastermap.version != "installed" else ""
-                    if rastermap.status == Status.OK:
-                        imgui.text_colored(COL_OK, f"Rastermap{ver}")
-                    else:
-                        imgui.text_colored(COL_WARN, f"Rastermap{ver}")
+                self._draw_formats_card_content()
 
                 imgui.unindent(hello_imgui.em_size(0.6))
                 imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
@@ -402,7 +443,7 @@ class FileDialog:
             # quit button (centered)
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
             qsz = imgui.ImVec2(hello_imgui.em_size(5), hello_imgui.em_size(1.5))
-            imgui.set_cursor_pos_x((win_w - qsz.x) * 0.5)
+            self._center_widget(qsz.x)
             push_button_style(primary=False)
             if imgui.button("Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
                 self.selected_path = None

@@ -27,24 +27,75 @@ File formats that `imread()` can read with full lazy loading and metadata suppor
 
 ## Quick Reference
 
-| Input | Returns | Shape | Use Case |
-|-------|---------|-------|----------|
-| `.tif` (raw ScanImage) | `ScanImageArray` | (T, Z, Y, X) | Multi-ROI volumetric data with phase correction |
-| `.tif` (raw ScanImage, LBM) | `LBMArray` | (T, Z, Y, X) | Light Beads Microscopy stacks |
-| `.tif` (raw ScanImage, piezo) | `PiezoArray` | (T, Z, Y, X) | Piezo z-stacks with optional frame averaging |
-| `.tif` (raw ScanImage, single-plane) | `SinglePlaneArray` | (T, 1, Y, X) | Single-plane time series |
-| `.tif` (processed, single file) | `TiffArray` | (T, 1, Y, X) | Standard TIFF files, lazy page access |
-| `.tif` (processed, multiple files) | `MBOTiffArray` | (T, Z, Y, X) | Dask-backed multi-file TIFF |
-| Directory with `planeXX.tiff` files | `TiffArray` | (T, Z, Y, X) | Multi-plane TIFF volume (auto-detected) |
-| `.bin` (direct path) | `BinArray` | (T, Y, X) | Direct binary file manipulation |
-| Directory with `ops.npy` | `Suite2pArray` | (T, Y, X) | Suite2p workflow integration |
-| Directory with `planeXX/` subdirs | `Suite2pArray` | (T, Z, Y, X) | Multi-plane Suite2p output (auto-detected) |
+### TIFF Files (`.tif`, `.tiff`)
+
+| Type | Returns | Shape | Use Case |
+|------|---------|-------|----------|
+| **Raw ScanImage** | `ScanImageArray` | (T, Z, Y, X) | Multi-ROI volumetric data with phase correction |
+| ↳ Light Beads Microscopy | `LBMArray` | (T, Z, Y, X) | Z-planes interleaved as ScanImage channels |
+| ↳ Piezo z-stack | `PiezoArray` | (T, Z, Y, X) | Piezo z-stacks with optional frame averaging |
+| ↳ Single-plane | `SinglePlaneArray` | (T, 1, Y, X) | Single-plane time series |
+| **Processed (single file)** | `TiffArray` | (T, 1, Y, X) | Standard TIFF files, lazy page access |
+| **Processed (multiple files)** | `MBOTiffArray` | (T, Z, Y, X) | Dask-backed multi-file TIFF |
+| **Directory with `planeXX.tiff`** | `TiffArray` | (T, Z, Y, X) | Multi-plane TIFF volume (auto-detected) |
+
+### Other Formats
+
+| Extension | Returns | Shape | Use Case |
+|-----------|---------|-------|----------|
+| `.bin` | `BinArray` | (T, Y, X) | Direct binary file manipulation |
 | `.h5` / `.hdf5` | `H5Array` | varies | HDF5 datasets |
 | `.zarr` | `ZarrArray` | (T, Z, Y, X) | Zarr v3 / OME-Zarr stores |
 | `.npy` | `NumpyArray` | varies | NumPy memory-mapped files |
 | `.nwb` | `NWBArray` | varies | Neurodata Without Borders files |
-| `np.ndarray` (in-memory) | `NumpyArray` | varies | Wrap numpy arrays for imwrite support |
-| Isoview lightsheet directory | `IsoviewArray` | (T, Z, V, Y, X) | Multi-view lightsheet data |
+| `np.ndarray` | `NumpyArray` | varies | Wrap in-memory arrays for imwrite support |
+
+### Directories
+
+| Contents | Returns | Shape | Use Case |
+|----------|---------|-------|----------|
+| `ops.npy` | `Suite2pArray` | (T, Y, X) | Suite2p workflow integration |
+| `planeXX/` subdirs with `ops.npy` | `Suite2pArray` | (T, Z, Y, X) | Multi-plane Suite2p output |
+| `planeXX.tiff` files | `TiffArray` | (T, Z, Y, X) | Multi-plane TIFF volume |
+| Isoview lightsheet data | `IsoviewArray` | (T, Z, V, Y, X) | Multi-view lightsheet data |
+
+### Decision Tree
+
+```
+imread(path)
+│
+├── np.ndarray? ──────────────────────────────► NumpyArray
+│
+├── .npy ─────────────────────────────────────► NumpyArray (memory-mapped)
+├── .nwb ─────────────────────────────────────► NWBArray
+├── .h5 / .hdf5 ──────────────────────────────► H5Array
+├── .zarr ────────────────────────────────────► ZarrArray
+├── .bin ─────────────────────────────────────► BinArray
+│
+├── .tif / .tiff
+│   ├── Has ScanImage ROI metadata?
+│   │   ├── LBM acquisition? ─────────────────► LBMArray
+│   │   ├── Piezo enabled? ───────────────────► PiezoArray
+│   │   └── Single-plane? ────────────────────► SinglePlaneArray
+│   ├── Has MBO metadata? ────────────────────► MBOTiffArray
+│   └── Standard TIFF ────────────────────────► TiffArray
+│
+├── Directory
+│   ├── Contains planeXX.tiff? ───────────────► TiffArray (volumetric)
+│   ├── Contains planeXX/ with ops.npy? ──────► Suite2pArray (volumetric)
+│   ├── Contains ops.npy? ────────────────────► Suite2pArray
+│   └── Contains raw ScanImage TIFFs? ────────► ScanImageArray
+│
+└── List of paths
+    ├── All .tif? ────────────────────────────► TiffArray or MBOTiffArray
+    └── All .zarr? ───────────────────────────► ZarrArray (stacked along Z)
+```
+
+**Tip:** Use `open_scanimage()` for automatic ScanImage subclass detection:
+```python
+from mbo_utilities.arrays import open_scanimage
+arr = open_scanimage("/path/to/data.tif")  # Returns LBMArray, PiezoArray, or SinglePlaneArray
+```
 
 ## Array Type Details
 
@@ -511,60 +562,6 @@ proj = arr.get_projection(timepoint=0, camera=0, proj_type='xy')
 - Lazy loading via Zarr
 
 ---
-
-## Decision Tree: What Will imread() Return?
-
-```text
-imread(input)
-  │
-  ├─ isinstance(input, np.ndarray)?
-  │   └─ Yes → NumpyArray (in-memory wrapper)
-  │
-  ├─ Is input a Path or string?
-  │   │
-  │   ├─ .npy file?
-  │   │   └─ NumpyArray (memory-mapped)
-  │   │
-  │   ├─ .nwb file?
-  │   │   └─ NWBArray
-  │   │
-  │   ├─ .h5 / .hdf5 file?
-  │   │   └─ H5Array
-  │   │
-  │   ├─ .zarr directory?
-  │   │   └─ ZarrArray
-  │   │
-  │   ├─ .bin file (direct path)?
-  │   │   └─ BinArray
-  │   │
-  │   ├─ .tif / .tiff file(s)?
-  │   │   ├─ Has ScanImage ROI metadata? → ScanImageArray
-  │   │   │   (use open_scanimage() for auto-detection of LBM/Piezo/SinglePlane)
-  │   │   ├─ Has MBO metadata (multiple files)? → MBOTiffArray
-  │   │   └─ Standard TIFF → TiffArray
-  │   │
-  │   ├─ Directory?
-  │   │   ├─ Contains planeXX.tiff files? → TiffArray (volumetric)
-  │   │   ├─ Contains planeXX/ subdirs with ops.npy? → Suite2pArray (volumetric)
-  │   │   ├─ Contains ops.npy? → Suite2pArray
-  │   │   └─ Contains raw ScanImage TIFFs? → ScanImageArray
-  │   │
-  │   └─ ops.npy file directly?
-  │       └─ Suite2pArray
-  │
-  └─ List of paths?
-      ├─ All .tif files → TiffArray or MBOTiffArray
-      └─ All .zarr stores → ZarrArray (stacked along Z)
-```
-
-For ScanImage data, use `open_scanimage()` to get the specific subclass:
-
-```python
-from mbo_utilities.arrays import open_scanimage
-
-arr = open_scanimage("/path/to/data.tif")
-# Returns LBMArray, PiezoArray, or SinglePlaneArray based on detection
-```
 
 ## Common Properties Across All Array Types
 
