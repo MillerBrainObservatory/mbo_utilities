@@ -2,7 +2,7 @@
 Mixin for adding feature support to array classes.
 
 Provides a standardized way to integrate features like DimLabels
-into array classes following the fastplotlib pattern.
+into array classes. 
 """
 
 from __future__ import annotations

@@ -266,7 +266,8 @@ class ZarrArray(DimLabelsMixin, ReductionMixin):
 
     @property
     def dtype(self):
-        return self._target_dtype if self._target_dtype is not None else self.zs[0].dtype
+        from mbo_utilities.util import get_dtype
+        return self._target_dtype if self._target_dtype is not None else get_dtype(self.zs[0].dtype)
 
     def astype(self, dtype, copy=True):
         """Set target dtype for lazy conversion on data access."""
