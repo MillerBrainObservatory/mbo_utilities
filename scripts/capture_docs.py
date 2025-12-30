@@ -57,14 +57,14 @@ def style_image(img: Image.Image, output_path: Path):
 def capture_file_dialog():
     """Capture the file selection dialog."""
     print("Capturing File Dialog (01)...")
-    
+
     start_time = time.time()
     def post_draw():
         if hello_imgui.get_runner_params().app_shall_exit:
             return
 
         # Wait 8 seconds to ensure installation checks complete and UI stabilizes
-        if time.time() - start_time > 8.0: 
+        if time.time() - start_time > 8.0:
             # Request exit - screenshot is taken at exit
             hello_imgui.get_runner_params().app_shall_exit = True
 
@@ -73,15 +73,14 @@ def capture_file_dialog():
     params.app_window_params.window_geometry.size = (340, 620)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = False
-    
+
     # Critical flags for capture
-    # params.app_window_params.ask_for_screenshot_at_exit = True # Not available in this binding
     params.fps_idling.enable_idling = False
-    
+
     params.callbacks.pre_new_frame = post_draw
-    
+
     run_gui(select_only=True, runner_params=params)
-    
+
     # Retrieve screenshot
     screenshot = hello_imgui.final_app_window_screenshot()
 
@@ -95,7 +94,7 @@ def capture_file_dialog():
 def capture_data_view(data_path: Path):
     """Capture the data view with loaded data."""
     print(f"Capturing Data View (02) for {data_path}...")
-    
+
     from mbo_utilities.reader import imread
     from mbo_utilities.gui.run_gui import _create_image_widget
     from mbo_utilities.arrays import normalize_roi
@@ -110,7 +109,7 @@ def capture_data_view(data_path: Path):
 
     # Create widget
     iw = _create_image_widget(data_array, widget=True)
-    
+
     start_time = time.time()
     state = {"captured": False}
 
@@ -140,21 +139,21 @@ def capture_data_view(data_path: Path):
             print("Taking snapshot via screen grab...")
             try:
                 canvas = iw.figure.canvas
-                
+
                 # Check for PySide6/Qt canvas
                 if "QRenderCanvas" in str(type(canvas)):
                     from PySide6.QtWidgets import QApplication
                     from PySide6.QtGui import QGuiApplication
-                    
+
                     window = canvas.window()
                     window.raise_()
                     window.activateWindow()
                     QApplication.instance().processEvents()
-                    
+
                     screen = window.screen()
                     if screen is None:
                         screen = QGuiApplication.primaryScreen()
-                        
+
                     pixmap = screen.grabWindow(window.winId())
                     qimg = pixmap.toImage()
 
@@ -181,7 +180,7 @@ def capture_data_view(data_path: Path):
                 else:
                     print("Snapshot was empty/None")
                     state["captured"] = True
-                     
+
                 iw.close()
                 try:
                     fpl.loop.close()
@@ -200,9 +199,168 @@ def capture_data_view(data_path: Path):
     iw.figure.add_animations(snapshot_callback)
     fpl.loop.run()
 
+
+def capture_metadata_viewer(data_path: Path):
+    """Capture the metadata viewer window."""
+    print(f"Capturing Metadata Viewer (03) for {data_path}...")
+
+    from mbo_utilities.reader import imread
+    from mbo_utilities.gui._widgets import draw_metadata_inspector
+    from mbo_utilities.gui._setup import get_default_ini_path
+    from imgui_bundle import immapp
+
+    # Load data to get metadata
+    try:
+        data_array = imread(data_path)
+        metadata = data_array.metadata
+        if not metadata:
+            print("No metadata found, skipping metadata viewer capture")
+            return
+    except Exception as e:
+        print(f"Failed to load data from {data_path}: {e}")
+        return
+
+    start_time = time.time()
+
+    def gui_callback():
+        draw_metadata_inspector(metadata)
+
+    def post_draw():
+        if hello_imgui.get_runner_params().app_shall_exit:
+            return
+        # Wait 3 seconds for UI to stabilize
+        if time.time() - start_time > 3.0:
+            hello_imgui.get_runner_params().app_shall_exit = True
+
+    params = hello_imgui.RunnerParams()
+    params.app_window_params.window_title = "MBO Metadata Viewer"
+    params.app_window_params.window_geometry.size = (500, 700)
+    params.app_window_params.window_geometry.size_auto = False
+    params.app_window_params.resizable = False
+    params.fps_idling.enable_idling = False
+    params.callbacks.show_gui = gui_callback
+    params.callbacks.pre_new_frame = post_draw
+
+    addons = immapp.AddOnsParams()
+    addons.with_markdown = True
+
+    immapp.run(params, addons)
+
+    # Retrieve screenshot
+    screenshot = hello_imgui.final_app_window_screenshot()
+
+    if screenshot is not None and screenshot.size > 0:
+        img = Image.fromarray(screenshot)
+        style_image(img, OUTPUT_DIR / "03_metadata_viewer.png")
+    else:
+        print("Failed to capture metadata viewer screenshot (empty buffer)")
+
+
+def capture_save_as_dialog(data_path: Path):
+    """Capture the save_as popup dialog from the data viewer."""
+    print(f"Capturing Save As Dialog (04) for {data_path}...")
+
+    from mbo_utilities.reader import imread
+    from mbo_utilities.gui.run_gui import _create_image_widget
+    from mbo_utilities.arrays import normalize_roi
+    import fastplotlib as fpl
+
+    # Load data
+    try:
+        data_array = imread(data_path, roi=normalize_roi(None))
+    except Exception as e:
+        print(f"Failed to load data from {data_path}: {e}")
+        return
+
+    # Create widget
+    iw = _create_image_widget(data_array, widget=True)
+
+    start_time = time.time()
+    state = {"popup_opened": False, "captured": False}
+
+    def snapshot_callback():
+        # Resize window first
+        if not hasattr(snapshot_callback, "resized"):
+            try:
+                canvas = iw.figure.canvas
+                if "QRenderCanvas" in str(type(canvas)):
+                    win = canvas.window()
+                    win.resize(900, 650)
+                snapshot_callback.resized = True
+            except:
+                pass
+
+        if state["captured"]:
+            iw.close()
+            try:
+                fpl.loop.close()
+            except:
+                pass
+            return
+
+        # After 2 seconds, open the save_as popup
+        if time.time() - start_time > 2.0 and not state["popup_opened"]:
+            try:
+                # Access the preview widget and open its save popup
+                if hasattr(iw, '_preview_widget') and iw._preview_widget is not None:
+                    iw._preview_widget._saveas_popup_open = True
+                    state["popup_opened"] = True
+                    print("Opened save_as popup")
+            except Exception as e:
+                print(f"Failed to open save popup: {e}")
+                state["popup_opened"] = True  # Don't keep trying
+
+        # After 4 seconds, take screenshot
+        if time.time() - start_time > 4.0 and not state["captured"]:
+            print("Taking snapshot with save_as dialog...")
+            try:
+                canvas = iw.figure.canvas
+
+                if "QRenderCanvas" in str(type(canvas)):
+                    from PySide6.QtWidgets import QApplication
+                    from PySide6.QtGui import QGuiApplication
+
+                    window = canvas.window()
+                    window.raise_()
+                    window.activateWindow()
+                    QApplication.instance().processEvents()
+
+                    screen = window.screen()
+                    if screen is None:
+                        screen = QGuiApplication.primaryScreen()
+
+                    pixmap = screen.grabWindow(window.winId())
+                    qimg = pixmap.toImage()
+
+                    qimg = qimg.convertToFormat(qimg.Format.Format_RGBA8888)
+                    width, height = qimg.width(), qimg.height()
+                    ptr = qimg.bits()
+                    arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 4)).copy()
+                    pil_img = Image.fromarray(arr, "RGBA")
+                    style_image(pil_img, OUTPUT_DIR / "04_save_as_dialog.png")
+                    state["captured"] = True
+
+                    QApplication.instance().quit()
+                    return
+
+            except Exception as e:
+                print(f"Snapshot failed: {e}")
+                state["captured"] = True
+                try:
+                    from PySide6.QtWidgets import QApplication
+                    QApplication.instance().quit()
+                except:
+                    pass
+
+    iw.figure.add_animations(snapshot_callback)
+    fpl.loop.run()
+
+
 if __name__ == "__main__":
     ensure_dirs()
-    
+
+    data_path = Path(r"C:\Users\flynn\mbo\data\raw")
+
     # Capture 1: File Dialog
     try:
         capture_file_dialog()
@@ -210,8 +368,28 @@ if __name__ == "__main__":
         print(f"File dialog capture failed: {e}")
 
     # Capture 2: Data View (if path exists)
-    data_path = Path(r"C:\Users\flynn\mbo\data\raw")
     if data_path.exists():
-        capture_data_view(data_path)
+        try:
+            capture_data_view(data_path)
+        except Exception as e:
+            print(f"Data view capture failed: {e}")
     else:
         print(f"Skipping data view capture: {data_path} not found")
+
+    # Capture 3: Metadata Viewer
+    if data_path.exists():
+        try:
+            capture_metadata_viewer(data_path)
+        except Exception as e:
+            print(f"Metadata viewer capture failed: {e}")
+    else:
+        print(f"Skipping metadata viewer capture: {data_path} not found")
+
+    # Capture 4: Save As Dialog
+    if data_path.exists():
+        try:
+            capture_save_as_dialog(data_path)
+        except Exception as e:
+            print(f"Save as dialog capture failed: {e}")
+    else:
+        print(f"Skipping save as dialog capture: {data_path} not found")
