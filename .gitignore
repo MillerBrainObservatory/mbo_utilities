@@ -183,3 +183,6 @@ __marimo__
 
 # backup images (pruned from repo)
 _backup_images/
+
+# numpy data files
+*.npz
