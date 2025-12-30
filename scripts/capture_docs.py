@@ -276,7 +276,7 @@ def capture_save_as_dialog(data_path: Path):
     iw = _create_image_widget(data_array, widget=True)
 
     start_time = time.time()
-    state = {"popup_opened": False, "captured": False}
+    state = {"popup_opened": False, "captured": False, "open_attempts": 0}
 
     def snapshot_callback():
         # Resize window first
@@ -298,26 +298,30 @@ def capture_save_as_dialog(data_path: Path):
                 pass
             return
 
-        # After 2 seconds, open the save_as popup
-        if time.time() - start_time > 2.0 and not state["popup_opened"]:
+        # After 2 seconds, start trying to open the save_as popup
+        # Keep trying every frame until it sticks (imgui popup needs multiple frames)
+        elapsed = time.time() - start_time
+        if elapsed > 2.0 and elapsed < 4.0:
             try:
                 # Access the PreviewDataWidget via figure.guis
                 guis = iw.figure.guis if hasattr(iw.figure, 'guis') else iw.figure._guis
                 for gui in guis:
                     if hasattr(gui, '_saveas_popup_open'):
+                        # Set the flag every frame to ensure popup opens
                         gui._saveas_popup_open = True
+                        if state["open_attempts"] == 0:
+                            print(f"Found gui: {type(gui).__name__}, setting _saveas_popup_open")
+                        state["open_attempts"] += 1
                         state["popup_opened"] = True
-                        print("Opened save_as popup")
                         break
-                if not state["popup_opened"]:
-                    print("No gui with _saveas_popup_open found")
-                    state["popup_opened"] = True
+                if not state["popup_opened"] and state["open_attempts"] == 0:
+                    print(f"No gui with _saveas_popup_open found. guis: {[type(g).__name__ for g in guis]}")
             except Exception as e:
-                print(f"Failed to open save popup: {e}")
-                state["popup_opened"] = True  # Don't keep trying
+                if state["open_attempts"] == 0:
+                    print(f"Failed to open save popup: {e}")
 
-        # After 4 seconds, take screenshot
-        if time.time() - start_time > 4.0 and not state["captured"]:
+        # After 4.5 seconds, take screenshot (give popup time to render)
+        if time.time() - start_time > 4.5 and not state["captured"]:
             print("Taking snapshot with save_as dialog...")
             try:
                 canvas = iw.figure.canvas
