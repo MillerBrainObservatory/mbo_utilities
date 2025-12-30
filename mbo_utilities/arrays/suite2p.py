@@ -339,7 +339,8 @@ class Suite2pArray(ReductionMixin):
 
     @property
     def dtype(self):
-        return self._target_dtype if hasattr(self, '_target_dtype') and self._target_dtype else self._dtype
+        from mbo_utilities.util import get_dtype
+        return self._target_dtype if hasattr(self, '_target_dtype') and self._target_dtype else get_dtype(self._dtype)
 
     @property
     def metadata(self) -> dict:

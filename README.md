@@ -18,15 +18,16 @@
 
 Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO).
 
-- **Read and write imaging data** with `imread`/`imwrite` - fast, lazy I/O for ScanImage TIFFs, generic TIFFs, Suite2p binaries, Zarr, and HDF5
+- **Modern Image Reader/Writer**: Fast, lazy I/O for ScanImage/generic TIFFs, Suite2p `.bin`, Zarr, HDF5, and Numpy (in memeory or saved to `.npy`)
 - **Run processing pipelines** for calcium imaging - motion correction, cell extraction, and signal analysis
 - **Visualize data interactively** with a GPU-accelerated GUI for exploring large datasets
 
 <p align="center">
-  <img src="docs/_images/gui/readme/01_step_file_dialog.png" height="360" alt="File Selection" />
-  <img src="docs/_images/gui/readme/02_step_data_view.png" height="360" alt="Data Viewer" />
+  <img src="docs/_images/gui/readme/01_step_file_dialog.png" height="280" alt="File Selection" />
+  <img src="docs/_images/gui/readme/02_step_data_view.png" height="280" alt="Data Viewer" />
+  <img src="docs/_images/gui/readme/03_metadata_viewer.png" height="280" alt="Metadata Viewer" />
   <br/>
-  <em>Select data and explore with GPU-accelerated visualization</em>
+  <em>Select data, visualize, and inspect metadata</em>
 </p>
 
 > **Note:**
@@ -38,11 +39,13 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 `pip install mbo_utilities`
 
-> For help setting up a virtual environment, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
-
-### Optional Dependencies
+> We recommend using a virtual environment. For help setting up a virtual environment, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ```bash
+
+# Base, reader + GUI
+pip install mbo_utilities
+ 
 # with lbm_suite2p_python, suite2p, cellpose
 pip install "mbo_utilities[suite2p]"
 
@@ -56,7 +59,7 @@ pip install "mbo_utilities[suite3d]"
 pip install "mbo_utilities[all]"
 ```
 
-### With [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
+### Easy Installation Script with [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
 
 The install script will either create a virtual environment with `mbo_utilities` installed, install the `mbo` CLI globally, or both:
 
@@ -75,6 +78,11 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 
 ## Usage
 
+The [user-guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html) covers usage in a jupyter notebook.
+The [CLI Guide](https://millerbrainobservatory.github.io/mbo_utilities/cli.html) provides a more in-depth overview of the CLI commands.
+The [GUI Guide](https://millerbrainobservatory.github.io/mbo_utilities/guides/gui.html) provides a more in-depth overview of the GUI.
+The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/guides/scanphase.html) describes the bi-direcitonal scan-phase analaysis tool with output figures and figure descriptions.
+
 | Command | Description |
 |---------|-------------|
 | `mbo` | Launch interactive GUI |
@@ -86,9 +94,12 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 | `mbo scanphase /path/to/data.tiff` | Scan-phase analysis |
 | `mbo formats` | List supported formats |
 | `mbo download path/to/notebook.ipynb` | Download a notebook to the current directory |
-| `pollen` | Pollen calibration tool (WIP) |
+| `mbo pollen` | Pollen calibration tool (WIP) |
+| `mbo pollen path/to/data` | Pollen calibration - Skip data collection |
 
 **Upgrade:**
+
+The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the package can be upgraded with `uv pip install -U mbo_utilities`.
 
 | Method | Command |
 |--------|---------|
@@ -96,7 +107,7 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 | CLI only | `uv tool upgrade mbo_utilities` |
 | Virtual env | `uv pip install -U mbo_utilities` |
 
-## Supported ScanImage Configurations
+## ScanImage Acquisition Modes
 
 `mbo_utilities` automatically detects and parses metadata from these ScanImage acquisition modes:
 
@@ -104,10 +115,10 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 |---------------|-----------|--------|
 | LBM single channel | `channelSave=[1..N]`, AI0 only | `lbm=True`, `colors=1` |
 | LBM dual channel | `channelSave=[1..N]`, AI0+AI1 | `lbm=True`, `colors=2` |
-| Piezo (single frame/slice) | `enable=True`, `framesPerSlice=1` | `piezo=True` |
-| Piezo multi-frame (with avg) | `enable=True`, `logAvgFactor>1` | `piezo=True`, averaged frames |
-| Piezo multi-frame (no avg) | `enable=True`, `framesPerSlice>1`, `logAvg=1` | `piezo=True`, raw frames |
-| Single plane | `enable=False` | `zplanes=1` |
+| Piezo (single frame/slice) | `hStackManager.enable=False`, `framesPerSlice=1` | `piezo=True` |
+| Piezo multi-frame (with avg) | `hStackManager.enable=False`, `logAvgFactor>1` | `piezo=True`, averaged frames |
+| Piezo multi-frame (no avg) | `hStackManager.enable=False`, `framesPerSlice>1`, `logAvg=1` | `piezo=True`, raw frames |
+| Single plane | `hStackManager.enable=False` | `zplanes=1` |
 
 > **Note:** Frame-averaging (`logAverageFactor > 1`) is only available for non-LBM acquisitions.
 

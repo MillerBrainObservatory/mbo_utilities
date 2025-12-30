@@ -552,3 +552,36 @@ def load_npy(path):
                 pathlib.PosixPath = _original_posix
             if _original_windows is not None:
                 pathlib.WindowsPath = _original_windows
+
+
+def get_dtype(dtype):
+    """
+    Ensure input is a valid numpy.dtype object.
+    
+    This guards against libraries (like Zarr v3) returning string representations ('int16')
+    instead of proper dtype objects, which can break downstream code expecting .name attributes.
+
+    Parameters
+    ----------
+    dtype : str, type, np.dtype, or any valid numpy dtype input
+        The data type to convert.
+
+    Returns
+    -------
+    np.dtype
+        The corresponding numpy dtype object.
+
+    Examples
+    --------
+    >>> safe_dtype('int16').name
+    'int16'
+    >>> safe_dtype(np.int16).itemsize
+    2
+    """
+    if isinstance(dtype, np.dtype):
+        return dtype
+    try:
+        return np.dtype(dtype)
+    except TypeError:
+        # Fallback for some weird cases or ensure string conversion first
+        return np.dtype(str(dtype))

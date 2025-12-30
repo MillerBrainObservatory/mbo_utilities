@@ -59,11 +59,23 @@ span.label {
 }
 
 .bd-page-width {
-  max-width: 1200px !important;
+  max-width: 1400px !important;
 }
 
 .bd-article-container {
-  max-width: 850px !important;
+  max-width: 1000px !important;
+}
+
+/* Ensure images with transparency render correctly on dark background */
+.sd-card img,
+.bd-article img,
+.sd-card-body img,
+.sd-card-carousel img,
+img[src*="readme"],
+img[src*="scanphase"],
+img[src*="cli"] {
+  background-color: transparent !important;
+  background: none !important;
 }
 
 figure, .figure {

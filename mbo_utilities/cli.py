@@ -640,7 +640,13 @@ main.add_command(db_cli)
     default=False,
     help="Display plots interactively after analysis.",
 )
-def scanphase(input_path, output_dir, num_tifs, image_format, show):
+@click.option(
+    "--docs",
+    is_flag=True,
+    default=False,
+    help="Save output to docs/_images/scanphase/ for documentation.",
+)
+def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
     """
     Scan-phase analysis for bidirectional scanning data.
 
@@ -648,9 +654,15 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
 
     \b
     OUTPUT:
+      summary.png            - dashboard with all key metrics
       temporal.png           - per-frame offset time series and histogram
-      window_convergence.png - offset vs window size (key diagnostic)
-      spatial.png            - spatial variation across FOV
+      windows.png            - offset vs window size (convergence)
+      spatial.png            - spatial variation across FOV (heatmaps)
+      horizontal.png         - offset variation across X position
+      vertical.png           - offset variation across Y position
+      temporal_spatial.png   - 2D heatmap of drift over time and space
+      parameters.png         - offset reliability vs signal intensity
+      zplanes.png            - z-plane analysis (if multi-plane data)
       scanphase_results.npz  - all numerical data
 
     \b
@@ -660,12 +672,20 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
       mbo scanphase ./folder/ -n 5           # use first 5 tiffs in folder
       mbo scanphase data.tiff -o ./results/  # custom output directory
       mbo scanphase data.tiff --show         # show plots interactively
+      mbo scanphase data.tiff --docs         # save to docs/_images/scanphase/
     """
     from pathlib import Path
     from mbo_utilities import get_files
     from mbo_utilities.analysis.scanphase import run_scanphase_analysis
 
     try:
+        # handle --docs flag: override output_dir to docs/_images/scanphase/
+        if docs:
+            # find the repo root (where docs/ folder is)
+            repo_root = Path(__file__).parent.parent
+            output_dir = str(repo_root / "docs" / "_images" / "scanphase")
+            click.echo(f"--docs flag: saving to {output_dir}")
+
         # handle num_tifs for folder input
         actual_input = input_path
         if input_path is not None:
@@ -680,11 +700,13 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show):
                 actual_input = tiffs
 
         # determine output directory for display
-        if input_path is not None:
+        if output_dir is not None:
+            actual_output_dir = Path(output_dir)
+        elif input_path is not None:
             input_path_obj = Path(input_path)
-            actual_output_dir = output_dir if output_dir else input_path_obj.parent / f"{input_path_obj.stem}_scanphase_analysis"
+            actual_output_dir = input_path_obj.parent / f"{input_path_obj.stem}_scanphase_analysis"
         else:
-            actual_output_dir = output_dir
+            actual_output_dir = None
 
         results = run_scanphase_analysis(
             data_path=actual_input,
