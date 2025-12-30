@@ -301,11 +301,17 @@ def capture_save_as_dialog(data_path: Path):
         # After 2 seconds, open the save_as popup
         if time.time() - start_time > 2.0 and not state["popup_opened"]:
             try:
-                # Access the preview widget and open its save popup
-                if hasattr(iw, '_preview_widget') and iw._preview_widget is not None:
-                    iw._preview_widget._saveas_popup_open = True
+                # Access the PreviewDataWidget via figure.guis
+                guis = iw.figure.guis if hasattr(iw.figure, 'guis') else iw.figure._guis
+                for gui in guis:
+                    if hasattr(gui, '_saveas_popup_open'):
+                        gui._saveas_popup_open = True
+                        state["popup_opened"] = True
+                        print("Opened save_as popup")
+                        break
+                if not state["popup_opened"]:
+                    print("No gui with _saveas_popup_open found")
                     state["popup_opened"] = True
-                    print("Opened save_as popup")
             except Exception as e:
                 print(f"Failed to open save popup: {e}")
                 state["popup_opened"] = True  # Don't keep trying
