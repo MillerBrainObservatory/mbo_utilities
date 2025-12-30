@@ -16,11 +16,18 @@
 <a href="https://github.com/MillerBrainObservatory/mbo_utilities/issues"><b>Issues</b></a>
 </p>
 
-Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO). Fast, lazy I/O with `imread`/`imwrite` for multiple array types (ScanImage and generic TIFFs, Suite2p binaries, Zarr and HDF5), an interactive GUI for data visualization, and processing pipelines for calcium imaging data.
+Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO).
 
-<div align="center">
-  <img src="docs/_images/gui/2_mbo_main_full.png" width="80%" />
-</div>
+- **Read and write imaging data** with `imread`/`imwrite` - fast, lazy I/O for ScanImage TIFFs, generic TIFFs, Suite2p binaries, Zarr, and HDF5
+- **Run processing pipelines** for calcium imaging - motion correction, cell extraction, and signal analysis
+- **Visualize data interactively** with a GPU-accelerated GUI for exploring large datasets
+
+<p align="center">
+  <img src="docs/_images/gui/readme/01_step_file_dialog.png" height="360" alt="File Selection" />
+  <img src="docs/_images/gui/readme/02_step_data_view.png" height="360" alt="Data Viewer" />
+  <br/>
+  <em>Select data and explore with GPU-accelerated visualization</em>
+</p>
 
 > **Note:**
 > `mbo_utilities` is in **late-beta** stage of active development. There will be bugs that can be addressed quickly, file an [issue](https://github.com/MillerBrainObservatory/mbo_utilities/issues) or reach out on slack.
@@ -31,7 +38,7 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 `pip install mbo_utilities`
 
-> For help setting up a virtual environment, see [the MBO guide](https://millerbrainobservatory.github.io/guides/venvs.html).
+> For help setting up a virtual environment, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ### Optional Dependencies
 
@@ -51,26 +58,7 @@ pip install "mbo_utilities[all]"
 
 ### With [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
 
-After [installing `uv`](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer):
-
-**For CLI usage only** (global `mbo` command):
-
-```bash
-uv tool install mbo_utilities
-```
-
-This installs the CLI globally. Not for use as a library in your own code.
-
-**For library/development use** (import in your code):
-
-```bash
-uv venv --python 3.12
-uv pip install mbo_utilities
-```
-
-This creates a project-specific virtual environment.
-
-**One-line install scripts** (CLI + desktop shortcut):
+The install script will either create a virtual environment with `mbo_utilities` installed, install the `mbo` CLI globally, or both:
 
 ```powershell
 # Windows (PowerShell)
@@ -82,84 +70,31 @@ irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/maste
 curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
 ```
 
-These scripts install to `~/mbo/envs/mbo_utilities` and add `mbo` to your PATH.
+> **Note:** The `mbo` command is available globally thanks to [uv tools](https://docs.astral.sh/uv/concepts/tools/). Update with the install script or manually with `uv tool upgrade mbo_utilities`.
 
-```bash
-$ mbo --help
-Usage: mbo [OPTIONS] COMMAND [ARGS]...
-
-  MBO Utilities CLI - data preview and processing tools.
-
-  GUI Mode:
-    mbo                            Open file selection dialog
-    mbo /path/to/data              Open specific file in GUI
-    mbo /path/to/data --metadata   Show only metadata
-
-  Commands:
-    mbo convert INPUT OUTPUT       Convert between formats
-    mbo info INPUT                 Show array information (CLI)
-    mbo download URL               Download file from GitHub
-    mbo formats                    List supported formats
-
-  Utilities:
-    mbo --download-notebook             Download user guide notebook
-    mbo --check-install                 Verify installation
-
-Options:
-  --download-notebook   Download the mbo_utiltities user guide notebook.
-  --notebook-url TEXT   URL of notebook to download.
-  --download-file TEXT  Download a file from URL (e.g. GitHub).
-  -o, --output TEXT     Output path for --download-file or --download-
-                        notebook.
-  --check-install       Verify the installation of mbo_utilities and
-                        dependencies.
-  --help                Show this message and exit.
-
-Commands:
-  convert    Convert imaging data between formats.
-  download   Download a file from a URL (supports GitHub).
-  formats    List supported file formats.
-  info       Show information about an imaging dataset.
-  scanphase  Scan-phase analysis for bidirectional scanning data.
-  view       Open imaging data in the GUI viewer.
-```
-
-### Environment Locations
-
-| Method | Use Case | Run Command |
-|--------|----------|-------------|
-| `uv tool install` | CLI only | `mbo` |
-| `uv pip install` | Scientific Data Processing | `uv run mbo` or activate venv |
-| Install script | CLI + desktop shortcut | `mbo` |
-
-For library use, activate the venv or use `uv run`:
-
-```bash
-# option 1: activate
-.venv\Scripts\activate  # Windows
-source .venv/bin/activate  # Linux/macOS
-mbo --help
-
-# option 2: uv run (no activation needed)
-uv run mbo --help
-```
 
 ## Usage
 
-**CLI Commands:**
-
 | Command | Description |
 |---------|-------------|
-| `uv run mbo` | Launch interactive GUI |
-| `uv run mbo --check-install` | Verify installation and GPU configuration |
-| `uv run mbo /path/to/data.tiff` | View a supported file/folder |
-| `uv run mbo /path/to/data.tiff --metadata` | View metadata for a supported file/folder |
-| `uv run mbo --download-notebook` | Download user guide notebook |
-| `uv run mbo info /path/to/data.tiff` | Show file info |
-| `uv run mbo convert input.tiff output.zarr` | Convert file formats |
-| `uv run mbo scanphase /path/to/data.tiff` | Scan-phase analysis |
-| `uv run mbo formats` | List supported formats |
-| `uv run pollen` | Pollen calibration tool (WIP) |
+| `mbo` | Launch interactive GUI |
+| `mbo --check-install` | Verify installation and GPU configuration |
+| `mbo /path/to/data.tiff` | View a supported file/folder |
+| `mbo /path/to/data.tiff --metadata` | View metadata for a supported file/folder |
+| `mbo info /path/to/data.tiff` | Show file info |
+| `mbo convert input.tiff output.zarr` | Convert file formats |
+| `mbo scanphase /path/to/data.tiff` | Scan-phase analysis |
+| `mbo formats` | List supported formats |
+| `mbo download path/to/notebook.ipynb` | Download a notebook to the current directory |
+| `pollen` | Pollen calibration tool (WIP) |
+
+**Upgrade:**
+
+| Method | Command |
+|--------|---------|
+| Install script | Re-run install script |
+| CLI only | `uv tool upgrade mbo_utilities` |
+| Virtual env | `uv pip install -U mbo_utilities` |
 
 ## Supported ScanImage Configurations
 

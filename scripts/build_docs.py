@@ -9,11 +9,18 @@ def main():
     """Clean and build the documentation."""
     docs_dir = Path(__file__).parent.parent / "docs"
 
+    # Use make.bat on Windows, make on Unix
+    if sys.platform == "win32":
+        make_cmd = [str(docs_dir / "make.bat")]
+    else:
+        make_cmd = ["make"]
+
     print("Cleaning documentation build...")
     result = subprocess.run(
-        ["make", "clean"],
+        make_cmd + ["clean"],
         cwd=docs_dir,
         capture_output=False,
+        shell=(sys.platform == "win32"),
     )
 
     if result.returncode != 0:
@@ -22,9 +29,10 @@ def main():
 
     print("\nBuilding documentation...")
     result = subprocess.run(
-        ["make", "html"],
+        make_cmd + ["html"],
         cwd=docs_dir,
         capture_output=False,
+        shell=(sys.platform == "win32"),
     )
 
     if result.returncode != 0:

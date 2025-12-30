@@ -17,18 +17,15 @@ html[data-theme=dark] .sd-card img[src*='.svg'] {
   filter: invert(0.82) brightness(0.8) contrast(1.2);
 }
 
-/** landing page logo **/
 #landing-page-logo {
     background: none;
 }
 
-/** Add a counter before subsections **/
 h1:not(.rubric) {
     counter-reset: subsection;
     text-decoration: underline;
 }
 
-/** No icon for admonitions with no-icon class */
 div.admonition.no-icon > .admonition-title::before {
     content: "";
 }
@@ -48,7 +45,6 @@ div.pyscript {
     margin-bottom: 0;
 }
 span.label {
-    /* pyscript changes this and it messes up footnote labels */
     all: unset;
 }
 
@@ -62,19 +58,6 @@ span.label {
     font-size: 0.8rem;
 }
 
-pre {
-  background-color: #0F111A;
-}
-
-/* ========================================
-   MATERIAL DARK THEME
-   background: #121212, surface: #1e1e1e
-   ======================================== */
-
-/* ========================================
-   CONTENT AREA WIDTH
-   ======================================== */
-
 .bd-page-width {
   max-width: 1200px !important;
 }
@@ -82,10 +65,6 @@ pre {
 .bd-article-container {
   max-width: 850px !important;
 }
-
-/* ========================================
-   FIGURES - CONSTRAINED
-   ======================================== */
 
 figure, .figure {
   max-width: 100% !important;
@@ -118,55 +97,50 @@ figcaption, .caption {
   margin: 1em auto !important;
 }
 
-/* ========================================
-   DARK CODE BLOCKS
-   ======================================== */
-
+/* code blocks: dark gray outer, dark blue inner */
 div[class*="highlight"], pre, code {
-  background-color: #1e1e1e !important;
+  background-color: #0d1117 !important;
 }
 
 .highlight {
-  background: #1e1e1e !important;
-  border-radius: 4px !important;
-  padding: 0 !important;
+  background: #1a1a1a !important;
+  border-radius: 6px !important;
+  padding: 4px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 4px 8px rgba(0, 0, 0, 0.4) !important;
 }
 
 pre {
-  background-color: #1e1e1e !important;
-  border: 1px solid #333 !important;
+  background-color: #0a0e14 !important;
+  border: none !important;
   border-radius: 4px !important;
-  padding: 8px 12px !important;
-  margin: 0.75em 0 !important;
-  font-size: 0.8rem !important;
+  padding: 12px 24px !important;
+  margin: 0 !important;
+  font-size: 0.82rem !important;
+  box-shadow: none !important;
 }
 
 code {
-  background-color: #2d2d2d !important;
-  color: #e0e0e0 !important;
-  padding: 2px 5px !important;
-  border-radius: 3px !important;
-  font-size: 0.8rem !important;
+  background-color: #161b22 !important;
+  color: #c9d1d9 !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  font-size: 0.82rem !important;
 }
 
 pre code {
   background-color: transparent !important;
   padding: 0 !important;
+  box-shadow: none !important;
 }
 
-/* syntax colors */
 .highlight .k, .highlight .kn, .highlight .kd { color: #c792ea !important; }
-.highlight .s, .highlight .s1, .highlight .s2 { color: #c3e88d !important; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #f9ae58 !important; }
 .highlight .n { color: #e0e0e0 !important; }
 .highlight .nf, .highlight .fm { color: #82aaff !important; }
 .highlight .nc { color: #ffcb6b !important; }
 .highlight .c, .highlight .c1, .highlight .cm { color: #546e7a !important; font-style: italic !important; }
 .highlight .mi, .highlight .mf { color: #f78c6c !important; }
 .highlight .o, .highlight .p { color: #89ddff !important; }
-
-/* ========================================
-   COMPACT TABLES
-   ======================================== */
 
 table {
   background-color: #1e1e1e !important;
@@ -222,10 +196,6 @@ table td code, table th code {
   font-size: 0.72rem !important;
   padding: 1px 3px !important;
 }
-
-/* ========================================
-   DARK ADMONITIONS
-   ======================================== */
 
 div.admonition {
   background-color: #1e1e1e !important;

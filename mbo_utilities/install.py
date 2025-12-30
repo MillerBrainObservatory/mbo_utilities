@@ -287,9 +287,21 @@ def _check_rastermap() -> FeatureStatus:
         )
 
 
-def check_installation() -> InstallStatus:
-    """run full installation check and return structured status."""
+def check_installation(callback: type[object] | None = None) -> InstallStatus:
+    """run full installation check and return structured status.
+    
+    Args:
+        callback: optional callable(progress: float, message: str) for status updates
+    """
+    def _update(p: float, msg: str):
+        if callback:
+            try:
+                callback(p, msg)
+            except Exception:
+                pass
+
     status = InstallStatus()
+    _update(0.1, "Checking Python version...")
 
     # basic info
     try:
@@ -301,15 +313,18 @@ def check_installation() -> InstallStatus:
     status.python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 
     # cuda environment
+    _update(0.2, "Checking CUDA environment...")
     status.cuda_info.nvcc_version = _get_nvcc_version()
     status.cuda_info.driver_version = _get_nvidia_smi_cuda()
 
     # check pytorch (needed for suite2p GPU)
+    _update(0.3, "Checking PyTorch...")
     pytorch_status, pytorch_cuda = _check_pytorch()
     status.cuda_info.pytorch_cuda = pytorch_cuda
     status.features.append(pytorch_status)
 
     # check cupy (needed for suite3d)
+    _update(0.5, "Checking CuPy...")
     cupy_status, cupy_cuda = _check_cupy()
     status.cuda_info.cupy_cuda = cupy_cuda
     status.features.append(cupy_status)
@@ -325,6 +340,7 @@ def check_installation() -> InstallStatus:
             pass
 
     # check pipelines
+    _update(0.7, "Checking Suite2p...")
     suite2p_status = _check_suite2p()
     # if suite2p is installed but pytorch has no GPU, warn
     if suite2p_status.status == Status.OK and pytorch_status.gpu_ok is False:
@@ -339,6 +355,7 @@ def check_installation() -> InstallStatus:
         suite2p_status.gpu_ok = pytorch_status.gpu_ok
     status.features.append(suite2p_status)
 
+    _update(0.8, "Checking Suite3D...")
     suite3d_status = _check_suite3d()
     # if suite3d is installed but cupy has no GPU, warn
     if suite3d_status.status == Status.OK and cupy_status.gpu_ok is False:
@@ -353,8 +370,10 @@ def check_installation() -> InstallStatus:
         suite3d_status.gpu_ok = cupy_status.gpu_ok
     status.features.append(suite3d_status)
 
+    _update(0.9, "Checking Rastermap...")
     status.features.append(_check_rastermap())
-
+    
+    _update(1.0, "Done")
     return status
 
 

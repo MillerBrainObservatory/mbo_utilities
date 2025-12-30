@@ -344,7 +344,7 @@ def _check_installation():
     return status.all_ok
 
 
-def _select_file() -> tuple[Any, Any, Any, bool]:
+def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bool]:
     """Show file selection dialog and return user choices."""
     from mbo_utilities.gui._file_dialog import FileDialog  # triggers _setup import
     from mbo_utilities.gui._setup import get_default_ini_path
@@ -352,12 +352,17 @@ def _select_file() -> tuple[Any, Any, Any, bool]:
 
     dlg = FileDialog()
 
-    params = hello_imgui.RunnerParams()
-    params.app_window_params.window_title = "MBO Utilities – Data Selection"
-    params.app_window_params.window_geometry.size = (420, 680)
-    params.app_window_params.window_geometry.size_auto = False
-    params.app_window_params.resizable = False  # fixed size to prevent scrollbar issues
-    params.ini_filename = get_default_ini_path("file_dialog")
+    if runner_params is None:
+        params = hello_imgui.RunnerParams()
+        params.app_window_params.window_title = "MBO Utilities – Data Selection"
+        params.app_window_params.window_geometry.size = (340, 620)
+        params.app_window_params.window_geometry.size_auto = False
+        params.app_window_params.resizable = True
+        params.ini_filename = get_default_ini_path("file_dialog")
+    else:
+        params = runner_params
+
+    # always override the gui callback to render our dialog
     params.callbacks.show_gui = dlg.render
 
     addons = immapp.AddOnsParams()
@@ -513,6 +518,7 @@ def _run_gui_impl(
     metadata_only: bool = False,
     select_only: bool = False,
     show_splash: bool = False,
+    runner_params: Optional[Any] = None,
 ):
     """Internal implementation of run_gui with all heavy imports."""
     # show splash screen while loading (only for desktop shortcut launches)
@@ -533,7 +539,7 @@ def _run_gui_impl(
 
         # Handle file selection if no path provided
         if data_in is None:
-            data_in, roi_from_dialog, widget, metadata_only = _select_file()
+            data_in, roi_from_dialog, widget, metadata_only = _select_file(runner_params=runner_params)
             if not data_in:
                 print("No file selected, exiting.")
                 return None
@@ -587,6 +593,7 @@ def run_gui(
     widget: bool = True,
     metadata_only: bool = False,
     select_only: bool = False,
+    runner_params: Optional[Any] = None,
 ):
     """
     Open a GUI to preview data of any supported type.
@@ -608,6 +615,8 @@ def run_gui(
     select_only : bool, default False
         If True, only show file selection dialog and return the selected path.
         Does not load data or open the image viewer.
+    runner_params : Any, optional
+        hello_imgui.RunnerParams instance for custom window configuration.
 
     Returns
     -------
@@ -641,6 +650,7 @@ def run_gui(
         widget=widget,
         metadata_only=metadata_only,
         select_only=select_only,
+        runner_params=runner_params,
     )
 
 
