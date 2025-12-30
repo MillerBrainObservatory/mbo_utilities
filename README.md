@@ -58,7 +58,7 @@ pip install "mbo_utilities[all]"
 
 ### With [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
 
-**One-line install scripts** (CLI + desktop shortcut):
+The install script will either create a virtual environment with `mbo_utilities` installed, install the `mbo` CLI globally, or both:
 
 ```powershell
 # Windows (PowerShell)
@@ -70,65 +70,31 @@ irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/maste
 curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
 ```
 
-These scripts install to `~/mbo/envs/mbo_utilities` and add `mbo` to your PATH.
-
-### Environment Locations
-
-| Method | Use Case | Run Command |
-|--------|----------|-------------|
-| `uv tool install` | CLI only | `mbo` |
-| `uv pip install` | Scientific Data Processing | `uv run mbo` |
-| Install script | CLI + desktop shortcut | `mbo` |
-
-For library use, activate the venv or use `uv run`:
-
-```bash
-# option 1: activate
-.venv\Scripts\activate  # Windows
-source .venv/bin/activate  # Linux/macOS
-mbo --help
-
-# option 2: uv run (no activation needed)
-uv run mbo --help
-```
-
-After [installing `uv`](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer):
-
-**For CLI usage only** (global `mbo` command):
-
-```bash
-uv tool install mbo_utilities
-```
-
-This installs the CLI globally. Not for use as a library in your own code.
-
-**For library/development use** (import in your code):
-
-```bash
-uv venv --python 3.12
-uv pip install mbo_utilities
-```
-
-This creates a project-specific virtual environment.
+> **Note:** The `mbo` command is available globally thanks to [uv tools](https://docs.astral.sh/uv/concepts/tools/). Update with the install script or manually with `uv tool upgrade mbo_utilities`.
 
 
 ## Usage
 
-**CLI Commands:**
-
 | Command | Description |
 |---------|-------------|
-| `uv run mbo` | Launch interactive GUI |
-| `uv run mbo --check-install` | Verify installation and GPU configuration |
-| `uv run mbo /path/to/data.tiff` | View a supported file/folder |
-| `uv run mbo /path/to/data.tiff --metadata` | View metadata for a supported file/folder |
-| `uv run mbo --download-notebook` | Download user guide notebook |
-| `uv run mbo info /path/to/data.tiff` | Show file info |
-| `uv run mbo convert input.tiff output.zarr` | Convert file formats |
-| `uv run mbo scanphase /path/to/data.tiff` | Scan-phase analysis |
-| `uv run mbo formats` | List supported formats |
-| `uv run mbo download path/to/notebook.ipynb` | Download a notebook to the current directory |
-| `uv run pollen` | Pollen calibration tool (WIP) |
+| `mbo` | Launch interactive GUI |
+| `mbo --check-install` | Verify installation and GPU configuration |
+| `mbo /path/to/data.tiff` | View a supported file/folder |
+| `mbo /path/to/data.tiff --metadata` | View metadata for a supported file/folder |
+| `mbo info /path/to/data.tiff` | Show file info |
+| `mbo convert input.tiff output.zarr` | Convert file formats |
+| `mbo scanphase /path/to/data.tiff` | Scan-phase analysis |
+| `mbo formats` | List supported formats |
+| `mbo download path/to/notebook.ipynb` | Download a notebook to the current directory |
+| `pollen` | Pollen calibration tool (WIP) |
+
+**Upgrade:**
+
+| Method | Command |
+|--------|---------|
+| Install script | Re-run install script |
+| CLI only | `uv tool upgrade mbo_utilities` |
+| Virtual env | `uv pip install -U mbo_utilities` |
 
 ## Supported ScanImage Configurations
 
