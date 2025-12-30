@@ -23,13 +23,10 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 - **Visualize data interactively** with a GPU-accelerated GUI for exploring large datasets
 
 <p align="center">
-  <img src="docs/_images/gui/readme/01_step_file_dialog.png" alt="File Selection" /><br/>
-  <em>Select files or folders to preview</em>
-</p>
-
-<p align="center">
-  <img src="docs/_images/gui/readme/02_step_data_view.png" alt="Data Viewer" /><br/>
-  <em>GPU-accelerated data viewer with interactive controls</em>
+  <img src="docs/_images/gui/readme/01_step_file_dialog.png" height="360" alt="File Selection" />
+  <img src="docs/_images/gui/readme/02_step_data_view.png" height="360" alt="Data Viewer" />
+  <br/>
+  <em>Select data and explore with GPU-accelerated visualization</em>
 </p>
 
 > **Note:**
