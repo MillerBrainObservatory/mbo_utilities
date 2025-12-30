@@ -204,7 +204,8 @@ class _SingleTiffPlaneReader:
 
     @property
     def dtype(self):
-        return self._dtype
+        from mbo_utilities.util import get_dtype
+        return get_dtype(self._dtype)
 
     def __getitem__(self, key):
         if not isinstance(key, tuple):
@@ -506,7 +507,8 @@ class TiffArray(ReductionMixin):
 
     @property
     def dtype(self):
-        return self._target_dtype if self._target_dtype is not None else self._dtype
+        from mbo_utilities.util import get_dtype
+        return self._target_dtype if self._target_dtype is not None else get_dtype(self._dtype)
 
     @property
     def ndim(self) -> int:
@@ -749,7 +751,8 @@ class MBOTiffArray(ReductionMixin):
 
     @property
     def dtype(self):
-        return self._target_dtype if self._target_dtype is not None else self._dtype
+        from mbo_utilities.util import get_dtype
+        return self._target_dtype if self._target_dtype is not None else get_dtype(self._dtype)
 
     def _compute_frame_vminmax(self):
         if not hasattr(self, '_cached_vmin'):
