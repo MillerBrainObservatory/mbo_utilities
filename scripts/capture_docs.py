@@ -303,19 +303,19 @@ def capture_save_as_dialog(data_path: Path):
         elapsed = time.time() - start_time
         if elapsed > 2.0 and elapsed < 4.0:
             try:
-                # Access the PreviewDataWidget via figure.guis
-                guis = iw.figure.guis if hasattr(iw.figure, 'guis') else iw.figure._guis
-                for gui in guis:
-                    if hasattr(gui, '_saveas_popup_open'):
+                # Access the PreviewDataWidget via figure.guis (it's a dict keyed by edge location)
+                guis_dict = iw.figure.guis if hasattr(iw.figure, 'guis') else iw.figure._guis
+                for edge, gui in guis_dict.items():
+                    if gui is not None and hasattr(gui, '_saveas_popup_open'):
                         # Set the flag every frame to ensure popup opens
                         gui._saveas_popup_open = True
                         if state["open_attempts"] == 0:
-                            print(f"Found gui: {type(gui).__name__}, setting _saveas_popup_open")
+                            print(f"Found gui at '{edge}': {type(gui).__name__}, setting _saveas_popup_open")
                         state["open_attempts"] += 1
                         state["popup_opened"] = True
                         break
                 if not state["popup_opened"] and state["open_attempts"] == 0:
-                    print(f"No gui with _saveas_popup_open found. guis: {[type(g).__name__ for g in guis]}")
+                    print(f"No gui with _saveas_popup_open found. guis: {guis_dict}")
             except Exception as e:
                 if state["open_attempts"] == 0:
                     print(f"Failed to open save popup: {e}")
