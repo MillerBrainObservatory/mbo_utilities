@@ -312,8 +312,18 @@ function Install-MboTool {
     Write-Info "Installing mbo CLI tool via uv tool install..."
 
     # build spec with extras
+    # For git URLs: "mbo_utilities @ git+..." -> "mbo_utilities[extras] @ git+..."
+    # For PyPI: "mbo_utilities" -> "mbo_utilities[extras]"
     if ($Extras.Count -gt 0) {
-        $fullSpec = "$Spec[" + ($Extras -join ',') + "]"
+        $extrasStr = "[" + ($Extras -join ',') + "]"
+        if ($Spec -match '^([^\s@]+)(\s*@\s*.*)$') {
+            # Git URL format: insert extras after package name, before @ URL
+            $fullSpec = $matches[1] + $extrasStr + $matches[2]
+        }
+        else {
+            # PyPI format: just append extras
+            $fullSpec = "$Spec$extrasStr"
+        }
     }
     else {
         $fullSpec = $Spec
@@ -336,7 +346,7 @@ function Install-MboTool {
                 Write-Host ""
                 Write-Warn "mbo_utilities is already installed as a tool."
                 Write-Host ""
-                Write-Host "  [1] Reinstall - Uninstall and reinstall" -ForegroundColor Cyan
+                Write-Host "  [1] Upgrade   - Uninstall and reinstall" -ForegroundColor Cyan
                 Write-Host "  [2] Skip      - Keep existing installation" -ForegroundColor Cyan
                 Write-Host "  [3] Cancel    - Exit" -ForegroundColor Cyan
                 Write-Host ""
@@ -383,24 +393,26 @@ function Install-MboTool {
     }
 }
 
-function Show-DevEnvPrompt {
+function Show-InstallTypePrompt {
     Write-Host ""
-    Write-Host "Development Environment" -ForegroundColor White
+    Write-Host "Installation Type" -ForegroundColor White
     Write-Host ""
-    Write-Host "  The CLI tool is now installed. You can also create a Python" -ForegroundColor Gray
-    Write-Host "  environment for importing mbo_utilities in your own scripts." -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  [1] Yes  - Create development environment" -ForegroundColor Cyan
-    Write-Host "  [2] No   - CLI only (recommended for most users)" -ForegroundColor Cyan
+    Write-Host "  [1] Environment + CLI - Create Python venv with mbo_utilities + global CLI (Recommended)" -ForegroundColor Cyan
+    Write-Host "  [2] Environment       - Create Python venv only (for library use)" -ForegroundColor Cyan
+    Write-Host "  [3] CLI               - Install global CLI only (mbo command)" -ForegroundColor Cyan
     Write-Host ""
 
     do {
-        $choice = Read-Host "Create development environment? (1-2)"
-        $valid = $choice -match '^[12]$'
+        $choice = Read-Host "Select installation type (1-3)"
+        $valid = $choice -match '^[123]$'
         if (-not $valid) { Write-Warn "Invalid selection." }
     } while (-not $valid)
 
-    return $choice -eq "1"
+    switch ($choice) {
+        "1" { return @{ InstallCli = $true; InstallEnv = $true } }
+        "2" { return @{ InstallCli = $false; InstallEnv = $true } }
+        "3" { return @{ InstallCli = $true; InstallEnv = $false } }
+    }
 }
 
 function Show-EnvLocationPrompt {
@@ -445,6 +457,70 @@ function Install-DevEnvironment {
 
     $pythonPath = Join-Path $EnvPath "Scripts\python.exe"
     $envExists = Test-Path $pythonPath
+    $dirExists = Test-Path $EnvPath
+
+    # Check if directory exists but is not a valid venv (likely a project directory)
+    if ($dirExists -and -not $envExists) {
+        # Check if it looks like a project directory (has pyproject.toml, .git, etc.)
+        $isProjectDir = (Test-Path (Join-Path $EnvPath "pyproject.toml")) -or
+                        (Test-Path (Join-Path $EnvPath ".git")) -or
+                        (Test-Path (Join-Path $EnvPath "setup.py"))
+
+        if ($isProjectDir) {
+            Write-Host ""
+            Write-Warn "This looks like a project directory: $EnvPath"
+            Write-Host ""
+            Write-Host "  [1] Create .venv inside - Create environment at $EnvPath\.venv (Recommended)" -ForegroundColor Cyan
+            Write-Host "  [2] Skip                - Don't create dev environment" -ForegroundColor Cyan
+            Write-Host ""
+
+            do {
+                $choice = Read-Host "Select option (1-2)"
+                $valid = $choice -match '^[12]$'
+                if (-not $valid) { Write-Warn "Invalid selection." }
+            } while (-not $valid)
+
+            switch ($choice) {
+                "1" {
+                    $EnvPath = Join-Path $EnvPath ".venv"
+                    Write-Info "Will create environment at: $EnvPath"
+                    $pythonPath = Join-Path $EnvPath "Scripts\python.exe"
+                    $envExists = Test-Path $pythonPath
+                }
+                "2" {
+                    Write-Info "Skipping dev environment."
+                    return $null
+                }
+            }
+        }
+        else {
+            Write-Host ""
+            Write-Warn "Directory exists but is not a virtual environment: $EnvPath"
+            Write-Host ""
+            Write-Host "  [1] Create .venv inside - Create environment at $EnvPath\.venv" -ForegroundColor Cyan
+            Write-Host "  [2] Skip                - Don't create dev environment" -ForegroundColor Cyan
+            Write-Host ""
+
+            do {
+                $choice = Read-Host "Select option (1-2)"
+                $valid = $choice -match '^[12]$'
+                if (-not $valid) { Write-Warn "Invalid selection." }
+            } while (-not $valid)
+
+            switch ($choice) {
+                "1" {
+                    $EnvPath = Join-Path $EnvPath ".venv"
+                    Write-Info "Will create environment at: $EnvPath"
+                    $pythonPath = Join-Path $EnvPath "Scripts\python.exe"
+                    $envExists = Test-Path $pythonPath
+                }
+                "2" {
+                    Write-Info "Skipping dev environment."
+                    return $null
+                }
+            }
+        }
+    }
 
     if ($envExists) {
         if ($env:MBO_OVERWRITE -eq "1") {
@@ -499,8 +575,18 @@ function Install-DevEnvironment {
     }
 
     # build spec with extras
+    # For git URLs: "mbo_utilities @ git+..." -> "mbo_utilities[extras] @ git+..."
+    # For PyPI: "mbo_utilities" -> "mbo_utilities[extras]"
     if ($Extras.Count -gt 0) {
-        $fullSpec = "$Spec[" + ($Extras -join ',') + "]"
+        $extrasStr = "[" + ($Extras -join ',') + "]"
+        if ($Spec -match '^([^\s@]+)(\s*@\s*.*)$') {
+            # Git URL format: insert extras after package name, before @ URL
+            $fullSpec = $matches[1] + $extrasStr + $matches[2]
+        }
+        else {
+            # PyPI format: just append extras
+            $fullSpec = "$Spec$extrasStr"
+        }
     }
     else {
         $fullSpec = $Spec
@@ -594,36 +680,45 @@ function New-DesktopShortcut {
     }
 
     # create shortcut pointing to uv-managed mbo.exe
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $mboExePath
-    $shortcut.WorkingDirectory = [Environment]::GetFolderPath("UserProfile")
-    if ($iconPath -and (Test-Path $iconPath)) { $shortcut.IconLocation = $iconPath }
-    $shortcut.Description = "MBO Image Viewer"
-    $shortcut.Save()
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $mboExePath
+        $shortcut.WorkingDirectory = [Environment]::GetFolderPath("UserProfile")
+        if ($iconPath -and (Test-Path $iconPath)) { $shortcut.IconLocation = $iconPath }
+        $shortcut.Description = "MBO Image Viewer"
+        $shortcut.Save()
 
-    Write-Success "Desktop shortcut created: $shortcutName"
-    Write-Info "  Target: $mboExePath"
+        Write-Success "Desktop shortcut created: $shortcutName"
+        Write-Info "  Target: $mboExePath"
+    }
+    catch {
+        Write-Warn "Could not create desktop shortcut: $_"
+        Write-Warn "You can manually create a shortcut to: $mboExePath"
+    }
 }
 
 function Show-UsageInstructions {
     param(
-        [string]$EnvPath = $null
+        [string]$EnvPath = $null,
+        [bool]$CliInstalled = $true
     )
-
-    $binDir = Get-UvToolBinDir
 
     Write-Host ""
     Write-Host "Installation Complete" -ForegroundColor White
     Write-Host ""
-    Write-Host "  CLI Location:" -ForegroundColor Gray
-    Write-Host "    $binDir\mbo.exe" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  Usage:" -ForegroundColor Gray
-    Write-Host "    mbo                    # Open GUI" -ForegroundColor White
-    Write-Host "    mbo /path/to/data      # Open specific file" -ForegroundColor White
-    Write-Host "    mbo --help             # Show all commands" -ForegroundColor White
-    Write-Host ""
+
+    if ($CliInstalled) {
+        $binDir = Get-UvToolBinDir
+        Write-Host "  CLI Location:" -ForegroundColor Gray
+        Write-Host "    $binDir\mbo.exe" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Usage:" -ForegroundColor Gray
+        Write-Host "    mbo                    # Open GUI" -ForegroundColor White
+        Write-Host "    mbo /path/to/data      # Open specific file" -ForegroundColor White
+        Write-Host "    mbo --help             # Show all commands" -ForegroundColor White
+        Write-Host ""
+    }
 
     if ($EnvPath) {
         Write-Host "  Development Environment:" -ForegroundColor Gray
@@ -650,41 +745,52 @@ function Main {
         Install-Uv
     }
 
-    # step 1: choose source (pypi or github branch)
+    # step 1: choose installation type (env, CLI, or both)
+    $installType = Show-InstallTypePrompt
+
+    # step 2: choose source (pypi or github branch)
     $sourceInfo = Show-SourceSelection
 
-    # step 2: detect GPU
+    # step 3: detect GPU
     $gpuInfo = Test-NvidiaGpu
 
-    # step 3: choose extras
+    # step 4: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
-    # step 4: install CLI tool via uv tool install
-    $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras
-    if (-not $toolInstalled) {
-        Write-Err "CLI installation failed."
-        exit 1
+    # step 5: get environment location if needed
+    $envPath = $null
+    $envLocation = $null
+    if ($installType.InstallEnv -and $env:MBO_SKIP_ENV -ne "1") {
+        $envLocation = Show-EnvLocationPrompt
     }
 
-    # step 5: optionally create dev environment
-    $envPath = $null
-    if ($env:MBO_SKIP_ENV -ne "1") {
-        $createEnv = Show-DevEnvPrompt
-        if ($createEnv) {
-            $envLocation = Show-EnvLocationPrompt
-            $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo
+    # step 6: install CLI tool if requested
+    if ($installType.InstallCli) {
+        $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras
+        if (-not $toolInstalled) {
+            Write-Err "CLI installation failed."
+            exit 1
         }
     }
 
-    # step 6: create desktop shortcut
-    New-DesktopShortcut -BranchRef $sourceInfo.Ref
+    # step 7: create dev environment if requested
+    if ($installType.InstallEnv -and $envLocation) {
+        $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo
+    }
+
+    # step 8: create desktop shortcut (only if CLI was installed)
+    if ($installType.InstallCli) {
+        New-DesktopShortcut -BranchRef $sourceInfo.Ref
+    }
 
     # show usage instructions
-    Show-UsageInstructions -EnvPath $envPath
+    Show-UsageInstructions -EnvPath $envPath -CliInstalled $installType.InstallCli
 
     Write-Success "Installation completed!"
     Write-Host ""
-    Write-Host "You may need to restart your terminal for PATH changes to take effect." -ForegroundColor Yellow
+    if ($installType.InstallCli) {
+        Write-Host "You may need to restart your terminal for PATH changes to take effect." -ForegroundColor Yellow
+    }
 }
 
 Main

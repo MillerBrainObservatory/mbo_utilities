@@ -9,6 +9,10 @@ from this module directly - use `from mbo_utilities.gui.run_gui import _cli_entr
 """
 
 from importlib.metadata import version, PackageNotFoundError
+import warnings
+
+# Suppress annoying CuPy warning about CUDA path (usually harmless if CUDA works)
+warnings.filterwarnings("ignore", category=UserWarning, message="CUDA path could not be detected")
 
 try:
     __version__ = version("mbo_utilities")

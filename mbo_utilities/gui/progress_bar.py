@@ -247,7 +247,10 @@ def draw_progress(
     imgui.spacing()
 
     p = min(max(percent_complete, 0.0), 1.0)
-    w = imgui.get_content_region_avail().x
+    # Constrain width to reasonable max (roughly 2 columns of text)
+    max_width = hello_imgui.em_size(30)
+    avail_width = imgui.get_content_region_avail().x
+    w = min(avail_width, max_width)
 
     bar_color = (
         imgui.ImVec4(0.0, 0.8, 0.0, 1.0)
@@ -477,13 +480,15 @@ def draw_status_bar(self):
     else:
         bar_color = imgui.ImVec4(0.2, 0.6, 0.9, 1.0)  # Blue
 
-    # Draw a thin progress bar spanning available width
+    # Draw a thin progress bar with constrained width
+    max_width = hello_imgui.em_size(30)
     avail_width = imgui.get_content_region_avail().x
+    bar_width = min(avail_width, max_width)
     bar_height = 4
 
     imgui.push_style_color(imgui.Col_.plot_histogram, bar_color)
     imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.15, 0.15, 0.15, 1.0))
-    imgui.progress_bar(total_progress, imgui.ImVec2(avail_width, bar_height), "")
+    imgui.progress_bar(total_progress, imgui.ImVec2(bar_width, bar_height), "")
     imgui.pop_style_color(2)
 
     # Tooltip on hover with detailed progress info
