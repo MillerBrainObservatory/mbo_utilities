@@ -89,13 +89,49 @@ mbo scanphase data.tiff --format pdf # output as pdf
 
 **Output Files:**
 
-| File | Description |
-|------|-------------|
-| `temporal.png` | Offset time series + histogram. Should be flat; large jumps indicate motion/hardware issues. Typical offset: 0.5-2.0 px. |
-| `windows.png` | Offset vs window size. Shows how estimate stabilizes. Red line marks std < 0.1 px. |
-| `spatial.png` | Spatial heatmaps (32x32 and 64x64 patches). Edges different from center is normal. Gray = low signal. |
-| `zplanes.png` | Offset vs depth (if multi-plane). Assess if offset varies with z due to resonant scanner angle. |
-| `parameters.png` | Offset vs signal intensity. Red line suggests threshold below which measurements are noisy. |
+::::{card-carousel} 2
+
+:::{card} temporal.png
+Offset time series + histogram. Should be flat; large jumps indicate motion/hardware issues. Typical offset: 0.5-2.0 px.
+
+```{image} /_images/scanphase/temporal.png
+:width: 100%
+```
+:::
+
+:::{card} windows.png
+Offset vs window size. Shows how estimate stabilizes with more frames. Red line marks where std drops below 0.1 px.
+
+```{image} /_images/scanphase/windows.png
+:width: 100%
+```
+:::
+
+:::{card} spatial.png
+Spatial heatmaps (32x32 and 64x64 patches). Edges different from center is normal. Gray = low signal.
+
+```{image} /_images/scanphase/spatial.png
+:width: 100%
+```
+:::
+
+:::{card} zplanes.png
+Offset vs depth (if multi-plane). Assess if offset varies with z due to resonant scanner angle.
+
+```{image} /_images/scanphase/zplanes.png
+:width: 100%
+```
+:::
+
+:::{card} parameters.png
+Offset vs signal intensity. Red line suggests threshold below which measurements are noisy.
+
+```{image} /_images/scanphase/parameters.png
+:width: 100%
+```
+:::
+
+::::
 
 **Tips:** Use `-n 2` or `-n 3` to run quickly on a subset of frames. Multi-ROI data: offsets are averaged across ROIs.
 
