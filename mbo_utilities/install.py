@@ -41,8 +41,8 @@ HAS_IMGUI: bool = _check_import("imgui_bundle")
 # fastplotlib - visualization
 HAS_FASTPLOTLIB: bool = _check_import("fastplotlib")
 
-# pyside6 - optional Qt backend (forces Qt over glfw if available)
-HAS_PYSIDE6: bool = _check_import("PySide6")
+# pyqt6 - Qt backend for GUI (compatible with cellpose/suite2p)
+HAS_PYQT6: bool = _check_import("PyQt6")
 
 # napari - interactive multi-dimensional image viewer
 HAS_NAPARI: bool = _check_import("napari")

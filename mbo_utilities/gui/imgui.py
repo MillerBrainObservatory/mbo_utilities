@@ -6,16 +6,16 @@ import threading
 import os
 import importlib.util
 
-# Force rendercanvas to use Qt backend if PySide6 is available
+# Force rendercanvas to use Qt backend if PyQt6 is available
 # This must happen BEFORE importing fastplotlib to avoid glfw selection
-# Note: rendercanvas.qt requires PySide6 to be IMPORTED, not just available
-if importlib.util.find_spec("PySide6") is not None:
+# Note: rendercanvas.qt requires PyQt6 to be IMPORTED, not just available
+if importlib.util.find_spec("PyQt6") is not None:
     os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
-    import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
+    import PyQt6  # noqa: F401 - Must be imported before rendercanvas.qt can load
 
-    # Fix suite2p PySide6 compatibility - must happen before any suite2p GUI imports
-    # suite2p's RangeSlider uses self.NoTicks which doesn't exist in PySide6
-    from PySide6.QtWidgets import QSlider
+    # Fix suite2p PyQt6 compatibility - must happen before any suite2p GUI imports
+    # suite2p's RangeSlider uses self.NoTicks which doesn't exist in PyQt6
+    from PyQt6.QtWidgets import QSlider
     if not hasattr(QSlider, "NoTicks"):
         QSlider.NoTicks = QSlider.TickPosition.NoTicks
 

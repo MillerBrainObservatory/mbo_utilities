@@ -67,6 +67,10 @@ try:
         stat_to_masks,
         save_comparison as save_cellpose_comparison,
     )
+    from lbm_suite2p_python.conversion import (
+        export_for_gui as export_suite2p_for_cellpose,
+        import_from_gui as import_cellpose_to_suite2p,
+    )
 
     def open_cellpose_gui(*args, **kwargs):
         """open cellpose GUI with Qt compatibility patch applied."""
@@ -80,6 +84,8 @@ try:
         "masks_to_stat",
         "stat_to_masks",
         "save_cellpose_comparison",
+        "export_suite2p_for_cellpose",
+        "import_cellpose_to_suite2p",
     ])
 except ImportError:
     pass  # lbm_suite2p_python not installed

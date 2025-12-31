@@ -4,7 +4,7 @@ mbo_utilities.metadata - metadata handling for calcium imaging data.
 this package provides:
 - standardized parameter definitions and aliases
 - scanimage-specific metadata parsing
-- stack type detection (lbm, piezo, single plane)
+- stack type detection (lbm, piezo, pollen, single plane)
 - voxel size extraction and normalization
 - file I/O for extracting metadata from TIFF files
 """
@@ -31,6 +31,7 @@ from .scanimage import (
     detect_stack_type,
     is_lbm_stack,
     is_piezo_stack,
+    is_pollen_stack,
     get_lbm_ai_sources,
     get_num_color_channels,
     get_num_zplanes,
@@ -78,6 +79,7 @@ __all__ = [
     "detect_stack_type",
     "is_lbm_stack",
     "is_piezo_stack",
+    "is_pollen_stack",
     "get_lbm_ai_sources",
     "get_num_color_channels",
     "get_num_zplanes",

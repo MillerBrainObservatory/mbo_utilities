@@ -10,7 +10,7 @@ from mbo_utilities.install import (
     HAS_RASTERMAP,
     HAS_IMGUI,
     HAS_FASTPLOTLIB,
-    HAS_PYSIDE6,
+    HAS_PYQT6,
 )
 
 __all__ = [
@@ -21,5 +21,5 @@ __all__ = [
     "HAS_RASTERMAP",
     "HAS_IMGUI",
     "HAS_FASTPLOTLIB",
-    "HAS_PYSIDE6",
+    "HAS_PYQT6",
 ]

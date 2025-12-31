@@ -36,10 +36,10 @@ def _check_lsp_available() -> bool:
     return _HAS_LSP
 
 
-def _patch_pyside6_slider():
-    """apply PySide6 compatibility fix for suite2p GUI (call before opening GUI)."""
+def _patch_pyqt6_slider():
+    """apply PyQt6 compatibility fix for suite2p GUI (call before opening GUI)."""
     try:
-        from PySide6.QtWidgets import QSlider
+        from PyQt6.QtWidgets import QSlider
         if not hasattr(QSlider, 'NoTicks'):
             QSlider.NoTicks = QSlider.TickPosition.NoTicks
     except ImportError:
@@ -391,11 +391,11 @@ class Suite2pPipelineWidget(PipelineWidget):
     def _open_suite2p_gui(self, statfile: Path):
         """Open suite2p GUI with the given stat.npy file."""
         try:
-            # apply PySide6 compatibility fix before importing suite2p GUI
-            _patch_pyside6_slider()
+            # apply PyQt6 compatibility fix before importing suite2p GUI
+            _patch_pyqt6_slider()
             from suite2p.gui.gui2p import MainWindow as Suite2pMainWindow
-            from PySide6.QtWidgets import QApplication
-            from PySide6.QtCore import QRect
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import QRect
 
             self._external_gui_window = Suite2pMainWindow(statfile=str(statfile))
             self._external_gui_type = "suite2p"
@@ -443,8 +443,8 @@ class Suite2pPipelineWidget(PipelineWidget):
                 from mbo_utilities.analysis import stat_to_masks
             from cellpose.gui.gui import MainW
             from cellpose.gui import io as cellpose_io
-            from PySide6.QtWidgets import QApplication
-            from PySide6.QtCore import QRect
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import QRect
 
             # patch QCheckBox for Qt5/Qt6 compatibility
             from mbo_utilities.analysis import _patch_qt_checkbox
@@ -532,7 +532,7 @@ class Suite2pPipelineWidget(PipelineWidget):
             Window size
         """
         try:
-            from PySide6.QtCore import QRect
+            from PyQt6.QtCore import QRect
 
             # Access the canvas through the parent widget hierarchy
             # parent -> PreviewDataWidget -> image_widget -> figure -> canvas

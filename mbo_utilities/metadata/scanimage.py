@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-StackType = Literal["lbm", "piezo", "single_plane"]
+StackType = Literal["lbm", "piezo", "pollen", "single_plane"]
 
 
 def detect_stack_type(metadata: dict) -> StackType:
@@ -23,11 +23,12 @@ def detect_stack_type(metadata: dict) -> StackType:
     Returns
     -------
     StackType
-        One of: "lbm", "piezo", "single_plane"
+        One of: "lbm", "piezo", "pollen", "single_plane"
 
     Notes
     -----
     Detection logic:
+    - Pollen: LBM + piezo enabled (calibration acquisition)
     - LBM: len(si.hChannels.channelSave) > 2
     - Piezo: si.hStackManager.enable == True
     - Single plane: neither of the above
@@ -39,25 +40,38 @@ def detect_stack_type(metadata: dict) -> StackType:
     # check for LBM (channels used as z-planes)
     hch = si.get("hChannels", {})
     channel_save = hch.get("channelSave", 1)
-    if isinstance(channel_save, list) and len(channel_save) > 2:
-        return "lbm"
+    is_lbm = isinstance(channel_save, list) and len(channel_save) > 2
 
     # check for piezo stack
     stack_mgr = si.get("hStackManager", {})
-    if stack_mgr.get("enable", False):
+    is_piezo = stack_mgr.get("enable", False)
+
+    # pollen calibration: LBM system with piezo z-scanning
+    if is_lbm and is_piezo:
+        return "pollen"
+
+    if is_lbm:
+        return "lbm"
+
+    if is_piezo:
         return "piezo"
 
     return "single_plane"
 
 
 def is_lbm_stack(metadata: dict) -> bool:
-    """Check if metadata indicates an LBM stack."""
-    return detect_stack_type(metadata) == "lbm"
+    """Check if metadata indicates an LBM stack (includes pollen)."""
+    return detect_stack_type(metadata) in ("lbm", "pollen")
 
 
 def is_piezo_stack(metadata: dict) -> bool:
-    """Check if metadata indicates a piezo stack."""
-    return detect_stack_type(metadata) == "piezo"
+    """Check if metadata indicates a piezo stack (includes pollen)."""
+    return detect_stack_type(metadata) in ("piezo", "pollen")
+
+
+def is_pollen_stack(metadata: dict) -> bool:
+    """Check if metadata indicates a pollen calibration stack (LBM + piezo)."""
+    return detect_stack_type(metadata) == "pollen"
 
 
 def get_lbm_ai_sources(metadata: dict) -> dict[str, list[int]]:

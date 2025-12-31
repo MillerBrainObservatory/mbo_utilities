@@ -31,7 +31,6 @@ dependencies = [
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
 	"glfw ; sys_platform != 'linux'",
-	"PySide6 ; sys_platform == 'linux'",
 	"pygfx>=0.15.2",
 	"jupyter_rfb>=0.5.1",
 	"llvmlite>=0.43.0",
@@ -39,7 +38,9 @@ dependencies = [
 	"mbo-fastplotlib>=0.7.3",
 	"rendercanvas>=2.4.2,<2.5",
 	"imgui-bundle>=1.92.5",
-	"pyside6>=6.10.1",
+	"pyqt6>=6.7",
+	"pyqt6-sip",
+	"qtpy",
 	"wgpu>=0.28.1,<0.29",
 ]
 

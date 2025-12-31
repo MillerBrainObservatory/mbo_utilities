@@ -192,8 +192,8 @@ class GridSearchViewer:
 
         try:
             from suite2p.gui.gui2p import MainWindow as Suite2pMainWindow
-            from PySide6.QtWidgets import QApplication
-            from PySide6.QtCore import QRect
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import QRect
 
             # close existing window for this position
             if position == "left" and self._suite2p_left is not None:

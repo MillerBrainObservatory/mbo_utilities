@@ -31,8 +31,8 @@ def _set_qt_icon():
     native window handles for proper Windows taskbar display.
     """
     try:
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtGui import QIcon
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtGui import QIcon
         from mbo_utilities.file_io import get_package_assets_path
         from mbo_utilities import get_mbo_dirs
 
@@ -412,13 +412,13 @@ def _create_image_widget(data_array, widget: bool = True):
     from mbo_utilities.arrays import iter_rois
 
     try:
-        from rendercanvas.pyside6 import RenderCanvas
+        from rendercanvas.pyqt6 import RenderCanvas
     except (ImportError, RuntimeError): # RuntimeError if qt is already selected
         RenderCanvas = None
 
     if RenderCanvas is not None:
         figure_kwargs = {
-            "canvas": "pyside6",
+            "canvas": "pyqt6",
             "canvas_kwargs": {"present_method": "bitmap"},
             "size": (800, 800)
         }

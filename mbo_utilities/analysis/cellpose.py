@@ -14,14 +14,20 @@ try:
         stat_to_masks,
         save_comparison,
     )
+    from lbm_suite2p_python.conversion import (
+        export_for_gui,
+        import_from_gui,
+    )
 
     __all__ = [
-        "save_results",
+        "export_for_gui",
+        "import_from_gui",
         "load_results",
-        "open_in_gui",
         "masks_to_stat",
-        "stat_to_masks",
+        "open_in_gui",
         "save_comparison",
+        "save_results",
+        "stat_to_masks",
     ]
 except ImportError:
     raise ImportError(
