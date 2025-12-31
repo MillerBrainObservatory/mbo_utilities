@@ -355,8 +355,8 @@ def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bo
     if runner_params is None:
         params = hello_imgui.RunnerParams()
         params.app_window_params.window_title = "MBO Utilities – Data Selection"
-        params.app_window_params.window_geometry.size = (340, 620)
-        params.app_window_params.window_geometry.size_auto = True
+        params.app_window_params.window_geometry.size = (340, 720)
+        params.app_window_params.window_geometry.size_auto = False
         params.app_window_params.resizable = True
         params.ini_filename = get_default_ini_path("file_dialog")
     else:

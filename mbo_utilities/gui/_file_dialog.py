@@ -392,7 +392,7 @@ class FileDialog:
         imgui.push_style_var(imgui.StyleVar_.item_spacing, hello_imgui.em_to_vec2(0.6, 0.4))
         imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
 
-        with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0)):
+        with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0), window_flags=imgui.WindowFlags_.no_scrollbar):
             imgui.push_id("pfd")
 
             # header
