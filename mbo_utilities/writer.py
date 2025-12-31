@@ -60,17 +60,9 @@ def imwrite(
     Parameters
     ----------
     lazy_array : object
-        One of the supported lazy array readers providing `.shape`, `.metadata`,
-        and `_imwrite()` methods:
-
-        - `MboRawArray` : Raw ScanImage/ScanMultiROI TIFF files with phase correction
-        - `Suite2pArray` : Memory-mapped binary (`data.bin` or `data_raw.bin`) + `ops.npy`
-        - `MBOTiffArray` : Multi-file TIFF reader using Dask backend
-        - `TiffArray` : Single or multi-TIFF reader
-        - `H5Array` : HDF5 dataset wrapper (`h5py.File[dataset]`)
-        - `ZarrArray` : Collection of z-plane `.zarr` stores
-        - `NumpyArray` : Single `.npy` memory-mapped NumPy file
-        - `NWBArray` : NWB file with "TwoPhotonSeries" acquisition dataset
+        A lazy array from `imread()` or a numpy array. Any object with `.shape`,
+        `.dtype`, and `_imwrite()` method is supported. Use `mbo formats` CLI
+        command to list all supported input formats.
 
     outpath : str or Path
         Target directory to write output files. Will be created if it doesn't exist.

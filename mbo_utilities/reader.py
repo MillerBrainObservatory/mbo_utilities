@@ -89,8 +89,8 @@ def imread(
     Returns
     -------
     array_like
-        One of Suite2pArray, TiffArray, MboRawArray, MBOTiffArray, H5Array,
-        ZarrArray, NumpyArray, or IsoviewArray.
+        A lazy array appropriate for the input format. Use `mbo formats` CLI
+        command to list all supported formats and their array types.
 
     Examples
     --------

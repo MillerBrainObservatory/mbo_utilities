@@ -61,6 +61,12 @@ from mbo_utilities.arrays.features._phase_correction import (
     PhaseCorrMethod,
 )
 from mbo_utilities.arrays.features._roi import ROIFeature
+from mbo_utilities.arrays.features._registration import Suite2pRegistrationMixin
+from mbo_utilities.arrays.features._segmentation import (
+    SegmentationMixin,
+    masks_to_stat,
+    stat_to_masks,
+)
 from mbo_utilities.arrays.features._voxel_size import (
     VoxelSizeFeature,
     get_voxel_size_from_metadata,
@@ -120,4 +126,8 @@ __all__ = [
     # phase correction
     "PhaseCorrectionFeature",
     "PhaseCorrMethod",
+    # segmentation
+    "SegmentationMixin",
+    "masks_to_stat",
+    "stat_to_masks",
 ]

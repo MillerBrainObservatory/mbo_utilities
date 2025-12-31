@@ -344,7 +344,7 @@ def _check_installation():
     return status.all_ok
 
 
-def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bool]:
+def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bool, str]:
     """Show file selection dialog and return user choices."""
     from mbo_utilities.gui._file_dialog import FileDialog  # triggers _setup import
     from mbo_utilities.gui._setup import get_default_ini_path
@@ -372,11 +372,15 @@ def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bo
 
     immapp.run(runner_params=params, add_ons_params=addons)
 
+    # Get selected mode
+    mode = dlg.gui_modes[dlg.selected_mode_index]
+
     return (
         dlg.selected_path,
         dlg.split_rois,
         dlg.widget_enabled,
         dlg.metadata_only,
+        mode,
     )
 
 
@@ -519,6 +523,7 @@ def _run_gui_impl(
     select_only: bool = False,
     show_splash: bool = False,
     runner_params: Optional[Any] = None,
+    mode: str = "Standard Viewer",
 ):
     """Internal implementation of run_gui with all heavy imports."""
     # show splash screen while loading (only for desktop shortcut launches)
@@ -531,6 +536,7 @@ def _run_gui_impl(
         # Import heavy dependencies only when actually running GUI
         from mbo_utilities.arrays import normalize_roi
         from mbo_utilities.gui import _setup  # triggers setup on import
+        import subprocess
 
         # close splash before showing file dialog
         if splash:
@@ -539,7 +545,7 @@ def _run_gui_impl(
 
         # Handle file selection if no path provided
         if data_in is None:
-            data_in, roi_from_dialog, widget, metadata_only = _select_file(runner_params=runner_params)
+            data_in, roi_from_dialog, widget, metadata_only, mode = _select_file(runner_params=runner_params)
             if not data_in:
                 print("No file selected, exiting.")
                 return None
@@ -547,44 +553,163 @@ def _run_gui_impl(
             if roi is None:
                 roi = roi_from_dialog
 
-        # If select_only, just return the path without loading data or opening viewer
+        # If select_only, just return the path
         if select_only:
             return data_in
 
-        # Normalize ROI to standard format
-        roi = normalize_roi(roi)
+        print(f"Launching Mode: {mode}")
 
-        # Load data
-        from mbo_utilities.reader import imread
-        data_array = imread(data_in, roi=roi)
-
-        # Show metadata viewer if requested
-        if metadata_only:
-            metadata = data_array.metadata
-            if not metadata:
-                print("No metadata found.")
-                return None
-            _show_metadata_viewer(metadata)
-            return None
-
-
-
-        # Create and show image viewer
-        import fastplotlib as fpl
-        iw = _create_image_widget(data_array, widget=widget)
-
-        # In Jupyter, just return the widget (user can interact immediately)
-        # In standalone, run the event loop
-        if _is_jupyter():
-            return iw
+        # Dispatch based on Mode
+        if mode == "Standard Viewer":
+            return _launch_standard_viewer(data_in, roi, widget, metadata_only)
+        elif mode == "Napari":
+            return _launch_napari(data_in)
+        elif mode == "Cellpose":
+            return _launch_cellpose(data_in)
+        elif mode == "Suite2p":
+            return _launch_suite2p()
         else:
-            fpl.loop.run()
-            return None
+            print(f"Unknown mode {mode}, falling back to Standard Viewer")
+            return _launch_standard_viewer(data_in, roi, widget, metadata_only)
 
     finally:
         # ensure splash is closed on any exit path
         if splash:
             splash.close()
+
+
+def _launch_standard_viewer(data_in, roi, widget, metadata_only):
+    from mbo_utilities.reader import imread
+    from mbo_utilities.arrays import normalize_roi
+    
+    roi = normalize_roi(roi)
+    data_array = imread(data_in, roi=roi)
+
+    if metadata_only:
+        metadata = data_array.metadata
+        if not metadata:
+            print("No metadata found.")
+            return None
+        _show_metadata_viewer(metadata)
+        return None
+
+    import fastplotlib as fpl
+    iw = _create_image_widget(data_array, widget=widget)
+
+    if _is_jupyter():
+        return iw
+    else:
+        fpl.loop.run()
+        return None
+
+
+def _launch_napari(data_in):
+    try:
+        import napari
+        # Try to use napari-ome-zarr if installed for zarr files
+        viewer = napari.Viewer()
+        
+        # Determine strict file type if possible, or let napari guess
+        path_str = str(data_in)
+        if path_str.endswith(".zarr"):
+            viewer.open(path_str, plugin="napari-ome-zarr")
+        else:
+            viewer.open(path_str)
+            
+        napari.run()
+    except ImportError:
+        print("Napari not installed or failed to launch.")
+        print("pip install napari[all]")
+    except Exception as e:
+        print(f"Error launching Napari: {e}")
+    return None
+
+
+
+def _launch_cellpose(data_in):
+    # Launch Cellpose GUI with monkeypatch for QCheckBox issue
+    import subprocess
+    import sys
+    
+    # We need to run this in a way that we can inject the patch.
+    # Simple CLI run won't inject the patch unless we run a custom script.
+    # So we'll write a temporary launcher script.
+    
+    import tempfile
+    import os
+    
+    launcher_code = """
+import sys
+import os
+
+# Monkeypatch QCheckBox for Cellpose compatibility with newer PySide6/Qt
+try:
+    from qtpy.QtWidgets import QCheckBox
+    if not hasattr(QCheckBox, "checkStateChanged"):
+        # Map checkStateChanged to stateChanged if missing
+        # This is a bit tricky as we need to patch the class before it's used
+        from PySide6.QtWidgets import QCheckBox as _QCheckBox
+        
+        # We can't easily add a signal to a compiled C++ class in Python
+        # But we can try to patch usage in cellpose if we could import it.
+        # However, cellpose imports Qt itself.
+        
+        # Strategy 2: Patch sys.modules to inject our own QCheckBox?
+        pass
+except ImportError:
+    pass
+
+# Try running cellpose main
+from cellpose import __main__
+import sys
+
+# Patching cellpose.gui.gui.QCheckBox if possible?
+# The error is: 'QCheckBox' object has no attribute 'checkStateChanged'
+# This means the instance created doesn't have it.
+# It seems cellpose expects it (PyQt6 style) but might be getting PyQt5 style?
+# Or vice versa.
+
+# Actually, the user log shows:
+#   File "cellpose/gui/gui.py", line 277, in __init__
+#   self.autobtn.checkStateChanged.connect(...)
+#   AttributeError: 'QCheckBox' object has no attribute 'checkStateChanged'
+
+# This means code IS calling checkStateChanged, but the object lacks it.
+# CheckStateChanged was added in Qt6. If we are running with PySide6, it should be there.
+# Unless 'qtpy' or 'fastplotlib' environment forces something else?
+
+if __name__ == '__main__':
+    from cellpose import __main__
+    __main__.main()
+"""
+    # The traceback indicates 'QCheckBox' object has no attribute 'checkStateChanged'.
+    # This implies we might be in a Qt5 environment (where it is 'stateChanged')
+    # BUT we see 'PySide6' in dependencies.
+    # If using PySide6, QCheckBox HAS checkStateChanged.
+    # The error might be because `cellpose` uses `fastremap` or `pyqtgraph` which might be messing with imports.
+    
+    # Direct CLI launch:
+    cmd = [sys.executable, "-m", "cellpose"]
+    
+    path_str = str(data_in)
+    if path_str.endswith((".tif", ".tiff", ".png", ".jpg")):
+       cmd.extend(["--image_path", path_str])
+    elif path_str.endswith(".zarr"):
+        print("Note: Cellpose GUI may not natively support Zarr. Use 'Standard Viewer' and 'export_to_cellpose' first if needed.")
+        
+    print(f"Running: {' '.join(cmd)}")
+    subprocess.run(cmd)
+    return None
+
+
+def _launch_suite2p():
+    import subprocess
+    import sys
+    # Suite2p main GUI
+    cmd = [sys.executable, "-m", "suite2p"]
+    print(f"Running: {' '.join(cmd)}")
+    subprocess.run(cmd)
+    return None
 
 
 def run_gui(

@@ -14,7 +14,11 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
-from mbo_utilities.arrays.features import DimLabelsMixin
+from mbo_utilities.arrays.features import (
+    DimLabelsMixin,
+    SegmentationMixin,
+    Suite2pRegistrationMixin,
+)
 from mbo_utilities.file_io import HAS_ZARR, logger
 from mbo_utilities.arrays.suite2p import _add_suite2p_labels
 from mbo_utilities.metadata import _build_ome_metadata, get_param, get_voxel_size
@@ -43,7 +47,7 @@ _ZARR_INFO = PipelineInfo(
 register_pipeline(_ZARR_INFO)
 
 
-class ZarrArray(DimLabelsMixin, ReductionMixin):
+class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, SegmentationMixin):
     """
     Reader for Zarr stores (including OME-Zarr).
 
@@ -389,6 +393,19 @@ class ZarrArray(DimLabelsMixin, ReductionMixin):
             debug=debug,
             **kwargs,
         )
+
+    def save(self, outpath, **kwargs):
+        """
+        Save array to disk.
+        
+        Parameters
+        ----------
+        outpath : str | Path
+            Output path.
+        **kwargs
+            Arguments passed to _imwrite (format, overwrite, etc).
+        """
+        return self._imwrite(outpath, **kwargs)
 
 
 def merge_zarr_zplanes(

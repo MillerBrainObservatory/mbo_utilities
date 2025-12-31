@@ -126,7 +126,8 @@ def _sanitize_suffix(suffix: str) -> str:
     # Remove any file extension patterns (e.g., ".bin", ".tiff")
     # This prevents issues like "plane01_stitched.bin.bin"
     import re
-    suffix = re.sub(r'\.[a-zA-Z0-9]+$', '', suffix)
+
+    suffix = re.sub(r"\.[a-zA-Z0-9]+$", "", suffix)
 
     # Ensure suffix starts with underscore if not empty and doesn't already
     if suffix and not suffix.startswith("_"):
@@ -218,6 +219,30 @@ def _build_output_path(
         return outpath / f"plane{plane_num:02d}{roi_suffix}.{ext}"
 
 
+def _sanitize_value(v):
+    if isinstance(v, dict):
+        return {k: _sanitize_value(val) for k, val in v.items()}
+    elif isinstance(v, (list, tuple)):
+        return [_sanitize_value(x) for x in v]
+    elif isinstance(v, Path):
+        return str(v)
+    elif isinstance(v, (np.dtype, type)):
+        return str(v)
+    elif hasattr(v, "dtype") or hasattr(v, "item"):  # numpy scalars/arrays
+        if hasattr(v, "ndim") and v.ndim == 0:
+            return v.item()
+        if hasattr(v, "tolist"):
+            return v.tolist()
+        if hasattr(v, "item"):
+            return v.item()
+    return v
+
+
+def _sanitize_metadata(md: dict) -> dict:
+    """Recursively sanitize metadata for JSON serialization."""
+    return _sanitize_value(md)
+
+
 def _imwrite_base(
     arr,
     outpath: Path | str,
@@ -289,6 +314,9 @@ def _imwrite_base(
         if overrides and isinstance(overrides, dict):
             md.update(overrides)
 
+    # Sanitize metadata for serialization (e.g. JSON in Zarr/Tiff)
+    md = _sanitize_metadata(md)
+
     # Get dimensions using protocol helpers
     dims = get_dims(arr)
     num_planes = get_num_planes(arr)
@@ -301,7 +329,9 @@ def _imwrite_base(
     if len(arr.shape) == 4:
         actual_z_size = arr.shape[1]  # TZYX format
         if num_planes > actual_z_size:
-            logger.debug(f"num_planes ({num_planes}) > actual Z dim ({actual_z_size}), using shape")
+            logger.debug(
+                f"num_planes ({num_planes}) > actual Z dim ({actual_z_size}), using shape"
+            )
             num_planes = actual_z_size
     elif len(arr.shape) == 3:
         # 3D data (TYX) has no Z dimension, treat as single plane
@@ -518,7 +548,11 @@ class ReductionMixin:
             # Subsample all dimensions uniformly - gives approximate result with full-res output shape
             data = subsample_array(self, max_size=max_size)
             return getattr(np, func)(data, axis=axis).astype(
-                np.float64 if func in ('mean', 'std') else self.dtype if dtype is None else dtype
+                np.float64
+                if func in ("mean", "std")
+                else self.dtype
+                if dtype is None
+                else dtype
             )
 
         n = self.shape[axis]
@@ -530,7 +564,7 @@ class ReductionMixin:
 
         # Determine dtype
         if dtype is None:
-            if func in ('mean', 'std'):
+            if func in ("mean", "std"):
                 dtype = np.float64
             else:
                 dtype = self.dtype
@@ -541,7 +575,7 @@ class ReductionMixin:
             return getattr(np, func)(data, axis=axis).astype(dtype)
 
         # Chunked reduction
-        if func == 'mean':
+        if func == "mean":
             # Running mean: accumulate sum and count
             accumulator = np.zeros(out_shape, dtype=np.float64)
             for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
@@ -553,7 +587,7 @@ class ReductionMixin:
                 accumulator += np.sum(chunk, axis=axis, dtype=np.float64)
             return (accumulator / n).astype(dtype)
 
-        elif func == 'sum':
+        elif func == "sum":
             accumulator = np.zeros(out_shape, dtype=dtype)
             for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
                 end = min(start + chunk_size, n)
@@ -563,32 +597,36 @@ class ReductionMixin:
                 accumulator += np.sum(chunk, axis=axis)
             return accumulator
 
-        elif func == 'max':
+        elif func == "max":
             # Initialize with first chunk
             slices = [slice(None)] * self.ndim
             slices[axis] = slice(0, min(chunk_size, n))
             accumulator = np.max(np.asarray(self[tuple(slices)]), axis=axis)
-            for start in tqdm(range(chunk_size, n, chunk_size), desc=f"Computing {func}"):
+            for start in tqdm(
+                range(chunk_size, n, chunk_size), desc=f"Computing {func}"
+            ):
                 end = min(start + chunk_size, n)
                 slices[axis] = slice(start, end)
                 chunk = np.asarray(self[tuple(slices)])
                 accumulator = np.maximum(accumulator, np.max(chunk, axis=axis))
             return accumulator.astype(dtype)
 
-        elif func == 'min':
+        elif func == "min":
             slices = [slice(None)] * self.ndim
             slices[axis] = slice(0, min(chunk_size, n))
             accumulator = np.min(np.asarray(self[tuple(slices)]), axis=axis)
-            for start in tqdm(range(chunk_size, n, chunk_size), desc=f"Computing {func}"):
+            for start in tqdm(
+                range(chunk_size, n, chunk_size), desc=f"Computing {func}"
+            ):
                 end = min(start + chunk_size, n)
                 slices[axis] = slice(start, end)
                 chunk = np.asarray(self[tuple(slices)])
                 accumulator = np.minimum(accumulator, np.min(chunk, axis=axis))
             return accumulator.astype(dtype)
 
-        elif func == 'std':
+        elif func == "std":
             # Two-pass: first compute mean, then variance
-            mean_val = self._chunked_reduce('mean', axis=axis, chunk_size=chunk_size)
+            mean_val = self._chunked_reduce("mean", axis=axis, chunk_size=chunk_size)
             variance = np.zeros(out_shape, dtype=np.float64)
             for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
                 end = min(start + chunk_size, n)
@@ -633,7 +671,7 @@ class ReductionMixin:
         np.ndarray
             Mean projection.
         """
-        return self._chunked_reduce('mean', axis=axis, dtype=dtype, subsample=subsample)
+        return self._chunked_reduce("mean", axis=axis, dtype=dtype, subsample=subsample)
 
     def max(
         self,
@@ -665,7 +703,7 @@ class ReductionMixin:
         np.ndarray
             Max projection.
         """
-        return self._chunked_reduce('max', axis=axis, dtype=dtype, subsample=subsample)
+        return self._chunked_reduce("max", axis=axis, dtype=dtype, subsample=subsample)
 
     def min(
         self,
@@ -697,7 +735,7 @@ class ReductionMixin:
         np.ndarray
             Min projection.
         """
-        return self._chunked_reduce('min', axis=axis, dtype=dtype, subsample=subsample)
+        return self._chunked_reduce("min", axis=axis, dtype=dtype, subsample=subsample)
 
     def std(
         self,
@@ -729,7 +767,7 @@ class ReductionMixin:
         np.ndarray
             Standard deviation.
         """
-        return self._chunked_reduce('std', axis=axis, dtype=dtype, subsample=subsample)
+        return self._chunked_reduce("std", axis=axis, dtype=dtype, subsample=subsample)
 
     def sum(
         self,
@@ -762,4 +800,4 @@ class ReductionMixin:
         np.ndarray
             Sum.
         """
-        return self._chunked_reduce('sum', axis=axis, dtype=dtype, subsample=subsample)
+        return self._chunked_reduce("sum", axis=axis, dtype=dtype, subsample=subsample)

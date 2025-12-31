@@ -55,6 +55,12 @@ def _copy_assets():
             need.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(fallback, need)
 
+    # copy FontAwesome 6 font for icons
+    fa6_src = fonts_src / "Font_Awesome_6_Free-Solid-900.otf"
+    fa6_dst = fonts_dst / "Font_Awesome_6_Free-Solid-900.otf"
+    if fa6_src.exists() and not fa6_dst.exists():
+        shutil.copy2(fa6_src, fa6_dst)
+
     return user_assets
 
 

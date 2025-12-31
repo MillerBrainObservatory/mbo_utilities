@@ -37,12 +37,9 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 `mbo_utilities` is available in [pypi](https://pypi.org/project/mbo_utilities/):
 
-`pip install mbo_utilities`
-
 > We recommend using a virtual environment. For help setting up a virtual environment, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ```bash
-
 # Base, reader + GUI
 pip install mbo_utilities
  
@@ -56,7 +53,7 @@ pip install "mbo_utilities[all]"
 
 The install script will allow you to:
 1. Create a virtual environment with `mbo_utilities`,
-2. Install `mbo` CLI globally, for quick and easy use in any terminal
+2. Install the image reader globally, with Destkop Icon + use `mbo` any terminal
 3. Specify optional dependencies, and environment paths
 
 ```powershell
@@ -71,21 +68,37 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 
 > **Note:** The `mbo` command is available globally thanks to [uv tools](https://docs.astral.sh/uv/concepts/tools/). Update with the install script or manually with `uv tool upgrade mbo_utilities`.
 
-
 ## Usage
 
 ### Notebook
 
-Use `imread` and `imwrite` for fast, lazy I/O across all supported formats. Works seamlessly in Jupyter notebooks for interactive data exploration and analysis.
+The functions `imread` and `imwrite` facilitate all lazy operations.
 
 ```python
 from mbo_utilities import imread, imwrite
 
-data = imread("path/to/data.tiff")  # lazy dask array
-imwrite("output.zarr", data)        # chunked zarr output
+# Read any supported format - returns a lazy array
+arr = imread("path/to/data.tiff")           # ScanImage TIFF with auto phase correction
+arr = imread("path/to/data.tiff",
+    fix_phase=True,                         # Bidirectional scan-phase correction (default)
+    use_fft=False,                          # FFT subpixel correction (slower, precise)
+    roi=None,                               # ROI handling: None=stitch, 0=split, N=select
+)
+
+# Write to any supported format
+imwrite(arr, "output/", ext=".zarr")        # Zarr with sharding
+imwrite(arr, "output/", ext=".zarr",
+    planes=[1, 7, 14],                      # Specific z-planes (1-based)
+    num_frames=1000,                        # Limit frames
+    register_z=True,                        # Suite3D axial registration
+    overwrite=True,                         # Replace existing
+    sharded=True,                           # Zarr sharding (default)
+    ome=True,                               # OME-NGFF metadata (default)
+    level=1,                                # Compression 0-9 (default: 1)
+)
 ```
 
-→ [Notebook Guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html)
+→ [Notebook Guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html) for full API reference
 
 ### CLI
 

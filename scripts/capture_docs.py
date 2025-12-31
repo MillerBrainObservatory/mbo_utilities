@@ -63,8 +63,8 @@ def capture_file_dialog():
         if hello_imgui.get_runner_params().app_shall_exit:
             return
 
-        # Wait 8 seconds to ensure installation checks complete and UI stabilizes
-        if time.time() - start_time > 8.0:
+        # Wait 12 seconds to ensure installation checks complete and UI stabilizes
+        if time.time() - start_time > 12.0:
             # Request exit - screenshot is taken at exit
             hello_imgui.get_runner_params().app_shall_exit = True
 

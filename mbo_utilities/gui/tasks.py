@@ -67,8 +67,12 @@ class TaskMonitor:
             "details": details or {}
         }
         try:
-            with open(self.progress_file, "w") as f:
+            # Write atomically to avoid race conditions with readers
+            # Write to temp file first, then rename (atomic on most filesystems)
+            tmp_file = self.progress_file.with_suffix(".tmp")
+            with open(tmp_file, "w") as f:
                 json.dump(data, f)
+            tmp_file.replace(self.progress_file)
         except Exception:
             pass  # Non-blocking
 
@@ -257,7 +261,7 @@ def _suite2p_worker(args):
 
     try:
         run_plane(
-            input_path=bin_file,
+            bin_file,  # input_data: first positional argument
             save_path=save_path,
             ops=ops,
             keep_raw=s2p_settings.get("keep_raw", False),
@@ -378,10 +382,16 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
                 metadata=current_md
             )
 
+            # Reload ops from disk to get Lx, Ly, and other metadata added by imwrite
+            if ops_path.exists():
+                updated_ops = load_npy(ops_path).item()
+            else:
+                updated_ops = current_md
+
             extracted_items.append({
                 "bin_file": str(raw_file),
                 "save_path": str(plane_dir),
-                "ops": current_md,
+                "ops": updated_ops,
                 "s2p_settings": s2p_settings
             })
 
