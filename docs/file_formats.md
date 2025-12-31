@@ -14,50 +14,29 @@ kernelspec:
 (file_formats)=
 # File Formats
 
-File formats that `imread()` can read with full lazy loading and metadata support.
-
-## Overview
-
-`mbo_utilities.imread()` is a smart file reader that automatically detects the file type and returns the appropriate lazy array class. All array types provide:
-
-- **Lazy loading**: Reading/writing is chunked, not loaded entirely into memory
-- **NumPy-like indexing**: Standard slicing syntax (`arr[0]`, `arr[10:20, :, 100:200]`)
-- **`_imwrite()` support**: All arrays can be written to any output format via `imwrite()`
-- **Metadata**: Accessible via `.metadata` property
+`imread` and `imwrite` designed for 3D and 4D image data in `.tiff`, `.zarr`, `.h5` formats, but has been extended to include several other formats including suite2p `.bin`/`.ops` files, `.hdf5` and `.npy`.
 
 ## Quick Reference
 
-### TIFF Files (`.tif`, `.tiff`)
-
-| Type | Returns | Shape | Use Case |
-|------|---------|-------|----------|
-| **Raw ScanImage** | `ScanImageArray` | (T, Z, Y, X) | Multi-ROI volumetric data with phase correction |
-| ↳ Light Beads Microscopy | `LBMArray` | (T, Z, Y, X) | Z-planes interleaved as ScanImage channels |
-| ↳ Piezo z-stack | `PiezoArray` | (T, Z, Y, X) | Piezo z-stacks with optional frame averaging |
-| ↳ Single-plane | `SinglePlaneArray` | (T, 1, Y, X) | Single-plane time series |
-| **Processed (single file)** | `TiffArray` | (T, 1, Y, X) | Standard TIFF files, lazy page access |
-| **Processed (multiple files)** | `MBOTiffArray` | (T, Z, Y, X) | Dask-backed multi-file TIFF |
-| **Directory with `planeXX.tiff`** | `TiffArray` | (T, Z, Y, X) | Multi-plane TIFF volume (auto-detected) |
-
-### Other Formats
-
-| Extension | Returns | Shape | Use Case |
-|-----------|---------|-------|----------|
-| `.bin` | `BinArray` | (T, Y, X) | Direct binary file manipulation |
-| `.h5` / `.hdf5` | `H5Array` | varies | HDF5 datasets |
-| `.zarr` | `ZarrArray` | (T, Z, Y, X) | Zarr v3 / OME-Zarr stores |
-| `.npy` | `NumpyArray` | varies | NumPy memory-mapped files |
-| `.nwb` | `NWBArray` | varies | Neurodata Without Borders files |
-| `np.ndarray` | `NumpyArray` | varies | Wrap in-memory arrays for imwrite support |
-
-### Directories
-
-| Contents | Returns | Shape | Use Case |
-|----------|---------|-------|----------|
-| `ops.npy` | `Suite2pArray` | (T, Y, X) | Suite2p workflow integration |
-| `planeXX/` subdirs with `ops.npy` | `Suite2pArray` | (T, Z, Y, X) | Multi-plane Suite2p output |
-| `planeXX.tiff` files | `TiffArray` | (T, Z, Y, X) | Multi-plane TIFF volume |
-| Isoview lightsheet data | `IsoviewArray` | (T, Z, V, Y, X) | Multi-view lightsheet data |
+| Input | Returns | Shape | Description | |
+|-------|---------|-------|-------------|:-:|
+| **`.tiff`** | | | TIFF image stacks | |
+| ↳ ScanImage | `ScanImageArray` | (T, Z, Y, X) | Multi-ROI volumetric with phase correction | [<i class="fa-solid fa-book"></i>](#scanimage-arrays) |
+| &emsp;↳ LBM | `LBMArray` | (T, Z, Y, X) | Z-planes as ScanImage channels | [<i class="fa-solid fa-book"></i>](#lbmarray) |
+| &emsp;↳ Piezo | `PiezoArray` | (T, Z, Y, X) | Piezo z-stacks, optional averaging | [<i class="fa-solid fa-book"></i>](#piezoarray) |
+| &emsp;↳ Single-plane | `SinglePlaneArray` | (T, 1, Y, X) | Single-plane time series | [<i class="fa-solid fa-book"></i>](#singleplanearray) |
+| ↳ Standard | `TiffArray` | (T, Z, Y, X) | Lazy page access, auto-detects volumetric | [<i class="fa-solid fa-book"></i>](#tiffarray) |
+| ↳ MBO metadata | `MBOTiffArray` | (T, Z, Y, X) | Dask-backed with MBO metadata | [<i class="fa-solid fa-book"></i>](#mbotiffarray) |
+| **`.bin`** | `BinArray` | (T, Y, X) | Direct binary file manipulation | [<i class="fa-solid fa-book"></i>](#binarray) |
+| **`.h5` / `.hdf5`** | `H5Array` | varies | HDF5 datasets | [<i class="fa-solid fa-book"></i>](#h5array) |
+| **`.zarr`** | `ZarrArray` | (T, Z, Y, X) | Zarr v3 / OME-Zarr stores | [<i class="fa-solid fa-book"></i>](#zarrarray) |
+| **`.npy` / `np.ndarray`** | `NumpyArray` | varies | Memory-mapped or in-memory arrays | [<i class="fa-solid fa-book"></i>](#numpyarray) |
+| **`.nwb`** | `NWBArray` | varies | Neurodata Without Borders files | [<i class="fa-solid fa-book"></i>](#nwbarray) |
+| **Directory** | | | | |
+| ↳ `ops.npy` | `Suite2pArray` | (T, Y, X) | Suite2p workflow integration | [<i class="fa-solid fa-book"></i>](#suite2parray) |
+| ↳ `planeXX/ops.npy` | `Suite2pArray` | (T, Z, Y, X) | Multi-plane Suite2p output | [<i class="fa-solid fa-book"></i>](#suite2parray) |
+| ↳ `planeXX.tiff` | `TiffArray` | (T, Z, Y, X) | Multi-plane TIFF volume | [<i class="fa-solid fa-book"></i>](#tiffarray) |
+| ↳ Isoview lightsheet | `IsoviewArray` | (T, Z, V, Y, X) | Multi-view lightsheet data | [<i class="fa-solid fa-book"></i>](#isoviewarray) |
 
 ### Decision Tree
 
@@ -99,6 +78,7 @@ arr = open_scanimage("/path/to/data.tif")  # Returns LBMArray, PiezoArray, or Si
 
 ## Array Type Details
 
+(scanimage-arrays)=
 ### ScanImage Arrays
 
 **Returned when:** Reading raw ScanImage TIFF files
@@ -147,6 +127,7 @@ scan.upsample = 5               # Subpixel upsampling factor
 scan.max_offset = 4             # Maximum phase offset to search
 ```
 
+(lbmarray)=
 #### LBMArray
 
 For Light Beads Microscopy stacks where z-planes are interleaved as ScanImage channels.
@@ -164,6 +145,7 @@ arr = open_scanimage("/path/to/lbm_data.tif")
 # - fs: Volume rate (frame rate / num_zplanes)
 ```
 
+(piezoarray)=
 #### PiezoArray
 
 For piezo z-stacks with optional frame averaging.
@@ -189,6 +171,7 @@ print(arr.shape)  # Reduced T dimension when averaging
 # - dz: Z-step size from hStackManager.stackZStepSize
 ```
 
+(singleplanearray)=
 #### SinglePlaneArray
 
 For single-plane time series without z-stack.
@@ -213,6 +196,7 @@ arr = open_scanimage("/path/to/single_plane.tif")
 
 ---
 
+(tiffarray)=
 ### TiffArray
 
 **Returned when:** Reading processed TIFF file(s) without ScanImage metadata, or a directory with `planeXX.tiff` files
@@ -252,6 +236,7 @@ arr32 = arr.astype(np.float32)
 
 ---
 
+(mbotiffarray)=
 ### MBOTiffArray
 
 **Returned when:** Reading TIFFs with MBO-specific metadata (uses Dask backend)
@@ -278,6 +263,7 @@ mean_proj = arr[:100].mean(axis=0).compute()
 
 ---
 
+(binarray)=
 ### BinArray
 
 **Returned when:** Explicitly reading a `.bin` file path
@@ -323,6 +309,7 @@ arr.close()
 
 ---
 
+(suite2parray)=
 ### Suite2pArray
 
 **Returned when:** Reading a directory containing `ops.npy`, or `ops.npy` directly, or a directory with multiple `planeXX/` subdirectories
@@ -368,6 +355,7 @@ iw = arr.imshow()  # Shows raw and registered side-by-side if both exist
 
 ---
 
+(h5array)=
 ### H5Array
 
 **Returned when:** Reading HDF5 files (`.h5`, `.hdf5`)
@@ -404,6 +392,7 @@ arr.close()
 
 ---
 
+(zarrarray)=
 ### ZarrArray
 
 **Returned when:** Reading Zarr stores (`.zarr` directories)
@@ -436,6 +425,7 @@ print(arr.metadata)
 
 ---
 
+(numpyarray)=
 ### NumpyArray
 
 **Returned when:** Reading `.npy` files OR passing an in-memory numpy array to `imread()`
@@ -501,6 +491,7 @@ mbo.imwrite(arr, "output", ext=".zarr", planes=[1, 7, 14])
 
 ---
 
+(nwbarray)=
 ### NWBArray
 
 **Returned when:** Reading NWB (Neurodata Without Borders) files
@@ -525,6 +516,7 @@ frame = arr[0]
 
 ---
 
+(isoviewarray)=
 ### IsoviewArray
 
 **Returned when:** Manually instantiated for isoview lightsheet microscopy data
