@@ -41,8 +41,6 @@ dependencies = [
 	"imgui-bundle>=1.92.5",
 	"pyside6>=6.10.1",
 	"wgpu>=0.28.1,<0.29",
-	"napari",
-	"napari-animation",
 ]
 
 [project.scripts]
@@ -72,6 +70,12 @@ suite3d = [
 # Rastermap dimensionality reduction
 rastermap = [
     "rastermap",
+]
+# Napari interactive viewer with plugins
+napari = [
+    "napari",
+    "napari-ome-zarr",
+    "napari-animation",
 ]
 # PyTorch for neural network operations
 torch = [

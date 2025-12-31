@@ -356,7 +356,7 @@ def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bo
         params = hello_imgui.RunnerParams()
         params.app_window_params.window_title = "MBO Utilities – Data Selection"
         params.app_window_params.window_geometry.size = (340, 620)
-        params.app_window_params.window_geometry.size_auto = False
+        params.app_window_params.window_geometry.size_auto = True
         params.app_window_params.resizable = True
         params.ini_filename = get_default_ini_path("file_dialog")
     else:
@@ -606,16 +606,37 @@ def _launch_standard_viewer(data_in, roi, widget, metadata_only):
 def _launch_napari(data_in):
     try:
         import napari
-        # Try to use napari-ome-zarr if installed for zarr files
+        from mbo_utilities import imread
+
         viewer = napari.Viewer()
-        
-        # Determine strict file type if possible, or let napari guess
         path_str = str(data_in)
+
+        # Try napari-ome-zarr plugin first for .zarr files
+        loaded = False
         if path_str.endswith(".zarr"):
-            viewer.open(path_str, plugin="napari-ome-zarr")
-        else:
+            try:
+                viewer.open(path_str, plugin="napari-ome-zarr")
+                loaded = True
+            except Exception:
+                # OME-Zarr plugin failed, fall back to mbo_utilities
+                pass
+
+        if not loaded:
+            # Load via mbo_utilities and add as layer
+            try:
+                arr = imread(data_in)
+                # For lazy arrays, load a subset or use dask
+                if hasattr(arr, 'shape'):
+                    # Add as image layer - napari handles dask/numpy arrays
+                    viewer.add_image(arr, name=Path(path_str).name)
+                    loaded = True
+            except Exception as e:
+                print(f"Failed to load via mbo_utilities: {e}")
+
+        if not loaded:
+            # Last resort: let napari try to open it directly
             viewer.open(path_str)
-            
+
         napari.run()
     except ImportError:
         print("Napari not installed or failed to launch.")
