@@ -18,7 +18,7 @@
 
 Image processing utilities for the [Miller Brain Observatory](https://github.com/MillerBrainObservatory) (MBO).
 
-- **Read and write imaging data** with `imread`/`imwrite` - fast, lazy I/O for ScanImage TIFFs, generic TIFFs, Suite2p binaries, Zarr, and HDF5
+- **Modern Image Reader/Writer**: Fast, lazy I/O for ScanImage/generic TIFFs, Suite2p `.bin`, Zarr, HDF5, and Numpy (in memeory or saved to `.npy`)
 - **Run processing pipelines** for calcium imaging - motion correction, cell extraction, and signal analysis
 - **Visualize data interactively** with a GPU-accelerated GUI for exploring large datasets
 
@@ -27,7 +27,7 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
   <img src="docs/_images/gui/readme/02_step_data_view.png" height="280" alt="Data Viewer" />
   <img src="docs/_images/gui/readme/03_metadata_viewer.png" height="280" alt="Metadata Viewer" />
   <br/>
-  <em>Easily open and explore large datasets with GPU-accelerated visualization</em>
+  <em>Select data, visualize, and inspect metadata</em>
 </p>
 
 > **Note:**
@@ -37,19 +37,22 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 `mbo_utilities` is available in [pypi](https://pypi.org/project/mbo_utilities/):
 
+`pip install mbo_utilities`
+
 > We recommend using a virtual environment. For help setting up a virtual environment, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ```bash
+
 # Base, reader + GUI
 pip install mbo_utilities
- 
-# with choose any or all optional dependencies
-pip install "mbo_utilities[suite2p, suite3d, rastermap]"
+
+# with lbm_suite2p_python, suite2p, cellpose
+pip install "mbo_utilities[suite2p]"
 
 pip install "mbo_utilities[all]"
 ```
 
-### Installation Script with [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
+### Easy Installation Script with [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
 
 The install script will allow you to:
 1. Create a virtual environment with `mbo_utilities`,
@@ -70,39 +73,10 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 
 ## Usage
 
-### Notebook
-
-The functions `imread` and `imwrite` facilitate all lazy operations.
-
-```python
-from mbo_utilities import imread, imwrite
-
-# Read any supported format - returns a lazy array
-arr = imread("path/to/data.tiff")           # ScanImage TIFF with auto phase correction
-arr = imread("path/to/data.tiff",
-    fix_phase=True,                         # Bidirectional scan-phase correction (default)
-    use_fft=False,                          # FFT subpixel correction (slower, precise)
-    roi=None,                               # ROI handling: None=stitch, 0=split, N=select
-)
-
-# Write to any supported format
-imwrite(arr, "output/", ext=".zarr")        # Zarr with sharding
-imwrite(arr, "output/", ext=".zarr",
-    planes=[1, 7, 14],                      # Specific z-planes (1-based)
-    num_frames=1000,                        # Limit frames
-    register_z=True,                        # Suite3D axial registration
-    overwrite=True,                         # Replace existing
-    sharded=True,                           # Zarr sharding (default)
-    ome=True,                               # OME-NGFF metadata (default)
-    level=1,                                # Compression 0-9 (default: 1)
-)
-```
-
-→ [Notebook Guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html) for full API reference
-
-### CLI
-
-The `mbo` command provides quick access to file conversion, metadata inspection, and analysis tools directly from the terminal.
+The [user-guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html) covers usage in a jupyter notebook.
+The [CLI Guide](https://millerbrainobservatory.github.io/mbo_utilities/cli.html) provides a more in-depth overview of the CLI commands.
+The [GUI Guide](https://millerbrainobservatory.github.io/mbo_utilities/guides/gui.html) provides a more in-depth overview of the GUI.
+The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/guides/scanphase.html) describes the bi-direcitonal scan-phase analaysis tool with output figures and figure descriptions.
 
 | Command | Description |
 |---------|-------------|
@@ -111,7 +85,9 @@ The `mbo` command provides quick access to file conversion, metadata inspection,
 | `mbo convert input.tiff output.zarr` | Convert between formats |
 | `mbo scanphase /path/to/data.tiff` | Run scan-phase analysis |
 | `mbo formats` | List supported formats |
-| `mbo download notebook.ipynb` | Download example notebook |
+| `mbo download path/to/notebook.ipynb` | Download a notebook to the current directory |
+| `mbo pollen` | Pollen calibration tool (WIP) |
+| `mbo pollen path/to/data` | Pollen calibration - Skip data collection |
 
 → [CLI Guide](https://millerbrainobservatory.github.io/mbo_utilities/cli.html)
 
@@ -151,6 +127,8 @@ mbo scanphase /path/to/data.tiff -o ./output
 
 ### Upgrade
 
+The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the package can be upgraded with `uv pip install -U mbo_utilities`.
+
 | Method | Command |
 |--------|---------|
 | Install script | Re-run install script |
@@ -165,10 +143,10 @@ mbo scanphase /path/to/data.tiff -o ./output
 |---------------|-----------|--------|
 | LBM single channel | `channelSave=[1..N]`, AI0 only | `lbm=True`, `colors=1` |
 | LBM dual channel | `channelSave=[1..N]`, AI0+AI1 | `lbm=True`, `colors=2` |
-| Piezo (single frame/slice) | `enable=True`, `framesPerSlice=1` | `piezo=True` |
-| Piezo multi-frame (with avg) | `enable=True`, `logAvgFactor>1` | `piezo=True`, averaged frames |
-| Piezo multi-frame (no avg) | `enable=True`, `framesPerSlice>1`, `logAvg=1` | `piezo=True`, raw frames |
-| Single plane | `enable=False` | `zplanes=1` |
+| Piezo (single frame/slice) | `hStackManager.enable=False`, `framesPerSlice=1` | `piezo=True` |
+| Piezo multi-frame (with avg) | `hStackManager.enable=False`, `logAvgFactor>1` | `piezo=True`, averaged frames |
+| Piezo multi-frame (no avg) | `hStackManager.enable=False`, `framesPerSlice>1`, `logAvg=1` | `piezo=True`, raw frames |
+| Single plane | `hStackManager.enable=False` | `zplanes=1` |
 
 > **Note:** Frame-averaging (`logAverageFactor > 1`) is only available for non-LBM acquisitions.
 
