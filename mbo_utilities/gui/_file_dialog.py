@@ -126,7 +126,7 @@ class FileDialog:
         self._check_thread = None
         
         # GUI Modes
-        self.gui_modes = ["Standard Viewer", "Napari", "Cellpose", "Suite2p"]
+        self.gui_modes = ["Standard Viewer", "Pollen Calibration", "Napari", "Cellpose", "Suite2p"]
         self.selected_mode_index = 0
 
     @property

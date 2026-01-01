@@ -151,8 +151,15 @@ def draw_tools_popups(parent):
         )
         if parent.image_widget and parent.image_widget.data:
             data_arr = parent.image_widget.data[0]
-            metadata = data_arr.metadata
-            draw_metadata_inspector(metadata, data_array=data_arr)
+            # Check if data has metadata (numpy arrays don't)
+            if hasattr(data_arr, 'metadata'):
+                metadata = data_arr.metadata
+                draw_metadata_inspector(metadata, data_array=data_arr)
+            else:
+                imgui.text("No metadata available")
+                imgui.text(f"Data type: {type(data_arr).__name__}")
+                if hasattr(data_arr, 'shape'):
+                    imgui.text(f"Shape: {data_arr.shape}")
         else:
             imgui.text("No data loaded")
         imgui.end()
@@ -245,9 +252,20 @@ def draw_menu_bar(parent):
 
 
 def draw_tabs(parent):
+    """Draw the main content tabs, switching based on main widget type."""
+    from mbo_utilities.gui.main_widgets import PollenCalibrationWidget
+
+    # Check if using pollen calibration widget - it has its own UI, no tabs
+    if hasattr(parent, '_main_widget') and isinstance(parent._main_widget, PollenCalibrationWidget):
+        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+        imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+        parent._main_widget.draw()
+        imgui.pop_style_var()
+        imgui.pop_style_var()
+        return
+
+    # Standard time-series tabs
     # Don't create an outer child window - let each tab manage its own scrolling
-    # For single z-plane data, show all tabs
-    # For multi-zplane data, show all tabs (user wants all tabs visible)
     if imgui.begin_tab_bar("MainPreviewTabs"):
         if imgui.begin_tab_item("Preview")[0]:
             imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
@@ -1503,6 +1521,12 @@ class PreviewDataWidget(EdgeWindow):
         # initialize widgets based on data capabilities
         self._widgets = get_supported_widgets(self)
 
+        # Initialize main widget based on data type
+        from mbo_utilities.gui.main_widgets import get_main_widget_class
+        main_widget_cls = get_main_widget_class(self.image_widget.data[0])
+        self._main_widget = main_widget_cls(self)
+        self.logger.info(f"Main widget: {self._main_widget.name}")
+
         self.set_context_info()
 
         if threading_enabled:
@@ -2385,8 +2409,19 @@ class PreviewDataWidget(EdgeWindow):
             # refresh widgets based on new data capabilities
             self._refresh_widgets()
 
-            # Automatically recompute z-stats for new data
-            self.refresh_zstats()
+            # Reinitialize main widget based on new data type
+            from mbo_utilities.gui.main_widgets import get_main_widget_class
+            if hasattr(self, '_main_widget') and self._main_widget:
+                self._main_widget.cleanup()
+            main_widget_cls = get_main_widget_class(new_data)
+            self._main_widget = main_widget_cls(self)
+            self._main_widget.on_data_loaded()
+            self.logger.info(f"Main widget switched to: {self._main_widget.name}")
+
+            # Automatically recompute z-stats for new data (only for time series)
+            from mbo_utilities.gui.main_widgets import PollenCalibrationWidget
+            if not isinstance(self._main_widget, PollenCalibrationWidget):
+                self.refresh_zstats()
 
             # Automatically reset vmin/vmax for initial view of new data
             if self.image_widget:

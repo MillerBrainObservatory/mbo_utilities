@@ -409,7 +409,6 @@ def _create_image_widget(data_array, widget: bool = True):
     import copy
     import numpy as np
     import fastplotlib as fpl
-    from mbo_utilities.arrays import iter_rois
 
     try:
         from rendercanvas.pyqt6 import RenderCanvas
@@ -442,8 +441,8 @@ def _create_image_widget(data_array, widget: bool = True):
         window_funcs = None
         window_sizes = None
 
-    # Handle multi-ROI data
-    if hasattr(data_array, "rois"):
+    # Handle multi-ROI data (duck typing: check for roi_mode attribute)
+    if hasattr(data_array, "roi_mode") and hasattr(data_array, "iter_rois"):
         arrays = []
         names = []
         # get name from first filename if available, truncate if too long
@@ -457,7 +456,7 @@ def _create_image_widget(data_array, widget: bool = True):
                 base_name = first_file.parent.name
             if len(base_name) > 24:
                 base_name = base_name[:21] + "..."
-        for r in iter_rois(data_array):
+        for r in data_array.iter_rois():
             arr = copy.copy(data_array)
             arr.fix_phase = False
             arr.roi = r
@@ -562,6 +561,8 @@ def _run_gui_impl(
         # Dispatch based on Mode
         if mode == "Standard Viewer":
             return _launch_standard_viewer(data_in, roi, widget, metadata_only)
+        elif mode == "Pollen Calibration":
+            return _launch_pollen_calibration(data_in, widget)
         elif mode == "Napari":
             return _launch_napari(data_in)
         elif mode == "Cellpose":
@@ -594,6 +595,35 @@ def _launch_standard_viewer(data_in, roi, widget, metadata_only):
         return None
 
     import fastplotlib as fpl
+    iw = _create_image_widget(data_array, widget=widget)
+
+    if _is_jupyter():
+        return iw
+    else:
+        fpl.loop.run()
+        return None
+
+
+def _launch_pollen_calibration(data_in, widget: bool = True):
+    """Launch viewer in pollen calibration mode.
+
+    Loads data with dims="ZCYX" for pollen calibration stacks where:
+    - Z = piezo z-positions
+    - C = beamlet channels
+    - Y, X = spatial dimensions
+    """
+    from mbo_utilities.arrays import open_scanimage
+    import fastplotlib as fpl
+
+    # Load with pollen-specific dims
+    data_array = open_scanimage(data_in, dims="ZCYX")
+    print(f"Loaded pollen calibration data: {data_array.shape} (Z, C, Y, X)")
+    print(f"  Stack type: {data_array.stack_type}")
+    print(f"  Array type: {type(data_array).__name__}")
+    # CalibrationArray has num_beamlets/num_zplanes, others have num_channels
+    num_beamlets = getattr(data_array, 'num_beamlets', data_array.num_channels)
+    print(f"  Beamlets: {num_beamlets}")
+
     iw = _create_image_widget(data_array, widget=widget)
 
     if _is_jupyter():
@@ -648,76 +678,19 @@ def _launch_napari(data_in):
 
 
 def _launch_cellpose(data_in):
-    # Launch Cellpose GUI with monkeypatch for QCheckBox issue
+    """Launch Cellpose GUI via subprocess."""
     import subprocess
     import sys
-    
-    # We need to run this in a way that we can inject the patch.
-    # Simple CLI run won't inject the patch unless we run a custom script.
-    # So we'll write a temporary launcher script.
-    
-    import tempfile
-    import os
-    
-    launcher_code = """
-import sys
-import os
 
-# Monkeypatch QCheckBox for Cellpose compatibility with newer PySide6/Qt
-try:
-    from qtpy.QtWidgets import QCheckBox
-    if not hasattr(QCheckBox, "checkStateChanged"):
-        # Map checkStateChanged to stateChanged if missing
-        # This is a bit tricky as we need to patch the class before it's used
-        from PySide6.QtWidgets import QCheckBox as _QCheckBox
-        
-        # We can't easily add a signal to a compiled C++ class in Python
-        # But we can try to patch usage in cellpose if we could import it.
-        # However, cellpose imports Qt itself.
-        
-        # Strategy 2: Patch sys.modules to inject our own QCheckBox?
-        pass
-except ImportError:
-    pass
-
-# Try running cellpose main
-from cellpose import __main__
-import sys
-
-# Patching cellpose.gui.gui.QCheckBox if possible?
-# The error is: 'QCheckBox' object has no attribute 'checkStateChanged'
-# This means the instance created doesn't have it.
-# It seems cellpose expects it (PyQt6 style) but might be getting PyQt5 style?
-# Or vice versa.
-
-# Actually, the user log shows:
-#   File "cellpose/gui/gui.py", line 277, in __init__
-#   self.autobtn.checkStateChanged.connect(...)
-#   AttributeError: 'QCheckBox' object has no attribute 'checkStateChanged'
-
-# This means code IS calling checkStateChanged, but the object lacks it.
-# CheckStateChanged was added in Qt6. If we are running with PySide6, it should be there.
-# Unless 'qtpy' or 'fastplotlib' environment forces something else?
-
-if __name__ == '__main__':
-    from cellpose import __main__
-    __main__.main()
-"""
-    # The traceback indicates 'QCheckBox' object has no attribute 'checkStateChanged'.
-    # This implies we might be in a Qt5 environment (where it is 'stateChanged')
-    # BUT we see 'PySide6' in dependencies.
-    # If using PySide6, QCheckBox HAS checkStateChanged.
-    # The error might be because `cellpose` uses `fastremap` or `pyqtgraph` which might be messing with imports.
-    
-    # Direct CLI launch:
     cmd = [sys.executable, "-m", "cellpose"]
-    
+
     path_str = str(data_in)
     if path_str.endswith((".tif", ".tiff", ".png", ".jpg")):
-       cmd.extend(["--image_path", path_str])
+        cmd.extend(["--image_path", path_str])
     elif path_str.endswith(".zarr"):
-        print("Note: Cellpose GUI may not natively support Zarr. Use 'Standard Viewer' and 'export_to_cellpose' first if needed.")
-        
+        print("Note: Cellpose GUI may not natively support Zarr.")
+        print("Use 'export_to_cellpose' first if needed.")
+
     print(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd)
     return None
