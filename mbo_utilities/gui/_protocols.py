@@ -102,7 +102,16 @@ class SupportsPhaseOffset(Protocol):
 
 
 def supports_raster_scan(obj) -> bool:
-    """Check if an object supports raster scan phase correction."""
+    """Check if an object supports raster scan phase correction.
+
+    Uses duck typing: presence of 'phase_correction' attribute indicates
+    the array supports phase correction operations (PhaseCorrectionFeature).
+    Falls back to protocol check for legacy compatibility.
+    """
+    # Duck typing: check for phase_correction feature
+    if hasattr(obj, "phase_correction"):
+        return True
+    # Fallback to protocol check for legacy objects
     return isinstance(obj, SupportsRasterScan)
 
 
@@ -112,8 +121,8 @@ def supports_metadata(obj) -> bool:
 
 
 def supports_roi(obj) -> bool:
-    """Check if an object supports ROI selection."""
-    return isinstance(obj, SupportsROI)
+    """Check if an object supports ROI selection (duck typing: has roi_mode)."""
+    return hasattr(obj, "roi_mode")
 
 
 def supports_phase_offset(obj) -> bool:
@@ -121,19 +130,74 @@ def supports_phase_offset(obj) -> bool:
     return isinstance(obj, SupportsPhaseOffset)
 
 
+def supports_phase_correction(obj) -> bool:
+    """Check if an object supports phase correction (duck typing).
+
+    Uses duck typing: presence of 'phase_correction' attribute indicates
+    the array has a PhaseCorrectionFeature instance.
+    """
+    return hasattr(obj, "phase_correction")
+
+
+def supports_frame_rate(obj) -> bool:
+    """Check if an object provides frame rate info (duck typing).
+
+    Uses duck typing: presence of 'frame_rate' attribute indicates
+    the array has a FrameRateFeature instance.
+    """
+    return hasattr(obj, "frame_rate")
+
+
+def supports_voxel_size(obj) -> bool:
+    """Check if an object provides voxel size info (duck typing).
+
+    Uses duck typing: presence of 'voxel_size' attribute indicates
+    the array has a VoxelSizeFeature instance.
+    """
+    return hasattr(obj, "voxel_size")
+
+
+def supports_dims(obj) -> bool:
+    """Check if an object provides dimension labels (duck typing).
+
+    Uses duck typing: presence of 'dims' attribute indicates
+    the array has dimension labeling support.
+    """
+    return hasattr(obj, "dims")
+
+
 def get_capabilities(obj) -> set[str]:
     """
     Get all capabilities of an object.
 
     Returns a set of capability names that the object supports.
+    Uses duck typing for feature detection where possible.
+
+    Capabilities:
+    - raster_scan: has phase_correction feature (bidirectional scan correction)
+    - phase_correction: has phase_correction feature
+    - metadata: has metadata property
+    - roi: has roi_mode attribute (multi-ROI support)
+    - phase_offset: exposes offset property
+    - frame_rate: has frame_rate feature (temporal sampling)
+    - voxel_size: has voxel_size feature (physical dimensions)
+    - dims: has dims attribute (dimension labels)
     """
     caps = set()
     if supports_raster_scan(obj):
         caps.add("raster_scan")
+    if supports_phase_correction(obj):
+        caps.add("phase_correction")
     if supports_metadata(obj):
         caps.add("metadata")
     if supports_roi(obj):
         caps.add("roi")
     if supports_phase_offset(obj):
         caps.add("phase_offset")
+    if supports_frame_rate(obj):
+        caps.add("frame_rate")
+    if supports_voxel_size(obj):
+        caps.add("voxel_size")
+    if supports_dims(obj):
+        caps.add("dims")
     return caps
