@@ -74,7 +74,7 @@ class BinArray(ReductionMixin):
     filename: str | Path
     shape: tuple = None
     dtype: np.dtype = field(default=np.int16)
-    metadata: dict = field(default_factory=dict)
+    _metadata: dict = field(default_factory=dict)
     _file: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -93,7 +93,7 @@ class BinArray(ReductionMixin):
                     if all(x is not None for x in [Ly, Lx, nframes]):
                         self.shape = (nframes, Ly, Lx)
                         # Optionally copy metadata from ops
-                        self.metadata.update(ops)
+                        self._metadata.update(ops)
                         logger.debug(f"Inferred shape from ops.npy: {self.shape}")
                 except Exception as e:
                     logger.warning(f"Could not read ops.npy: {e}")
@@ -161,6 +161,17 @@ class BinArray(ReductionMixin):
     @property
     def Lx(self):
         return self.shape[2]
+
+    @property
+    def metadata(self) -> dict:
+        """Return metadata as dict. Always returns dict, never None."""
+        return self._metadata if self._metadata is not None else {}
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
 
     @property
     def file(self):

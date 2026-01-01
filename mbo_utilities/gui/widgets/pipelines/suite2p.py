@@ -36,10 +36,10 @@ def _check_lsp_available() -> bool:
     return _HAS_LSP
 
 
-def _patch_pyside6_slider():
-    """apply PySide6 compatibility fix for suite2p GUI (call before opening GUI)."""
+def _patch_pyqt6_slider():
+    """apply PyQt6 compatibility fix for suite2p GUI (call before opening GUI)."""
     try:
-        from PySide6.QtWidgets import QSlider
+        from PyQt6.QtWidgets import QSlider
         if not hasattr(QSlider, 'NoTicks'):
             QSlider.NoTicks = QSlider.TickPosition.NoTicks
     except ImportError:
@@ -391,11 +391,11 @@ class Suite2pPipelineWidget(PipelineWidget):
     def _open_suite2p_gui(self, statfile: Path):
         """Open suite2p GUI with the given stat.npy file."""
         try:
-            # apply PySide6 compatibility fix before importing suite2p GUI
-            _patch_pyside6_slider()
+            # apply PyQt6 compatibility fix before importing suite2p GUI
+            _patch_pyqt6_slider()
             from suite2p.gui.gui2p import MainWindow as Suite2pMainWindow
-            from PySide6.QtWidgets import QApplication
-            from PySide6.QtCore import QRect
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import QRect
 
             self._external_gui_window = Suite2pMainWindow(statfile=str(statfile))
             self._external_gui_type = "suite2p"
@@ -432,64 +432,43 @@ class Suite2pPipelineWidget(PipelineWidget):
             print(f"Error opening suite2p GUI: {e}")
 
     def _open_cellpose_gui(self, statfile: Path):
-        """Open cellpose GUI with the stat.npy converted to masks."""
+        """Open cellpose GUI with Suite2p results.
+
+        Converts stat.npy to a cellpose-compatible _seg.npy file, then opens
+        the cellpose GUI using cellpose's native loading mechanism.
+        Edits made in the GUI can be saved and will persist.
+        """
         try:
-            import tempfile
-            import tifffile
-            # try lbm_suite2p_python first (primary source), fallback to mbo_utilities.analysis
-            try:
-                from lbm_suite2p_python import stat_to_masks
-            except ImportError:
-                from mbo_utilities.analysis import stat_to_masks
+            from lbm_suite2p_python.conversion import ensure_cellpose_format
             from cellpose.gui.gui import MainW
             from cellpose.gui import io as cellpose_io
-            from PySide6.QtWidgets import QApplication
-            from PySide6.QtCore import QRect
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import QRect
 
             # patch QCheckBox for Qt5/Qt6 compatibility
             from mbo_utilities.analysis import _patch_qt_checkbox
             _patch_qt_checkbox()
 
-            # load stat.npy and convert to masks for cellpose
             plane_dir = statfile.parent
-            stat = np.load(statfile, allow_pickle=True)
 
-            # get image shape from ops.npy, or use meanImg if available
-            ops_file = plane_dir / "ops.npy"
-            image = None
-            if ops_file.exists():
-                ops = np.load(ops_file, allow_pickle=True).item()
-                Ly, Lx = ops.get("Ly", 512), ops.get("Lx", 512)
-                # use meanImg if available for better visualization
-                if "meanImg" in ops:
-                    image = ops["meanImg"].astype(np.float32)
-            else:
-                # fallback: estimate from stat
-                Ly = max(s["ypix"].max() for s in stat) + 1
-                Lx = max(s["xpix"].max() for s in stat) + 1
+            # Ensure _seg.npy file exists (creates if needed)
+            print(f"Preparing cellpose format...")
+            seg_file = ensure_cellpose_format(plane_dir)
+            print(f"Using: {seg_file}")
 
-            if image is None:
-                image = np.zeros((Ly, Lx), dtype=np.float32)
-
-            masks = stat_to_masks(stat, (Ly, Lx))
-
-            # save image to temp file (cellpose expects file path)
-            temp_file = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
-            tifffile.imwrite(temp_file.name, image)
-            temp_file.close()
-
-            # create cellpose MainW directly (avoid creating new QApplication)
-            self._external_gui_window = MainW(image=temp_file.name)
+            # Create cellpose MainW window (without image - we'll load via _load_seg)
+            self._external_gui_window = MainW()
             self._external_gui_type = "cellpose"
 
-            # load masks into the gui
-            self._external_gui_window.masks = masks
-            self._external_gui_window.ncells = int(masks.max())
-            # trigger redraw with masks
-            if hasattr(self._external_gui_window, 'draw_layer'):
-                self._external_gui_window.draw_layer()
+            # Use cellpose's native _load_seg to properly load everything
+            # This handles image loading, mask initialization, outlines, colors, etc.
+            cellpose_io._load_seg(
+                self._external_gui_window,
+                filename=str(seg_file),
+                load_3D=False
+            )
 
-            # position window side-by-side
+            # Position window side-by-side with MBO window
             screen = QApplication.primaryScreen()
             if screen:
                 screen_geom = screen.availableGeometry()
@@ -511,12 +490,19 @@ class Suite2pPipelineWidget(PipelineWidget):
                 self._reposition_mbo_window(screen_x, screen_y + margin_top, half_width, win_height)
 
             self._external_gui_window.show()
-            print(f"Opened cellpose GUI with {len(stat)} ROIs")
+
+            n_rois = self._external_gui_window.ncells.get() if hasattr(self._external_gui_window.ncells, 'get') else 0
+            print(f"Opened cellpose GUI with {n_rois} ROIs")
+            print(f"Edits will be saved to: {seg_file}")
+            print(f"Save with Ctrl+S in cellpose GUI")
 
         except ImportError as e:
             print(f"Could not open cellpose GUI: {e}")
+            print("Install with: pip install lbm-suite2p-python cellpose[gui]")
         except Exception as e:
+            import traceback
             print(f"Error opening cellpose GUI: {e}")
+            traceback.print_exc()
 
     def _reposition_mbo_window(self, x: int, y: int, width: int, height: int):
         """Reposition the MBO window to the specified geometry.
@@ -532,7 +518,7 @@ class Suite2pPipelineWidget(PipelineWidget):
             Window size
         """
         try:
-            from PySide6.QtCore import QRect
+            from PyQt6.QtCore import QRect
 
             # Access the canvas through the parent widget hierarchy
             # parent -> PreviewDataWidget -> image_widget -> figure -> canvas

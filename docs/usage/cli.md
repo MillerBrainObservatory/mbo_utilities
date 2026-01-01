@@ -1,4 +1,4 @@
-(cli_usage)=
+﻿(cli_usage)=
 
 # Command Line Interface
 
@@ -172,8 +172,8 @@ CUDA Environment:
   Driver CUDA:         12.6
 
 Features:
-  [✓] PyTorch
-  [✓] CuPy
+  [Γ£ô] PyTorch
+  [Γ£ô] CuPy
   [ ] Suite2p (not installed)
   [ ] Suite3D (not installed)
   [ ] Rastermap (not installed)

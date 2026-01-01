@@ -41,8 +41,15 @@ HAS_IMGUI: bool = _check_import("imgui_bundle")
 # fastplotlib - visualization
 HAS_FASTPLOTLIB: bool = _check_import("fastplotlib")
 
-# pyside6 - optional Qt backend (forces Qt over glfw if available)
-HAS_PYSIDE6: bool = _check_import("PySide6")
+# pyqt6 - Qt backend for GUI (compatible with cellpose/suite2p)
+HAS_PYQT6: bool = _check_import("PyQt6")
+
+# napari - interactive multi-dimensional image viewer
+HAS_NAPARI: bool = _check_import("napari")
+
+# napari plugins
+HAS_NAPARI_OME_ZARR: bool = _check_import("napari_ome_zarr")
+HAS_NAPARI_ANIMATION: bool = _check_import("napari_animation")
 
 
 class Status(Enum):
@@ -287,6 +294,63 @@ def _check_rastermap() -> FeatureStatus:
         )
 
 
+def _check_napari() -> FeatureStatus:
+    """check napari installation."""
+    try:
+        import napari
+        version = getattr(napari, "__version__", "installed")
+        return FeatureStatus(
+            name="Napari",
+            status=Status.OK,
+            version=version,
+            message="ready"
+        )
+    except ImportError:
+        return FeatureStatus(
+            name="Napari",
+            status=Status.MISSING,
+            message="not installed (pip install napari[all])"
+        )
+
+
+def _check_napari_ome_zarr() -> FeatureStatus:
+    """check napari-ome-zarr plugin installation."""
+    try:
+        import napari_ome_zarr
+        version = getattr(napari_ome_zarr, "__version__", "installed")
+        return FeatureStatus(
+            name="napari-ome-zarr",
+            status=Status.OK,
+            version=version,
+            message="ready"
+        )
+    except ImportError:
+        return FeatureStatus(
+            name="napari-ome-zarr",
+            status=Status.MISSING,
+            message="not installed (pip install napari-ome-zarr)"
+        )
+
+
+def _check_napari_animation() -> FeatureStatus:
+    """check napari-animation plugin installation."""
+    try:
+        import napari_animation
+        version = getattr(napari_animation, "__version__", "installed")
+        return FeatureStatus(
+            name="napari-animation",
+            status=Status.OK,
+            version=version,
+            message="ready"
+        )
+    except ImportError:
+        return FeatureStatus(
+            name="napari-animation",
+            status=Status.MISSING,
+            message="not installed (pip install napari-animation)"
+        )
+
+
 def check_installation(callback: type[object] | None = None) -> InstallStatus:
     """run full installation check and return structured status.
     
@@ -370,9 +434,21 @@ def check_installation(callback: type[object] | None = None) -> InstallStatus:
         suite3d_status.gpu_ok = cupy_status.gpu_ok
     status.features.append(suite3d_status)
 
-    _update(0.9, "Checking Rastermap...")
+    _update(0.85, "Checking Rastermap...")
     status.features.append(_check_rastermap())
-    
+
+    _update(0.9, "Checking Napari...")
+    napari_status = _check_napari()
+    status.features.append(napari_status)
+
+    # Only check napari plugins if napari is installed
+    if napari_status.status == Status.OK:
+        _update(0.93, "Checking napari-ome-zarr...")
+        status.features.append(_check_napari_ome_zarr())
+
+        _update(0.96, "Checking napari-animation...")
+        status.features.append(_check_napari_animation())
+
     _update(1.0, "Done")
     return status
 

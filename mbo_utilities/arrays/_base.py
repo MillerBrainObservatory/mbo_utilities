@@ -33,6 +33,17 @@ CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
 
 def supports_roi(obj):
+    """
+    Check if object supports ROI operations.
+
+    .. deprecated::
+        Use ``hasattr(obj, 'roi_mode')`` for duck typing instead.
+        This function is kept for backward compatibility.
+    """
+    # Modern check: duck typing via roi_mode attribute
+    if hasattr(obj, "roi_mode"):
+        return True
+    # Legacy check for backwards compatibility
     return hasattr(obj, "roi") and hasattr(obj, "num_rois")
 
 
@@ -50,13 +61,25 @@ def normalize_roi(value):
 
 
 def iter_rois(obj):
-    """Yield ROI indices based on MBO semantics.
+    """
+    Yield ROI indices based on MBO semantics.
+
+    .. deprecated::
+        Use ``arr.iter_rois()`` method on arrays with RoiFeatureMixin instead.
+        Check support with ``hasattr(arr, 'roi_mode')``.
+        This function is kept for backward compatibility.
 
     - roi=None -> yield None (stitched full-FOV image)
     - roi=0 -> yield each ROI index from 1..num_rois (split all)
     - roi=int > 0 -> yield that ROI only
     - roi=list/tuple -> yield each element (as given)
     """
+    # Modern approach: use object's own iter_rois method if available
+    if hasattr(obj, "roi_mode") and hasattr(obj, "iter_rois"):
+        yield from obj.iter_rois()
+        return
+
+    # Legacy fallback
     if not supports_roi(obj):
         yield None
         return
@@ -126,7 +149,8 @@ def _sanitize_suffix(suffix: str) -> str:
     # Remove any file extension patterns (e.g., ".bin", ".tiff")
     # This prevents issues like "plane01_stitched.bin.bin"
     import re
-    suffix = re.sub(r'\.[a-zA-Z0-9]+$', '', suffix)
+
+    suffix = re.sub(r"\.[a-zA-Z0-9]+$", "", suffix)
 
     # Ensure suffix starts with underscore if not empty and doesn't already
     if suffix and not suffix.startswith("_"):
@@ -218,6 +242,30 @@ def _build_output_path(
         return outpath / f"plane{plane_num:02d}{roi_suffix}.{ext}"
 
 
+def _sanitize_value(v):
+    if isinstance(v, dict):
+        return {k: _sanitize_value(val) for k, val in v.items()}
+    elif isinstance(v, (list, tuple)):
+        return [_sanitize_value(x) for x in v]
+    elif isinstance(v, Path):
+        return str(v)
+    elif isinstance(v, (np.dtype, type)):
+        return str(v)
+    elif hasattr(v, "dtype") or hasattr(v, "item"):  # numpy scalars/arrays
+        if hasattr(v, "ndim") and v.ndim == 0:
+            return v.item()
+        if hasattr(v, "tolist"):
+            return v.tolist()
+        if hasattr(v, "item"):
+            return v.item()
+    return v
+
+
+def _sanitize_metadata(md: dict) -> dict:
+    """Recursively sanitize metadata for JSON serialization."""
+    return _sanitize_value(md)
+
+
 def _imwrite_base(
     arr,
     outpath: Path | str,
@@ -289,6 +337,9 @@ def _imwrite_base(
         if overrides and isinstance(overrides, dict):
             md.update(overrides)
 
+    # Sanitize metadata for serialization (e.g. JSON in Zarr/Tiff)
+    md = _sanitize_metadata(md)
+
     # Get dimensions using protocol helpers
     dims = get_dims(arr)
     num_planes = get_num_planes(arr)
@@ -301,7 +352,9 @@ def _imwrite_base(
     if len(arr.shape) == 4:
         actual_z_size = arr.shape[1]  # TZYX format
         if num_planes > actual_z_size:
-            logger.debug(f"num_planes ({num_planes}) > actual Z dim ({actual_z_size}), using shape")
+            logger.debug(
+                f"num_planes ({num_planes}) > actual Z dim ({actual_z_size}), using shape"
+            )
             num_planes = actual_z_size
     elif len(arr.shape) == 3:
         # 3D data (TYX) has no Z dimension, treat as single plane
@@ -323,15 +376,21 @@ def _imwrite_base(
     # Normalize planes to 0-indexed list
     planes_list = _normalize_planes(planes, num_planes)
 
-    # Use provided ROI iterator or default
-    roi_iter = roi_iterator if roi_iterator is not None else iter_rois(arr)
+    # Use provided ROI iterator or detect via duck typing
+    # Arrays with roi_mode attribute support multi-ROI operations
+    if roi_iterator is not None:
+        roi_iter = roi_iterator
+    elif hasattr(arr, "roi_mode") and hasattr(arr, "iter_rois"):
+        roi_iter = arr.iter_rois()
+    else:
+        roi_iter = iter([None])  # No ROI support, single iteration
 
     # Check if array has multiple ROIs (for "_stitched" suffix)
     has_multiple_rois = getattr(arr, "num_rois", 1) > 1
 
     for roi in roi_iter:
-        # Update array's ROI if it supports it
-        if roi is not None and hasattr(arr, "roi"):
+        # Update array's ROI if it supports ROI operations
+        if roi is not None and hasattr(arr, "roi_mode"):
             arr.roi = roi
 
         for plane_idx in planes_list:
@@ -438,328 +497,495 @@ def _safe_get_metadata(path: Path) -> dict:
 
 class ReductionMixin:
     """
-    Mixin providing numpy-like reduction methods for lazy arrays.
+    Mixin providing numpy-compatible reduction methods for arrays.
 
-    Adds mean, max, min, std, sum methods that work efficiently with lazy arrays
-    by processing data in chunks. For 4D arrays (T, Z, Y, X), reduces over time
-    to produce 3D volumes (Z, Y, X) by default.
+    Adds mean, max, min, std, sum methods that work like numpy does. For lazy
+    arrays, uses chunked processing to avoid loading everything into memory.
+    For numpy arrays or memmaps, delegates directly to numpy.
+
+    The API matches numpy exactly - same parameters, same behavior. No custom
+    defaults for axis (axis=None reduces over entire array, just like numpy).
+
+    Required attributes (duck-typed):
+        shape : tuple[int, ...]
+            Array dimensions
+        dtype : np.dtype
+            Data type
+        __getitem__ : callable
+            Slicing support
 
     Usage
     -----
     class MyArray(ReductionMixin):
-        # ... array implementation ...
+        # ... array implementation with shape, dtype, __getitem__ ...
         pass
 
     arr = MyArray(path)
-    volume = arr.mean(axis=0)  # Mean over time -> (Z, Y, X)
-
-    # Fast approximate reductions using subsampling
-    quick_max = arr.max(axis=0, subsample=True)  # ~1M element sample
-    quick_std = arr.std(axis=0, subsample=int(5e5))  # ~500k element sample
+    scalar = arr.mean()           # Mean of all elements (like numpy)
+    volume = arr.mean(axis=0)     # Mean over first axis
     """
 
-    def _chunked_reduce(
+    def _is_numpy_like(self) -> bool:
+        """Check if this array can be reduced directly by numpy."""
+        # numpy arrays, memmaps, and anything with __array__ that's small enough
+        return isinstance(self, (np.ndarray, np.memmap))
+
+    def _get_array_info(self) -> tuple[tuple, np.dtype, int]:
+        """
+        Get shape, dtype, ndim from array using duck typing.
+
+        Returns
+        -------
+        tuple
+            (shape, dtype, ndim)
+
+        Raises
+        ------
+        TypeError
+            If required attributes are missing
+        """
+        shape = getattr(self, "shape", None)
+        dtype = getattr(self, "dtype", None)
+
+        if shape is None:
+            raise TypeError(
+                f"{type(self).__name__} missing required 'shape' attribute for reductions"
+            )
+
+        ndim = len(shape)
+        if dtype is None:
+            dtype = np.float64  # fallback
+
+        return shape, dtype, ndim
+
+    def _reduce(
         self,
         func: str,
-        axis: int | None = None,
-        chunk_size: int = 100,
+        axis: int | tuple[int, ...] | None = None,
         dtype: np.dtype | None = None,
-        subsample: bool | int = False,
+        keepdims: bool = False,
+        out: np.ndarray | None = None,
+        **kwargs,
     ) -> np.ndarray:
         """
-        Apply reduction function over axis, processing in chunks.
+        Apply reduction function with numpy-compatible semantics.
 
         Parameters
         ----------
         func : str
-            Reduction function name: 'mean', 'max', 'min', 'std', 'sum'
-        axis : int | None
-            Axis to reduce over. If None and ndim > 2, defaults to 0 (time).
-            For 2D arrays, reduces over entire array.
-        chunk_size : int
-            Number of frames to process at once along the reduction axis.
+            Reduction function name: 'mean', 'max', 'min', 'std', 'sum', 'var'
+        axis : int | tuple[int, ...] | None
+            Axis or axes to reduce over. None reduces over all elements.
         dtype : np.dtype | None
-            Output dtype. If None, uses float64 for mean/std, input dtype otherwise.
-        subsample : bool | int
-            If True, subsample the array to ~1M elements for fast approximate reduction.
-            If an int, use that as the max_size for subsampling.
-            The reduction axis is preserved (not subsampled).
+            Output dtype.
+        keepdims : bool
+            If True, reduced axes are left with size 1.
+        out : np.ndarray | None
+            Output array (numpy compatibility, used if provided).
+        **kwargs
+            Additional arguments passed to numpy (e.g., ddof for std/var).
 
         Returns
         -------
-        np.ndarray
-            Reduced array.
+        np.ndarray or scalar
+            Reduced result.
+        """
+        shape, arr_dtype, ndim = self._get_array_info()
+
+        # For numpy arrays/memmaps, just delegate directly
+        if self._is_numpy_like():
+            np_func = getattr(np, func)
+            # Not all numpy functions accept dtype (max/min don't)
+            if func in ("max", "min"):
+                return np_func(self, axis=axis, keepdims=keepdims, out=out, **kwargs)
+            return np_func(self, axis=axis, dtype=dtype, keepdims=keepdims, out=out, **kwargs)
+
+        # Normalize axis
+        if axis is not None:
+            if isinstance(axis, int):
+                if axis < 0:
+                    axis = ndim + axis
+                if axis < 0 or axis >= ndim:
+                    raise np.AxisError(axis, ndim)
+            else:
+                # tuple of axes
+                axis = tuple(ax if ax >= 0 else ndim + ax for ax in axis)
+                for ax in axis:
+                    if ax < 0 or ax >= ndim:
+                        raise np.AxisError(ax, ndim)
+
+        # Determine if we can just load and compute (small arrays)
+        total_elements = int(np.prod(shape))
+        chunk_threshold = 100_000_000  # ~100M elements, ~800MB for float64
+
+        if total_elements <= chunk_threshold:
+            # Small enough to load entirely
+            data = np.asarray(self)
+            np_func = getattr(np, func)
+            # Not all numpy functions accept dtype (max/min don't)
+            if func in ("max", "min"):
+                result = np_func(data, axis=axis, keepdims=keepdims, out=out, **kwargs)
+            else:
+                result = np_func(data, axis=axis, dtype=dtype, keepdims=keepdims, out=out, **kwargs)
+            return result
+
+        # Large array - use chunked reduction
+        return self._chunked_reduce(
+            func, axis=axis, dtype=dtype, keepdims=keepdims, out=out, **kwargs
+        )
+
+    def _chunked_reduce(
+        self,
+        func: str,
+        axis: int | tuple[int, ...] | None = None,
+        dtype: np.dtype | None = None,
+        keepdims: bool = False,
+        out: np.ndarray | None = None,
+        chunk_size: int = 100,
+        **kwargs,
+    ) -> np.ndarray:
+        """
+        Apply reduction function over axis, processing in chunks for large arrays.
         """
         from tqdm.auto import tqdm
 
-        from mbo_utilities.util import subsample_array
+        shape, arr_dtype, ndim = self._get_array_info()
 
-        # Default axis to 0 for time series data
+        # axis=None means reduce over all - load in chunks along axis 0
         if axis is None:
-            if self.ndim > 2:
-                axis = 0
+            # Reduce everything to a scalar
+            n = shape[0]
+            if func == "mean":
+                total_sum = 0.0
+                total_count = 0
+                for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                    end = min(start + chunk_size, n)
+                    chunk = np.asarray(self[start:end])
+                    total_sum += np.sum(chunk, dtype=np.float64)
+                    total_count += chunk.size
+                result = total_sum / total_count
+            elif func == "sum":
+                result = 0
+                for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                    end = min(start + chunk_size, n)
+                    chunk = np.asarray(self[start:end])
+                    result += np.sum(chunk, dtype=dtype)
+            elif func == "max":
+                result = None
+                for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                    end = min(start + chunk_size, n)
+                    chunk = np.asarray(self[start:end])
+                    chunk_max = np.max(chunk)
+                    result = chunk_max if result is None else max(result, chunk_max)
+            elif func == "min":
+                result = None
+                for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                    end = min(start + chunk_size, n)
+                    chunk = np.asarray(self[start:end])
+                    chunk_min = np.min(chunk)
+                    result = chunk_min if result is None else min(result, chunk_min)
+            elif func in ("std", "var"):
+                # Two-pass for numerical stability
+                mean_val = self._chunked_reduce("mean", axis=None, chunk_size=chunk_size)
+                variance_sum = 0.0
+                total_count = 0
+                for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                    end = min(start + chunk_size, n)
+                    chunk = np.asarray(self[start:end]).astype(np.float64)
+                    variance_sum += np.sum((chunk - mean_val) ** 2)
+                    total_count += chunk.size
+                ddof = kwargs.get("ddof", 0)
+                variance = variance_sum / (total_count - ddof)
+                result = np.sqrt(variance) if func == "std" else variance
             else:
-                # For 2D, reduce over everything
-                if subsample:
-                    max_size = subsample if isinstance(subsample, int) else int(1e6)
-                    data = subsample_array(self, max_size=max_size)
-                    return getattr(np, func)(data)
-                return getattr(np.asarray(self), func)()
+                raise ValueError(f"Unknown reduction function: {func}")
 
-        # Validate axis
-        if axis < 0:
-            axis = self.ndim + axis
-        if axis < 0 or axis >= self.ndim:
-            raise ValueError(f"axis {axis} out of bounds for {self.ndim}D array")
+            if dtype is not None:
+                result = np.dtype(dtype).type(result)
+            if keepdims:
+                result = np.array(result).reshape((1,) * ndim)
+            if out is not None:
+                out[...] = result
+                return out
+            return result
 
-        # Handle subsampled fast mode
-        if subsample:
-            max_size = subsample if isinstance(subsample, int) else int(1e6)
-            # Subsample all dimensions uniformly - gives approximate result with full-res output shape
-            data = subsample_array(self, max_size=max_size)
-            return getattr(np, func)(data, axis=axis).astype(
-                np.float64 if func in ('mean', 'std') else self.dtype if dtype is None else dtype
-            )
+        # Single axis reduction
+        if isinstance(axis, int):
+            ax = axis
+            n = shape[ax]
 
-        n = self.shape[axis]
+            # Determine output shape
+            out_shape = list(shape)
+            out_shape.pop(ax)
+            out_shape = tuple(out_shape)
 
-        # Determine output shape (remove the reduction axis)
-        out_shape = list(self.shape)
-        out_shape.pop(axis)
-        out_shape = tuple(out_shape)
-
-        # Determine dtype
-        if dtype is None:
-            if func in ('mean', 'std'):
-                dtype = np.float64
+            # Determine dtype
+            if dtype is None:
+                if func in ("mean", "std", "var"):
+                    reduce_dtype = np.float64
+                else:
+                    reduce_dtype = arr_dtype
             else:
-                dtype = self.dtype
+                reduce_dtype = dtype
 
-        # For small arrays, just compute directly
-        if n <= chunk_size * 2:
-            data = np.asarray(self)
-            return getattr(np, func)(data, axis=axis).astype(dtype)
+            # Build slicing helper
+            def make_slice(start, end):
+                slices = [slice(None)] * ndim
+                slices[ax] = slice(start, end)
+                return tuple(slices)
 
-        # Chunked reduction
-        if func == 'mean':
-            # Running mean: accumulate sum and count
-            accumulator = np.zeros(out_shape, dtype=np.float64)
-            for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
-                end = min(start + chunk_size, n)
-                # Build slice for the reduction axis
-                slices = [slice(None)] * self.ndim
-                slices[axis] = slice(start, end)
-                chunk = np.asarray(self[tuple(slices)])
-                accumulator += np.sum(chunk, axis=axis, dtype=np.float64)
-            return (accumulator / n).astype(dtype)
+            if func == "mean":
+                accumulator = np.zeros(out_shape, dtype=np.float64)
+                for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                    end = min(start + chunk_size, n)
+                    chunk = np.asarray(self[make_slice(start, end)])
+                    accumulator += np.sum(chunk, axis=ax, dtype=np.float64)
+                result = (accumulator / n).astype(reduce_dtype)
 
-        elif func == 'sum':
-            accumulator = np.zeros(out_shape, dtype=dtype)
-            for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
-                end = min(start + chunk_size, n)
-                slices = [slice(None)] * self.ndim
-                slices[axis] = slice(start, end)
-                chunk = np.asarray(self[tuple(slices)])
-                accumulator += np.sum(chunk, axis=axis)
-            return accumulator
+            elif func == "sum":
+                accumulator = np.zeros(out_shape, dtype=reduce_dtype)
+                for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                    end = min(start + chunk_size, n)
+                    chunk = np.asarray(self[make_slice(start, end)])
+                    accumulator += np.sum(chunk, axis=ax)
+                result = accumulator
 
-        elif func == 'max':
-            # Initialize with first chunk
-            slices = [slice(None)] * self.ndim
-            slices[axis] = slice(0, min(chunk_size, n))
-            accumulator = np.max(np.asarray(self[tuple(slices)]), axis=axis)
-            for start in tqdm(range(chunk_size, n, chunk_size), desc=f"Computing {func}"):
-                end = min(start + chunk_size, n)
-                slices[axis] = slice(start, end)
-                chunk = np.asarray(self[tuple(slices)])
-                accumulator = np.maximum(accumulator, np.max(chunk, axis=axis))
-            return accumulator.astype(dtype)
+            elif func == "max":
+                chunk = np.asarray(self[make_slice(0, min(chunk_size, n))])
+                accumulator = np.max(chunk, axis=ax)
+                for start in tqdm(range(chunk_size, n, chunk_size), desc=f"Computing {func}"):
+                    end = min(start + chunk_size, n)
+                    chunk = np.asarray(self[make_slice(start, end)])
+                    accumulator = np.maximum(accumulator, np.max(chunk, axis=ax))
+                result = accumulator.astype(reduce_dtype)
 
-        elif func == 'min':
-            slices = [slice(None)] * self.ndim
-            slices[axis] = slice(0, min(chunk_size, n))
-            accumulator = np.min(np.asarray(self[tuple(slices)]), axis=axis)
-            for start in tqdm(range(chunk_size, n, chunk_size), desc=f"Computing {func}"):
-                end = min(start + chunk_size, n)
-                slices[axis] = slice(start, end)
-                chunk = np.asarray(self[tuple(slices)])
-                accumulator = np.minimum(accumulator, np.min(chunk, axis=axis))
-            return accumulator.astype(dtype)
+            elif func == "min":
+                chunk = np.asarray(self[make_slice(0, min(chunk_size, n))])
+                accumulator = np.min(chunk, axis=ax)
+                for start in tqdm(range(chunk_size, n, chunk_size), desc=f"Computing {func}"):
+                    end = min(start + chunk_size, n)
+                    chunk = np.asarray(self[make_slice(start, end)])
+                    accumulator = np.minimum(accumulator, np.min(chunk, axis=ax))
+                result = accumulator.astype(reduce_dtype)
 
-        elif func == 'std':
-            # Two-pass: first compute mean, then variance
-            mean_val = self._chunked_reduce('mean', axis=axis, chunk_size=chunk_size)
-            variance = np.zeros(out_shape, dtype=np.float64)
-            for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
-                end = min(start + chunk_size, n)
-                slices = [slice(None)] * self.ndim
-                slices[axis] = slice(start, end)
-                chunk = np.asarray(self[tuple(slices)]).astype(np.float64)
-                # Expand mean for broadcasting
-                mean_expanded = np.expand_dims(mean_val, axis=axis)
-                variance += np.sum((chunk - mean_expanded) ** 2, axis=axis)
-            return np.sqrt(variance / n).astype(dtype)
+            elif func in ("std", "var"):
+                mean_val = self._chunked_reduce("mean", axis=ax, chunk_size=chunk_size)
+                variance = np.zeros(out_shape, dtype=np.float64)
+                for start in tqdm(range(0, n, chunk_size), desc=f"Computing {func}"):
+                    end = min(start + chunk_size, n)
+                    chunk = np.asarray(self[make_slice(start, end)]).astype(np.float64)
+                    mean_expanded = np.expand_dims(mean_val, axis=ax)
+                    variance += np.sum((chunk - mean_expanded) ** 2, axis=ax)
+                ddof = kwargs.get("ddof", 0)
+                variance = variance / (n - ddof)
+                result = (np.sqrt(variance) if func == "std" else variance).astype(reduce_dtype)
 
-        else:
-            raise ValueError(f"Unknown reduction function: {func}")
+            else:
+                raise ValueError(f"Unknown reduction function: {func}")
+
+            if keepdims:
+                result = np.expand_dims(result, axis=ax)
+            if out is not None:
+                out[...] = result
+                return out
+            return result
+
+        # Multi-axis reduction - reduce one at a time
+        # Sort axes in descending order so indices don't shift
+        axes = sorted(axis, reverse=True)
+        result = self
+        for ax in axes:
+            result = result._chunked_reduce(func, axis=ax, dtype=dtype, **kwargs) if hasattr(result, '_chunked_reduce') else getattr(np, func)(result, axis=ax, dtype=dtype, **kwargs)
+        if keepdims:
+            for ax in sorted(axis):
+                result = np.expand_dims(result, axis=ax)
+        if out is not None:
+            out[...] = result
+            return out
+        return result
 
     def mean(
         self,
-        axis: int | None = None,
+        axis: int | tuple[int, ...] | None = None,
         dtype: np.dtype | None = None,
-        subsample: bool | int = False,
+        out: np.ndarray | None = None,
+        keepdims: bool = False,
         **kwargs,
     ) -> np.ndarray:
         """
         Compute mean along axis.
 
-        For 4D arrays (T, Z, Y, X), defaults to axis=0 to produce a 3D volume.
+        Identical to numpy.mean() - axis=None reduces over all elements.
 
         Parameters
         ----------
-        axis : int | None
-            Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
+        axis : int | tuple[int, ...] | None
+            Axis or axes to reduce. None reduces all elements.
         dtype : np.dtype | None
             Output dtype. Defaults to float64.
-        subsample : bool | int
-            If True, subsample to ~1M elements for fast approximate result.
-            If int, use as max_size for subsampling.
-        **kwargs
-            Accepts additional numpy kwargs (e.g., out, keepdims) for compatibility
-            with np.mean() delegation, but they are ignored.
+        out : np.ndarray | None
+            Output array.
+        keepdims : bool
+            Keep reduced dimensions as size 1.
 
         Returns
         -------
-        np.ndarray
-            Mean projection.
+        np.ndarray or scalar
+            Mean value(s).
         """
-        return self._chunked_reduce('mean', axis=axis, dtype=dtype, subsample=subsample)
+        return self._reduce("mean", axis=axis, dtype=dtype, out=out, keepdims=keepdims, **kwargs)
 
     def max(
         self,
-        axis: int | None = None,
-        dtype: np.dtype | None = None,
-        subsample: bool | int = False,
+        axis: int | tuple[int, ...] | None = None,
+        out: np.ndarray | None = None,
+        keepdims: bool = False,
         **kwargs,
     ) -> np.ndarray:
         """
         Compute maximum along axis.
 
-        For 4D arrays (T, Z, Y, X), defaults to axis=0 to produce a 3D volume.
+        Identical to numpy.max() - axis=None finds global maximum.
 
         Parameters
         ----------
-        axis : int | None
-            Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
-        dtype : np.dtype | None
-            Output dtype. Defaults to input dtype.
-        subsample : bool | int
-            If True, subsample to ~1M elements for fast approximate result.
-            If int, use as max_size for subsampling.
-        **kwargs
-            Accepts additional numpy kwargs (e.g., out, keepdims) for compatibility
-            with np.max() delegation, but they are ignored.
+        axis : int | tuple[int, ...] | None
+            Axis or axes to reduce. None reduces all elements.
+        out : np.ndarray | None
+            Output array.
+        keepdims : bool
+            Keep reduced dimensions as size 1.
 
         Returns
         -------
-        np.ndarray
-            Max projection.
+        np.ndarray or scalar
+            Maximum value(s).
         """
-        return self._chunked_reduce('max', axis=axis, dtype=dtype, subsample=subsample)
+        return self._reduce("max", axis=axis, out=out, keepdims=keepdims, **kwargs)
 
     def min(
         self,
-        axis: int | None = None,
-        dtype: np.dtype | None = None,
-        subsample: bool | int = False,
+        axis: int | tuple[int, ...] | None = None,
+        out: np.ndarray | None = None,
+        keepdims: bool = False,
         **kwargs,
     ) -> np.ndarray:
         """
         Compute minimum along axis.
 
-        For 4D arrays (T, Z, Y, X), defaults to axis=0 to produce a 3D volume.
+        Identical to numpy.min() - axis=None finds global minimum.
 
         Parameters
         ----------
-        axis : int | None
-            Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
-        dtype : np.dtype | None
-            Output dtype. Defaults to input dtype.
-        subsample : bool | int
-            If True, subsample to ~1M elements for fast approximate result.
-            If int, use as max_size for subsampling.
-        **kwargs
-            Accepts additional numpy kwargs (e.g., out, keepdims) for compatibility
-            with np.min() delegation, but they are ignored.
+        axis : int | tuple[int, ...] | None
+            Axis or axes to reduce. None reduces all elements.
+        out : np.ndarray | None
+            Output array.
+        keepdims : bool
+            Keep reduced dimensions as size 1.
 
         Returns
         -------
-        np.ndarray
-            Min projection.
+        np.ndarray or scalar
+            Minimum value(s).
         """
-        return self._chunked_reduce('min', axis=axis, dtype=dtype, subsample=subsample)
+        return self._reduce("min", axis=axis, out=out, keepdims=keepdims, **kwargs)
 
     def std(
         self,
-        axis: int | None = None,
+        axis: int | tuple[int, ...] | None = None,
         dtype: np.dtype | None = None,
-        subsample: bool | int = False,
+        out: np.ndarray | None = None,
+        ddof: int = 0,
+        keepdims: bool = False,
         **kwargs,
     ) -> np.ndarray:
         """
         Compute standard deviation along axis.
 
-        For 4D arrays (T, Z, Y, X), defaults to axis=0 to produce a 3D volume.
+        Identical to numpy.std() - axis=None computes over all elements.
 
         Parameters
         ----------
-        axis : int | None
-            Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
+        axis : int | tuple[int, ...] | None
+            Axis or axes to reduce. None reduces all elements.
         dtype : np.dtype | None
             Output dtype. Defaults to float64.
-        subsample : bool | int
-            If True, subsample to ~1M elements for fast approximate result.
-            If int, use as max_size for subsampling.
-        **kwargs
-            Accepts additional numpy kwargs (e.g., out, keepdims) for compatibility
-            with np.std() delegation, but they are ignored.
+        out : np.ndarray | None
+            Output array.
+        ddof : int
+            Delta degrees of freedom (divisor is N - ddof).
+        keepdims : bool
+            Keep reduced dimensions as size 1.
 
         Returns
         -------
-        np.ndarray
+        np.ndarray or scalar
             Standard deviation.
         """
-        return self._chunked_reduce('std', axis=axis, dtype=dtype, subsample=subsample)
+        return self._reduce("std", axis=axis, dtype=dtype, out=out, ddof=ddof, keepdims=keepdims, **kwargs)
+
+    def var(
+        self,
+        axis: int | tuple[int, ...] | None = None,
+        dtype: np.dtype | None = None,
+        out: np.ndarray | None = None,
+        ddof: int = 0,
+        keepdims: bool = False,
+        **kwargs,
+    ) -> np.ndarray:
+        """
+        Compute variance along axis.
+
+        Identical to numpy.var() - axis=None computes over all elements.
+
+        Parameters
+        ----------
+        axis : int | tuple[int, ...] | None
+            Axis or axes to reduce. None reduces all elements.
+        dtype : np.dtype | None
+            Output dtype. Defaults to float64.
+        out : np.ndarray | None
+            Output array.
+        ddof : int
+            Delta degrees of freedom (divisor is N - ddof).
+        keepdims : bool
+            Keep reduced dimensions as size 1.
+
+        Returns
+        -------
+        np.ndarray or scalar
+            Variance.
+        """
+        return self._reduce("var", axis=axis, dtype=dtype, out=out, ddof=ddof, keepdims=keepdims, **kwargs)
 
     def sum(
         self,
-        axis: int | None = None,
+        axis: int | tuple[int, ...] | None = None,
         dtype: np.dtype | None = None,
-        subsample: bool | int = False,
+        out: np.ndarray | None = None,
+        keepdims: bool = False,
         **kwargs,
     ) -> np.ndarray:
         """
         Compute sum along axis.
 
-        For 4D arrays (T, Z, Y, X), defaults to axis=0 to produce a 3D volume.
+        Identical to numpy.sum() - axis=None sums all elements.
 
         Parameters
         ----------
-        axis : int | None
-            Axis to reduce. Defaults to 0 (time) for 3D+ arrays.
+        axis : int | tuple[int, ...] | None
+            Axis or axes to reduce. None reduces all elements.
         dtype : np.dtype | None
-            Output dtype. Defaults to input dtype.
-        subsample : bool | int
-            If True, subsample to ~1M elements for fast approximate result.
-            If int, use as max_size for subsampling.
-            Note: For sum, the result is scaled by the subsampling factor.
-        **kwargs
-            Accepts additional numpy kwargs (e.g., out, keepdims) for compatibility
-            with np.sum() delegation, but they are ignored.
+            Output dtype.
+        out : np.ndarray | None
+            Output array.
+        keepdims : bool
+            Keep reduced dimensions as size 1.
 
         Returns
         -------
-        np.ndarray
+        np.ndarray or scalar
             Sum.
         """
-        return self._chunked_reduce('sum', axis=axis, dtype=dtype, subsample=subsample)
+        return self._reduce("sum", axis=axis, dtype=dtype, out=out, keepdims=keepdims, **kwargs)

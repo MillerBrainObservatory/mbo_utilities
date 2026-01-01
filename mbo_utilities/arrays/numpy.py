@@ -217,8 +217,9 @@ class NumpyArray(ReductionMixin):
 
     @property
     def metadata(self) -> dict:
+        """Return metadata as dict. Always returns dict, never None."""
         # ensure basic metadata is always present
-        md = dict(self._metadata)
+        md = dict(self._metadata) if self._metadata is not None else {}
         if "num_timepoints" not in md:
             md["num_timepoints"] = self.shape[0] if self.ndim >= 1 else 1
         if "nframes" not in md:
@@ -234,7 +235,7 @@ class NumpyArray(ReductionMixin):
     @metadata.setter
     def metadata(self, value: dict):
         if not isinstance(value, dict):
-            raise TypeError("metadata must be a dict")
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
         self._metadata = value
 
 

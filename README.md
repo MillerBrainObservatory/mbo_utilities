@@ -45,23 +45,19 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 # Base, reader + GUI
 pip install mbo_utilities
- 
+
 # with lbm_suite2p_python, suite2p, cellpose
 pip install "mbo_utilities[suite2p]"
 
-# all suite2p deps + rastermap
-pip install "mbo_utilities[rastermap]"
-
-# suite3D for axial (z-plane) registration
-pip install "mbo_utilities[suite3d]"
-
-# all of the above
 pip install "mbo_utilities[all]"
 ```
 
 ### Easy Installation Script with [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
 
-The install script will either create a virtual environment with `mbo_utilities` installed, install the `mbo` CLI globally, or both:
+The install script will allow you to:
+1. Create a virtual environment with `mbo_utilities`,
+2. Install the image reader globally, with Destkop Icon + use `mbo` any terminal
+3. Specify optional dependencies, and environment paths
 
 ```powershell
 # Windows (PowerShell)
@@ -75,7 +71,6 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 
 > **Note:** The `mbo` command is available globally thanks to [uv tools](https://docs.astral.sh/uv/concepts/tools/). Update with the install script or manually with `uv tool upgrade mbo_utilities`.
 
-
 ## Usage
 
 The [user-guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html) covers usage in a jupyter notebook.
@@ -85,26 +80,61 @@ The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/gui
 
 | Command | Description |
 |---------|-------------|
-| `mbo` | Launch interactive GUI |
-| `mbo --check-install` | Verify installation and GPU configuration |
 | `mbo /path/to/data.tiff` | View a supported file/folder |
-| `mbo /path/to/data.tiff --metadata` | View metadata for a supported file/folder |
-| `mbo info /path/to/data.tiff` | Show file info |
-| `mbo convert input.tiff output.zarr` | Convert file formats |
-| `mbo scanphase /path/to/data.tiff` | Scan-phase analysis |
+| `mbo info /path/to/data.tiff` | Show file info and metadata |
+| `mbo convert input.tiff output.zarr` | Convert between formats |
+| `mbo scanphase /path/to/data.tiff` | Run scan-phase analysis |
 | `mbo formats` | List supported formats |
 | `mbo download path/to/notebook.ipynb` | Download a notebook to the current directory |
 | `mbo pollen` | Pollen calibration tool (WIP) |
 | `mbo pollen path/to/data` | Pollen calibration - Skip data collection |
 
-**Upgrade:**
+→ [CLI Guide](https://millerbrainobservatory.github.io/mbo_utilities/cli.html)
+
+### GUI
+
+Launch an interactive GPU-accelerated viewer for exploring large imaging datasets. Supports all MBO file formats with real-time visualization.
+
+```bash
+mbo                    # launch GUI
+mbo /path/to/data      # open file directly
+mbo --check-install    # verify GPU configuration
+```
+
+→ [GUI Guide](https://millerbrainobservatory.github.io/mbo_utilities/guides/gui.html)
+
+### Scan-Phase Analysis
+
+Measure and correct bidirectional scan-phase offset in resonant scanning microscopy data. Generates diagnostic figures showing temporal stability, spatial variation, and recommended corrections.
+
+```bash
+mbo scanphase /path/to/data.tiff -o ./output
+```
+
+→ [Scan-Phase Guide](https://millerbrainobservatory.github.io/mbo_utilities/guides/scanphase.html)
+
+### Supported Formats
+
+| Format | Read | Write | Description |
+|--------|:----:|:-----:|-------------|
+| ScanImage TIFF | ✓ | ✓ | Native LBM acquisition format |
+| Generic TIFF | ✓ | ✓ | Standard TIFF stacks |
+| Zarr | ✓ | ✓ | Chunked cloud-ready arrays |
+| HDF5 | ✓ | ✓ | Hierarchical data format |
+| Suite2p | ✓ | — | Binary and ops.npy files |
+
+→ [Formats Guide](https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html)
+
+### Upgrade
+
+The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the package can be upgraded with `uv pip install -U mbo_utilities`.
 
 The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the package can be upgraded with `uv pip install -U mbo_utilities`.
 
 | Method | Command |
 |--------|---------|
 | Install script | Re-run install script |
-| CLI only | `uv tool upgrade mbo_utilities` |
+| CLI tool | `uv tool upgrade mbo_utilities` |
 | Virtual env | `uv pip install -U mbo_utilities` |
 
 ## ScanImage Acquisition Modes

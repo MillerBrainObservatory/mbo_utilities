@@ -31,8 +31,8 @@ def _set_qt_icon():
     native window handles for proper Windows taskbar display.
     """
     try:
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtGui import QIcon
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtGui import QIcon
         from mbo_utilities.file_io import get_package_assets_path
         from mbo_utilities import get_mbo_dirs
 
@@ -344,7 +344,7 @@ def _check_installation():
     return status.all_ok
 
 
-def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bool]:
+def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bool, str]:
     """Show file selection dialog and return user choices."""
     from mbo_utilities.gui._file_dialog import FileDialog  # triggers _setup import
     from mbo_utilities.gui._setup import get_default_ini_path
@@ -355,7 +355,7 @@ def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bo
     if runner_params is None:
         params = hello_imgui.RunnerParams()
         params.app_window_params.window_title = "MBO Utilities – Data Selection"
-        params.app_window_params.window_geometry.size = (340, 620)
+        params.app_window_params.window_geometry.size = (340, 720)
         params.app_window_params.window_geometry.size_auto = False
         params.app_window_params.resizable = True
         params.ini_filename = get_default_ini_path("file_dialog")
@@ -372,11 +372,15 @@ def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bo
 
     immapp.run(runner_params=params, add_ons_params=addons)
 
+    # Get selected mode
+    mode = dlg.gui_modes[dlg.selected_mode_index]
+
     return (
         dlg.selected_path,
         dlg.split_rois,
         dlg.widget_enabled,
         dlg.metadata_only,
+        mode,
     )
 
 
@@ -405,16 +409,15 @@ def _create_image_widget(data_array, widget: bool = True):
     import copy
     import numpy as np
     import fastplotlib as fpl
-    from mbo_utilities.arrays import iter_rois
 
     try:
-        from rendercanvas.pyside6 import RenderCanvas
+        from rendercanvas.pyqt6 import RenderCanvas
     except (ImportError, RuntimeError): # RuntimeError if qt is already selected
         RenderCanvas = None
 
     if RenderCanvas is not None:
         figure_kwargs = {
-            "canvas": "pyside6",
+            "canvas": "pyqt6",
             "canvas_kwargs": {"present_method": "bitmap"},
             "size": (800, 800)
         }
@@ -438,8 +441,8 @@ def _create_image_widget(data_array, widget: bool = True):
         window_funcs = None
         window_sizes = None
 
-    # Handle multi-ROI data
-    if hasattr(data_array, "rois"):
+    # Handle multi-ROI data (duck typing: check for roi_mode attribute)
+    if hasattr(data_array, "roi_mode") and hasattr(data_array, "iter_rois"):
         arrays = []
         names = []
         # get name from first filename if available, truncate if too long
@@ -453,7 +456,7 @@ def _create_image_widget(data_array, widget: bool = True):
                 base_name = first_file.parent.name
             if len(base_name) > 24:
                 base_name = base_name[:21] + "..."
-        for r in iter_rois(data_array):
+        for r in data_array.iter_rois():
             arr = copy.copy(data_array)
             arr.fix_phase = False
             arr.roi = r
@@ -519,6 +522,7 @@ def _run_gui_impl(
     select_only: bool = False,
     show_splash: bool = False,
     runner_params: Optional[Any] = None,
+    mode: str = "Standard Viewer",
 ):
     """Internal implementation of run_gui with all heavy imports."""
     # show splash screen while loading (only for desktop shortcut launches)
@@ -531,6 +535,7 @@ def _run_gui_impl(
         # Import heavy dependencies only when actually running GUI
         from mbo_utilities.arrays import normalize_roi
         from mbo_utilities.gui import _setup  # triggers setup on import
+        import subprocess
 
         # close splash before showing file dialog
         if splash:
@@ -539,7 +544,7 @@ def _run_gui_impl(
 
         # Handle file selection if no path provided
         if data_in is None:
-            data_in, roi_from_dialog, widget, metadata_only = _select_file(runner_params=runner_params)
+            data_in, roi_from_dialog, widget, metadata_only, mode = _select_file(runner_params=runner_params)
             if not data_in:
                 print("No file selected, exiting.")
                 return None
@@ -547,44 +552,158 @@ def _run_gui_impl(
             if roi is None:
                 roi = roi_from_dialog
 
-        # If select_only, just return the path without loading data or opening viewer
+        # If select_only, just return the path
         if select_only:
             return data_in
 
-        # Normalize ROI to standard format
-        roi = normalize_roi(roi)
+        print(f"Launching Mode: {mode}")
 
-        # Load data
-        from mbo_utilities.reader import imread
-        data_array = imread(data_in, roi=roi)
-
-        # Show metadata viewer if requested
-        if metadata_only:
-            metadata = data_array.metadata
-            if not metadata:
-                print("No metadata found.")
-                return None
-            _show_metadata_viewer(metadata)
-            return None
-
-
-
-        # Create and show image viewer
-        import fastplotlib as fpl
-        iw = _create_image_widget(data_array, widget=widget)
-
-        # In Jupyter, just return the widget (user can interact immediately)
-        # In standalone, run the event loop
-        if _is_jupyter():
-            return iw
+        # Dispatch based on Mode
+        if mode == "Standard Viewer":
+            return _launch_standard_viewer(data_in, roi, widget, metadata_only)
+        elif mode == "Pollen Calibration":
+            return _launch_pollen_calibration(data_in, widget)
+        elif mode == "Napari":
+            return _launch_napari(data_in)
+        elif mode == "Cellpose":
+            return _launch_cellpose(data_in)
+        elif mode == "Suite2p":
+            return _launch_suite2p()
         else:
-            fpl.loop.run()
-            return None
+            print(f"Unknown mode {mode}, falling back to Standard Viewer")
+            return _launch_standard_viewer(data_in, roi, widget, metadata_only)
 
     finally:
         # ensure splash is closed on any exit path
         if splash:
             splash.close()
+
+
+def _launch_standard_viewer(data_in, roi, widget, metadata_only):
+    from mbo_utilities.reader import imread
+    from mbo_utilities.arrays import normalize_roi
+    
+    roi = normalize_roi(roi)
+    data_array = imread(data_in, roi=roi)
+
+    if metadata_only:
+        metadata = data_array.metadata
+        if not metadata:
+            print("No metadata found.")
+            return None
+        _show_metadata_viewer(metadata)
+        return None
+
+    import fastplotlib as fpl
+    iw = _create_image_widget(data_array, widget=widget)
+
+    if _is_jupyter():
+        return iw
+    else:
+        fpl.loop.run()
+        return None
+
+
+def _launch_pollen_calibration(data_in, widget: bool = True):
+    """Launch viewer in pollen calibration mode.
+
+    Loads data with dims="ZCYX" for pollen calibration stacks where:
+    - Z = piezo z-positions
+    - C = beamlet channels
+    - Y, X = spatial dimensions
+    """
+    from mbo_utilities.arrays import open_scanimage
+    import fastplotlib as fpl
+
+    # Load with pollen-specific dims
+    data_array = open_scanimage(data_in, dims="ZCYX")
+    print(f"Loaded pollen calibration data: {data_array.shape} (Z, C, Y, X)")
+    print(f"  Stack type: {data_array.stack_type}")
+    print(f"  Array type: {type(data_array).__name__}")
+    # CalibrationArray has num_beamlets/num_zplanes, others have num_channels
+    num_beamlets = getattr(data_array, 'num_beamlets', data_array.num_channels)
+    print(f"  Beamlets: {num_beamlets}")
+
+    iw = _create_image_widget(data_array, widget=widget)
+
+    if _is_jupyter():
+        return iw
+    else:
+        fpl.loop.run()
+        return None
+
+
+def _launch_napari(data_in):
+    try:
+        import napari
+        from mbo_utilities import imread
+
+        viewer = napari.Viewer()
+        path_str = str(data_in)
+
+        # Try napari-ome-zarr plugin first for .zarr files
+        loaded = False
+        if path_str.endswith(".zarr"):
+            try:
+                viewer.open(path_str, plugin="napari-ome-zarr")
+                loaded = True
+            except Exception:
+                # OME-Zarr plugin failed, fall back to mbo_utilities
+                pass
+
+        if not loaded:
+            # Load via mbo_utilities and add as layer
+            try:
+                arr = imread(data_in)
+                # For lazy arrays, load a subset or use dask
+                if hasattr(arr, 'shape'):
+                    # Add as image layer - napari handles dask/numpy arrays
+                    viewer.add_image(arr, name=Path(path_str).name)
+                    loaded = True
+            except Exception as e:
+                print(f"Failed to load via mbo_utilities: {e}")
+
+        if not loaded:
+            # Last resort: let napari try to open it directly
+            viewer.open(path_str)
+
+        napari.run()
+    except ImportError:
+        print("Napari not installed or failed to launch.")
+        print("pip install napari[all]")
+    except Exception as e:
+        print(f"Error launching Napari: {e}")
+    return None
+
+
+
+def _launch_cellpose(data_in):
+    """Launch Cellpose GUI via subprocess."""
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, "-m", "cellpose"]
+
+    path_str = str(data_in)
+    if path_str.endswith((".tif", ".tiff", ".png", ".jpg")):
+        cmd.extend(["--image_path", path_str])
+    elif path_str.endswith(".zarr"):
+        print("Note: Cellpose GUI may not natively support Zarr.")
+        print("Use 'export_to_cellpose' first if needed.")
+
+    print(f"Running: {' '.join(cmd)}")
+    subprocess.run(cmd)
+    return None
+
+
+def _launch_suite2p():
+    import subprocess
+    import sys
+    # Suite2p main GUI
+    cmd = [sys.executable, "-m", "suite2p"]
+    print(f"Running: {' '.join(cmd)}")
+    subprocess.run(cmd)
+    return None
 
 
 def run_gui(

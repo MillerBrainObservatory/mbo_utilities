@@ -7,6 +7,7 @@ from imgui_bundle import (
     imgui,
     imgui_ctx,
     portable_file_dialogs as pfd,
+    icons_fontawesome_6 as fa,
 )
 from mbo_utilities.gui._widgets import set_tooltip
 from mbo_utilities.gui import _setup  # triggers setup on import
@@ -63,6 +64,51 @@ def pop_button_style():
     imgui.pop_style_color(4)
 
 
+def icon_button(icon: str, label: str, size: imgui.ImVec2, tooltip: str = "") -> bool:
+    """
+    Draw a styled icon button with MBO theme.
+
+    Dark gray background with blue outline, blue icon+text, hover effect.
+
+    Parameters
+    ----------
+    icon : str
+        FontAwesome 6 icon character (e.g., fa.ICON_FA_FOLDER_OPEN)
+    label : str
+        Button label text
+    size : imgui.ImVec2
+        Button size
+    tooltip : str
+        Tooltip text shown on hover
+
+    Returns
+    -------
+    bool
+        True if button was clicked
+    """
+    # Style: dark gray bg, blue border, blue text
+    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.18, 0.18, 0.20, 1.0))
+    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.22, 0.22, 0.25, 1.0))
+    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.15, 0.15, 0.17, 1.0))
+    imgui.push_style_color(imgui.Col_.text, COL_ACCENT)
+    imgui.push_style_color(imgui.Col_.border, COL_ACCENT)
+    imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
+    imgui.push_style_var(imgui.StyleVar_.frame_border_size, 1.5)
+
+    # Combine icon and label
+    button_text = f"{icon}  {label}"
+    clicked = imgui.button(button_text, size)
+
+    # Show tooltip on hover
+    if tooltip and imgui.is_item_hovered():
+        imgui.set_tooltip(tooltip)
+
+    imgui.pop_style_var(2)
+    imgui.pop_style_color(5)
+
+    return clicked
+
+
 class FileDialog:
     def __init__(self):
         self.selected_path = None
@@ -78,6 +124,10 @@ class FileDialog:
         # cached install status (computed on first render)
         self._install_status = None
         self._check_thread = None
+        
+        # GUI Modes
+        self.gui_modes = ["Standard Viewer", "Pollen Calibration", "Napari", "Cellpose", "Suite2p"]
+        self.selected_mode_index = 0
 
     @property
     def widget_enabled(self):
@@ -238,10 +288,12 @@ class FileDialog:
         imgui.text_colored(COL_ACCENT, "Supported Formats")
         imgui.same_line()
         push_button_style(primary=False)
-        if imgui.small_button("docs"):
+        if imgui.small_button(f"{fa.ICON_FA_BOOK}  docs"):
             import webbrowser
             webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html")
         pop_button_style()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Open documentation in browser")
 
         imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
 
@@ -340,7 +392,7 @@ class FileDialog:
         imgui.push_style_var(imgui.StyleVar_.item_spacing, hello_imgui.em_to_vec2(0.6, 0.4))
         imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
 
-        with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0)):
+        with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0), window_flags=imgui.WindowFlags_.no_scrollbar):
             imgui.push_id("pfd")
 
             # header
@@ -357,9 +409,29 @@ class FileDialog:
             btn_w = min(avail_w - hello_imgui.em_size(2), hello_imgui.em_size(16))
             btn_h = hello_imgui.em_size(1.8)
 
+            # Mode Selector
             self._center_widget(btn_w)
-            push_button_style(primary=True)
-            if imgui.button("Open File(s)", imgui.ImVec2(btn_w, btn_h)):
+            imgui.set_next_item_width(btn_w)
+            
+            # Simple combo
+            # ret, idx = imgui.combo("##mode", current_item, items)
+            changed, self.selected_mode_index = imgui.combo(
+                "##mode", 
+                self.selected_mode_index, 
+                self.gui_modes
+            )
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"Select Application: {self.gui_modes[self.selected_mode_index]}")
+            
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+            self._center_widget(btn_w)
+            if icon_button(
+                fa.ICON_FA_FILE_IMAGE,
+                "Open File(s)",
+                imgui.ImVec2(btn_w, btn_h),
+                "Select one or more image files"
+            ):
                 self._open_multi = pfd.open_file(
                     "Select files",
                     self._default_dir,
@@ -367,17 +439,17 @@ class FileDialog:
                      "All Files", "*"],
                     pfd.opt.multiselect
                 )
-            pop_button_style()
-            set_tooltip("Select one or more image files")
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
             self._center_widget(btn_w)
-            push_button_style(primary=True)
-            if imgui.button("Select Folder", imgui.ImVec2(btn_w, btn_h)):
+            if icon_button(
+                fa.ICON_FA_FOLDER_OPEN,
+                "Select Folder",
+                imgui.ImVec2(btn_w, btn_h),
+                "Select folder with image data"
+            ):
                 self._select_folder = pfd.select_folder("Select folder", self._default_dir)
-            pop_button_style()
-            set_tooltip("Select folder with image data")
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.4))
 
@@ -442,10 +514,11 @@ class FileDialog:
 
             # quit button (centered)
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-            qsz = imgui.ImVec2(hello_imgui.em_size(5), hello_imgui.em_size(1.5))
+            qsz = imgui.ImVec2(hello_imgui.em_size(6), hello_imgui.em_size(1.5))
             self._center_widget(qsz.x)
+            # Quit uses secondary style (gray bg, no border)
             push_button_style(primary=False)
-            if imgui.button("Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
+            if imgui.button(f"{fa.ICON_FA_XMARK}  Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
                 self.selected_path = None
                 hello_imgui.get_runner_params().app_shall_exit = True
             pop_button_style()

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-StackType = Literal["lbm", "piezo", "single_plane"]
+StackType = Literal["lbm", "piezo", "pollen", "single_plane"]
 
 
 def detect_stack_type(metadata: dict) -> StackType:
@@ -23,11 +23,12 @@ def detect_stack_type(metadata: dict) -> StackType:
     Returns
     -------
     StackType
-        One of: "lbm", "piezo", "single_plane"
+        One of: "lbm", "piezo", "pollen", "single_plane"
 
     Notes
     -----
     Detection logic:
+    - Pollen: LBM + piezo enabled (calibration acquisition)
     - LBM: len(si.hChannels.channelSave) > 2
     - Piezo: si.hStackManager.enable == True
     - Single plane: neither of the above
@@ -39,25 +40,38 @@ def detect_stack_type(metadata: dict) -> StackType:
     # check for LBM (channels used as z-planes)
     hch = si.get("hChannels", {})
     channel_save = hch.get("channelSave", 1)
-    if isinstance(channel_save, list) and len(channel_save) > 2:
-        return "lbm"
+    is_lbm = isinstance(channel_save, list) and len(channel_save) > 2
 
     # check for piezo stack
     stack_mgr = si.get("hStackManager", {})
-    if stack_mgr.get("enable", False):
+    is_piezo = stack_mgr.get("enable", False)
+
+    # pollen calibration: LBM system with piezo z-scanning
+    if is_lbm and is_piezo:
+        return "pollen"
+
+    if is_lbm:
+        return "lbm"
+
+    if is_piezo:
         return "piezo"
 
     return "single_plane"
 
 
 def is_lbm_stack(metadata: dict) -> bool:
-    """Check if metadata indicates an LBM stack."""
-    return detect_stack_type(metadata) == "lbm"
+    """Check if metadata indicates an LBM stack (includes pollen)."""
+    return detect_stack_type(metadata) in ("lbm", "pollen")
 
 
 def is_piezo_stack(metadata: dict) -> bool:
-    """Check if metadata indicates a piezo stack."""
-    return detect_stack_type(metadata) == "piezo"
+    """Check if metadata indicates a piezo stack (includes pollen)."""
+    return detect_stack_type(metadata) in ("piezo", "pollen")
+
+
+def is_pollen_stack(metadata: dict) -> bool:
+    """Check if metadata indicates a pollen calibration stack (LBM + piezo)."""
+    return detect_stack_type(metadata) == "pollen"
 
 
 def get_lbm_ai_sources(metadata: dict) -> dict[str, list[int]]:
@@ -150,14 +164,15 @@ def get_num_zplanes(metadata: dict) -> int:
 
     Notes
     -----
-    For LBM: len(si.hChannels.channelSave)
+    For LBM/pollen: len(si.hChannels.channelSave) - beamlets are the z-planes
     For piezo: si.hStackManager.numSlices
     For single plane: 1
     """
     stack_type = detect_stack_type(metadata)
     si = metadata.get("si", {})
 
-    if stack_type == "lbm":
+    if stack_type in ("lbm", "pollen"):
+        # For both LBM and pollen, beamlets (channels) represent z-planes
         hch = si.get("hChannels", {})
         channel_save = hch.get("channelSave", [])
         if isinstance(channel_save, list):
@@ -263,12 +278,12 @@ def compute_num_timepoints(total_frames: int, metadata: dict) -> int:
     Notes
     -----
     For LBM: each TIFF frame is one timepoint (z-planes interleaved as channels)
-    For piezo: total_frames // (numSlices * framesPerSlice), adjusted for averaging
+    For piezo/pollen: total_frames // (numSlices * framesPerSlice), adjusted for averaging
 
     Decision tree:
     - LBM → num_timepoints = total_frames
-    - piezo with averaging → frames_per_volume = numSlices (1 saved frame per slice)
-    - piezo no averaging → frames_per_volume = numSlices * framesPerSlice
+    - piezo/pollen with averaging → frames_per_volume = numSlices (1 saved frame per slice)
+    - piezo/pollen no averaging → frames_per_volume = numSlices * framesPerSlice
     - single plane → num_timepoints = total_frames
     """
     stack_type = detect_stack_type(metadata)
@@ -280,7 +295,7 @@ def compute_num_timepoints(total_frames: int, metadata: dict) -> int:
     if stack_type == "single_plane":
         return total_frames
 
-    # piezo stack
+    # piezo or pollen stack - both use piezo z-scanning
     si = metadata.get("si", {})
     stack_mgr = si.get("hStackManager", {})
     scan2d = si.get("hScan2D", {})

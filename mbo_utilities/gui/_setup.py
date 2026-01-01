@@ -55,6 +55,12 @@ def _copy_assets():
             need.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(fallback, need)
 
+    # copy FontAwesome 6 font for icons
+    fa6_src = fonts_src / "Font_Awesome_6_Free-Solid-900.otf"
+    fa6_dst = fonts_dst / "Font_Awesome_6_Free-Solid-900.otf"
+    if fa6_src.exists() and not fa6_dst.exists():
+        shutil.copy2(fa6_src, fa6_dst)
+
     return user_assets
 
 
@@ -89,18 +95,18 @@ def get_default_ini_path(name: str = "imgui_settings") -> str:
 
 
 def _configure_qt_backend():
-    """set up qt backend for rendercanvas if pyside6 is available.
+    """set up qt backend for rendercanvas if pyqt6 is available.
 
     must happen before importing fastplotlib to avoid glfw selection.
     """
-    if importlib.util.find_spec("PySide6") is None:
+    if importlib.util.find_spec("PyQt6") is None:
         return
 
     os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
-    import PySide6  # noqa: F401
+    import PyQt6  # noqa: F401
 
-    # fix suite2p pyside6 compatibility
-    from PySide6.QtWidgets import QSlider
+    # fix suite2p pyqt6 compatibility
+    from PyQt6.QtWidgets import QSlider
     if not hasattr(QSlider, "NoTicks"):
         QSlider.NoTicks = QSlider.TickPosition.NoTicks
 

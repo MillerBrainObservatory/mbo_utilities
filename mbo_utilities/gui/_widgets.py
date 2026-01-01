@@ -162,6 +162,131 @@ def compact_header(label: str, default_open: bool = False) -> bool:
     return is_open
 
 
+# Track popup states globally by popup_id
+_popup_states: dict[str, bool] = {}
+
+
+def settings_row_with_popup(
+    popup_id: str,
+    label: str,
+    enabled: bool,
+    draw_settings_content: callable,
+    tooltip: str = "",
+    checkbox_tooltip: str = "",
+    popup_width: float = 400,
+    popup_height: float = 0,
+) -> tuple[bool, bool]:
+    """
+    Draw a compact settings row: [checkbox] Label [Settings button] -> popup.
+
+    Parameters
+    ----------
+    popup_id : str
+        Unique identifier for the popup (used for imgui ID and state tracking).
+    label : str
+        Label shown next to checkbox and as popup title.
+    enabled : bool
+        Current enabled state for the checkbox.
+    draw_settings_content : callable
+        Function to call to draw the popup content. Called with no arguments.
+    tooltip : str, optional
+        Tooltip shown when hovering the Settings button.
+    checkbox_tooltip : str, optional
+        Tooltip shown when hovering the checkbox.
+    popup_width : float, optional
+        Width of the popup window. Default 400.
+    popup_height : float, optional
+        Height of the popup window. 0 = auto-size. Default 0.
+
+    Returns
+    -------
+    tuple[bool, bool]
+        (enabled_changed, new_enabled_value)
+
+    Example
+    -------
+    >>> changed, self.do_registration = settings_row_with_popup(
+    ...     "reg_settings",
+    ...     "Registration",
+    ...     self.do_registration,
+    ...     lambda: draw_registration_settings(self),
+    ...     tooltip="Configure registration parameters"
+    ... )
+    """
+    global _popup_states
+
+    # Initialize popup state if needed
+    if popup_id not in _popup_states:
+        _popup_states[popup_id] = False
+
+    # Draw checkbox
+    changed, new_enabled = imgui.checkbox(f"##{popup_id}_checkbox", enabled)
+
+    # Add checkbox tooltip
+    if checkbox_tooltip:
+        if imgui.is_item_hovered():
+            imgui.begin_tooltip()
+            imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+            imgui.text_unformatted(checkbox_tooltip)
+            imgui.pop_text_wrap_pos()
+            imgui.end_tooltip()
+
+    # Draw label
+    imgui.same_line()
+    imgui.text(label)
+
+    # Draw Settings button
+    imgui.same_line()
+    if imgui.button(f"Settings##{popup_id}"):
+        _popup_states[popup_id] = True
+        imgui.open_popup(f"{label} Settings##{popup_id}")
+
+    # Add button tooltip
+    if tooltip:
+        if imgui.is_item_hovered():
+            imgui.begin_tooltip()
+            imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+            imgui.text_unformatted(tooltip)
+            imgui.pop_text_wrap_pos()
+            imgui.end_tooltip()
+
+    # Draw popup
+    if popup_height > 0:
+        imgui.set_next_window_size(
+            imgui.ImVec2(popup_width, popup_height), imgui.Cond_.first_use_ever
+        )
+    else:
+        imgui.set_next_window_size(
+            imgui.ImVec2(popup_width, 0), imgui.Cond_.first_use_ever
+        )
+
+    opened, visible = imgui.begin_popup_modal(
+        f"{label} Settings##{popup_id}",
+        p_open=True if _popup_states[popup_id] else None,
+        flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+    )
+
+    if opened:
+        if not visible:
+            # User closed via X button
+            _popup_states[popup_id] = False
+            imgui.close_current_popup()
+        else:
+            # Draw the settings content
+            draw_settings_content()
+
+            # Close button at bottom
+            imgui.spacing()
+            imgui.separator()
+            if imgui.button("Close", imgui.ImVec2(80, 0)):
+                _popup_states[popup_id] = False
+                imgui.close_current_popup()
+
+        imgui.end_popup()
+
+    return changed, new_enabled
+
+
 def _fmt_multivalue(value, max_items=8):
     """format a value that may be a list of per-camera values."""
     if isinstance(value, (list, tuple)):

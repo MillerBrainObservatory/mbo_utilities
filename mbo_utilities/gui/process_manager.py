@@ -76,10 +76,10 @@ class ProcessInfo:
                  pass
 
         if verbose:
-            print(f"DEBUG_PM: Checking sidecar for PID {self.pid} (UUID={uuid})")
+            logger.debug(f"Checking sidecar for PID {self.pid} (UUID={uuid})")
             if uuid:
-                print(f"DEBUG_PM:   UUID path: {log_dir / f'progress_{uuid}.json'} (Exists: {(log_dir / f'progress_{uuid}.json').exists()})")
-            print(f"DEBUG_PM:   PID path:  {log_dir / f'progress_{self.pid}.json'} (Exists: {(log_dir / f'progress_{self.pid}.json').exists()})")
+                logger.debug(f"  UUID path: {log_dir / f'progress_{uuid}.json'} (Exists: {(log_dir / f'progress_{uuid}.json').exists()})")
+            logger.debug(f"  PID path:  {log_dir / f'progress_{self.pid}.json'} (Exists: {(log_dir / f'progress_{self.pid}.json').exists()})")
 
         if sidecar and sidecar.exists():
             try:
@@ -99,15 +99,13 @@ class ProcessInfo:
                         self.status_message = data.get("message", self.status_message)
                         self.error_details = data.get("details", self.error_details)
                     else:
-                        print(f"DEBUG_PM: Identity mismatch in sidecar {sidecar}. Found pid={data.get('pid')}, uuid={data.get('uuid')}")
+                        logger.debug(f"Identity mismatch in sidecar {sidecar}. Found pid={data.get('pid')}, uuid={data.get('uuid')}")
             except Exception as e:
-                # Log this, as silent failure leads to false "Process Crashed" errors
-                print(f"DEBUG_PM: Sidecar read error: {e}")
+                # Silently ignore read errors - atomic writes should prevent most issues
                 logger.debug(f"Failed to read sidecar for pid {self.pid}: {e}")
-                pass
         else:
             if verbose:
-                print(f"DEBUG_PM: No sidecar found.")
+                logger.debug(f"No sidecar found for PID {self.pid}.")
 
     def is_alive(self) -> bool:
         """check if process is still running."""
@@ -131,7 +129,7 @@ class ProcessInfo:
                     # ERROR_INVALID_PARAMETER (87) usually means PID found no process (Dead).
                     if err != 87:
                         # Log unusual errors
-                        print(f"DEBUG_PM: PID {self.pid} is_alive check failed. OpenProcess err={err}")
+                        logger.debug(f"PID {self.pid} is_alive check failed. OpenProcess err={err}")
                     return False
             else:
                 os.kill(self.pid, 0)
@@ -264,8 +262,13 @@ class ProcessManager:
             pid of spawned process, or None if spawn failed.
         """
         try:
-            # Note: use python.exe (not pythonw.exe) to allow output logging
+            # Use pythonw.exe on Windows to prevent console window from appearing
+            # Output still goes to log file via stdout/stderr redirection
             python_exe = sys.executable
+            if sys.platform == "win32" and python_exe.endswith("python.exe"):
+                pythonw = python_exe[:-10] + "pythonw.exe"
+                if Path(pythonw).exists():
+                    python_exe = pythonw
 
             # Generate UUID for the task
             from uuid import uuid4
@@ -337,15 +340,10 @@ class ProcessManager:
 
             logger.info(f"Spawned background process {proc.pid}: {description}")
             logger.debug(f"Process log: {log_file}")
-            # Diagnostic prints
-            print(f"DEBUG_PM: Spawning worker successfully.")
-            print(f"DEBUG_PM: Command: {cmd}")
-            print(f"DEBUG_PM: Log file: {log_file}")
             return proc.pid
 
         except Exception as e:
             logger.error(f"Failed to spawn process: {e}")
-            print(f"DEBUG_PM: Failed to spawn process: {e}")
             return None
 
     def get_all(self) -> list[ProcessInfo]:
@@ -356,13 +354,14 @@ class ProcessManager:
         """get active processes (running or failed/pending view)."""
         active = []
         for p in self._processes.values():
+            # Always update from sidecar first to get latest status
+            p.update_from_sidecar()
+
             # if alive, it's running.
             if p.is_alive():
-                p.update_from_sidecar()
                 active.append(p)
             # if not alive but error, it's "active" in the sense of needing attention
             elif p.status == "error":
-                p.update_from_sidecar()
                 active.append(p)
         return active
 
@@ -387,9 +386,9 @@ class ProcessManager:
                 retries = 0
                 while p.status == "running" and retries < 10:
                     time.sleep(0.1)
-                    p.update_from_sidecar(verbose=True)
+                    p.update_from_sidecar(verbose=False)
                     if p.status == "running":
-                        print(f"DEBUG_PM: PID {pid} Retry {retries+1}/10")
+                        logger.debug(f"PID {pid} Retry {retries+1}/10")
                     retries += 1
 
                 if p.status == "error":

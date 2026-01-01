@@ -335,7 +335,7 @@ class IsoviewArray:
     @property
     def metadata(self) -> dict:
         """
-        Metadata dictionary for LazyArrayProtocol.
+        Return metadata as dict. Always returns dict, never None.
 
         Contains standard keys for Suite2p compatibility:
         - nframes: number of frames (timepoints)
@@ -350,7 +350,7 @@ class IsoviewArray:
         - num_timepoints, views, shape, structure
         - cameras: per-camera metadata dict
         """
-        meta = dict(self._zarr_attrs)
+        meta = dict(self._zarr_attrs) if self._zarr_attrs else {}
 
         # map isoview keys to canonical metadata keys
         # pixel resolution: pixel_resolution_um -> dx, dy
@@ -401,6 +401,12 @@ class IsoviewArray:
                         meta[key] = values
 
         return meta
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._zarr_attrs.update(value)
 
     @property
     def camera_metadata(self) -> dict[int, dict]:

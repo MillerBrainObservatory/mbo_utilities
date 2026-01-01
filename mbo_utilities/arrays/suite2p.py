@@ -344,7 +344,8 @@ class Suite2pArray(ReductionMixin):
 
     @property
     def metadata(self) -> dict:
-        return self._metadata
+        """Return metadata as dict. Always returns dict, never None."""
+        return self._metadata if self._metadata is not None else {}
 
     @metadata.setter
     def metadata(self, value: dict):

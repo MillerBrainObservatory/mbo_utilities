@@ -87,8 +87,11 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
         if status == "completed":
             data["progress"] = 1.0
 
-        with open(sidecar, "w") as f:
+        # Write atomically to avoid race conditions with readers
+        tmp_file = sidecar.with_suffix(".tmp")
+        with open(tmp_file, "w") as f:
             json.dump(data, f)
+        tmp_file.replace(sidecar)
 
     except Exception as e:
         print(f"Failed to update sidecar: {e}", file=sys.stderr)
@@ -96,6 +99,10 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
 
 def main():
     """main entry point for worker subprocess."""
+    # Disable tqdm's dynamic display for file output (no terminal = no \r updates)
+    # This prevents the flood of progress bar lines in log files
+    os.environ["TQDM_DISABLE"] = "1"
+
     # early print so we can see the process started even if logging fails
     print(f"Worker process starting (pid={os.getpid()})", flush=True)
 

@@ -1,29 +1,35 @@
 """
 Analysis tools for mbo_utilities.
+
+This package uses lazy imports to minimize startup time. Heavy dependencies
+like lbm_suite2p_python are only loaded when actually needed.
 """
 
-from mbo_utilities.analysis.phasecorr import (
-    bidir_phasecorr,
-    ALL_PHASECORR_METHODS,
-    TWO_DIM_PHASECORR_METHODS,
-    THREE_DIM_PHASECORR_METHODS,
-)
+from __future__ import annotations
 
-from mbo_utilities.analysis.scanphase import (
-    ScanPhaseAnalyzer,
-    ScanPhaseResults,
-    analyze_scanphase,
-    run_scanphase_analysis,
-)
+from typing import TYPE_CHECKING
 
-from mbo_utilities.analysis.metrics import (
-    snr_roi,
-    mean_row_misalignment,
-    temporal_corr,
-    sharpness_metric,
-    avg_sharpness,
-    frame_correlations,
-)
+if TYPE_CHECKING:
+    from mbo_utilities.analysis.phasecorr import (
+        bidir_phasecorr as bidir_phasecorr,
+        ALL_PHASECORR_METHODS as ALL_PHASECORR_METHODS,
+        TWO_DIM_PHASECORR_METHODS as TWO_DIM_PHASECORR_METHODS,
+        THREE_DIM_PHASECORR_METHODS as THREE_DIM_PHASECORR_METHODS,
+    )
+    from mbo_utilities.analysis.scanphase import (
+        ScanPhaseAnalyzer as ScanPhaseAnalyzer,
+        ScanPhaseResults as ScanPhaseResults,
+        analyze_scanphase as analyze_scanphase,
+        run_scanphase_analysis as run_scanphase_analysis,
+    )
+    from mbo_utilities.analysis.metrics import (
+        snr_roi as snr_roi,
+        mean_row_misalignment as mean_row_misalignment,
+        temporal_corr as temporal_corr,
+        sharpness_metric as sharpness_metric,
+        avg_sharpness as avg_sharpness,
+        frame_correlations as frame_correlations,
+    )
 
 __all__ = [
     # phasecorr
@@ -43,11 +49,64 @@ __all__ = [
     "sharpness_metric",
     "avg_sharpness",
     "frame_correlations",
+    # cellpose/lbm_suite2p_python (optional)
+    "save_cellpose_results",
+    "load_cellpose_results",
+    "open_cellpose_gui",
+    "masks_to_stat",
+    "stat_to_masks",
+    "save_cellpose_comparison",
+    "export_suite2p_for_cellpose",
+    "import_cellpose_to_suite2p",
+    "get_results",
+    "ensure_cellpose_format",
+    "detect_format",
+    # helpers
+    "_patch_qt_checkbox",
 ]
+
+# Lazy import mapping: name -> (module, attr)
+_LAZY_IMPORTS: dict[str, tuple[str, str]] = {
+    # phasecorr
+    "bidir_phasecorr": (".phasecorr", "bidir_phasecorr"),
+    "ALL_PHASECORR_METHODS": (".phasecorr", "ALL_PHASECORR_METHODS"),
+    "TWO_DIM_PHASECORR_METHODS": (".phasecorr", "TWO_DIM_PHASECORR_METHODS"),
+    "THREE_DIM_PHASECORR_METHODS": (".phasecorr", "THREE_DIM_PHASECORR_METHODS"),
+    # scanphase
+    "ScanPhaseAnalyzer": (".scanphase", "ScanPhaseAnalyzer"),
+    "ScanPhaseResults": (".scanphase", "ScanPhaseResults"),
+    "analyze_scanphase": (".scanphase", "analyze_scanphase"),
+    "run_scanphase_analysis": (".scanphase", "run_scanphase_analysis"),
+    # metrics
+    "snr_roi": (".metrics", "snr_roi"),
+    "mean_row_misalignment": (".metrics", "mean_row_misalignment"),
+    "temporal_corr": (".metrics", "temporal_corr"),
+    "sharpness_metric": (".metrics", "sharpness_metric"),
+    "avg_sharpness": (".metrics", "avg_sharpness"),
+    "frame_correlations": (".metrics", "frame_correlations"),
+}
+
+# lbm_suite2p_python imports (optional dependency)
+_LSP_IMPORTS: dict[str, tuple[str, str]] = {
+    "save_cellpose_results": ("lbm_suite2p_python.cellpose", "save_gui_results"),
+    "load_cellpose_results": ("lbm_suite2p_python.cellpose", "load_seg_file"),
+    "_open_in_gui": ("lbm_suite2p_python.cellpose", "open_in_gui"),
+    "masks_to_stat": ("lbm_suite2p_python.cellpose", "masks_to_stat"),
+    "stat_to_masks": ("lbm_suite2p_python.cellpose", "stat_to_masks"),
+    "save_cellpose_comparison": ("lbm_suite2p_python.cellpose", "save_comparison"),
+    "export_suite2p_for_cellpose": ("lbm_suite2p_python.conversion", "export_for_gui"),
+    "import_cellpose_to_suite2p": ("lbm_suite2p_python.conversion", "import_from_gui"),
+    "get_results": ("lbm_suite2p_python.conversion", "get_results"),
+    "ensure_cellpose_format": ("lbm_suite2p_python.conversion", "ensure_cellpose_format"),
+    "detect_format": ("lbm_suite2p_python.conversion", "detect_format"),
+}
+
+# Cache for loaded objects
+_loaded: dict[str, object] = {}
 
 
 def _patch_qt_checkbox():
-    """patch QCheckBox for Qt5/Qt6 compatibility with cellpose."""
+    """Patch QCheckBox for Qt5/Qt6 compatibility with cellpose."""
     try:
         from qtpy.QtWidgets import QCheckBox
         if not hasattr(QCheckBox, 'checkStateChanged'):
@@ -56,30 +115,42 @@ def _patch_qt_checkbox():
         pass
 
 
-# cellpose functions are now in lbm_suite2p_python
-# import with optional dependency handling
-try:
-    from lbm_suite2p_python.cellpose import (
-        save_gui_results as save_cellpose_results,
-        load_seg_file as load_cellpose_results,
-        open_in_gui as _open_in_gui,
-        masks_to_stat,
-        stat_to_masks,
-        save_comparison as save_cellpose_comparison,
-    )
+def open_cellpose_gui(*args, **kwargs):
+    """Open cellpose GUI with Qt compatibility patch applied."""
+    _patch_qt_checkbox()
+    _open_in_gui = __getattr__("_open_in_gui")
+    return _open_in_gui(*args, **kwargs)
 
-    def open_cellpose_gui(*args, **kwargs):
-        """open cellpose GUI with Qt compatibility patch applied."""
-        _patch_qt_checkbox()
-        return _open_in_gui(*args, **kwargs)
 
-    __all__.extend([
-        "save_cellpose_results",
-        "load_cellpose_results",
-        "open_cellpose_gui",
-        "masks_to_stat",
-        "stat_to_masks",
-        "save_cellpose_comparison",
-    ])
-except ImportError:
-    pass  # lbm_suite2p_python not installed
+def __getattr__(name: str) -> object:
+    if name in _loaded:
+        return _loaded[name]
+
+    # Local submodule imports
+    if name in _LAZY_IMPORTS:
+        module_name, attr_name = _LAZY_IMPORTS[name]
+        from importlib import import_module
+        module = import_module(module_name, package="mbo_utilities.analysis")
+        obj = getattr(module, attr_name)
+        _loaded[name] = obj
+        return obj
+
+    # lbm_suite2p_python imports (optional)
+    if name in _LSP_IMPORTS:
+        module_name, attr_name = _LSP_IMPORTS[name]
+        try:
+            from importlib import import_module
+            module = import_module(module_name)
+            obj = getattr(module, attr_name)
+            _loaded[name] = obj
+            return obj
+        except ImportError:
+            raise AttributeError(
+                f"'{name}' requires lbm_suite2p_python which is not installed"
+            ) from None
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return list(__all__)

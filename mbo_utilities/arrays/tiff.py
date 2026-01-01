@@ -7,6 +7,7 @@ This module provides array readers for TIFF files:
 - ScanImageArray: Base class for raw ScanImage TIFFs with phase correction
 - LBMArray: LBM (Light Beads Microscopy) stacks, z-planes as channels
 - PiezoArray: Piezo z-stacks with optional frame averaging
+- CalibrationArray: Pollen/bead calibration stacks (LBM + piezo)
 - SinglePlaneArray: Single-plane time series
 - open_scanimage: Factory function that auto-detects stack type
 
@@ -30,7 +31,6 @@ from tifffile import TiffFile
 from mbo_utilities import log
 from mbo_utilities.arrays._base import (
     _imwrite_base,
-    iter_rois,
     ReductionMixin,
 )
 from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
@@ -44,7 +44,11 @@ from mbo_utilities.metadata.scanimage import (
 from mbo_utilities.analysis.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
-from mbo_utilities.arrays.features import PhaseCorrectionFeature, DimLabels
+from mbo_utilities.arrays.features import (
+    DimLabels,
+    PhaseCorrectionFeature,
+    RoiFeatureMixin,
+)
 from mbo_utilities.arrays.features._phase_correction import PhaseCorrMethod
 
 if TYPE_CHECKING:
@@ -205,6 +209,7 @@ class _SingleTiffPlaneReader:
     @property
     def dtype(self):
         from mbo_utilities.util import get_dtype
+
         return get_dtype(self._dtype)
 
     def __getitem__(self, key):
@@ -232,7 +237,9 @@ class _SingleTiffPlaneReader:
         return out
 
     def _read_frames(self, frames: list[int]) -> np.ndarray:
-        buf = np.empty((len(frames), self._page_shape[0], self._page_shape[1]), dtype=self._dtype)
+        buf = np.empty(
+            (len(frames), self._page_shape[0], self._page_shape[1]), dtype=self._dtype
+        )
 
         start = 0
         frame_to_buf_idx = {f: i for i, f in enumerate(frames)}
@@ -398,18 +405,21 @@ class TiffArray(ReductionMixin):
         # Use metadata from first plane
         try:
             from mbo_utilities.metadata import get_metadata_single
+
             self._metadata = get_metadata_single(plane_groups[0][0])
         except Exception:
             self._metadata = {}
 
-        self._metadata.update({
-            "shape": self.shape,
-            "dtype": str(self._dtype),
-            "nframes": self._nframes,
-            "num_frames": self._nframes,
-            "num_planes": self._nz,
-            "file_paths": [str(p) for p in self.filenames],
-        })
+        self._metadata.update(
+            {
+                "shape": self.shape,
+                "dtype": str(self._dtype),
+                "nframes": self._nframes,
+                "num_frames": self._nframes,
+                "num_planes": self._nz,
+                "file_paths": [str(p) for p in self.filenames],
+            }
+        )
         self.num_rois = 1
 
     def _init_single_plane(self, files: list[Path]):
@@ -428,19 +438,22 @@ class TiffArray(ReductionMixin):
         # try to read metadata from file first, fall back to basic info
         try:
             from mbo_utilities.metadata import get_metadata_single
+
             self._metadata = get_metadata_single(files[0])
         except Exception:
             self._metadata = {}
 
         # ensure basic shape info is present
-        self._metadata.update({
-            "shape": self.shape,
-            "dtype": str(self._dtype),
-            "nframes": self._nframes,
-            "num_frames": self._nframes,
-            "file_paths": [str(p) for p in files],
-            "num_files": len(files),
-        })
+        self._metadata.update(
+            {
+                "shape": self.shape,
+                "dtype": str(self._dtype),
+                "nframes": self._nframes,
+                "num_frames": self._nframes,
+                "file_paths": [str(p) for p in files],
+                "num_files": len(files),
+            }
+        )
         self.num_rois = 1
 
     def _init_volume(self, plane_files: list[Path]):
@@ -471,19 +484,22 @@ class TiffArray(ReductionMixin):
         # try to read metadata from first plane file, fall back to basic info
         try:
             from mbo_utilities.metadata import get_metadata_single
+
             self._metadata = get_metadata_single(plane_files[0])
         except Exception:
             self._metadata = {}
 
         # ensure basic shape info is present
-        self._metadata.update({
-            "shape": self.shape,
-            "dtype": str(self._dtype),
-            "nframes": self._nframes,
-            "num_frames": self._nframes,
-            "num_planes": self._nz,
-            "plane_files": [str(p) for p in plane_files],
-        })
+        self._metadata.update(
+            {
+                "shape": self.shape,
+                "dtype": str(self._dtype),
+                "nframes": self._nframes,
+                "num_frames": self._nframes,
+                "num_planes": self._nz,
+                "plane_files": [str(p) for p in plane_files],
+            }
+        )
         self.num_rois = 1
 
         logger.info(
@@ -508,7 +524,12 @@ class TiffArray(ReductionMixin):
     @property
     def dtype(self):
         from mbo_utilities.util import get_dtype
-        return self._target_dtype if self._target_dtype is not None else get_dtype(self._dtype)
+
+        return (
+            self._target_dtype
+            if self._target_dtype is not None
+            else get_dtype(self._dtype)
+        )
 
     @property
     def ndim(self) -> int:
@@ -516,7 +537,8 @@ class TiffArray(ReductionMixin):
 
     @property
     def metadata(self) -> dict:
-        return self._metadata
+        """Return metadata as dict. Always returns dict, never None."""
+        return self._metadata if self._metadata is not None else {}
 
     @metadata.setter
     def metadata(self, value: dict):
@@ -525,7 +547,7 @@ class TiffArray(ReductionMixin):
         self._metadata = value
 
     def _compute_frame_vminmax(self):
-        if not hasattr(self, '_cached_vmin'):
+        if not hasattr(self, "_cached_vmin"):
             frame = np.asarray(self[0, 0])
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
@@ -560,7 +582,9 @@ class TiffArray(ReductionMixin):
             if t_key < 0:
                 t_key = self._nframes + t_key
             if t_key >= self._nframes:
-                raise IndexError(f"Time index {t_key} out of bounds for {self._nframes} frames")
+                raise IndexError(
+                    f"Time index {t_key} out of bounds for {self._nframes} frames"
+                )
 
         # handle z indexing
         if isinstance(z_key, int):
@@ -719,15 +743,17 @@ class MBOTiffArray(ReductionMixin):
             self._num_frames += nframes
 
         self._metadata = get_metadata(self.filenames)
-        self._metadata.update({
-            "shape": self.shape,
-            "dtype": str(self._dtype),
-            "nframes": self._num_frames,
-            "num_frames": self._num_frames,
-            "frames_per_file": self._frames_per_file,
-            "file_paths": [str(p) for p in self.filenames],
-            "num_files": len(self.filenames),
-        })
+        self._metadata.update(
+            {
+                "shape": self.shape,
+                "dtype": str(self._dtype),
+                "nframes": self._num_frames,
+                "num_frames": self._num_frames,
+                "frames_per_file": self._frames_per_file,
+                "file_paths": [str(p) for p in self.filenames],
+                "num_files": len(self.filenames),
+            }
+        )
         self.num_rois = get_param(self._metadata, "num_mrois", default=1)
         self.tags = [derive_tag_from_filename(f) for f in self.filenames]
         self._target_dtype = None
@@ -739,11 +765,14 @@ class MBOTiffArray(ReductionMixin):
 
     @property
     def metadata(self) -> dict:
-        return self._metadata or {}
+        """Return metadata as dict. Always returns dict, never None."""
+        return self._metadata if self._metadata is not None else {}
 
     @metadata.setter
-    def metadata(self, metadata: dict):
-        self._metadata = metadata
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -752,10 +781,15 @@ class MBOTiffArray(ReductionMixin):
     @property
     def dtype(self):
         from mbo_utilities.util import get_dtype
-        return self._target_dtype if self._target_dtype is not None else get_dtype(self._dtype)
+
+        return (
+            self._target_dtype
+            if self._target_dtype is not None
+            else get_dtype(self._dtype)
+        )
 
     def _compute_frame_vminmax(self):
-        if not hasattr(self, '_cached_vmin'):
+        if not hasattr(self, "_cached_vmin"):
             frame = np.asarray(self[0, 0])
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
@@ -819,7 +853,8 @@ class MBOTiffArray(ReductionMixin):
 
     def _read_frames(self, frames: list[int]) -> np.ndarray:
         buf = np.empty(
-            (len(frames), 1, self._page_shape[0], self._page_shape[1]), dtype=self._dtype
+            (len(frames), 1, self._page_shape[0], self._page_shape[1]),
+            dtype=self._dtype,
         )
 
         start = 0
@@ -882,6 +917,10 @@ class MBOTiffArray(ReductionMixin):
             window_funcs=window_funcs,
         )
 
+    def save(self, outpath, **kwargs):
+        """Save array to disk."""
+        return self._imwrite(outpath, **kwargs)
+
     def _imwrite(
         self,
         outpath: Path | str,
@@ -906,7 +945,7 @@ class MBOTiffArray(ReductionMixin):
         )
 
 
-class ScanImageArray(ReductionMixin):
+class ScanImageArray(RoiFeatureMixin, ReductionMixin):
     """
     Base class for raw ScanImage TIFF readers with phase correction support.
 
@@ -981,14 +1020,16 @@ class ScanImageArray(ReductionMixin):
             value = get_param(self._metadata, param, default=None)
             mp = METADATA_PARAMS.get(param)
             desc = self.get_param_description(param)
-            fields.append({
-                "canonical": param,
-                "description": desc,
-                "label": mp.label if mp else param,
-                "unit": mp.unit if mp else "",
-                "dtype": mp.dtype if mp else float,
-                "value": value,
-            })
+            fields.append(
+                {
+                    "canonical": param,
+                    "description": desc,
+                    "label": mp.label if mp else param,
+                    "unit": mp.unit if mp else "",
+                    "dtype": mp.dtype if mp else float,
+                    "value": value,
+                }
+            )
         return fields
 
     def get_param_description(self, param: str) -> str:
@@ -1015,6 +1056,7 @@ class ScanImageArray(ReductionMixin):
                 return ctx[param]
         # fallback to METADATA_PARAMS
         from mbo_utilities.metadata import METADATA_PARAMS
+
         mp = METADATA_PARAMS.get(param)
         return mp.description if mp else ""
 
@@ -1028,7 +1070,6 @@ class ScanImageArray(ReductionMixin):
         upsample: int = 5,
         max_offset: int = 4,
         use_fft: bool = False,
-
         metadata: dict | None = None,
         dims: str | Sequence[str] | None = None,
     ):
@@ -1043,13 +1084,21 @@ class ScanImageArray(ReductionMixin):
             self._metadata = get_metadata(self.filenames)
 
         self.num_channels = get_param(self._metadata, "nplanes", default=1)
-        self.num_rois = get_param(self._metadata, "num_rois", default=1)
+        self.num_frames = get_param(self._metadata, "nframes")
+        self._source_dtype = get_param(self._metadata, "dtype", default="int16")
+        self._target_dtype = None
+        self._ndim = self._metadata.get("ndim", 3)
+        self._frames_per_file = self._metadata.get("frames_per_file", None)
 
-        self._roi = roi
-        self.roi = roi
+        # Extract ROI info before setting roi (needed for validation)
+        self._rois = self._extract_roi_info()
+
+        # Initialize ROI state (mixin provides roi property with validation)
+        self._roi = None
+        if roi is not None:
+            self.roi = roi  # validates via mixin setter
 
         self._offset = 0.0
-        self._mean_subtraction = False
         self._mean_subtraction = False
         self.pbar = None
         self.show_pbar = False
@@ -1060,22 +1109,15 @@ class ScanImageArray(ReductionMixin):
             "roi_array_shape": False,
             "phase_offset": False,
         }
-        self.num_frames = get_param(self._metadata, "nframes")
-        self._source_dtype = get_param(self._metadata, "dtype", default="int16")
-        self._target_dtype = None
-        self._ndim = self._metadata.get("ndim", 3)
-
-        self._frames_per_file = self._metadata.get("frames_per_file", None)
-        self._rois = self._extract_roi_info()
 
         # Initialize PhaseCorrectionFeature
         self.phase_correction = PhaseCorrectionFeature(
             enabled=fix_phase,
             method=phasecorr_method,
-            shift=None, # auto-compute by default
+            shift=None,  # auto-compute by default
             use_fft=use_fft,
             upsample=upsample,
-            border=border if isinstance(border, int) else 3, # feature checks int
+            border=border if isinstance(border, int) else 3,  # feature checks int
             max_offset=max_offset,
         )
 
@@ -1116,7 +1158,7 @@ class ScanImageArray(ReductionMixin):
         )
 
     def _compute_frame_vminmax(self):
-        if not hasattr(self, '_cached_vmin'):
+        if not hasattr(self, "_cached_vmin"):
             frame = self[0, 0]
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
@@ -1132,7 +1174,10 @@ class ScanImageArray(ReductionMixin):
         return self._cached_vmax
 
     @property
-    def metadata(self):
+    def metadata(self) -> dict:
+        """Return metadata as dict. Always returns dict, never None."""
+        if self._metadata is None:
+            self._metadata = {}
         self._metadata.update(
             {
                 "dtype": self.dtype,
@@ -1151,12 +1196,17 @@ class ScanImageArray(ReductionMixin):
         return self._metadata
 
     @metadata.setter
-    def metadata(self, value):
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        if self._metadata is None:
+            self._metadata = {}
         self._metadata.update(value)
 
     @property
     def rois(self):
-        return self._rois
+        """Alias for roi_slices (backwards compatibility)."""
+        return self.roi_slices
 
     @property
     def offset(self):
@@ -1230,28 +1280,7 @@ class ScanImageArray(ReductionMixin):
             raise ValueError("mean_subtraction must be a boolean value.")
         self._mean_subtraction = value
 
-    @property
-    def roi(self):
-        return self._roi
-
-    @roi.setter
-    def roi(self, value):
-        if value is not None and value != 0:
-            if isinstance(value, int):
-                if value < 1 or value > self.num_rois:
-                    raise ValueError(
-                        f"ROI index {value} out of bounds.\n"
-                        f"Valid range: 1 to {self.num_rois} (1-indexed)\n"
-                        f"Use roi=0 to split all ROIs, or roi=None to stitch."
-                    )
-            elif isinstance(value, (list, tuple)):
-                for v in value:
-                    if v < 1 or v > self.num_rois:
-                        raise ValueError(
-                            f"ROI index {v} in {value} out of bounds.\n"
-                            f"Valid range: 1 to {self.num_rois} (1-indexed)"
-                        )
-        self._roi = value
+    # roi property is provided by RoiFeatureMixin
 
     @property
     def output_xslices(self):
@@ -1282,9 +1311,7 @@ class ScanImageArray(ReductionMixin):
 
         start = 0
         tiff_iterator = (
-            zip(
-                self.tiff_files, (f * self.num_channels for f in self._frames_per_file)
-            )
+            zip(self.tiff_files, (f * self.num_channels for f in self._frames_per_file))
             if self._frames_per_file is not None
             else ((tf, len(tf.pages)) for tf in self.tiff_files)
         )
@@ -1329,26 +1356,23 @@ class ScanImageArray(ReductionMixin):
 
             if self.fix_phase:
                 import time as _t
+
                 _t0 = _t.perf_counter()
 
                 # If we have a fixed shift, use it
                 shift = self.phase_correction.effective_shift
 
                 if shift is not None:
-                     from mbo_utilities.analysis.phasecorr import _apply_offset
-                     # Use _apply_offset directly or feature.apply
-                     # Note: feature.apply returns 2D, but we have 3D (Z/T) chunk (N, Y, X)
-                     # Bidirectional phase correction applies to rows (X axis)
-                     # _apply_offset handles N-D arrays if applied along last axis?
-                     # Let's inspect source or assume it works like bidir_phasecorr
+                    from mbo_utilities.analysis.phasecorr import _apply_offset
+                    # Use _apply_offset directly or feature.apply
+                    # Note: feature.apply returns 2D, but we have 3D (Z/T) chunk (N, Y, X)
+                    # Bidirectional phase correction applies to rows (X axis)
+                    # _apply_offset handles N-D arrays if applied along last axis?
+                    # Let's inspect source or assume it works like bidir_phasecorr
 
-                     # Fallback to applying manually using computed shift
-                     corrected = _apply_offset(
-                         chunk,
-                         shift,
-                         use_fft=self.use_fft
-                     )
-                     offset = shift
+                    # Fallback to applying manually using computed shift
+                    corrected = _apply_offset(chunk, shift, use_fft=self.use_fft)
+                    offset = shift
                 else:
                     # No fixed shift, compute on this chunk (Legacy behavior)
                     corrected, offset = bidir_phasecorr(
@@ -1365,14 +1389,16 @@ class ScanImageArray(ReductionMixin):
                 _t1 = _t.perf_counter()
                 logger.debug(
                     f"phase_corr: offset={offset:.2f}, method={self.phasecorr_method}, "
-                    f"fft={self.use_fft}, chunk={chunk.shape}, took {(_t1-_t0)*1000:.1f}ms"
+                    f"fft={self.use_fft}, chunk={chunk.shape}, took {(_t1 - _t0) * 1000:.1f}ms"
                 )
             else:
                 buf[idxs] = chunk
                 self._offset = 0.0
             start = end
 
-        logger.debug(f"_read_pages: {len(frames)} frames, {len(chans)} chans -> {buf.shape}")
+        logger.debug(
+            f"_read_pages: {len(frames)} frames, {len(chans)} chans -> {buf.shape}"
+        )
         return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
 
     def __getitem__(self, key):
@@ -1389,7 +1415,7 @@ class ScanImageArray(ReductionMixin):
 
         out = self.process_rois(frames, chans)
         t1 = time.perf_counter()
-        self.logger.debug(f"__getitem__ took {(t1-t0)*1000:.1f}ms")
+        self.logger.debug(f"__getitem__ took {(t1 - t0) * 1000:.1f}ms")
 
         squeeze = []
         if isinstance(t_key, int):
@@ -1413,24 +1439,23 @@ class ScanImageArray(ReductionMixin):
     def process_rois(self, frames, chans):
         if self.roi is not None and isinstance(self.roi, int) and self.roi != 0:
             return self._read_pages(
-                frames, chans,
+                frames,
+                chans,
                 yslice=self._rois[self.roi - 1]["slice"],
                 xslice=slice(None),
             )
 
-        full_data = self._read_pages(frames, chans, yslice=slice(None), xslice=slice(None))
+        full_data = self._read_pages(
+            frames, chans, yslice=slice(None), xslice=slice(None)
+        )
 
         if self.roi is not None:
             if isinstance(self.roi, list):
                 return tuple(
-                    full_data[:, :, self._rois[r - 1]["slice"], :]
-                    for r in self.roi
+                    full_data[:, :, self._rois[r - 1]["slice"], :] for r in self.roi
                 )
             elif self.roi == 0:
-                return tuple(
-                    full_data[:, :, self._rois[r]["slice"], :]
-                    for r in range(self.num_rois)
-                )
+                pass  # Already handled by splitting in calling code or higher level
 
         total_width = sum(roi["width"] for roi in self._rois)
         max_height = max(roi["height"] for roi in self._rois)
@@ -1445,6 +1470,36 @@ class ScanImageArray(ReductionMixin):
             out[:, :, oys, oxs] = full_data[:, :, yslice, :]
 
         return out
+
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
+        progress_callback=None,
+        debug=None,
+        planes=None,
+        **kwargs,
+    ):
+        """Write ScanImage array to disk."""
+        from mbo_utilities.arrays._base import _imwrite_base
+
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
+
+    def save(self, outpath, **kwargs):
+        """Save array to disk."""
+        return self._imwrite(outpath, **kwargs)
 
     @property
     def num_planes(self):
@@ -1493,7 +1548,9 @@ class ScanImageArray(ReductionMixin):
             return np.asarray(self[:])
 
         rng = np.random.default_rng(42)
-        sample_frames = sorted(rng.choice(self.num_frames, max_frames, replace=False).tolist())
+        sample_frames = sorted(
+            rng.choice(self.num_frames, max_frames, replace=False).tolist()
+        )
         return np.asarray(self[sample_frames])
 
     def _imwrite(
@@ -1516,7 +1573,7 @@ class ScanImageArray(ReductionMixin):
             target_chunk_mb=target_chunk_mb,
             progress_callback=progress_callback,
             debug=debug,
-            roi_iterator=iter_rois(self),
+            roi_iterator=self.iter_rois(),
             **kwargs,
         )
 
@@ -1525,7 +1582,7 @@ class ScanImageArray(ReductionMixin):
 
         arrays = []
         names = []
-        for roi in iter_rois(self):
+        for roi in self.iter_rois():
             arr = copy.copy(self)
             arr.roi = roi
             # Need to disable feature on copies to show raw? Or valid?
@@ -1596,7 +1653,9 @@ class LBMArray(ScanImageArray):
     # dz is not stored in ScanImage metadata for LBM, must be user-supplied
     REQUIRED_METADATA: list[str] = ["dz"]
 
-    def __init__(self, files: str | Path | list, metadata: dict | None = None, **kwargs):
+    def __init__(
+        self, files: str | Path | list, metadata: dict | None = None, **kwargs
+    ):
         super().__init__(files, metadata=metadata, **kwargs)
         if self.stack_type != "lbm":
             raise ValueError(
@@ -1655,7 +1714,7 @@ class PiezoArray(ScanImageArray):
         files: str | Path | list,
         average_frames: bool = False,
         metadata: dict | None = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(files, metadata=metadata, **kwargs)
         if self.stack_type != "piezo":
@@ -1785,7 +1844,9 @@ class SinglePlaneArray(ScanImageArray):
         "fs": "Frame rate in Hz.",
     }
 
-    def __init__(self, files: str | Path | list, metadata: dict | None = None, **kwargs):
+    def __init__(
+        self, files: str | Path | list, metadata: dict | None = None, **kwargs
+    ):
         super().__init__(files, metadata=metadata, **kwargs)
         if self.stack_type != "single_plane":
             raise ValueError(
@@ -1794,15 +1855,76 @@ class SinglePlaneArray(ScanImageArray):
             )
 
 
-def open_scanimage(
-    files: str | Path | list,
+class CalibrationArray(ScanImageArray):
+    """
+    Calibration array reader for pollen/bead calibration data.
+
+    For calibration stacks that combine LBM beamlet channels with piezo z-scanning.
+    This is specifically for pollen calibration where the z-piezo scans through
+    different focal planes while LBM channels capture individual beamlet data.
+
+    The data has dimensions ZCYX where:
+    - Z: piezo z-positions (focal planes)
+    - C: LBM beamlet channels
+    - Y: spatial height
+    - X: spatial width
+
+    Parameters
+    ----------
+    files : str, Path, or list
+        TIFF file path(s).
     **kwargs
-) -> ScanImageArray:
+        Additional arguments passed to ScanImageArray.
+
+    Raises
+    ------
+    ValueError
+        If the data is not a pollen/calibration stack.
+
+    Attributes
+    ----------
+    num_zplanes : int
+        Number of z-positions (piezo steps).
+    num_beamlets : int
+        Number of LBM beamlet channels.
+    """
+
+    METADATA_CONTEXT: dict[str, str] = {
+        "Ly": "Frame height in pixels.",
+        "Lx": "Frame width in pixels.",
+        "num_zplanes": "Number of z-slices (piezo positions).",
+        "num_beamlets": "Number of LBM beamlet channels.",
+        "dz": "Z-step size in µm (from hStackManager.stackZStepSize).",
+        "fs": "Frame rate in Hz.",
+    }
+
+    def __init__(
+        self, files: str | Path | list, metadata: dict | None = None, **kwargs
+    ):
+        super().__init__(files, metadata=metadata, **kwargs)
+        if self.stack_type != "pollen":
+            raise ValueError(
+                f"CalibrationArray requires pollen calibration data, but detected '{self.stack_type}'. "
+                f"Use open_scanimage() for automatic detection or ScanImageArray directly."
+            )
+
+    @property
+    def num_zplanes(self) -> int:
+        """Number of z-positions (piezo steps)."""
+        return self.num_frames
+
+    @property
+    def num_beamlets(self) -> int:
+        """Number of LBM beamlet channels."""
+        return self.num_channels
+
+
+def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
     """
     Open ScanImage TIFF file(s), automatically detecting stack type.
 
     Factory function that returns the appropriate array subclass based on
-    the detected acquisition type (LBM, piezo, or single-plane).
+    the detected acquisition type (LBM, piezo, pollen, or single-plane).
 
     Parameters
     ----------
@@ -1815,7 +1937,8 @@ def open_scanimage(
     Returns
     -------
     ScanImageArray
-        One of LBMArray, PiezoArray, or SinglePlaneArray.
+        One of LBMArray, PiezoArray, CalibrationArray, or SinglePlaneArray.
+        Pollen calibration stacks (LBM + piezo) return CalibrationArray.
 
     Examples
     --------
@@ -1843,6 +1966,10 @@ def open_scanimage(
             # LBMArray doesn't use average_frames
             kwargs.pop("average_frames", None)
             return LBMArray(files, metadata=metadata, **kwargs)
+        elif stack_type == "pollen":
+            # Pollen calibration: LBM beamlets + piezo z-scanning
+            kwargs.pop("average_frames", None)
+            return CalibrationArray(files, metadata=metadata, **kwargs)
         elif stack_type == "piezo":
             return PiezoArray(files, metadata=metadata, **kwargs)
         else:
@@ -1854,6 +1981,9 @@ def open_scanimage(
         if stack_type == "lbm":
             kwargs.pop("average_frames", None)
             return LBMArray(files, **kwargs)
+        elif stack_type == "pollen":
+            kwargs.pop("average_frames", None)
+            return CalibrationArray(files, **kwargs)
         elif stack_type == "piezo":
             return PiezoArray(files, **kwargs)
         else:

@@ -18,9 +18,7 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities._writers import _try_generic_writers, add_processing_step
 from mbo_utilities.arrays import (
-    iter_rois,
     register_zplanes_s3d,
-    supports_roi,
     validate_s3d_registration,
 )
 from mbo_utilities.metadata import get_param, RoiMode
@@ -60,17 +58,9 @@ def imwrite(
     Parameters
     ----------
     lazy_array : object
-        One of the supported lazy array readers providing `.shape`, `.metadata`,
-        and `_imwrite()` methods:
-
-        - `MboRawArray` : Raw ScanImage/ScanMultiROI TIFF files with phase correction
-        - `Suite2pArray` : Memory-mapped binary (`data.bin` or `data_raw.bin`) + `ops.npy`
-        - `MBOTiffArray` : Multi-file TIFF reader using Dask backend
-        - `TiffArray` : Single or multi-TIFF reader
-        - `H5Array` : HDF5 dataset wrapper (`h5py.File[dataset]`)
-        - `ZarrArray` : Collection of z-plane `.zarr` stores
-        - `NumpyArray` : Single `.npy` memory-mapped NumPy file
-        - `NWBArray` : NWB file with "TwoPhotonSeries" acquisition dataset
+        A lazy array from `imread()` or a numpy array. Any object with `.shape`,
+        `.dtype`, and `_imwrite()` method is supported. Use `mbo formats` CLI
+        command to list all supported input formats.
 
     outpath : str or Path
         Target directory to write output files. Will be created if it doesn't exist.
@@ -199,9 +189,10 @@ def imwrite(
     outpath.mkdir(exist_ok=True)
 
     # handle roi based on roi_mode
+    # ROI support detected via duck typing: hasattr(arr, 'roi_mode')
     if roi_mode == RoiMode.separate:
         # separate mode: set roi on array if specified
-        if roi is not None and supports_roi(lazy_array):
+        if roi is not None and hasattr(lazy_array, "roi_mode"):
             lazy_array.roi = roi
     elif roi_mode == RoiMode.concat_y:
         # concat mode: roi parameter is ignored, use None (stitch all)

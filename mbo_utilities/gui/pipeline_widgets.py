@@ -8,7 +8,7 @@ import numpy as np
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui
 
-from mbo_utilities.gui._widgets import set_tooltip, compact_header
+from mbo_utilities.gui._widgets import set_tooltip, compact_header, settings_row_with_popup
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities._parsing import _convert_paths_to_strings
 
@@ -23,6 +23,220 @@ except ImportError as e:
 
 
 USER_PIPELINES = ["suite2p"]
+
+
+def draw_suite2p_settings_panel(
+    settings: "Suite2pSettings",
+    input_width: int = 120,
+    show_header: bool = False,
+    show_footer: bool = False,
+    header_text: str = "",
+    footer_text: str = "",
+    readonly: bool = False,
+) -> "Suite2pSettings":
+    """
+    Draw a reusable Suite2p settings panel.
+
+    This function renders the Suite2p configuration UI and can be used in:
+    - The main PreviewDataWidget pipeline tab (via draw_section_suite2p)
+    - Standalone documentation screenshots
+    - Any imgui context where Suite2p settings need to be displayed
+
+    Parameters
+    ----------
+    settings : Suite2pSettings
+        The settings dataclass to render and modify.
+    input_width : int
+        Width for input fields in pixels.
+    show_header : bool
+        Whether to show a header explanation text.
+    show_footer : bool
+        Whether to show a footer tip text.
+    header_text : str
+        Custom header text. If empty, uses default.
+    footer_text : str
+        Custom footer text. If empty, uses default.
+    readonly : bool
+        If True, inputs are display-only (no modification).
+
+    Returns
+    -------
+    Suite2pSettings
+        The (potentially modified) settings.
+    """
+    if show_header:
+        text = header_text or (
+            "Suite2p pipeline parameters for calcium imaging analysis. "
+            "These defaults are optimized for LBM (Light Beads Microscopy) datasets."
+        )
+        imgui.push_text_wrap_pos(imgui.get_font_size() * 30.0)
+        imgui.text_colored(imgui.ImVec4(0.7, 0.85, 1.0, 1.0), text)
+        imgui.pop_text_wrap_pos()
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+    # Main Settings section
+    imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "Main Settings:")
+    imgui.dummy(imgui.ImVec2(0, 4))
+
+    imgui.text("  tau")
+    imgui.same_line(hello_imgui.em_size(14))
+    imgui.set_next_item_width(hello_imgui.em_size(6))
+    if readonly:
+        imgui.text(f"{settings.tau:.1f}")
+    else:
+        _, settings.tau = imgui.input_float(
+            "##tau_panel", settings.tau, 0.1, 0.5, "%.1f"
+        )
+    imgui.same_line()
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Indicator timescale (s)")
+
+    imgui.text("  frames_include")
+    imgui.same_line(hello_imgui.em_size(14))
+    imgui.set_next_item_width(hello_imgui.em_size(6))
+    if readonly:
+        imgui.text(f"{settings.frames_include}")
+    else:
+        _, settings.frames_include = imgui.input_int(
+            "##frames_panel", settings.frames_include
+        )
+    imgui.same_line()
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "-1 = all frames")
+
+    imgui.spacing()
+    imgui.separator()
+    imgui.spacing()
+
+    # Registration section
+    imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "Registration:")
+    imgui.dummy(imgui.ImVec2(0, 4))
+
+    if readonly:
+        imgui.text(f"  [{'x' if settings.do_registration else ' '}] do_registration")
+    else:
+        _, settings.do_registration = imgui.checkbox(
+            "do_registration##panel", settings.do_registration
+        )
+    imgui.same_line(hello_imgui.em_size(20))
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Run motion correction")
+
+    if readonly:
+        imgui.text(f"  [{'x' if settings.nonrigid else ' '}] nonrigid")
+    else:
+        _, settings.nonrigid = imgui.checkbox("nonrigid##panel", settings.nonrigid)
+    imgui.same_line(hello_imgui.em_size(20))
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Non-rigid registration")
+
+    imgui.text("  maxregshift")
+    imgui.same_line(hello_imgui.em_size(14))
+    imgui.set_next_item_width(hello_imgui.em_size(6))
+    if readonly:
+        imgui.text(f"{settings.maxregshift:.2f}")
+    else:
+        _, settings.maxregshift = imgui.input_float(
+            "##maxreg_panel", settings.maxregshift, 0.01, 0.1, "%.2f"
+        )
+    imgui.same_line()
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Max shift (fraction)")
+
+    imgui.spacing()
+    imgui.separator()
+    imgui.spacing()
+
+    # ROI Detection section
+    imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "ROI Detection:")
+    imgui.dummy(imgui.ImVec2(0, 4))
+
+    if readonly:
+        imgui.text(f"  [{'x' if settings.roidetect else ' '}] roidetect")
+    else:
+        _, settings.roidetect = imgui.checkbox("roidetect##panel", settings.roidetect)
+    imgui.same_line(hello_imgui.em_size(20))
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Run cell detection")
+
+    if readonly:
+        imgui.text(f"  [{'x' if settings.sparse_mode else ' '}] sparse_mode")
+    else:
+        _, settings.sparse_mode = imgui.checkbox(
+            "sparse_mode##panel", settings.sparse_mode
+        )
+    imgui.same_line(hello_imgui.em_size(20))
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Sparse detection (faster)")
+
+    imgui.text("  diameter")
+    imgui.same_line(hello_imgui.em_size(14))
+    imgui.set_next_item_width(hello_imgui.em_size(6))
+    if readonly:
+        imgui.text(f"{settings.diameter}")
+    else:
+        _, settings.diameter = imgui.input_int("##diam_panel", settings.diameter)
+    imgui.same_line()
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Cell diameter (px)")
+
+    imgui.text("  threshold_scaling")
+    imgui.same_line(hello_imgui.em_size(14))
+    imgui.set_next_item_width(hello_imgui.em_size(6))
+    if readonly:
+        imgui.text(f"{settings.threshold_scaling:.1f}")
+    else:
+        _, settings.threshold_scaling = imgui.input_float(
+            "##thresh_panel", settings.threshold_scaling, 0.1, 0.5, "%.1f"
+        )
+    imgui.same_line()
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Higher = fewer ROIs")
+
+    imgui.spacing()
+    imgui.separator()
+    imgui.spacing()
+
+    # Signal Extraction section
+    imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "Signal Extraction:")
+    imgui.dummy(imgui.ImVec2(0, 4))
+
+    if readonly:
+        imgui.text(f"  [{'x' if settings.neuropil_extract else ' '}] neuropil_extract")
+    else:
+        _, settings.neuropil_extract = imgui.checkbox(
+            "neuropil_extract##panel", settings.neuropil_extract
+        )
+    imgui.same_line(hello_imgui.em_size(20))
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Extract neuropil signal")
+
+    imgui.text("  neucoeff")
+    imgui.same_line(hello_imgui.em_size(14))
+    imgui.set_next_item_width(hello_imgui.em_size(6))
+    if readonly:
+        imgui.text(f"{settings.neucoeff:.2f}")
+    else:
+        _, settings.neucoeff = imgui.input_float(
+            "##neuc_panel", settings.neucoeff, 0.05, 0.1, "%.2f"
+        )
+    imgui.same_line()
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Neuropil coefficient")
+
+    if readonly:
+        imgui.text(f"  [{'x' if settings.spikedetect else ' '}] spikedetect")
+    else:
+        _, settings.spikedetect = imgui.checkbox(
+            "spikedetect##panel", settings.spikedetect
+        )
+    imgui.same_line(hello_imgui.em_size(20))
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Run spike deconvolution")
+
+    if show_footer:
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        text = footer_text or (
+            "Tip: For LBM data, tau=1.3 and diameter=4 are good starting points. "
+            "Increase threshold_scaling if detecting too many false ROIs."
+        )
+        imgui.push_text_wrap_pos(imgui.get_font_size() * 30.0)
+        imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), text)
+        imgui.pop_text_wrap_pos()
+
+    return settings
 
 
 @dataclass
@@ -187,7 +401,7 @@ def draw_section_suite2p(self):
 
     # Suite2p output path (separate from save_as dialog path)
     # Use _s2p_outdir, defaulting to _saveas_outdir if not set
-    s2p_path = getattr(self, '_s2p_outdir', '') or getattr(self, '_saveas_outdir', '')
+    s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
 
     imgui.text("Output path:")
     imgui.same_line()
@@ -216,8 +430,12 @@ def draw_section_suite2p(self):
 
     # Browse button
     if imgui.button("Browse##s2p_outpath"):
-        default_dir = s2p_path or str(get_last_dir("suite2p_output") or pathlib.Path().home())
-        self._s2p_folder_dialog = pfd.select_folder("Select Suite2p output folder", default_dir)
+        default_dir = s2p_path or str(
+            get_last_dir("suite2p_output") or pathlib.Path().home()
+        )
+        self._s2p_folder_dialog = pfd.select_folder(
+            "Select Suite2p output folder", default_dir
+        )
 
     # Check if async folder dialog has a result
     if self._s2p_folder_dialog is not None and self._s2p_folder_dialog.ready():
@@ -241,19 +459,24 @@ def draw_section_suite2p(self):
     # Frames to process slider
     imgui.spacing()
     # Initialize target_timepoints only once, or when max changes
-    if not hasattr(self, '_timepoints_initialized'):
+    if not hasattr(self, "_timepoints_initialized"):
         self._timepoints_initialized = True
         self._last_max_timepoints = max_frames
         if self.s2p.target_timepoints == -1:
             self.s2p.target_timepoints = max_frames
-    elif hasattr(self, '_last_max_timepoints') and self._last_max_timepoints != max_frames:
+    elif (
+        hasattr(self, "_last_max_timepoints")
+        and self._last_max_timepoints != max_frames
+    ):
         # max timepoints changed (different data loaded), reset to new max
         self._last_max_timepoints = max_frames
         self.s2p.target_timepoints = max_frames
 
     # timepoints input with slider
     imgui.set_next_item_width(INPUT_WIDTH)
-    changed, new_value = imgui.input_int("##timepoints_input", self.s2p.target_timepoints, step=1, step_fast=100)
+    changed, new_value = imgui.input_int(
+        "##timepoints_input", self.s2p.target_timepoints, step=1, step_fast=100
+    )
     if changed:
         self.s2p.target_timepoints = max(1, min(new_value, max_frames))
     imgui.same_line()
@@ -339,12 +562,14 @@ def draw_section_suite2p(self):
     # Calculate popup size to fit all planes (resizable by user)
     popup_height = 130 + num_planes * 24
     popup_height = max(150, min(400, popup_height))
-    imgui.set_next_window_size(imgui.ImVec2(250, popup_height), imgui.Cond_.first_use_ever)
+    imgui.set_next_window_size(
+        imgui.ImVec2(250, popup_height), imgui.Cond_.first_use_ever
+    )
 
     opened, visible = imgui.begin_popup_modal(
         "Select Z-Planes##popup",
         p_open=True if getattr(self, "_plane_popup_open", True) else None,
-        flags=imgui.WindowFlags_.no_saved_settings
+        flags=imgui.WindowFlags_.no_saved_settings,
     )
 
     if opened:
@@ -414,7 +639,9 @@ def draw_section_suite2p(self):
             _, self._max_parallel_jobs = imgui.input_int(
                 "Max parallel jobs", self._max_parallel_jobs, step=1, step_fast=2
             )
-            self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, len(self._selected_planes)))
+            self._max_parallel_jobs = max(
+                1, min(self._max_parallel_jobs, len(self._selected_planes))
+            )
             set_tooltip("Maximum number of planes to process simultaneously")
 
             # Memory warning estimate
@@ -428,17 +655,19 @@ def draw_section_suite2p(self):
                     frames_per_plane = plane_shape[0] * plane_shape[1] * plane_shape[2]
                 bytes_per_element = 2  # assume uint16
                 mem_per_plane_gb = (frames_per_plane * bytes_per_element) / (1024**3)
-                total_mem_gb = mem_per_plane_gb * self._max_parallel_jobs * 2  # 2x for processing overhead
+                total_mem_gb = (
+                    mem_per_plane_gb * self._max_parallel_jobs * 2
+                )  # 2x for processing overhead
 
                 if total_mem_gb > 16:
                     imgui.text_colored(
                         imgui.ImVec4(1.0, 0.3, 0.3, 1.0),
-                        f"Warning: ~{total_mem_gb:.1f} GB RAM needed"
+                        f"Warning: ~{total_mem_gb:.1f} GB RAM needed",
                     )
                 elif total_mem_gb > 8:
                     imgui.text_colored(
                         imgui.ImVec4(1.0, 0.7, 0.2, 1.0),
-                        f"Est. memory: ~{total_mem_gb:.1f} GB"
+                        f"Est. memory: ~{total_mem_gb:.1f} GB",
                     )
                 else:
                     imgui.text(f"Est. memory: ~{total_mem_gb:.1f} GB")
@@ -448,7 +677,7 @@ def draw_section_suite2p(self):
     imgui.spacing()
 
     # Run in background checkbox
-    if not hasattr(self, '_s2p_background'):
+    if not hasattr(self, "_s2p_background"):
         self._s2p_background = True  # default to background
     _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
     set_tooltip(
@@ -459,12 +688,14 @@ def draw_section_suite2p(self):
     imgui.spacing()
 
     # Green Run button - disabled if no output path
-    s2p_path = getattr(self, '_s2p_outdir', '') or getattr(self, '_saveas_outdir', '')
+    s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
     has_save_path = bool(s2p_path)
 
     # Green button color
     imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
-    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0))
+    imgui.push_style_color(
+        imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0)
+    )
     imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.45, 0.1, 1.0))
 
     if not has_save_path:
@@ -478,18 +709,26 @@ def draw_section_suite2p(self):
     imgui.pop_style_color(3)
 
     # Show tooltip on button hover when disabled
-    if not has_save_path and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+    if not has_save_path and imgui.is_item_hovered(
+        imgui.HoveredFlags_.allow_when_disabled
+    ):
         imgui.begin_tooltip()
         imgui.text("Set an output path first (see 'Output path:' above)")
         imgui.end_tooltip()
 
     if button_clicked and has_save_path:
-        self.logger.info(f"Running Suite2p pipeline on {len(self._selected_planes)} planes...")
+        self.logger.info(
+            f"Running Suite2p pipeline on {len(self._selected_planes)} planes..."
+        )
         run_process(self)
         if self._s2p_background:
-            self.logger.info("Suite2p processing started in background. Click the process status indicator to monitor.")
+            self.logger.info(
+                "Suite2p processing started in background. Click the process status indicator to monitor."
+            )
         else:
-            self.logger.info("Suite2p processing submitted (running in background thread).")
+            self.logger.info(
+                "Suite2p processing submitted (running in background thread)."
+            )
 
     if self._install_error:
         imgui.same_line()
@@ -545,7 +784,9 @@ def draw_section_suite2p(self):
     _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
     set_tooltip("Force re-registration even if already processed")
 
-    _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
+    _, self.s2p.force_detect = imgui.checkbox(
+        "Force Re-detection", self.s2p.force_detect
+    )
     set_tooltip("Force ROI detection even if stat.npy exists")
 
     imgui.spacing()
@@ -569,36 +810,22 @@ def draw_section_suite2p(self):
     )
     set_tooltip("Smooth ΔF/F trace with rolling window (0 = disabled)")
 
-    # pipeline step toggles section
+    # pipeline step toggles with settings popups
     imgui.spacing()
     imgui.separator_text("Pipeline Steps")
-
-    _, self.s2p.do_registration = imgui.checkbox("Registration", self.s2p.do_registration)
-    imgui.same_line()
-    _, self.s2p.roidetect = imgui.checkbox("ROI Detection", self.s2p.roidetect)
-    imgui.same_line()
-    _, self.s2p.spikedetect = imgui.checkbox("Spike Deconv", self.s2p.spikedetect)
 
     # determine detection mode for greying out
     use_anatomical = self.s2p.anatomical_only > 0
 
-    imgui.spacing()
-
-    # registration settings - grey out if disabled
-    if not self.s2p.do_registration:
-        imgui.begin_disabled()
-        imgui.collapsing_header("Registration Settings (disabled)")
-        imgui.end_disabled()
-    elif compact_header("Registration Settings"):
+    # --- Registration ---
+    def draw_registration_settings():
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.align_by_chan = imgui.input_int(
             "Align by Channel", self.s2p.align_by_chan
         )
         set_tooltip("Channel index used for alignment (1-based).")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.nimg_init = imgui.input_int(
-            "Initial Frames", self.s2p.nimg_init
-        )
+        _, self.s2p.nimg_init = imgui.input_int("Initial Frames", self.s2p.nimg_init)
         set_tooltip("Number of frames used to build the reference image.")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.batch_size = imgui.input_int("Batch Size", self.s2p.batch_size)
@@ -626,18 +853,14 @@ def draw_section_suite2p(self):
             "Two-Step Registration", self.s2p.two_step_registration
         )
         set_tooltip("Perform registration twice for low-SNR data.")
-        _, self.s2p.reg_tif = imgui.checkbox(
-            "Export Registered TIFF", self.s2p.reg_tif
-        )
+        _, self.s2p.reg_tif = imgui.checkbox("Export Registered TIFF", self.s2p.reg_tif)
         set_tooltip("Export registered movie as TIFF files.")
         _, self.s2p.reg_tif_chan2 = imgui.checkbox(
             "Export Chan2 TIFF", self.s2p.reg_tif_chan2
         )
         set_tooltip("Export registered TIFFs for channel 2.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.subpixel = imgui.input_int(
-            "Subpixel Precision", self.s2p.subpixel
-        )
+        _, self.s2p.subpixel = imgui.input_int("Subpixel Precision", self.s2p.subpixel)
         set_tooltip("Subpixel precision level (1/subpixel step).")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.th_badframes = imgui.input_float(
@@ -648,9 +871,7 @@ def draw_section_suite2p(self):
             "Normalize Frames", self.s2p.norm_frames
         )
         set_tooltip("Normalize frames during registration.")
-        _, self.s2p.force_refImg = imgui.checkbox(
-            "Force refImg", self.s2p.force_refImg
-        )
+        _, self.s2p.force_refImg = imgui.checkbox("Force refImg", self.s2p.force_refImg)
         set_tooltip("Use stored reference image instead of recomputing.")
         _, self.s2p.pad_fft = imgui.checkbox("Pad FFT", self.s2p.pad_fft)
         set_tooltip("Pad image for FFT registration to reduce edge artifacts.")
@@ -700,9 +921,7 @@ def draw_section_suite2p(self):
             imgui.tree_pop()
 
         if imgui.tree_node("Non-rigid Registration"):
-            _, self.s2p.nonrigid = imgui.checkbox(
-                "Enable Non-rigid", self.s2p.nonrigid
-            )
+            _, self.s2p.nonrigid = imgui.checkbox("Enable Non-rigid", self.s2p.nonrigid)
             set_tooltip(
                 "Split FOV into blocks and compute registration offsets per block."
             )
@@ -732,9 +951,7 @@ def draw_section_suite2p(self):
             _, self.s2p.snr_thresh = imgui.input_float(
                 "SNR Threshold", self.s2p.snr_thresh
             )
-            set_tooltip(
-                "Phase correlation peak threshold (1.5 recommended for 1P)."
-            )
+            set_tooltip("Phase correlation peak threshold (1.5 recommended for 1P).")
             imgui.set_next_item_width(INPUT_WIDTH)
             _, self.s2p.maxregshiftNR = imgui.input_float(
                 "Max NR Shift", self.s2p.maxregshiftNR
@@ -744,12 +961,21 @@ def draw_section_suite2p(self):
             imgui.end_disabled()
             imgui.tree_pop()
 
-    # roi detection settings - only show if enabled
-    if not self.s2p.roidetect:
-        imgui.begin_disabled()
-        imgui.collapsing_header("ROI Detection Settings (disabled)")
-        imgui.end_disabled()
-    elif compact_header("ROI Detection Settings"):
+    _, self.s2p.do_registration = settings_row_with_popup(
+        "reg_settings",
+        "Registration",
+        self.s2p.do_registration,
+        draw_registration_settings,
+        tooltip="Configure motion correction and registration parameters",
+        checkbox_tooltip="Enable/disable motion registration",
+        popup_width=450,
+    )
+
+    # --- ROI Detection ---
+    def draw_roi_detection_settings():
+        # determine detection mode for greying out (re-check in popup context)
+        use_anatomical_local = self.s2p.anatomical_only > 0
+
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.anatomical_only = imgui.input_int(
             "Anatomical Only", self.s2p.anatomical_only
@@ -763,17 +989,19 @@ def draw_section_suite2p(self):
         )
 
         # Grey out Cellpose settings when anatomical_only = 0
-        imgui.begin_disabled(not use_anatomical)
+        imgui.begin_disabled(not use_anatomical_local)
 
-        if not use_anatomical:
+        if not use_anatomical_local:
             imgui.text_colored(
                 imgui.ImVec4(0.7, 0.7, 0.7, 1.0),
-                "(Enable anatomical_only to use Cellpose)"
+                "(Enable anatomical_only to use Cellpose)",
             )
 
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.diameter = imgui.input_int("Cell Diameter", self.s2p.diameter)
-        set_tooltip("Expected cell diameter in pixels (6 = LBM default for ~6μm cells). Passed to Cellpose.")
+        set_tooltip(
+            "Expected cell diameter in pixels (6 = LBM default for ~6μm cells). Passed to Cellpose."
+        )
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.cellprob_threshold = imgui.input_float(
             "CellProb Threshold", self.s2p.cellprob_threshold
@@ -814,11 +1042,11 @@ def draw_section_suite2p(self):
 
         # functional detection settings (greyed if using anatomical)
         if imgui.tree_node("Functional Detection"):
-            imgui.begin_disabled(use_anatomical)
-            if use_anatomical:
+            imgui.begin_disabled(use_anatomical_local)
+            if use_anatomical_local:
                 imgui.text_colored(
                     imgui.ImVec4(0.7, 0.7, 0.7, 1.0),
-                    "(Skipped when anatomical_only > 0)"
+                    "(Skipped when anatomical_only > 0)",
                 )
 
             imgui.set_next_item_width(INPUT_WIDTH)
@@ -861,71 +1089,21 @@ def draw_section_suite2p(self):
         imgui.spacing()
         imgui.text("Shared Settings:")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.max_overlap = imgui.input_float(
-            "Max Overlap", self.s2p.max_overlap
-        )
+        _, self.s2p.max_overlap = imgui.input_float("Max Overlap", self.s2p.max_overlap)
         set_tooltip("Maximum allowed fraction of overlapping ROI pixels.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.high_pass = imgui.input_int(
-            "High-Pass Window", self.s2p.high_pass
-        )
+        _, self.s2p.high_pass = imgui.input_int("High-Pass Window", self.s2p.high_pass)
         set_tooltip("Running mean subtraction window for temporal high-pass filtering.")
-        _, self.s2p.smooth_masks = imgui.checkbox(
-            "Smooth Masks", self.s2p.smooth_masks
-        )
+        _, self.s2p.smooth_masks = imgui.checkbox("Smooth Masks", self.s2p.smooth_masks)
         set_tooltip("Smooth masks in the final ROI detection pass.")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.nbinned = imgui.input_int("Max Binned Frames", self.s2p.nbinned)
         set_tooltip("Maximum number of binned frames for ROI detection.")
 
-    # classification settings - grey out if roi detection disabled
-    if not self.s2p.roidetect:
-        imgui.begin_disabled()
-        imgui.collapsing_header("Classification Settings (disabled)")
-        imgui.end_disabled()
-    elif compact_header("Classification Settings"):
-        _, self.s2p.soma_crop = imgui.checkbox("Soma Crop", self.s2p.soma_crop)
-        set_tooltip("Crop dendrites for soma classification.")
-        _, self.s2p.use_builtin_classifier = imgui.checkbox(
-            "Use Built-in Classifier", self.s2p.use_builtin_classifier
-        )
-        set_tooltip("Use Suite2p's built-in ROI classifier.")
-        imgui.text("Classifier Path:")
-        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
-        imgui.text(
-            self.s2p.classifier_path if self.s2p.classifier_path else "(none)"
-        )
-        imgui.pop_text_wrap_pos()
-        set_tooltip("Path to external classifier if not using built-in.")
-
-    if compact_header("Output Settings"):
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.preclassify = imgui.input_float(
-            "Preclassify Threshold", self.s2p.preclassify
-        )
-        set_tooltip("Probability threshold to apply classifier before extraction.")
-        _, self.s2p.save_nwb = imgui.checkbox("Save NWB", self.s2p.save_nwb)
-        set_tooltip("Export processed data to NWB format.")
-        _, self.s2p.save_mat = imgui.checkbox("Save MATLAB File", self.s2p.save_mat)
-        set_tooltip("Export results to Fall.mat for MATLAB analysis.")
-        _, self.s2p.combined = imgui.checkbox(
-            "Combine Across Planes", self.s2p.combined
-        )
-        set_tooltip("Combine per-plane results into one GUI-loadable folder.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.aspect = imgui.input_float("Aspect Ratio", self.s2p.aspect)
-        set_tooltip("um/pixel ratio X/Y for correct GUI aspect display.")
-        _, self.s2p.report_time = imgui.checkbox(
-            "Report Timing", self.s2p.report_time
-        )
-        set_tooltip("Return timing dictionary for each processing stage.")
-
-    # signal extraction - grey out if roi detection disabled
-    if not self.s2p.roidetect:
-        imgui.begin_disabled()
-        imgui.collapsing_header("Signal Extraction Settings (disabled)")
-        imgui.end_disabled()
-    elif compact_header("Signal Extraction Settings"):
+        # Signal extraction settings (part of ROI detection workflow)
+        imgui.spacing()
+        imgui.separator()
+        imgui.text("Signal Extraction:")
         _, self.s2p.neuropil_extract = imgui.checkbox(
             "Extract Neuropil", self.s2p.neuropil_extract
         )
@@ -950,12 +1128,34 @@ def draw_section_suite2p(self):
         )
         set_tooltip("Percentile of Lambda used for neuropil exclusion.")
 
-    # spike deconvolution - only show if enabled
-    if not self.s2p.spikedetect:
-        imgui.begin_disabled()
-        imgui.collapsing_header("Spike Deconvolution Settings (disabled)")
-        imgui.end_disabled()
-    elif compact_header("Spike Deconvolution Settings"):
+        # Classification settings (part of ROI detection workflow)
+        imgui.spacing()
+        imgui.separator()
+        imgui.text("Classification:")
+        _, self.s2p.soma_crop = imgui.checkbox("Soma Crop", self.s2p.soma_crop)
+        set_tooltip("Crop dendrites for soma classification.")
+        _, self.s2p.use_builtin_classifier = imgui.checkbox(
+            "Use Built-in Classifier", self.s2p.use_builtin_classifier
+        )
+        set_tooltip("Use Suite2p's built-in ROI classifier.")
+        imgui.text("Classifier Path:")
+        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
+        imgui.text(self.s2p.classifier_path if self.s2p.classifier_path else "(none)")
+        imgui.pop_text_wrap_pos()
+        set_tooltip("Path to external classifier if not using built-in.")
+
+    _, self.s2p.roidetect = settings_row_with_popup(
+        "roi_settings",
+        "ROI Detection",
+        self.s2p.roidetect,
+        draw_roi_detection_settings,
+        tooltip="Configure cell detection, extraction, and classification",
+        checkbox_tooltip="Enable/disable ROI detection and signal extraction",
+        popup_width=450,
+    )
+
+    # --- Spike Deconvolution ---
+    def draw_spike_deconv_settings():
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.neucoeff = imgui.input_float(
             "Neuropil Coefficient", self.s2p.neucoeff
@@ -999,12 +1199,74 @@ def draw_section_suite2p(self):
         )
         set_tooltip("Percentile of trace for constant_percentile baseline method.")
 
-    if compact_header("Channel 2 Settings"):
+    _, self.s2p.spikedetect = settings_row_with_popup(
+        "spike_settings",
+        "Spike Deconv",
+        self.s2p.spikedetect,
+        draw_spike_deconv_settings,
+        tooltip="Configure spike deconvolution parameters",
+        checkbox_tooltip="Enable/disable spike deconvolution",
+        popup_width=400,
+    )
+
+    imgui.spacing()
+
+    # --- Output Settings (no checkbox, just a settings button) ---
+    def draw_output_settings():
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.preclassify = imgui.input_float(
+            "Preclassify Threshold", self.s2p.preclassify
+        )
+        set_tooltip("Probability threshold to apply classifier before extraction.")
+        _, self.s2p.save_nwb = imgui.checkbox("Save NWB", self.s2p.save_nwb)
+        set_tooltip("Export processed data to NWB format.")
+        _, self.s2p.save_mat = imgui.checkbox("Save MATLAB File", self.s2p.save_mat)
+        set_tooltip("Export results to Fall.mat for MATLAB analysis.")
+        _, self.s2p.combined = imgui.checkbox(
+            "Combine Across Planes", self.s2p.combined
+        )
+        set_tooltip("Combine per-plane results into one GUI-loadable folder.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.aspect = imgui.input_float("Aspect Ratio", self.s2p.aspect)
+        set_tooltip("um/pixel ratio X/Y for correct GUI aspect display.")
+        _, self.s2p.report_time = imgui.checkbox("Report Timing", self.s2p.report_time)
+        set_tooltip("Return timing dictionary for each processing stage.")
+
+        # Channel 2 settings
+        imgui.spacing()
+        imgui.separator()
+        imgui.text("Channel 2:")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.chan2_thres = imgui.input_float(
             "Chan2 Detection Threshold", self.s2p.chan2_thres
         )
         set_tooltip("Threshold for calling ROI detected on channel 2.")
+
+    if imgui.button("Output Settings"):
+        from mbo_utilities.gui._widgets import _popup_states
+        _popup_states["output_settings"] = True
+        imgui.open_popup("Output Settings##output_settings")
+
+    # Draw output settings popup
+    imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
+    opened, visible = imgui.begin_popup_modal(
+        "Output Settings##output_settings",
+        p_open=True,
+        flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+    )
+    if opened:
+        from mbo_utilities.gui._widgets import _popup_states
+        if not visible:
+            _popup_states["output_settings"] = False
+            imgui.close_current_popup()
+        else:
+            draw_output_settings()
+            imgui.spacing()
+            imgui.separator()
+            if imgui.button("Close", imgui.ImVec2(80, 0)):
+                _popup_states["output_settings"] = False
+                imgui.close_current_popup()
+        imgui.end_popup()
 
     # Pop style variables
     imgui.pop_style_var(2)  # Pop both style vars
@@ -1059,8 +1321,6 @@ def draw_section_suite2p(self):
     #         self.image_widget.graphics[1].data = combined
 
 
-
-
 def run_process(self):
     """Runs the selected processing pipeline."""
     if self._current_pipeline != "suite2p":
@@ -1072,8 +1332,10 @@ def run_process(self):
 
     self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
     if not HAS_LSP:
-        self.logger.warning("lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline."
-                            "`uv pip install lbm_suite2p_python`",)
+        self.logger.warning(
+            "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline."
+            "`uv pip install lbm_suite2p_python`",
+        )
         self._install_error = True
         return
 
@@ -1089,7 +1351,9 @@ def run_process(self):
                 current_z = 0
             selected_planes = {current_z + 1}
 
-        self.logger.info(f"Running Suite2p pipeline on {len(selected_planes)} plane(s)...")
+        self.logger.info(
+            f"Running Suite2p pipeline on {len(selected_planes)} plane(s)..."
+        )
 
         # Check if running in background subprocess
         use_background = getattr(self, "_s2p_background", True)
@@ -1107,17 +1371,23 @@ def run_process(self):
                 input_path = str(self.fpath) if self.fpath else ""
 
             # get output path
-            s2p_path = getattr(self, '_s2p_outdir', '') or getattr(self, '_saveas_outdir', '')
+            s2p_path = getattr(self, "_s2p_outdir", "") or getattr(
+                self, "_saveas_outdir", ""
+            )
 
             # determine roi
-            num_rois = len(self.image_widget.graphics) if hasattr(self.image_widget, 'graphics') else 1
+            num_rois = (
+                len(self.image_widget.graphics)
+                if hasattr(self.image_widget, "graphics")
+                else 1
+            )
             roi = 1 if num_rois > 1 else None
 
             # Spawn a SINGLE subprocess for ALL selected planes (more efficient extraction)
             worker_args = {
                 "input_path": input_path,
                 "output_dir": s2p_path,
-                "planes": sorted(list(selected_planes)), # Pass list of planes
+                "planes": sorted(list(selected_planes)),  # Pass list of planes
                 "roi": roi,
                 "num_timepoints": self.s2p.target_timepoints,
                 "ops": self.s2p.to_dict(),
@@ -1146,7 +1416,9 @@ def run_process(self):
             if pid:
                 self.logger.info(f"Started background process {pid} for {description}")
             else:
-                self.logger.error(f"Failed to start background process for {description}")
+                self.logger.error(
+                    f"Failed to start background process for {description}"
+                )
         else:
             # Use daemon threads (original behavior)
             # Build list of all (arr_idx, z_plane) pairs to process
@@ -1164,20 +1436,28 @@ def run_process(self):
                 from concurrent.futures import ThreadPoolExecutor
 
                 def run_parallel():
-                    self.logger.info(f"Starting parallel processing with max {max_jobs} concurrent jobs...")
+                    self.logger.info(
+                        f"Starting parallel processing with max {max_jobs} concurrent jobs..."
+                    )
                     with ThreadPoolExecutor(max_workers=max_jobs) as executor:
                         futures = {}
                         for job_idx, (arr_idx, z_plane) in enumerate(jobs):
-                            future = executor.submit(run_plane_from_data, self, arr_idx, z_plane)
+                            future = executor.submit(
+                                run_plane_from_data, self, arr_idx, z_plane
+                            )
                             futures[future] = (z_plane, job_idx)
 
                         for future in futures:
                             z_plane, job_idx = futures[future]
                             try:
                                 future.result()
-                                self.logger.info(f"Plane {z_plane + 1} completed ({job_idx + 1}/{len(jobs)})")
+                                self.logger.info(
+                                    f"Plane {z_plane + 1} completed ({job_idx + 1}/{len(jobs)})"
+                                )
                             except Exception as e:
-                                self.logger.error(f"Error processing plane {z_plane + 1}: {e}")
+                                self.logger.error(
+                                    f"Error processing plane {z_plane + 1}: {e}"
+                                )
                     self.logger.info("Suite2p parallel processing complete.")
 
                 threading.Thread(target=run_parallel, daemon=True).start()
@@ -1185,14 +1465,19 @@ def run_process(self):
                 # Sequential processing in a single background thread
                 def run_all_planes_sequential():
                     for job_idx, (arr_idx, z_plane) in enumerate(jobs):
-                        self.logger.info(f"Processing plane {z_plane + 1} ({job_idx + 1}/{len(jobs)})...")
+                        self.logger.info(
+                            f"Processing plane {z_plane + 1} ({job_idx + 1}/{len(jobs)})..."
+                        )
                         try:
                             run_plane_from_data(self, arr_idx, z_plane)
                         except Exception as e:
-                            self.logger.error(f"Error processing plane {z_plane + 1}: {e}")
+                            self.logger.error(
+                                f"Error processing plane {z_plane + 1}: {e}"
+                            )
                     self.logger.info("Suite2p processing complete.")
 
                 threading.Thread(target=run_all_planes_sequential, daemon=True).start()
+
 
 def run_plane_from_data(self, arr_idx, z_plane=None):
     if not HAS_LSP:
@@ -1212,10 +1497,11 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
             current_z = 0
 
     # Use _s2p_outdir for suite2p, fallback to _saveas_outdir
-    s2p_path = getattr(self, '_s2p_outdir', '') or getattr(self, '_saveas_outdir', '')
+    s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
     base_out = Path(s2p_path) if s2p_path else None
     if not base_out:
         from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
+
         # find last saved dir
         last_savedir = get_last_savedir_path()
         if last_savedir:
@@ -1226,11 +1512,11 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
         base_out.mkdir(exist_ok=True)
 
     if len(self.image_widget.graphics) > 1:
-        plane_dir = base_out / f"plane{current_z+1:02d}_roi{arr_idx+1:02d}"
+        plane_dir = base_out / f"plane{current_z + 1:02d}_roi{arr_idx + 1:02d}"
         roi = arr_idx + 1
         plane = current_z + 1
     else:
-        plane_dir = base_out / f"plane{current_z+1:02d}_stitched"
+        plane_dir = base_out / f"plane{current_z + 1:02d}_stitched"
         roi = None
         plane = current_z + 1
 
@@ -1246,6 +1532,7 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
 
     # Use standard metadata accessors to ensure we get correct values from any alias
     from mbo_utilities.metadata import get_param, get_voxel_size
+
     vs = get_voxel_size(lazy_mdata)
 
     # extract only scalar metadata needed for suite2p - do NOT pass shape arrays
@@ -1282,29 +1569,29 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     # set the correct 3D shape for the output binary (T, Ly, Lx)
     # this is needed by write_ops to create ops.npy
     # CRITICAL: override any 4D shape from the source array with the correct 3D shape
-    defaults['shape'] = (self.s2p.target_timepoints, Ly, Lx)
-    defaults['num_timepoints'] = self.s2p.target_timepoints
-    defaults['num_frames'] = self.s2p.target_timepoints  # legacy alias
-    defaults['nframes'] = self.s2p.target_timepoints  # suite2p alias
+    defaults["shape"] = (self.s2p.target_timepoints, Ly, Lx)
+    defaults["num_timepoints"] = self.s2p.target_timepoints
+    defaults["num_frames"] = self.s2p.target_timepoints  # legacy alias
+    defaults["nframes"] = self.s2p.target_timepoints  # suite2p alias
 
     # also clean lazy_mdata to prevent shape contamination from arr.metadata
     # TODO: Do we need this?
-    lazy_mdata.pop('shape', None)
-    lazy_mdata.pop('num_timepoints', None)
-    lazy_mdata.pop('num_frames', None)
-    lazy_mdata.pop('nframes', None)
-    lazy_mdata.pop('n_frames', None)
+    lazy_mdata.pop("shape", None)
+    lazy_mdata.pop("num_timepoints", None)
+    lazy_mdata.pop("num_frames", None)
+    lazy_mdata.pop("nframes", None)
+    lazy_mdata.pop("n_frames", None)
 
     # CRITICAL: Also clean arr.metadata directly to prevent imwrite from getting
     # the full shape when it does file_metadata = dict(lazy_array.metadata)
     # Note: Some arrays have read-only metadata, so wrap in try/except
-    if hasattr(arr, 'metadata'):
+    if hasattr(arr, "metadata"):
         try:
-            arr.metadata.pop('shape', None)
-            arr.metadata.pop('num_timepoints', None)
-            arr.metadata.pop('num_frames', None)
-            arr.metadata.pop('nframes', None)
-            arr.metadata.pop('n_frames', None)
+            arr.metadata.pop("shape", None)
+            arr.metadata.pop("num_timepoints", None)
+            arr.metadata.pop("num_frames", None)
+            arr.metadata.pop("nframes", None)
+            arr.metadata.pop("n_frames", None)
         except (TypeError, AttributeError):
             # read-only metadata, skip cleaning
             pass
@@ -1329,11 +1616,16 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
 
     # Use run_plane instead of run_plane_bin - it handles initialization properly
     from lbm_suite2p_python import run_plane
+
     raw_file = plane_dir / "data_raw.bin"
 
     # Log detection settings for debugging
-    self.logger.info(f"Suite2p settings - roidetect: {defaults.get('roidetect')}, force_detect: {self.s2p.force_detect}")
-    self.logger.info(f"Detection params - diameter: {defaults.get('diameter')}, sparse_mode: {defaults.get('sparse_mode')}")
+    self.logger.info(
+        f"Suite2p settings - roidetect: {defaults.get('roidetect')}, force_detect: {self.s2p.force_detect}"
+    )
+    self.logger.info(
+        f"Detection params - diameter: {defaults.get('diameter')}, sparse_mode: {defaults.get('sparse_mode')}"
+    )
 
     try:
         result = run_plane(
@@ -1346,20 +1638,31 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
             force_detect=self.s2p.force_detect,
             dff_window_size=self.s2p.dff_window_size,
             dff_percentile=self.s2p.dff_percentile,
-            dff_smooth_window=self.s2p.dff_smooth_window if self.s2p.dff_smooth_window > 0 else None,
+            dff_smooth_window=self.s2p.dff_smooth_window
+            if self.s2p.dff_smooth_window > 0
+            else None,
         )
-        self.logger.info(f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}")
+        self.logger.info(
+            f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}"
+        )
 
         # Check if detection outputs were created
         stat_file = plane_dir / "stat.npy"
         if stat_file.exists():
             self.logger.info(f"Detection succeeded - stat.npy created")
         else:
-            self.logger.warning(f"Detection did not run - stat.npy not found. Check Suite2p output logs.")
+            self.logger.warning(
+                f"Detection did not run - stat.npy not found. Check Suite2p output logs."
+            )
     except Exception as e:
-        self.logger.error(f"Suite2p processing failed for plane {current_z}, roi {arr_idx}: {e}")
+        self.logger.error(
+            f"Suite2p processing failed for plane {current_z}, roi {arr_idx}: {e}"
+        )
         import traceback
+
         traceback.print_exc()
+
+
 #
 # def _run_plane_worker(
 #     source_file,

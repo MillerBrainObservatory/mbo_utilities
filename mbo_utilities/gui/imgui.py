@@ -6,16 +6,16 @@ import threading
 import os
 import importlib.util
 
-# Force rendercanvas to use Qt backend if PySide6 is available
+# Force rendercanvas to use Qt backend if PyQt6 is available
 # This must happen BEFORE importing fastplotlib to avoid glfw selection
-# Note: rendercanvas.qt requires PySide6 to be IMPORTED, not just available
-if importlib.util.find_spec("PySide6") is not None:
+# Note: rendercanvas.qt requires PyQt6 to be IMPORTED, not just available
+if importlib.util.find_spec("PyQt6") is not None:
     os.environ.setdefault("RENDERCANVAS_BACKEND", "qt")
-    import PySide6  # noqa: F401 - Must be imported before rendercanvas.qt can load
+    import PyQt6  # noqa: F401 - Must be imported before rendercanvas.qt can load
 
-    # Fix suite2p PySide6 compatibility - must happen before any suite2p GUI imports
-    # suite2p's RangeSlider uses self.NoTicks which doesn't exist in PySide6
-    from PySide6.QtWidgets import QSlider
+    # Fix suite2p PyQt6 compatibility - must happen before any suite2p GUI imports
+    # suite2p's RangeSlider uses self.NoTicks which doesn't exist in PyQt6
+    from PyQt6.QtWidgets import QSlider
     if not hasattr(QSlider, "NoTicks"):
         QSlider.NoTicks = QSlider.TickPosition.NoTicks
 
@@ -151,8 +151,15 @@ def draw_tools_popups(parent):
         )
         if parent.image_widget and parent.image_widget.data:
             data_arr = parent.image_widget.data[0]
-            metadata = data_arr.metadata
-            draw_metadata_inspector(metadata, data_array=data_arr)
+            # Check if data has metadata (numpy arrays don't)
+            if hasattr(data_arr, 'metadata'):
+                metadata = data_arr.metadata
+                draw_metadata_inspector(metadata, data_array=data_arr)
+            else:
+                imgui.text("No metadata available")
+                imgui.text(f"Data type: {type(data_arr).__name__}")
+                if hasattr(data_arr, 'shape'):
+                    imgui.text(f"Shape: {data_arr.shape}")
         else:
             imgui.text("No data loaded")
         imgui.end()
@@ -245,9 +252,20 @@ def draw_menu_bar(parent):
 
 
 def draw_tabs(parent):
+    """Draw the main content tabs, switching based on main widget type."""
+    from mbo_utilities.gui.main_widgets import PollenCalibrationWidget
+
+    # Check if using pollen calibration widget - it has its own UI, no tabs
+    if hasattr(parent, '_main_widget') and isinstance(parent._main_widget, PollenCalibrationWidget):
+        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+        imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+        parent._main_widget.draw()
+        imgui.pop_style_var()
+        imgui.pop_style_var()
+        return
+
+    # Standard time-series tabs
     # Don't create an outer child window - let each tab manage its own scrolling
-    # For single z-plane data, show all tabs
-    # For multi-zplane data, show all tabs (user wants all tabs visible)
     if imgui.begin_tab_bar("MainPreviewTabs"):
         if imgui.begin_tab_item("Preview")[0]:
             imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
@@ -380,9 +398,9 @@ def draw_process_console_popup(parent):
 
     center = imgui.get_main_viewport().get_center()
     imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
-    imgui.set_next_window_size(imgui.ImVec2(900, 600), imgui.Cond_.first_use_ever)
+    imgui.set_next_window_size_constraints(imgui.ImVec2(400, 100), imgui.ImVec2(900, 600))
 
-    if imgui.begin_popup_modal("Process Console")[0]:
+    if imgui.begin_popup_modal("Process Console", flags=imgui.WindowFlags_.always_auto_resize)[0]:
         pm = get_process_manager()
         pm.cleanup_finished()
         running = pm.get_running()
@@ -391,7 +409,7 @@ def draw_process_console_popup(parent):
         if imgui.begin_tab_bar("ProcessConsoleTabs"):
             # Tab 1: Processes
             if imgui.begin_tab_item("Processes")[0]:
-                with imgui_ctx.begin_child("##BGTasksContent", imgui.ImVec2(0, -30), imgui.ChildFlags_.none):
+                with imgui_ctx.begin_child("##BGTasksContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.auto_resize_y):
                     from mbo_utilities.gui.progress_bar import _get_active_progress_items
                     progress_items = _get_active_progress_items(parent)
 
@@ -438,11 +456,19 @@ def draw_process_console_popup(parent):
                                 if imgui.small_button(f"Kill##{proc.pid}"):
                                     pm.kill(proc.pid)
 
+                            # Show error message prominently if status is error
+                            if proc.status == "error" and proc.status_message:
+                                imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.6, 1.0), f"Error: {proc.status_message}")
+
                             # Show process output (tail of log)
                             if proc.output_path and Path(proc.output_path).is_file():
                                 if imgui.tree_node(f"Output##proc_{proc.pid}"):
                                     lines = proc.tail_log(20)
-                                    if imgui.begin_child(f"##proc_output_{proc.pid}", imgui.ImVec2(0, 150), imgui.ChildFlags_.borders):
+                                    # Calculate height to fit content, max 150px
+                                    line_height = imgui.get_text_line_height_with_spacing()
+                                    output_content_height = len(lines) * line_height + 10
+                                    output_height = min(output_content_height, 150) if lines else line_height + 10
+                                    if imgui.begin_child(f"##proc_output_{proc.pid}", imgui.ImVec2(0, output_height), imgui.ChildFlags_.borders):
                                         for line in lines:
                                             line_stripped = line.strip()
                                             if "error" in line_stripped.lower():
@@ -480,7 +506,7 @@ def draw_process_console_popup(parent):
 
             # Tab 2: System Logs
             if imgui.begin_tab_item("System Logs")[0]:
-                with imgui_ctx.begin_child("##SysLogsContent", imgui.ImVec2(0, -30), imgui.ChildFlags_.none):
+                with imgui_ctx.begin_child("##SysLogsContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.auto_resize_y):
                     parent.debug_panel.draw()
                 imgui.end_tab_item()
 
@@ -1495,6 +1521,12 @@ class PreviewDataWidget(EdgeWindow):
         # initialize widgets based on data capabilities
         self._widgets = get_supported_widgets(self)
 
+        # Initialize main widget based on data type
+        from mbo_utilities.gui.main_widgets import get_main_widget_class
+        main_widget_cls = get_main_widget_class(self.image_widget.data[0])
+        self._main_widget = main_widget_cls(self)
+        self.logger.info(f"Main widget: {self._main_widget.name}")
+
         self.set_context_info()
 
         if threading_enabled:
@@ -1595,8 +1627,12 @@ class PreviewDataWidget(EdgeWindow):
 
                 # tail log
                 lines = v_proc.tail_log(30)
-                # Ensure we have a reasonable height for the console
-                if imgui.begin_child("##proc_console", imgui.ImVec2(0, 250), imgui.ChildFlags_.borders):
+                # Calculate height to fit content, with a max height and scrollbar when needed
+                line_height = imgui.get_text_line_height_with_spacing()
+                content_height = len(lines) * line_height + 10  # padding
+                max_height = 250
+                console_height = min(content_height, max_height) if lines else line_height + 10
+                if imgui.begin_child("##proc_console", imgui.ImVec2(0, console_height), imgui.ChildFlags_.borders):
                     for line in lines:
                         line_stripped = line.strip()
                         if "error" in line_stripped.lower():
@@ -2373,8 +2409,19 @@ class PreviewDataWidget(EdgeWindow):
             # refresh widgets based on new data capabilities
             self._refresh_widgets()
 
-            # Automatically recompute z-stats for new data
-            self.refresh_zstats()
+            # Reinitialize main widget based on new data type
+            from mbo_utilities.gui.main_widgets import get_main_widget_class
+            if hasattr(self, '_main_widget') and self._main_widget:
+                self._main_widget.cleanup()
+            main_widget_cls = get_main_widget_class(new_data)
+            self._main_widget = main_widget_cls(self)
+            self._main_widget.on_data_loaded()
+            self.logger.info(f"Main widget switched to: {self._main_widget.name}")
+
+            # Automatically recompute z-stats for new data (only for time series)
+            from mbo_utilities.gui.main_widgets import PollenCalibrationWidget
+            if not isinstance(self._main_widget, PollenCalibrationWidget):
+                self.refresh_zstats()
 
             # Automatically reset vmin/vmax for initial view of new data
             if self.image_widget:
