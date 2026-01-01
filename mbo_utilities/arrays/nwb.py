@@ -95,13 +95,14 @@ class NWBArray:
         return float(self.data[0].max())
 
     @property
-    def metadata(self):
-        return self._metadata
+    def metadata(self) -> dict:
+        """Return metadata as dict. Always returns dict, never None."""
+        return self._metadata if self._metadata is not None else {}
 
     @metadata.setter
     def metadata(self, value: dict):
         if not isinstance(value, dict):
-            raise TypeError("metadata must be a dict")
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
         self._metadata = value
 
     def _imwrite(

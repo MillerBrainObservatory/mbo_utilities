@@ -205,8 +205,20 @@ class H5Array(ReductionMixin):
 
     @property
     def metadata(self) -> dict:
-        """File-level attributes as metadata dictionary."""
-        return dict(self._f.attrs)
+        """File-level attributes as metadata dictionary. Always returns dict, never None."""
+        return dict(self._f.attrs) if self._f.attrs else {}
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        # Update file-level attributes
+        for k, v in value.items():
+            try:
+                self._f.attrs[k] = v
+            except (TypeError, ValueError):
+                # Skip values that can't be stored in HDF5 attrs
+                pass
 
     def _imwrite(
         self,

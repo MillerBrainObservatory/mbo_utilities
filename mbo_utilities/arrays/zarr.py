@@ -155,12 +155,12 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
         self._init_dim_labels(dims)
 
     @property
-    def metadata(self):
-        """Return metadata as a dict."""
+    def metadata(self) -> dict:
+        """Return metadata as dict. Always returns dict, never None."""
         if not self._metadata:
             md = {}
         else:
-            md = self._metadata[0].copy()
+            md = self._metadata[0].copy() if self._metadata[0] else {}
 
         # ensure critical keys are present
         md["dtype"] = self.dtype

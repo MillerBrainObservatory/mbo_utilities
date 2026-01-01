@@ -9,6 +9,7 @@ This package provides lazy array readers for various imaging data formats:
 - ScanImageArray: Base class for raw ScanImage TIFFs with phase correction
 - LBMArray: LBM (Light Beads Microscopy) stacks
 - PiezoArray: Piezo z-stacks with optional frame averaging
+- CalibrationArray: Pollen/bead calibration stacks (LBM + piezo)
 - SinglePlaneArray: Single-plane time series
 - open_scanimage: Factory function for auto-detecting ScanImage stack type
 - NumpyArray: NumPy arrays and .npy files
@@ -22,7 +23,8 @@ Legacy aliases:
 
 Also provides:
 - Registration utilities (validate_s3d_registration, register_zplanes_s3d)
-- Common helpers (supports_roi, normalize_roi, iter_rois, etc.)
+- RoiFeatureMixin: Mixin for multi-ROI support (use hasattr(arr, 'roi_mode') for detection)
+- Common helpers (normalize_roi, etc.)
 - Features (DimLabels, DimLabelsMixin for dimension labeling)
 
 Array classes are lazy-loaded on first access to improve startup time.
@@ -63,6 +65,7 @@ if TYPE_CHECKING:
         find_suite2p_plane_dirs as find_suite2p_plane_dirs,
     )
     from mbo_utilities.arrays.tiff import (
+        CalibrationArray as CalibrationArray,
         LBMArray as LBMArray,
         MBOTiffArray as MBOTiffArray,
         MboRawArray as MboRawArray,
@@ -87,6 +90,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "MboRawArray": (".tiff", "MboRawArray"),
     "LBMArray": (".tiff", "LBMArray"),
     "PiezoArray": (".tiff", "PiezoArray"),
+    "CalibrationArray": (".tiff", "CalibrationArray"),
     "SinglePlaneArray": (".tiff", "SinglePlaneArray"),
     "open_scanimage": (".tiff", "open_scanimage"),
     "find_tiff_plane_files": (".tiff", "find_tiff_plane_files"),
@@ -101,6 +105,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "register_zplanes_s3d": ("._registration", "register_zplanes_s3d"),
     # features subpackage
     "features": (".features", None),
+    # ROI mixin
+    "RoiFeatureMixin": (".features._roi", "RoiFeatureMixin"),
 }
 
 # cache loaded modules
@@ -151,6 +157,7 @@ __all__ = [
     "ScanImageArray",
     "LBMArray",
     "PiezoArray",
+    "CalibrationArray",
     "SinglePlaneArray",
     "MboRawArray",  # backwards compat alias
     "NumpyArray",
@@ -184,4 +191,6 @@ __all__ = [
     "register_all_pipelines",
     # Features subpackage
     "features",
+    # ROI mixin
+    "RoiFeatureMixin",
 ]
