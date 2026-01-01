@@ -19,7 +19,7 @@ from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities.util import load_npy
 
 # import from sibling modules
-from .params import normalize_resolution
+from .params import normalize_resolution, get_param
 
 __all__ = [
     # file I/O functions
@@ -35,6 +35,45 @@ __all__ = [
 ]
 
 logger = log.get("metadata")
+
+
+def _metadata_from_ops(ops: dict) -> dict:
+    """
+    Build metadata dict from ops.npy using the metadata API for consistent extraction.
+
+    Parameters
+    ----------
+    ops : dict
+        The ops dictionary loaded from ops.npy.
+
+    Returns
+    -------
+    dict
+        Metadata dictionary with standard keys.
+    """
+    # Use get_param for consistent value extraction across aliases
+    result = {
+        "num_planes": get_param(ops, "nplanes", default=1),
+        "Lx": get_param(ops, "Lx"),
+        "Ly": get_param(ops, "Ly"),
+        "fov": (
+            get_param(ops, "Lx", default=0),
+            get_param(ops, "Ly", default=0),
+        ),
+        "frame_rate": get_param(ops, "fs"),
+        "fs": get_param(ops, "fs"),
+        "zoom_factor": ops.get("zoom"),
+        "dx": get_param(ops, "dx", default=1.0),
+        "dy": get_param(ops, "dy", default=1.0),
+        "pixel_resolution": (
+            get_param(ops, "dx", default=1.0),
+            get_param(ops, "dy", default=1.0),
+        ),
+        "dtype": "int16",
+        "source": "ops_fallback",
+    }
+    # Filter out None values
+    return {k: v for k, v in result.items() if v is not None}
 
 
 def has_mbo_metadata(file: os.PathLike | str) -> bool:
@@ -328,36 +367,29 @@ def get_metadata_single(file: Path):
                 if ops_path.exists():
                     try:
                         ops = load_npy(ops_path).item()
-                        return {
-                            "num_planes": int(ops.get("nplanes", 1) or 1),
-                            "fov": (
-                                int(ops.get("Lx", 0) or 0),
-                                int(ops.get("Ly", 0) or 0),
-                            ),
-                            "frame_rate": float(ops.get("fs", 0) or 0),
-                            "zoom_factor": ops.get("zoom"),
-                            "pixel_resolution": (
-                                float(ops.get("umPerPixX", 1) or 1),
-                                float(ops.get("umPerPixY", 1) or 1),
-                            ),
-                            "dtype": "int16",
-                            "source": "ops_fallback",
-                        }
+                        return _metadata_from_ops(ops)
                     except Exception as e:
                         logger.warning(f"Failed ops.npy fallback for {file}: {e}")
-            raise ValueError(f"No metadata found in {file}.")
+            return {"source": "no_metadata"}
 
         si = meta.get("FrameData", {})
         if not si:
             logger.warning(f"No FrameData found in {file}.")
-            return None
+            return {"source": "scanimage_no_framedata"}
 
         pages = tiff_file.pages
         first_page = pages[0]
         shape = first_page.shape
 
-        # Extract ROI and imaging metadata
-        roi_group = meta["RoiGroups"]["imagingRoiGroup"]["rois"]
+        # Extract ROI and imaging metadata with defensive access
+        roi_groups_container = meta.get("RoiGroups", {})
+        imaging_roi_group = roi_groups_container.get("imagingRoiGroup", {})
+        roi_group = imaging_roi_group.get("rois")
+
+        if roi_group is None:
+            logger.warning(f"No ROI information found in {file}.")
+            return {"source": "scanimage_no_rois"}
+
         if isinstance(roi_group, dict):
             num_rois = 1
             roi_group = [roi_group]
@@ -365,29 +397,41 @@ def get_metadata_single(file: Path):
             num_rois = len(roi_group)
 
         # Handle single channel case where channelSave is int instead of list
-        channel_save = si["SI.hChannels.channelSave"]
-        if isinstance(channel_save, (int, float)):
+        channel_save = si.get("SI.hChannels.channelSave")
+        if channel_save is None:
+            num_planes = 1
+        elif isinstance(channel_save, (int, float)):
             num_planes = 1
         else:
             num_planes = len(channel_save)
 
-        zoom_factor = si["SI.hRoiManager.scanZoomFactor"]
+        zoom_factor = si.get("SI.hRoiManager.scanZoomFactor")
         uniform_sampling = si.get("SI.hScan2D.uniformSampling", "NA")
-        objective_resolution = si["SI.objectiveResolution"]
-        frame_rate = si["SI.hRoiManager.scanFrameRate"]
+        objective_resolution = si.get("SI.objectiveResolution", 1.0)
+        frame_rate = si.get("SI.hRoiManager.scanFrameRate")
 
-        fly_to_time = float(si["SI.hScan2D.flytoTimePerScanfield"])
-        line_period = float(si["SI.hRoiManager.linePeriod"])
-        num_fly_to_lines = int(round(fly_to_time / line_period))
+        fly_to_time = float(si.get("SI.hScan2D.flytoTimePerScanfield", 0))
+        line_period = float(si.get("SI.hRoiManager.linePeriod", 1))
+        num_fly_to_lines = int(round(fly_to_time / line_period)) if line_period > 0 else 0
 
         sizes = []
         num_pixel_xys = []
         for roi in roi_group:
-            scanfields = roi["scanfields"]
+            scanfields = roi.get("scanfields")
+            if scanfields is None:
+                continue
             if isinstance(scanfields, list):
-                scanfields = scanfields[0]
-            sizes.append(scanfields["sizeXY"])
-            num_pixel_xys.append(scanfields["pixelResolutionXY"])
+                scanfields = scanfields[0] if scanfields else {}
+            size_xy = scanfields.get("sizeXY")
+            pixel_res = scanfields.get("pixelResolutionXY")
+            if size_xy:
+                sizes.append(size_xy)
+            if pixel_res:
+                num_pixel_xys.append(pixel_res)
+
+        if not sizes or not num_pixel_xys:
+            logger.warning(f"Could not extract ROI size/resolution from {file}.")
+            return {"source": "scanimage_no_roi_sizes"}
 
         size_xy = sizes[0]
         num_pixel_xy = num_pixel_xys[0]
@@ -435,43 +479,21 @@ def get_metadata_single(file: Path):
                 if ops_path.exists():
                     try:
                         ops = load_npy(ops_path).item()
-                        num_planes = int(ops.get("nplanes") or 1)
+                        result = _metadata_from_ops(ops)
                         # single-plane suite2p folder → force to 1
                         if "plane0" in str(ops_path.parent).lower():
-                            num_planes = 1
-                        return {
-                            "num_planes": num_planes,
-                            "fov": (
-                                int(ops.get("Lx") or 0),
-                                int(ops.get("Ly") or 0),
-                            ),
-                            "frame_rate": float(ops.get("fs") or 0),
-                            "zoom_factor": ops.get("zoom"),
-                            "pixel_resolution": (
-                                float(ops.get("umPerPixX") or 1.0),
-                                float(ops.get("umPerPixY") or 1.0),
-                            ),
-                            "dtype": "int16",
-                            "source": "ops_fallback",
-                        }
+                            result["num_planes"] = 1
+                        return result
                     except Exception as e:
                         logger.warning(f"Failed ops.npy fallback for {file}: {e}")
         if ops_path.exists():
             logger.info(f"Found ops.npy at {ops_path}, attempting to load.")
             try:
                 ops = load_npy(ops_path).item()
-                return {
-                    "num_planes": ops.get("nplanes", 1),
-                    "fov": (ops.get("Lx"), ops.get("Ly")),
-                    "frame_rate": ops.get("fs"),
-                    "zoom_factor": ops.get("zoom", None),
-                    "pixel_resolution": (ops.get("umPerPixX"), ops.get("umPerPixY")),
-                    "dtype": "int16",
-                    "source": "ops_fallback",
-                }
+                return _metadata_from_ops(ops)
             except Exception as e:
                 logger.warning(f"Failed ops.npy fallback for {file}: {e}")
-        raise ValueError(f"No metadata found in {file}.")
+        return {"source": "no_metadata"}
 
 
 def get_metadata_batch(file_paths: list | tuple):

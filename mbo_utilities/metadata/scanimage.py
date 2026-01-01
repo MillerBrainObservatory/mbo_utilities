@@ -164,14 +164,15 @@ def get_num_zplanes(metadata: dict) -> int:
 
     Notes
     -----
-    For LBM: len(si.hChannels.channelSave)
+    For LBM/pollen: len(si.hChannels.channelSave) - beamlets are the z-planes
     For piezo: si.hStackManager.numSlices
     For single plane: 1
     """
     stack_type = detect_stack_type(metadata)
     si = metadata.get("si", {})
 
-    if stack_type == "lbm":
+    if stack_type in ("lbm", "pollen"):
+        # For both LBM and pollen, beamlets (channels) represent z-planes
         hch = si.get("hChannels", {})
         channel_save = hch.get("channelSave", [])
         if isinstance(channel_save, list):
@@ -277,12 +278,12 @@ def compute_num_timepoints(total_frames: int, metadata: dict) -> int:
     Notes
     -----
     For LBM: each TIFF frame is one timepoint (z-planes interleaved as channels)
-    For piezo: total_frames // (numSlices * framesPerSlice), adjusted for averaging
+    For piezo/pollen: total_frames // (numSlices * framesPerSlice), adjusted for averaging
 
     Decision tree:
     - LBM → num_timepoints = total_frames
-    - piezo with averaging → frames_per_volume = numSlices (1 saved frame per slice)
-    - piezo no averaging → frames_per_volume = numSlices * framesPerSlice
+    - piezo/pollen with averaging → frames_per_volume = numSlices (1 saved frame per slice)
+    - piezo/pollen no averaging → frames_per_volume = numSlices * framesPerSlice
     - single plane → num_timepoints = total_frames
     """
     stack_type = detect_stack_type(metadata)
@@ -294,7 +295,7 @@ def compute_num_timepoints(total_frames: int, metadata: dict) -> int:
     if stack_type == "single_plane":
         return total_frames
 
-    # piezo stack
+    # piezo or pollen stack - both use piezo z-scanning
     si = metadata.get("si", {})
     stack_mgr = si.get("hStackManager", {})
     scan2d = si.get("hScan2D", {})
