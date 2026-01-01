@@ -14,10 +14,191 @@ $ErrorActionPreference = "Stop"
 $GITHUB_REPO = "MillerBrainObservatory/mbo_utilities"
 $DEFAULT_ENV_PATH = Join-Path $env:USERPROFILE "mbo\envs\mbo_utilities"
 
+# System dependency URLs
+$MSVC_BUILD_TOOLS_URL = "https://visualstudio.microsoft.com/visual-cpp-build-tools/"
+$FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/"
+
 function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Blue }
 function Write-Success { Write-Host "[OK] $args" -ForegroundColor Green }
 function Write-Warn { Write-Host "[WARN] $args" -ForegroundColor Yellow }
 function Write-Err { Write-Host "[ERROR] $args" -ForegroundColor Red }
+
+function Test-MsvcBuildTools {
+    <#
+    .SYNOPSIS
+    Check if Microsoft Visual C++ Build Tools are installed.
+    Required for compiling Python packages with C extensions.
+    #>
+
+    # Check via vswhere (most reliable)
+    $vswherePaths = @(
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\Installer\vswhere.exe"
+    )
+
+    foreach ($vswhere in $vswherePaths) {
+        if (Test-Path $vswhere) {
+            try {
+                # Check for any VS installation with C++ build tools
+                $result = & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+                if ($result) {
+                    return @{ Installed = $true; Path = $result }
+                }
+            }
+            catch {}
+        }
+    }
+
+    # Fallback: check for cl.exe in common paths
+    $clPaths = @(
+        "${env:ProgramFiles}\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio *\VC\bin\cl.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio *\VC\bin\cl.exe"
+    )
+
+    foreach ($pattern in $clPaths) {
+        $found = Get-Item $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            return @{ Installed = $true; Path = $found.DirectoryName }
+        }
+    }
+
+    # Check if cl.exe is in PATH
+    try {
+        $cl = Get-Command cl.exe -ErrorAction Stop
+        return @{ Installed = $true; Path = $cl.Source }
+    }
+    catch {}
+
+    return @{ Installed = $false; Path = $null }
+}
+
+function Test-Ffmpeg {
+    <#
+    .SYNOPSIS
+    Check if ffmpeg is installed (optional, for video export).
+    #>
+    try {
+        $ffmpeg = Get-Command ffmpeg -ErrorAction Stop
+        $version = & ffmpeg -version 2>&1 | Select-Object -First 1
+        if ($version -match "ffmpeg version ([^\s]+)") {
+            return @{ Installed = $true; Version = $matches[1] }
+        }
+        return @{ Installed = $true; Version = "unknown" }
+    }
+    catch {
+        return @{ Installed = $false; Version = $null }
+    }
+}
+
+function Test-SystemDependencies {
+    <#
+    .SYNOPSIS
+    Check all required and optional system dependencies.
+    Returns a hashtable with dependency status.
+    #>
+    $msvc = Test-MsvcBuildTools
+    $ffmpeg = Test-Ffmpeg
+
+    return @{
+        Msvc = $msvc
+        Ffmpeg = $ffmpeg
+    }
+}
+
+function Show-SystemDependencyCheck {
+    <#
+    .SYNOPSIS
+    Display system dependency status and prompt user if required deps are missing.
+    Returns $true if installation should proceed, $false to abort.
+    #>
+    param([hashtable]$Deps)
+
+    Write-Host ""
+    Write-Host "System Dependencies" -ForegroundColor White
+    Write-Host ""
+
+    $hasMissing = $false
+
+    # MSVC Build Tools (required)
+    if ($Deps.Msvc.Installed) {
+        Write-Host "  [" -NoNewline
+        Write-Host "OK" -ForegroundColor Green -NoNewline
+        Write-Host "] Microsoft C++ Build Tools" -NoNewline
+        Write-Host " (required)" -ForegroundColor Gray
+    }
+    else {
+        Write-Host "  [" -NoNewline
+        Write-Host "MISSING" -ForegroundColor Red -NoNewline
+        Write-Host "] Microsoft C++ Build Tools" -NoNewline
+        Write-Host " (required)" -ForegroundColor Gray
+        $hasMissing = $true
+    }
+
+    # ffmpeg (optional)
+    if ($Deps.Ffmpeg.Installed) {
+        Write-Host "  [" -NoNewline
+        Write-Host "OK" -ForegroundColor Green -NoNewline
+        Write-Host "] ffmpeg" -NoNewline
+        Write-Host " (optional, for video export)" -ForegroundColor Gray
+    }
+    else {
+        Write-Host "  [" -NoNewline
+        Write-Host "  " -NoNewline
+        Write-Host "] ffmpeg" -NoNewline
+        Write-Host " (optional, for video export)" -ForegroundColor Gray
+    }
+
+    Write-Host ""
+
+    if ($hasMissing) {
+        Write-Host ""
+        Write-Err "Required system dependencies are missing."
+        Write-Host ""
+        Write-Host "  Microsoft C++ Build Tools is required to compile Python packages." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Install from:" -ForegroundColor White
+        Write-Host "    $MSVC_BUILD_TOOLS_URL" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  During installation, select:" -ForegroundColor White
+        Write-Host "    'Desktop development with C++'" -ForegroundColor Cyan
+        Write-Host "  or at minimum:" -ForegroundColor White
+        Write-Host "    'MSVC v143 - VS 2022 C++ x64/x86 build tools'" -ForegroundColor Cyan
+        Write-Host "    'Windows 10/11 SDK'" -ForegroundColor Cyan
+        Write-Host ""
+
+        Write-Host "  [1] Open download page and exit" -ForegroundColor Cyan
+        Write-Host "  [2] Continue anyway (may fail)" -ForegroundColor Cyan
+        Write-Host "  [3] Exit" -ForegroundColor Cyan
+        Write-Host ""
+
+        do {
+            $choice = Read-Host "Select option (1-3)"
+            $valid = $choice -match '^[123]$'
+            if (-not $valid) { Write-Warn "Invalid selection." }
+        } while (-not $valid)
+
+        switch ($choice) {
+            "1" {
+                Start-Process $MSVC_BUILD_TOOLS_URL
+                Write-Host ""
+                Write-Info "After installing Build Tools, restart your terminal and run this script again."
+                return $false
+            }
+            "2" {
+                Write-Host ""
+                Write-Warn "Continuing without Build Tools. Installation may fail for some packages."
+                return $true
+            }
+            "3" {
+                return $false
+            }
+        }
+    }
+
+    return $true
+}
 
 function Show-Banner {
     Write-Host ""
@@ -739,6 +920,13 @@ function Show-UsageInstructions {
 
 function Main {
     Show-Banner
+
+    # step 0: check system dependencies first
+    $sysDeps = Test-SystemDependencies
+    $shouldContinue = Show-SystemDependencyCheck -Deps $sysDeps
+    if (-not $shouldContinue) {
+        exit 0
+    }
 
     # check/install uv
     if (-not (Test-UvInstalled)) {
