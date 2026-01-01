@@ -129,6 +129,8 @@ mbo scanphase /path/to/data.tiff -o ./output
 
 The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the package can be upgraded with `uv pip install -U mbo_utilities`.
 
+The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the package can be upgraded with `uv pip install -U mbo_utilities`.
+
 | Method | Command |
 |--------|---------|
 | Install script | Re-run install script |
