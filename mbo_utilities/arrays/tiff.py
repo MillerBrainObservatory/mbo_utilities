@@ -7,6 +7,7 @@ This module provides array readers for TIFF files:
 - ScanImageArray: Base class for raw ScanImage TIFFs with phase correction
 - LBMArray: LBM (Light Beads Microscopy) stacks, z-planes as channels
 - PiezoArray: Piezo z-stacks with optional frame averaging
+- CalibrationArray: Pollen/bead calibration stacks (LBM + piezo)
 - SinglePlaneArray: Single-plane time series
 - open_scanimage: Factory function that auto-detects stack type
 
@@ -30,7 +31,6 @@ from tifffile import TiffFile
 from mbo_utilities import log
 from mbo_utilities.arrays._base import (
     _imwrite_base,
-    iter_rois,
     ReductionMixin,
 )
 from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
@@ -44,7 +44,11 @@ from mbo_utilities.metadata.scanimage import (
 from mbo_utilities.analysis.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
-from mbo_utilities.arrays.features import PhaseCorrectionFeature, DimLabels
+from mbo_utilities.arrays.features import (
+    DimLabels,
+    PhaseCorrectionFeature,
+    RoiFeatureMixin,
+)
 from mbo_utilities.arrays.features._phase_correction import PhaseCorrMethod
 
 if TYPE_CHECKING:
@@ -533,7 +537,8 @@ class TiffArray(ReductionMixin):
 
     @property
     def metadata(self) -> dict:
-        return self._metadata
+        """Return metadata as dict. Always returns dict, never None."""
+        return self._metadata if self._metadata is not None else {}
 
     @metadata.setter
     def metadata(self, value: dict):
@@ -760,11 +765,14 @@ class MBOTiffArray(ReductionMixin):
 
     @property
     def metadata(self) -> dict:
-        return self._metadata or {}
+        """Return metadata as dict. Always returns dict, never None."""
+        return self._metadata if self._metadata is not None else {}
 
     @metadata.setter
-    def metadata(self, metadata: dict):
-        self._metadata = metadata
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata = value
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -937,7 +945,7 @@ class MBOTiffArray(ReductionMixin):
         )
 
 
-class ScanImageArray(ReductionMixin):
+class ScanImageArray(RoiFeatureMixin, ReductionMixin):
     """
     Base class for raw ScanImage TIFF readers with phase correction support.
 
@@ -1076,13 +1084,21 @@ class ScanImageArray(ReductionMixin):
             self._metadata = get_metadata(self.filenames)
 
         self.num_channels = get_param(self._metadata, "nplanes", default=1)
-        self.num_rois = get_param(self._metadata, "num_rois", default=1)
+        self.num_frames = get_param(self._metadata, "nframes")
+        self._source_dtype = get_param(self._metadata, "dtype", default="int16")
+        self._target_dtype = None
+        self._ndim = self._metadata.get("ndim", 3)
+        self._frames_per_file = self._metadata.get("frames_per_file", None)
 
-        self._roi = roi
-        self.roi = roi
+        # Extract ROI info before setting roi (needed for validation)
+        self._rois = self._extract_roi_info()
+
+        # Initialize ROI state (mixin provides roi property with validation)
+        self._roi = None
+        if roi is not None:
+            self.roi = roi  # validates via mixin setter
 
         self._offset = 0.0
-        self._mean_subtraction = False
         self._mean_subtraction = False
         self.pbar = None
         self.show_pbar = False
@@ -1093,13 +1109,6 @@ class ScanImageArray(ReductionMixin):
             "roi_array_shape": False,
             "phase_offset": False,
         }
-        self.num_frames = get_param(self._metadata, "nframes")
-        self._source_dtype = get_param(self._metadata, "dtype", default="int16")
-        self._target_dtype = None
-        self._ndim = self._metadata.get("ndim", 3)
-
-        self._frames_per_file = self._metadata.get("frames_per_file", None)
-        self._rois = self._extract_roi_info()
 
         # Initialize PhaseCorrectionFeature
         self.phase_correction = PhaseCorrectionFeature(
@@ -1165,7 +1174,10 @@ class ScanImageArray(ReductionMixin):
         return self._cached_vmax
 
     @property
-    def metadata(self):
+    def metadata(self) -> dict:
+        """Return metadata as dict. Always returns dict, never None."""
+        if self._metadata is None:
+            self._metadata = {}
         self._metadata.update(
             {
                 "dtype": self.dtype,
@@ -1184,12 +1196,17 @@ class ScanImageArray(ReductionMixin):
         return self._metadata
 
     @metadata.setter
-    def metadata(self, value):
+    def metadata(self, value: dict):
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        if self._metadata is None:
+            self._metadata = {}
         self._metadata.update(value)
 
     @property
     def rois(self):
-        return self._rois
+        """Alias for roi_slices (backwards compatibility)."""
+        return self.roi_slices
 
     @property
     def offset(self):
@@ -1263,28 +1280,7 @@ class ScanImageArray(ReductionMixin):
             raise ValueError("mean_subtraction must be a boolean value.")
         self._mean_subtraction = value
 
-    @property
-    def roi(self):
-        return self._roi
-
-    @roi.setter
-    def roi(self, value):
-        if value is not None and value != 0:
-            if isinstance(value, int):
-                if value < 1 or value > self.num_rois:
-                    raise ValueError(
-                        f"ROI index {value} out of bounds.\n"
-                        f"Valid range: 1 to {self.num_rois} (1-indexed)\n"
-                        f"Use roi=0 to split all ROIs, or roi=None to stitch."
-                    )
-            elif isinstance(value, (list, tuple)):
-                for v in value:
-                    if v < 1 or v > self.num_rois:
-                        raise ValueError(
-                            f"ROI index {v} in {value} out of bounds.\n"
-                            f"Valid range: 1 to {self.num_rois} (1-indexed)"
-                        )
-        self._roi = value
+    # roi property is provided by RoiFeatureMixin
 
     @property
     def output_xslices(self):
@@ -1577,7 +1573,7 @@ class ScanImageArray(ReductionMixin):
             target_chunk_mb=target_chunk_mb,
             progress_callback=progress_callback,
             debug=debug,
-            roi_iterator=iter_rois(self),
+            roi_iterator=self.iter_rois(),
             **kwargs,
         )
 
@@ -1586,7 +1582,7 @@ class ScanImageArray(ReductionMixin):
 
         arrays = []
         names = []
-        for roi in iter_rois(self):
+        for roi in self.iter_rois():
             arr = copy.copy(self)
             arr.roi = roi
             # Need to disable feature on copies to show raw? Or valid?
@@ -1859,12 +1855,76 @@ class SinglePlaneArray(ScanImageArray):
             )
 
 
+class CalibrationArray(ScanImageArray):
+    """
+    Calibration array reader for pollen/bead calibration data.
+
+    For calibration stacks that combine LBM beamlet channels with piezo z-scanning.
+    This is specifically for pollen calibration where the z-piezo scans through
+    different focal planes while LBM channels capture individual beamlet data.
+
+    The data has dimensions ZCYX where:
+    - Z: piezo z-positions (focal planes)
+    - C: LBM beamlet channels
+    - Y: spatial height
+    - X: spatial width
+
+    Parameters
+    ----------
+    files : str, Path, or list
+        TIFF file path(s).
+    **kwargs
+        Additional arguments passed to ScanImageArray.
+
+    Raises
+    ------
+    ValueError
+        If the data is not a pollen/calibration stack.
+
+    Attributes
+    ----------
+    num_zplanes : int
+        Number of z-positions (piezo steps).
+    num_beamlets : int
+        Number of LBM beamlet channels.
+    """
+
+    METADATA_CONTEXT: dict[str, str] = {
+        "Ly": "Frame height in pixels.",
+        "Lx": "Frame width in pixels.",
+        "num_zplanes": "Number of z-slices (piezo positions).",
+        "num_beamlets": "Number of LBM beamlet channels.",
+        "dz": "Z-step size in µm (from hStackManager.stackZStepSize).",
+        "fs": "Frame rate in Hz.",
+    }
+
+    def __init__(
+        self, files: str | Path | list, metadata: dict | None = None, **kwargs
+    ):
+        super().__init__(files, metadata=metadata, **kwargs)
+        if self.stack_type != "pollen":
+            raise ValueError(
+                f"CalibrationArray requires pollen calibration data, but detected '{self.stack_type}'. "
+                f"Use open_scanimage() for automatic detection or ScanImageArray directly."
+            )
+
+    @property
+    def num_zplanes(self) -> int:
+        """Number of z-positions (piezo steps)."""
+        return self.num_frames
+
+    @property
+    def num_beamlets(self) -> int:
+        """Number of LBM beamlet channels."""
+        return self.num_channels
+
+
 def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
     """
     Open ScanImage TIFF file(s), automatically detecting stack type.
 
     Factory function that returns the appropriate array subclass based on
-    the detected acquisition type (LBM, piezo, or single-plane).
+    the detected acquisition type (LBM, piezo, pollen, or single-plane).
 
     Parameters
     ----------
@@ -1877,7 +1937,8 @@ def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
     Returns
     -------
     ScanImageArray
-        One of LBMArray, PiezoArray, or SinglePlaneArray.
+        One of LBMArray, PiezoArray, CalibrationArray, or SinglePlaneArray.
+        Pollen calibration stacks (LBM + piezo) return CalibrationArray.
 
     Examples
     --------
@@ -1905,6 +1966,10 @@ def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
             # LBMArray doesn't use average_frames
             kwargs.pop("average_frames", None)
             return LBMArray(files, metadata=metadata, **kwargs)
+        elif stack_type == "pollen":
+            # Pollen calibration: LBM beamlets + piezo z-scanning
+            kwargs.pop("average_frames", None)
+            return CalibrationArray(files, metadata=metadata, **kwargs)
         elif stack_type == "piezo":
             return PiezoArray(files, metadata=metadata, **kwargs)
         else:
@@ -1916,6 +1981,9 @@ def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
         if stack_type == "lbm":
             kwargs.pop("average_frames", None)
             return LBMArray(files, **kwargs)
+        elif stack_type == "pollen":
+            kwargs.pop("average_frames", None)
+            return CalibrationArray(files, **kwargs)
         elif stack_type == "piezo":
             return PiezoArray(files, **kwargs)
         else:
