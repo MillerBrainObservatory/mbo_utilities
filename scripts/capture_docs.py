@@ -140,10 +140,10 @@ def capture_data_view(data_path: Path):
             try:
                 canvas = iw.figure.canvas
 
-                # Check for PySide6/Qt canvas
+                # Check for PyQt6/Qt canvas
                 if "QRenderCanvas" in str(type(canvas)):
-                    from PySide6.QtWidgets import QApplication
-                    from PySide6.QtGui import QGuiApplication
+                    from PyQt6.QtWidgets import QApplication
+                    from PyQt6.QtGui import QGuiApplication
 
                     window = canvas.window()
                     window.raise_()
@@ -189,11 +189,11 @@ def capture_data_view(data_path: Path):
 
             except Exception as e:
                 print(f"Snapshot failed: {e}")
-                state["captured"] = True # Exit anyway
+                state["captured"] = True  # Exit anyway
                 try:
-                    from PySide6.QtWidgets import QApplication
+                    from PyQt6.QtWidgets import QApplication
                     QApplication.instance().quit()
-                except:
+                except Exception:
                     pass
 
     iw.figure.add_animations(snapshot_callback)
@@ -498,8 +498,8 @@ def capture_save_as_dialog(data_path: Path):
                 canvas = iw.figure.canvas
 
                 if "QRenderCanvas" in str(type(canvas)):
-                    from PySide6.QtWidgets import QApplication
-                    from PySide6.QtGui import QGuiApplication
+                    from PyQt6.QtWidgets import QApplication
+                    from PyQt6.QtGui import QGuiApplication
 
                     window = canvas.window()
                     window.raise_()
@@ -528,9 +528,9 @@ def capture_save_as_dialog(data_path: Path):
                 print(f"Snapshot failed: {e}")
                 state["captured"] = True
                 try:
-                    from PySide6.QtWidgets import QApplication
+                    from PyQt6.QtWidgets import QApplication
                     QApplication.instance().quit()
-                except:
+                except Exception:
                     pass
 
     iw.figure.add_animations(snapshot_callback)
