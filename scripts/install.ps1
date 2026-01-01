@@ -844,34 +844,59 @@ function New-DesktopShortcut {
     $shortcutName = if ($BranchRef -and $BranchRef -ne "master") { "MBO Utilities ($BranchRef).lnk" } else { "MBO Utilities.lnk" }
     $shortcutPath = Join-Path $desktopPath $shortcutName
 
-    # setup icon directory
-    $iconDir = Join-Path $env:USERPROFILE "mbo"
-    if (-not (Test-Path $iconDir)) { New-Item -ItemType Directory -Path $iconDir -Force | Out-Null }
+    # setup mbo directory for launcher and icon
+    $mboDir = Join-Path $env:USERPROFILE "mbo"
+    if (-not (Test-Path $mboDir)) { New-Item -ItemType Directory -Path $mboDir -Force | Out-Null }
 
     $downloadRef = if ($BranchRef) { $BranchRef } else { "master" }
 
-    # download icon
-    $iconPath = Join-Path $iconDir "mbo_icon.ico"
+    # download icon (same as taskbar icon)
+    $iconPath = Join-Path $mboDir "icon.ico"
     try {
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/$downloadRef/mbo_utilities/assets/static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/$downloadRef/mbo_utilities/assets/app_settings/icon.ico" -OutFile $iconPath -ErrorAction Stop
     }
     catch {
-        try { Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/mbo_utilities/assets/static/mbo_icon.ico" -OutFile $iconPath -ErrorAction Stop }
+        try { Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/mbo_utilities/assets/app_settings/icon.ico" -OutFile $iconPath -ErrorAction Stop }
         catch { $iconPath = $null }
     }
 
-    # create shortcut pointing to uv-managed mbo.exe
+    # create VBScript launcher to hide terminal window
+    # The "0" argument to Run means hidden window, "False" means don't wait
+    $launcherPath = Join-Path $mboDir "mbo_launcher.vbs"
+    $vbsContent = @"
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run """$mboExePath""", 0, False
+"@
+    try {
+        Set-Content -Path $launcherPath -Value $vbsContent -Encoding ASCII
+    }
+    catch {
+        Write-Warn "Could not create launcher script: $_"
+        # Fall back to direct shortcut
+        $launcherPath = $null
+    }
+
+    # create shortcut pointing to VBScript launcher (no terminal window)
     try {
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = $mboExePath
+
+        if ($launcherPath -and (Test-Path $launcherPath)) {
+            # Use wscript.exe to run the VBS launcher (fully hidden)
+            $shortcut.TargetPath = "wscript.exe"
+            $shortcut.Arguments = """$launcherPath"""
+        }
+        else {
+            # Fallback: direct to mbo.exe (will show terminal)
+            $shortcut.TargetPath = $mboExePath
+        }
+
         $shortcut.WorkingDirectory = [Environment]::GetFolderPath("UserProfile")
         if ($iconPath -and (Test-Path $iconPath)) { $shortcut.IconLocation = $iconPath }
         $shortcut.Description = "MBO Image Viewer"
         $shortcut.Save()
 
         Write-Success "Desktop shortcut created: $shortcutName"
-        Write-Info "  Target: $mboExePath"
     }
     catch {
         Write-Warn "Could not create desktop shortcut: $_"
