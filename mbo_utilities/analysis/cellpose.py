@@ -7,12 +7,16 @@ this module re-exports them for backwards compatibility.
 
 try:
     from lbm_suite2p_python.cellpose import (
-        save_gui_results as save_results,
         load_seg_file as load_results,
-        open_in_gui,
+    )
+    from lbm_suite2p_python.cellpose import (
         masks_to_stat,
-        stat_to_masks,
+        open_in_gui,
         save_comparison,
+        stat_to_masks,
+    )
+    from lbm_suite2p_python.cellpose import (
+        save_gui_results as save_results,
     )
     from lbm_suite2p_python.conversion import (
         export_for_gui,
