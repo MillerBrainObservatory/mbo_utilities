@@ -54,13 +54,14 @@ from mbo_utilities.arrays.features._display_range import (
     DisplayRangeFeature,
 )
 from mbo_utilities.arrays.features._dtype import DataTypeFeature
-from mbo_utilities.arrays.features._frame_rate import FrameRateFeature
+from mbo_utilities.arrays.features._frame_rate import FrameRateFeature, FrameRateMixin
 from mbo_utilities.arrays.features._mixin import DimLabelsMixin
 from mbo_utilities.arrays.features._phase_correction import (
     PhaseCorrectionFeature,
+    PhaseCorrectionMixin,
     PhaseCorrMethod,
 )
-from mbo_utilities.arrays.features._roi import ROIFeature
+from mbo_utilities.arrays.features._roi import ROIFeature, RoiFeatureMixin
 from mbo_utilities.arrays.features._registration import Suite2pRegistrationMixin
 from mbo_utilities.arrays.features._segmentation import (
     SegmentationMixin,
@@ -69,6 +70,7 @@ from mbo_utilities.arrays.features._segmentation import (
 )
 from mbo_utilities.arrays.features._voxel_size import (
     VoxelSizeFeature,
+    VoxelSizeMixin,
     get_voxel_size_from_metadata,
 )
 from mbo_utilities.arrays.features._stats import (
@@ -96,14 +98,17 @@ __all__ = [
     "infer_dims",
     # voxel size
     "VoxelSizeFeature",
+    "VoxelSizeMixin",
     "get_voxel_size_from_metadata",
     # frame rate
     "FrameRateFeature",
+    "FrameRateMixin",
     # display range
     "DisplayRange",
     "DisplayRangeFeature",
     # roi
     "ROIFeature",
+    "RoiFeatureMixin",
     # dtype
     "DataTypeFeature",
     # compression
@@ -125,6 +130,7 @@ __all__ = [
     "PlaneStats",
     # phase correction
     "PhaseCorrectionFeature",
+    "PhaseCorrectionMixin",
     "PhaseCorrMethod",
     # segmentation
     "SegmentationMixin",

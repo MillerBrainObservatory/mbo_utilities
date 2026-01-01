@@ -2,6 +2,16 @@
 Phase correction feature for arrays.
 
 Provides bidirectional scan phase correction settings.
+
+Classes
+-------
+PhaseCorrMethod
+    Enum of available phase correction methods.
+PhaseCorrectionFeature
+    Standalone feature object for managing phase correction state.
+PhaseCorrectionMixin
+    Mixin class that adds phase correction properties to array classes.
+    Presence of `phase_correction` attribute indicates support (duck typing).
 """
 
 from __future__ import annotations
@@ -340,3 +350,151 @@ class PhaseCorrectionFeature(ArrayFeature):
             return "PhaseCorrectionFeature(disabled)"
         shift_str = f"{self.effective_shift:.2f}" if self.effective_shift else "auto"
         return f"PhaseCorrectionFeature({self._method.value}, shift={shift_str})"
+
+
+class PhaseCorrectionMixin:
+    """
+    Mixin class that adds phase correction support to array classes.
+
+    This mixin provides convenience properties that delegate to a
+    `phase_correction` PhaseCorrectionFeature instance. Feature detection
+    uses duck typing: presence of `phase_correction` attribute indicates
+    the array supports phase correction operations.
+
+    Usage
+    -----
+    Check for phase correction support::
+
+        if hasattr(arr, 'phase_correction'):
+            # array supports phase correction
+            arr.fix_phase = True
+            arr.use_fft = False
+
+    Required attributes (set by implementing class):
+        phase_correction : PhaseCorrectionFeature
+            The feature instance managing phase correction state
+
+    Properties provided (all delegate to phase_correction):
+        fix_phase : bool
+            Enable/disable phase correction
+        use_fft : bool
+            Use FFT-based subpixel correction
+        phasecorr_method : str
+            Current correction method name
+        border : int
+            Border pixels to exclude
+        upsample : int
+            Upsampling factor
+        max_offset : int
+            Maximum phase offset to search
+        offset : float | None
+            Current effective shift value
+    """
+
+    @property
+    def fix_phase(self) -> bool:
+        """Whether bidirectional phase correction is enabled."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            return pc.enabled
+        return False
+
+    @fix_phase.setter
+    def fix_phase(self, value: bool):
+        """Enable or disable phase correction."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            pc.enabled = value
+
+    @property
+    def use_fft(self) -> bool:
+        """Whether FFT-based phase correlation is used."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            return pc.use_fft
+        return False
+
+    @use_fft.setter
+    def use_fft(self, value: bool):
+        """Set FFT mode."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            pc.use_fft = value
+
+    @property
+    def phasecorr_method(self) -> str:
+        """Current phase correction method name."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            return pc.method.value
+        return "none"
+
+    @phasecorr_method.setter
+    def phasecorr_method(self, value: str | None):
+        """Set phase correction method."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            if value is None:
+                pc.enabled = False
+            else:
+                pc.method = value
+
+    @property
+    def border(self) -> int:
+        """Border pixels to exclude from phase estimation."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            return pc.border
+        return 0
+
+    @border.setter
+    def border(self, value: int):
+        """Set border pixels."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            pc.border = value
+
+    @property
+    def upsample(self) -> int:
+        """Upsampling factor for subpixel phase estimation."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            return pc.upsample
+        return 1
+
+    @upsample.setter
+    def upsample(self, value: int):
+        """Set upsampling factor."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            pc.upsample = value
+
+    @property
+    def max_offset(self) -> int:
+        """Maximum phase offset to search."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            return pc.max_offset
+        return 4
+
+    @max_offset.setter
+    def max_offset(self, value: int):
+        """Set maximum offset."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            pc.max_offset = value
+
+    @property
+    def offset(self) -> float | None:
+        """Current effective phase shift value."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            return pc.effective_shift
+        return None
+
+    @offset.setter
+    def offset(self, value: float):
+        """Set fixed phase shift value."""
+        pc = getattr(self, "phase_correction", None)
+        if pc is not None:
+            pc.shift = value

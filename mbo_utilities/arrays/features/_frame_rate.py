@@ -147,3 +147,103 @@ class FrameRateFeature(ArrayFeature):
         if self._value is None:
             return "FrameRateFeature(None)"
         return f"FrameRateFeature({self._value:.2f} Hz)"
+
+
+class FrameRateMixin:
+    """
+    Mixin class that adds frame rate support to array classes.
+
+    This mixin provides convenience properties that delegate to a
+    `frame_rate` FrameRateFeature instance. Feature detection uses
+    duck typing: presence of `frame_rate` attribute indicates the
+    array supports temporal sampling rate operations.
+
+    Usage
+    -----
+    Check for frame rate support::
+
+        if hasattr(arr, 'frame_rate'):
+            # array supports frame rate operations
+            print(f"Frame rate: {arr.fs} Hz")
+
+    Required attributes (set by implementing class):
+        frame_rate : FrameRateFeature
+            The feature instance managing frame rate state
+
+    Properties provided (all delegate to frame_rate):
+        fs : float | None
+            Sampling frequency in Hz
+        frame_interval : float | None
+            Frame interval in seconds (1/fs)
+        frame_interval_ms : float | None
+            Frame interval in milliseconds
+    """
+
+    @property
+    def fs(self) -> float | None:
+        """Sampling frequency in Hz."""
+        fr = getattr(self, "frame_rate", None)
+        if fr is not None:
+            return fr.fs
+        return None
+
+    @fs.setter
+    def fs(self, value: float | None):
+        """Set sampling frequency in Hz."""
+        fr = getattr(self, "frame_rate", None)
+        if fr is not None:
+            fr.set_value(self, value)
+
+    @property
+    def frame_interval(self) -> float | None:
+        """Frame interval in seconds (1/fs)."""
+        fr = getattr(self, "frame_rate", None)
+        if fr is not None:
+            return fr.period
+        return None
+
+    @property
+    def frame_interval_ms(self) -> float | None:
+        """Frame interval in milliseconds."""
+        fr = getattr(self, "frame_rate", None)
+        if fr is not None:
+            return fr.period_ms
+        return None
+
+    def time_to_frames(self, seconds: float) -> int:
+        """
+        Convert time in seconds to frame count.
+
+        Parameters
+        ----------
+        seconds : float
+            time in seconds
+
+        Returns
+        -------
+        int
+            number of frames
+        """
+        fr = getattr(self, "frame_rate", None)
+        if fr is not None:
+            return fr.time_to_frames(seconds)
+        raise ValueError("frame rate not set")
+
+    def frames_to_time(self, frames: int) -> float:
+        """
+        Convert frame count to time in seconds.
+
+        Parameters
+        ----------
+        frames : int
+            number of frames
+
+        Returns
+        -------
+        float
+            time in seconds
+        """
+        fr = getattr(self, "frame_rate", None)
+        if fr is not None:
+            return fr.frames_to_time(frames)
+        raise ValueError("frame rate not set")

@@ -176,3 +176,124 @@ def get_voxel_size_from_metadata(metadata: dict) -> VoxelSize:
     from mbo_utilities.metadata import get_voxel_size
 
     return get_voxel_size(metadata)
+
+
+class VoxelSizeMixin:
+    """
+    Mixin class that adds voxel size support to array classes.
+
+    This mixin provides convenience properties that delegate to a
+    `voxel_size` VoxelSizeFeature instance. Feature detection uses
+    duck typing: presence of `voxel_size` attribute indicates the
+    array supports physical dimension operations.
+
+    Usage
+    -----
+    Check for voxel size support::
+
+        if hasattr(arr, 'voxel_size'):
+            # array supports voxel size operations
+            print(f"Pixel size: {arr.dx} x {arr.dy} µm")
+
+    Required attributes (set by implementing class):
+        voxel_size : VoxelSizeFeature
+            The feature instance managing voxel size state
+
+    Properties provided (all delegate to voxel_size):
+        dx : float
+            Pixel size in X dimension (µm)
+        dy : float
+            Pixel size in Y dimension (µm)
+        dz : float | None
+            Voxel size in Z dimension (µm)
+        pixel_resolution : tuple[float, float]
+            (dx, dy) tuple for 2D resolution
+        is_isotropic_xy : bool
+            True if dx == dy
+    """
+
+    @property
+    def dx(self) -> float:
+        """Pixel size in X dimension (µm)."""
+        vs = getattr(self, "voxel_size", None)
+        if vs is not None:
+            return vs.dx
+        return 1.0
+
+    @dx.setter
+    def dx(self, value: float):
+        """Set pixel size in X dimension."""
+        vs = getattr(self, "voxel_size", None)
+        if vs is not None:
+            current = vs.value
+            vs.set_value(self, VoxelSize(float(value), current.dy, current.dz))
+
+    @property
+    def dy(self) -> float:
+        """Pixel size in Y dimension (µm)."""
+        vs = getattr(self, "voxel_size", None)
+        if vs is not None:
+            return vs.dy
+        return 1.0
+
+    @dy.setter
+    def dy(self, value: float):
+        """Set pixel size in Y dimension."""
+        vs = getattr(self, "voxel_size", None)
+        if vs is not None:
+            current = vs.value
+            vs.set_value(self, VoxelSize(current.dx, float(value), current.dz))
+
+    @property
+    def dz(self) -> float | None:
+        """Voxel size in Z dimension (µm), None if not set."""
+        vs = getattr(self, "voxel_size", None)
+        if vs is not None:
+            return vs.dz
+        return None
+
+    @dz.setter
+    def dz(self, value: float | None):
+        """Set voxel size in Z dimension."""
+        vs = getattr(self, "voxel_size", None)
+        if vs is not None:
+            current = vs.value
+            vs.set_value(
+                self, VoxelSize(current.dx, current.dy, float(value) if value else None)
+            )
+
+    @property
+    def pixel_resolution(self) -> tuple[float, float]:
+        """(dx, dy) tuple for 2D resolution."""
+        vs = getattr(self, "voxel_size", None)
+        if vs is not None:
+            return vs.pixel_resolution
+        return (1.0, 1.0)
+
+    @property
+    def is_isotropic_xy(self) -> bool:
+        """True if dx == dy."""
+        vs = getattr(self, "voxel_size", None)
+        if vs is not None:
+            return vs.is_isotropic_xy
+        return True
+
+    def get_scale(self, dims: tuple[str, ...] | None = None) -> tuple[float, ...]:
+        """
+        Get scale tuple for napari/viewers.
+
+        Parameters
+        ----------
+        dims : tuple[str, ...] | None
+            dimension labels to determine scale order.
+            if None, returns (dz, dy, dx) for 3D or (dy, dx) for 2D.
+
+        Returns
+        -------
+        tuple[float, ...]
+            scale values in dimension order
+        """
+        vs = getattr(self, "voxel_size", None)
+        if vs is not None:
+            return vs.to_scale(dims)
+        return (1.0, 1.0)
