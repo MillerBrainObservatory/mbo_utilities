@@ -7,6 +7,8 @@ various file formats as lazy arrays.
 
 from __future__ import annotations
 
+import inspect
+from functools import lru_cache
 from pathlib import Path
 from typing import Sequence
 
@@ -35,28 +37,48 @@ MBO_SUPPORTED_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy"]
 # Re-export PIPELINE_TAGS for backward compatibility (canonical location is file_io.py)
 from mbo_utilities.file_io import PIPELINE_TAGS
 
-_ARRAY_TYPE_KWARGS = {
-    MboRawArray: {
-        "roi",
-        "fix_phase",
-        "phasecorr_method",
-        "border",
-        "upsample",
-        "max_offset",
-        "use_fft",
-    },
-    ZarrArray: {"filenames", "compressor", "rois"},
-    MBOTiffArray: {"filenames", "_chunks"},
-    Suite2pArray: set(),
-    BinArray: {"shape"},
-    H5Array: {"dataset"},
-    TiffArray: set(),
-    NumpyArray: {"metadata"},
-}
+
+@lru_cache(maxsize=32)
+def _get_init_params(cls: type) -> set[str]:
+    """
+    Get the set of parameter names accepted by a class's __init__.
+
+    Uses inspect.signature for dynamic introspection rather than hardcoded
+    mappings. Results are cached for performance.
+
+    Parameters
+    ----------
+    cls : type
+        The class to inspect.
+
+    Returns
+    -------
+    set[str]
+        Set of parameter names (excluding 'self').
+    """
+    try:
+        sig = inspect.signature(cls.__init__)
+        # Exclude 'self' and collect all parameter names
+        params = {
+            name
+            for name, param in sig.parameters.items()
+            if name != "self" and param.kind
+            not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        }
+        return params
+    except (ValueError, TypeError):
+        # Fallback for classes without inspectable __init__
+        return set()
 
 
 def _filter_kwargs(cls, kwargs):
-    allowed = _ARRAY_TYPE_KWARGS.get(cls, set())
+    """
+    Filter kwargs to only those accepted by cls.__init__.
+
+    Uses dynamic introspection via _get_init_params rather than
+    hardcoded mappings.
+    """
+    allowed = _get_init_params(cls)
     return {k: v for k, v in kwargs.items() if k in allowed}
 
 

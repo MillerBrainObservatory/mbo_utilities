@@ -18,9 +18,7 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities._writers import _try_generic_writers, add_processing_step
 from mbo_utilities.arrays import (
-    iter_rois,
     register_zplanes_s3d,
-    supports_roi,
     validate_s3d_registration,
 )
 from mbo_utilities.metadata import get_param, RoiMode
@@ -191,9 +189,10 @@ def imwrite(
     outpath.mkdir(exist_ok=True)
 
     # handle roi based on roi_mode
+    # ROI support detected via duck typing: hasattr(arr, 'roi_mode')
     if roi_mode == RoiMode.separate:
         # separate mode: set roi on array if specified
-        if roi is not None and supports_roi(lazy_array):
+        if roi is not None and hasattr(lazy_array, "roi_mode"):
             lazy_array.roi = roi
     elif roi_mode == RoiMode.concat_y:
         # concat mode: roi parameter is ignored, use None (stitch all)
