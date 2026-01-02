@@ -40,9 +40,9 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False):
         If False, use fast integer-only correlation.
     """
     if frame.ndim != 2:
-        raise ValueError("Expected 2D frame, got shape {}".format(frame.shape))
+        raise ValueError(f"Expected 2D frame, got shape {frame.shape}")
 
-    h, w = frame.shape
+    _h, w = frame.shape
 
     if isinstance(border, int):
         t = b = l = r = border
@@ -119,7 +119,7 @@ def _apply_offset(img, offset, use_fft=False):
         shift_vec = (0,) * (f.ndim - 1) + (offset,)
         rows[:] = np.fft.ifftn(fourier_shift(f, shift_vec), axes=(-2, -1)).real
     else:
-        rows[:] = np.roll(rows, shift=int(round(offset)), axis=-1)
+        rows[:] = np.roll(rows, shift=round(offset), axis=-1)
     return img
 
 
@@ -192,7 +192,7 @@ def bidir_phasecorr(
         out = _apply_offset(arr.copy(), float(_offsets), use_fft)
     else:
         out = np.stack(
-            [_apply_offset(f.copy(), float(s), use_fft) for f, s in zip(arr, _offsets)]
+            [_apply_offset(f.copy(), float(s), use_fft) for f, s in zip(arr, _offsets, strict=False)]
         )
     return out, _offsets
 

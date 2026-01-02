@@ -17,12 +17,9 @@ PhaseCorrectionMixin
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING
 
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
-if TYPE_CHECKING:
-    pass
 
 
 class PhaseCorrMethod(str, Enum):
@@ -36,7 +33,7 @@ class PhaseCorrMethod(str, Enum):
     mean_sub = "mean-sub"  # mean subtraction
 
     @classmethod
-    def from_string(cls, value: str | None) -> "PhaseCorrMethod":
+    def from_string(cls, value: str | None) -> PhaseCorrMethod:
         """Case-insensitive lookup."""
         if value is None:
             return cls.none
@@ -119,7 +116,7 @@ class PhaseCorrectionFeature(ArrayFeature):
 
     @property
     def value(self) -> dict:
-        """phase correction settings as dict"""
+        """Phase correction settings as dict."""
         return {
             "enabled": self._enabled,
             "method": self._method.value,
@@ -132,12 +129,12 @@ class PhaseCorrectionFeature(ArrayFeature):
 
     @property
     def enabled(self) -> bool:
-        """whether correction is enabled"""
+        """Whether correction is enabled."""
         return self._enabled
 
     @enabled.setter
     def enabled(self, value: bool) -> None:
-        """enable or disable correction"""
+        """Enable or disable correction."""
         old_enabled = self._enabled
         self._enabled = bool(value)
         if old_enabled != self._enabled:
@@ -149,12 +146,12 @@ class PhaseCorrectionFeature(ArrayFeature):
 
     @property
     def method(self) -> PhaseCorrMethod:
-        """correction method"""
+        """Correction method."""
         return self._method
 
     @method.setter
     def method(self, value: PhaseCorrMethod | str) -> None:
-        """set correction method"""
+        """Set correction method."""
         if isinstance(value, str):
             self._method = PhaseCorrMethod.from_string(value)
         else:
@@ -164,64 +161,64 @@ class PhaseCorrectionFeature(ArrayFeature):
 
     @property
     def shift(self) -> float | None:
-        """fixed shift value (None for auto)"""
+        """Fixed shift value (None for auto)."""
         return self._shift
 
     @shift.setter
     def shift(self, value: float | None) -> None:
-        """set fixed shift value"""
+        """Set fixed shift value."""
         self._shift = value
 
     @property
     def effective_shift(self) -> float | None:
-        """effective shift (fixed or computed)"""
+        """Effective shift (fixed or computed)."""
         if self._shift is not None:
             return self._shift
         return self._computed_shift
 
     @property
     def use_fft(self) -> bool:
-        """use FFT-based subpixel correction"""
+        """Use FFT-based subpixel correction."""
         return self._use_fft
 
     @use_fft.setter
     def use_fft(self, value: bool) -> None:
-        """set FFT mode"""
+        """Set FFT mode."""
         self._use_fft = bool(value)
 
     @property
     def upsample(self) -> int:
-        """upsampling factor for subpixel phase estimation"""
+        """Upsampling factor for subpixel phase estimation."""
         return self._upsample
 
     @upsample.setter
     def upsample(self, value: int) -> None:
-        """set upsampling factor"""
+        """Set upsampling factor."""
         self._upsample = max(1, int(value))
 
     @property
     def border(self) -> int:
-        """border pixels to exclude from phase estimation"""
+        """Border pixels to exclude from phase estimation."""
         return self._border
 
     @border.setter
     def border(self, value: int) -> None:
-        """set border pixels"""
+        """Set border pixels."""
         self._border = max(0, int(value))
 
     @property
     def max_offset(self) -> int:
-        """maximum phase offset to search"""
+        """Maximum phase offset to search."""
         return self._max_offset
 
     @max_offset.setter
     def max_offset(self, value: int) -> None:
-        """set maximum offset"""
+        """Set maximum offset."""
         self._max_offset = max(1, int(value))
 
     @property
     def is_auto_shift(self) -> bool:
-        """True if shift is auto-computed"""
+        """True if shift is auto-computed."""
         return self._shift is None
 
     def set_value(self, array, value) -> None:
@@ -299,7 +296,7 @@ class PhaseCorrectionFeature(ArrayFeature):
             window = array[start : start + n_sample]
 
         # compute using phasecorr module
-        corrected, shift = bidir_phasecorr(
+        _corrected, shift = bidir_phasecorr(
             window,
             method=self._method.value if self._method != PhaseCorrMethod.none else "mean",
             return_shift=True,

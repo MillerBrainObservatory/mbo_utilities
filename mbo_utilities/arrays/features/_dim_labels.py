@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
 if TYPE_CHECKING:
-    from typing import Sequence
+    from collections.abc import Sequence
 
 # common dimension label characters and their meanings
 DIM_DESCRIPTIONS = {
@@ -211,22 +211,22 @@ class DimLabels(ArrayFeature):
 
     @property
     def value(self) -> tuple[str, ...]:
-        """current dimension labels"""
+        """Current dimension labels."""
         return self._dims
 
     @property
     def slider_dims(self) -> tuple[str, ...]:
-        """dimensions that should have sliders (non-spatial)"""
+        """Dimensions that should have sliders (non-spatial)."""
         return get_slider_dims(self._dims)
 
     @property
     def spatial_dims(self) -> tuple[str, ...]:
-        """spatial dimensions (Y, X)"""
+        """Spatial dimensions (Y, X)."""
         return tuple(d for d in self._dims if d in ("Y", "X"))
 
     @property
     def ndim(self) -> int:
-        """number of dimensions"""
+        """Number of dimensions."""
         return self._ndim
 
     def set_value(self, array, value: str | Sequence[str] | None) -> None:
@@ -269,11 +269,11 @@ class DimLabels(ArrayFeature):
         return get_dim_index(self._dims, label)
 
     def has(self, label: str) -> bool:
-        """check if a dimension label exists"""
+        """Check if a dimension label exists."""
         return self.index(label) is not None
 
     def __getitem__(self, idx: int) -> str:
-        """get dimension label by index"""
+        """Get dimension label by index."""
         return self._dims[idx]
 
     def __len__(self) -> int:

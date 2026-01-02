@@ -14,6 +14,7 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
+import contextlib
 
 logger = log.get("arrays.numpy")
 
@@ -143,14 +144,13 @@ class NumpyArray(ReductionMixin):
         """Infer dimension labels from array shape."""
         if self.ndim == 2:
             return "YX"
-        elif self.ndim == 3:
+        if self.ndim == 3:
             return "TYX"
-        elif self.ndim == 4:
+        if self.ndim == 4:
             return "TZYX"
-        elif self.ndim == 5:
+        if self.ndim == 5:
             return "TCZYX"
-        else:
-            return "".join([f"D{i}" for i in range(self.ndim)])
+        return "".join([f"D{i}" for i in range(self.ndim)])
 
     def __getitem__(self, item):
         out = self.data[item]
@@ -190,7 +190,7 @@ class NumpyArray(ReductionMixin):
 
     def _compute_frame_vminmax(self):
         """Compute vmin/vmax from first frame (frame 0, plane 0)."""
-        if not hasattr(self, '_cached_vmin'):
+        if not hasattr(self, "_cached_vmin"):
             frame = self[0, 0] if self.ndim == 4 else self[0]
             frame = np.asarray(frame)
             self._cached_vmin = float(frame.min())
@@ -242,10 +242,8 @@ class NumpyArray(ReductionMixin):
     def close(self):
         """Release resources and clean up temporary files."""
         if self._npz_file is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._npz_file.close()
-            except Exception:
-                pass
             self._npz_file = None
 
     def __del__(self):

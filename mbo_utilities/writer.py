@@ -11,9 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import Callable, Sequence
 
-import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities._writers import _try_generic_writers, add_processing_step
@@ -23,6 +21,12 @@ from mbo_utilities.arrays import (
 )
 from mbo_utilities.metadata import RoiMode, get_param
 from mbo_utilities.util import load_npy
+from typing import TYPE_CHECKING
+import contextlib
+
+if TYPE_CHECKING:
+    import numpy as np
+    from collections.abc import Callable, Sequence
 
 logger = log.get("writer")
 
@@ -231,10 +235,8 @@ def imwrite(
         file_metadata["nframes"] = int(num_frames)
 
     if hasattr(lazy_array, "metadata"):
-        try:
+        with contextlib.suppress(AttributeError):
             lazy_array.metadata = file_metadata
-        except AttributeError:
-            pass
 
     s3d_job_dir = None
     if register_z:
@@ -254,7 +256,7 @@ def imwrite(
                     existing_s3d_dir = candidate
                 else:
                     logger.warning(
-                        f"s3d-job in metadata exists but registration is invalid"
+                        "s3d-job in metadata exists but registration is invalid"
                     )
 
             if not existing_s3d_dir:
@@ -289,8 +291,8 @@ def imwrite(
                         logger.info(f"Z-plane registration succeeded: {s3d_job_dir}")
                     else:
                         logger.error(
-                            f"Suite3D job completed but validation failed. "
-                            f"Proceeding without registration."
+                            "Suite3D job completed but validation failed. "
+                            "Proceeding without registration."
                         )
                         s3d_job_dir = None
                         file_metadata["apply_shift"] = False
@@ -305,17 +307,13 @@ def imwrite(
             file_metadata["s3d-job"] = str(s3d_job_dir)
 
         if hasattr(lazy_array, "metadata"):
-            try:
+            with contextlib.suppress(AttributeError):
                 lazy_array.metadata = file_metadata
-            except AttributeError:
-                pass
     else:
         file_metadata["apply_shift"] = False
         if hasattr(lazy_array, "metadata"):
-            try:
+            with contextlib.suppress(AttributeError):
                 lazy_array.metadata = file_metadata
-            except AttributeError:
-                pass
 
     # Collect input files for processing history
     input_files = getattr(lazy_array, "filenames", None)
@@ -425,10 +423,8 @@ def imwrite(
 
     # Update lazy_array metadata with processing history if possible
     if hasattr(lazy_array, "metadata"):
-        try:
+        with contextlib.suppress(AttributeError):
             lazy_array.metadata = file_metadata
-        except AttributeError:
-            pass
 
     logger.debug(f"Processing step recorded: imwrite to {ext} in {write_duration:.2f}s")
 

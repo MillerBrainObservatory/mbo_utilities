@@ -11,7 +11,6 @@ This module contains shared functionality used across all array implementations:
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,9 +21,10 @@ from mbo_utilities import log
 from mbo_utilities.arrays.features._dim_labels import get_dims, get_num_planes
 from mbo_utilities._writers import _write_plane
 from mbo_utilities.metadata import RoiMode
+from numpy.exceptions import AxisError
 
 if TYPE_CHECKING:
-    from typing import Callable
+    from collections.abc import Callable
 
 logger = log.get("arrays._base")
 
@@ -161,9 +161,8 @@ def _sanitize_suffix(suffix: str) -> str:
         suffix = suffix.replace("__", "_")
 
     # Strip trailing underscores
-    suffix = suffix.rstrip("_")
+    return suffix.rstrip("_")
 
-    return suffix
 
 
 def _build_output_path(
@@ -237,21 +236,18 @@ def _build_output_path(
         if structural:
             return plane_dir / "data_chan2.bin"
         return plane_dir / "data_raw.bin"
-    else:
-        # Non-binary formats: single file per plane
-        return outpath / f"plane{plane_num:02d}{roi_suffix}.{ext}"
+    # Non-binary formats: single file per plane
+    return outpath / f"plane{plane_num:02d}{roi_suffix}.{ext}"
 
 
 def _sanitize_value(v):
     if isinstance(v, dict):
         return {k: _sanitize_value(val) for k, val in v.items()}
-    elif isinstance(v, (list, tuple)):
+    if isinstance(v, (list, tuple)):
         return [_sanitize_value(x) for x in v]
-    elif isinstance(v, Path):
+    if isinstance(v, (Path, np.dtype, type)):
         return str(v)
-    elif isinstance(v, (np.dtype, type)):
-        return str(v)
-    elif hasattr(v, "dtype") or hasattr(v, "item"):  # numpy scalars/arrays
+    if hasattr(v, "dtype") or hasattr(v, "item"):  # numpy scalars/arrays
         if hasattr(v, "ndim") and v.ndim == 0:
             return v.item()
         if hasattr(v, "tolist"):
@@ -273,7 +269,7 @@ def _imwrite_base(
     ext: str = ".tiff",
     overwrite: bool = False,
     target_chunk_mb: int = 50,
-    progress_callback: "Callable | None" = None,
+    progress_callback: Callable | None = None,
     debug: bool = False,
     show_progress: bool = True,
     roi_iterator=None,
@@ -477,12 +473,11 @@ def _axes_or_guess(arr_ndim: int) -> str:
     """Guess axis labels from array dimensionality."""
     if arr_ndim == 2:
         return "YX"
-    elif arr_ndim == 3:
+    if arr_ndim == 3:
         return "ZYX"
-    elif arr_ndim == 4:
+    if arr_ndim == 4:
         return "TZYX"
-    else:
-        return "Unknown"
+    return "Unknown"
 
 
 def _safe_get_metadata(path: Path) -> dict:
@@ -590,7 +585,7 @@ class ReductionMixin:
         np.ndarray or scalar
             Reduced result.
         """
-        shape, arr_dtype, ndim = self._get_array_info()
+        shape, _arr_dtype, ndim = self._get_array_info()
 
         # For numpy arrays/memmaps, just delegate directly
         if self._is_numpy_like():
@@ -606,13 +601,13 @@ class ReductionMixin:
                 if axis < 0:
                     axis = ndim + axis
                 if axis < 0 or axis >= ndim:
-                    raise np.AxisError(axis, ndim)
+                    raise AxisError(axis, ndim)
             else:
                 # tuple of axes
                 axis = tuple(ax if ax >= 0 else ndim + ax for ax in axis)
                 for ax in axis:
                     if ax < 0 or ax >= ndim:
-                        raise np.AxisError(ax, ndim)
+                        raise AxisError(ax, ndim)
 
         # Determine if we can just load and compute (small arrays)
         total_elements = int(np.prod(shape))
@@ -644,9 +639,7 @@ class ReductionMixin:
         chunk_size: int = 100,
         **kwargs,
     ) -> np.ndarray:
-        """
-        Apply reduction function over axis, processing in chunks for large arrays.
-        """
+        """Apply reduction function over axis, processing in chunks for large arrays."""
         from tqdm.auto import tqdm
 
         shape, arr_dtype, ndim = self._get_array_info()
@@ -795,7 +788,7 @@ class ReductionMixin:
         axes = sorted(axis, reverse=True)
         result = self
         for ax in axes:
-            result = result._chunked_reduce(func, axis=ax, dtype=dtype, **kwargs) if hasattr(result, '_chunked_reduce') else getattr(np, func)(result, axis=ax, dtype=dtype, **kwargs)
+            result = result._chunked_reduce(func, axis=ax, dtype=dtype, **kwargs) if hasattr(result, "_chunked_reduce") else getattr(np, func)(result, axis=ax, dtype=dtype, **kwargs)
         if keepdims:
             for ax in sorted(axis):
                 result = np.expand_dims(result, axis=ax)

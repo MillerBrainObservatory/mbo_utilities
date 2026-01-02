@@ -5,7 +5,7 @@ Each array type and pipeline declares what files it reads/writes
 """
 
 from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
 
 
 @dataclass
@@ -52,37 +52,37 @@ _PIPELINES: dict[str, PipelineInfo] = {}
 
 
 def register_pipeline(info: PipelineInfo) -> None:
-    """register a pipeline's info in the global registry."""
+    """Register a pipeline's info in the global registry."""
     _PIPELINES[info.name] = info
 
 
 def get_pipeline_info(name: str) -> PipelineInfo | None:
-    """get info for a specific pipeline by name."""
+    """Get info for a specific pipeline by name."""
     return _PIPELINES.get(name)
 
 
 def get_all_pipelines() -> dict[str, PipelineInfo]:
-    """get all registered pipelines."""
+    """Get all registered pipelines."""
     return dict(_PIPELINES)
 
 
 def get_all_input_patterns() -> dict[str, list[str]]:
-    """get input patterns grouped by pipeline name."""
+    """Get input patterns grouped by pipeline name."""
     return {name: info.input_patterns for name, info in _PIPELINES.items()}
 
 
 def get_all_output_patterns() -> dict[str, list[str]]:
-    """get output patterns grouped by pipeline name."""
+    """Get output patterns grouped by pipeline name."""
     return {name: info.output_patterns for name, info in _PIPELINES.items()}
 
 
 def get_all_marker_files() -> dict[str, list[str]]:
-    """get marker files grouped by pipeline name."""
+    """Get marker files grouped by pipeline name."""
     return {name: info.marker_files for name, info in _PIPELINES.items()}
 
 
 def get_pipelines_by_category(category: str) -> dict[str, PipelineInfo]:
-    """get all pipelines in a category."""
+    """Get all pipelines in a category."""
     return {
         name: info for name, info in _PIPELINES.items()
         if info.category == category
@@ -90,7 +90,7 @@ def get_pipelines_by_category(category: str) -> dict[str, PipelineInfo]:
 
 
 def get_readable_extensions() -> set[str]:
-    """get all file extensions that can be read by any pipeline."""
+    """Get all file extensions that can be read by any pipeline."""
     extensions = set()
     for info in _PIPELINES.values():
         extensions.update(info.input_extensions)
@@ -98,7 +98,7 @@ def get_readable_extensions() -> set[str]:
 
 
 def get_writable_extensions() -> set[str]:
-    """get all file extensions that can be written by any pipeline."""
+    """Get all file extensions that can be written by any pipeline."""
     extensions = set()
     for info in _PIPELINES.values():
         extensions.update(info.output_extensions)
@@ -116,7 +116,7 @@ def pipeline(
     marker_files: list[str] | None = None,
     category: str = "unknown",
 ):
-    """decorator to register a class as a pipeline with file patterns."""
+    """Decorator to register a class as a pipeline with file patterns."""
     def decorator(cls):
         info = PipelineInfo(
             name=name,

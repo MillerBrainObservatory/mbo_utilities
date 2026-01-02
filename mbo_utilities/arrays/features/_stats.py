@@ -7,14 +7,12 @@ generalizes to z-planes, cameras, rois, or any sliceable dimension.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 import numpy as np
 
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
-if TYPE_CHECKING:
-    pass
 
 
 class SliceStats(NamedTuple):
@@ -77,7 +75,7 @@ class StatsFeature(ArrayFeature):
 
     @property
     def value(self) -> dict | None:
-        """statistics as dict with mean, std, snr lists"""
+        """Statistics as dict with mean, std, snr lists."""
         if not self._computed:
             return None
         return {
@@ -91,57 +89,57 @@ class StatsFeature(ArrayFeature):
 
     @property
     def mean(self) -> list[float] | None:
-        """mean intensity per slice"""
+        """Mean intensity per slice."""
         return self._mean
 
     @property
     def std(self) -> list[float] | None:
-        """standard deviation per slice"""
+        """Standard deviation per slice."""
         return self._std
 
     @property
     def snr(self) -> list[float] | None:
-        """signal-to-noise ratio per slice (mean/std)"""
+        """signal-to-noise ratio per slice (mean/std)."""
         return self._snr
 
     @property
     def mean_images(self) -> list[np.ndarray] | None:
-        """mean image per slice (for mean subtraction)"""
+        """Mean image per slice (for mean subtraction)."""
         return self._mean_images
 
     @property
     def is_computed(self) -> bool:
-        """True if statistics have been computed"""
+        """True if statistics have been computed."""
         return self._computed
 
     @property
     def num_slices(self) -> int:
-        """number of slices"""
+        """Number of slices."""
         return self._num_slices
 
     @property
     def slice_label(self) -> str:
-        """label for slices (z, camera, roi, etc.)"""
+        """Label for slices (z, camera, roi, etc.)."""
         return self._slice_label
 
     @slice_label.setter
     def slice_label(self, value: str) -> None:
-        """set slice label"""
+        """Set slice label."""
         self._slice_label = str(value)
 
     @property
     def progress(self) -> float:
-        """computation progress (0.0 to 1.0)"""
+        """Computation progress (0.0 to 1.0)."""
         return self._progress
 
     @property
     def current_slice(self) -> int:
-        """current slice being computed"""
+        """Current slice being computed."""
         return self._current_slice
 
     def get_slice_stats(self, slice_idx: int) -> SliceStats | None:
         """
-        get statistics for a specific slice.
+        Get statistics for a specific slice.
 
         Parameters
         ----------
@@ -167,7 +165,7 @@ class StatsFeature(ArrayFeature):
 
     def get_mean_image(self, slice_idx: int) -> np.ndarray | None:
         """
-        get mean image for a specific slice.
+        Get mean image for a specific slice.
 
         Parameters
         ----------
@@ -187,7 +185,7 @@ class StatsFeature(ArrayFeature):
 
     def set_value(self, array, value: dict) -> None:
         """
-        set statistics from dict.
+        Set statistics from dict.
 
         Parameters
         ----------
@@ -232,7 +230,7 @@ class StatsFeature(ArrayFeature):
         slice_axis: int | None = None,
     ) -> None:
         """
-        compute statistics from array.
+        Compute statistics from array.
 
         Parameters
         ----------
@@ -272,7 +270,7 @@ class StatsFeature(ArrayFeature):
         subsample: int,
         compute_mean_images: bool,
     ) -> None:
-        """compute stats for 3D (TYX) array."""
+        """Compute stats for 3D (TYX) array."""
         n_frames = len(array)
         if n_frames <= sample_frames:
             indices = list(range(n_frames))
@@ -310,7 +308,7 @@ class StatsFeature(ArrayFeature):
         compute_mean_images: bool,
         slice_axis: int,
     ) -> None:
-        """compute stats for 4D array along given axis."""
+        """Compute stats for 4D array along given axis."""
         n_frames = array.shape[0]
         n_slices = array.shape[slice_axis]
 
@@ -383,7 +381,7 @@ class StatsFeature(ArrayFeature):
 
     def best_slice(self) -> int | None:
         """
-        find slice with highest SNR.
+        Find slice with highest SNR.
 
         Returns
         -------
@@ -396,7 +394,7 @@ class StatsFeature(ArrayFeature):
 
     def to_dict(self) -> dict:
         """
-        convert to serializable dict.
+        Convert to serializable dict.
 
         Returns
         -------
@@ -416,7 +414,7 @@ class StatsFeature(ArrayFeature):
         }
 
     def reset(self) -> None:
-        """reset to initial state."""
+        """Reset to initial state."""
         self._mean = None
         self._std = None
         self._snr = None

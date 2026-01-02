@@ -11,11 +11,12 @@ from enum import Enum
 import importlib.util
 import subprocess
 import sys
+import contextlib
 
 
 # quick import availability checks (no actual imports)
 def _check_import(module_name: str) -> bool:
-    """check if a module can be imported without actually importing it."""
+    """Check if a module can be imported without actually importing it."""
     return importlib.util.find_spec(module_name) is not None
 
 
@@ -54,6 +55,7 @@ HAS_NAPARI_ANIMATION: bool = _check_import("napari_animation")
 
 class Status(Enum):
     """installation status for a feature."""
+
     OK = "ok"           # installed and working
     WARN = "warn"       # installed but degraded (e.g., no GPU)
     ERROR = "error"     # installed but broken
@@ -63,6 +65,7 @@ class Status(Enum):
 @dataclass
 class FeatureStatus:
     """status of a single feature/package."""
+
     name: str
     status: Status
     version: str = ""
@@ -73,6 +76,7 @@ class FeatureStatus:
 @dataclass
 class CudaInfo:
     """cuda environment information."""
+
     nvcc_version: str | None = None      # cuda toolkit version (nvcc)
     driver_version: str | None = None    # nvidia driver cuda version (nvidia-smi)
     pytorch_cuda: str | None = None      # pytorch compiled cuda version
@@ -84,6 +88,7 @@ class CudaInfo:
 @dataclass
 class InstallStatus:
     """complete installation status."""
+
     mbo_version: str = ""
     python_version: str = ""
     cuda_info: CudaInfo = field(default_factory=CudaInfo)
@@ -91,16 +96,16 @@ class InstallStatus:
 
     @property
     def all_ok(self) -> bool:
-        """true if all installed features are working properly."""
+        """True if all installed features are working properly."""
         return all(f.status in (Status.OK, Status.MISSING) for f in self.features)
 
 
 def _get_nvcc_version() -> str | None:
-    """get cuda toolkit version from nvcc."""
+    """Get cuda toolkit version from nvcc."""
     try:
         result = subprocess.run(
             ["nvcc", "--version"],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=5
         )
@@ -116,11 +121,11 @@ def _get_nvcc_version() -> str | None:
 
 
 def _get_nvidia_smi_cuda() -> str | None:
-    """get driver-supported cuda version from nvidia-smi."""
+    """Get driver-supported cuda version from nvidia-smi."""
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=5
         )
@@ -128,7 +133,7 @@ def _get_nvidia_smi_cuda() -> str | None:
             # also get cuda version
             result2 = subprocess.run(
                 ["nvidia-smi"],
-                capture_output=True,
+                check=False, capture_output=True,
                 text=True,
                 timeout=5
             )
@@ -136,15 +141,14 @@ def _get_nvidia_smi_cuda() -> str | None:
                 # parse "CUDA Version: X.Y" from output
                 for line in result2.stdout.split("\n"):
                     if "CUDA Version" in line:
-                        parts = line.split("CUDA Version:")[-1].strip().split()[0]
-                        return parts
+                        return line.split("CUDA Version:")[-1].strip().split()[0]
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
     return None
 
 
 def _check_pytorch() -> tuple[FeatureStatus, str | None]:
-    """check pytorch installation and cuda support."""
+    """Check pytorch installation and cuda support."""
     pytorch_cuda = None
     try:
         import torch
@@ -161,16 +165,15 @@ def _check_pytorch() -> tuple[FeatureStatus, str | None]:
                 message=f"CUDA {pytorch_cuda}, {device_name}",
                 gpu_ok=True
             ), pytorch_cuda
-        else:
-            # pytorch installed but no cuda
-            pytorch_cuda = getattr(torch.version, "cuda", None)
-            return FeatureStatus(
-                name="PyTorch",
-                status=Status.WARN,
-                version=version,
-                message="CPU only (no CUDA)",
-                gpu_ok=False
-            ), pytorch_cuda
+        # pytorch installed but no cuda
+        pytorch_cuda = getattr(torch.version, "cuda", None)
+        return FeatureStatus(
+            name="PyTorch",
+            status=Status.WARN,
+            version=version,
+            message="CPU only (no CUDA)",
+            gpu_ok=False
+        ), pytorch_cuda
     except ImportError:
         return FeatureStatus(
             name="PyTorch",
@@ -180,7 +183,7 @@ def _check_pytorch() -> tuple[FeatureStatus, str | None]:
 
 
 def _check_cupy() -> tuple[FeatureStatus, str | None]:
-    """check cupy installation and cuda support."""
+    """Check cupy installation and cuda support."""
     cupy_cuda = None
     try:
         import cupy as cp
@@ -198,9 +201,9 @@ def _check_cupy() -> tuple[FeatureStatus, str | None]:
             # test nvrtc (required for suite3d)
             try:
                 kernel = cp.ElementwiseKernel(
-                    'float32 x', 'float32 y', 'y = x * 2', 'test_kernel'
+                    "float32 x", "float32 y", "y = x * 2", "test_kernel"
                 )
-                test_in = cp.array([1.0], dtype='float32')
+                test_in = cp.array([1.0], dtype="float32")
                 test_out = cp.empty_like(test_in)
                 kernel(test_in, test_out)
 
@@ -238,7 +241,7 @@ def _check_cupy() -> tuple[FeatureStatus, str | None]:
 
 
 def _check_suite2p() -> FeatureStatus:
-    """check suite2p installation."""
+    """Check suite2p installation."""
     try:
         import suite2p
         version = getattr(suite2p, "__version__", "installed")
@@ -257,7 +260,7 @@ def _check_suite2p() -> FeatureStatus:
 
 
 def _check_suite3d() -> FeatureStatus:
-    """check suite3d installation."""
+    """Check suite3d installation."""
     try:
         import suite3d
         version = getattr(suite3d, "__version__", "installed")
@@ -276,7 +279,7 @@ def _check_suite3d() -> FeatureStatus:
 
 
 def _check_rastermap() -> FeatureStatus:
-    """check rastermap installation."""
+    """Check rastermap installation."""
     try:
         import rastermap
         version = getattr(rastermap, "__version__", "installed")
@@ -295,7 +298,7 @@ def _check_rastermap() -> FeatureStatus:
 
 
 def _check_napari() -> FeatureStatus:
-    """check napari installation."""
+    """Check napari installation."""
     try:
         import napari
         version = getattr(napari, "__version__", "installed")
@@ -314,7 +317,7 @@ def _check_napari() -> FeatureStatus:
 
 
 def _check_napari_ome_zarr() -> FeatureStatus:
-    """check napari-ome-zarr plugin installation."""
+    """Check napari-ome-zarr plugin installation."""
     try:
         import napari_ome_zarr
         version = getattr(napari_ome_zarr, "__version__", "installed")
@@ -333,7 +336,7 @@ def _check_napari_ome_zarr() -> FeatureStatus:
 
 
 def _check_napari_animation() -> FeatureStatus:
-    """check napari-animation plugin installation."""
+    """Check napari-animation plugin installation."""
     try:
         import napari_animation
         version = getattr(napari_animation, "__version__", "installed")
@@ -352,17 +355,15 @@ def _check_napari_animation() -> FeatureStatus:
 
 
 def check_installation(callback: type[object] | None = None) -> InstallStatus:
-    """run full installation check and return structured status.
-    
+    """Run full installation check and return structured status.
+
     Args:
         callback: optional callable(progress: float, message: str) for status updates
     """
     def _update(p: float, msg: str):
         if callback:
-            try:
+            with contextlib.suppress(Exception):
                 callback(p, msg)
-            except Exception:
-                pass
 
     status = InstallStatus()
     _update(0.1, "Checking Python version...")
@@ -454,7 +455,7 @@ def check_installation(callback: type[object] | None = None) -> InstallStatus:
 
 
 def print_status_cli(status: InstallStatus):
-    """print installation status to CLI with colors."""
+    """Print installation status to CLI with colors."""
     import click
 
     click.echo(f"\nmbo_utilities v{status.mbo_version} | Python {status.python_version}")

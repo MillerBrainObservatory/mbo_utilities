@@ -402,7 +402,7 @@ def _write_plane(
         # Convert lazy/disk-backed arrays to contiguous numpy arrays
         # This is critical for performance - memmap slices pass isinstance(np.ndarray)
         # but are extremely slow when passed to writers (220x+ slower)
-        if hasattr(chunk, 'compute'):
+        if hasattr(chunk, "compute"):
             # Dask arrays - can hang during implicit compute in writers
             chunk = chunk.compute()
         elif isinstance(chunk, np.memmap):
@@ -462,28 +462,27 @@ def _get_file_writer(ext, overwrite):
             _write_tiff,
             overwrite=overwrite,
         )
-    elif ext in ["h5", "hdf5"]:
+    if ext in ["h5", "hdf5"]:
         return functools.partial(
             _write_h5,
             overwrite=overwrite,
         )
-    elif ext in ["zarr"]:
+    if ext in ["zarr"]:
         return functools.partial(
             _write_zarr,
             overwrite=overwrite,
         )
-    elif ext == "bin":
+    if ext == "bin":
         return functools.partial(
             _write_bin,
             overwrite=overwrite,
         )
-    elif ext == "npy":
+    if ext == "npy":
         return functools.partial(
             _write_npy,
             overwrite=overwrite,
         )
-    else:
-        raise ValueError(f"Unsupported file extension: {ext}")
+    raise ValueError(f"Unsupported file extension: {ext}")
 
 
 def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
@@ -514,9 +513,9 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
 
     if key not in _write_bin._writers:
         Ly, Lx = data.shape[-2], data.shape[-1]
-        nframes = metadata.get("nframes", None)
+        nframes = metadata.get("nframes")
         if nframes is None:
-            nframes = metadata.get("num_frames", None)
+            nframes = metadata.get("num_frames")
         if nframes is None:
             raise ValueError("Metadata must contain 'nframes' or 'num_frames'.")
 
@@ -630,7 +629,7 @@ def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
         _write_h5._offsets = {}
 
     if filename not in _write_h5._initialized:
-        nframes = metadata.get("num_frames", None)
+        nframes = metadata.get("num_frames")
         if nframes is None:
             raise ValueError("Metadata must contain 'nframes' or 'nun_frames'.")
         h, w = data.shape[-2:]
@@ -904,10 +903,7 @@ def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
 
     # extract temporal scale using canonical parameter access
     frame_rate = get_param(metadata, "fs")
-    if frame_rate:
-        time_scale = 1.0 / float(frame_rate)
-    else:
-        time_scale = 1.0
+    time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
 
     # Build axes definition
     # Order: time (if present) -> channel (if present) -> spatial (z, y, x)
@@ -993,8 +989,8 @@ def _write_zarr(
     level = kwargs.get("level", 1)
     # chunk configuration: shard_frames is outer (shard) size, chunk_shape is inner
     # chunk_shape can be tuple (t, y, x) or None for default (1, h, w)
-    shard_frames = kwargs.get("shard_frames", None)  # frames per shard
-    chunk_shape = kwargs.get("chunk_shape", None)  # inner chunk shape (t, y, x)
+    shard_frames = kwargs.get("shard_frames")  # frames per shard
+    chunk_shape = kwargs.get("chunk_shape")  # inner chunk shape (t, y, x)
 
     if metadata is None:
         metadata = {}
@@ -1060,10 +1056,7 @@ def _write_zarr(
         else:
             # non-sharded mode: each chunk is a file
             codecs = inner_codecs
-            if chunk_shape is not None:
-                chunks = chunk_shape
-            else:
-                chunks = (1, h, w)
+            chunks = chunk_shape if chunk_shape is not None else (1, h, w)
 
         if ome:
             # Create OME-Zarr using NGFF v0.5 with Zarr v3
@@ -1206,10 +1199,7 @@ def _try_generic_writers(
         arr = np.asarray(data)
 
         # Compute chunks: (1, ..., H, W) for time-series data
-        if arr.ndim >= 3:
-            chunks = (1,) * (arr.ndim - 2) + arr.shape[-2:]
-        else:
-            chunks = arr.shape
+        chunks = (1,) * (arr.ndim - 2) + arr.shape[-2:] if arr.ndim >= 3 else arr.shape
 
         # Create zarr array with compression
         z = zarr.create(
@@ -1381,18 +1371,18 @@ def to_video(
     output_path,
     fps: int = 30,
     speed_factor: float = 1.0,
-    plane: int = None,
-    vmin: float = None,
-    vmax: float = None,
+    plane: int | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
     vmin_percentile: float = 1.0,
     vmax_percentile: float = 99.5,
     temporal_smooth: int = 0,
     spatial_smooth: float = 0,
     gamma: float = 1.0,
-    cmap: str = None,
+    cmap: str | None = None,
     quality: int = 9,
     codec: str = "libx264",
-    max_frames: int = None,
+    max_frames: int | None = None,
 ):
     """
     Export array data to video file (mp4/avi).
@@ -1510,10 +1500,7 @@ def to_video(
         sample_indices = np.linspace(0, n_frames - 1, n_samples, dtype=int)
         samples = []
         for i in sample_indices:
-            if ndim == 4:
-                frame = np.asarray(arr[i, plane_idx])
-            else:
-                frame = np.asarray(arr[i])
+            frame = np.asarray(arr[i, plane_idx]) if ndim == 4 else np.asarray(arr[i])
             samples.append(frame)
         sample_stack = np.stack(samples)
 

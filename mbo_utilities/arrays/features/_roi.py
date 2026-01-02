@@ -20,7 +20,7 @@ from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 from mbo_utilities.metadata.base import RoiMode
 
 if TYPE_CHECKING:
-    from typing import Iterator, Sequence
+    from collections.abc import Iterator, Sequence
 
 
 class ROIFeature(ArrayFeature):
@@ -67,32 +67,32 @@ class ROIFeature(ArrayFeature):
 
     @property
     def value(self) -> int | None:
-        """current ROI index (1-based), None for stitched"""
+        """Current ROI index (1-based), None for stitched."""
         return self._current
 
     @property
     def current(self) -> int | None:
-        """current ROI index (1-based), None for stitched view"""
+        """Current ROI index (1-based), None for stitched view."""
         return self._current
 
     @property
     def num_rois(self) -> int:
-        """total number of ROIs"""
+        """Total number of ROIs."""
         return self._num_rois
 
     @property
     def mode(self) -> RoiMode:
-        """ROI handling mode"""
+        """ROI handling mode."""
         return self._mode
 
     @property
     def is_multi_roi(self) -> bool:
-        """True if there are multiple ROIs"""
+        """True if there are multiple ROIs."""
         return self._num_rois > 1
 
     @property
     def is_stitched(self) -> bool:
-        """True if viewing stitched (all ROIs concatenated)"""
+        """True if viewing stitched (all ROIs concatenated)."""
         return self._current is None
 
     def set_value(self, array, value: int | None) -> None:
@@ -106,11 +106,10 @@ class ROIFeature(ArrayFeature):
         value : int | None
             ROI index (1-based), None for stitched view
         """
-        if value is not None:
-            if value < 1 or value > self._num_rois:
-                raise ValueError(
-                    f"ROI index {value} out of range [1, {self._num_rois}]"
-                )
+        if value is not None and (value < 1 or value > self._num_rois):
+            raise ValueError(
+                f"ROI index {value} out of range [1, {self._num_rois}]"
+            )
 
         old_value = self._current
         self._current = value

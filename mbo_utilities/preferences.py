@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from mbo_utilities import log
+import contextlib
 
 logger = log.get("preferences")
 
@@ -330,10 +331,8 @@ def set_last_save_dir(path: str | Path) -> None:
         _save_preferences(prefs)
         # Also update legacy location for backwards compatibility
         legacy_path = _get_settings_dir() / "last_savedir.json"
-        try:
+        with contextlib.suppress(OSError):
             legacy_path.write_text(json.dumps({"last_savedir": str(path)}))
-        except OSError:
-            pass
 
 
 def get_default_open_dir() -> Path:

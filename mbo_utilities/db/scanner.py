@@ -11,10 +11,11 @@ import re
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Iterator
+from collections.abc import Iterator
 
 from mbo_utilities import log
 from mbo_utilities.db.models import Dataset, DatasetStatus
+import contextlib
 
 logger = log.get("db.scanner")
 
@@ -25,7 +26,7 @@ SCANIMAGE_SUFFIX_PATTERN = re.compile(r"(_\d{5})+$")
 
 
 def _match_pattern(path: Path, pattern: str) -> bool:
-    """check if path matches a glob pattern."""
+    """Check if path matches a glob pattern."""
     # convert path to posix for consistent matching
     path_str = path.as_posix()
 
@@ -43,17 +44,15 @@ def _match_pattern(path: Path, pattern: str) -> bool:
 
 
 def _get_directory_size(path: Path) -> int:
-    """get total size of directory contents."""
+    """Get total size of directory contents."""
     total = 0
     try:
         if path.is_file():
             return path.stat().st_size
         for entry in path.rglob("*"):
             if entry.is_file():
-                try:
+                with contextlib.suppress(OSError, PermissionError):
                     total += entry.stat().st_size
-                except (OSError, PermissionError):
-                    pass
     except (OSError, PermissionError):
         pass
     return total
@@ -61,10 +60,12 @@ def _get_directory_size(path: Path) -> int:
 
 def _get_scanimage_base_name(path: Path) -> str | None:
     """
-    extract base name from scanimage tiff, stripping _00001 suffix.
+    Extract base name from scanimage tiff, stripping _00001 suffix.
 
     returns None if not a scanimage-style filename.
-    examples:
+
+    Examples
+    --------
         pollen_00001.tif -> pollen
         scan_00001_00001.tif -> scan_00001 (first is acquisition, second is timepoint)
         plane01.tif -> None (not scanimage style)
@@ -78,7 +79,7 @@ def _get_scanimage_base_name(path: Path) -> str | None:
 
 def _group_scanimage_files(tiff_files: list[Path]) -> dict[str, list[Path]]:
     """
-    group scanimage tiff files by their base acquisition name.
+    Group scanimage tiff files by their base acquisition name.
 
     returns dict mapping base_name -> list of files.
     non-scanimage tiffs are grouped by their full stem.
@@ -97,19 +98,17 @@ def _group_scanimage_files(tiff_files: list[Path]) -> dict[str, list[Path]]:
 
 
 def _get_files_size(files: list[Path]) -> int:
-    """get total size of a list of files."""
+    """Get total size of a list of files."""
     total = 0
     for f in files:
-        try:
+        with contextlib.suppress(OSError, PermissionError):
             total += f.stat().st_size
-        except (OSError, PermissionError):
-            pass
     return total
 
 
 def _is_inside_discovered(path: Path, discovered: set) -> bool:
-    """check if path is inside any discovered directory."""
-    path_str = str(path)
+    """Check if path is inside any discovered directory."""
+    str(path)
     parent_str = str(path.parent)
     for d in discovered:
         # skip non-directory entries (like "dir:basename" keys)
@@ -130,7 +129,7 @@ SUITE2P_OUTPUT_FILES = {
 
 
 def _extract_metadata(path: Path, pipeline_name: str) -> dict:
-    """extract metadata from a dataset path."""
+    """Extract metadata from a dataset path."""
     metadata = {
         "num_frames": None,
         "num_zplanes": None,
@@ -146,7 +145,7 @@ def _extract_metadata(path: Path, pipeline_name: str) -> dict:
 
     try:
         # try to load with imread to get metadata
-        from mbo_utilities import imread, get_metadata, get_voxel_size
+        from mbo_utilities import imread, get_voxel_size
 
         # for suite2p, load ops.npy directly for fast metadata
         if pipeline_name == "suite2p":
@@ -208,7 +207,7 @@ def scan_for_datasets(
     progress_callback=None,
 ) -> Iterator[Dataset]:
     """
-    scan a directory for datasets using pipeline registry patterns.
+    Scan a directory for datasets using pipeline registry patterns.
 
     yields Dataset objects for each discovered dataset.
     groups scanimage raw tiffs (filename_00001.tif, etc.) into single acquisitions.
@@ -245,12 +244,9 @@ def scan_for_datasets(
 
     logger.info(f"scanning {root} for datasets...")
 
-    if recursive:
-        all_files = list(root.rglob("*"))
-    else:
-        all_files = list(root.iterdir())
+    all_files = list(root.rglob("*")) if recursive else list(root.iterdir())
 
-    total_files = len(all_files)
+    len(all_files)
 
     # separate files and directories
     files = []
@@ -279,10 +275,9 @@ def scan_for_datasets(
 
     # pass 2: find zarr directories
     for path in dirs:
-        if path.suffix == ".zarr":
-            if str(path) not in discovered:
-                discovered.add(str(path))
-                yield _create_dataset(path, "zarr", pipelines)
+        if path.suffix == ".zarr" and str(path) not in discovered:
+            discovered.add(str(path))
+            yield _create_dataset(path, "zarr", pipelines)
 
     # pass 3: collect tiff files by directory and group scanimage sequences
     tiff_files = [f for f in files if f.suffix.lower() in (".tif", ".tiff")]
@@ -311,7 +306,7 @@ def scan_for_datasets(
             for (parent_dir, base_name), group_files in groups.items():
                 group_files = sorted(group_files)
                 # use the directory as the dataset path, with base_name in the name
-                dataset_path = Path(parent_dir)
+                Path(parent_dir)
                 dataset_key = f"{parent_dir}:{base_name}"
                 if dataset_key not in discovered:
                     discovered.add(dataset_key)
@@ -320,7 +315,7 @@ def scan_for_datasets(
                     )
         else:
             # non-raw tiffs: check for plane structure or treat as generic tiff
-            plane_tiffs = [f for f in dir_tiffs if re.search(r"plane\d+", f.stem, re.I)]
+            plane_tiffs = [f for f in dir_tiffs if re.search(r"plane\d+", f.stem, re.IGNORECASE)]
             if plane_tiffs:
                 # this is a tiff volume directory
                 if dir_path not in discovered:
@@ -388,7 +383,7 @@ def _create_dataset_from_files(
     pipeline_name: str,
     pipelines: dict,
 ) -> Dataset:
-    """create a Dataset object from a group of files (e.g. scanimage sequence)."""
+    """Create a Dataset object from a group of files (e.g. scanimage sequence)."""
     info = pipelines.get(pipeline_name)
 
     # use parent directory as path, files for size calculation
@@ -431,7 +426,7 @@ def _create_dataset_from_files(
 
 
 def _create_dataset(path: Path, pipeline_name: str, pipelines: dict) -> Dataset:
-    """create a Dataset object from a path."""
+    """Create a Dataset object from a path."""
     info = pipelines.get(pipeline_name)
 
     # get file stats

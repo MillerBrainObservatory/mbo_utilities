@@ -11,9 +11,7 @@ from __future__ import annotations
 
 import re
 import warnings
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
@@ -24,6 +22,10 @@ from mbo_utilities.arrays.features import DimLabels
 from mbo_utilities.metadata import get_param
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import load_npy
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # register suite2p pipeline info
 _SUITE2P_INFO = PipelineInfo(
@@ -134,12 +136,12 @@ class _SinglePlaneReader:
                 f"Expected: {expected_bytes:,} bytes for shape {self.shape}\n"
                 f"Actual: {actual_bytes:,} bytes"
             )
-        elif actual_bytes > expected_bytes:
+        if actual_bytes > expected_bytes:
             warnings.warn(
                 f"Binary file {self.active_file.name} is larger than expected.\n"
                 f"Expected: {expected_bytes:,} bytes\n"
                 f"Actual: {actual_bytes:,} bytes\nExtra data will be ignored.",
-                UserWarning,
+                UserWarning, stacklevel=2,
             )
 
         self._file = np.memmap(
@@ -330,8 +332,7 @@ class Suite2pArray(ReductionMixin):
     def shape(self) -> tuple:
         if self._is_volumetric:
             return (self._nframes, self._nz, self._ly, self._lx)
-        else:
-            return (self._nframes, self._ly, self._lx)
+        return (self._nframes, self._ly, self._lx)
 
     @property
     def ndim(self) -> int:
@@ -340,7 +341,7 @@ class Suite2pArray(ReductionMixin):
     @property
     def dtype(self):
         from mbo_utilities.util import get_dtype
-        return self._target_dtype if hasattr(self, '_target_dtype') and self._target_dtype else get_dtype(self._dtype)
+        return self._target_dtype if hasattr(self, "_target_dtype") and self._target_dtype else get_dtype(self._dtype)
 
     @property
     def metadata(self) -> dict:
@@ -364,7 +365,7 @@ class Suite2pArray(ReductionMixin):
 
     def _compute_frame_vminmax(self):
         """Compute vmin/vmax from first frame."""
-        if not hasattr(self, '_cached_vmin'):
+        if not hasattr(self, "_cached_vmin"):
             if self._is_volumetric:
                 frame = np.asarray(self[0, 0])
             else:
@@ -390,13 +391,12 @@ class Suite2pArray(ReductionMixin):
     def __getitem__(self, key):
         if self._is_volumetric:
             return self._getitem_volume(key)
-        else:
-            return self._getitem_single(key)
+        return self._getitem_single(key)
 
     def _getitem_single(self, key):
         """Index single-plane array."""
         out = self._planes[0][key]
-        if hasattr(self, '_target_dtype') and self._target_dtype is not None:
+        if hasattr(self, "_target_dtype") and self._target_dtype is not None:
             out = out.astype(self._target_dtype)
         return out
 
@@ -435,7 +435,7 @@ class Suite2pArray(ReductionMixin):
             arrs = [self._planes[i][t_key, y_key, x_key] for i in z_indices]
             out = np.stack(arrs, axis=1)
 
-        if hasattr(self, '_target_dtype') and self._target_dtype is not None:
+        if hasattr(self, "_target_dtype") and self._target_dtype is not None:
             out = out.astype(self._target_dtype)
         return out
 
@@ -444,9 +444,8 @@ class Suite2pArray(ReductionMixin):
         if self._is_volumetric:
             arrs = [p._file[:self._nframes] for p in self._planes]
             return np.stack(arrs, axis=1)
-        else:
-            n = min(10, self._nframes)
-            return np.stack([self._planes[0][i] for i in range(n)], axis=0)
+        n = min(10, self._nframes)
+        return np.stack([self._planes[0][i] for i in range(n)], axis=0)
 
     def switch_channel(self, use_raw: bool = False):
         """Switch all planes between raw and registered data."""
@@ -532,7 +531,7 @@ class Suite2pArray(ReductionMixin):
 
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
         histogram_widget = kwargs.get("histogram_widget", True)
-        window_funcs = kwargs.get("window_funcs", None)
+        window_funcs = kwargs.get("window_funcs")
 
         import fastplotlib as fpl
 
@@ -600,7 +599,7 @@ def _add_suite2p_labels(
 
         plane_mask = np.zeros((Y, X), dtype=np.uint32)
 
-        for roi_idx, (roi_stat, is_cell) in enumerate(zip(stat, iscell)):
+        for _roi_idx, (roi_stat, is_cell) in enumerate(zip(stat, iscell, strict=False)):
             if not is_cell:
                 continue
 
@@ -643,10 +642,9 @@ def load_ops(ops_input: str | Path | list[str | Path]):
     """Simple utility to load a suite2p npy file."""
     if isinstance(ops_input, (str, Path)):
         return load_npy(ops_input).item()
-    elif isinstance(ops_input, dict):
+    if isinstance(ops_input, dict):
         return ops_input
     logger.warning("No valid ops file provided, returning empty dict.")
     return {}
 
 
-from mbo_utilities._writers import write_ops

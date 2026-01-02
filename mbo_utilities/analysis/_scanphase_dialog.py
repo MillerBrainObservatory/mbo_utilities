@@ -5,9 +5,7 @@ This dialog provides file selection with context about the scan-phase
 analysis tool and how to interpret its outputs.
 """
 
-from pathlib import Path
 
-import mbo_utilities as mbo
 from imgui_bundle import (
     hello_imgui,
     imgui,
@@ -17,7 +15,6 @@ from imgui_bundle import (
 from mbo_utilities.gui._widgets import set_tooltip
 from mbo_utilities.preferences import (
     get_default_open_dir,
-    get_last_dir,
     set_last_dir,
     add_recent_file,
 )
@@ -84,7 +81,7 @@ class ScanPhaseFileDialog:
         imgui.push_style_var(imgui.StyleVar_.frame_rounding, 6.0)
 
         win_w = imgui.get_window_width()
-        win_h = imgui.get_window_height()
+        imgui.get_window_height()
 
         with imgui_ctx.begin_child("##main", size=imgui.ImVec2(0, 0)):
             imgui.push_id("scanphase_dialog")
@@ -281,7 +278,6 @@ def select_scanphase_file() -> str | None:
     str or None
         Selected file path, or None if cancelled.
     """
-    from mbo_utilities.gui import _setup  # triggers setup on import
     from mbo_utilities.gui._setup import get_default_ini_path
     from imgui_bundle import immapp, hello_imgui
 

@@ -49,7 +49,7 @@ class RoiMode(str, Enum):
     # concat_y_reg = "concat_y_reg"      # register at seams
 
     @classmethod
-    def from_string(cls, value: str) -> "RoiMode":
+    def from_string(cls, value: str) -> RoiMode:
         """
         Case-insensitive lookup of RoiMode from string.
 
@@ -462,7 +462,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
 
 
 def _build_alias_map() -> dict[str, str]:
-    """build reverse lookup: alias (lowercase) -> canonical name."""
+    """Build reverse lookup: alias (lowercase) -> canonical name."""
     alias_map = {}
     for param in METADATA_PARAMS.values():
         alias_map[param.canonical.lower()] = param.canonical
