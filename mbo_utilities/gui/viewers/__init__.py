@@ -6,6 +6,17 @@ A Viewer is a complete GUI window that:
 - Contains Panels (reusable UI sections)
 - Contains Features (capability-based controls)
 - Uses Widgets (generic UI building blocks)
+
+Integration with Legacy Code
+----------------------------
+The new viewer classes integrate with the existing PreviewDataWidget through
+a delegation pattern. The PreviewDataWidget creates a viewer instance and
+delegates rendering to it. This allows gradual migration of functionality.
+
+To use new viewers from PreviewDataWidget:
+1. PreviewDataWidget.update() calls viewer.draw() instead of draw_tabs()
+2. Viewer.draw() delegates to existing main_widget.draw() for now
+3. Gradually migrate logic from main_widgets into viewers
 """
 
 from __future__ import annotations
@@ -21,12 +32,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BaseViewer",
-    "get_viewer_class",
-    "TimeSeriesViewer",
     "PollenCalibrationViewer",
-    "DiagnosticsViewer",
-    "GridSearchViewer",
-    "Suite2pResultsViewer",
+    "TimeSeriesViewer",
+    "get_viewer_class",
 ]
 
 
@@ -48,6 +56,8 @@ class BaseViewer(ABC):
         The fastplotlib ImageWidget for display.
     fpath : str | list[str]
         Path(s) to the loaded data file(s).
+    parent : PreviewDataWidget | None
+        Optional parent widget for legacy integration.
 
     Notes
     -----
@@ -59,8 +69,9 @@ class BaseViewer(ABC):
 
     def __init__(
         self,
-        image_widget: "ImageWidget",
+        image_widget: ImageWidget,
         fpath: str | list[str],
+        parent=None,
         **kwargs,
     ):
         """
@@ -72,14 +83,21 @@ class BaseViewer(ABC):
             The fastplotlib ImageWidget for display.
         fpath : str | list[str]
             Path(s) to the loaded data file(s).
+        parent : PreviewDataWidget, optional
+            Parent widget for legacy integration. When set, the viewer
+            can delegate to existing main_widget implementations.
         **kwargs
             Additional keyword arguments for subclasses.
         """
         self.image_widget = image_widget
         self.fpath = fpath
+        self.parent = parent
         self._panels: dict = {}
         self._features: list = []
         self._kwargs = kwargs
+
+        # Legacy main_widget for delegation during migration
+        self._main_widget = None
 
     @property
     def data(self):
@@ -87,6 +105,15 @@ class BaseViewer(ABC):
         if self.image_widget is None:
             return None
         return self.image_widget.data
+
+    @property
+    def logger(self):
+        """Access the logger (from parent if available)."""
+        if self.parent is not None and hasattr(self.parent, "logger"):
+            return self.parent.logger
+        # Fallback to module logger
+        import logging
+        return logging.getLogger("mbo_utilities.gui")
 
     def _get_data_arrays(self) -> list:
         """Get the loaded data arrays as a list."""
@@ -106,7 +133,6 @@ class BaseViewer(ABC):
         Override to add viewer-specific menus. Base implementation provides
         common File/View/Help menus.
         """
-        pass
 
     def on_data_loaded(self) -> None:
         """
@@ -114,7 +140,9 @@ class BaseViewer(ABC):
 
         Override to perform viewer-specific initialization after data loads.
         """
-        pass
+        # If using legacy main_widget, delegate
+        if self._main_widget is not None:
+            self._main_widget.on_data_loaded()
 
     def cleanup(self) -> None:
         """
@@ -122,6 +150,10 @@ class BaseViewer(ABC):
 
         Override to release threads, close windows, etc.
         """
+        # Clean up legacy main_widget
+        if self._main_widget is not None:
+            self._main_widget.cleanup()
+
         for feature in self._features:
             if hasattr(feature, "cleanup"):
                 feature.cleanup()
@@ -143,11 +175,21 @@ def get_viewer_class(data_array) -> type[BaseViewer]:
     -------
     type[BaseViewer]
         The viewer class to use.
+
+    Notes
+    -----
+    Detection logic must match main_widgets.get_main_widget_class() to ensure
+    consistency during migration.
     """
     # Import here to avoid circular imports
     from .time_series import TimeSeriesViewer
 
-    # Check for pollen calibration data
+    # Check for pollen calibration data (matches main_widgets detection)
+    if hasattr(data_array, "stack_type") and data_array.stack_type == "pollen":
+        from .pollen_calibration import PollenCalibrationViewer
+        return PollenCalibrationViewer
+
+    # Fallback: also check metadata for experiment_type
     if hasattr(data_array, "metadata"):
         meta = data_array.metadata
         if hasattr(meta, "get"):
@@ -168,13 +210,4 @@ def __getattr__(name: str):
     if name == "PollenCalibrationViewer":
         from .pollen_calibration import PollenCalibrationViewer
         return PollenCalibrationViewer
-    if name == "DiagnosticsViewer":
-        from .diagnostics import DiagnosticsViewer
-        return DiagnosticsViewer
-    if name == "GridSearchViewer":
-        from .grid_search import GridSearchViewer
-        return GridSearchViewer
-    if name == "Suite2pResultsViewer":
-        from .suite2p_results import Suite2pResultsViewer
-        return Suite2pResultsViewer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

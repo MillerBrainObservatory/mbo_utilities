@@ -15,7 +15,7 @@ _initialized = False
 
 
 def _copy_assets():
-    """copy package assets to user config directory."""
+    """Copy package assets to user config directory."""
     import imgui_bundle
     from mbo_utilities.file_io import get_package_assets_path
     import mbo_utilities as mbo
@@ -65,7 +65,7 @@ def _copy_assets():
 
 
 def _configure_imgui(user_assets: Path):
-    """configure hello_imgui assets folder."""
+    """Configure hello_imgui assets folder."""
     from imgui_bundle import hello_imgui
 
     # set hello_imgui assets folder
@@ -73,7 +73,7 @@ def _configure_imgui(user_assets: Path):
 
 
 def get_default_ini_path(name: str = "imgui_settings") -> str:
-    """get path for imgui ini file in the mbo settings directory.
+    """Get path for imgui ini file in the mbo settings directory.
 
     use this with RunnerParams.ini_filename before calling immapp.run().
 
@@ -95,7 +95,7 @@ def get_default_ini_path(name: str = "imgui_settings") -> str:
 
 
 def _configure_qt_backend():
-    """set up qt backend for rendercanvas if pyqt6 is available.
+    """Set up qt backend for rendercanvas if pyqt6 is available.
 
     must happen before importing fastplotlib to avoid glfw selection.
     """
@@ -112,7 +112,7 @@ def _configure_qt_backend():
 
 
 def _configure_wgpu_backend():
-    """configure wgpu instance to skip opengl backend and avoid egl warnings."""
+    """Configure wgpu instance to skip opengl backend and avoid egl warnings."""
     if sys.platform == "emscripten":
         return
 
@@ -126,10 +126,14 @@ def _configure_wgpu_backend():
             set_instance_extras(backends=["Vulkan"])
     except ImportError:
         pass
+    except RuntimeError:
+        # Instance already exists - wgpu was initialized before setup_imgui was called
+        # This is fine, just skip the backend configuration
+        pass
 
 
 def setup_imgui():
-    """initialize all graphics configuration.
+    """Initialize all graphics configuration.
 
     safe to call multiple times - only runs once.
     configures:

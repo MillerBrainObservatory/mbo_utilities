@@ -20,9 +20,9 @@ from imgui_bundle import imgui
 from . import BasePanel
 
 if TYPE_CHECKING:
-    from ..viewers import BaseViewer
+    from mbo_utilities.gui.viewers import BaseViewer
 
-__all__ = ["ProcessPanel", "ProcessInfo", "get_process_manager", "ProcessManager"]
+__all__ = ["ProcessInfo", "ProcessManager", "ProcessPanel", "get_process_manager"]
 
 
 @dataclass
@@ -50,10 +50,9 @@ class ProcessInfo:
         elapsed = self.elapsed_seconds()
         if elapsed < 60:
             return f"{int(elapsed)} seconds ago"
-        elif elapsed < 3600:
+        if elapsed < 3600:
             return f"{int(elapsed / 60)} minutes ago"
-        else:
-            return f"{elapsed / 3600:.1f} hours ago"
+        return f"{elapsed / 3600:.1f} hours ago"
 
     def update_from_sidecar(self, verbose: bool = False) -> None:
         """Read progress_{uuid}.json (preferred) or progress_{pid}.json."""
@@ -75,14 +74,12 @@ class ProcessInfo:
 
         if sidecar and sidecar.exists():
             try:
-                with open(sidecar, "r") as f:
+                with open(sidecar) as f:
                     data = json.load(f)
 
                     # Validate: either UUID matches or PID matches
                     valid = False
-                    if uuid and data.get("uuid") == uuid:
-                        valid = True
-                    elif data.get("pid") == self.pid:
+                    if (uuid and data.get("uuid") == uuid) or data.get("pid") == self.pid:
                         valid = True
 
                     if valid:
@@ -104,14 +101,12 @@ class ProcessInfo:
                 if handle:
                     k32.CloseHandle(handle)
                     return True
-                else:
-                    err = ctypes.get_last_error()
-                    if err == 5:  # ERROR_ACCESS_DENIED
-                        return True
-                    return False
-            else:
-                os.kill(self.pid, 0)
-                return True
+                err = ctypes.get_last_error()
+                if err == 5:  # ERROR_ACCESS_DENIED
+                    return True
+                return False
+            os.kill(self.pid, 0)
+            return True
         except (OSError, ProcessLookupError):
             return False
 
@@ -134,7 +129,7 @@ class ProcessInfo:
         if not p.is_file():
             return []
         try:
-            with open(p, "r", encoding="utf-8", errors="replace") as f:
+            with open(p, encoding="utf-8", errors="replace") as f:
                 return f.readlines()[-n:]
         except Exception:
             return []
@@ -161,7 +156,7 @@ class ProcessManager:
             return
 
         try:
-            with open(self.PROCESS_FILE, "r") as f:
+            with open(self.PROCESS_FILE) as f:
                 data = json.load(f)
 
             for entry in data.get("processes", []):
@@ -267,9 +262,7 @@ class ProcessManager:
         active = []
         for p in self._processes.values():
             p.update_from_sidecar()
-            if p.is_alive():
-                active.append(p)
-            elif p.status == "error":
+            if p.is_alive() or p.status == "error":
                 active.append(p)
         return active
 
@@ -346,7 +339,7 @@ class ProcessPanel(BasePanel):
 
     name = "Processes"
 
-    def __init__(self, viewer: "BaseViewer"):
+    def __init__(self, viewer: BaseViewer):
         super().__init__(viewer)
         self._pm = get_process_manager()
 
@@ -420,11 +413,10 @@ class ProcessPanel(BasePanel):
                 imgui.tree_pop()
 
         # Dismiss button for completed/failed
-        if not proc.is_alive():
-            if imgui.small_button(f"Dismiss##{proc.pid}"):
-                if proc.pid in self._pm._processes:
-                    del self._pm._processes[proc.pid]
-                    self._pm._save()
+        if not proc.is_alive() and imgui.small_button(f"Dismiss##{proc.pid}"):
+            if proc.pid in self._pm._processes:
+                del self._pm._processes[proc.pid]
+                self._pm._save()
 
         imgui.unindent()
         imgui.pop_id()

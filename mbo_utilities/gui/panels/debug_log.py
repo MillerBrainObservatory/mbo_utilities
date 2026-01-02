@@ -7,18 +7,20 @@ level control, and message management.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import time
 from typing import TYPE_CHECKING
 
-from imgui_bundle import imgui
+from imgui_bundle import imgui, imgui_ctx
 
 from . import BasePanel
+from mbo_utilities.gui._imgui_helpers import fmt_value
 
 if TYPE_CHECKING:
-    from ..viewers import BaseViewer
+    from mbo_utilities.gui.viewers import BaseViewer
 
-__all__ = ["DebugPanel", "GuiLogHandler"]
+__all__ = ["DebugPanel", "GuiLogHandler", "draw_scope"]
 
 LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 LEVEL_VAL = {n: getattr(logging, n) for n in LEVELS}
@@ -34,7 +36,7 @@ LEVEL_COLORS = {
 class _GuiNameFilter(logging.Filter):
     """Filter log records by logger name based on panel toggle state."""
 
-    def __init__(self, panel: "DebugPanel"):
+    def __init__(self, panel: DebugPanel):
         super().__init__()
         self.panel = panel
 
@@ -45,7 +47,7 @@ class _GuiNameFilter(logging.Filter):
 class GuiLogHandler(logging.Handler):
     """Handler that routes log records to the debug panel."""
 
-    def __init__(self, panel: "DebugPanel"):
+    def __init__(self, panel: DebugPanel):
         super().__init__()
         self.panel = panel
         self.addFilter(_GuiNameFilter(panel))
@@ -75,7 +77,7 @@ class DebugPanel(BasePanel):
     name = "Debug Log"
     MAX_MESSAGES = 1000
 
-    def __init__(self, viewer: "BaseViewer"):
+    def __init__(self, viewer: BaseViewer):
         super().__init__(viewer)
 
         # Import log utilities
@@ -100,8 +102,8 @@ class DebugPanel(BasePanel):
         }
 
         # Logger toggles
-        self.active_loggers = {name: True for name in initial_loggers}
-        self.levels = {name: "INFO" for name in self.active_loggers}
+        self.active_loggers = dict.fromkeys(initial_loggers, True)
+        self.levels = dict.fromkeys(self.active_loggers, "INFO")
         self.master_level = "INFO"
 
         # UI state
@@ -304,3 +306,29 @@ class DebugPanel(BasePanel):
             self._draw_messages()
 
         imgui.end()
+
+
+# Scope colors
+_NAME_COLOR = imgui.ImVec4(0.95, 0.80, 0.30, 1.0)
+_VALUE_COLOR = imgui.ImVec4(0.85, 0.85, 0.85, 1.0)
+
+
+def draw_scope():
+    """Draw a scope inspector showing local variables from the calling frame."""
+    with imgui_ctx.begin_child("Scope Inspector"):
+        frame = inspect.currentframe().f_back
+        vars_all = {**frame.f_locals}
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4))
+        try:
+            for name, val in sorted(vars_all.items()):
+                if (
+                    inspect.ismodule(val)
+                    or (name.startswith("_") or name.endswith("_"))
+                    or callable(val)
+                ):
+                    continue
+                imgui.text_colored(_NAME_COLOR, name)
+                imgui.same_line(spacing=16)
+                imgui.text_colored(_VALUE_COLOR, fmt_value(val))
+        finally:
+            imgui.pop_style_var()

@@ -38,7 +38,7 @@ def _discover_widgets() -> None:
 
     for module_info in pkgutil.iter_modules([str(package_dir)]):
         # skip private modules
-        if module_info.name.startswith('_'):
+        if module_info.name.startswith("_"):
             continue
 
         try:
@@ -53,9 +53,9 @@ def _discover_widgets() -> None:
                     and attr is not Widget
                 ):
                     _WIDGET_CLASSES.append(attr)
-        except Exception as e:
+        except Exception:
             # log but don't crash on import errors
-            print(f"warning: failed to import widget module {module_info.name}: {e}")
+            pass
 
     # sort by priority
     _WIDGET_CLASSES.sort(key=lambda w: w.priority)
@@ -63,7 +63,7 @@ def _discover_widgets() -> None:
 
 def get_supported_widgets(parent: "PreviewDataWidget") -> list[Widget]:
     """
-    get all widgets that are supported for the given parent.
+    Get all widgets that are supported for the given parent.
 
     returns instantiated widgets sorted by priority.
     """
@@ -74,10 +74,9 @@ def get_supported_widgets(parent: "PreviewDataWidget") -> list[Widget]:
         try:
             if widget_cls.is_supported(parent):
                 supported.append(widget_cls(parent))
-        except Exception as e:
+        except Exception:
             # Log the error for debugging
             import traceback
-            print(f"Warning: Widget {widget_cls.__name__} support check failed: {e}")
             traceback.print_exc()
 
     # sort by priority (lower = first)
@@ -86,7 +85,7 @@ def get_supported_widgets(parent: "PreviewDataWidget") -> list[Widget]:
 
 
 def draw_all_widgets(parent: "PreviewDataWidget", widgets: list[Widget]) -> None:
-    """draw all supported widgets."""
+    """Draw all supported widgets."""
     for widget in widgets:
         try:
             widget.draw()
@@ -94,8 +93,8 @@ def draw_all_widgets(parent: "PreviewDataWidget", widgets: list[Widget]) -> None
             # log error but don't crash the ui
             import traceback
             error_msg = f"Error in {widget.name}: {e}"
-            parent.logger.error(error_msg)
-            parent.logger.error(traceback.format_exc())
+            parent.logger.exception(error_msg)
+            parent.logger.exception(traceback.format_exc())
             imgui.text_colored(
                 imgui.ImVec4(1.0, 0.3, 0.3, 1.0),
                 error_msg
@@ -103,21 +102,21 @@ def draw_all_widgets(parent: "PreviewDataWidget", widgets: list[Widget]) -> None
 
 
 def cleanup_all_widgets(widgets: list[Widget]) -> None:
-    """clean up all widgets when the gui is closing.
+    """Clean up all widgets when the gui is closing.
 
     calls cleanup() on each widget to release resources.
     """
     for widget in widgets:
         try:
             widget.cleanup()
-        except Exception as e:
+        except Exception:
             # log but don't crash during cleanup
-            print(f"Warning: cleanup failed for {widget.name}: {e}")
+            pass
 
 
 __all__ = [
     "Widget",
-    "get_supported_widgets",
-    "draw_all_widgets",
     "cleanup_all_widgets",
+    "draw_all_widgets",
+    "get_supported_widgets",
 ]

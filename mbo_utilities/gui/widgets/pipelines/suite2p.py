@@ -5,7 +5,7 @@ combines processing configuration with a button to view trace quality statistics
 in a separate popup window.
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from pathlib import Path
 import time
 
@@ -25,7 +25,7 @@ _HAS_LSP: bool | None = None
 
 
 def _check_lsp_available() -> bool:
-    """check if lbm_suite2p_python is available (lazy, cached)."""
+    """Check if lbm_suite2p_python is available (lazy, cached)."""
     global _HAS_LSP
     if _HAS_LSP is None:
         try:
@@ -37,10 +37,10 @@ def _check_lsp_available() -> bool:
 
 
 def _patch_pyqt6_slider():
-    """apply PyQt6 compatibility fix for suite2p GUI (call before opening GUI)."""
+    """Apply PyQt6 compatibility fix for suite2p GUI (call before opening GUI)."""
     try:
         from PyQt6.QtWidgets import QSlider
-        if not hasattr(QSlider, 'NoTicks'):
+        if not hasattr(QSlider, "NoTicks"):
             QSlider.NoTicks = QSlider.TickPosition.NoTicks
     except ImportError:
         pass
@@ -54,7 +54,7 @@ class Suite2pPipelineWidget(PipelineWidget):
 
     @property
     def is_available(self) -> bool:
-        """check availability lazily to avoid slow imports at module load."""
+        """Check availability lazily to avoid slow imports at module load."""
         return HAS_SUITE2P and _check_lsp_available()
 
     def __init__(self, parent: "PreviewDataWidget"):
@@ -100,21 +100,21 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._gui_choice = 0
 
     def _get_diagnostics_widget(self):
-        """get diagnostics widget (lazy init)."""
+        """Get diagnostics widget (lazy init)."""
         if self._diagnostics_widget is None:
-            from mbo_utilities.gui.diagnostics_widget import DiagnosticsWidget
+            from mbo_utilities.gui.widgets.diagnostics import DiagnosticsWidget
             self._diagnostics_widget = DiagnosticsWidget()
         return self._diagnostics_widget
 
     def _get_grid_search_widget(self):
-        """get grid search widget (lazy init)."""
+        """Get grid search widget (lazy init)."""
         if self._grid_search_widget is None:
-            from mbo_utilities.gui.grid_search_viewer import GridSearchViewer
+            from mbo_utilities.gui.widgets.grid_search import GridSearchViewer
             self._grid_search_widget = GridSearchViewer()
         return self._grid_search_widget
 
     def _check_suite2p_gui(self) -> bool:
-        """check if suite2p GUI is available (requires rastermap)."""
+        """Check if suite2p GUI is available (requires rastermap)."""
         # always re-check using find_spec (fast, no actual import)
         import importlib.util
         # suite2p GUI requires rastermap
@@ -124,13 +124,13 @@ class Suite2pPipelineWidget(PipelineWidget):
         )
 
     def _check_cellpose_gui(self) -> bool:
-        """check if cellpose GUI is available."""
+        """Check if cellpose GUI is available."""
         # always re-check using find_spec (fast, no actual import)
         import importlib.util
         return importlib.util.find_spec("cellpose.gui") is not None
 
     def draw_config(self) -> None:
-        """draw suite2p configuration ui."""
+        """Draw suite2p configuration ui."""
         from mbo_utilities.gui.pipeline_widgets import draw_section_suite2p
 
         self._draw_diagnostics_button()
@@ -140,9 +140,9 @@ class Suite2pPipelineWidget(PipelineWidget):
         # sync widget state to parent before drawing
         # ONLY set parent values if parent doesn't already have a value set
         # This prevents overwriting values set by the Browse dialog
-        if self._saveas_outdir and not getattr(self.parent, '_saveas_outdir', ''):
+        if self._saveas_outdir and not getattr(self.parent, "_saveas_outdir", ""):
             self.parent._saveas_outdir = self._saveas_outdir
-        if self._s2p_outdir and not getattr(self.parent, '_s2p_outdir', ''):
+        if self._s2p_outdir and not getattr(self.parent, "_s2p_outdir", ""):
             self.parent._s2p_outdir = self._s2p_outdir
         self.parent._install_error = self._install_error
         self.parent._frames_initialized = self._frames_initialized
@@ -159,21 +159,21 @@ class Suite2pPipelineWidget(PipelineWidget):
 
         # sync back from parent - always read latest values
         # use parent value if set, otherwise keep widget value
-        parent_saveas = getattr(self.parent, '_saveas_outdir', '')
-        parent_s2p = getattr(self.parent, '_s2p_outdir', '')
+        parent_saveas = getattr(self.parent, "_saveas_outdir", "")
+        parent_s2p = getattr(self.parent, "_s2p_outdir", "")
         if parent_saveas:
             self._saveas_outdir = parent_saveas
         if parent_s2p:
             self._s2p_outdir = parent_s2p
         self._install_error = self.parent._install_error
-        self._frames_initialized = getattr(self.parent, '_frames_initialized', False)
-        self._last_max_frames = getattr(self.parent, '_last_max_frames', 1000)
-        self._selected_planes = getattr(self.parent, '_selected_planes', set())
-        self._show_plane_popup = getattr(self.parent, '_show_plane_popup', False)
-        self._parallel_processing = getattr(self.parent, '_parallel_processing', False)
-        self._max_parallel_jobs = getattr(self.parent, '_max_parallel_jobs', 2)
-        self._savepath_flash_start = getattr(self.parent, '_s2p_savepath_flash_start', None)
-        self._show_savepath_popup = getattr(self.parent, '_s2p_show_savepath_popup', False)
+        self._frames_initialized = getattr(self.parent, "_frames_initialized", False)
+        self._last_max_frames = getattr(self.parent, "_last_max_frames", 1000)
+        self._selected_planes = getattr(self.parent, "_selected_planes", set())
+        self._show_plane_popup = getattr(self.parent, "_show_plane_popup", False)
+        self._parallel_processing = getattr(self.parent, "_parallel_processing", False)
+        self._max_parallel_jobs = getattr(self.parent, "_max_parallel_jobs", 2)
+        self._savepath_flash_start = getattr(self.parent, "_s2p_savepath_flash_start", None)
+        self._show_savepath_popup = getattr(self.parent, "_s2p_show_savepath_popup", False)
 
         # Poll suite2p for selection changes
         self._poll_suite2p_selection()
@@ -230,12 +230,11 @@ class Suite2pPipelineWidget(PipelineWidget):
         if dialog_pending:
             imgui.begin_disabled()
 
-        if imgui.button("Grid Search..."):
-            if self._grid_search_dialog is None:
-                default_dir = str(get_last_dir("grid_search") or Path.home())
-                self._grid_search_dialog = pfd.select_folder(
-                    "Select grid search results folder", default_dir
-                )
+        if imgui.button("Grid Search...") and self._grid_search_dialog is None:
+            default_dir = str(get_last_dir("grid_search") or Path.home())
+            self._grid_search_dialog = pfd.select_folder(
+                "Select grid search results folder", default_dir
+            )
 
         if dialog_pending:
             imgui.end_disabled()
@@ -275,11 +274,11 @@ class Suite2pPipelineWidget(PipelineWidget):
             self._last_suite2p_ichosen = None
             return
 
-        if not hasattr(self._external_gui_window, 'loaded') or not self._external_gui_window.loaded:
+        if not hasattr(self._external_gui_window, "loaded") or not self._external_gui_window.loaded:
             return
 
         # get current selection from suite2p
-        ichosen = getattr(self._external_gui_window, 'ichosen', None)
+        ichosen = getattr(self._external_gui_window, "ichosen", None)
 
         # check if selection changed
         if ichosen != self._last_suite2p_ichosen:
@@ -325,10 +324,10 @@ class Suite2pPipelineWidget(PipelineWidget):
 
                         # Open external GUI based on user choice (optional)
                         self._open_external_gui(stat_path)
-                    except Exception as e:
-                        print(f"Error loading results: {e}")
+                    except Exception:
+                        pass
                 else:
-                    print(f"Please select a stat.npy file, got: {stat_path.name}")
+                    pass
             self._file_dialog = None
 
         if self._show_diagnostics_popup:
@@ -381,12 +380,12 @@ class Suite2pPipelineWidget(PipelineWidget):
             if self._check_suite2p_gui():
                 self._open_suite2p_gui(statfile)
             else:
-                print("suite2p GUI not available (requires rastermap). Install with: uv pip install rastermap")
+                pass
         elif self._gui_choice == 1:
             if self._check_cellpose_gui():
                 self._open_cellpose_gui(statfile)
             else:
-                print("cellpose GUI not available. Install with: uv pip install cellpose[gui]")
+                pass
 
     def _open_suite2p_gui(self, statfile: Path):
         """Open suite2p GUI with the given stat.npy file."""
@@ -426,10 +425,10 @@ class Suite2pPipelineWidget(PipelineWidget):
             self._external_gui_window.showNormal()
             self._last_suite2p_ichosen = None
 
-        except ImportError as e:
-            print(f"Could not open suite2p GUI: {e}")
-        except Exception as e:
-            print(f"Error opening suite2p GUI: {e}")
+        except ImportError:
+            pass
+        except Exception:
+            pass
 
     def _open_cellpose_gui(self, statfile: Path):
         """Open cellpose GUI with Suite2p results.
@@ -452,9 +451,7 @@ class Suite2pPipelineWidget(PipelineWidget):
             plane_dir = statfile.parent
 
             # Ensure _seg.npy file exists (creates if needed)
-            print(f"Preparing cellpose format...")
             seg_file = ensure_cellpose_format(plane_dir)
-            print(f"Using: {seg_file}")
 
             # Create cellpose MainW window (without image - we'll load via _load_seg)
             self._external_gui_window = MainW()
@@ -491,17 +488,12 @@ class Suite2pPipelineWidget(PipelineWidget):
 
             self._external_gui_window.show()
 
-            n_rois = self._external_gui_window.ncells.get() if hasattr(self._external_gui_window.ncells, 'get') else 0
-            print(f"Opened cellpose GUI with {n_rois} ROIs")
-            print(f"Edits will be saved to: {seg_file}")
-            print(f"Save with Ctrl+S in cellpose GUI")
+            self._external_gui_window.ncells.get() if hasattr(self._external_gui_window.ncells, "get") else 0
 
-        except ImportError as e:
-            print(f"Could not open cellpose GUI: {e}")
-            print("Install with: pip install lbm-suite2p-python cellpose[gui]")
-        except Exception as e:
+        except ImportError:
+            pass
+        except Exception:
             import traceback
-            print(f"Error opening cellpose GUI: {e}")
             traceback.print_exc()
 
     def _reposition_mbo_window(self, x: int, y: int, width: int, height: int):
@@ -522,10 +514,10 @@ class Suite2pPipelineWidget(PipelineWidget):
 
             # Access the canvas through the parent widget hierarchy
             # parent -> PreviewDataWidget -> image_widget -> figure -> canvas
-            if hasattr(self.parent, 'image_widget'):
+            if hasattr(self.parent, "image_widget"):
                 canvas = self.parent.image_widget.figure.canvas
                 # Get the top-level window containing the canvas
-                if hasattr(canvas, 'window'):
+                if hasattr(canvas, "window"):
                     # rendercanvas provides window() method
                     window = canvas.window()
                     if window:
@@ -538,9 +530,9 @@ class Suite2pPipelineWidget(PipelineWidget):
                         widget.setGeometry(QRect(x, y, width, height))
                         return
                     widget = widget.parent()
-        except Exception as e:
+        except Exception:
             # Silently fail - window positioning is not critical
-            print(f"Could not reposition MBO window: {e}")
+            pass
 
     @property
     def suite2p_window(self):
@@ -564,8 +556,8 @@ class Suite2pPipelineWidget(PipelineWidget):
                     set_last_dir("grid_search", result)
                     self._get_grid_search_widget().load_results(Path(result))
                     self._show_grid_search_popup = True
-                except Exception as e:
-                    print(f"Error loading grid search results: {e}")
+                except Exception:
+                    pass
             self._grid_search_dialog = None
 
         if self._show_grid_search_popup:

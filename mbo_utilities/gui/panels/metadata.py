@@ -13,7 +13,7 @@ from imgui_bundle import imgui, ImVec2
 from . import BasePanel
 
 if TYPE_CHECKING:
-    from ..viewers import BaseViewer
+    from mbo_utilities.gui.viewers import BaseViewer
 
 __all__ = ["MetadataPanel"]
 
@@ -53,9 +53,8 @@ def _matches_filter_recursive(key: str, value: Any, filter_text: str) -> bool:
         for i, item in enumerate(value):
             if _matches_filter_recursive(str(i), item, filter_text):
                 return True
-    else:
-        if filter_lower in str(value).lower():
-            return True
+    elif filter_lower in str(value).lower():
+        return True
     return False
 
 
@@ -123,7 +122,7 @@ class MetadataPanel(BasePanel):
 
     name = "Metadata"
 
-    def __init__(self, viewer: "BaseViewer"):
+    def __init__(self, viewer: BaseViewer):
         super().__init__(viewer)
         self._filter_text = ""
 
@@ -161,7 +160,7 @@ class MetadataPanel(BasePanel):
 
                     # Search filter
                     imgui.set_next_item_width(200)
-                    changed, self._filter_text = imgui.input_text_with_hint(
+                    _changed, self._filter_text = imgui.input_text_with_hint(
                         "##meta_search", "Search...", self._filter_text
                     )
 

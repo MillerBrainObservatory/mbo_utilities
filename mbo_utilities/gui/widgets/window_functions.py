@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from imgui_bundle import imgui, hello_imgui
 
 from mbo_utilities.gui.widgets._base import Widget
-from mbo_utilities.gui._widgets import set_tooltip
+from mbo_utilities.gui._imgui_helpers import set_tooltip
 
 if TYPE_CHECKING:
     from mbo_utilities.gui.imgui import PreviewDataWidget
@@ -24,11 +24,11 @@ class WindowFunctionsWidget(Widget):
 
     @classmethod
     def is_supported(cls, parent: "PreviewDataWidget") -> bool:
-        """always supported for any array with temporal dimension."""
+        """Always supported for any array with temporal dimension."""
         return True
 
     def draw(self) -> None:
-        """draw window functions controls."""
+        """Draw window functions controls."""
         parent = self.parent
 
         imgui.spacing()
@@ -75,11 +75,11 @@ class SpatialFunctionsWidget(Widget):
 
     @classmethod
     def is_supported(cls, parent: "PreviewDataWidget") -> bool:
-        """always supported."""
+        """Always supported."""
         return True
 
     def draw(self) -> None:
-        """draw spatial functions controls."""
+        """Draw spatial functions controls."""
         parent = self.parent
 
         imgui.spacing()

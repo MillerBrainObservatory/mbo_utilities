@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from imgui_bundle import imgui, hello_imgui
 
 from mbo_utilities.gui.widgets._base import Widget
-from mbo_utilities.gui._widgets import set_tooltip
+from mbo_utilities.gui._imgui_helpers import set_tooltip
 
 if TYPE_CHECKING:
     from mbo_utilities.gui.imgui import PreviewDataWidget
@@ -24,11 +24,11 @@ class RasterScanWidget(Widget):
 
     @classmethod
     def is_supported(cls, parent: "PreviewDataWidget") -> bool:
-        """show only if data array supports phase correction (cached on parent)."""
+        """Show only if data array supports phase correction (cached on parent)."""
         return parent.has_raster_scan_support
 
     def draw(self) -> None:
-        """draw raster scan phase correction controls."""
+        """Draw raster scan phase correction controls."""
         parent = self.parent
 
         imgui.spacing()

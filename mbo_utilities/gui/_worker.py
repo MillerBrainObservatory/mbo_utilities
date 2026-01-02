@@ -21,7 +21,7 @@ from mbo_utilities.gui.tasks import TASKS
 
 
 def setup_logging(log_file: str | None = None) -> logging.Logger:
-    """setup logging for worker process."""
+    """Setup logging for worker process."""
     logger = logging.getLogger("mbo.worker")
     logger.setLevel(logging.INFO)
 
@@ -42,9 +42,9 @@ def setup_logging(log_file: str | None = None) -> logging.Logger:
             fh.setLevel(logging.INFO)
             fh.setFormatter(formatter)
             logger.addHandler(fh)
-        except Exception as e:
+        except Exception:
             # print to stderr so it's captured in the redirect if setup fails
-            print(f"Failed to setup file logging: {e}", file=sys.stderr)
+            pass
 
     return logger
 
@@ -63,7 +63,7 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
         current_data = {}
         if sidecar.exists():
             try:
-                with open(sidecar, "r") as f:
+                with open(sidecar) as f:
                     current_data = json.load(f)
             except Exception:
                 pass
@@ -93,32 +93,28 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
             json.dump(data, f)
         tmp_file.replace(sidecar)
 
-    except Exception as e:
-        print(f"Failed to update sidecar: {e}", file=sys.stderr)
+    except Exception:
+        pass
 
 
 def main():
-    """main entry point for worker subprocess."""
+    """Main entry point for worker subprocess."""
     # Disable tqdm's dynamic display for file output (no terminal = no \r updates)
     # This prevents the flood of progress bar lines in log files
     os.environ["TQDM_DISABLE"] = "1"
 
     # early print so we can see the process started even if logging fails
-    print(f"Worker process starting (pid={os.getpid()})", flush=True)
 
     if len(sys.argv) < 3:
-        print("Usage: python -m mbo_utilities.gui._worker <task_type> <args_json>", flush=True)
         sys.exit(1)
 
     task_type = sys.argv[1]
     args_json = sys.argv[2]
 
-    print(f"Task type: {task_type}", flush=True)
 
     try:
         args = json.loads(args_json)
-    except json.JSONDecodeError as e:
-        print(f"Invalid JSON args: {e}", flush=True)
+    except json.JSONDecodeError:
         sys.exit(1)
 
     # setup logging
@@ -131,7 +127,6 @@ def main():
     # get task function
     if task_type not in TASKS:
         logger.error(f"Unknown task type: {task_type}")
-        print(f"Unknown task type: {task_type}", flush=True)
         _update_status(os.getpid(), "error", f"Unknown task type: {task_type}", uuid=uuid)
         sys.exit(1)
 
@@ -143,17 +138,14 @@ def main():
         task_func(args, logger)
 
         logger.info("Task completed successfully")
-        print("Task completed successfully", flush=True)
 
         # Explicitly mark as completed in sidecar so ProcessManager knows
         _update_status(os.getpid(), "completed", uuid=uuid)
 
         sys.exit(0)
     except Exception as e:
-        logger.error(f"Task failed: {e}")
-        logger.error(traceback.format_exc())
-        print(f"Task failed: {e}", flush=True)
-        print(traceback.format_exc(), flush=True)
+        logger.exception(f"Task failed: {e}")
+        logger.exception(traceback.format_exc())
 
         # Explicitly mark as error
         _update_status(os.getpid(), "error", message=str(e), details=traceback.format_exc(), uuid=uuid)
