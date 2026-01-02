@@ -33,7 +33,7 @@ class Widget(ABC):
     @abstractmethod
     def is_supported(cls, parent: "PreviewDataWidget") -> bool:
         """
-        check if this widget should show for the given parent.
+        Check if this widget should show for the given parent.
 
         override to check data metadata, attributes, etc.
         """
@@ -41,13 +41,12 @@ class Widget(ABC):
 
     @abstractmethod
     def draw(self) -> None:
-        """draw the imgui ui for this widget."""
+        """Draw the imgui ui for this widget."""
         ...
 
     def cleanup(self) -> None:
-        """clean up resources when widget is destroyed.
+        """Clean up resources when widget is destroyed.
 
         override in subclasses to release resources like open windows,
         background threads, file handles, etc.
         """
-        pass

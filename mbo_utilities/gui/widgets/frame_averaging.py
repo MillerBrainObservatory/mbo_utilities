@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from imgui_bundle import imgui
 
 from mbo_utilities.gui.widgets._base import Widget
-from mbo_utilities.gui._widgets import set_tooltip
+from mbo_utilities.gui._imgui_helpers import set_tooltip
 
 if TYPE_CHECKING:
     from mbo_utilities.gui.imgui import PreviewDataWidget
@@ -24,7 +24,7 @@ class FrameAveragingWidget(Widget):
 
     @classmethod
     def is_supported(cls, parent: "PreviewDataWidget") -> bool:
-        """show only for piezo arrays that can average frames."""
+        """Show only for piezo arrays that can average frames."""
         arrays = parent._get_data_arrays()
         for arr in arrays:
             # check if this is a PiezoArray with averaging capability
@@ -33,7 +33,7 @@ class FrameAveragingWidget(Widget):
         return False
 
     def draw(self) -> None:
-        """draw frame averaging controls."""
+        """Draw frame averaging controls."""
         parent = self.parent
         arrays = parent._get_data_arrays()
 

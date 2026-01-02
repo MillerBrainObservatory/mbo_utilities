@@ -15,13 +15,12 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Optional, Union
 
 # set windows appusermodelid immediately for taskbar icon grouping
-if sys.platform == 'win32':
+if sys.platform == "win32":
     try:
         import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('mbo.utilities.gui.1.0')
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("mbo.utilities.gui.1.0")
     except Exception:
         pass
 
@@ -60,7 +59,7 @@ class PathAwareGroup(click.Group):
 
 def download_file(
     url: str,
-    output_path: Optional[Union[str, Path]] = None,
+    output_path: str | Path | None = None,
 ) -> Path:
     """Download a file from a URL to a local path.
 
@@ -112,8 +111,8 @@ def download_file(
 
 
 def download_notebook(
-    output_path: Optional[Union[str, Path]] = None,
-    notebook_url: Optional[str] = None,
+    output_path: str | Path | None = None,
+    notebook_url: str | None = None,
 ) -> Path:
     """Download a Jupyter notebook from a URL to a local file."""
     default_url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
@@ -125,13 +124,13 @@ def download_notebook(
 
 
 def _get_marker_path() -> Path:
-    """get path to first-run marker file"""
+    """Get path to first-run marker file."""
     from mbo_utilities import get_mbo_dirs
     return get_mbo_dirs()["base"] / ".initialized"
 
 
 def _is_first_run() -> bool:
-    """check if this is the first run (no marker file exists)"""
+    """Check if this is the first run (no marker file exists)."""
     try:
         return not _get_marker_path().exists()
     except Exception:
@@ -139,7 +138,7 @@ def _is_first_run() -> bool:
 
 
 def _mark_initialized() -> None:
-    """create marker file to indicate successful initialization"""
+    """Create marker file to indicate successful initialization."""
     try:
         marker = _get_marker_path()
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -149,7 +148,7 @@ def _mark_initialized() -> None:
 
 
 class LoadingSpinner:
-    """simple terminal spinner for loading feedback"""
+    """simple terminal spinner for loading feedback."""
 
     def __init__(self, message: str = "Loading"):
         self.message = message
@@ -219,7 +218,7 @@ def main(
     output_path=None,
     check_install=False,
 ):
-    """
+    r"""
     MBO Utilities CLI - data preview and processing tools.
 
     \b
@@ -269,9 +268,9 @@ def main(
     try:
         from mbo_utilities.gui.run_gui import run_gui
         spinner.stop()
-    except Exception as e:
+    except Exception:
         spinner.stop()
-        raise e
+        raise
 
     # mark as initialized after successful import
     if first_run:
@@ -299,7 +298,7 @@ def main(
     help="Show only metadata (no image viewer).",
 )
 def view(data_in=None, roi=None, widget=True, metadata=False):
-    """
+    r"""
     Open imaging data in the GUI viewer.
 
     \b
@@ -320,9 +319,9 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
     try:
         from mbo_utilities.gui.run_gui import run_gui
         spinner.stop()
-    except Exception as e:
+    except Exception:
         spinner.stop()
-        raise e
+        raise
 
     if first_run:
         _mark_initialized()
@@ -421,7 +420,7 @@ def convert(
     output_name,
     debug,
 ):
-    """
+    r"""
     Convert imaging data between formats.
 
     If INPUT_PATH and OUTPUT_PATH are provided, runs conversion directly.
@@ -517,7 +516,7 @@ def convert(
     help="Show metadata.",
 )
 def info(input_path, metadata):
-    """
+    r"""
     Show information about an imaging dataset.
 
     \b
@@ -531,7 +530,7 @@ def info(input_path, metadata):
     click.echo(f"Loading: {input_path}")
     data = imread(input_path)
 
-    click.echo(f"\nArray Information:")
+    click.echo("\nArray Information:")
     click.echo(f"  Type:  {type(data).__name__}")
     click.echo(f"  Shape: {data.shape}")
     click.echo(f"  Dtype: {data.dtype}")
@@ -557,12 +556,12 @@ def info(input_path, metadata):
     if metadata and hasattr(data, "metadata"):
         md = data.metadata
         if md:
-            click.echo(f"\nMetadata:")
+            click.echo("\nMetadata:")
             important_keys = ["num_timepoints", "nframes", "num_frames", "Ly", "Lx", "fs", "num_rois", "plane"]
             for key in important_keys:
                 if key in md:
                     click.echo(f"  {key}: {md[key]}")
-            other_keys = [k for k in md.keys() if k not in important_keys]
+            other_keys = [k for k in md if k not in important_keys]
             if other_keys:
                 click.echo(f"  ... and {len(other_keys)} more keys")
 
@@ -577,7 +576,7 @@ def info(input_path, metadata):
     help="Output directory or file path. Default: current directory.",
 )
 def download(url, output_path):
-    """
+    r"""
     Download a file from a URL (supports GitHub).
 
     \b
@@ -647,7 +646,7 @@ main.add_command(db_cli)
     help="Save output to docs/_images/scanphase/ for documentation.",
 )
 def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
-    """
+    r"""
     Scan-phase analysis for bidirectional scanning data.
 
     Analyzes phase offset to determine optimal correction parameters.
@@ -694,7 +693,7 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
                 tiffs = get_files(input_path, str_contains=".tif", max_depth=1)
                 if not tiffs:
                     click.secho(f"No tiff files found in {input_path}", fg="red")
-                    raise click.Abort()
+                    raise click.Abort
                 tiffs = tiffs[:num_tifs]
                 click.echo(f"Using {len(tiffs)} tiff files from {input_path}")
                 actual_input = tiffs
@@ -720,7 +719,7 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
 
         # print summary
         summary = results.get_summary()
-        meta = summary.get('metadata', {})
+        meta = summary.get("metadata", {})
 
         click.echo("")
         click.secho("scan-phase analysis complete", fg="cyan", bold=True)
@@ -732,8 +731,8 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
         click.echo(f"output: {actual_output_dir}")
 
         # fft stats
-        if 'fft' in summary:
-            stats = summary['fft']
+        if "fft" in summary:
+            stats = summary["fft"]
             click.echo("")
             click.secho("offset (FFT)", fg="yellow", bold=True)
             click.echo(f"  mean:   {stats.get('mean', 0):+.3f} px")
@@ -742,8 +741,8 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
             click.echo(f"  range:  [{stats.get('min', 0):.2f}, {stats.get('max', 0):.2f}] px")
 
         # int stats
-        if 'int' in summary:
-            stats = summary['int']
+        if "int" in summary:
+            stats = summary["int"]
             click.echo("")
             click.secho("offset (integer)", fg="yellow", bold=True)
             click.echo(f"  mean:   {stats.get('mean', 0):+.3f} px")
@@ -753,7 +752,7 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
 
     except Exception as e:
         click.secho(f"Error: {e}", fg="red")
-        raise click.Abort()
+        raise click.Abort
 
 
 @main.command("benchmark")
@@ -869,7 +868,7 @@ def benchmark(
     release,
     version_tag,
 ):
-    """
+    r"""
     Run performance benchmarks on MboRawArray.
 
     Measures initialization, indexing, phase correction, write performance,
@@ -1145,7 +1144,7 @@ def benchmark(
     help="Remove entries for finished processes.",
 )
 def processes(kill_all, kill, cleanup):
-    """
+    r"""
     Manage background processes (suite2p, save operations, etc.).
 
     \b
@@ -1155,7 +1154,7 @@ def processes(kill_all, kill, cleanup):
       mbo processes --kill 12345     # Kill specific process
       mbo processes --kill-all       # Kill all background processes
     """
-    from mbo_utilities.gui.process_manager import get_process_manager
+    from mbo_utilities.gui.widgets.process_manager import get_process_manager
 
     pm = get_process_manager()
 

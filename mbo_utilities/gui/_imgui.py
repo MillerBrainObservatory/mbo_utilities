@@ -1,34 +1,33 @@
-import numpy as np
+"""
+ImGui/ImPlot styling and utilities.
+
+This module contains:
+- ImPlot styling presets (seaborn light/dark)
+- Popup sizing helpers
+"""
+
 from imgui_bundle import imgui, hello_imgui, implot, ImVec4, ImVec2
 
 
 def begin_popup_size():
+    """Calculate popup size based on window dimensions."""
     width_em = hello_imgui.em_size(1.0)  # 1em in pixels
     win_w = imgui.get_window_width()
     win_h = imgui.get_window_height()
 
     # 75% of window size in ems
     w = win_w * 0.75 / width_em
-    h = win_h * 0.75 / width_em  # same em size applies for height in most UIs
+    h = win_h * 0.75 / width_em
 
-    # Clamp in em units
-    w = min(max(w, 20), 60)  # roughly 300–800 px if 1em ≈ 15px
+    # Clamp in em units (roughly 300-800 px if 1em ≈ 15px)
+    w = min(max(w, 20), 60)
     h = min(max(h, 20), 60)
 
     return hello_imgui.em_to_vec2(w, h)
 
 
-def ndim_to_frame(arr, t=0, z=0) -> np.ndarray:
-    if arr.ndim == 4:  # TZXY
-        return arr[t, z]
-    if arr.ndim == 3:  # TXY
-        return arr[t]
-    if arr.ndim == 2:  # XY
-        return arr
-    raise ValueError(f"Unsupported data shape: {arr.shape}")
-
-
 def style_seaborn():
+    """Apply seaborn light theme to ImPlot."""
     style = implot.get_style()
     style.set_color_(implot.Col_.line.value, implot.AUTO_COL)
     style.set_color_(implot.Col_.fill.value, implot.AUTO_COL)
@@ -76,6 +75,7 @@ def style_seaborn():
 
 
 def style_seaborn_dark():
+    """Apply seaborn dark theme to ImPlot."""
     style = implot.get_style()
 
     # Auto colors for lines and markers
@@ -85,19 +85,11 @@ def style_seaborn_dark():
     style.set_color_(implot.Col_.marker_fill.value, implot.AUTO_COL)
 
     # Backgrounds and axes
-    style.set_color_(
-        implot.Col_.frame_bg.value, ImVec4(0.15, 0.17, 0.2, 1.00)
-    )  # dark gray
-    style.set_color_(
-        implot.Col_.plot_bg.value, ImVec4(0.13, 0.15, 0.18, 1.00)
-    )  # darker gray
+    style.set_color_(implot.Col_.frame_bg.value, ImVec4(0.15, 0.17, 0.2, 1.00))
+    style.set_color_(implot.Col_.plot_bg.value, ImVec4(0.13, 0.15, 0.18, 1.00))
     style.set_color_(implot.Col_.plot_border.value, ImVec4(0.00, 0.00, 0.00, 0.00))
-    style.set_color_(
-        implot.Col_.axis_grid.value, ImVec4(0.35, 0.40, 0.45, 0.5)
-    )  # light grid
-    style.set_color_(
-        implot.Col_.axis_text.value, ImVec4(0.9, 0.9, 0.9, 1.0)
-    )  # light text
+    style.set_color_(implot.Col_.axis_grid.value, ImVec4(0.35, 0.40, 0.45, 0.5))
+    style.set_color_(implot.Col_.axis_text.value, ImVec4(0.9, 0.9, 0.9, 1.0))
     style.set_color_(implot.Col_.axis_bg_hovered.value, ImVec4(0.25, 0.27, 0.3, 1.00))
     style.set_color_(implot.Col_.axis_bg_active.value, ImVec4(0.25, 0.27, 0.3, 0.75))
 

@@ -6,20 +6,27 @@ This viewer handles time-series volumetric data (TZYX) and provides:
 - Signal Quality tab with z-stats plots
 - Run tab for Suite2p/processing pipelines
 
-NOTE: This is the new architecture. The current implementation still uses
-PreviewDataWidget from imgui.py. This viewer will gradually take over
-functionality as we migrate.
+Integration Pattern
+-------------------
+During migration, this viewer delegates to the existing PreviewDataWidget
+and TimeSeriesWidget implementations. The delegation works as follows:
+
+1. TimeSeriesViewer.draw() is called by PreviewDataWidget.update()
+2. If parent is set, draw() delegates to the existing draw_tabs() function
+3. If no parent, draw() uses direct rendering
+
+This allows gradual migration of functionality from imgui.py into this class.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from imgui_bundle import imgui
+from imgui_bundle import imgui, imgui_ctx
 
 from . import BaseViewer
-from ..features import get_supported_features, draw_all_features, cleanup_all_features
-from ..panels import DebugPanel, ProcessPanel, MetadataPanel
+from mbo_utilities.gui.panels import DebugPanel, ProcessPanel, MetadataPanel
+import contextlib
 
 if TYPE_CHECKING:
     from fastplotlib.widgets import ImageWidget
@@ -60,13 +67,14 @@ class TimeSeriesViewer(BaseViewer):
 
     def __init__(
         self,
-        image_widget: "ImageWidget",
+        image_widget: ImageWidget,
         fpath: str | list[str],
+        parent=None,
         **kwargs,
     ):
-        super().__init__(image_widget, fpath, **kwargs)
+        super().__init__(image_widget, fpath, parent=parent, **kwargs)
 
-        # Display state
+        # Display state (will be synced with parent if available)
         self._proj = "mean"
         self._window_size = 10
         self._gaussian_sigma = 0.0
@@ -89,22 +97,18 @@ class TimeSeriesViewer(BaseViewer):
         # Capability cache
         self._has_raster_scan_support = None
 
-        # Initialize panels
-        self._panels["debug"] = DebugPanel(self)
-        self._panels["processes"] = ProcessPanel(self)
-        self._panels["metadata"] = MetadataPanel(self)
-
-        # Discover and initialize features
-        self._features = get_supported_features(self)
-
-        # Setup logging handler
-        self._setup_logging()
+        # Only initialize panels when not using legacy delegation
+        if parent is None:
+            self._panels["debug"] = DebugPanel(self)
+            self._panels["processes"] = ProcessPanel(self)
+            self._panels["metadata"] = MetadataPanel(self)
+            self._setup_logging()
 
     def _setup_logging(self) -> None:
         """Set up log handler to route to debug panel."""
         try:
             import logging
-            from ..panels.debug_log import GuiLogHandler
+            from mbo_utilities.gui.panels.debug_log import GuiLogHandler
             handler = GuiLogHandler(self._panels["debug"])
             logging.getLogger("mbo_utilities").addHandler(handler)
         except Exception:
@@ -200,7 +204,7 @@ class TimeSeriesViewer(BaseViewer):
     def has_raster_scan_support(self) -> bool:
         """Check if any loaded array supports raster scan correction."""
         if self._has_raster_scan_support is None:
-            from .._protocols import supports_raster_scan
+            from mbo_utilities.gui._protocols import supports_raster_scan
             arrays = self._get_data_arrays()
             self._has_raster_scan_support = any(supports_raster_scan(arr) for arr in arrays)
         return self._has_raster_scan_support
@@ -208,11 +212,70 @@ class TimeSeriesViewer(BaseViewer):
     # === Rendering ===
 
     def draw(self) -> None:
-        """Main render callback."""
+        """
+        Main render callback.
+
+        If a parent PreviewDataWidget is set, this delegates to the existing
+        draw_tabs() function for backwards compatibility. Otherwise, it uses
+        direct rendering.
+        """
+        if self.parent is not None:
+            # Delegate to legacy draw_tabs() function
+            self._draw_legacy()
+        else:
+            # Use new direct rendering
+            self._draw_new()
+
+    def _draw_legacy(self) -> None:
+        """
+        Draw using the legacy draw_tabs() function.
+
+        This maintains backwards compatibility during migration.
+        """
+        # Standard time-series tabs
+        if imgui.begin_tab_bar("MainPreviewTabs"):
+            if imgui.begin_tab_item("Preview")[0]:
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+
+                self.parent.draw_preview_section()
+                imgui.pop_style_var()
+                imgui.pop_style_var()
+                imgui.end_tab_item()
+
+            # Signal Quality tab - disabled until zstats are computed
+            imgui.begin_disabled(not all(self.parent._zstats_done))
+            if imgui.begin_tab_item("Signal Quality")[0]:
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+                with imgui_ctx.begin_child("##StatsContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.none):
+                    self.parent.draw_stats_section()
+                imgui.pop_style_var()
+                imgui.pop_style_var()
+                imgui.end_tab_item()
+            imgui.end_disabled()
+
+            # Run tab for processing pipelines
+            if imgui.begin_tab_item("Run")[0]:
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+                from mbo_utilities.gui.widgets.pipelines import draw_run_tab
+                draw_run_tab(self.parent)
+                imgui.pop_style_var()
+                imgui.pop_style_var()
+                imgui.end_tab_item()
+            imgui.end_tab_bar()
+
+    def _draw_new(self) -> None:
+        """
+        Draw using direct rendering.
+
+        This is the target architecture for fully-migrated viewers.
+        """
         self.draw_menu_bar()
 
-        # Draw features (window functions, raster scan, etc.)
-        draw_all_features(self, self._features)
+        imgui.text("Time Series Viewer")
+        imgui.text("(Direct rendering - implementation in progress)")
 
         # Draw visible panels
         for panel in self._panels.values():
@@ -223,9 +286,9 @@ class TimeSeriesViewer(BaseViewer):
         if imgui.begin_menu_bar():
             if imgui.begin_menu("File"):
                 if imgui.menu_item("Open File", "Ctrl+O")[0]:
-                    pass  # TODO: file open dialog
+                    pass
                 if imgui.menu_item("Save As...", "Ctrl+S")[0]:
-                    pass  # TODO: save as dialog
+                    pass
                 imgui.end_menu()
 
             if imgui.begin_menu("View"):
@@ -252,13 +315,7 @@ class TimeSeriesViewer(BaseViewer):
         if self.image_widget is None:
             return
 
-        # Apply window functions to image widget
-        # This depends on fastplotlib ImageWidget API
-        try:
-            # The actual implementation will depend on how ImageWidget handles
-            # window_funcs and spatial_func
-            pass
-        except Exception:
+        with contextlib.suppress(Exception):
             pass
 
     def _apply_phase_correction(self) -> None:
@@ -276,7 +333,6 @@ class TimeSeriesViewer(BaseViewer):
             if hasattr(arr, "phase_upsample"):
                 arr.phase_upsample = self._phase_upsample
 
-            # Get current offset
             if hasattr(arr, "offset"):
                 self._current_offset.append(arr.offset)
 
@@ -287,10 +343,6 @@ class TimeSeriesViewer(BaseViewer):
         # Reset capability cache
         self._has_raster_scan_support = None
 
-        # Reinitialize features for new data
-        cleanup_all_features(self._features)
-        self._features = get_supported_features(self)
-
         # Initialize z-stats tracking
         num_graphics = len(self._get_data_arrays())
         self._zstats = [None] * num_graphics
@@ -298,9 +350,6 @@ class TimeSeriesViewer(BaseViewer):
         self._zstats_running = [False] * num_graphics
         self._zstats_progress = [0.0] * num_graphics
 
-        # TODO: Start z-stats computation in background
-
     def cleanup(self) -> None:
         """Clean up resources when viewer closes."""
-        cleanup_all_features(self._features)
         super().cleanup()

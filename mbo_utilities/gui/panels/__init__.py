@@ -13,13 +13,13 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..viewers import BaseViewer
+    from mbo_utilities.gui.viewers import BaseViewer
 
 __all__ = [
     "BasePanel",
     "DebugPanel",
-    "ProcessPanel",
     "MetadataPanel",
+    "ProcessPanel",
 ]
 
 
@@ -42,7 +42,7 @@ class BasePanel(ABC):
 
     name: str = "Base Panel"
 
-    def __init__(self, viewer: "BaseViewer"):
+    def __init__(self, viewer: BaseViewer):
         """
         Initialize the panel.
 
@@ -91,7 +91,6 @@ class BasePanel(ABC):
 
         Override in subclasses to release resources.
         """
-        pass
 
 
 # Lazy imports for panel classes
