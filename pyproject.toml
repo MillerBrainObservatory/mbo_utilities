@@ -144,6 +144,10 @@ pydocstyle = { convention = "numpy" }
 select = ["ALL"]
 ignore = [
 # Complexity rules - not useful for scientific code
+    "EM101",  # Exception must not use string literal
+    "EM102",  # Exception must not use f-string literal
+    "TRY003", # Long exception messages
+    "I001",
     "C901",   # Too complex
     "PLR0912", # Too many branches
     "PLR0913", # Too many arguments
@@ -177,12 +181,12 @@ mbo_utilities = ["assets/**/*"]
 
 [tool.coverage.report]
 exclude_lines = [
-	"pragma: no cover",
-	"if TYPE_CHECKING:",
-	"@overload",
-	"except ImportError",
-	"\\.\\.\\.",
-	"raise NotImplementedError()"
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@overload",
+    "except ImportError",
+    "\\.\\.\\.",
+    "raise NotImplementedError()"
 ]
 
 [dependency-groups]
