@@ -6,14 +6,12 @@ Provides min/max values for display scaling (vmin/vmax).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 import numpy as np
 
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
-if TYPE_CHECKING:
-    pass
 
 
 class DisplayRange(NamedTuple):
@@ -24,12 +22,12 @@ class DisplayRange(NamedTuple):
 
     @property
     def span(self) -> float:
-        """range span (vmax - vmin)"""
+        """Range span (vmax - vmin)."""
         return self.vmax - self.vmin
 
     @property
     def center(self) -> float:
-        """center value"""
+        """Center value."""
         return (self.vmin + self.vmax) / 2
 
 
@@ -70,38 +68,38 @@ class DisplayRangeFeature(ArrayFeature):
 
     @property
     def value(self) -> DisplayRange | None:
-        """display range as DisplayRange namedtuple"""
+        """Display range as DisplayRange namedtuple."""
         if self._vmin is None or self._vmax is None:
             return None
         return DisplayRange(self._vmin, self._vmax)
 
     @property
     def vmin(self) -> float | None:
-        """minimum display value"""
+        """Minimum display value."""
         return self._vmin
 
     @property
     def vmax(self) -> float | None:
-        """maximum display value"""
+        """Maximum display value."""
         return self._vmax
 
     @property
     def span(self) -> float | None:
-        """range span (vmax - vmin)"""
+        """Range span (vmax - vmin)."""
         if self._vmin is None or self._vmax is None:
             return None
         return self._vmax - self._vmin
 
     @property
     def center(self) -> float | None:
-        """center value"""
+        """Center value."""
         if self._vmin is None or self._vmax is None:
             return None
         return (self._vmin + self._vmax) / 2
 
     @property
     def is_auto_computed(self) -> bool:
-        """True if range was auto-computed from data"""
+        """True if range was auto-computed from data."""
         return self._auto_computed
 
     def set_value(self, array, value) -> None:

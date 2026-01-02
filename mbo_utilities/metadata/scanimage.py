@@ -1,5 +1,5 @@
 """
-scanimage.py
+scanimage.py.
 
 Functions to detect acquisition parameters from ScanImage metadata,
 including stack type, color channels, and timepoints.
@@ -520,9 +520,7 @@ def extract_roi_slices(metadata: dict) -> list[dict]:
         if i == len(heights_from_metadata) - 1:
             height = remaining_height
         else:
-            height = int(
-                round(metadata_height * total_available_height / total_metadata_height)
-            )
+            height = round(metadata_height * total_available_height / total_metadata_height)
             remaining_height -= height
         actual_heights.append(height)
 

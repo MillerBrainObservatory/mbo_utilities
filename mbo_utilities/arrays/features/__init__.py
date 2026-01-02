@@ -81,59 +81,59 @@ from mbo_utilities.arrays.features._stats import (
 )
 
 __all__ = [
-    # base
-    "ArrayFeature",
-    "ArrayFeatureEvent",
-    # dim labels
-    "DimLabels",
-    "DimLabelsMixin",
+    "CHUNKS_2D",
+    "CHUNKS_3D",
+    "CHUNKS_4D",
     "DEFAULT_DIMS",
     "DIM_DESCRIPTIONS",
     "KNOWN_ORDERINGS",
-    "parse_dims",
-    "get_dims",
-    "get_num_planes",
-    "get_slider_dims",
-    "get_dim_index",
-    "infer_dims",
-    # voxel size
-    "VoxelSizeFeature",
-    "VoxelSizeMixin",
-    "get_voxel_size_from_metadata",
-    # frame rate
-    "FrameRateFeature",
-    "FrameRateMixin",
-    # display range
-    "DisplayRange",
-    "DisplayRangeFeature",
-    # roi
-    "ROIFeature",
-    "RoiFeatureMixin",
-    # dtype
-    "DataTypeFeature",
+    # base
+    "ArrayFeature",
+    "ArrayFeatureEvent",
+    # chunks
+    "ChunkSizeFeature",
     # compression
     "Codec",
     "CompressionFeature",
     "CompressionSettings",
-    # chunks
-    "ChunkSizeFeature",
-    "CHUNKS_2D",
-    "CHUNKS_3D",
-    "CHUNKS_4D",
-    "normalize_chunks",
-    "estimate_chunk_memory",
-    # stats
-    "StatsFeature",
-    "SliceStats",
-    # backwards compat aliases
-    "ZStatsFeature",
-    "PlaneStats",
+    # dtype
+    "DataTypeFeature",
+    # dim labels
+    "DimLabels",
+    "DimLabelsMixin",
+    # display range
+    "DisplayRange",
+    "DisplayRangeFeature",
+    # frame rate
+    "FrameRateFeature",
+    "FrameRateMixin",
+    "PhaseCorrMethod",
     # phase correction
     "PhaseCorrectionFeature",
     "PhaseCorrectionMixin",
-    "PhaseCorrMethod",
+    "PlaneStats",
+    # roi
+    "ROIFeature",
+    "RoiFeatureMixin",
     # segmentation
     "SegmentationMixin",
+    "SliceStats",
+    # stats
+    "StatsFeature",
+    # voxel size
+    "VoxelSizeFeature",
+    "VoxelSizeMixin",
+    # backwards compat aliases
+    "ZStatsFeature",
+    "estimate_chunk_memory",
+    "get_dim_index",
+    "get_dims",
+    "get_num_planes",
+    "get_slider_dims",
+    "get_voxel_size_from_metadata",
+    "infer_dims",
     "masks_to_stat",
+    "normalize_chunks",
+    "parse_dims",
     "stat_to_masks",
 ]

@@ -8,7 +8,6 @@ Presents data in TZYX format.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
@@ -23,6 +22,10 @@ from mbo_utilities.file_io import HAS_ZARR, logger
 from mbo_utilities.arrays.suite2p import _add_suite2p_labels
 from mbo_utilities.metadata import _build_ome_metadata, get_param, get_voxel_size
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = log.get("arrays.zarr")
 
@@ -102,7 +105,7 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
         try:
             import zarr
         except ImportError:
-            logger.error(
+            logger.exception(
                 "zarr is not installed. Install with `uv pip install zarr>=3.1.3`."
             )
             raise
@@ -126,7 +129,7 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
             if isinstance(z, zarr.Group):
                 if "0" not in z:
                     # get store path for error message (zarr v3 uses .root)
-                    store_path = getattr(z.store, 'root', getattr(z.store, 'path', self.filenames[i]))
+                    store_path = getattr(z.store, "root", getattr(z.store, "path", self.filenames[i]))
                     raise ValueError(
                         f"OME-Zarr group missing '0' array in {store_path}"
                     )
@@ -164,12 +167,11 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
 
         # ensure critical keys are present
         md["dtype"] = self.dtype
-        if "num_timepoints" not in md:
-            if self.zs:
-                tp = int(self.zs[0].shape[0])
-                md["num_timepoints"] = tp
-                md["nframes"] = tp  # suite2p alias
-                md["num_frames"] = tp  # legacy alias
+        if "num_timepoints" not in md and self.zs:
+            tp = int(self.zs[0].shape[0])
+            md["num_timepoints"] = tp
+            md["nframes"] = tp  # suite2p alias
+            md["num_frames"] = tp  # legacy alias
 
         return md
 
@@ -259,14 +261,13 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
         first_shape = self.zs[0].shape
         if len(first_shape) == 4:
             return first_shape
-        elif len(first_shape) == 3:
+        if len(first_shape) == 3:
             t, h, w = first_shape
             return t, len(self.zs), h, w
-        else:
-            raise ValueError(
-                f"Unexpected zarr shape: {first_shape}. "
-                f"Expected 3D (T, H, W) or 4D (T, Z, H, W)"
-            )
+        raise ValueError(
+            f"Unexpected zarr shape: {first_shape}. "
+            f"Expected 3D (T, H, W) or 4D (T, Z, H, W)"
+        )
 
     @property
     def dtype(self):
@@ -280,7 +281,7 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
 
     def _compute_frame_vminmax(self):
         """Compute vmin/vmax from first frame (frame 0, plane 0)."""
-        if not hasattr(self, '_cached_vmin'):
+        if not hasattr(self, "_cached_vmin"):
             frame = self[0, 0] if self.ndim == 4 else self[0]
             frame = np.asarray(frame)
             self._cached_vmin = float(frame.min())
@@ -331,8 +332,7 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
             if isinstance(idx, list) and len(idx) > 0:
                 if all(idx[i] + 1 == idx[i + 1] for i in range(len(idx) - 1)):
                     return slice(idx[0], idx[-1] + 1)
-                else:
-                    return np.array(idx)
+                return np.array(idx)
             return idx
 
         t_key = normalize(t_key)
@@ -359,7 +359,7 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
         else:
             if isinstance(z_key, slice):
                 z_indices = range(len(self.zs))[z_key]
-            elif isinstance(z_key, np.ndarray) or isinstance(z_key, list):
+            elif isinstance(z_key, (np.ndarray, list)):
                 z_indices = z_key
             else:
                 z_indices = range(len(self.zs))
@@ -397,7 +397,7 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
     def save(self, outpath, **kwargs):
         """
         Save array to disk.
-        
+
         Parameters
         ----------
         outpath : str | Path

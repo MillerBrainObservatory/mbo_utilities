@@ -149,48 +149,48 @@ def register_all_pipelines() -> None:
 
 
 __all__ = [
+    "CHUNKS_3D",
+    "CHUNKS_4D",
+    "BinArray",
+    "CalibrationArray",
+    "H5Array",
+    "IsoviewArray",
+    "LBMArray",
+    "MBOTiffArray",
+    "MboRawArray",  # backwards compat alias
+    "NWBArray",
+    "NumpyArray",
+    "PiezoArray",
+    # ROI mixin
+    "RoiFeatureMixin",
+    "ScanImageArray",
+    "SinglePlaneArray",
     # Array classes
     "Suite2pArray",
-    "H5Array",
     "TiffArray",
-    "MBOTiffArray",
-    "ScanImageArray",
-    "LBMArray",
-    "PiezoArray",
-    "CalibrationArray",
-    "SinglePlaneArray",
-    "MboRawArray",  # backwards compat alias
-    "NumpyArray",
-    "NWBArray",
     "ZarrArray",
-    "BinArray",
-    "IsoviewArray",
+    "_axes_or_guess",
+    "_build_output_path",
+    "_extract_tiff_plane_number",
+    "_imwrite_base",
+    "_normalize_planes",
+    "_safe_get_metadata",
+    "_sanitize_suffix",
+    "_to_tzyx",
+    # Features subpackage
+    "features",
     # Suite2p helpers
     "find_suite2p_plane_dirs",
     # TIFF helpers
     "find_tiff_plane_files",
+    "iter_rois",
+    "normalize_roi",
     "open_scanimage",
-    "_extract_tiff_plane_number",
-    # Registration
-    "validate_s3d_registration",
+    # Pipeline registration
+    "register_all_pipelines",
     "register_zplanes_s3d",
     # Helpers
     "supports_roi",
-    "normalize_roi",
-    "iter_rois",
-    "_normalize_planes",
-    "_build_output_path",
-    "_imwrite_base",
-    "_to_tzyx",
-    "_axes_or_guess",
-    "_safe_get_metadata",
-    "_sanitize_suffix",
-    "CHUNKS_3D",
-    "CHUNKS_4D",
-    # Pipeline registration
-    "register_all_pipelines",
-    # Features subpackage
-    "features",
-    # ROI mixin
-    "RoiFeatureMixin",
+    # Registration
+    "validate_s3d_registration",
 ]

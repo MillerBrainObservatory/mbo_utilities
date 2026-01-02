@@ -23,51 +23,51 @@ except PackageNotFoundError:
 
 # Define what's available for lazy loading
 __all__ = [
-    # Core I/O
-    "imread",
-    "imwrite",
     "MBO_SUPPORTED_FTYPES",
-    # File utilities
-    "get_mbo_dirs",
-    "files_to_dask",
-    "get_files",
-    "expand_paths",
-    "load_ops",
-    "write_ops",
-    "merge_zarr_zplanes",
-    # Metadata
-    "is_raw_scanimage",
-    "get_metadata",
-    "get_voxel_size",
-    "normalize_resolution",
     "VoxelSize",
-    # Pipeline registry
-    "get_all_pipelines",
-    "get_pipeline_info",
-    "get_all_input_patterns",
-    "get_all_output_patterns",
-    "get_all_marker_files",
-    # Preferences
-    "get_recent_files",
     "add_recent_file",
-    "get_last_open_dir",
-    "set_last_open_dir",
-    "get_last_save_dir",
-    "set_last_save_dir",
-    # Utilities
-    "norm_minmax",
-    "smooth_data",
-    "is_running_jupyter",
-    "is_imgui_installed",
-    "subsample_array",
-    # Visualization
-    "to_video",
     # CLI utilities
     "download_file",
     "download_notebook",
+    "expand_paths",
+    "files_to_dask",
+    "get_all_input_patterns",
+    "get_all_marker_files",
+    "get_all_output_patterns",
+    # Pipeline registry
+    "get_all_pipelines",
+    "get_files",
+    "get_last_open_dir",
+    "get_last_save_dir",
+    # File utilities
+    "get_mbo_dirs",
+    "get_metadata",
+    "get_pipeline_info",
+    # Preferences
+    "get_recent_files",
+    "get_voxel_size",
+    # Core I/O
+    "imread",
+    "imwrite",
+    "is_imgui_installed",
+    # Metadata
+    "is_raw_scanimage",
+    "is_running_jupyter",
+    "load_ops",
+    "merge_zarr_zplanes",
+    # Utilities
+    "norm_minmax",
+    "normalize_resolution",
+    "select_files",
     # File/folder selection (GUI)
     "select_folder",
-    "select_files",
+    "set_last_open_dir",
+    "set_last_save_dir",
+    "smooth_data",
+    "subsample_array",
+    # Visualization
+    "to_video",
+    "write_ops",
 ]
 
 

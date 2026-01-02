@@ -4,7 +4,7 @@ from skimage.registration import phase_cross_correlation
 
 
 def snr_roi(data, y0, y1, x0, x1):
-    """Higher = Better"""
+    """Higher = Better."""
     roi = data[:, y0:y1, x0:x1]
     mean_signal = np.mean(roi)
     noise = np.std(roi)
@@ -12,7 +12,7 @@ def snr_roi(data, y0, y1, x0, x1):
 
 
 def mean_row_misalignment(data):
-    """Lower is better"""
+    """Lower is better."""
     offsets = []
     for frame in data:
         even = frame[::2]
@@ -64,7 +64,7 @@ def frame_correlations(data, subsample: int = 1):
 
     if data.ndim == 4:
         # (t, z, y, x) - compute per z-plane
-        t, z, y, x = data.shape
+        t, z, _y, _x = data.shape
         correlations = np.zeros((t - 1, z), dtype=np.float32)
         for zi in range(z):
             plane = data[:, zi, ::subsample, ::subsample]
@@ -74,7 +74,7 @@ def frame_correlations(data, subsample: int = 1):
                 correlations[i, zi] = np.corrcoef(f1, f2)[0, 1]
         return correlations
 
-    elif data.ndim == 3:
+    if data.ndim == 3:
         # (t, y, x)
         t = data.shape[0]
         if subsample > 1:
@@ -86,8 +86,7 @@ def frame_correlations(data, subsample: int = 1):
             correlations[i] = np.corrcoef(f1, f2)[0, 1]
         return correlations
 
-    else:
-        raise ValueError(f"Expected 3D or 4D array, got {data.ndim}D")
+    raise ValueError(f"Expected 3D or 4D array, got {data.ndim}D")
 
 
 def detect_dropped_frames(
@@ -147,9 +146,9 @@ def detect_dropped_frames(
     dropped_indices = low_corr_indices + 1
 
     return {
-        'correlations': correlations,
-        'dropped_indices': dropped_indices,
-        'threshold': threshold,
-        'mean_corr': mean_corr,
-        'std_corr': std_corr,
+        "correlations": correlations,
+        "dropped_indices": dropped_indices,
+        "threshold": threshold,
+        "mean_corr": mean_corr,
+        "std_corr": std_corr,
     }

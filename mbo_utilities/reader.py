@@ -10,7 +10,6 @@ from __future__ import annotations
 import inspect
 from functools import lru_cache
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
@@ -29,13 +28,16 @@ from mbo_utilities.arrays import (
     open_scanimage,
 )
 from mbo_utilities.metadata import has_mbo_metadata, is_raw_scanimage
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = log.get("reader")
 
 MBO_SUPPORTED_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy"]
 
 # Re-export PIPELINE_TAGS for backward compatibility (canonical location is file_io.py)
-from mbo_utilities.file_io import PIPELINE_TAGS
 
 
 @lru_cache(maxsize=32)
@@ -59,13 +61,12 @@ def _get_init_params(cls: type) -> set[str]:
     try:
         sig = inspect.signature(cls.__init__)
         # Exclude 'self' and collect all parameter names
-        params = {
+        return {
             name
             for name, param in sig.parameters.items()
             if name != "self" and param.kind
             not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
         }
-        return params
     except (ValueError, TypeError):
         # Fallback for classes without inspectable __init__
         return set()
@@ -135,7 +136,6 @@ def imread(
         return inputs
 
     if "isoview" in kwargs.items():
-        print("Isoview!")
         return IsoviewArray(inputs)
 
     if isinstance(inputs, (str, Path)):
@@ -236,9 +236,8 @@ def imread(
         if len(paths) == 1 and paths[0].suffix.lower() == ".bin":
             logger.debug(f"Ops.npy detected - reading specific binary {paths[0]}.")
             return Suite2pArray(paths[0])
-        else:
-            logger.debug(f"Ops.npy detected - reading from {ops_file}.")
-            return Suite2pArray(ops_file)
+        logger.debug(f"Ops.npy detected - reading from {ops_file}.")
+        return Suite2pArray(ops_file)
 
     exts = {p.suffix.lower() for p in paths}
     first = paths[0]
@@ -252,7 +251,7 @@ def imread(
 
     if first.suffix in [".tif", ".tiff"]:
         if is_raw_scanimage(first):
-            logger.debug(f"Detected raw ScanImage TIFFs, using open_scanimage for auto-detection.")
+            logger.debug("Detected raw ScanImage TIFFs, using open_scanimage for auto-detection.")
             return open_scanimage(files=paths, **_filter_kwargs(MboRawArray, kwargs))
 
         # Check if list of files represents multiple distinct planes
@@ -260,14 +259,14 @@ def imread(
             plane_nums = { _extract_tiff_plane_number(p.name) for p in paths }
             plane_nums.discard(None)
             if len(plane_nums) > 1:
-                logger.debug(f"Detected multiple planes in file list, loading as volumetric TiffArray.")
+                logger.debug("Detected multiple planes in file list, loading as volumetric TiffArray.")
                 # We use TiffArray because it handles Z-plane assembly from grouped files
                 return TiffArray(paths, **_filter_kwargs(TiffArray, kwargs))
 
         if has_mbo_metadata(first):
-            logger.debug(f"Detected MBO TIFFs, loading as MBOTiffArray.")
+            logger.debug("Detected MBO TIFFs, loading as MBOTiffArray.")
             return MBOTiffArray(paths, **_filter_kwargs(MBOTiffArray, kwargs))
-        logger.debug(f"Loading TIFF files as TiffArray.")
+        logger.debug("Loading TIFF files as TiffArray.")
         return TiffArray(paths, **_filter_kwargs(TiffArray, kwargs))
 
     if first.suffix == ".bin":
@@ -281,8 +280,8 @@ def imread(
             return Suite2pArray(npy_file)
 
         raise ValueError(
-            f"Cannot read .bin file without ops.npy or shape parameter. "
-            f"Provide shape=(nframes, Ly, Lx) as kwarg or ensure ops.npy exists."
+            "Cannot read .bin file without ops.npy or shape parameter. "
+            "Provide shape=(nframes, Ly, Lx) as kwarg or ensure ops.npy exists."
         )
 
     if first.suffix == ".h5":
@@ -293,7 +292,7 @@ def imread(
         # Case 1: nested zarrs inside
         sub_zarrs = list(first.glob("*.zarr"))
         if sub_zarrs:
-            logger.info(f"Detected nested zarr stores, loading as ZarrArray.")
+            logger.info("Detected nested zarr stores, loading as ZarrArray.")
             return ZarrArray(sub_zarrs, **_filter_kwargs(ZarrArray, kwargs))
 
         # Case 2: flat zarr store with zarr.json
@@ -308,11 +307,10 @@ def imread(
                 if parent.name.startswith("TM"):
                     # Single TM folder
                     return IsoviewArray(parent)
-                else:
-                    # The zarr file IS the isoview structure (single timepoint)
-                    return IsoviewArray(parent)
+                # The zarr file IS the isoview structure (single timepoint)
+                return IsoviewArray(parent)
 
-            logger.info(f"Detected zarr.json, loading as ZarrArray.")
+            logger.info("Detected zarr.json, loading as ZarrArray.")
             return ZarrArray(paths, **_filter_kwargs(ZarrArray, kwargs))
 
         raise ValueError(

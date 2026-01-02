@@ -72,7 +72,7 @@ class H5Array(ReductionMixin):
     >>> frame = arr[0]  # Get first frame
     """
 
-    def __init__(self, filenames: Path | str, dataset: str = None):
+    def __init__(self, filenames: Path | str, dataset: str | None = None):
         self.filenames = Path(filenames)
         self._f = h5py.File(self.filenames, "r")
 
@@ -121,7 +121,7 @@ class H5Array(ReductionMixin):
 
     def _compute_frame_vminmax(self):
         """Compute vmin/vmax from first frame (frame 0, plane 0)."""
-        if not hasattr(self, '_cached_vmin'):
+        if not hasattr(self, "_cached_vmin"):
             frame = self[0, 0] if self.ndim == 4 else self[0]
             frame = np.asarray(frame)
             self._cached_vmin = float(frame.min())
@@ -150,14 +150,14 @@ class H5Array(ReductionMixin):
         # infer from shape based on data dimensionality
         if self.ndim >= 4:  # (T, Z, Y, X) - volumetric time series
             return int(self.shape[1])
-        elif self.ndim == 3:  # (T, Y, X) - single plane time series
+        if self.ndim == 3:  # (T, Y, X) - single plane time series
             return 1
-        elif self.ndim == 1:
+        if self.ndim == 1:
             # special case: pollen scan_corrections (nc,)
             if self.dataset_name == "scan_corrections":
                 return int(self.shape[0])
             return 1
-        elif self.ndim == 2:  # (Y, X) - single frame
+        if self.ndim == 2:  # (Y, X) - single frame
             return 1
 
         return 1

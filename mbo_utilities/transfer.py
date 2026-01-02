@@ -39,33 +39,22 @@ def main():
 
     dst_root = Path(args.dst)
     if not dst_root.exists():
-        print(f"Creating destination root: {dst_root}")
         dst_root.mkdir(parents=True, exist_ok=True)
 
     results = []
     for src_str in args.src:
         src = Path(src_str).resolve()
         if not src.exists() or not src.is_dir():
-            print(f"Skipping missing folder: {src}")
             continue
 
-        print(f"Copying {src} → {dst_root / src.name}")
         metrics = copy_dir(src, dst_root / src.name)
         results.append(metrics)
-        print(
-            f"{metrics['name']}: {metrics['size_mb']:.1f} MB in "
-            f"{metrics['elapsed']:.2f}s ({metrics['mbps']:.1f} MB/s)"
-        )
 
-    print("\nSummary:")
     total_mb = sum(m["size_mb"] for m in results)
     total_time = sum(m["elapsed"] for m in results)
-    avg_mbps = total_mb / total_time if total_time > 0 else 0
-    for m in results:
-        print(
-            f"  {m['name']:<15} {m['size_mb']:8.1f} MB  {m['elapsed']:8.2f}s  {m['mbps']:6.1f} MB/s"
-        )
-    print(f"\nTotal: {total_mb:.1f} MB in {total_time:.2f}s (avg {avg_mbps:.1f} MB/s)")
+    total_mb / total_time if total_time > 0 else 0
+    for _m in results:
+        pass
 
 
 if __name__ == "__main__":

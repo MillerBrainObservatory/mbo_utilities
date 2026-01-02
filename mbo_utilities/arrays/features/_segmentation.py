@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 import numpy as np
 from pathlib import Path
-from tqdm import tqdm
 from mbo_utilities import log
 
 logger = log.get("arrays.features.segmentation")
@@ -137,7 +136,7 @@ class SegmentationMixin:
         self,
         diameter: float | None = None,
         model_type: str = "cyto3",
-        channels: list[int] = [0, 0],
+        channels: list[int] | None = None,
         flow_threshold: float = 0.4,
         batch_size: int = 8,
         time_index: int | None = 0,
@@ -169,6 +168,8 @@ class SegmentationMixin:
         -------
         masks, flows, styles, diams
         """
+        if channels is None:
+            channels = [0, 0]
         try:
             from cellpose import models
         except ImportError:
@@ -295,7 +296,6 @@ class SegmentationMixin:
             Name of label dataset (default '0').
         """
         import zarr
-        from zarr.codecs import BytesCodec, GzipCodec
 
         # Resolve masks
         if masks is None and stat is not None:
@@ -322,7 +322,6 @@ class SegmentationMixin:
             root = output_path
 
         labels_grp = root.require_group("labels")
-        print(f"DEBUG: Zarr version: {zarr.__version__}")
 
         # Resolve store
         if hasattr(root, "store"):
@@ -363,7 +362,7 @@ class SegmentationMixin:
 
         # Metadata
         labels_grp.attrs["labels"] = list(
-            set(labels_grp.attrs.get("labels", []) + [name])
+            {*labels_grp.attrs.get("labels", []), name}
         )
 
         ds.attrs["image-label"] = {
@@ -432,7 +431,6 @@ class SegmentationMixin:
 
         img_path = output_dir / f"{name}.tif"
         tifffile.imwrite(img_path, img)
-        msg_img = f"Saved image to {img_path}"
 
         # 2. Prepare Masks
         if masks is None and stat is not None:

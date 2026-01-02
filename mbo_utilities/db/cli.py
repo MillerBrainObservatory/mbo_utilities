@@ -14,7 +14,6 @@ logger = log.get("db.cli")
 @click.group("db")
 def db_cli():
     """Dataset database management commands."""
-    pass
 
 
 @db_cli.command("scan")
@@ -23,7 +22,6 @@ def db_cli():
 @click.option("--verbose", "-v", is_flag=True, help="Show verbose output")
 def scan_cmd(path: str, recursive: bool, verbose: bool):
     """Scan a directory and index datasets."""
-    from pathlib import Path
     from mbo_utilities.db.database import scan_directory
 
     click.echo(f"Scanning {path}...")
@@ -125,12 +123,12 @@ def info_cmd(dataset_id: int):
     children = get_children(dataset.id)
 
     if parents:
-        click.echo(f"\n  Derived from:")
+        click.echo("\n  Derived from:")
         for p in parents:
             click.echo(f"    - [{p.id}] {p.name}")
 
     if children:
-        click.echo(f"\n  Processed to:")
+        click.echo("\n  Processed to:")
         for c in children:
             click.echo(f"    - [{c.id}] {c.name}")
 
@@ -194,21 +192,21 @@ def stats_cmd():
     click.echo(f"\nTotal datasets: {stats['total_datasets']}")
 
     # format total size
-    size = stats['total_size_bytes']
+    size = stats["total_size_bytes"]
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if size < 1024:
             click.echo(f"Total size: {size:.1f} {unit}")
             break
         size /= 1024
 
-    if stats['by_pipeline']:
+    if stats["by_pipeline"]:
         click.echo("\nBy pipeline:")
-        for pipeline, count in sorted(stats['by_pipeline'].items()):
+        for pipeline, count in sorted(stats["by_pipeline"].items()):
             click.echo(f"  {pipeline}: {count}")
 
-    if stats['by_status']:
+    if stats["by_status"]:
         click.echo("\nBy status:")
-        for status, count in sorted(stats['by_status'].items()):
+        for status, count in sorted(stats["by_status"].items()):
             click.echo(f"  {status}: {count}")
 
     click.echo()

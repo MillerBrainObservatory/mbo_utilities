@@ -8,19 +8,18 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, Optional
 
 from mbo_utilities import log
-from mbo_utilities.db.models import Dataset, DatasetLink, DatasetStatus, SCHEMA
+from mbo_utilities.db.models import Dataset, DatasetStatus, SCHEMA
 
 logger = log.get("db.database")
 
 # default database path
-_DB_PATH: Optional[Path] = None
+_DB_PATH: Path | None = None
 
 
 def get_db_path() -> Path:
-    """get the database file path (~/mbo/mbo_db.sqlite)."""
+    """Get the database file path (~/mbo/mbo_db.sqlite)."""
     global _DB_PATH
     if _DB_PATH is None:
         from mbo_utilities import get_mbo_dirs
@@ -30,14 +29,14 @@ def get_db_path() -> Path:
 
 
 def set_db_path(path: Path) -> None:
-    """set a custom database path (for testing)."""
+    """Set a custom database path (for testing)."""
     global _DB_PATH
     _DB_PATH = Path(path)
 
 
 @contextmanager
 def get_connection():
-    """get a database connection."""
+    """Get a database connection."""
     db_path = get_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -54,14 +53,14 @@ def get_connection():
 
 
 def init_db() -> None:
-    """initialize the database schema."""
+    """Initialize the database schema."""
     with get_connection() as conn:
         conn.executescript(SCHEMA)
     logger.info(f"initialized database at {get_db_path()}")
 
 
 def _row_to_dataset(row: sqlite3.Row) -> Dataset:
-    """convert a database row to a Dataset object."""
+    """Convert a database row to a Dataset object."""
     return Dataset(
         id=row["id"],
         path=row["path"],
@@ -88,7 +87,7 @@ def _row_to_dataset(row: sqlite3.Row) -> Dataset:
 
 
 def upsert_dataset(dataset: Dataset) -> int:
-    """insert or update a dataset, returns the id."""
+    """Insert or update a dataset, returns the id."""
     with get_connection() as conn:
         cursor = conn.execute(
             """
@@ -155,7 +154,7 @@ def scan_directory(
     progress_callback=None,
 ) -> int:
     """
-    scan a directory and add datasets to the database.
+    Scan a directory and add datasets to the database.
 
     Parameters
     ----------
@@ -188,15 +187,15 @@ def scan_directory(
 
 
 def get_datasets(
-    pipeline: Optional[str] = None,
-    status: Optional[DatasetStatus] = None,
-    tag: Optional[str] = None,
-    search: Optional[str] = None,
+    pipeline: str | None = None,
+    status: DatasetStatus | None = None,
+    tag: str | None = None,
+    search: str | None = None,
     limit: int = 1000,
     offset: int = 0,
 ) -> list[Dataset]:
     """
-    get datasets from the database with optional filters.
+    Get datasets from the database with optional filters.
 
     Parameters
     ----------
@@ -247,8 +246,8 @@ def get_datasets(
         return [_row_to_dataset(row) for row in rows]
 
 
-def get_dataset(dataset_id: int) -> Optional[Dataset]:
-    """get a single dataset by id."""
+def get_dataset(dataset_id: int) -> Dataset | None:
+    """Get a single dataset by id."""
     with get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM datasets WHERE id = ?", (dataset_id,)
@@ -256,8 +255,8 @@ def get_dataset(dataset_id: int) -> Optional[Dataset]:
         return _row_to_dataset(row) if row else None
 
 
-def get_dataset_by_path(path: str | Path) -> Optional[Dataset]:
-    """get a dataset by path."""
+def get_dataset_by_path(path: str | Path) -> Dataset | None:
+    """Get a dataset by path."""
     with get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM datasets WHERE path = ?", (str(path),)
@@ -266,7 +265,7 @@ def get_dataset_by_path(path: str | Path) -> Optional[Dataset]:
 
 
 def delete_dataset(dataset_id: int) -> bool:
-    """delete a dataset from the database."""
+    """Delete a dataset from the database."""
     with get_connection() as conn:
         cursor = conn.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
         return cursor.rowcount > 0
@@ -278,7 +277,7 @@ def link_datasets(
     link_type: str = "processed_from",
 ) -> int:
     """
-    create a link between datasets.
+    Create a link between datasets.
 
     Parameters
     ----------
@@ -306,7 +305,7 @@ def link_datasets(
 
 
 def get_children(dataset_id: int) -> list[Dataset]:
-    """get child datasets (processed from this dataset)."""
+    """Get child datasets (processed from this dataset)."""
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -320,7 +319,7 @@ def get_children(dataset_id: int) -> list[Dataset]:
 
 
 def get_parents(dataset_id: int) -> list[Dataset]:
-    """get parent datasets (this was processed from)."""
+    """Get parent datasets (this was processed from)."""
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -334,7 +333,7 @@ def get_parents(dataset_id: int) -> list[Dataset]:
 
 
 def add_tag(dataset_id: int, tag: str) -> None:
-    """add a tag to a dataset."""
+    """Add a tag to a dataset."""
     dataset = get_dataset(dataset_id)
     if dataset:
         dataset.add_tag(tag)
@@ -346,7 +345,7 @@ def add_tag(dataset_id: int, tag: str) -> None:
 
 
 def remove_tag(dataset_id: int, tag: str) -> None:
-    """remove a tag from a dataset."""
+    """Remove a tag from a dataset."""
     dataset = get_dataset(dataset_id)
     if dataset:
         dataset.remove_tag(tag)
@@ -358,7 +357,7 @@ def remove_tag(dataset_id: int, tag: str) -> None:
 
 
 def update_notes(dataset_id: int, notes: str) -> None:
-    """update notes for a dataset."""
+    """Update notes for a dataset."""
     with get_connection() as conn:
         conn.execute(
             "UPDATE datasets SET notes = ? WHERE id = ?",
@@ -367,7 +366,7 @@ def update_notes(dataset_id: int, notes: str) -> None:
 
 
 def get_stats() -> dict:
-    """get database statistics."""
+    """Get database statistics."""
     with get_connection() as conn:
         total = conn.execute("SELECT COUNT(*) FROM datasets").fetchone()[0]
         by_pipeline = dict(

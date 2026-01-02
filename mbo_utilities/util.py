@@ -1,11 +1,12 @@
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike
 
 
 def check():
-    import importlib, pandas as pd
+    import importlib
+    import pandas as pd
 
     rows = []
 
@@ -112,8 +113,7 @@ def check():
         )
 
     df = pd.DataFrame(rows, columns=["component", "ok", "version", "details"])
-    df = df.sort_values("component").reset_index(drop=True)
-    return df
+    return df.sort_values("component").reset_index(drop=True)
 
 
 def smooth_data(data, window_size=5):
@@ -309,7 +309,7 @@ def is_running_jupyter():
 def subsample_array(
     arr: ArrayLike, max_size: int = 1e6, ignore_dims: Sequence[int] | None = None
 ):
-    """
+    r"""
     Subsamples an input array while preserving its relative dimensional proportions.
 
     The dimensions (shape) of the array can be represented as:
@@ -406,8 +406,7 @@ def _process_slice_str(slice_str):
         raise ValueError(f"Expected a string argument, received: {slice_str}")
     if slice_str.isdigit():
         return int(slice_str)
-    else:
-        parts = slice_str.split(":")
+    parts = slice_str.split(":")
     return slice(*[int(p) if p else None for p in parts])
 
 
@@ -416,13 +415,12 @@ def _process_slice_objects(slice_str):
 
 
 def _print_params(params, indent=5):
-    for k, v in params.items():
+    for v in params.values():
         # if value is a dictionary, recursively call the function
         if isinstance(v, dict):
-            print(" " * indent + f"{k}:")
             _print_params(v, indent + 4)
         else:
-            print(" " * indent + f"{k}: {v}")
+            pass
 
 
 def listify_index(index, dim_size):
@@ -432,10 +430,12 @@ def listify_index(index, dim_size):
         index: A single index (integer, slice or list/tuple/array of integers).
         dim_size: Size of the dimension corresponding to the index.
 
-    Returns:
+    Returns
+    -------
         A list of positive integers. List of indices.
 
-    Raises:
+    Raises
+    ------
         TypeError: If index is not either integer, slice, or array.
     """
     if np.issubdtype(type(index), np.signedinteger):
@@ -449,9 +449,7 @@ def listify_index(index, dim_size):
         index_as_list = list(range(start, stop, step))
     else:
         error_msg = (
-            "index {} is not integer, slice or array/list/tuple of integers".format(
-                index
-            )
+            f"index {index} is not integer, slice or array/list/tuple of integers"
         )
         raise TypeError(error_msg)
 
@@ -460,22 +458,20 @@ def listify_index(index, dim_size):
 
 def index_length(index, dim_size):
     """
-    compute length of index without creating full list.
+    Compute length of index without creating full list.
 
     much faster than len(listify_index(...)) for slices.
     """
     if np.issubdtype(type(index), np.signedinteger):
         return 1
-    elif isinstance(index, (list, tuple, np.ndarray)):
+    if isinstance(index, (list, tuple, np.ndarray)):
         return len(index)
-    elif isinstance(index, slice):
+    if isinstance(index, slice):
         start, stop, step = index.indices(dim_size)
         if step > 0:
             return max(0, (stop - start + step - 1) // step)
-        else:
-            return max(0, (start - stop - step - 1) // (-step))
-    else:
-        raise TypeError(f"index {index} is not integer, slice or array")
+        return max(0, (start - stop - step - 1) // (-step))
+    raise TypeError(f"index {index} is not integer, slice or array")
 
 
 def load_npy(path):
@@ -509,18 +505,18 @@ def load_npy(path):
     class CrossPlatformUnpickler(pickle.Unpickler):
         def find_class(self, module, name):
             # Redirect PosixPath/WindowsPath to the current platform's Path
-            if module == 'pathlib':
-                if name in ('PosixPath', 'WindowsPath', 'PurePosixPath', 'PureWindowsPath'):
+            if module == "pathlib":
+                if name in ("PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath"):
                     # Return Path which auto-selects the right type for current platform
                     return pathlib.Path
             return super().find_class(module, name)
 
     # Try loading with cross-platform unpickler first
     try:
-        with open(path, 'rb') as f:
+        with open(path, "rb") as f:
             # Read numpy header to get to the pickle data
             version = np.lib.format.read_magic(f)
-            shape, fortran_order, dtype = np.lib.format._read_array_header(f, version)
+            _shape, _fortran_order, dtype = np.lib.format._read_array_header(f, version)
 
             if dtype.hasobject:
                 # Contains Python objects - use our custom unpickler
@@ -531,17 +527,16 @@ def load_npy(path):
 
                 # Now unpickle the data
                 return CrossPlatformUnpickler(f).load()
-            else:
-                # No objects, can use standard numpy load
-                f.seek(0)
-                return np.load(f, allow_pickle=True)
+            # No objects, can use standard numpy load
+            f.seek(0)
+            return np.load(f, allow_pickle=True)
     except Exception:
         # Fallback: try the old patching method
-        _original_posix = getattr(pathlib, 'PosixPath', None)
-        _original_windows = getattr(pathlib, 'WindowsPath', None)
+        _original_posix = getattr(pathlib, "PosixPath", None)
+        _original_windows = getattr(pathlib, "WindowsPath", None)
 
         try:
-            if sys.platform == 'win32':
+            if sys.platform == "win32":
                 pathlib.PosixPath = pathlib.WindowsPath
             else:
                 pathlib.WindowsPath = pathlib.PosixPath
@@ -557,7 +552,7 @@ def load_npy(path):
 def get_dtype(dtype):
     """
     Ensure input is a valid numpy.dtype object.
-    
+
     This guards against libraries (like Zarr v3) returning string representations ('int16')
     instead of proper dtype objects, which can break downstream code expecting .name attributes.
 
