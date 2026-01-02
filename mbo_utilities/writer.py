@@ -21,7 +21,7 @@ from mbo_utilities.arrays import (
     register_zplanes_s3d,
     validate_s3d_registration,
 )
-from mbo_utilities.metadata import get_param, RoiMode
+from mbo_utilities.metadata import RoiMode, get_param
 from mbo_utilities.util import load_npy
 
 logger = log.get("writer")
@@ -38,7 +38,7 @@ def imwrite(
     roi: int | Sequence[int] | None = None,
     metadata: dict | None = None,
     overwrite: bool = False,
-    order: list | tuple = None,
+    order: list | tuple | None = None,
     target_chunk_mb: int = 100,
     progress_callback: Callable | None = None,
     debug: bool = False,
@@ -399,7 +399,9 @@ def imwrite(
 
     # Add planes info if specified
     if planes is not None:
-        processing_extra["planes"] = list(planes) if hasattr(planes, "__iter__") else planes
+        processing_extra["planes"] = (
+            list(planes) if hasattr(planes, "__iter__") else planes
+        )
 
     # Collect output files
     output_files = None
@@ -428,8 +430,6 @@ def imwrite(
         except AttributeError:
             pass
 
-    logger.debug(
-        f"Processing step recorded: imwrite to {ext} in {write_duration:.2f}s"
-    )
+    logger.debug(f"Processing step recorded: imwrite to {ext} in {write_duration:.2f}s")
 
     return result
