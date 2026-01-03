@@ -47,7 +47,6 @@ from .scanimage import (
 
 # file I/O functions
 from .io import (
-    has_mbo_metadata,
     is_raw_scanimage,
     get_metadata,
     get_metadata_single,
@@ -93,7 +92,6 @@ __all__ = [
     "get_voxel_size",
     "get_z_step_size",
     # file I/O
-    "has_mbo_metadata",
     "is_lbm_stack",
     "is_piezo_stack",
     "is_pollen_stack",

@@ -318,6 +318,29 @@ class TiffArray(ReductionMixin):
     True
     """
 
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by TiffArray.
+
+        Returns True for any valid TIFF file. This is the fallback
+        array type for TIFF files.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is a TIFF file.
+        """
+        if not file:
+            return False
+        path = Path(file)
+        return path.suffix.lower() in (".tif", ".tiff")
+
     def __init__(
         self,
         files: str | Path | list[str] | list[Path],
@@ -682,6 +705,44 @@ class MBOTiffArray(ReductionMixin):
         Dimension labels.
     """
 
+    # Keys that indicate MBO-processed TIFF (in shaped_metadata)
+    _MBO_MARKER_KEYS = {"num_planes", "num_rois", "frame_rate", "Ly", "Lx", "fov", "pixel_resolution"}
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by MBOTiffArray.
+
+        Returns True for TIFF files with MBO-specific shaped_metadata,
+        indicating they were processed/assembled by mbo_utilities.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file has MBO shaped_metadata.
+        """
+        if not file or not isinstance(file, (str, Path)):
+            return False
+        path = Path(file)
+        if path.suffix.lower() not in (".tif", ".tiff"):
+            return False
+        try:
+            with TiffFile(file) as tf:
+                if not hasattr(tf, "shaped_metadata") or tf.shaped_metadata is None:
+                    return False
+                meta = tf.shaped_metadata[0] if tf.shaped_metadata else {}
+                if not isinstance(meta, dict):
+                    return False
+                # Check if any MBO-specific keys are present
+                return bool(cls._MBO_MARKER_KEYS & meta.keys())
+        except Exception:
+            return False
+
     def __init__(
         self,
         filenames: list[Path],
@@ -985,6 +1046,44 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
     stack_type : StackType
         Detected stack type: "lbm", "piezo", or "single_plane".
     """
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by ScanImageArray.
+
+        Returns True for raw ScanImage TIFFs that have scanimage_metadata
+        and no shaped_metadata (indicating unprocessed acquisition data).
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is a raw ScanImage TIFF.
+        """
+        if not file or not isinstance(file, (str, Path)):
+            return False
+        path = Path(file)
+        if path.suffix.lower() not in (".tif", ".tiff"):
+            return False
+        try:
+            with TiffFile(file) as tf:
+                # If shaped_metadata exists, it's a processed file (not raw)
+                if (
+                    hasattr(tf, "shaped_metadata")
+                    and tf.shaped_metadata is not None
+                    and isinstance(tf.shaped_metadata, (list, tuple))
+                    and len(tf.shaped_metadata) > 0
+                ):
+                    return False
+                # Must have ScanImage metadata
+                return tf.scanimage_metadata is not None
+        except Exception:
+            return False
 
     # contextual descriptions for metadata params (shown in GUI tooltips)
     # subclasses can override to provide array-type-specific context
@@ -1632,6 +1731,31 @@ class LBMArray(ScanImageArray):
         If the data is not an LBM stack.
     """
 
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by LBMArray.
+
+        Returns True for raw ScanImage TIFFs with LBM stack type.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is an LBM stack.
+        """
+        if not ScanImageArray.can_open(file):
+            return False
+        try:
+            meta = get_metadata(file)
+            return detect_stack_type(meta) == "lbm"
+        except Exception:
+            return False
+
     METADATA_CONTEXT: dict[str, str] = {
         "Ly": (
             "For LBM with multi-ROIs, this is the total vertical height of all ROI strips "
@@ -1691,6 +1815,31 @@ class PiezoArray(ScanImageArray):
     can_average : bool
         True if frame averaging is possible (not pre-averaged, >1 frame/slice).
     """
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by PiezoArray.
+
+        Returns True for raw ScanImage TIFFs with piezo stack type.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is a piezo stack.
+        """
+        if not ScanImageArray.can_open(file):
+            return False
+        try:
+            meta = get_metadata(file)
+            return detect_stack_type(meta) == "piezo"
+        except Exception:
+            return False
 
     METADATA_CONTEXT: dict[str, str] = {
         "Ly": "Frame height in pixels.",
@@ -1830,6 +1979,31 @@ class SinglePlaneArray(ScanImageArray):
         If the data is not a single-plane acquisition.
     """
 
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by SinglePlaneArray.
+
+        Returns True for raw ScanImage TIFFs with single-plane stack type.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is a single-plane acquisition.
+        """
+        if not ScanImageArray.can_open(file):
+            return False
+        try:
+            meta = get_metadata(file)
+            return detect_stack_type(meta) == "single_plane"
+        except Exception:
+            return False
+
     METADATA_CONTEXT: dict[str, str] = {
         "Ly": "Frame height in pixels.",
         "Lx": "Frame width in pixels.",
@@ -1881,6 +2055,31 @@ class CalibrationArray(ScanImageArray):
     num_beamlets : int
         Number of LBM beamlet channels.
     """
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by CalibrationArray.
+
+        Returns True for raw ScanImage TIFFs with pollen/calibration stack type.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is a pollen/calibration stack.
+        """
+        if not ScanImageArray.can_open(file):
+            return False
+        try:
+            meta = get_metadata(file)
+            return detect_stack_type(meta) == "pollen"
+        except Exception:
+            return False
 
     METADATA_CONTEXT: dict[str, str] = {
         "Ly": "Frame height in pixels.",
