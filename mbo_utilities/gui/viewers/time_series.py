@@ -25,7 +25,13 @@ from typing import TYPE_CHECKING
 from imgui_bundle import imgui, imgui_ctx
 
 from . import BaseViewer
-from mbo_utilities.gui.panels import DebugPanel, ProcessPanel, MetadataPanel
+from mbo_utilities.gui.panels import (
+    DebugPanel,
+    MetadataPanel,
+    PipelinePanel,
+    ProcessPanel,
+    StatsPanel,
+)
 import contextlib
 
 if TYPE_CHECKING:
@@ -102,6 +108,8 @@ class TimeSeriesViewer(BaseViewer):
             self._panels["debug"] = DebugPanel(self)
             self._panels["processes"] = ProcessPanel(self)
             self._panels["metadata"] = MetadataPanel(self)
+            self._panels["stats"] = StatsPanel(self)
+            self._panels["pipeline"] = PipelinePanel(self)
             self._setup_logging()
 
     def _setup_logging(self) -> None:
@@ -272,14 +280,62 @@ class TimeSeriesViewer(BaseViewer):
 
         This is the target architecture for fully-migrated viewers.
         """
+        from mbo_utilities.gui.widgets import (
+            get_supported_widgets,
+            draw_all_widgets,
+        )
+
         self.draw_menu_bar()
 
-        imgui.text("Time Series Viewer")
-        imgui.text("(Direct rendering - implementation in progress)")
+        # Main tab bar
+        if imgui.begin_tab_bar("MainPreviewTabs"):
+            # Preview tab - core preview widgets
+            if imgui.begin_tab_item("Preview")[0]:
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
 
-        # Draw visible panels
-        for panel in self._panels.values():
-            panel.draw()
+                # Get and draw supported widgets for this viewer
+                if not hasattr(self, "_widgets") or self._widgets is None:
+                    self._widgets = get_supported_widgets(self)
+                draw_all_widgets(self, self._widgets)
+
+                imgui.pop_style_var(2)
+                imgui.end_tab_item()
+
+            # Signal Quality tab - z-stats visualization
+            stats_panel = self._panels.get("stats")
+            stats_computed = stats_panel and any(getattr(stats_panel, "_zstats_done", []))
+            imgui.begin_disabled(not stats_computed)
+            if imgui.begin_tab_item("Signal Quality")[0]:
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+
+                with imgui_ctx.begin_child("##StatsContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.none):
+                    if stats_panel:
+                        stats_panel.draw()
+
+                imgui.pop_style_var(2)
+                imgui.end_tab_item()
+            imgui.end_disabled()
+
+            # Run tab - processing pipelines
+            if imgui.begin_tab_item("Run")[0]:
+                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+
+                pipeline_panel = self._panels.get("pipeline")
+                if pipeline_panel:
+                    pipeline_panel.draw()
+
+                imgui.pop_style_var(2)
+                imgui.end_tab_item()
+
+            imgui.end_tab_bar()
+
+        # Draw popup panels (metadata viewer, debug log, process console)
+        self._panels["metadata"].draw()
+        self._panels["debug"].draw()
+        self._panels["processes"].draw()
 
     def draw_menu_bar(self) -> None:
         """Render the menu bar."""
@@ -352,4 +408,10 @@ class TimeSeriesViewer(BaseViewer):
 
     def cleanup(self) -> None:
         """Clean up resources when viewer closes."""
+        # Clean up widgets if using new architecture
+        if hasattr(self, "_widgets") and self._widgets:
+            from mbo_utilities.gui.widgets import cleanup_all_widgets
+            cleanup_all_widgets(self._widgets)
+            self._widgets = None
+
         super().cleanup()

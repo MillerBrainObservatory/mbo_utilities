@@ -16,11 +16,11 @@ import threading
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 
-from imgui_bundle import imgui
+from imgui_bundle import imgui, implot, portable_file_dialogs as pfd
 
 from . import BaseViewer
 from mbo_utilities.gui.panels import DebugPanel, ProcessPanel, MetadataPanel
-from mbo_utilities.gui._imgui_helpers import set_tooltip
+from mbo_utilities.gui._imgui_helpers import set_tooltip, style_seaborn_dark
 from mbo_utilities.metadata import get_param
 from mbo_utilities.metadata.scanimage import (
     get_lbm_ai_sources,
@@ -148,6 +148,15 @@ class PollenCalibrationViewer(BaseViewer):
         self._num_channels = None  # Number of channels (set during manual mode)
         self._max_projections = None  # Max projections for viewing
         self._original_metadata = None  # Store metadata before replacing with numpy array
+
+        # External file loading state
+        self._external_h5_dialog = None  # pfd file dialog for loading external H5
+        self._loaded_external = None     # External calibration data dict
+        self._existing_h5_files = []     # H5 files found in current directory
+
+        # ImPlot comparison popup state
+        self._show_shift_popup = False
+        self._shift_popup_open = False
 
         # Only initialize panels when not using legacy delegation
         if parent is None:
@@ -291,6 +300,20 @@ class PollenCalibrationViewer(BaseViewer):
         if self._manual_mode:
             self._draw_manual_mode()
         else:
+            # Load previous section
+            self._draw_load_previous_section()
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            # Shift preview (only if we have data)
+            self._draw_shift_preview()
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
             self._draw_auto_status()
             imgui.spacing()
             imgui.separator()
@@ -301,19 +324,63 @@ class PollenCalibrationViewer(BaseViewer):
         imgui.pop_style_var()
 
     def _draw_info_section(self):
-        """Draw info panel."""
+        """Draw info panel with meaningful calibration metrics."""
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Pollen Calibration")
         imgui.spacing()
 
         arr = self._get_array()
         if arr is not None:
-            imgui.text(f"Shape: {arr.shape} (Z, C, Y, X)")
-            imgui.text(f"Beamlets: {self.num_beamlets}")
-            imgui.text(f"Z-planes: {self.num_z_planes}")
-            if self._cavity_info and self._cavity_info["is_lbm"]:
-                imgui.text(f"Cavities: {self._cavity_info['num_cavities']}")
+            # Shape info (compact)
+            imgui.text(f"Shape: {arr.shape}")
+            set_tooltip("(Z-piezo, Channels, Y, X)")
+
+            # Core parameters
+            imgui.text(f"Z-step: {self._z_step_um:.2f} um")
+            imgui.text(f"Pixel: {self._pixel_size_um:.3f} um")
+
+            # Get calibration summary data if available
+            summary = self._get_active_calibration_summary()
+            if summary:
+                imgui.spacing()
+                # RMS shifts - key metric
+                if summary.get("rms_dx") is not None and summary.get("rms_dy") is not None:
+                    imgui.text_colored(
+                        imgui.ImVec4(0.6, 0.8, 0.6, 1.0),
+                        f"RMS dX: {summary['rms_dx']:.2f} um"
+                    )
+                    imgui.same_line()
+                    imgui.text_colored(
+                        imgui.ImVec4(0.6, 0.8, 0.6, 1.0),
+                        f"dY: {summary['rms_dy']:.2f} um"
+                    )
+
+                # Fit quality metrics
+                r2 = summary.get("z_fit_r_squared")
+                decay = summary.get("decay_length_um")
+                if r2 is not None or decay is not None:
+                    parts = []
+                    if r2 is not None:
+                        parts.append(f"R\u00b2: {r2:.3f}")
+                    if decay is not None:
+                        parts.append(f"Decay: {decay:.0f} um")
+                    if parts:
+                        imgui.text_colored(
+                            imgui.ImVec4(0.6, 0.7, 0.9, 1.0),
+                            "  ".join(parts)
+                        )
         else:
             imgui.text_disabled("No data loaded")
+
+    def _get_active_calibration_summary(self) -> dict | None:
+        """Get the most recent calibration summary for display."""
+        # Prefer manual if available, then auto, then external
+        if self._calibration_data_manual:
+            return self._calibration_data_manual
+        if self._calibration_data_auto:
+            return self._calibration_data_auto
+        if self._loaded_external:
+            return self._loaded_external
+        return None
 
     def _draw_auto_status(self):
         """Draw automatic calibration status and results for both modes."""
@@ -353,6 +420,14 @@ class PollenCalibrationViewer(BaseViewer):
                 self._load_calibration_data("manual")
             imgui.spacing()
 
+        # External loaded results
+        if self._loaded_external:
+            mode = self._loaded_external.get("calibration_mode", "external")
+            imgui.text_colored(imgui.ImVec4(0.9, 0.6, 0.9, 1.0), f"Loaded: {mode}")
+            if imgui.button("Clear##external"):
+                self._loaded_external = None
+            imgui.spacing()
+
         # Comparison button - appears when both auto and manual are done
         if self._results_auto and self._results_manual:
             imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "Comparison")
@@ -367,6 +442,305 @@ class PollenCalibrationViewer(BaseViewer):
         # Draw popups
         self._draw_image_popup()
         self._draw_results_table()
+        self._draw_shift_comparison_popup()
+
+    def _draw_load_previous_section(self):
+        """Draw UI for loading previous calibration files."""
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.9, 1.0), "Load Previous")
+        imgui.spacing()
+
+        # Scan for existing H5 files if not already done
+        if not self._existing_h5_files:
+            self._scan_existing_h5_files()
+
+        # Show existing files from current dataset directory
+        if self._existing_h5_files:
+            imgui.text_disabled(f"Found {len(self._existing_h5_files)} file(s)")
+            for h5_path in self._existing_h5_files:
+                name = h5_path.name
+                # Truncate long names
+                display_name = name if len(name) < 25 else name[:22] + "..."
+                if imgui.button(display_name):
+                    self._load_h5_file(str(h5_path))
+                set_tooltip(str(h5_path))
+
+        imgui.spacing()
+
+        # Browse for external file
+        if imgui.button("Browse H5..."):
+            fpath = self._get_fpath()
+            start_dir = str(fpath.parent) if fpath else str(Path.home())
+            self._external_h5_dialog = pfd.open_file(
+                "Select Calibration H5",
+                start_dir,
+                ["H5 Files", "*.h5", "All Files", "*"],
+            )
+
+        # Check dialog result
+        if self._external_h5_dialog is not None and self._external_h5_dialog.ready():
+            result = self._external_h5_dialog.result()
+            if result and len(result) > 0:
+                self._load_h5_file(result[0])
+            self._external_h5_dialog = None
+
+    def _scan_existing_h5_files(self):
+        """Scan current file's directory for existing pollen H5 files."""
+        self._existing_h5_files = []
+        fpath = self._get_fpath()
+        if fpath is None:
+            return
+
+        parent_dir = fpath.parent
+        if not parent_dir.exists():
+            return
+
+        # Find pollen calibration H5 files
+        for h5_file in parent_dir.glob("*_pollen_*.h5"):
+            self._existing_h5_files.append(h5_file)
+
+        # Sort by modification time (newest first)
+        self._existing_h5_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+    def _load_h5_file(self, path: str):
+        """Load calibration data from an H5 file."""
+        from mbo_utilities.gui._pollen_analysis import extract_calibration_summary
+
+        summary = extract_calibration_summary(path)
+        if summary:
+            self._loaded_external = summary
+            self._loaded_external["h5_path"] = path
+            self.logger.info(f"Loaded calibration from: {path}")
+        else:
+            self.logger.error(f"Failed to load calibration from: {path}")
+
+    def _draw_shift_preview(self):
+        """Draw small inline XY shift scatter plot preview."""
+        summary = self._get_active_calibration_summary()
+        if not summary:
+            return
+
+        diffx = summary.get("diffx")
+        diffy = summary.get("diffy")
+        if diffx is None or diffy is None:
+            return
+
+        diffx = np.asarray(diffx, dtype=np.float64)
+        diffy = np.asarray(diffy, dtype=np.float64)
+
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.9, 1.0), "X/Y Shifts")
+        imgui.spacing()
+
+        plot_height = 120
+        style_seaborn_dark()
+
+        if implot.begin_plot("##shift_preview", imgui.ImVec2(-1, plot_height)):
+            implot.setup_axes("dX (um)", "dY (um)",
+                              implot.AxisFlags_.auto_fit.value,
+                              implot.AxisFlags_.auto_fit.value)
+
+            # Plot scatter
+            implot.push_style_color(implot.Col_.marker_fill.value, (0.2, 0.6, 0.9, 0.8))
+            implot.plot_scatter("Shifts", diffx, diffy)
+            implot.pop_style_color()
+
+            implot.end_plot()
+
+        # Click to enlarge button
+        if imgui.button("Enlarge", imgui.ImVec2(-1, 0)):
+            self._show_shift_popup = True
+
+    def _draw_shift_comparison_popup(self):
+        """Draw full X/Y shift comparison popup with multiple plots."""
+        if self._show_shift_popup:
+            self._shift_popup_open = True
+            imgui.open_popup("X/Y Shift Analysis")
+            self._show_shift_popup = False
+
+        imgui.set_next_window_size(imgui.ImVec2(700, 550), imgui.Cond_.first_use_ever)
+
+        opened, visible = imgui.begin_popup_modal(
+            "X/Y Shift Analysis",
+            p_open=True if self._shift_popup_open else None,
+            flags=imgui.WindowFlags_.no_saved_settings
+        )
+
+        if opened:
+            if not visible:
+                self._shift_popup_open = False
+                imgui.close_current_popup()
+                imgui.end_popup()
+                return
+
+            style_seaborn_dark()
+
+            # Get data from both sources if available
+            auto_data = self._calibration_data_auto
+            manual_data = self._calibration_data_manual
+            external_data = self._loaded_external
+
+            # Use whatever data is available
+            primary_data = manual_data or auto_data or external_data
+            secondary_data = auto_data if manual_data else external_data
+
+            if not primary_data:
+                imgui.text_disabled("No calibration data available")
+                if imgui.button("Close"):
+                    self._shift_popup_open = False
+                    imgui.close_current_popup()
+                imgui.end_popup()
+                return
+
+            avail = imgui.get_content_region_avail()
+            plot_w = (avail.x - 20) / 2
+            plot_h = (avail.y - 60) / 2
+
+            # Row 1: XY Scatter and dX bar chart
+            self._draw_xy_scatter_plot(primary_data, secondary_data, plot_w, plot_h)
+            imgui.same_line()
+            self._draw_dx_bar_chart(primary_data, secondary_data, plot_w, plot_h)
+
+            # Row 2: dY bar chart and difference plot
+            self._draw_dy_bar_chart(primary_data, secondary_data, plot_w, plot_h)
+            imgui.same_line()
+            self._draw_difference_plot(primary_data, secondary_data, plot_w, plot_h)
+
+            imgui.spacing()
+            if imgui.button("Close", imgui.ImVec2(100, 0)):
+                self._shift_popup_open = False
+                imgui.close_current_popup()
+
+            imgui.end_popup()
+
+    def _draw_xy_scatter_plot(self, primary, secondary, width, height):
+        """Draw XY scatter plot comparing positions."""
+        if implot.begin_plot("XY Positions", imgui.ImVec2(width, height)):
+            implot.setup_axes("X (um)", "Y (um)",
+                              implot.AxisFlags_.auto_fit.value,
+                              implot.AxisFlags_.auto_fit.value)
+
+            # Primary data
+            xs = np.asarray(primary.get("xs_um", primary.get("diffx", [])), dtype=np.float64)
+            ys = np.asarray(primary.get("ys_um", primary.get("diffy", [])), dtype=np.float64)
+            if len(xs) > 0 and len(ys) > 0:
+                mode1 = primary.get("calibration_mode", "primary")
+                implot.push_style_color(implot.Col_.marker_fill.value, (0.0, 0.75, 1.0, 0.8))
+                implot.plot_scatter(mode1.capitalize(), xs, ys)
+                implot.pop_style_color()
+
+            # Secondary data
+            if secondary:
+                xs2 = np.asarray(secondary.get("xs_um", secondary.get("diffx", [])), dtype=np.float64)
+                ys2 = np.asarray(secondary.get("ys_um", secondary.get("diffy", [])), dtype=np.float64)
+                if len(xs2) > 0 and len(ys2) > 0:
+                    mode2 = secondary.get("calibration_mode", "secondary")
+                    implot.push_style_color(implot.Col_.marker_fill.value, (0.4, 1.0, 0.4, 0.8))
+                    implot.plot_scatter(mode2.capitalize(), xs2, ys2)
+                    implot.pop_style_color()
+
+            implot.end_plot()
+
+    def _draw_dx_bar_chart(self, primary, secondary, width, height):
+        """Draw dX per-beamlet bar chart."""
+        if implot.begin_plot("dX per Beamlet", imgui.ImVec2(width, height)):
+            implot.setup_axes("Beam", "dX (um)",
+                              implot.AxisFlags_.auto_fit.value,
+                              implot.AxisFlags_.auto_fit.value)
+
+            dx1 = np.asarray(primary.get("diffx", []), dtype=np.float64)
+            if len(dx1) > 0:
+                x_pos = np.arange(1, len(dx1) + 1, dtype=np.float64)
+                bar_width = 0.35 if secondary else 0.7
+                offset = -bar_width/2 if secondary else 0
+
+                implot.push_style_color(implot.Col_.fill.value, (0.0, 0.75, 1.0, 0.8))
+                implot.plot_bars("Primary", x_pos + offset, dx1, bar_width)
+                implot.pop_style_color()
+
+            if secondary:
+                dx2 = np.asarray(secondary.get("diffx", []), dtype=np.float64)
+                if len(dx2) > 0:
+                    x_pos = np.arange(1, len(dx2) + 1, dtype=np.float64)
+                    implot.push_style_color(implot.Col_.fill.value, (0.4, 1.0, 0.4, 0.8))
+                    implot.plot_bars("Secondary", x_pos + bar_width/2, dx2, bar_width)
+                    implot.pop_style_color()
+
+            implot.end_plot()
+
+    def _draw_dy_bar_chart(self, primary, secondary, width, height):
+        """Draw dY per-beamlet bar chart."""
+        if implot.begin_plot("dY per Beamlet", imgui.ImVec2(width, height)):
+            implot.setup_axes("Beam", "dY (um)",
+                              implot.AxisFlags_.auto_fit.value,
+                              implot.AxisFlags_.auto_fit.value)
+
+            dy1 = np.asarray(primary.get("diffy", []), dtype=np.float64)
+            if len(dy1) > 0:
+                x_pos = np.arange(1, len(dy1) + 1, dtype=np.float64)
+                bar_width = 0.35 if secondary else 0.7
+                offset = -bar_width/2 if secondary else 0
+
+                implot.push_style_color(implot.Col_.fill.value, (0.0, 0.75, 1.0, 0.8))
+                implot.plot_bars("Primary", x_pos + offset, dy1, bar_width)
+                implot.pop_style_color()
+
+            if secondary:
+                dy2 = np.asarray(secondary.get("diffy", []), dtype=np.float64)
+                if len(dy2) > 0:
+                    x_pos = np.arange(1, len(dy2) + 1, dtype=np.float64)
+                    implot.push_style_color(implot.Col_.fill.value, (0.4, 1.0, 0.4, 0.8))
+                    implot.plot_bars("Secondary", x_pos + bar_width/2, dy2, bar_width)
+                    implot.pop_style_color()
+
+            implot.end_plot()
+
+    def _draw_difference_plot(self, primary, secondary, width, height):
+        """Draw difference plot (secondary - primary) with RMS annotation."""
+        if implot.begin_plot("Difference", imgui.ImVec2(width, height)):
+            implot.setup_axes("Beam", "Diff (um)",
+                              implot.AxisFlags_.auto_fit.value,
+                              implot.AxisFlags_.auto_fit.value)
+
+            if secondary:
+                dx1 = np.asarray(primary.get("diffx", []), dtype=np.float64)
+                dy1 = np.asarray(primary.get("diffy", []), dtype=np.float64)
+                dx2 = np.asarray(secondary.get("diffx", []), dtype=np.float64)
+                dy2 = np.asarray(secondary.get("diffy", []), dtype=np.float64)
+
+                n = min(len(dx1), len(dx2), len(dy1), len(dy2))
+                if n > 0:
+                    diff_x = dx2[:n] - dx1[:n]
+                    diff_y = dy2[:n] - dy1[:n]
+                    x_pos = np.arange(1, n + 1, dtype=np.float64)
+
+                    bar_width = 0.35
+                    implot.push_style_color(implot.Col_.fill.value, (1.0, 0.4, 0.4, 0.8))
+                    implot.plot_bars("dX diff", x_pos - bar_width/2, diff_x, bar_width)
+                    implot.pop_style_color()
+
+                    implot.push_style_color(implot.Col_.fill.value, (1.0, 0.67, 0.0, 0.8))
+                    implot.plot_bars("dY diff", x_pos + bar_width/2, diff_y, bar_width)
+                    implot.pop_style_color()
+
+                    # Add zero line
+                    implot.push_style_color(implot.Col_.line.value, (1.0, 1.0, 1.0, 0.5))
+                    zeros = np.zeros_like(x_pos)
+                    implot.plot_line("##zero", x_pos, zeros)
+                    implot.pop_style_color()
+
+                    # Show RMS in annotation
+                    rms_x = np.sqrt(np.mean(diff_x**2))
+                    rms_y = np.sqrt(np.mean(diff_y**2))
+                    implot.annotation(
+                        float(x_pos[-1]), float(max(diff_x.max(), diff_y.max())),
+                        imgui.ImVec4(1, 1, 1, 1),
+                        imgui.ImVec2(-10, -10),
+                        True,
+                        f"RMS: X={rms_x:.2f}, Y={rms_y:.2f}"
+                    )
+            else:
+                imgui.text_disabled("Need two datasets")
+
+            implot.end_plot()
 
     def _draw_manual_button(self):
         """Draw manual calibration button."""
@@ -1085,7 +1459,13 @@ class PollenCalibrationViewer(BaseViewer):
                     "z_step_um": f.attrs.get("z_step_um", 0),
                     "is_lbm": f.attrs.get("is_lbm", False),
                     "num_cavities": f.attrs.get("num_cavities", 1),
-                    "mode": mode,
+                    "calibration_mode": mode,
+                    # Fit quality metrics
+                    "z_fit_r_squared": f.attrs.get("z_fit_r_squared"),
+                    "z_slope_um_per_beam": f.attrs.get("z_slope_um_per_beam"),
+                    "decay_length_um": f.attrs.get("decay_length_um"),
+                    "decay_length_cavity_a_um": f.attrs.get("decay_length_cavity_a_um"),
+                    "decay_length_cavity_b_um": f.attrs.get("decay_length_cavity_b_um"),
                 }
 
                 # Load arrays
@@ -1103,6 +1483,11 @@ class PollenCalibrationViewer(BaseViewer):
                     data["cavity_a"] = f["cavity_a_channels"][:]
                 if "cavity_b_channels" in f:
                     data["cavity_b"] = f["cavity_b_channels"][:]
+
+                # Compute RMS of shifts
+                if "diffx" in data and "diffy" in data:
+                    data["rms_dx"] = float(np.sqrt(np.mean(data["diffx"]**2)))
+                    data["rms_dy"] = float(np.sqrt(np.mean(data["diffy"]**2)))
 
                 # Store in appropriate slot
                 if mode == "auto":
