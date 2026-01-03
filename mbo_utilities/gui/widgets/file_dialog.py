@@ -268,9 +268,24 @@ class FileDialog:
             # Vertical spacing
             imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + hello_imgui.em_size(0.5))
 
-            # Progress bar from callback
+            # Progress bar with centered percentage overlay
             p = getattr(self, "_check_progress", 0.0)
-            imgui.progress_bar(p)
+            pct_text = f"{int(p * 100)}%"
+            imgui.progress_bar(p, imgui.ImVec2(-1, 0), "")
+
+            # Draw percentage text centered on the progress bar
+            bar_min = imgui.get_item_rect_min()
+            bar_max = imgui.get_item_rect_max()
+            bar_center_x = (bar_min.x + bar_max.x) * 0.5
+            bar_center_y = (bar_min.y + bar_max.y) * 0.5
+            text_size = imgui.calc_text_size(pct_text)
+
+            draw_list = imgui.get_window_draw_list()
+            draw_list.add_text(
+                imgui.ImVec2(bar_center_x - text_size.x * 0.5, bar_center_y - text_size.y * 0.5),
+                imgui.get_color_u32(imgui.Col_.text),
+                pct_text
+            )
             return
 
         # version line
