@@ -54,7 +54,7 @@ from mbo_utilities.gui.widgets import get_supported_widgets, draw_all_widgets
 from mbo_utilities import log
 
 # Import modular components
-from mbo_utilities.gui._menu_bar import draw_menu_bar
+from mbo_utilities.gui.widgets.menu_bar import draw_menu_bar
 from mbo_utilities.gui._popups import draw_tools_popups, draw_process_console_popup
 from mbo_utilities.gui._save_as import draw_saveas_popup
 from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts
@@ -147,11 +147,11 @@ class PreviewDataWidget(EdgeWindow):
         self.num_graphics = len(self.image_widget.graphics)
         self.shape = self.image_widget.data[0].shape
 
-        # Determine data type
-        from mbo_utilities.metadata import has_mbo_metadata
+        # Determine data type (ScanImage or processed MBO TIFF)
+        from mbo_utilities.arrays import MBOTiffArray
         self.is_mbo_scan = (
             isinstance(self.image_widget.data[0], ScanImageArray) or
-            has_mbo_metadata(self.fpath) if self.fpath else False
+            (MBOTiffArray.can_open(self.fpath) if self.fpath else False)
         )
         self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
@@ -200,7 +200,7 @@ class PreviewDataWidget(EdgeWindow):
     def _init_suite2p(self):
         """Initialize Suite2p settings."""
         if HAS_SUITE2P:
-            from mbo_utilities.gui.pipeline_widgets import Suite2pSettings
+            from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings
             self.s2p = Suite2pSettings()
         else:
             self.s2p = None
