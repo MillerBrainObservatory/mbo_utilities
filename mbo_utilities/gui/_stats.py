@@ -8,53 +8,17 @@ the ImPlot-based visualization for signal quality analysis.
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING
+from typing import Any
 
 import numpy as np
 from imgui_bundle import imgui, implot
 
-from mbo_utilities.gui._imgui import style_seaborn_dark
-from mbo_utilities.gui._imgui_helpers import set_tooltip
+from mbo_utilities.gui._imgui_helpers import set_tooltip, style_seaborn_dark
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
 from mbo_utilities.reader import imread
 
-if TYPE_CHECKING:
-    from .imgui import PreviewDataWidget
 
-
-def compute_zstats_single_roi(parent: PreviewDataWidget, roi: int, fpath: str):
-    """Compute z-stats for a single ROI."""
-    arr = imread(fpath)
-    if hasattr(arr, "fix_phase"):
-        arr.fix_phase = False
-    if hasattr(arr, "roi"):
-        arr.roi = roi
-
-    stats, means = {"mean": [], "std": [], "snr": []}, []
-    tiff_lock = threading.Lock()
-    for z in range(parent.nz):
-        with tiff_lock:
-            stack = arr[::10, z].astype(np.float32)  # Z, Y, X
-            mean_img = np.mean(stack, axis=0)
-            std_img = np.std(stack, axis=0)
-            snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
-            stats["mean"].append(float(np.mean(mean_img)))
-            stats["std"].append(float(np.mean(std_img)))
-            stats["snr"].append(float(np.mean(snr_img)))
-            means.append(mean_img)
-            parent._zstats_progress[roi - 1] = (z + 1) / parent.nz
-            parent._zstats_current_z[roi - 1] = z
-
-    parent._zstats[roi - 1] = stats
-    means_stack = np.stack(means)
-
-    parent._zstats_means[roi - 1] = means_stack
-    parent._zstats_mean_scalar[roi - 1] = means_stack.mean(axis=(1, 2))
-    parent._zstats_done[roi - 1] = True
-    parent._zstats_running[roi - 1] = False
-
-
-def compute_zstats_single_array(parent: PreviewDataWidget, idx: int, arr):
+def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     """Compute z-stats for a single array."""
     # Check for pre-computed stats in zarr metadata (instant loading)
     # supports both 'stats' (new) and 'zstats' (legacy) properties
@@ -72,9 +36,9 @@ def compute_zstats_single_array(parent: PreviewDataWidget, idx: int, arr):
         for z in [0] if arr.ndim == 3 else range(parent.nz):
             with tiff_lock:
                 stack = (
-                    arr[::10].astype(np.float32)
+                    arr[::10]
                     if arr.ndim == 3
-                    else arr[::10, z].astype(np.float32)
+                    else arr[::10, z]
                 )
                 mean_img = np.mean(stack, axis=0)
                 means.append(mean_img)
@@ -134,7 +98,7 @@ def compute_zstats_single_array(parent: PreviewDataWidget, idx: int, arr):
             parent.logger.debug(f"Could not save z-stats to array metadata: {e}")
 
 
-def compute_zstats(parent: PreviewDataWidget):
+def compute_zstats(parent: Any):
     """Compute z-stats for all graphics/arrays."""
     if not parent.image_widget or not parent.image_widget.data:
         return
@@ -148,7 +112,7 @@ def compute_zstats(parent: PreviewDataWidget):
         ).start()
 
 
-def refresh_zstats(parent: PreviewDataWidget):
+def refresh_zstats(parent: Any):
     """
     Reset and recompute z-stats for all arrays.
 
@@ -192,7 +156,7 @@ def refresh_zstats(parent: PreviewDataWidget):
     compute_zstats(parent)
 
 
-def draw_stats_section(parent: PreviewDataWidget):
+def draw_stats_section(parent: Any):
     """Draw the z-stats visualization section."""
     if not any(parent._zstats_done):
         return
@@ -200,7 +164,6 @@ def draw_stats_section(parent: PreviewDataWidget):
     stats_list = parent._zstats
     is_single_zplane = parent.nz == 1  # Single bar for 1 plane
     is_dual_zplane = parent.nz == 2    # Grouped bars for 2 planes
-    is_multi_zplane = parent.nz > 2    # Line graph for 3+ planes
 
     # Different title for single vs multi z-plane
     if is_single_zplane or is_dual_zplane:
@@ -247,87 +210,67 @@ def draw_stats_section(parent: PreviewDataWidget):
 
     # Check if "Combined" view is selected (only valid if there are multiple arrays)
     has_combined = len(array_labels) > 1 and array_labels[-1] == "Combined"
-    is_combined_selected = has_combined and parent._selected_array == len(array_labels) - 1
+    is_combined = has_combined and parent._selected_array == len(array_labels) - 1
 
-    if is_combined_selected:
-        _draw_combined_stats(parent, stats_list, is_single_zplane, is_dual_zplane, is_multi_zplane)
+    _draw_array_stats(parent, stats_list, is_single_zplane, is_dual_zplane, is_combined)
+
+
+def _draw_array_stats(
+    parent, stats_list, is_single_zplane, is_dual_zplane, is_combined
+):
+    """Draw stats for selected array or combined view."""
+    # Get stats values based on combined or single array mode
+    if is_combined:
+        imgui.text("Stats for Combined graphics")
+        mean_vals = np.mean(
+            [np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0
+        )
+        if len(mean_vals) == 0:
+            return
+        std_vals = np.mean(
+            [np.array(s["std"]) for s in stats_list if s and "std" in s], axis=0
+        )
+        snr_vals = np.mean(
+            [np.array(s["snr"]) for s in stats_list if s and "snr" in s], axis=0
+        )
+        array_idx = None
     else:
-        _draw_single_array_stats(parent, stats_list, is_single_zplane, is_dual_zplane, is_multi_zplane)
+        array_idx = parent._selected_array
+        stats = stats_list[array_idx]
+        if not stats or "mean" not in stats:
+            return
+        imgui.text(f"Stats for graphic {array_idx + 1}")
+        mean_vals = np.array(stats["mean"])
+        std_vals = np.array(stats["std"])
+        snr_vals = np.array(stats["snr"])
+        n = min(len(mean_vals), len(std_vals), len(snr_vals))
+        mean_vals, std_vals, snr_vals = mean_vals[:n], std_vals[:n], snr_vals[:n]
 
-
-def _draw_combined_stats(parent, stats_list, is_single_zplane, is_dual_zplane, is_multi_zplane):
-    """Draw combined stats view."""
-    imgui.text("Stats for Combined graphics")
-    mean_vals = np.mean(
-        [np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0
-    )
-
-    if len(mean_vals) == 0:
-        return
-
-    std_vals = np.mean(
-        [np.array(s["std"]) for s in stats_list if s and "std" in s], axis=0
-    )
-    snr_vals = np.mean(
-        [np.array(s["snr"]) for s in stats_list if s and "snr" in s], axis=0
-    )
-
-    z_vals = np.ascontiguousarray(
-        np.arange(1, len(mean_vals) + 1, dtype=np.float64)
-    )
+    # Convert to contiguous arrays for ImPlot
+    z_vals = np.ascontiguousarray(np.arange(1, len(mean_vals) + 1, dtype=np.float64))
     mean_vals = np.ascontiguousarray(mean_vals, dtype=np.float64)
     std_vals = np.ascontiguousarray(std_vals, dtype=np.float64)
 
-    # For single/dual z-plane, show simplified combined view
-    if is_single_zplane or is_dual_zplane:
-        _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane)
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-        _draw_signal_comparison_chart(parent, mean_vals, is_dual_zplane)
-    else:
-        # Multi-z-plane: show original table and combined plot
-        _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals)
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-        _draw_combined_zplane_plot(parent, z_vals, stats_list)
-
-
-def _draw_single_array_stats(parent, stats_list, is_single_zplane, is_dual_zplane, is_multi_zplane):
-    """Draw stats for a single array."""
-    array_idx = parent._selected_array
-    stats = stats_list[array_idx]
-    if not stats or "mean" not in stats:
-        return
-
-    mean_vals = np.array(stats["mean"])
-    std_vals = np.array(stats["std"])
-    snr_vals = np.array(stats["snr"])
-    n = min(len(mean_vals), len(std_vals), len(snr_vals))
-
-    mean_vals, std_vals, snr_vals = mean_vals[:n], std_vals[:n], snr_vals[:n]
-
-    z_vals = np.ascontiguousarray(np.arange(1, n + 1, dtype=np.float64))
-    mean_vals = np.ascontiguousarray(mean_vals, dtype=np.float64)
-    std_vals = np.ascontiguousarray(std_vals, dtype=np.float64)
-
-    imgui.text(f"Stats for graphic {array_idx + 1}")
-
-    # For single/dual z-plane, show simplified table and visualization
+    # Draw table and chart based on z-plane count
     if is_single_zplane or is_dual_zplane:
         _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, array_idx)
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
-        _draw_signal_metrics_chart(mean_vals, std_vals, snr_vals, is_dual_zplane, array_idx)
+        if is_combined:
+            _draw_signal_comparison_chart(parent, mean_vals, is_dual_zplane)
+        else:
+            _draw_signal_metrics_chart(mean_vals, std_vals, snr_vals, is_dual_zplane, array_idx)
     else:
-        # Multi-z-plane: show original table and line plot
+        # Multi-z-plane: show table and line plot
         _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals, array_idx)
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
-        _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, array_idx)
+        if is_combined:
+            _draw_combined_zplane_plot(parent, z_vals, stats_list)
+        else:
+            _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, array_idx)
 
 
 def _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, array_idx=None):

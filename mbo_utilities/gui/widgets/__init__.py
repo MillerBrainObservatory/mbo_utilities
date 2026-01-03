@@ -14,14 +14,12 @@ to add a new widget:
 import importlib
 import pkgutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui
 
 from mbo_utilities.gui.widgets._base import Widget
-
-if TYPE_CHECKING:
-    from mbo_utilities.gui.imgui import PreviewDataWidget
+from mbo_utilities.gui.widgets.menu_bar import draw_menu_bar, draw_process_status_indicator
 
 # registry of all discovered widget classes
 _WIDGET_CLASSES: list[type[Widget]] = []
@@ -61,7 +59,7 @@ def _discover_widgets() -> None:
     _WIDGET_CLASSES.sort(key=lambda w: w.priority)
 
 
-def get_supported_widgets(parent: "PreviewDataWidget") -> list[Widget]:
+def get_supported_widgets(parent: Any) -> list[Widget]:
     """
     Get all widgets that are supported for the given parent.
 
@@ -84,7 +82,7 @@ def get_supported_widgets(parent: "PreviewDataWidget") -> list[Widget]:
     return supported
 
 
-def draw_all_widgets(parent: "PreviewDataWidget", widgets: list[Widget]) -> None:
+def draw_all_widgets(parent: Any, widgets: list[Widget]) -> None:
     """Draw all supported widgets."""
     for widget in widgets:
         try:
@@ -118,5 +116,7 @@ __all__ = [
     "Widget",
     "cleanup_all_widgets",
     "draw_all_widgets",
+    "draw_menu_bar",
+    "draw_process_status_indicator",
     "get_supported_widgets",
 ]
