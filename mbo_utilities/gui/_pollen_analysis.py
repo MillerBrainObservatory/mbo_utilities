@@ -287,6 +287,8 @@ def analyze_z_positions(ZZ, zoi, order, filepath, cavity_info, mode="auto"):
         )
 
     beam_nums = np.arange(1, n_beams + 1)
+    r_squared = None
+    z_slope = None
     try:
         coeffs = np.polyfit(beam_nums, z_rel, 1)
         poly = np.poly1d(coeffs)
@@ -295,6 +297,7 @@ def analyze_z_positions(ZZ, zoi, order, filepath, cavity_info, mode="auto"):
         ss_res = np.sum((z_rel - y_pred) ** 2)
         ss_tot = np.sum((z_rel - np.mean(z_rel)) ** 2)
         r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+        z_slope = coeffs[0]
 
         x_fit = np.linspace(0, n_beams + 1, 101)
         ax.plot(x_fit, poly(x_fit), "-", color=Colors.WHITE,
@@ -311,6 +314,14 @@ def analyze_z_positions(ZZ, zoi, order, filepath, cavity_info, mode="auto"):
     out_name = f"pollen_{mode}_z_vs_N.png"
     plt.savefig(filepath.with_name(out_name), dpi=150)
     plt.close()
+
+    # Save fit quality to H5 file
+    h5_path = filepath.with_name(filepath.stem + f"_pollen_{mode}.h5")
+    with h5py.File(h5_path, "a") as f:
+        if r_squared is not None:
+            f.attrs["z_fit_r_squared"] = r_squared
+        if z_slope is not None:
+            f.attrs["z_slope_um_per_beam"] = z_slope
 
 
 def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"):
@@ -354,20 +365,27 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"
 
     z_fit_range = DZ * np.linspace(0, nz - 1, 1001)
 
+    # Track decay lengths for saving
+    decay_length_a = None
+    decay_length_b = None
+    decay_length_combined = None
+
     # Fit each cavity
     if len(z1) > 2:
         try:
             popt1, _ = curve_fit(exp_func, z1, p1, p0=(p1.max(), -0.01), maxfev=5000)
+            decay_length_a = abs(1/popt1[1])
             ax.plot(z_fit_range, exp_func(z_fit_range, *popt1), color=Colors.FIT_A,
-                    label=f"Fit C1 (ls = {abs(1/popt1[1]):.0f} um)")
+                    label=f"Fit C1 (ls = {decay_length_a:.0f} um)")
         except Exception:
             pass
 
     if len(z2) > 2:
         try:
             popt2, _ = curve_fit(exp_func, z2, p2, p0=(p2.max(), -0.01), maxfev=5000)
+            decay_length_b = abs(1/popt2[1])
             ax.plot(z_fit_range, exp_func(z_fit_range, *popt2), color=Colors.FIT_B,
-                    label=f"Fit C2 (ls = {abs(1/popt2[1]):.0f} um)")
+                    label=f"Fit C2 (ls = {decay_length_b:.0f} um)")
         except Exception:
             pass
 
@@ -378,8 +396,9 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"
     if len(z_combined) > 2:
         try:
             popt3, _ = curve_fit(exp_func, z_combined, p_combined, p0=(p_combined.max(), -0.01), maxfev=5000)
+            decay_length_combined = abs(1/popt3[1])
             ax.plot(z_fit_range, exp_func(z_fit_range, *popt3), color=Colors.FIT_COMBINED,
-                    label=f"Fit both (ls = {abs(1/popt3[1]):.0f} um)")
+                    label=f"Fit both (ls = {decay_length_combined:.0f} um)")
         except Exception:
             pass
 
@@ -392,6 +411,16 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"
     out_name = f"pollen_{mode}_power_linear.png"
     plt.savefig(filepath.with_name(out_name), dpi=150)
     plt.close()
+
+    # Save decay lengths to H5 file
+    h5_path = filepath.with_name(filepath.stem + f"_pollen_{mode}.h5")
+    with h5py.File(h5_path, "a") as f:
+        if decay_length_a is not None:
+            f.attrs["decay_length_cavity_a_um"] = decay_length_a
+        if decay_length_b is not None:
+            f.attrs["decay_length_cavity_b_um"] = decay_length_b
+        if decay_length_combined is not None:
+            f.attrs["decay_length_um"] = decay_length_combined
 
 
 def plot_z_spacing(ZZ, zoi, order, filepath, mode="auto"):
@@ -614,3 +643,62 @@ def plot_comparison(filepath):
     plt.close()
 
     return True
+
+
+def extract_calibration_summary(h5_path: str) -> dict | None:
+    """Extract key metrics from calibration H5 file for display.
+
+    Parameters
+    ----------
+    h5_path : str
+        Path to the pollen calibration H5 file.
+
+    Returns
+    -------
+    dict or None
+        Dictionary with calibration summary metrics, or None if file not found.
+    """
+    from pathlib import Path
+    h5_path = Path(h5_path)
+    if not h5_path.exists():
+        return None
+
+    try:
+        with h5py.File(h5_path, "r") as f:
+            summary = {
+                "num_beamlets": f.attrs.get("num_planes", 0),
+                "z_step_um": f.attrs.get("z_step_um", 0),
+                "is_lbm": f.attrs.get("is_lbm", False),
+                "num_cavities": f.attrs.get("num_cavities", 1),
+                "calibration_mode": f.attrs.get("calibration_mode", "unknown"),
+                "source_file": f.attrs.get("source_file", ""),
+                # Fit quality metrics
+                "z_fit_r_squared": f.attrs.get("z_fit_r_squared"),
+                "z_slope_um_per_beam": f.attrs.get("z_slope_um_per_beam"),
+                "decay_length_um": f.attrs.get("decay_length_um"),
+                "decay_length_cavity_a_um": f.attrs.get("decay_length_cavity_a_um"),
+                "decay_length_cavity_b_um": f.attrs.get("decay_length_cavity_b_um"),
+            }
+
+            # Compute RMS of shifts if available
+            if "diffx" in f and "diffy" in f:
+                diffx = f["diffx"][:]
+                diffy = f["diffy"][:]
+                summary["rms_dx"] = float(np.sqrt(np.mean(diffx**2)))
+                summary["rms_dy"] = float(np.sqrt(np.mean(diffy**2)))
+                summary["diffx"] = diffx
+                summary["diffy"] = diffy
+            else:
+                summary["rms_dx"] = None
+                summary["rms_dy"] = None
+
+            # Load position arrays if available
+            if "xs_um" in f:
+                summary["xs_um"] = f["xs_um"][:]
+            if "ys_um" in f:
+                summary["ys_um"] = f["ys_um"][:]
+
+            return summary
+
+    except Exception:
+        return None

@@ -487,7 +487,7 @@ def _create_image_widget(data_array, widget: bool = True):
 
     # Add PreviewDataWidget if requested
     if widget:
-        from mbo_utilities.gui.imgui import PreviewDataWidget
+        from mbo_utilities.gui.widgets.preview_data import PreviewDataWidget
 
         gui = PreviewDataWidget(
             iw=iw,

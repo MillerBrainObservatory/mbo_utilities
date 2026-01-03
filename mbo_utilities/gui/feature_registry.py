@@ -18,7 +18,7 @@ Register a feature:
         category="pipeline",
     )
     def draw_suite2p_feature(settings=None, **kwargs):
-        from mbo_utilities.gui.pipeline_widgets import Suite2pSettings, draw_suite2p_settings_panel
+        from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings, draw_suite2p_settings_panel
         settings = settings or Suite2pSettings()
         return draw_suite2p_settings_panel(settings, show_header=True, show_footer=True)
 
@@ -208,7 +208,7 @@ def draw_suite2p_feature(settings=None, **kwargs):
     Suite2pSettings
         The (potentially modified) settings.
     """
-    from mbo_utilities.gui.pipeline_widgets import (
+    from mbo_utilities.gui.widgets.pipelines.settings import (
         Suite2pSettings,
         draw_suite2p_settings_panel,
     )
