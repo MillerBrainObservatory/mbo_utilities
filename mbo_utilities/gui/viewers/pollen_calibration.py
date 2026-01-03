@@ -495,7 +495,7 @@ class PollenCalibrationViewer(BaseViewer):
             return
 
         # Find pollen calibration H5 files
-        for h5_file in parent_dir.glob("*_pollen_*.h5"):
+        for h5_file in parent_dir.glob("*_pollen.h5"):
             self._existing_h5_files.append(h5_file)
 
         # Sort by modification time (newest first)
@@ -1113,7 +1113,7 @@ class PollenCalibrationViewer(BaseViewer):
             self._done = True
             self._results_manual = {
                 "output_dir": str(fpath.parent),
-                "h5_file": str(fpath.with_name(fpath.stem + "_pollen_manual.h5")),
+                "h5_file": str(fpath.with_name(fpath.stem + "_pollen.h5")),
                 "mode": "manual",
             }
             self.logger.info(f"Manual calibration complete! Results saved to {fpath.parent}")
@@ -1204,7 +1204,7 @@ class PollenCalibrationViewer(BaseViewer):
             self._done = True
             self._results_auto = {
                 "output_dir": str(fpath.parent),
-                "h5_file": str(fpath.with_name(fpath.stem + "_pollen_auto.h5")),
+                "h5_file": str(fpath.with_name(fpath.stem + "_pollen.h5")),
                 "mode": "auto",
             }
             self.logger.info(f"Auto calibration complete! Results saved to {fpath.parent}")
@@ -1216,34 +1216,49 @@ class PollenCalibrationViewer(BaseViewer):
             self._processing = False
 
     def _detect_beads(self, vol):
-        """Detect bead positions in each channel."""
+        """Detect bead positions in each channel following beam order.
+
+        Returns positions and z_indices in beam order (matching manual calibration),
+        not raw channel order.
+        """
         _nz, nc, ny, nx = vol.shape
         positions = []
         z_indices = []
+        patch_size = 10
 
-        for c in range(nc):
-            img = vol[:, c, :, :].max(axis=0)
-            threshold = np.percentile(img, 95)
+        # Iterate in beam order so positions match manual calibration order
+        for idx in range(nc):
+            channel = self._beam_order[idx] if idx < len(self._beam_order) else idx
+
+            # Max projection over Z for this channel
+            img = vol[:, channel, :, :].max(axis=0)
+
+            # Find brightest region using adaptive threshold
+            # Use a more robust approach: find peak then refine with centroid
+            threshold = np.percentile(img, 90)
             mask = img > threshold
 
             if mask.sum() > 0:
+                # Find weighted centroid of bright region
                 yy, xx = np.where(mask)
                 weights = img[mask]
                 cx = np.average(xx, weights=weights)
                 cy = np.average(yy, weights=weights)
             else:
-                cx, cy = nx / 2, ny / 2
+                # Fallback: find global maximum
+                peak_idx = np.argmax(img)
+                cy, cx = np.unravel_index(peak_idx, img.shape)
 
             positions.append((cx, cy))
 
+            # Find best Z for this position
             ix, iy = round(cx), round(cy)
-            patch_size = 10
             y0 = max(0, iy - patch_size)
             y1 = min(ny, iy + patch_size + 1)
             x0 = max(0, ix - patch_size)
             x1 = min(nx, ix + patch_size + 1)
 
-            patch = vol[:, c, y0:y1, x0:x1]
+            patch = vol[:, channel, y0:y1, x0:x1]
             smoothed = uniform_filter1d(patch.max(axis=(1, 2)), size=3, mode="nearest")
             best_z = int(np.argmax(smoothed))
             z_indices.append(best_z)
@@ -1441,7 +1456,6 @@ class PollenCalibrationViewer(BaseViewer):
         """Load calibration data from HDF5 file for results table."""
         import h5py
 
-        # Store which mode we're displaying
         self._results_table_mode = mode
 
         results = self._results_auto if mode == "auto" else self._results_manual
@@ -1454,35 +1468,43 @@ class PollenCalibrationViewer(BaseViewer):
 
         try:
             with h5py.File(h5_file, "r") as f:
+                if mode not in f:
+                    self.logger.error(f"Mode '{mode}' not found in H5 file")
+                    return
+
+                # Get shared metadata from root level
                 data = {
                     "num_beamlets": f.attrs.get("num_planes", 0),
                     "z_step_um": f.attrs.get("z_step_um", 0),
                     "is_lbm": f.attrs.get("is_lbm", False),
                     "num_cavities": f.attrs.get("num_cavities", 1),
                     "calibration_mode": mode,
-                    # Fit quality metrics
-                    "z_fit_r_squared": f.attrs.get("z_fit_r_squared"),
-                    "z_slope_um_per_beam": f.attrs.get("z_slope_um_per_beam"),
-                    "decay_length_um": f.attrs.get("decay_length_um"),
-                    "decay_length_cavity_a_um": f.attrs.get("decay_length_cavity_a_um"),
-                    "decay_length_cavity_b_um": f.attrs.get("decay_length_cavity_b_um"),
                 }
 
-                # Load arrays
-                if "diffx" in f:
-                    data["diffx"] = f["diffx"][:]
-                if "diffy" in f:
-                    data["diffy"] = f["diffy"][:]
-                if "xs_um" in f:
-                    data["xs_um"] = f["xs_um"][:]
-                if "ys_um" in f:
-                    data["ys_um"] = f["ys_um"][:]
-                if "scan_corrections" in f:
-                    data["scan_corrections"] = f["scan_corrections"][:]
-                if "cavity_a_channels" in f:
-                    data["cavity_a"] = f["cavity_a_channels"][:]
-                if "cavity_b_channels" in f:
-                    data["cavity_b"] = f["cavity_b_channels"][:]
+                grp = f[mode]
+
+                # Mode-specific fit quality metrics
+                data["z_fit_r_squared"] = grp.attrs.get("z_fit_r_squared")
+                data["z_slope_um_per_beam"] = grp.attrs.get("z_slope_um_per_beam")
+                data["decay_length_um"] = grp.attrs.get("decay_length_um")
+                data["decay_length_cavity_a_um"] = grp.attrs.get("decay_length_cavity_a_um")
+                data["decay_length_cavity_b_um"] = grp.attrs.get("decay_length_cavity_b_um")
+
+                # Load arrays from group
+                if "diffx" in grp:
+                    data["diffx"] = grp["diffx"][:]
+                if "diffy" in grp:
+                    data["diffy"] = grp["diffy"][:]
+                if "xs_um" in grp:
+                    data["xs_um"] = grp["xs_um"][:]
+                if "ys_um" in grp:
+                    data["ys_um"] = grp["ys_um"][:]
+                if "scan_corrections" in grp:
+                    data["scan_corrections"] = grp["scan_corrections"][:]
+                if "cavity_a_channels" in grp:
+                    data["cavity_a"] = grp["cavity_a_channels"][:]
+                if "cavity_b_channels" in grp:
+                    data["cavity_b"] = grp["cavity_b_channels"][:]
 
                 # Compute RMS of shifts
                 if "diffx" in data and "diffy" in data:
