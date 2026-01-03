@@ -8,20 +8,17 @@ metadata viewer, and process console.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui, imgui_ctx, ImVec2
 
-from mbo_utilities.gui._imgui import begin_popup_size
+from mbo_utilities.gui._imgui_helpers import begin_popup_size
 from mbo_utilities.gui._metadata import draw_metadata_inspector
 from mbo_utilities.gui.panels.debug_log import draw_scope
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
 
-if TYPE_CHECKING:
-    from .imgui import PreviewDataWidget
 
-
-def draw_tools_popups(parent: PreviewDataWidget):
+def draw_tools_popups(parent: Any):
     """Draw independent popup windows (Scope, Debug, Metadata)."""
     if parent.show_scope_window:
         size = begin_popup_size()
@@ -64,7 +61,7 @@ def draw_tools_popups(parent: PreviewDataWidget):
         imgui.end()
 
 
-def draw_process_console_popup(parent: PreviewDataWidget):
+def draw_process_console_popup(parent: Any):
     """Draw popup showing process outputs and debug logs."""
     if not hasattr(parent, "_show_process_console"):
         parent._show_process_console = False
@@ -196,7 +193,7 @@ def draw_process_console_popup(parent: PreviewDataWidget):
         imgui.end_popup()
 
 
-def draw_background_processes_section(parent: PreviewDataWidget):
+def draw_background_processes_section(parent: Any):
     """Draw listing of background processes and their logs."""
     pm = get_process_manager()
     pm.cleanup_finished()  # clean up dead processes
