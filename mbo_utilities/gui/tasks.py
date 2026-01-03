@@ -271,7 +271,9 @@ def _suite2p_worker(args):
         )
         return {"status": "success", "plane": ops.get("plane")}
     except Exception as e:
-        return {"status": "error", "plane": ops.get("plane"), "error": str(e)}
+        import traceback
+        tb = traceback.format_exc()
+        return {"status": "error", "plane": ops.get("plane"), "error": str(e), "traceback": tb}
 
 
 def task_suite2p(args: dict, logger: logging.Logger) -> None:
@@ -438,6 +440,8 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
                 if res["status"] == "error":
                     errors += 1
                     logger.error(f"Error in plane {res['plane']}: {res['error']}")
+                    if "traceback" in res:
+                        logger.error(f"Traceback:\n{res['traceback']}")
                 else:
                     completed += 1
             except Exception as e:
