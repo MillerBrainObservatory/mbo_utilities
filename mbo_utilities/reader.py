@@ -16,18 +16,22 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays import (
     BinArray,
+    CalibrationArray,
     H5Array,
     IsoviewArray,
+    LBMArray,
     MBOTiffArray,
     MboRawArray,
     NumpyArray,
+    PiezoArray,
+    ScanImageArray,
+    SinglePlaneArray,
     Suite2pArray,
     TiffArray,
     ZarrArray,
     _extract_tiff_plane_number,
     open_scanimage,
 )
-from mbo_utilities.metadata import has_mbo_metadata, is_raw_scanimage
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -250,24 +254,35 @@ def imread(
         raise ValueError(f"Multiple file types found in input: {exts!r}")
 
     if first.suffix in [".tif", ".tiff"]:
-        if is_raw_scanimage(first):
-            logger.debug("Detected raw ScanImage TIFFs, using open_scanimage for auto-detection.")
-            return open_scanimage(files=paths, **_filter_kwargs(MboRawArray, kwargs))
-
         # Check if list of files represents multiple distinct planes
+        # (this takes priority over type detection - it's a structural choice)
         if len(paths) > 1:
-            plane_nums = { _extract_tiff_plane_number(p.name) for p in paths }
+            plane_nums = {_extract_tiff_plane_number(p.name) for p in paths}
             plane_nums.discard(None)
             if len(plane_nums) > 1:
                 logger.debug("Detected multiple planes in file list, loading as volumetric TiffArray.")
-                # We use TiffArray because it handles Z-plane assembly from grouped files
                 return TiffArray(paths, **_filter_kwargs(TiffArray, kwargs))
 
-        if has_mbo_metadata(first):
-            logger.debug("Detected MBO TIFFs, loading as MBOTiffArray.")
-            return MBOTiffArray(paths, **_filter_kwargs(MBOTiffArray, kwargs))
-        logger.debug("Loading TIFF files as TiffArray.")
-        return TiffArray(paths, **_filter_kwargs(TiffArray, kwargs))
+        # Try array classes in priority order (most specific first)
+        # Each class's can_open() checks if it can handle the file
+        TIFF_ARRAY_CLASSES = [
+            # Specialized ScanImage subclasses (most specific)
+            (LBMArray, "LBM stack"),
+            (PiezoArray, "piezo stack"),
+            (CalibrationArray, "calibration/pollen stack"),
+            (SinglePlaneArray, "single-plane ScanImage"),
+            # Generic ScanImage (raw acquisition data)
+            (ScanImageArray, "raw ScanImage"),
+            # Processed MBO TIFFs
+            (MBOTiffArray, "MBO processed TIFF"),
+            # Fallback (any TIFF)
+            (TiffArray, "generic TIFF"),
+        ]
+
+        for array_cls, description in TIFF_ARRAY_CLASSES:
+            if array_cls.can_open(first):
+                logger.debug(f"Detected {description}, loading as {array_cls.__name__}.")
+                return array_cls(paths, **_filter_kwargs(array_cls, kwargs))
 
     if first.suffix == ".bin":
         if isinstance(inputs, (str, Path)) and Path(inputs).suffix == ".bin":

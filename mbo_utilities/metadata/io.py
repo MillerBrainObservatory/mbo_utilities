@@ -29,7 +29,6 @@ __all__ = [
     "get_metadata_batch",
     "get_metadata_single",
     # file I/O functions
-    "has_mbo_metadata",
     "is_raw_scanimage",
     "query_tiff_pages",
 ]
@@ -74,48 +73,6 @@ def _metadata_from_ops(ops: dict) -> dict:
     }
     # Filter out None values
     return {k: v for k, v in result.items() if v is not None}
-
-
-def has_mbo_metadata(file: os.PathLike | str) -> bool:
-    """
-    Check if a TIFF file has metadata from the Miller Brain Observatory.
-
-    This checks for MBO-specific keys in the shaped_metadata, not just its presence.
-    Generic TIFFs written by tifffile may have shaped_metadata with only a 'shape' key,
-    which is not sufficient to identify them as MBO files.
-
-    MBO-specific keys include: num_planes, num_rois, frame_rate, pixel_resolution,
-    fov, Ly, Lx, etc.
-
-    Parameters
-    ----------
-    file: os.PathLike
-        Path to the TIFF file.
-
-    Returns
-    -------
-    bool
-        True if the TIFF file has MBO metadata; False otherwise.
-    """
-    # Keys that indicate MBO origin (beyond just 'shape' which is generic tifffile)
-    MBO_MARKER_KEYS = {"num_planes", "num_rois", "frame_rate", "Ly", "Lx", "fov", "pixel_resolution"}
-
-    if not file or not isinstance(file, (str, os.PathLike)):
-        return False
-    if Path(file).suffix not in [".tif", ".tiff"]:
-        return False
-    try:
-        with tifffile.TiffFile(file) as tiff_file:
-            if not hasattr(tiff_file, "shaped_metadata") or tiff_file.shaped_metadata is None:
-                return False
-            # shaped_metadata is a tuple of dicts, check the first one
-            meta = tiff_file.shaped_metadata[0] if tiff_file.shaped_metadata else {}
-            if not isinstance(meta, dict):
-                return False
-            # Check if any MBO-specific keys are present
-            return bool(MBO_MARKER_KEYS & meta.keys())
-    except Exception:
-        return False
 
 
 def is_raw_scanimage(file: os.PathLike | str) -> bool:
