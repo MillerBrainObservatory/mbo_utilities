@@ -383,7 +383,7 @@ def capture_suite2p_settings():
 
     from imgui_bundle import imgui, immapp
     from mbo_utilities.gui.feature_registry import get_feature
-    from mbo_utilities.gui.pipeline_widgets import Suite2pSettings
+    from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings
 
     feature = get_feature("suite2p_settings")
     start_time = time.time()
