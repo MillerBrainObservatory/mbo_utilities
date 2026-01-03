@@ -5,7 +5,7 @@ combines processing configuration with a button to view trace quality statistics
 in a separate popup window.
 """
 
-from typing import TYPE_CHECKING
+from typing import Any
 from pathlib import Path
 import time
 
@@ -15,9 +15,6 @@ from imgui_bundle import imgui, portable_file_dialogs as pfd
 from mbo_utilities.gui.widgets.pipelines._base import PipelineWidget
 from mbo_utilities.gui._availability import HAS_SUITE2P
 from mbo_utilities.preferences import get_last_dir, set_last_dir
-
-if TYPE_CHECKING:
-    from mbo_utilities.gui.imgui import PreviewDataWidget
 
 
 # lazy availability check cache
@@ -57,11 +54,11 @@ class Suite2pPipelineWidget(PipelineWidget):
         """Check availability lazily to avoid slow imports at module load."""
         return HAS_SUITE2P and _check_lsp_available()
 
-    def __init__(self, parent: "PreviewDataWidget"):
+    def __init__(self, parent: Any):
         super().__init__(parent)
 
-        # import settings from existing module
-        from mbo_utilities.gui.pipeline_widgets import Suite2pSettings
+        # import settings from settings module
+        from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings
         self.settings = Suite2pSettings()
 
         # config state
@@ -131,7 +128,7 @@ class Suite2pPipelineWidget(PipelineWidget):
 
     def draw_config(self) -> None:
         """Draw suite2p configuration ui."""
-        from mbo_utilities.gui.pipeline_widgets import draw_section_suite2p
+        from mbo_utilities.gui.widgets.pipelines.settings import draw_section_suite2p
 
         self._draw_diagnostics_button()
         imgui.separator()
