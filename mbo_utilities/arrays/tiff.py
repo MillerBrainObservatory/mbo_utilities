@@ -1424,7 +1424,7 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
                         chunk = tf.asarray(key=frame_idx)
                     except Exception as e:
                         raise OSError(
-                            f"MboRawArray: Failed to read pages {frame_idx} from {tf.filename}\n"
+                            f"ScanImageArray: Failed to read pages {frame_idx} from {tf.filename}\n"
                             f"File may be corrupted or incomplete.\n"
                             f": {type(e).__name__}: {e}"
                         ) from e
@@ -1436,7 +1436,7 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
                             c = tf.asarray(key=fi)
                         except Exception as e:
                             raise OSError(
-                                f"MboRawArray: Failed to read page {fi} from {tf.filename}\n"
+                                f"ScanImageArray: Failed to read page {fi} from {tf.filename}\n"
                                 f"File may be corrupted or incomplete.\n"
                                 f": {type(e).__name__}: {e}"
                             ) from e

@@ -21,7 +21,6 @@ from mbo_utilities.arrays import (
     IsoviewArray,
     LBMArray,
     MBOTiffArray,
-    MboRawArray,
     NumpyArray,
     PiezoArray,
     ScanImageArray,

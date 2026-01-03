@@ -29,7 +29,7 @@ class LazyArrayProtocol(Protocol):
     """
     Protocol for lazy array types used in mbo_utilities.
 
-    All array types (MboRawArray, Suite2pArray, ZarrArray, etc.) should implement
+    All array types (ScanImageArray, Suite2pArray, ZarrArray, etc.) should implement
     this protocol to ensure compatibility with imread/imwrite and downstream
     processing pipelines like Suite2p.
 

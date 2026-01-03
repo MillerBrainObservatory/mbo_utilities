@@ -87,7 +87,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "TiffArray": (".tiff", "TiffArray"),
     "MBOTiffArray": (".tiff", "MBOTiffArray"),
     "ScanImageArray": (".tiff", "ScanImageArray"),
-    "MboRawArray": (".tiff", "MboRawArray"),
+    "MboRawArray": (".tiff", "ScanImageArray"),  # backwards compat alias
     "LBMArray": (".tiff", "LBMArray"),
     "PiezoArray": (".tiff", "PiezoArray"),
     "CalibrationArray": (".tiff", "CalibrationArray"),

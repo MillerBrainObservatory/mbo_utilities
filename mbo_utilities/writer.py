@@ -324,7 +324,7 @@ def imwrite(
         else:
             input_files = [str(f) for f in input_files]
 
-    # Extract scan-phase correction parameters if available (MboRawArray)
+    # Extract scan-phase correction parameters if available (ScanImageArray)
     scan_phase_params = {}
     if hasattr(lazy_array, "fix_phase"):
         scan_phase_params["fix_phase"] = getattr(lazy_array, "fix_phase", False)
