@@ -701,7 +701,7 @@ class ScanPhaseAnalyzer:
 
     def run(self, upsample=10, border=4, max_offset=10):
         """Run full analysis."""
-        start = time.time()
+        start = time.perf_counter()
 
         steps = [
             ("per-frame", lambda: self.analyze_per_frame(
@@ -727,7 +727,7 @@ class ScanPhaseAnalyzer:
         for _name, func in tqdm(steps, desc="scan-phase analysis"):
             func()
 
-        self.results.analysis_time = time.time() - start
+        self.results.analysis_time = time.perf_counter() - start
         logger.info(f"complete in {self.results.analysis_time:.1f}s")
         return self.results
 
