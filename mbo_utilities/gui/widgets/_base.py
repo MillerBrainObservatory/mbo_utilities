@@ -11,10 +11,7 @@ or imagewidget's built-in window_funcs/spatial_func apis.
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from mbo_utilities.gui.imgui import PreviewDataWidget
+from typing import Any
 
 
 class Widget(ABC):
@@ -26,12 +23,12 @@ class Widget(ABC):
     # priority for ordering (lower = rendered first)
     priority: int = 100
 
-    def __init__(self, parent: "PreviewDataWidget"):
+    def __init__(self, parent: Any):
         self.parent = parent
 
     @classmethod
     @abstractmethod
-    def is_supported(cls, parent: "PreviewDataWidget") -> bool:
+    def is_supported(cls, parent: Any) -> bool:
         """
         Check if this widget should show for the given parent.
 

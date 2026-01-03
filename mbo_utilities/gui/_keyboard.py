@@ -7,18 +7,15 @@ This module contains keyboard shortcut handling for the PreviewDataWidget.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from mbo_utilities.preferences import get_last_dir
 import contextlib
 
-if TYPE_CHECKING:
-    from .imgui import PreviewDataWidget
 
-
-def handle_keyboard_shortcuts(parent: PreviewDataWidget):
+def handle_keyboard_shortcuts(parent: Any):
     """Handle global keyboard shortcuts."""
     io = imgui.get_io()
 
@@ -89,7 +86,7 @@ def handle_keyboard_shortcuts(parent: PreviewDataWidget):
         pass  # ignore errors during data transitions
 
 
-def handle_arrow_keys(parent: PreviewDataWidget):
+def handle_arrow_keys(parent: Any):
     """Handle arrow key navigation for T and Z dimensions."""
     if not parent.image_widget or not parent.image_widget.data:
         return
