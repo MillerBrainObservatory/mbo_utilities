@@ -5,15 +5,12 @@ pipelines are processing workflows (suite2p, masknmf, etc) that can be
 run on imaging data. each pipeline has config and results views.
 """
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui
 
 from mbo_utilities.gui.widgets.pipelines._base import PipelineWidget
 import contextlib
-
-if TYPE_CHECKING:
-    from mbo_utilities.gui.imgui import PreviewDataWidget
 
 # registry of available pipeline classes
 _PIPELINE_CLASSES: list[type[PipelineWidget]] = []
@@ -56,7 +53,7 @@ def any_pipeline_available() -> bool:
     return any(p.is_available for p in _PIPELINE_CLASSES)
 
 
-def draw_run_tab(parent: "PreviewDataWidget") -> None:
+def draw_run_tab(parent: Any) -> None:
     """
     Draw the run tab content.
 
@@ -120,7 +117,7 @@ def draw_run_tab(parent: "PreviewDataWidget") -> None:
         )
 
 
-def cleanup_pipelines(parent: "PreviewDataWidget") -> None:
+def cleanup_pipelines(parent: Any) -> None:
     """Clean up all pipeline instances when gui is closing.
 
     calls cleanup() on each pipeline to release resources like
@@ -136,11 +133,20 @@ def cleanup_pipelines(parent: "PreviewDataWidget") -> None:
     parent._pipeline_instances.clear()
 
 
+from mbo_utilities.gui.widgets.pipelines.settings import (
+    Suite2pSettings,
+    draw_suite2p_settings_panel,
+    draw_section_suite2p,
+)
+
 __all__ = [
     "PipelineWidget",
+    "Suite2pSettings",
     "any_pipeline_available",
     "cleanup_pipelines",
     "draw_run_tab",
+    "draw_section_suite2p",
+    "draw_suite2p_settings_panel",
     "get_available_pipelines",
     "get_pipeline_names",
 ]
