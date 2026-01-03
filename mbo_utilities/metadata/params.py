@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from .base import METADATA_PARAMS, ALIAS_MAP, VoxelSize
+import contextlib
 
 
 def get_param(
@@ -84,7 +85,7 @@ def get_param(
         return final_default
 
     # check canonical name first, then all aliases
-    keys_to_check = (param.canonical,) + param.aliases
+    keys_to_check = (param.canonical, *param.aliases)
     for key in keys_to_check:
         val = metadata.get(key)
         if val is not None:
@@ -238,10 +239,8 @@ def get_voxel_size(
             default=None,
         )
     if resolved_dz is None and si_dz is not None:
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             resolved_dz = float(si_dz)
-        except (TypeError, ValueError):
-            pass
 
     # for LBM stacks, dz must be user-supplied - no default
     # for non-LBM, default to 1.0 if not found

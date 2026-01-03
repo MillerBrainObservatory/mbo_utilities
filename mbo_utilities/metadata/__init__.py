@@ -47,7 +47,6 @@ from .scanimage import (
 
 # file I/O functions
 from .io import (
-    has_mbo_metadata,
     is_raw_scanimage,
     get_metadata,
     get_metadata_single,
@@ -59,46 +58,45 @@ from .io import (
 )
 
 __all__ = [
-    # base types
-    "MetadataParameter",
-    "VoxelSize",
-    "RoiMode",
-    "METADATA_PARAMS",
     "ALIAS_MAP",
-    "get_canonical_name",
     # imaging metadata (core params for display/editing)
     "IMAGING_METADATA_KEYS",
-    "get_imaging_metadata_info",
-    # parameter access
-    "get_param",
-    "get_voxel_size",
-    "normalize_resolution",
-    "normalize_metadata",
+    "METADATA_PARAMS",
+    # base types
+    "MetadataParameter",
+    "RoiMode",
     # scanimage detection
     "StackType",
+    "VoxelSize",
+    "_build_ome_metadata",
+    "clean_scanimage_metadata",
+    "compute_num_timepoints",
+    "default_ops",
     "detect_stack_type",
+    "extract_roi_slices",
+    "get_canonical_name",
+    "get_frame_rate",
+    "get_frames_per_slice",
+    "get_imaging_metadata_info",
+    "get_lbm_ai_sources",
+    "get_log_average_factor",
+    "get_metadata",
+    "get_metadata_batch",
+    "get_metadata_single",
+    "get_num_color_channels",
+    "get_num_zplanes",
+    # parameter access
+    "get_param",
+    "get_roi_info",
+    "get_stack_info",
+    "get_voxel_size",
+    "get_z_step_size",
+    # file I/O
     "is_lbm_stack",
     "is_piezo_stack",
     "is_pollen_stack",
-    "get_lbm_ai_sources",
-    "get_num_color_channels",
-    "get_num_zplanes",
-    "get_frames_per_slice",
-    "get_log_average_factor",
-    "get_z_step_size",
-    "compute_num_timepoints",
-    "get_roi_info",
-    "get_frame_rate",
-    "get_stack_info",
-    "extract_roi_slices",
-    # file I/O
-    "has_mbo_metadata",
     "is_raw_scanimage",
-    "get_metadata",
-    "get_metadata_single",
-    "get_metadata_batch",
+    "normalize_metadata",
+    "normalize_resolution",
     "query_tiff_pages",
-    "clean_scanimage_metadata",
-    "default_ops",
-    "_build_ome_metadata",
 ]

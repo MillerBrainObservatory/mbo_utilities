@@ -1,6 +1,4 @@
-"""
-upgrade manager widget for checking and installing mbo_utilities updates.
-"""
+"""upgrade manager widget for checking and installing mbo_utilities updates."""
 
 import json
 import subprocess
@@ -9,13 +7,13 @@ import threading
 import urllib.request
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 from imgui_bundle import imgui
 
 
 class CheckStatus(Enum):
     """status of the version check."""
+
     IDLE = "idle"
     CHECKING = "checking"
     DONE = "done"
@@ -24,6 +22,7 @@ class CheckStatus(Enum):
 
 class UpgradeStatus(Enum):
     """status of the upgrade process."""
+
     IDLE = "idle"
     RUNNING = "running"
     SUCCESS = "success"
@@ -37,21 +36,22 @@ class UpgradeManager:
 
     uses pypi as the version database.
     """
+
     enabled: bool = True
     current_version: str = "unknown"
-    latest_version: Optional[str] = None
+    latest_version: str | None = None
     check_status: CheckStatus = CheckStatus.IDLE
     upgrade_status: UpgradeStatus = UpgradeStatus.IDLE
     error_message: str = ""
     upgrade_message: str = ""
-    _check_thread: Optional[threading.Thread] = field(default=None, repr=False)
-    _upgrade_thread: Optional[threading.Thread] = field(default=None, repr=False)
+    _check_thread: threading.Thread | None = field(default=None, repr=False)
+    _upgrade_thread: threading.Thread | None = field(default=None, repr=False)
 
     def __post_init__(self):
         self._load_current_version()
 
     def _load_current_version(self):
-        """load the current installed version."""
+        """Load the current installed version."""
         try:
             import mbo_utilities
             self.current_version = getattr(mbo_utilities, "__version__", "unknown")
@@ -59,7 +59,7 @@ class UpgradeManager:
             self.current_version = "unknown"
 
     def check_for_upgrade(self):
-        """start async version check against pypi."""
+        """Start async version check against pypi."""
         if self.check_status == CheckStatus.CHECKING:
             return  # already checking
 
@@ -81,7 +81,7 @@ class UpgradeManager:
         self._check_thread.start()
 
     def start_upgrade(self):
-        """start async upgrade process."""
+        """Start async upgrade process."""
         if self.upgrade_status == UpgradeStatus.RUNNING:
             return  # already running
 
@@ -93,7 +93,7 @@ class UpgradeManager:
                 # try uv first, fall back to pip
                 result = subprocess.run(
                     [sys.executable, "-m", "uv", "pip", "install", "--upgrade", "mbo-utilities"],
-                    capture_output=True,
+                    check=False, capture_output=True,
                     text=True,
                     timeout=300,
                 )
@@ -102,7 +102,7 @@ class UpgradeManager:
                     # try regular pip
                     result = subprocess.run(
                         [sys.executable, "-m", "pip", "install", "--upgrade", "mbo-utilities"],
-                        capture_output=True,
+                        check=False, capture_output=True,
                         text=True,
                         timeout=300,
                     )
@@ -127,7 +127,7 @@ class UpgradeManager:
 
     @property
     def upgrade_available(self) -> bool:
-        """check if an upgrade is available."""
+        """Check if an upgrade is available."""
         if self.check_status != CheckStatus.DONE:
             return False
         if self.latest_version is None or self.current_version == "unknown":
@@ -142,7 +142,7 @@ class UpgradeManager:
 
     @property
     def is_dev_build(self) -> bool:
-        """check if running a dev build (newer than pypi)."""
+        """Check if running a dev build (newer than pypi)."""
         if self.check_status != CheckStatus.DONE:
             return False
         if self.latest_version is None or self.current_version == "unknown":
@@ -157,7 +157,7 @@ class UpgradeManager:
 
 def draw_upgrade_manager(manager: UpgradeManager):
     """
-    draw the upgrade manager ui.
+    Draw the upgrade manager ui.
 
     shows current version, check button, and upgrade option if available.
     """

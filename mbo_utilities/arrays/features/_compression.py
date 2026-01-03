@@ -7,12 +7,10 @@ Provides compression settings for zarr/h5/tiff formats.
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
-if TYPE_CHECKING:
-    pass
 
 
 class Codec(str, Enum):
@@ -27,7 +25,7 @@ class Codec(str, Enum):
     lzma = "lzma"
 
     @classmethod
-    def from_string(cls, value: str) -> "Codec":
+    def from_string(cls, value: str) -> Codec:
         """Case-insensitive lookup."""
         value_lower = value.lower().strip()
         for member in cls:
@@ -49,7 +47,7 @@ class CompressionSettings(NamedTuple):
 
     @property
     def is_compressed(self) -> bool:
-        """True if compression is enabled"""
+        """True if compression is enabled."""
         return self.codec != Codec.none
 
 
@@ -98,27 +96,27 @@ class CompressionFeature(ArrayFeature):
 
     @property
     def value(self) -> CompressionSettings:
-        """compression settings as namedtuple"""
+        """Compression settings as namedtuple."""
         return CompressionSettings(self._codec, self._level, self._shuffle)
 
     @property
     def codec(self) -> Codec:
-        """compression codec"""
+        """Compression codec."""
         return self._codec
 
     @property
     def level(self) -> int:
-        """compression level (0-9)"""
+        """Compression level (0-9)."""
         return self._level
 
     @property
     def shuffle(self) -> bool:
-        """byte shuffling enabled"""
+        """Byte shuffling enabled."""
         return self._shuffle
 
     @property
     def is_compressed(self) -> bool:
-        """True if compression is enabled"""
+        """True if compression is enabled."""
         return self._codec != Codec.none
 
     def set_value(self, array, value) -> None:
@@ -182,11 +180,10 @@ class CompressionFeature(ArrayFeature):
 
         if self._codec == Codec.none:
             return [BytesCodec()]
-        elif self._codec == Codec.gzip:
+        if self._codec == Codec.gzip:
             return [BytesCodec(), GzipCodec(level=self._level)]
-        else:
-            # fallback to gzip for unsupported codecs
-            return [BytesCodec(), GzipCodec(level=self._level)]
+        # fallback to gzip for unsupported codecs
+        return [BytesCodec(), GzipCodec(level=self._level)]
 
     def to_h5_kwargs(self) -> dict:
         """
@@ -199,12 +196,11 @@ class CompressionFeature(ArrayFeature):
         """
         if self._codec == Codec.none:
             return {}
-        elif self._codec == Codec.gzip:
+        if self._codec == Codec.gzip:
             return {"compression": "gzip", "compression_opts": self._level}
-        elif self._codec == Codec.lzf:
+        if self._codec == Codec.lzf:
             return {"compression": "lzf"}
-        else:
-            return {"compression": "gzip", "compression_opts": self._level}
+        return {"compression": "gzip", "compression_opts": self._level}
 
     def __repr__(self) -> str:
         if self._codec == Codec.none:

@@ -5,21 +5,19 @@ pipelines are processing workflows (suite2p, masknmf, etc) that can be
 run on imaging data. each pipeline has config and results views.
 """
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui
 
 from mbo_utilities.gui.widgets.pipelines._base import PipelineWidget
-
-if TYPE_CHECKING:
-    from mbo_utilities.gui.imgui import PreviewDataWidget
+import contextlib
 
 # registry of available pipeline classes
 _PIPELINE_CLASSES: list[type[PipelineWidget]] = []
 
 
 def _register_pipelines() -> None:
-    """register available pipeline widgets."""
+    """Register available pipeline widgets."""
     global _PIPELINE_CLASSES
 
     if _PIPELINE_CLASSES:
@@ -38,26 +36,26 @@ def _register_pipelines() -> None:
 
 
 def get_available_pipelines() -> list[type[PipelineWidget]]:
-    """get list of all registered pipeline classes."""
+    """Get list of all registered pipeline classes."""
     _register_pipelines()
     return _PIPELINE_CLASSES.copy()
 
 
 def get_pipeline_names() -> list[str]:
-    """get names of all registered pipelines."""
+    """Get names of all registered pipelines."""
     _register_pipelines()
     return [p.name for p in _PIPELINE_CLASSES]
 
 
 def any_pipeline_available() -> bool:
-    """check if any pipeline is available (installed)."""
+    """Check if any pipeline is available (installed)."""
     _register_pipelines()
     return any(p.is_available for p in _PIPELINE_CLASSES)
 
 
-def draw_run_tab(parent: "PreviewDataWidget") -> None:
+def draw_run_tab(parent: Any) -> None:
     """
-    draw the run tab content.
+    Draw the run tab content.
 
     shows pipeline selector and the selected pipeline's widget.
     if no pipelines available, shows install message.
@@ -65,9 +63,9 @@ def draw_run_tab(parent: "PreviewDataWidget") -> None:
     _register_pipelines()
 
     # initialize state
-    if not hasattr(parent, '_selected_pipeline_idx'):
+    if not hasattr(parent, "_selected_pipeline_idx"):
         parent._selected_pipeline_idx = 0
-    if not hasattr(parent, '_pipeline_instances'):
+    if not hasattr(parent, "_pipeline_instances"):
         parent._pipeline_instances = {}
 
     # check if any pipelines available
@@ -119,29 +117,36 @@ def draw_run_tab(parent: "PreviewDataWidget") -> None:
         )
 
 
-def cleanup_pipelines(parent: "PreviewDataWidget") -> None:
-    """clean up all pipeline instances when gui is closing.
+def cleanup_pipelines(parent: Any) -> None:
+    """Clean up all pipeline instances when gui is closing.
 
     calls cleanup() on each pipeline to release resources like
     open windows, background threads, etc.
     """
-    if not hasattr(parent, '_pipeline_instances'):
+    if not hasattr(parent, "_pipeline_instances"):
         return
 
-    for name, pipeline in parent._pipeline_instances.items():
-        try:
+    for pipeline in parent._pipeline_instances.values():
+        with contextlib.suppress(Exception):
             pipeline.cleanup()
-        except Exception as e:
-            print(f"Warning: cleanup failed for pipeline {name}: {e}")
 
     parent._pipeline_instances.clear()
 
 
+from mbo_utilities.gui.widgets.pipelines.settings import (
+    Suite2pSettings,
+    draw_suite2p_settings_panel,
+    draw_section_suite2p,
+)
+
 __all__ = [
     "PipelineWidget",
+    "Suite2pSettings",
+    "any_pipeline_available",
+    "cleanup_pipelines",
+    "draw_run_tab",
+    "draw_section_suite2p",
+    "draw_suite2p_settings_panel",
     "get_available_pipelines",
     "get_pipeline_names",
-    "any_pipeline_available",
-    "draw_run_tab",
-    "cleanup_pipelines",
 ]

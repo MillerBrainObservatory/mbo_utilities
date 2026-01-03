@@ -4,15 +4,15 @@ database models for mbo_db.
 uses sqlite with dataclasses for simplicity and portability.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 
 class DatasetStatus(str, Enum):
     """processing status of a dataset."""
+
     RAW = "raw"
     REGISTERED = "registered"
     SEGMENTED = "segmented"
@@ -26,14 +26,14 @@ class Dataset:
     """represents a discovered dataset in the database."""
 
     # primary key (auto-generated)
-    id: Optional[int] = None
+    id: int | None = None
 
     # file system info
     path: str = ""
     name: str = ""
     size_bytes: int = 0
-    modified_at: Optional[datetime] = None
-    scanned_at: Optional[datetime] = None
+    modified_at: datetime | None = None
+    scanned_at: datetime | None = None
 
     # pipeline info (from pipeline_registry)
     pipeline: str = ""  # e.g. "suite2p", "zarr", "tiff"
@@ -41,24 +41,24 @@ class Dataset:
 
     # dataset structure
     status: DatasetStatus = DatasetStatus.UNKNOWN
-    num_frames: Optional[int] = None
-    num_zplanes: Optional[int] = None
-    num_rois: Optional[int] = None
+    num_frames: int | None = None
+    num_zplanes: int | None = None
+    num_rois: int | None = None
     shape: str = ""  # stored as string "(T, Z, Y, X)"
     dtype: str = ""
 
     # voxel size
-    dx: Optional[float] = None
-    dy: Optional[float] = None
-    dz: Optional[float] = None
-    fs: Optional[float] = None  # frame rate
+    dx: float | None = None
+    dy: float | None = None
+    dz: float | None = None
+    fs: float | None = None  # frame rate
 
     # user annotations
     tags: str = ""  # comma-separated
     notes: str = ""
 
     # parent dataset (for linking raw -> processed)
-    parent_id: Optional[int] = None
+    parent_id: int | None = None
 
     def __post_init__(self):
         if isinstance(self.status, str):
@@ -101,7 +101,7 @@ class Dataset:
         return f"{size:.1f} PB"
 
     def to_dict(self) -> dict:
-        """convert to dictionary for display."""
+        """Convert to dictionary for display."""
         return {
             "id": self.id,
             "path": self.path,
@@ -119,11 +119,11 @@ class Dataset:
 class DatasetLink:
     """represents a relationship between datasets (e.g. raw -> processed)."""
 
-    id: Optional[int] = None
+    id: int | None = None
     source_id: int = 0  # parent dataset
     target_id: int = 0  # child dataset
     link_type: str = ""  # e.g. "processed_from", "registered_from"
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
     def __post_init__(self):
         if isinstance(self.created_at, str):

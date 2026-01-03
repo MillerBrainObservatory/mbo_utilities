@@ -74,11 +74,11 @@ class _TeeWriter:
         import re
 
         # Remove ANSI escape codes (colors, cursor movement)
-        ansi_escape = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07')
-        text = ansi_escape.sub('', text)
+        ansi_escape = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07")
+        text = ansi_escape.sub("", text)
 
         # Remove carriage return (tqdm uses \r to update in place)
-        text = text.replace('\r', '')
+        text = text.replace("\r", "")
 
         # Skip empty lines after cleaning
         if not text.strip():
@@ -87,21 +87,21 @@ class _TeeWriter:
         # Clean up tqdm progress bar characters
         # Replace box drawing characters with simpler alternatives
         replacements = {
-            '█': '#',
-            '▏': '|',
-            '▎': '|',
-            '▍': '|',
-            '▌': '|',
-            '▋': '|',
-            '▊': '|',
-            '▉': '|',
-            '░': '-',
-            '▒': '=',
-            '▓': '#',
-            '━': '-',
-            '┃': '|',
-            '╸': '>',
-            '╺': '<',
+            "█": "#",
+            "▏": "|",
+            "▎": "|",
+            "▍": "|",
+            "▌": "|",
+            "▋": "|",
+            "▊": "|",
+            "▉": "|",
+            "░": "-",
+            "▒": "=",
+            "▓": "#",
+            "━": "-",
+            "┃": "|",
+            "╸": ">",
+            "╺": "<",
         }
         for old, new in replacements.items():
             text = text.replace(old, new)
@@ -119,15 +119,15 @@ class _TeeWriter:
         # tqdm lines typically have patterns like "  0%|" or "100%|" or contain "it/s"
         # They also often have the format: "description:  XX%|###..."
         tqdm_patterns = [
-            r'\d+%\|',  # "50%|"
-            r'it/s',     # iterations per second
-            r'[0-9]+/[0-9]+\s*\[',  # "10/100 ["
+            r"\d+%\|",  # "50%|"
+            r"it/s",     # iterations per second
+            r"[0-9]+/[0-9]+\s*\[",  # "10/100 ["
         ]
 
         for pattern in tqdm_patterns:
             if re.search(pattern, text):
                 # Extract a key from the description (text before the percentage)
-                match = re.match(r'^([^:]+):', text)
+                match = re.match(r"^([^:]+):", text)
                 key = match.group(1).strip() if match else "tqdm"
                 return True, key
 
@@ -379,10 +379,10 @@ def _get_active_progress_items(self) -> list[dict]:
     items = []
 
     # Check saveas progress - use _running flag for immediate feedback
-    saveas_running = getattr(self, '_saveas_running', False)
-    saveas_progress = getattr(self, '_saveas_progress', 0.0)
-    saveas_current = getattr(self, '_saveas_current_index', 0)
-    saveas_done = getattr(self, '_saveas_done', False)
+    saveas_running = getattr(self, "_saveas_running", False)
+    saveas_progress = getattr(self, "_saveas_progress", 0.0)
+    saveas_current = getattr(self, "_saveas_current_index", 0)
+    saveas_done = getattr(self, "_saveas_done", False)
 
     if saveas_running or (0.0 < saveas_progress < 1.0):
         # show "Starting..." if progress is still 0
@@ -406,11 +406,11 @@ def _get_active_progress_items(self) -> list[dict]:
         })
 
     # Check zstats progress for each graphic - use _running flags
-    num_graphics = getattr(self, 'num_graphics', 1)
-    zstats_running = getattr(self, '_zstats_running', [])
-    zstats_progress = getattr(self, '_zstats_progress', [])
-    zstats_current_z = getattr(self, '_zstats_current_z', [])
-    nz = getattr(self, 'nz', 1)
+    num_graphics = getattr(self, "num_graphics", 1)
+    zstats_running = getattr(self, "_zstats_running", [])
+    zstats_progress = getattr(self, "_zstats_progress", [])
+    zstats_current_z = getattr(self, "_zstats_current_z", [])
+    nz = getattr(self, "nz", 1)
 
     for i in range(num_graphics):
         running = zstats_running[i] if isinstance(zstats_running, list) and i < len(zstats_running) else False
@@ -431,10 +431,10 @@ def _get_active_progress_items(self) -> list[dict]:
             })
 
     # Check register_z progress - use _running flag
-    register_running = getattr(self, '_register_z_running', False)
-    register_progress = getattr(self, '_register_z_progress', 0.0)
-    register_msg = getattr(self, '_register_z_current_msg', None)
-    register_done = getattr(self, '_register_z_done', False)
+    register_running = getattr(self, "_register_z_running", False)
+    register_progress = getattr(self, "_register_z_progress", 0.0)
+    register_msg = getattr(self, "_register_z_current_msg", None)
+    register_done = getattr(self, "_register_z_done", False)
 
     if register_running or (0.0 < register_progress < 1.0):
         msg = register_msg if register_msg else "Starting..."
@@ -674,7 +674,7 @@ def _save_log_to_file():
         return
 
     with open(log_file, "w", encoding="utf-8") as f:
-        f.write(f"MBO Console Output Log\n")
+        f.write("MBO Console Output Log\n")
         f.write(f"Saved: {datetime.datetime.now().isoformat()}\n")
         f.write(f"{'=' * 60}\n\n")
         for timestamp, stream, text in lines:

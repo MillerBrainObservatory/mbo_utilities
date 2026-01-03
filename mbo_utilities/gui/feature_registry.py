@@ -18,7 +18,7 @@ Register a feature:
         category="pipeline",
     )
     def draw_suite2p_feature(settings=None, **kwargs):
-        from mbo_utilities.gui.pipeline_widgets import Suite2pSettings, draw_suite2p_settings_panel
+        from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings, draw_suite2p_settings_panel
         settings = settings or Suite2pSettings()
         return draw_suite2p_settings_panel(settings, show_header=True, show_footer=True)
 
@@ -33,8 +33,8 @@ Generate documentation:
     generate_feature_docs(output_path="docs/gui_features.md")
 """
 
-from dataclasses import dataclass, field
-from typing import Callable, Optional, Any
+from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -160,7 +160,7 @@ def register_feature(
     return decorator
 
 
-def get_feature(name: str) -> Optional[GUIFeature]:
+def get_feature(name: str) -> GUIFeature | None:
     """Get a registered feature by name."""
     return _FEATURE_REGISTRY.get(name)
 
@@ -208,7 +208,7 @@ def draw_suite2p_feature(settings=None, **kwargs):
     Suite2pSettings
         The (potentially modified) settings.
     """
-    from mbo_utilities.gui.pipeline_widgets import (
+    from mbo_utilities.gui.widgets.pipelines.settings import (
         Suite2pSettings,
         draw_suite2p_settings_panel,
     )
@@ -512,7 +512,7 @@ def capture_feature(
     feature: GUIFeature,
     output_dir: Path,
     **kwargs,
-) -> Optional[Path]:
+) -> Path | None:
     """
     Capture a screenshot of a single feature.
 
@@ -538,7 +538,6 @@ def capture_feature(
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / feature.image_filename
 
-    print(f"Capturing {feature.title} -> {output_path}")
 
     start_time = time.time()
 
@@ -579,14 +578,12 @@ def capture_feature(
         # Apply styling (shadow, padding) if desired
         img.save(output_path, "PNG")
         return output_path
-    else:
-        print(f"Failed to capture {feature.title}")
-        return None
+    return None
 
 
 def capture_all_features(
     output_dir: str | Path = "docs/_images/gui/features",
-    categories: Optional[list[str]] = None,
+    categories: list[str] | None = None,
     skip_requires_data: bool = True,
 ) -> dict[str, Path]:
     """
@@ -613,7 +610,6 @@ def capture_all_features(
         if categories and feature.category not in categories:
             continue
         if skip_requires_data and feature.requires_data:
-            print(f"Skipping {feature.title} (requires data)")
             continue
 
         path = capture_feature(feature, output_dir)

@@ -6,9 +6,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui
+from imgui_bundle import imgui, portable_file_dialogs as pfd, hello_imgui
 
-from mbo_utilities.gui._widgets import set_tooltip, compact_header, settings_row_with_popup
+from mbo_utilities.gui._imgui_helpers import set_tooltip, settings_row_with_popup, _popup_states
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities._parsing import _convert_paths_to_strings
 
@@ -16,8 +16,7 @@ try:
     from lbm_suite2p_python.run_lsp import run_plane, run_plane_bin
 
     HAS_LSP = True
-except ImportError as e:
-    print(f"Error importing lbm_suite2p_python: \n {e}")
+except ImportError:
     HAS_LSP = False
     run_plane = None
 
@@ -366,7 +365,6 @@ class Suite2pSettings:
 
 def draw_tab_process(self):
     """Draws the pipeline selection and configuration section."""
-
     if not hasattr(self, "_current_pipeline"):
         self._current_pipeline = USER_PIPELINES[0]
     if not hasattr(self, "_install_error"):
@@ -742,20 +740,19 @@ def draw_section_suite2p(self):
                 imgui.ImVec4(1.0, 0.0, 0.0, 1.0),
                 "lbm_suite2p_python install success.",
             )
-        if self._show_install_button:
-            if imgui.button("Install"):
-                import subprocess
+        if self._show_install_button and imgui.button("Install"):
+            import subprocess
 
-                self.logger.log("info", "Installing lbm_suite2p_python...")
-                try:
-                    subprocess.check_call(["pip", "install", "lbm_suite2p_python"])
-                    self.logger.log("info", "Installation complete.")
-                    self._install_error = False
-                    self._show_red_text = False
-                    self._show_green_text = True
-                    self._show_install_button = False
-                except Exception as e:
-                    self.logger.log("error", f"Installation failed: {e}")
+            self.logger.log("info", "Installing lbm_suite2p_python...")
+            try:
+                subprocess.check_call(["pip", "install", "lbm_suite2p_python"])
+                self.logger.log("info", "Installation complete.")
+                self._install_error = False
+                self._show_red_text = False
+                self._show_green_text = True
+                self._show_install_button = False
+            except Exception as e:
+                self.logger.log("error", f"Installation failed: {e}")
 
     # Tau setting (main processing parameter)
     imgui.set_next_item_width(INPUT_WIDTH)
@@ -815,7 +812,6 @@ def draw_section_suite2p(self):
     imgui.separator_text("Pipeline Steps")
 
     # determine detection mode for greying out
-    use_anatomical = self.s2p.anatomical_only > 0
 
     # --- Registration ---
     def draw_registration_settings():
@@ -1243,7 +1239,6 @@ def draw_section_suite2p(self):
         set_tooltip("Threshold for calling ROI detected on channel 2.")
 
     if imgui.button("Output Settings"):
-        from mbo_utilities.gui._widgets import _popup_states
         _popup_states["output_settings"] = True
         imgui.open_popup("Output Settings##output_settings")
 
@@ -1255,7 +1250,6 @@ def draw_section_suite2p(self):
         flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
     )
     if opened:
-        from mbo_utilities.gui._widgets import _popup_states
         if not visible:
             _popup_states["output_settings"] = False
             imgui.close_current_popup()
@@ -1360,7 +1354,7 @@ def run_process(self):
 
         if use_background:
             # Use ProcessManager to spawn detached subprocesses
-            from mbo_utilities.gui.process_manager import get_process_manager
+            from mbo_utilities.gui.widgets.process_manager import get_process_manager
 
             pm = get_process_manager()
 
@@ -1387,7 +1381,7 @@ def run_process(self):
             worker_args = {
                 "input_path": input_path,
                 "output_dir": s2p_path,
-                "planes": sorted(list(selected_planes)),  # Pass list of planes
+                "planes": sorted(selected_planes),  # Pass list of planes
                 "roi": roi,
                 "num_timepoints": self.s2p.target_timepoints,
                 "ops": self.s2p.to_dict(),
@@ -1423,7 +1417,7 @@ def run_process(self):
             # Use daemon threads (original behavior)
             # Build list of all (arr_idx, z_plane) pairs to process
             jobs = []
-            for i, arr in enumerate(self.image_widget.data):
+            for i, _arr in enumerate(self.image_widget.data):
                 for plane in sorted(selected_planes):
                     jobs.append((i, plane - 1))  # Convert to 0-indexed
 
@@ -1455,7 +1449,7 @@ def run_process(self):
                                     f"Plane {z_plane + 1} completed ({job_idx + 1}/{len(jobs)})"
                                 )
                             except Exception as e:
-                                self.logger.error(
+                                self.logger.exception(
                                     f"Error processing plane {z_plane + 1}: {e}"
                                 )
                     self.logger.info("Suite2p parallel processing complete.")
@@ -1471,7 +1465,7 @@ def run_process(self):
                         try:
                             run_plane_from_data(self, arr_idx, z_plane)
                         except Exception as e:
-                            self.logger.error(
+                            self.logger.exception(
                                 f"Error processing plane {z_plane + 1}: {e}"
                             )
                     self.logger.info("Suite2p processing complete.")
@@ -1504,10 +1498,7 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
 
         # find last saved dir
         last_savedir = get_last_savedir_path()
-        if last_savedir:
-            base_out = Path(last_savedir)
-        else:
-            base_out = get_mbo_dirs()["data"]
+        base_out = Path(last_savedir) if last_savedir else get_mbo_dirs()["data"]
     if not base_out.exists():
         base_out.mkdir(exist_ok=True)
 
@@ -1628,7 +1619,7 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     )
 
     try:
-        result = run_plane(
+        run_plane(
             input_path=raw_file,
             save_path=plane_dir,
             ops=defaults,
@@ -1649,13 +1640,13 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
         # Check if detection outputs were created
         stat_file = plane_dir / "stat.npy"
         if stat_file.exists():
-            self.logger.info(f"Detection succeeded - stat.npy created")
+            self.logger.info("Detection succeeded - stat.npy created")
         else:
             self.logger.warning(
-                f"Detection did not run - stat.npy not found. Check Suite2p output logs."
+                "Detection did not run - stat.npy not found. Check Suite2p output logs."
             )
     except Exception as e:
-        self.logger.error(
+        self.logger.exception(
             f"Suite2p processing failed for plane {current_z}, roi {arr_idx}: {e}"
         )
         import traceback

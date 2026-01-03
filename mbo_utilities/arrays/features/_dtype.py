@@ -6,14 +6,11 @@ Provides dtype management with lazy conversion support.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 import numpy as np
 
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
-if TYPE_CHECKING:
-    pass
 
 
 class DataTypeFeature(ArrayFeature):
@@ -53,22 +50,22 @@ class DataTypeFeature(ArrayFeature):
 
     @property
     def value(self) -> np.dtype:
-        """effective dtype (target if set, else original)"""
+        """Effective dtype (target if set, else original)."""
         return self._target if self._target is not None else self._original
 
     @property
     def original(self) -> np.dtype:
-        """original data type"""
+        """Original data type."""
         return self._original
 
     @property
     def target(self) -> np.dtype | None:
-        """target data type for conversion"""
+        """Target data type for conversion."""
         return self._target
 
     @target.setter
     def target(self, value: np.dtype | str | None) -> None:
-        """set target dtype"""
+        """Set target dtype."""
         old_value = self._target
         self._target = np.dtype(value) if value is not None else None
 
@@ -85,27 +82,27 @@ class DataTypeFeature(ArrayFeature):
 
     @property
     def is_converted(self) -> bool:
-        """True if target dtype differs from original"""
+        """True if target dtype differs from original."""
         return self._target is not None and self._target != self._original
 
     @property
     def itemsize(self) -> int:
-        """bytes per element for effective dtype"""
+        """Bytes per element for effective dtype."""
         return self.value.itemsize
 
     @property
     def is_float(self) -> bool:
-        """True if effective dtype is floating point"""
+        """True if effective dtype is floating point."""
         return np.issubdtype(self.value, np.floating)
 
     @property
     def is_integer(self) -> bool:
-        """True if effective dtype is integer"""
+        """True if effective dtype is integer."""
         return np.issubdtype(self.value, np.integer)
 
     @property
     def is_unsigned(self) -> bool:
-        """True if effective dtype is unsigned integer"""
+        """True if effective dtype is unsigned integer."""
         return np.issubdtype(self.value, np.unsignedinteger)
 
     def set_value(self, array, value: np.dtype | str | None) -> None:

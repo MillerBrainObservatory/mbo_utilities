@@ -27,7 +27,6 @@ from mbo_utilities.metadata.scanimage import (
 
 from imgui_bundle import (
     imgui,
-    imgui_md,
     hello_imgui,
     imgui_ctx,
     icons_fontawesome_6 as fa,
@@ -94,21 +93,21 @@ def get_cavity_indices(metadata: dict, nc: int) -> dict:
         - 'num_cavities': number of cavities detected (1 or 2)
     """
     result = {
-        'cavity_a': [],
-        'cavity_b': [],
-        'is_lbm': False,
-        'num_cavities': 1,
+        "cavity_a": [],
+        "cavity_b": [],
+        "is_lbm": False,
+        "num_cavities": 1,
     }
 
     # Check if this is an LBM stack
     if not is_lbm_stack(metadata):
         # Not LBM - fall back to simple half/half split
         half = nc // 2
-        result['cavity_a'] = list(range(half))
-        result['cavity_b'] = list(range(half, nc))
+        result["cavity_a"] = list(range(half))
+        result["cavity_b"] = list(range(half, nc))
         return result
 
-    result['is_lbm'] = True
+    result["is_lbm"] = True
 
     # Get AI sources from virtualChannelSettings
     ai_sources = get_lbm_ai_sources(metadata)
@@ -116,8 +115,8 @@ def get_cavity_indices(metadata: dict, nc: int) -> dict:
     if not ai_sources:
         # No AI source info available - fall back to half/half
         half = nc // 2
-        result['cavity_a'] = list(range(half))
-        result['cavity_b'] = list(range(half, nc))
+        result["cavity_a"] = list(range(half))
+        result["cavity_b"] = list(range(half, nc))
         return result
 
     # Sort AI sources by name (AI0 comes before AI1)
@@ -127,15 +126,15 @@ def get_cavity_indices(metadata: dict, nc: int) -> dict:
         # AI0 = Cavity A
         cavity_a_channels = ai_sources.get(sorted_sources[0], [])
         # Convert to 0-indexed if needed (virtualChannelSettings uses 1-indexed)
-        result['cavity_a'] = sorted([ch - 1 if ch > 0 else ch for ch in cavity_a_channels])
+        result["cavity_a"] = sorted([ch - 1 if ch > 0 else ch for ch in cavity_a_channels])
 
     if len(sorted_sources) >= 2:
         # AI1 = Cavity B
         cavity_b_channels = ai_sources.get(sorted_sources[1], [])
-        result['cavity_b'] = sorted([ch - 1 if ch > 0 else ch for ch in cavity_b_channels])
-        result['num_cavities'] = 2
+        result["cavity_b"] = sorted([ch - 1 if ch > 0 else ch for ch in cavity_b_channels])
+        result["num_cavities"] = 2
     else:
-        result['num_cavities'] = 1
+        result["num_cavities"] = 1
 
     return result
 
@@ -345,13 +344,9 @@ def pollen_calibration_mbo(filepath, order=None, zoom=None, fov_um=None, dz_over
     # Use dims="ZCYX" for pollen calibration:
     #   Z = piezo z-positions (scanning through depth)
     #   C = channels/beamlets (each beamlet has different focal plane)
-    print(f"Loading: {filepath}")
     arr = open_scanimage(filepath, dims="ZCYX")
     metadata = arr.metadata
 
-    print(f"  Stack type: {arr.stack_type}")
-    print(f"  Shape: {arr.shape} (Z, C, Y, X) - Z=piezo positions, C=beamlets")
-    print(f"  Num beamlets: {arr.num_channels}")
 
     # Get dimensions from array - shape is (Z, C, Y, X) for pollen calibration
     nz = arr.shape[0]  # Z dimension = number of piezo z-positions
@@ -362,21 +357,18 @@ def pollen_calibration_mbo(filepath, order=None, zoom=None, fov_um=None, dz_over
     # Get z-step from metadata or override
     if dz_override is not None:
         z_step_um = dz_override
-        print(f"  Z-step (user override): {z_step_um} µm")
     else:
         z_step_um = get_z_step_size(metadata)
         if z_step_um is None:
             z_step_um = get_param(metadata, "dz", default=1.0)
             if z_step_um == 1.0:
-                print("  Warning: Z-step not found in metadata, using default 1.0 µm")
-                print("    Hint: For accurate calibration, pass --dz value")
+                pass
         else:
-            print(f"  Z-step (from metadata): {z_step_um} µm")
+            pass
 
     # Get zoom factor - from CLI, metadata, or default
     if zoom is None:
         zoom = get_param(metadata, "zoom_factor", default=1.0)
-    print(f"  Zoom factor: {zoom}")
 
     # FOV at zoom=1 (standard for MIMMS systems)
     if fov_um is None:
@@ -385,7 +377,6 @@ def pollen_calibration_mbo(filepath, order=None, zoom=None, fov_um=None, dz_over
     # Calculate pixel size in microns: dx = fov / zoom / pixels
     dx = fov_um / zoom / nx
     dy = fov_um / zoom / ny
-    print(f"  Pixel size: {dx:.3f} x {dy:.3f} µm")
 
     # Set up beam order
     if order is None:
@@ -397,37 +388,32 @@ def pollen_calibration_mbo(filepath, order=None, zoom=None, fov_um=None, dz_over
 
     # Validate order
     if len(order) != nc:
-        print(f"  Warning: order length ({len(order)}) != nc ({nc}), using sequential order")
         order = list(range(nc))
 
     # Get cavity indices from LBM metadata
     # For LBM: Cavity A = AI0 channels, Cavity B = AI1 channels
     cavity_info = get_cavity_indices(metadata, nc)
 
-    if cavity_info['is_lbm']:
-        print(f"  Detected LBM stack with {cavity_info['num_cavities']} cavit{'ies' if cavity_info['num_cavities'] > 1 else 'y'}")
-        print(f"    Cavity A (AI0): channels {cavity_info['cavity_a']}")
-        if cavity_info['cavity_b']:
-            print(f"    Cavity B (AI1): channels {cavity_info['cavity_b']}")
+    if cavity_info["is_lbm"]:
+        if cavity_info["cavity_b"]:
+            pass
     else:
-        print(f"  Non-LBM stack, using half/half cavity split")
+        pass
 
     # Load full volume into memory
     # Array is (Z, C, Y, X) where Z=piezo positions, C=beamlets
     # This matches our internal (nz, nc, ny, nx) convention
-    print("\nLoading volume into memory...")
     vol = np.asarray(arr[:]).astype(np.float32)  # Load all data
     vol -= vol.mean()
-    print(f"  Volume shape: {vol.shape} (nz, nc, ny, nx)")
 
     # 1. Scan offset correction
-    vol, scan_corrections = correct_scan_phase(vol, filepath, z_step_um, metadata)
+    vol, _scan_corrections = correct_scan_phase(vol, filepath, z_step_um, metadata)
 
     # 2. Plot beamlet grid (Figure 701 in MATLAB)
     plot_beamlet_grid(vol, order, filepath)
 
     # 3. User marked pollen selection
-    xs, ys, Iz, III, zoi_per_channel = user_pollen_selection(vol, order, filepath)
+    xs, ys, Iz, III, _zoi_per_channel = user_pollen_selection(vol, order, filepath)
 
     # 4. Power vs Z analysis
     ZZ, zoi, pp = analyze_power_vs_z(Iz, filepath, z_step_um, order, nc)
@@ -444,7 +430,6 @@ def pollen_calibration_mbo(filepath, order=None, zoom=None, fov_um=None, dz_over
     # 8. XY calibration with proper units
     calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info)
 
-    print(f"\nCalibration complete! Results saved to: {filepath.parent}")
 
 
 def correct_scan_phase(vol, filepath, z_step_um, metadata):
@@ -452,15 +437,12 @@ def correct_scan_phase(vol, filepath, z_step_um, metadata):
     scan_corrections = []
     nz, nc, ny, nx = vol.shape
 
-    print("Detecting scan offsets...")
     for c in range(nc):
         # Take z-projection like MATLAB Iinit(:,:,c)
         Iproj = vol[:, c, :, :].max(axis=0)  # (ny, nx)
         offset = return_scan_offset(Iproj)
         scan_corrections.append(offset)
-        print(f"  Channel {c+1}/{nc}: offset = {offset}")
 
-    print("Correcting scan phase...")
     for c in range(nc):
         # Apply to each z-slice
         for z in range(nz):
@@ -474,22 +456,22 @@ def correct_scan_phase(vol, filepath, z_step_um, metadata):
         f.create_dataset("scan_corrections", data=np.array(scan_corrections))
 
         # Save metadata as file attributes for H5Array compatibility
-        f.attrs['num_planes'] = nc
-        f.attrs['roi_width_px'] = nx
-        f.attrs['roi_height_px'] = ny
-        f.attrs['z_step_um'] = z_step_um
-        f.attrs['source_file'] = filepath.name
-        f.attrs['pollen_calibration_version'] = '2.0'
+        f.attrs["num_planes"] = nc
+        f.attrs["roi_width_px"] = nx
+        f.attrs["roi_height_px"] = ny
+        f.attrs["z_step_um"] = z_step_um
+        f.attrs["source_file"] = filepath.name
+        f.attrs["pollen_calibration_version"] = "2.0"
 
         # Save additional metadata if available
         frame_rate = get_param(metadata, "fs")
         if frame_rate is not None:
-            f.attrs['frame_rate'] = frame_rate
+            f.attrs["frame_rate"] = frame_rate
 
         dx = get_param(metadata, "dx")
         dy = get_param(metadata, "dy")
         if dx is not None and dy is not None:
-            f.attrs['pixel_resolution'] = f"({dx}, {dy})"
+            f.attrs["pixel_resolution"] = f"({dx}, {dy})"
 
     return vol, scan_corrections
 
@@ -529,10 +511,8 @@ def fix_scan_phase(frame, offset):
 
 
 def plot_beamlet_grid(vol, order, filepath):
-    """
-    Plot 5x6 grid of max-projected beamlet images (Figure 701 in MATLAB).
-    """
-    nz, nc, ny, nx = vol.shape
+    """Plot 5x6 grid of max-projected beamlet images (Figure 701 in MATLAB)."""
+    _nz, nc, ny, nx = vol.shape
     Imax = vol.max(axis=0)  # (nc, ny, nx)
 
     # Determine grid size
@@ -546,22 +526,21 @@ def plot_beamlet_grid(vol, order, filepath):
         ax = axes[idx]
         channel = order[idx]
         img = Imax[channel, :, :].T  # Transpose to match MATLAB's imagesc behavior
-        ax.imshow(img, cmap='gray', vmin=np.percentile(img, 1), vmax=np.percentile(img, 99))
+        ax.imshow(img, cmap="gray", vmin=np.percentile(img, 1), vmax=np.percentile(img, 99))
         ax.set_xlim([0, ny])
         ax.set_ylim([0, nx])
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.set_title(f'Beam {idx+1}', fontsize=8)
+        ax.set_title(f"Beam {idx+1}", fontsize=8)
 
     # Hide unused subplots
     for idx in range(nc, len(axes)):
-        axes[idx].axis('off')
+        axes[idx].axis("off")
 
-    fig.suptitle('Max-Projected Beamlet Images (Scan Corrected)', fontweight='bold')
+    fig.suptitle("Max-Projected Beamlet Images (Scan Corrected)", fontweight="bold")
     plt.tight_layout()
     plt.savefig(filepath.with_name("pollen_calibration_beamlet_grid.png"), dpi=150)
     plt.close()
-    print("Saved: pollen_calibration_beamlet_grid.png")
 
 
 def user_pollen_selection(vol, order, filepath, num=10):
@@ -575,8 +554,6 @@ def user_pollen_selection(vol, order, filepath, num=10):
     xs, ys, Iz, III = [], [], [], []
     zoi_per_channel = []
 
-    print("\nSelect pollen beads (click on the same pollen grain in each image)...")
-    print("Close the window or press any key after clicking to proceed to next beamlet.\n")
 
     amt = max(1, 10)  # Smoothing window
 
@@ -603,12 +580,10 @@ def user_pollen_selection(vol, order, filepath, num=10):
         plt.close(fig)
 
         if not pts:
-            print(f"  Beamlet {idx+1}: No point selected, skipping")
             continue
 
         x, y = pts[0]
-        ix, iy = int(round(x)), int(round(y))
-        print(f"  Beamlet {idx+1}: Selected ({ix}, {iy})")
+        ix, iy = round(x), round(y)
 
         xs.append(x)
         ys.append(y)
@@ -622,15 +597,15 @@ def user_pollen_selection(vol, order, filepath, num=10):
         patch = vol[:, channel, y0:y1, x0:x1]  # (nz, roi_y, roi_x)
 
         # Apply moving mean smoothing like MATLAB (size 3 along each spatial dim)
-        smoothed_patch = uniform_filter1d(patch, size=3, axis=1, mode='nearest')
-        smoothed_patch = uniform_filter1d(smoothed_patch, size=3, axis=2, mode='nearest')
+        smoothed_patch = uniform_filter1d(patch, size=3, axis=1, mode="nearest")
+        smoothed_patch = uniform_filter1d(smoothed_patch, size=3, axis=2, mode="nearest")
 
         # Max over spatial dimensions to get trace
         trace = smoothed_patch.max(axis=(1, 2))  # (nz,)
         Iz.append(trace)
 
         # Find best z using smoothed trace
-        smoothed_trace = uniform_filter1d(trace, size=amt, mode='nearest')
+        smoothed_trace = uniform_filter1d(trace, size=amt, mode="nearest")
         zoi = int(np.argmax(smoothed_trace))
         zoi_per_channel.append(zoi)
 
@@ -678,23 +653,22 @@ def plot_selected_patches(III, filepath, nc):
         ax = axes[idx]
         num = crop.shape[0] // 2
         extent = [-num, num, -num, num]
-        ax.imshow(crop, cmap='gray', extent=extent,
+        ax.imshow(crop, cmap="gray", extent=extent,
                   vmin=np.percentile(crop, 1), vmax=np.percentile(crop, 99))
         ax.set_xlim([-num, num])
         ax.set_ylim([-num, num])
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.set_title(f'Beam {idx+1}', fontsize=8)
+        ax.set_title(f"Beam {idx+1}", fontsize=8)
 
     # Hide unused subplots
     for idx in range(n_patches, len(axes)):
-        axes[idx].axis('off')
+        axes[idx].axis("off")
 
-    fig.suptitle('Selected Pollen Patches at Best Z', fontweight='bold')
+    fig.suptitle("Selected Pollen Patches at Best Z", fontweight="bold")
     plt.tight_layout()
     plt.savefig(filepath.with_name("pollen_calibration_selected_patches.png"), dpi=150)
     plt.close()
-    print("Saved: pollen_calibration_selected_patches.png")
 
 
 def analyze_power_vs_z(Iz, filepath, DZ, order, nc):
@@ -706,7 +680,7 @@ def analyze_power_vs_z(Iz, filepath, DZ, order, nc):
     nz = Iz.shape[1]
     ZZ = np.flip(np.arange(nz) * DZ)  # Z positions in microns (flipped like MATLAB)
 
-    amt = max(1, int(round(10.0 / DZ)))
+    amt = max(1, round(10.0 / DZ))
     smoothed = uniform_filter1d(Iz, size=amt, axis=1, mode="nearest")
 
     # Find peak position and value for each beamlet
@@ -714,7 +688,7 @@ def analyze_power_vs_z(Iz, filepath, DZ, order, nc):
     pp = smoothed.max(axis=1)
 
     # Create figure matching MATLAB Figure 99
-    fig, ax = plt.subplots(figsize=(8, 6))
+    _fig, ax = plt.subplots(figsize=(8, 6))
 
     # Plot all curves
     for i in range(len(order)):
@@ -743,7 +717,6 @@ def analyze_power_vs_z(Iz, filepath, DZ, order, nc):
     plt.tight_layout()
     plt.savefig(filepath.with_name("pollen_calibration_power_vs_z.png"), dpi=150)
     plt.close()
-    print("Saved: pollen_calibration_power_vs_z.png")
 
     return ZZ, zoi, pp
 
@@ -763,11 +736,11 @@ def analyze_z_positions(ZZ, zoi, order, filepath, cavity_info):
     Z0 = ZZ[zoi[0]]  # Reference from first beam
     z_rel = ZZ[zoi] - Z0  # Relative Z positions
 
-    fig, ax = plt.subplots(figsize=(7, 5))
+    _fig, ax = plt.subplots(figsize=(7, 5))
 
     # Get cavity indices from metadata-derived info
-    cavity_a_channels = set(cavity_info['cavity_a'])
-    cavity_b_channels = set(cavity_info['cavity_b'])
+    cavity_a_channels = set(cavity_info["cavity_a"])
+    cavity_b_channels = set(cavity_info["cavity_b"])
 
     # Map beam index to cavity based on which channel it corresponds to
     cavity_a_beams = []
@@ -788,7 +761,7 @@ def analyze_z_positions(ZZ, zoi, order, filepath, cavity_info):
         ax.plot(
             [i+1 for i in cavity_a_beams],
             [z_rel[i] for i in cavity_a_beams],
-            'bo', markersize=6, label='Cavity A'
+            "bo", markersize=6, label="Cavity A"
         )
 
     # Cavity B - green squares
@@ -796,7 +769,7 @@ def analyze_z_positions(ZZ, zoi, order, filepath, cavity_info):
         ax.plot(
             [i+1 for i in cavity_b_beams],
             [z_rel[i] for i in cavity_b_beams],
-            'gs', markersize=6, label='Cavity B', color=[0, 0.5, 0]
+            "gs", markersize=6, label="Cavity B", color=[0, 0.5, 0]
         )
 
     # Linear fit on all data
@@ -813,20 +786,19 @@ def analyze_z_positions(ZZ, zoi, order, filepath, cavity_info):
 
         # Plot fit line
         x_fit = np.linspace(0, n_beams + 1, 101)
-        ax.plot(x_fit, poly(x_fit), 'k-',
-                label=f'Linear fit (r² = {r_squared:.3f})\ny = {coeffs[0]:.2f}x + {coeffs[1]:.2f}')
-    except Exception as e:
-        print(f"Linear fit failed: {e}")
+        ax.plot(x_fit, poly(x_fit), "k-",
+                label=f"Linear fit (r² = {r_squared:.3f})\ny = {coeffs[0]:.2f}x + {coeffs[1]:.2f}")
+    except Exception:
+        pass
 
     ax.set_xlabel("Beam number", fontweight="bold")
     ax.set_ylabel("Z position (µm)", fontweight="bold")
     ax.set_title("Z Position vs. Beam Number", fontweight="bold")
-    ax.legend(loc='best')
+    ax.legend(loc="best")
     ax.grid(True)
     plt.tight_layout()
     plt.savefig(filepath.with_name("pollen_calibration_z_vs_N.png"), dpi=150)
     plt.close()
-    print("Saved: pollen_calibration_z_vs_N.png")
 
 
 def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz):
@@ -845,8 +817,8 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz):
     n_beams = len(order)
 
     # Get cavity indices from metadata-derived info
-    cavity_a_channels = set(cavity_info['cavity_a'])
-    cavity_b_channels = set(cavity_info['cavity_b'])
+    cavity_a_channels = set(cavity_info["cavity_a"])
+    cavity_b_channels = set(cavity_info["cavity_b"])
 
     # Map beam index to cavity based on which channel it corresponds to
     cavity_a_beams = []
@@ -876,9 +848,9 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz):
 
     # Plot data points
     if len(z1) > 0:
-        ax.plot(z1, p1, 'bo', markersize=6, label='Data Cavity A')
+        ax.plot(z1, p1, "bo", markersize=6, label="Data Cavity A")
     if len(z2) > 0:
-        ax.plot(z2, p2, 's', color=[0, 0.5, 0], markersize=6, label='Data Cavity B')
+        ax.plot(z2, p2, "s", color=[0, 0.5, 0], markersize=6, label="Data Cavity B")
 
     z_fit_range = DZ * np.linspace(0, nz - 1, 1001)
 
@@ -888,11 +860,11 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz):
     if len(z1) > 2:
         try:
             popt1, _ = curve_fit(exp_func, z1, p1, p0=(p1.max(), -0.01), maxfev=5000)
-            ax.plot(z_fit_range, exp_func(z_fit_range, *popt1), 'r-',
-                    label=f'Fit C1 (lₛ = {abs(1/popt1[1]):.0f} µm)')
+            ax.plot(z_fit_range, exp_func(z_fit_range, *popt1), "r-",
+                    label=f"Fit C1 (lₛ = {abs(1/popt1[1]):.0f} µm)")
             ls1 = abs(1/popt1[1])
-        except Exception as e:
-            print(f"Cavity A fit failed: {e}")
+        except Exception:
+            pass
 
     # Fit Cavity B
     popt2 = None
@@ -900,11 +872,11 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz):
     if len(z2) > 2:
         try:
             popt2, _ = curve_fit(exp_func, z2, p2, p0=(p2.max(), -0.01), maxfev=5000)
-            ax.plot(z_fit_range, exp_func(z_fit_range, *popt2), 'k-',
-                    label=f'Fit C2 (lₛ = {abs(1/popt2[1]):.0f} µm)')
+            ax.plot(z_fit_range, exp_func(z_fit_range, *popt2), "k-",
+                    label=f"Fit C2 (lₛ = {abs(1/popt2[1]):.0f} µm)")
             ls2 = abs(1/popt2[1])
-        except Exception as e:
-            print(f"Cavity B fit failed: {e}")
+        except Exception:
+            pass
 
     # Fit both cavities combined
     z_combined = np.concatenate([z1, z2]) if len(z2) > 0 else z1
@@ -915,50 +887,48 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz):
     if len(z_combined) > 2:
         try:
             popt3, _ = curve_fit(exp_func, z_combined, p_combined, p0=(p_combined.max(), -0.01), maxfev=5000)
-            ax.plot(z_fit_range, exp_func(z_fit_range, *popt3), 'm-',
-                    label=f'Fit both (lₛ = {abs(1/popt3[1]):.0f} µm)')
+            ax.plot(z_fit_range, exp_func(z_fit_range, *popt3), "m-",
+                    label=f"Fit both (lₛ = {abs(1/popt3[1]):.0f} µm)")
             ls3 = abs(1/popt3[1])
-        except Exception as e:
-            print(f"Combined fit failed: {e}")
+        except Exception:
+            pass
 
     ax.set_xlabel("Z (µm)", fontweight="bold")
     ax.set_ylabel("Power (a.u.)", fontweight="bold")
     ax.set_title("Power vs Depth (Linear Scale)", fontweight="bold")
-    ax.legend(loc='upper right')
+    ax.legend(loc="upper right")
     ax.grid(True)
     plt.tight_layout()
     plt.savefig(filepath.with_name("pollen_calibration_power_linear.png"), dpi=150)
     plt.close()
-    print("Saved: pollen_calibration_power_linear.png")
 
     # === Log scale plot ===
-    fig, ax = plt.subplots(figsize=(8, 6))
+    _fig, ax = plt.subplots(figsize=(8, 6))
 
     if len(z1) > 0:
-        ax.semilogy(z1, p1, 'bo', markersize=6, label='Data Cavity A')
+        ax.semilogy(z1, p1, "bo", markersize=6, label="Data Cavity A")
     if len(z2) > 0:
-        ax.semilogy(z2, p2, 's', color=[0, 0.5, 0], markersize=6, label='Data Cavity B')
+        ax.semilogy(z2, p2, "s", color=[0, 0.5, 0], markersize=6, label="Data Cavity B")
 
     # Plot fits on log scale
     if popt1 is not None and ls1 is not None:
-        ax.semilogy(z_fit_range, exp_func(z_fit_range, *popt1), 'r-',
-                    label=f'Fit C1 (lₛ = {ls1:.0f} µm)')
+        ax.semilogy(z_fit_range, exp_func(z_fit_range, *popt1), "r-",
+                    label=f"Fit C1 (lₛ = {ls1:.0f} µm)")
     if popt2 is not None and ls2 is not None:
-        ax.semilogy(z_fit_range, exp_func(z_fit_range, *popt2), 'k-',
-                    label=f'Fit C2 (lₛ = {ls2:.0f} µm)')
+        ax.semilogy(z_fit_range, exp_func(z_fit_range, *popt2), "k-",
+                    label=f"Fit C2 (lₛ = {ls2:.0f} µm)")
     if popt3 is not None and ls3 is not None:
-        ax.semilogy(z_fit_range, exp_func(z_fit_range, *popt3), 'm-',
-                    label=f'Fit both (lₛ = {ls3:.0f} µm)')
+        ax.semilogy(z_fit_range, exp_func(z_fit_range, *popt3), "m-",
+                    label=f"Fit both (lₛ = {ls3:.0f} µm)")
 
     ax.set_xlabel("Z (µm)", fontweight="bold")
     ax.set_ylabel("Power (a.u.)", fontweight="bold")
     ax.set_title("Power vs Depth (Log Scale)", fontweight="bold")
     ax.set_xlim([0, DZ * nz])
-    ax.legend(loc='upper right')
+    ax.legend(loc="upper right")
     plt.tight_layout()
     plt.savefig(filepath.with_name("pollen_calibration_power_log.png"), dpi=150)
     plt.close()
-    print("Saved: pollen_calibration_power_log.png")
 
 
 def plot_z_spacing(ZZ, zoi, order, filepath):
@@ -966,8 +936,8 @@ def plot_z_spacing(ZZ, zoi, order, filepath):
     z_positions = ZZ[zoi]
     z_diff = np.diff(z_positions)
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(range(1, len(z_diff) + 1), z_diff, 'k.', markersize=14)
+    _fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(range(1, len(z_diff) + 1), z_diff, "k.", markersize=14)
     ax.set_xlabel("Beam pair", fontweight="bold")
     ax.set_ylabel("ΔZ (µm)", fontweight="bold")
     ax.set_title("Z Spacing Between Consecutive Beams", fontweight="bold")
@@ -975,7 +945,6 @@ def plot_z_spacing(ZZ, zoi, order, filepath):
     plt.tight_layout()
     plt.savefig(filepath.with_name("pollen_calibration_z_spacing.png"), dpi=150)
     plt.close()
-    print("Saved: pollen_calibration_z_spacing.png")
 
 
 def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info):
@@ -1006,10 +975,10 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info):
         IOI[IOI > 0] = 1
         IOI[IOI <= 0] = 0
 
-        total = np.trapz(np.trapz(IOI, axis=0))
+        total = np.trapezoid(np.trapezoid(IOI, axis=0))
         if total > 0:
-            offx[zz] = round(np.trapz(np.trapz(XX * IOI, axis=0)) / total)
-            offy[zz] = round(np.trapz(np.trapz(YY * IOI, axis=0)) / total)
+            offx[zz] = round(np.trapezoid(np.trapezoid(XX * IOI, axis=0)) / total)
+            offy[zz] = round(np.trapezoid(np.trapezoid(YY * IOI, axis=0)) / total)
 
     # Refine positions with centroid offsets
     xs_refined = xs + offx
@@ -1024,18 +993,18 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info):
     ys_um = np.zeros(n_patches)
 
     for i in range(n_patches):
-        xi = int(round(xs_refined[i]))
-        yi = int(round(ys_refined[i]))
+        xi = round(xs_refined[i])
+        yi = round(ys_refined[i])
         xi = np.clip(xi, 0, len(vx) - 1)
         yi = np.clip(yi, 0, len(vy) - 1)
         xs_um[i] = vx[xi]
         ys_um[i] = vy[yi]
 
     # Plot XY offsets in microns - show ALL selected beads
-    fig, ax = plt.subplots(figsize=(6, 6))
+    _fig, ax = plt.subplots(figsize=(6, 6))
 
     # Plot all patches as a single series
-    ax.plot(xs_um, ys_um, 'bo', markersize=8)
+    ax.plot(xs_um, ys_um, "bo", markersize=8)
 
     # Add beam number labels next to each point
     for i in range(n_patches):
@@ -1043,8 +1012,8 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info):
                     xytext=(5, 5), fontsize=8)
 
     # Store cavity info for reference but don't split the plot
-    n_cavity_a = len(cavity_info['cavity_a'])
-    n_cavity_b = len(cavity_info['cavity_b'])
+    n_cavity_a = len(cavity_info["cavity_a"])
+    len(cavity_info["cavity_b"])
 
     ax.set_xlabel("X (µm)", fontweight="bold")
     ax.set_ylabel("Y (µm)", fontweight="bold")
@@ -1058,7 +1027,6 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info):
     plt.tight_layout()
     plt.savefig(filepath.with_name("pollen_calibration_xy_offsets.png"), dpi=150)
     plt.close()
-    print("Saved: pollen_calibration_xy_offsets.png")
 
     # Save calibration data
     # Calculate relative offsets like MATLAB
@@ -1066,7 +1034,7 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info):
     diffy = ys_um.copy()
 
     # Use cavity A size for reference offset calculation
-    if n_patches >= n_cavity_a and n_cavity_a > 0:
+    if n_patches >= n_cavity_a > 0:
         diffx = diffx - max(diffx[0] if n_patches > 0 else 0,
                            diffx[n_cavity_a-1] if n_patches >= n_cavity_a else 0)
         diffy = diffy - min(diffy[0] if n_patches > 0 else 0,
@@ -1087,17 +1055,15 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info):
         f.create_dataset("centroid_offy", data=offy)
 
         # Save cavity info
-        f.create_dataset("cavity_a_channels", data=np.array(cavity_info['cavity_a']))
-        f.create_dataset("cavity_b_channels", data=np.array(cavity_info['cavity_b']))
-        f.attrs['is_lbm'] = cavity_info['is_lbm']
-        f.attrs['num_cavities'] = cavity_info['num_cavities']
+        f.create_dataset("cavity_a_channels", data=np.array(cavity_info["cavity_a"]))
+        f.create_dataset("cavity_b_channels", data=np.array(cavity_info["cavity_b"]))
+        f.attrs["is_lbm"] = cavity_info["is_lbm"]
+        f.attrs["num_cavities"] = cavity_info["num_cavities"]
 
-    print(f"Saved XY calibration to: {h5_path}")
 
 
 def select_pollen_file() -> str | None:
     from imgui_bundle import immapp, hello_imgui
-    from mbo_utilities.gui import _setup  # triggers setup on import
     from mbo_utilities.gui._setup import get_default_ini_path
 
     dlg = PollenDialog()
@@ -1148,7 +1114,6 @@ def select_pollen_file() -> str | None:
 )
 def main(input_path, zoom, fov, dz):
     """Run pollen calibration with optional input/output paths."""
-
     if input_path is None:
         data_in = select_pollen_file()
         if not data_in:

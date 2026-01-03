@@ -1,14 +1,26 @@
-# gui_logger.py
 """
-debug panel for mbo_utilities GUI.
+Debug log panel.
 
-displays log messages from all mbo.* loggers with filtering,
+Displays log messages from all mbo.* loggers with filtering,
 level control, and message management.
 """
+
+from __future__ import annotations
+
+import inspect
 import logging
 import time
-from imgui_bundle import imgui
-from .. import log
+from typing import TYPE_CHECKING
+
+from imgui_bundle import imgui, imgui_ctx
+
+from . import BasePanel
+from mbo_utilities.gui._imgui_helpers import fmt_value
+
+if TYPE_CHECKING:
+    from mbo_utilities.gui.viewers import BaseViewer
+
+__all__ = ["DebugPanel", "GuiLogHandler", "draw_scope"]
 
 LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 LEVEL_VAL = {n: getattr(logging, n) for n in LEVELS}
@@ -22,47 +34,65 @@ LEVEL_COLORS = {
 
 
 class _GuiNameFilter(logging.Filter):
-    """filter log records by logger name based on gui toggle state."""
-    def __init__(self, gui_logger):
-        super().__init__()
-        self.gui_logger = gui_logger
+    """Filter log records by logger name based on panel toggle state."""
 
-    def filter(self, record):
-        return 1 if self.gui_logger.active_loggers.get(record.name, True) else 0
+    def __init__(self, panel: DebugPanel):
+        super().__init__()
+        self.panel = panel
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return self.panel.active_loggers.get(record.name, True)
 
 
 class GuiLogHandler(logging.Handler):
-    """handler that routes log records to the gui debug panel."""
-    def __init__(self, gui_logger):
-        super().__init__()
-        self.gui_logger = gui_logger
-        self.addFilter(_GuiNameFilter(gui_logger))
+    """Handler that routes log records to the debug panel."""
 
-    def emit(self, record):
+    def __init__(self, panel: DebugPanel):
+        super().__init__()
+        self.panel = panel
+        self.addFilter(_GuiNameFilter(panel))
+
+    def emit(self, record: logging.LogRecord) -> None:
         t = time.strftime("%H:%M:%S")
         lvl_map = {10: "debug", 20: "info", 30: "warning", 40: "error", 50: "critical"}
         lvl = lvl_map.get(record.levelno, "info")
         msg = self.format(record)
-        self.gui_logger.add_message(t, lvl, record.name, msg)
+        self.panel.add_message(t, lvl, record.name, msg)
 
 
-class GuiLogger:
+class DebugPanel(BasePanel):
     """
-    debug panel widget for imgui.
+    Debug panel with per-level filtering and search.
 
-    features:
-    - filter messages by level (debug/info/warning/error/critical)
-    - toggle individual loggers on/off
-    - set log level globally or per-logger
-    - auto-scroll to newest messages
-    - search/filter messages
-    - clear messages
-    - message limit to prevent memory issues
+    Features:
+    - Filter messages by level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
+    - Toggle individual loggers on/off
+    - Set log level globally or per-logger
+    - Auto-scroll to newest messages
+    - Search/filter messages
+    - Clear messages
+    - Message limit to prevent memory issues
     """
+
+    name = "Debug Log"
     MAX_MESSAGES = 1000
 
-    def __init__(self):
-        self.show = True
+    def __init__(self, viewer: BaseViewer):
+        super().__init__(viewer)
+
+        # Import log utilities
+        try:
+            from mbo_utilities import log
+            self._log = log
+            initial_loggers = log.get_package_loggers()
+        except ImportError:
+            self._log = None
+            initial_loggers = []
+
+        # Message storage
+        self.messages: list[tuple[str, str, str, str]] = []  # (timestamp, level, name, msg)
+
+        # Filter state
         self.filters = {
             "debug": False,  # off by default - too noisy
             "info": True,
@@ -70,41 +100,43 @@ class GuiLogger:
             "error": True,
             "critical": True,
         }
-        self.messages = []
-        self.window_flags = imgui.WindowFlags_.none
-        self.active_loggers = {name: True for name in log.get_package_loggers()}
-        self.levels = {name: "INFO" for name in self.active_loggers}
+
+        # Logger toggles
+        self.active_loggers = dict.fromkeys(initial_loggers, True)
+        self.levels = dict.fromkeys(self.active_loggers, "INFO")
         self.master_level = "INFO"
 
-        # ui state
+        # UI state
         self.auto_scroll = True
         self.search_text = ""
         self.show_loggers = False  # collapsed by default
         self.show_controls = True
 
-    def add_message(self, timestamp, level, logger_name, message):
-        """add a message, enforcing max limit."""
+    def add_message(self, timestamp: str, level: str, logger_name: str, message: str) -> None:
+        """Add a message, enforcing max limit."""
         self.messages.append((timestamp, level, logger_name, message))
         if len(self.messages) > self.MAX_MESSAGES:
-            # remove oldest 10%
+            # Remove oldest 10%
             trim = self.MAX_MESSAGES // 10
             self.messages = self.messages[trim:]
 
-    @staticmethod
-    def _apply_level(name: str, lvl_name: str):
+    def _apply_level(self, name: str, lvl_name: str) -> None:
+        """Apply log level to a logger."""
         logging.getLogger(name).setLevel(LEVEL_VAL[lvl_name])
 
-    def _refresh_loggers(self):
-        """refresh active_loggers list to include newly created loggers."""
-        current = log.get_package_loggers()
+    def _refresh_loggers(self) -> None:
+        """Refresh active_loggers list to include newly created loggers."""
+        if self._log is None:
+            return
+        current = self._log.get_package_loggers()
         for name in current:
             if name not in self.active_loggers:
                 self.active_loggers[name] = True
                 self.levels[name] = self.master_level
 
-    def _draw_controls(self):
-        """draw level filter checkboxes and global controls."""
-        # level filters
+    def _draw_controls(self) -> None:
+        """Draw level filter checkboxes and global controls."""
+        # Level filters
         imgui.text("Levels:")
         imgui.same_line()
         for lvl in ["debug", "info", "warning", "error", "critical"]:
@@ -116,7 +148,7 @@ class GuiLogger:
                 self.filters[lvl] = val
             imgui.same_line()
 
-        # global level dropdown
+        # Global level dropdown
         imgui.same_line(imgui.get_window_width() - 180)
         imgui.set_next_item_width(80)
         combo_open = imgui.begin_combo("##global_level", self.master_level)
@@ -128,18 +160,19 @@ class GuiLogger:
                 clicked = sel[0] if isinstance(sel, tuple) else sel
                 if clicked:
                     self.master_level = lvl
-                    log.set_global_level(LEVEL_VAL[lvl])
+                    if self._log:
+                        self._log.set_global_level(LEVEL_VAL[lvl])
                     for name in self.active_loggers:
                         self.levels[name] = lvl
             imgui.end_combo()
         imgui.same_line()
 
-        # clear button
+        # Clear button
         if imgui.button("Clear"):
             self.messages.clear()
 
-    def _draw_search(self):
-        """draw search bar and auto-scroll toggle."""
+    def _draw_search(self) -> None:
+        """Draw search bar and auto-scroll toggle."""
         imgui.set_next_item_width(200)
         changed, val = imgui.input_text_with_hint(
             "##search", "Search messages...", self.search_text
@@ -153,20 +186,19 @@ class GuiLogger:
         imgui.same_line()
         imgui.text(f"({len(self.messages)} msgs)")
 
-    def _draw_logger_toggles(self):
-        """draw collapsible section with per-logger controls."""
+    def _draw_logger_toggles(self) -> None:
+        """Draw collapsible section with per-logger controls."""
         self._refresh_loggers()
 
         flags = imgui.TreeNodeFlags_.default_open if self.show_loggers else 0
         expanded = imgui.collapsing_header("Loggers", flags)
-        # handle both tuple return (older imgui) and bool return (newer imgui)
         if isinstance(expanded, tuple):
             expanded = expanded[0]
         if expanded:
             self.show_loggers = True
 
-            # group loggers by prefix
-            groups = {}
+            # Group loggers by prefix
+            groups: dict[str, list[str]] = {}
             for name in sorted(self.active_loggers.keys()):
                 parts = name.split(".")
                 if len(parts) > 1:
@@ -177,9 +209,9 @@ class GuiLogger:
                     groups[prefix] = []
                 groups[prefix].append(name)
 
-            # draw grouped loggers in columns
+            # Draw grouped loggers in columns
             columns = min(3, len(groups))
-            if imgui.begin_table("logger_table", columns, imgui.TableFlags_.borders_inner_v):
+            if columns > 0 and imgui.begin_table("logger_table", columns, imgui.TableFlags_.borders_inner_v):
                 for group_name in sorted(groups.keys()):
                     imgui.table_next_column()
                     imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"[{group_name}]")
@@ -213,9 +245,9 @@ class GuiLogger:
         else:
             self.show_loggers = False
 
-    def _draw_messages(self):
-        """draw scrollable message list."""
-        # calculate available height
+    def _draw_messages(self) -> None:
+        """Draw scrollable message list."""
+        # Calculate available height
         avail = imgui.get_content_region_avail()
         child_height = max(100, avail.y - 4)
 
@@ -229,22 +261,22 @@ class GuiLogger:
         search_lower = self.search_text.lower()
 
         for timestamp, lvl, full_name, msg in reversed(self.messages):
-            # filter by level
+            # Filter by level
             if not self.filters.get(lvl, False):
                 continue
 
-            # filter by logger toggle
+            # Filter by logger toggle
             if not self.active_loggers.get(full_name, True):
                 continue
 
-            # filter by search
+            # Filter by search
             if search_lower and search_lower not in msg.lower():
                 continue
 
             short = full_name.split(".")[-1]
             col = LEVEL_COLORS.get(lvl, LEVEL_COLORS["info"])
 
-            # format: [HH:MM:SS] [logger] message
+            # Format: [HH:MM:SS] [logger] message
             imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), f"[{timestamp}]")
             imgui.same_line()
             imgui.text_colored(imgui.ImVec4(0.4, 0.7, 1.0, 1.0), f"[{short}]")
@@ -256,11 +288,47 @@ class GuiLogger:
 
         imgui.end_child()
 
-    def draw(self):
-        """draw the full debug panel."""
-        self._draw_controls()
-        self._draw_search()
-        imgui.separator()
-        self._draw_logger_toggles()
-        imgui.separator()
-        self._draw_messages()
+    def draw(self) -> None:
+        """Draw the full debug panel."""
+        if not self._visible:
+            return
+
+        # Use a separate window
+        expanded, opened = imgui.begin("Debug Log", self._visible)
+        self._visible = opened
+
+        if expanded:
+            self._draw_controls()
+            self._draw_search()
+            imgui.separator()
+            self._draw_logger_toggles()
+            imgui.separator()
+            self._draw_messages()
+
+        imgui.end()
+
+
+# Scope colors
+_NAME_COLOR = imgui.ImVec4(0.95, 0.80, 0.30, 1.0)
+_VALUE_COLOR = imgui.ImVec4(0.85, 0.85, 0.85, 1.0)
+
+
+def draw_scope():
+    """Draw a scope inspector showing local variables from the calling frame."""
+    with imgui_ctx.begin_child("Scope Inspector"):
+        frame = inspect.currentframe().f_back
+        vars_all = {**frame.f_locals}
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4))
+        try:
+            for name, val in sorted(vars_all.items()):
+                if (
+                    inspect.ismodule(val)
+                    or (name.startswith("_") or name.endswith("_"))
+                    or callable(val)
+                ):
+                    continue
+                imgui.text_colored(_NAME_COLOR, name)
+                imgui.same_line(spacing=16)
+                imgui.text_colored(_VALUE_COLOR, fmt_value(val))
+        finally:
+            imgui.pop_style_var()

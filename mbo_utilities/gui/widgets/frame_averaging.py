@@ -5,15 +5,12 @@ shows ui for toggling frame averaging on piezo stack data
 that has framesPerSlice > 1 and was not pre-averaged.
 """
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui
 
 from mbo_utilities.gui.widgets._base import Widget
-from mbo_utilities.gui._widgets import set_tooltip
-
-if TYPE_CHECKING:
-    from mbo_utilities.gui.imgui import PreviewDataWidget
+from mbo_utilities.gui._imgui_helpers import set_tooltip
 
 
 class FrameAveragingWidget(Widget):
@@ -23,8 +20,8 @@ class FrameAveragingWidget(Widget):
     priority = 55  # after raster scan (50)
 
     @classmethod
-    def is_supported(cls, parent: "PreviewDataWidget") -> bool:
-        """show only for piezo arrays that can average frames."""
+    def is_supported(cls, parent: Any) -> bool:
+        """Show only for piezo arrays that can average frames."""
         arrays = parent._get_data_arrays()
         for arr in arrays:
             # check if this is a PiezoArray with averaging capability
@@ -33,7 +30,7 @@ class FrameAveragingWidget(Widget):
         return False
 
     def draw(self) -> None:
-        """draw frame averaging controls."""
+        """Draw frame averaging controls."""
         parent = self.parent
         arrays = parent._get_data_arrays()
 

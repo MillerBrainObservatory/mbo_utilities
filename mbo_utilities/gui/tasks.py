@@ -14,14 +14,13 @@ import json
 import logging
 import time
 import os
-import sys
 import traceback
 from pathlib import Path
 from multiprocessing import Pool, cpu_count
 
 from mbo_utilities import imread
 from mbo_utilities.writer import imwrite
-from mbo_utilities.util import listify_index, load_npy
+from mbo_utilities.util import load_npy
 from mbo_utilities.arrays import register_zplanes_s3d, validate_s3d_registration
 from mbo_utilities.metadata import get_param
 
@@ -33,6 +32,7 @@ class TaskMonitor:
     Helper to report task progress to a JSON sidecar file.
     Plugins into the ProcessManager on the GUI side.
     """
+
     def __init__(self, output_dir: Path | str, uuid: str | None = None):
         self.output_dir = Path(output_dir)
         self.pid = os.getpid()
@@ -50,12 +50,12 @@ class TaskMonitor:
         else:
             self.progress_file = self.log_dir / f"progress_{self.pid}.json"
 
-    def update(self, progress: float, message: str, state: str = "running", details: dict = None):
+    def update(self, progress: float, message: str, state: str = "running", details: dict | None = None):
         """
         Update progress file.
         progress: 0.0 to 1.0
         message: Short status description
-        state: "running", "completed", "error"
+        state: "running", "completed", "error".
         """
         data = {
             "pid": self.pid,
@@ -79,7 +79,7 @@ class TaskMonitor:
     def finish(self, message: str = "Task completed"):
         self.update(1.0, message, state="completed")
 
-    def fail(self, error: str, details: str | dict = None):
+    def fail(self, error: str, details: str | dict | None = None):
         self.update(0.0, f"Error: {error}", state="error", details=details)
 
 
@@ -134,10 +134,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
         # Determine directory for registration outputs
         # If output_path has an extension (file .tif or wrapper .zarr), use its parent.
         # If output_path looks like a directory (no suffix), use it directly.
-        if output_path.suffix:
-            reg_out_dir = output_path.parent
-        else:
-            reg_out_dir = output_path
+        reg_out_dir = output_path.parent if output_path.suffix else output_path
 
         # Check output path for existing registration
         job_id = combined_meta.get("job_id", "s3d-preprocessed")
@@ -161,7 +158,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
                          progress_callback=_reg_cb,
                      )
              except Exception as e:
-                 logger.error(f"Registration failed: {e}")
+                 logger.exception(f"Registration failed: {e}")
 
         if s3d_job_dir and validate_s3d_registration(s3d_job_dir, num_planes):
             metadata["apply_shift"] = True
@@ -274,7 +271,9 @@ def _suite2p_worker(args):
         )
         return {"status": "success", "plane": ops.get("plane")}
     except Exception as e:
-        return {"status": "error", "plane": ops.get("plane"), "error": str(e)}
+        import traceback
+        tb = traceback.format_exc()
+        return {"status": "error", "plane": ops.get("plane"), "error": str(e), "traceback": tb}
 
 
 def task_suite2p(args: dict, logger: logging.Logger) -> None:
@@ -319,7 +318,6 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
          monitor.update(0.05, "Applying phase correction settings...")
          # Assuming these args might be passed in ops or kwargs,
          # but usually encoded in the array defaults or metadata
-         pass
 
     extracted_items = [] # List of dicts describing each extracted plane
 
@@ -383,10 +381,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             )
 
             # Reload ops from disk to get Lx, Ly, and other metadata added by imwrite
-            if ops_path.exists():
-                updated_ops = load_npy(ops_path).item()
-            else:
-                updated_ops = current_md
+            updated_ops = load_npy(ops_path).item() if ops_path.exists() else current_md
 
             extracted_items.append({
                 "bin_file": str(raw_file),
@@ -396,8 +391,8 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             })
 
         except Exception as e:
-            logger.error(f"Failed to extract plane {p_idx}: {e}")
-            logger.error(traceback.format_exc())
+            logger.exception(f"Failed to extract plane {p_idx}: {e}")
+            logger.exception(traceback.format_exc())
             monitor.fail(f"Extraction failed for plane {p_idx}: {e}", details={"traceback": traceback.format_exc()})
             raise # Stop processing
 
@@ -445,18 +440,19 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
                 if res["status"] == "error":
                     errors += 1
                     logger.error(f"Error in plane {res['plane']}: {res['error']}")
+                    if "traceback" in res:
+                        logger.error(f"Traceback:\n{res['traceback']}")
                 else:
                     completed += 1
             except Exception as e:
                 errors += 1
-                logger.error(f"Worker crashed: {e}")
+                logger.exception(f"Worker crashed: {e}")
 
     if errors > 0:
         msg = f"Completed with {errors} errors. ({completed} success)"
         monitor.fail(msg)
         raise RuntimeError(msg)
-    else:
-        monitor.finish(f"All {completed} planes processed successfully.")
+    monitor.finish(f"All {completed} planes processed successfully.")
 
 # Registry
 TASKS = {

@@ -9,6 +9,7 @@ from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities.util import load_npy
+import contextlib
 
 
 def _load_stats(plane_dir: Path) -> dict:
@@ -197,15 +198,11 @@ class GridSearchViewer:
 
             # close existing window for this position
             if position == "left" and self._suite2p_left is not None:
-                try:
+                with contextlib.suppress(RuntimeError, AttributeError):
                     self._suite2p_left.close()
-                except (RuntimeError, AttributeError):
-                    pass
             elif position == "right" and self._suite2p_right is not None:
-                try:
+                with contextlib.suppress(RuntimeError, AttributeError):
                     self._suite2p_right.close()
-                except (RuntimeError, AttributeError):
-                    pass
 
             # Normalize paths for suite2p - it has issues with UNC paths
             import os
@@ -252,8 +249,8 @@ class GridSearchViewer:
                 try:
                     set_last_dir("grid_search", result)
                     self.load_results(Path(result))
-                except Exception as e:
-                    print(f"Error loading grid search results: {e}")
+                except Exception:
+                    pass
             self._file_dialog = None
 
         if not self.loaded:
@@ -331,7 +328,7 @@ class GridSearchViewer:
         stats_l = self._get_stats(self._left_idx)
         if not left_complete:
             imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.2, 1.0), f"Incomplete - missing: {', '.join(left_missing)}")
-        elif stats_l['n_cells'] == 0:
+        elif stats_l["n_cells"] == 0:
             imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "No detected cells")
         else:
             imgui.text(f"Cells: {stats_l['n_cells']}  Non-cells: {stats_l['n_not_cells']}  SNR: {stats_l['mean_snr']:.2f}")
@@ -369,7 +366,7 @@ class GridSearchViewer:
         stats_r = self._get_stats(self._right_idx)
         if not right_complete:
             imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.2, 1.0), f"Incomplete - missing: {', '.join(right_missing)}")
-        elif stats_r['n_cells'] == 0:
+        elif stats_r["n_cells"] == 0:
             imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "No detected cells")
         else:
             imgui.text(f"Cells: {stats_r['n_cells']}  Non-cells: {stats_r['n_not_cells']}  SNR: {stats_r['mean_snr']:.2f}")
@@ -419,7 +416,7 @@ class GridSearchViewer:
 
                 imgui.table_next_column()
                 # highlight selected rows
-                if i == self._left_idx or i == self._right_idx:
+                if i in (self._left_idx, self._right_idx):
                     imgui.text_colored(imgui.ImVec4(0.3, 0.8, 0.3, 1.0), combo.name)
                 else:
                     imgui.text(combo.name)
@@ -449,9 +446,7 @@ class GridSearchViewer:
         """Clean up suite2p windows."""
         for window in [self._suite2p_left, self._suite2p_right]:
             if window is not None:
-                try:
+                with contextlib.suppress(RuntimeError, AttributeError):
                     window.close()
-                except (RuntimeError, AttributeError):
-                    pass
         self._suite2p_left = None
         self._suite2p_right = None

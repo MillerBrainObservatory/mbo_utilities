@@ -5,19 +5,18 @@ This module is designed for fast startup - heavy imports are deferred until need
 Operations like --download-notebook and --check-install should be near-instant.
 """
 import sys
-import os
-import importlib.util
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 import click
+import contextlib
 
 # Set AppUserModelID immediately for Windows
 try:
     import ctypes
     import sys
-    if sys.platform == 'win32':
-        myappid = 'mbo.utilities.gui.1.0'
+    if sys.platform == "win32":
+        myappid = "mbo.utilities.gui.1.0"
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 except Exception:
     pass
@@ -112,7 +111,7 @@ class SplashScreen:
             self.progress_frame.pack(pady=5)
 
             self.dots = []
-            for i in range(5):
+            for _i in range(5):
                 dot = tk.Label(
                     self.progress_frame,
                     text="●",
@@ -146,10 +145,8 @@ class SplashScreen:
         """Close the splash screen."""
         self._closed = True
         if self.root is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.root.destroy()
-            except Exception:
-                pass
             self.root = None
 
 
@@ -203,22 +200,22 @@ def _print_upgrade_status():
         try:
             from packaging.version import parse
             if parse(current) < parse(latest):
-                click.secho(f"\nUpgrade available! Run:", fg="cyan")
-                click.secho(f"  uv pip install --upgrade mbo-utilities", fg="cyan", bold=True)
+                click.secho("\nUpgrade available! Run:", fg="cyan")
+                click.secho("  uv pip install --upgrade mbo-utilities", fg="cyan", bold=True)
                 click.echo("  or")
-                click.secho(f"  pip install --upgrade mbo-utilities", fg="cyan", bold=True)
+                click.secho("  pip install --upgrade mbo-utilities", fg="cyan", bold=True)
             else:
                 click.secho("You are running a newer version than PyPI (dev build)", fg="green")
         except ImportError:
             # no packaging module, do string comparison
             if current != latest:
-                click.secho(f"\nDifferent version on PyPI. To upgrade:", fg="cyan")
-                click.secho(f"  uv pip install --upgrade mbo-utilities", fg="cyan", bold=True)
+                click.secho("\nDifferent version on PyPI. To upgrade:", fg="cyan")
+                click.secho("  uv pip install --upgrade mbo-utilities", fg="cyan", bold=True)
 
 
 def _download_notebook_file(
-    output_path: Optional[Union[str, Path]] = None,
-    notebook_url: Optional[str] = None,
+    output_path: str | Path | None = None,
+    notebook_url: str | None = None,
 ):
     """Download a Jupyter notebook from a URL to a local file.
 
@@ -292,8 +289,8 @@ def _download_notebook_file(
 
 
 def download_notebook(
-    output_path: Optional[Union[str, Path]] = None,
-    notebook_url: Optional[str] = None,
+    output_path: str | Path | None = None,
+    notebook_url: str | None = None,
 ) -> Path:
     """Download a Jupyter notebook from a URL to a local file.
 
@@ -344,9 +341,9 @@ def _check_installation():
     return status.all_ok
 
 
-def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bool, str]:
+def _select_file(runner_params: Any | None = None) -> tuple[Any, Any, Any, bool, str]:
     """Show file selection dialog and return user choices."""
-    from mbo_utilities.gui._file_dialog import FileDialog  # triggers _setup import
+    from mbo_utilities.gui.widgets.file_dialog import FileDialog  # triggers _setup import
     from mbo_utilities.gui._setup import get_default_ini_path
     from imgui_bundle import immapp, hello_imgui
 
@@ -387,7 +384,7 @@ def _select_file(runner_params: Optional[Any] = None) -> tuple[Any, Any, Any, bo
 def _show_metadata_viewer(metadata: dict) -> None:
     """Show metadata in an ImGui window."""
     from imgui_bundle import immapp, hello_imgui
-    from mbo_utilities.gui._widgets import draw_metadata_inspector
+    from mbo_utilities.gui._metadata import draw_metadata_inspector
     from mbo_utilities.gui._setup import get_default_ini_path
 
     params = hello_imgui.RunnerParams()
@@ -429,7 +426,6 @@ def _create_image_widget(data_array, widget: bool = True):
     from mbo_utilities.arrays.features import get_slider_dims
 
     slider_dim_names = get_slider_dims(data_array)
-    ndim = data_array.ndim
 
     # window_funcs tuple must match slider_dim_names length
     if slider_dim_names:
@@ -491,7 +487,7 @@ def _create_image_widget(data_array, widget: bool = True):
 
     # Add PreviewDataWidget if requested
     if widget:
-        from mbo_utilities.gui.imgui import PreviewDataWidget
+        from mbo_utilities.gui.widgets.preview_data import PreviewDataWidget
 
         gui = PreviewDataWidget(
             iw=iw,
@@ -515,13 +511,13 @@ def _is_jupyter() -> bool:
 
 
 def _run_gui_impl(
-    data_in: Optional[Union[str, Path]] = None,
-    roi: Optional[Union[int, tuple[int, ...]]] = None,
+    data_in: str | Path | None = None,
+    roi: int | tuple[int, ...] | None = None,
     widget: bool = True,
     metadata_only: bool = False,
     select_only: bool = False,
     show_splash: bool = False,
-    runner_params: Optional[Any] = None,
+    runner_params: Any | None = None,
     mode: str = "Standard Viewer",
 ):
     """Internal implementation of run_gui with all heavy imports."""
@@ -533,9 +529,6 @@ def _run_gui_impl(
 
     try:
         # Import heavy dependencies only when actually running GUI
-        from mbo_utilities.arrays import normalize_roi
-        from mbo_utilities.gui import _setup  # triggers setup on import
-        import subprocess
 
         # close splash before showing file dialog
         if splash:
@@ -546,7 +539,6 @@ def _run_gui_impl(
         if data_in is None:
             data_in, roi_from_dialog, widget, metadata_only, mode = _select_file(runner_params=runner_params)
             if not data_in:
-                print("No file selected, exiting.")
                 return None
             # Use ROI from dialog if not specified in function call
             if roi is None:
@@ -556,22 +548,19 @@ def _run_gui_impl(
         if select_only:
             return data_in
 
-        print(f"Launching Mode: {mode}")
 
         # Dispatch based on Mode
         if mode == "Standard Viewer":
             return _launch_standard_viewer(data_in, roi, widget, metadata_only)
-        elif mode == "Pollen Calibration":
+        if mode == "Pollen Calibration":
             return _launch_pollen_calibration(data_in, widget)
-        elif mode == "Napari":
+        if mode == "Napari":
             return _launch_napari(data_in)
-        elif mode == "Cellpose":
+        if mode == "Cellpose":
             return _launch_cellpose(data_in)
-        elif mode == "Suite2p":
+        if mode == "Suite2p":
             return _launch_suite2p()
-        else:
-            print(f"Unknown mode {mode}, falling back to Standard Viewer")
-            return _launch_standard_viewer(data_in, roi, widget, metadata_only)
+        return _launch_standard_viewer(data_in, roi, widget, metadata_only)
 
     finally:
         # ensure splash is closed on any exit path
@@ -582,14 +571,13 @@ def _run_gui_impl(
 def _launch_standard_viewer(data_in, roi, widget, metadata_only):
     from mbo_utilities.reader import imread
     from mbo_utilities.arrays import normalize_roi
-    
+
     roi = normalize_roi(roi)
     data_array = imread(data_in, roi=roi)
 
     if metadata_only:
         metadata = data_array.metadata
         if not metadata:
-            print("No metadata found.")
             return None
         _show_metadata_viewer(metadata)
         return None
@@ -599,9 +587,8 @@ def _launch_standard_viewer(data_in, roi, widget, metadata_only):
 
     if _is_jupyter():
         return iw
-    else:
-        fpl.loop.run()
-        return None
+    fpl.loop.run()
+    return None
 
 
 def _launch_pollen_calibration(data_in, widget: bool = True):
@@ -617,20 +604,15 @@ def _launch_pollen_calibration(data_in, widget: bool = True):
 
     # Load with pollen-specific dims
     data_array = open_scanimage(data_in, dims="ZCYX")
-    print(f"Loaded pollen calibration data: {data_array.shape} (Z, C, Y, X)")
-    print(f"  Stack type: {data_array.stack_type}")
-    print(f"  Array type: {type(data_array).__name__}")
     # CalibrationArray has num_beamlets/num_zplanes, others have num_channels
-    num_beamlets = getattr(data_array, 'num_beamlets', data_array.num_channels)
-    print(f"  Beamlets: {num_beamlets}")
+    getattr(data_array, "num_beamlets", data_array.num_channels)
 
     iw = _create_image_widget(data_array, widget=widget)
 
     if _is_jupyter():
         return iw
-    else:
-        fpl.loop.run()
-        return None
+    fpl.loop.run()
+    return None
 
 
 def _launch_napari(data_in):
@@ -656,12 +638,12 @@ def _launch_napari(data_in):
             try:
                 arr = imread(data_in)
                 # For lazy arrays, load a subset or use dask
-                if hasattr(arr, 'shape'):
+                if hasattr(arr, "shape"):
                     # Add as image layer - napari handles dask/numpy arrays
                     viewer.add_image(arr, name=Path(path_str).name)
                     loaded = True
-            except Exception as e:
-                print(f"Failed to load via mbo_utilities: {e}")
+            except Exception:
+                pass
 
         if not loaded:
             # Last resort: let napari try to open it directly
@@ -669,11 +651,9 @@ def _launch_napari(data_in):
 
         napari.run()
     except ImportError:
-        print("Napari not installed or failed to launch.")
-        print("pip install napari[all]")
-    except Exception as e:
-        print(f"Error launching Napari: {e}")
-    return None
+        pass
+    except Exception:
+        pass
 
 
 
@@ -688,12 +668,9 @@ def _launch_cellpose(data_in):
     if path_str.endswith((".tif", ".tiff", ".png", ".jpg")):
         cmd.extend(["--image_path", path_str])
     elif path_str.endswith(".zarr"):
-        print("Note: Cellpose GUI may not natively support Zarr.")
-        print("Use 'export_to_cellpose' first if needed.")
+        pass
 
-    print(f"Running: {' '.join(cmd)}")
-    subprocess.run(cmd)
-    return None
+    subprocess.run(cmd, check=False)
 
 
 def _launch_suite2p():
@@ -701,18 +678,16 @@ def _launch_suite2p():
     import sys
     # Suite2p main GUI
     cmd = [sys.executable, "-m", "suite2p"]
-    print(f"Running: {' '.join(cmd)}")
-    subprocess.run(cmd)
-    return None
+    subprocess.run(cmd, check=False)
 
 
 def run_gui(
-    data_in: Optional[Union[str, Path]] = None,
-    roi: Optional[Union[int, tuple[int, ...]]] = None,
+    data_in: str | Path | None = None,
+    roi: int | tuple[int, ...] | None = None,
     widget: bool = True,
     metadata_only: bool = False,
     select_only: bool = False,
-    runner_params: Optional[Any] = None,
+    runner_params: Any | None = None,
 ):
     """
     Open a GUI to preview data of any supported type.

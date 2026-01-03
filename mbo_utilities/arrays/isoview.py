@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 import logging
 
 import numpy as np
 
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
-if TYPE_CHECKING:
-    from numpy.typing import DTypeLike
 
 logger = logging.getLogger(__name__)
 
@@ -109,18 +106,18 @@ class IsoviewArray:
         consolidated_zarrs = []
         for zf in tm_folder.glob("*.zarr"):
             try:
-                z = zarr.open(zf, mode='r')
+                z = zarr.open(zf, mode="r")
                 if isinstance(z, zarr.Group):
-                    if any(k.startswith('camera_') for k in z.group_keys()):
+                    if any(k.startswith("camera_") for k in z.group_keys()):
                         consolidated_zarrs.append(zf)
             except:
                 continue
 
         if consolidated_zarrs:
-            self._structure = 'consolidated'
+            self._structure = "consolidated"
             self._discover_consolidated(tm_folder, consolidated_zarrs[0])
         else:
-            self._structure = 'separate'
+            self._structure = "separate"
             self._discover_separate(tm_folder)
 
         logger.info(
@@ -142,7 +139,7 @@ class IsoviewArray:
             name = zf.stem
 
             # Skip mask files
-            if any(x in name for x in ['Mask', 'mask', 'coords']):
+            if any(x in name for x in ["Mask", "mask", "coords"]):
                 continue
 
             parts = name.split("_")
@@ -169,23 +166,23 @@ class IsoviewArray:
         # Open first valid (non-mask) file to get shape/dtype/metadata
         first_valid = None
         for zf in zarr_files:
-            if not any(x in zf.stem for x in ['Mask', 'mask', 'coords']):
+            if not any(x in zf.stem for x in ["Mask", "mask", "coords"]):
                 first_valid = zf
                 break
 
         if first_valid is None:
             raise ValueError(f"No valid data files in {tm_folder}")
 
-        first_z = zarr.open(first_valid, mode='r')
+        first_z = zarr.open(first_valid, mode="r")
         if isinstance(first_z, zarr.Group):
-            if '0' in first_z:
-                first_arr = first_z['0']
+            if "0" in first_z:
+                first_arr = first_z["0"]
             else:
                 raise ValueError(f"OME-Zarr group missing '0' array: {zarr_files[0]}")
             self._zarr_attrs = dict(first_z.attrs)
         else:
             first_arr = first_z
-            self._zarr_attrs = dict(first_arr.attrs) if hasattr(first_arr, 'attrs') else {}
+            self._zarr_attrs = dict(first_arr.attrs) if hasattr(first_arr, "attrs") else {}
 
         self._single_shape = first_arr.shape  # (Z, Y, X)
         self._dtype = first_arr.dtype
@@ -196,12 +193,12 @@ class IsoviewArray:
         import zarr
 
         self._consolidated_path = consolidated_zarr
-        z = zarr.open(consolidated_zarr, mode='r')
+        z = zarr.open(consolidated_zarr, mode="r")
 
         # Find all camera_N groups
         camera_groups = sorted(
-            [k for k in z.group_keys() if k.startswith('camera_')],
-            key=lambda x: int(x.split('_')[1])
+            [k for k in z.group_keys() if k.startswith("camera_")],
+            key=lambda x: int(x.split("_")[1])
         )
 
         if not camera_groups:
@@ -211,11 +208,11 @@ class IsoviewArray:
         # TODO: detect multiple channels per camera from metadata
         self._views = []
         for cam_group in camera_groups:
-            cam_idx = int(cam_group.split('_')[1])
+            cam_idx = int(cam_group.split("_")[1])
             self._views.append((cam_idx, 0))
 
         # Get shape/dtype from first camera
-        first_arr = z[f'{camera_groups[0]}/0']
+        first_arr = z[f"{camera_groups[0]}/0"]
         self._single_shape = first_arr.shape  # (Z, Y, X)
         self._dtype = first_arr.dtype
 
@@ -233,14 +230,14 @@ class IsoviewArray:
         camera, channel = self._views[view_idx]
         tm_folder = self.tm_folders[t_idx]
 
-        if self._structure == 'consolidated':
+        if self._structure == "consolidated":
             # Find consolidated zarr in this TM folder
             zarr_files = []
             for zf in tm_folder.glob("*.zarr"):
                 try:
-                    z = zarr.open(zf, mode='r')
+                    z = zarr.open(zf, mode="r")
                     if isinstance(z, zarr.Group):
-                        if any(k.startswith('camera_') for k in z.group_keys()):
+                        if any(k.startswith("camera_") for k in z.group_keys()):
                             zarr_files.append(zf)
                 except:
                     continue
@@ -248,8 +245,8 @@ class IsoviewArray:
             if not zarr_files:
                 raise FileNotFoundError(f"No consolidated zarr in {tm_folder}")
 
-            z = zarr.open(zarr_files[0], mode='r')
-            arr = z[f'camera_{camera}/0']
+            z = zarr.open(zarr_files[0], mode="r")
+            arr = z[f"camera_{camera}/0"]
 
         else:  # separate
             pattern = f"*_CM{camera:02d}_CHN{channel:02d}.zarr"
@@ -258,10 +255,10 @@ class IsoviewArray:
             if not matches:
                 raise FileNotFoundError(f"No {pattern} in {tm_folder}")
 
-            z = zarr.open(matches[0], mode='r')
+            z = zarr.open(matches[0], mode="r")
             if isinstance(z, zarr.Group):
-                if '0' in z:
-                    arr = z['0']
+                if "0" in z:
+                    arr = z["0"]
                 else:
                     raise ValueError(f"OME-Zarr group missing '0' array: {matches[0]}")
             else:
@@ -275,15 +272,15 @@ class IsoviewArray:
         """
         Array shape.
 
-        Returns:
+        Returns
+        -------
         - Single TM: (Z, Views, Y, X) - 4D
         - Multi TM: (T, Z, Views, Y, X) - 5D
         """
         z, y, x = self._single_shape
         if self._single_timepoint:
             return (z, len(self._views), y, x)
-        else:
-            return (len(self.tm_folders), z, len(self._views), y, x)
+        return (len(self.tm_folders), z, len(self._views), y, x)
 
     @property
     def dtype(self):
@@ -308,15 +305,15 @@ class IsoviewArray:
         For consolidated structure, uses min_intensity from camera metadata.
         Otherwise computes lazily from first view.
         """
-        if self._structure == 'consolidated' and hasattr(self, '_consolidated_path'):
+        if self._structure == "consolidated" and hasattr(self, "_consolidated_path"):
             import zarr
-            z = zarr.open(self._consolidated_path, mode='r')
+            z = zarr.open(self._consolidated_path, mode="r")
             # Get min from first camera metadata
             for cam_group in z.group_keys():
-                if cam_group.startswith('camera_'):
+                if cam_group.startswith("camera_"):
                     cam_attrs = dict(z[cam_group].attrs)
-                    if 'min_intensity' in cam_attrs:
-                        return float(cam_attrs['min_intensity'])
+                    if "min_intensity" in cam_attrs:
+                        return float(cam_attrs["min_intensity"])
 
         # Fallback: compute from first view
         first_arr = self._get_zarr(0, 0)
@@ -354,48 +351,48 @@ class IsoviewArray:
 
         # map isoview keys to canonical metadata keys
         # pixel resolution: pixel_resolution_um -> dx, dy
-        px_res = meta.get('pixel_resolution_um')
+        px_res = meta.get("pixel_resolution_um")
         if px_res is not None:
-            meta['dx'] = float(px_res)
-            meta['dy'] = float(px_res)
+            meta["dx"] = float(px_res)
+            meta["dy"] = float(px_res)
 
         # z step: z_step -> dz
-        z_step = meta.get('z_step')
+        z_step = meta.get("z_step")
         if z_step is not None:
-            meta['dz'] = float(z_step)
+            meta["dz"] = float(z_step)
 
         # frame rate: fps -> fs
-        fps = meta.get('fps')
+        fps = meta.get("fps")
         if fps is not None:
-            meta['fs'] = float(fps)
+            meta["fs"] = float(fps)
 
         # LazyArrayProtocol required fields
-        meta['num_timepoints'] = len(self.tm_folders)
-        meta['nframes'] = len(self.tm_folders)  # suite2p alias
-        meta['num_frames'] = len(self.tm_folders)  # legacy alias
-        meta['Ly'] = self._single_shape[1]
-        meta['Lx'] = self._single_shape[2]
+        meta["num_timepoints"] = len(self.tm_folders)
+        meta["nframes"] = len(self.tm_folders)  # suite2p alias
+        meta["num_frames"] = len(self.tm_folders)  # legacy alias
+        meta["Ly"] = self._single_shape[1]
+        meta["Lx"] = self._single_shape[2]
 
         # z-planes from shape (not timepoints!)
-        meta['nplanes'] = self._single_shape[0]
-        meta['num_planes'] = self._single_shape[0]
+        meta["nplanes"] = self._single_shape[0]
+        meta["num_planes"] = self._single_shape[0]
 
         # isoview-specific fields
-        meta['views'] = self._views
-        meta['shape'] = self.shape
-        meta['structure'] = self._structure
-        meta['single_timepoint'] = self._single_timepoint
+        meta["views"] = self._views
+        meta["shape"] = self.shape
+        meta["structure"] = self._structure
+        meta["single_timepoint"] = self._single_timepoint
 
         # add per-camera metadata
         cam_meta = self.camera_metadata
         if cam_meta:
-            meta['cameras'] = cam_meta
+            meta["cameras"] = cam_meta
             # aggregate per-camera values for display
-            for key in ['zplanes', 'min_intensity', 'illumination_arms', 'vps']:
+            for key in ["zplanes", "min_intensity", "illumination_arms", "vps"]:
                 values = [cm.get(key) for cm in cam_meta.values() if cm.get(key) is not None]
                 if values:
                     # if all same, use single value, otherwise use list
-                    if len(set(str(v) for v in values)) == 1:
+                    if len({str(v) for v in values}) == 1:
                         meta[key] = values[0]
                     else:
                         meta[key] = values
@@ -415,16 +412,16 @@ class IsoviewArray:
 
         Returns dict mapping camera index to camera-specific metadata.
         """
-        if self._structure != 'consolidated':
+        if self._structure != "consolidated":
             return {}
 
         import zarr
-        z = zarr.open(self._consolidated_path, mode='r')
+        z = zarr.open(self._consolidated_path, mode="r")
         cam_meta = {}
 
         for cam_group in z.group_keys():
-            if cam_group.startswith('camera_'):
-                cam_idx = int(cam_group.split('_')[1])
+            if cam_group.startswith("camera_"):
+                cam_idx = int(cam_group.split("_")[1])
                 cam_meta[cam_idx] = dict(z[cam_group].attrs)
 
         return cam_meta
@@ -477,12 +474,11 @@ class IsoviewArray:
                 if k < 0:
                     k = max_val + k
                 return [k]
-            elif isinstance(k, slice):
+            if isinstance(k, slice):
                 return list(range(*k.indices(max_val)))
-            elif isinstance(k, (list, np.ndarray)):
+            if isinstance(k, (list, np.ndarray)):
                 return list(k)
-            else:
-                return list(range(max_val))
+            return list(range(max_val))
 
         if self._single_timepoint:
             # 4D indexing: (Z, Views, Y, X)
@@ -509,16 +505,16 @@ class IsoviewArray:
 
         # Handle Y, X slicing
         if isinstance(y_key, int):
-            out_shape = out_shape[:3] + (1,) + out_shape[4:]
+            out_shape = (*out_shape[:3], 1, *out_shape[4:])
         elif isinstance(y_key, slice):
             y_size = len(range(*y_key.indices(self._single_shape[1])))
-            out_shape = out_shape[:3] + (y_size,) + out_shape[4:]
+            out_shape = (*out_shape[:3], y_size, *out_shape[4:])
 
         if isinstance(x_key, int):
-            out_shape = out_shape[:4] + (1,)
+            out_shape = (*out_shape[:4], 1)
         elif isinstance(x_key, slice):
             x_size = len(range(*x_key.indices(self._single_shape[2])))
-            out_shape = out_shape[:4] + (x_size,)
+            out_shape = (*out_shape[:4], x_size)
 
         result = np.empty(out_shape, dtype=self._dtype)
 
@@ -573,7 +569,7 @@ class IsoviewArray:
         return self[:]
 
     def get_labels(self, timepoint: int, camera: int,
-                   label_type: str = 'segmentation') -> np.ndarray:
+                   label_type: str = "segmentation") -> np.ndarray:
         """
         Access labels from consolidated structure.
 
@@ -582,10 +578,11 @@ class IsoviewArray:
             camera: Camera index
             label_type: 'segmentation', 'xy_coords', 'xz_coords'
 
-        Returns:
+        Returns
+        -------
             Label array (Z, Y, X)
         """
-        if self._structure != 'consolidated':
+        if self._structure != "consolidated":
             raise NotImplementedError("Labels only available in consolidated structure")
 
         import zarr
@@ -594,9 +591,9 @@ class IsoviewArray:
         zarr_files = []
         for zf in tm_folder.glob("*.zarr"):
             try:
-                z = zarr.open(zf, mode='r')
+                z = zarr.open(zf, mode="r")
                 if isinstance(z, zarr.Group):
-                    if any(k.startswith('camera_') for k in z.group_keys()):
+                    if any(k.startswith("camera_") for k in z.group_keys()):
                         zarr_files.append(zf)
             except:
                 continue
@@ -604,11 +601,11 @@ class IsoviewArray:
         if not zarr_files:
             raise FileNotFoundError(f"No consolidated zarr in {tm_folder}")
 
-        z = zarr.open(zarr_files[0], mode='r')
-        return z[f'camera_{camera}/labels/{label_type}/0'][:]
+        z = zarr.open(zarr_files[0], mode="r")
+        return z[f"camera_{camera}/labels/{label_type}/0"][:]
 
     def get_projection(self, timepoint: int, camera: int,
-                      proj_type: str = 'xy') -> np.ndarray:
+                      proj_type: str = "xy") -> np.ndarray:
         """
         Access projections from consolidated structure.
 
@@ -617,10 +614,11 @@ class IsoviewArray:
             camera: Camera index
             proj_type: 'xy', 'xz', 'yz'
 
-        Returns:
+        Returns
+        -------
             Projection array
         """
-        if self._structure != 'consolidated':
+        if self._structure != "consolidated":
             raise NotImplementedError("Projections only in consolidated structure")
 
         import zarr
@@ -629,9 +627,9 @@ class IsoviewArray:
         zarr_files = []
         for zf in tm_folder.glob("*.zarr"):
             try:
-                z = zarr.open(zf, mode='r')
+                z = zarr.open(zf, mode="r")
                 if isinstance(z, zarr.Group):
-                    if any(k.startswith('camera_') for k in z.group_keys()):
+                    if any(k.startswith("camera_") for k in z.group_keys()):
                         zarr_files.append(zf)
             except:
                 continue
@@ -639,8 +637,8 @@ class IsoviewArray:
         if not zarr_files:
             raise FileNotFoundError(f"No consolidated zarr in {tm_folder}")
 
-        z = zarr.open(zarr_files[0], mode='r')
-        return z[f'camera_{camera}/projections/{proj_type}/0'][:]
+        z = zarr.open(zarr_files[0], mode="r")
+        return z[f"camera_{camera}/projections/{proj_type}/0"][:]
 
     @property
     def filenames(self) -> list[Path]:
@@ -667,8 +665,8 @@ class IsoviewArray:
             V = Views (camera/channel combinations)
         """
         if self._single_timepoint:
-            return ('Z', 'V', 'Y', 'X')
-        return ('T', 'Z', 'V', 'Y', 'X')
+            return ("Z", "V", "Y", "X")
+        return ("T", "Z", "V", "Y", "X")
 
     @property
     def num_planes(self) -> int:

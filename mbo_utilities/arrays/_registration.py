@@ -19,7 +19,7 @@ from mbo_utilities.util import load_npy
 logger = log.get("arrays._registration")
 
 
-def validate_s3d_registration(s3d_job_dir: Path, num_planes: int = None) -> bool:
+def validate_s3d_registration(s3d_job_dir: Path, num_planes: int | None = None) -> bool:
     """
     Validate that Suite3D registration completed successfully.
 

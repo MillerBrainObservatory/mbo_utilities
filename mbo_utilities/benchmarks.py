@@ -2,7 +2,7 @@
 benchmarking utilities for mbo_utilities.
 
 provides reproducible performance benchmarks for:
-- MboRawArray initialization and metadata extraction
+- ScanImageArray initialization and metadata extraction
 - frame indexing (single, batch, z-plane selection)
 - phase correction variants (off, correlation, fft)
 - writing to supported formats (.zarr, .tiff, .h5, .bin, .npy)
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
 from mbo_utilities import log
+from mbo_utilities.util import TimingStats, time_func as _time_func
 
 logger = log.get("benchmarks")
 
@@ -79,8 +80,8 @@ class BenchmarkConfig:
     warmup: bool = True
 
     @classmethod
-    def quick(cls) -> "BenchmarkConfig":
-        """quick test: 10, 200 frames, no FFT, fewer formats."""
+    def quick(cls) -> BenchmarkConfig:
+        """Quick test: 10, 200 frames, no FFT, fewer formats."""
         return cls(
             frame_counts=(10, 200),
             test_phase_fft=False,
@@ -100,13 +101,13 @@ class BenchmarkConfig:
         )
 
     @classmethod
-    def full(cls) -> "BenchmarkConfig":
-        """full benchmark suite with all tests."""
+    def full(cls) -> BenchmarkConfig:
+        """Full benchmark suite with all tests."""
         return cls()
 
     @classmethod
-    def read_only(cls) -> "BenchmarkConfig":
-        """skip write benchmarks entirely."""
+    def read_only(cls) -> BenchmarkConfig:
+        """Skip write benchmarks entirely."""
         return cls(
             write_formats=(),
             test_chunk_sizes=False,
@@ -115,8 +116,8 @@ class BenchmarkConfig:
         )
 
     @classmethod
-    def write_only(cls) -> "BenchmarkConfig":
-        """only test write operations."""
+    def write_only(cls) -> BenchmarkConfig:
+        """Only test write operations."""
         return cls(
             frame_counts=(),
             test_no_phase=False,
@@ -131,8 +132,8 @@ class BenchmarkConfig:
         )
 
     @classmethod
-    def analysis(cls) -> "BenchmarkConfig":
-        """performance analysis focus: throughput, scaling, access patterns."""
+    def analysis(cls) -> BenchmarkConfig:
+        """Performance analysis focus: throughput, scaling, access patterns."""
         return cls(
             frame_counts=(10, 50, 100, 200),
             test_no_phase=False,
@@ -151,29 +152,6 @@ class BenchmarkConfig:
 
 
 @dataclass
-class TimingStats:
-    """statistics for a set of timing measurements."""
-
-    times_ms: list[float] = field(default_factory=list)
-    mean_ms: float = 0.0
-    std_ms: float = 0.0
-    min_ms: float = 0.0
-    max_ms: float = 0.0
-
-    @classmethod
-    def from_times(cls, times_ms: list[float]) -> "TimingStats":
-        """compute stats from raw timing list."""
-        arr = np.array(times_ms)
-        return cls(
-            times_ms=times_ms,
-            mean_ms=float(np.mean(arr)),
-            std_ms=float(np.std(arr)),
-            min_ms=float(np.min(arr)),
-            max_ms=float(np.max(arr)),
-        )
-
-
-@dataclass
 class BenchmarkResult:
     """complete benchmark results with metadata."""
 
@@ -186,11 +164,11 @@ class BenchmarkResult:
     results: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        """convert to serializable dict."""
+        """Convert to serializable dict."""
         return asdict(self)
 
     def save(self, path: str | Path) -> Path:
-        """save results to json file."""
+        """Save results to json file."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
@@ -199,15 +177,15 @@ class BenchmarkResult:
         return path
 
     @classmethod
-    def load(cls, path: str | Path) -> "BenchmarkResult":
-        """load results from json file."""
+    def load(cls, path: str | Path) -> BenchmarkResult:
+        """Load results from json file."""
         with open(path) as f:
             data = json.load(f)
         return cls(**data)
 
 
 def get_system_info() -> dict:
-    """collect system information for benchmark context."""
+    """Collect system information for benchmark context."""
     info = {
         "platform": platform.platform(),
         "python_version": platform.python_version(),
@@ -234,7 +212,7 @@ def get_system_info() -> dict:
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=5,
         )
@@ -247,11 +225,11 @@ def get_system_info() -> dict:
 
 
 def get_git_commit() -> str:
-    """get current git commit hash."""
+    """Get current git commit hash."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=5,
             cwd=Path(__file__).parent,
@@ -263,16 +241,8 @@ def get_git_commit() -> str:
     return ""
 
 
-def _time_func(func, *args, **kwargs) -> tuple[Any, float]:
-    """time a function call, return (result, time_ms)."""
-    t0 = time.perf_counter()
-    result = func(*args, **kwargs)
-    t1 = time.perf_counter()
-    return result, (t1 - t0) * 1000
-
-
 def _suppress_tifffile_warnings():
-    """suppress tifffile stderr output during benchmark reads."""
+    """Suppress tifffile stderr output during benchmark reads."""
     import sys
     import os
     import logging
@@ -300,13 +270,13 @@ def benchmark_init(
     warmup: bool = True,
 ) -> dict[str, TimingStats]:
     """
-    benchmark MboRawArray initialization.
+    Benchmark ScanImageArray initialization.
 
     measures:
     - total imread() time
     - internal timing breakdown (if available)
 
-    parameters
+    Parameters
     ----------
     files : path or list of paths
         scanimage tiff files to load
@@ -315,7 +285,7 @@ def benchmark_init(
     warmup : bool
         run one warmup iteration first
 
-    returns
+    Returns
     -------
     dict
         timing stats for each metric
@@ -345,13 +315,13 @@ def benchmark_indexing(
     test_zplane: bool = True,
 ) -> dict[str, TimingStats]:
     """
-    benchmark array indexing operations.
+    Benchmark array indexing operations.
 
     tests frame batches and z-plane selection patterns.
 
-    parameters
+    Parameters
     ----------
-    arr : MboRawArray
+    arr : ScanImageArray
         array to benchmark
     frame_counts : tuple of int
         number of frames to read in each test
@@ -362,7 +332,7 @@ def benchmark_indexing(
     test_zplane : bool
         include z-plane indexing tests
 
-    returns
+    Returns
     -------
     dict
         timing stats for each indexing pattern
@@ -425,7 +395,7 @@ def benchmark_random_access(
     warmup: bool = True,
 ) -> dict[str, TimingStats]:
     """
-    benchmark random vs sequential access patterns.
+    Benchmark random vs sequential access patterns.
 
     compares contiguous reads against strided/random reads to measure
     seek overhead and cache effects. useful for understanding whether
@@ -436,9 +406,9 @@ def benchmark_random_access(
     - strided: arr[::10] - every 10th frame (forces seeks)
     - random: arr[random_indices] - worst case random access
 
-    parameters
+    Parameters
     ----------
-    arr : MboRawArray
+    arr : ScanImageArray
         array to benchmark
     num_samples : int
         number of frames to read in each test
@@ -447,7 +417,7 @@ def benchmark_random_access(
     warmup : bool
         run warmup iteration
 
-    returns
+    Returns
     -------
     dict
         timing stats for each access pattern
@@ -498,21 +468,21 @@ def benchmark_parallel_planes(
     warmup: bool = True,
 ) -> dict[str, TimingStats]:
     """
-    benchmark reading different z-planes.
+    Benchmark reading different z-planes.
 
     checks if plane position affects read speed (e.g., first vs middle vs last).
     useful for detecting whether certain planes have higher I/O cost.
 
-    parameters
+    Parameters
     ----------
-    arr : MboRawArray
+    arr : ScanImageArray
         array to benchmark (must be 4D with Z dimension)
     repeats : int
         timing iterations per test
     warmup : bool
         run warmup iteration
 
-    returns
+    Returns
     -------
     dict
         timing stats for each plane position
@@ -552,13 +522,13 @@ def benchmark_cold_warm_reads(
     repeats: int = 3,
 ) -> dict[str, TimingStats]:
     """
-    benchmark cold start vs warm cache reads.
+    Benchmark cold start vs warm cache reads.
 
     measures the difference between first read after opening a file (cold)
     and subsequent reads (warm). large differences indicate filesystem/OS
     caching is significant for your workload.
 
-    parameters
+    Parameters
     ----------
     files : path or list
         scanimage tiff files
@@ -567,7 +537,7 @@ def benchmark_cold_warm_reads(
     repeats : int
         number of cold/warm cycles
 
-    returns
+    Returns
     -------
     dict
         timing stats for cold and warm reads
@@ -609,14 +579,14 @@ def benchmark_throughput(
     warmup: bool = True,
 ) -> dict[str, dict]:
     """
-    measure memory throughput in MB/s.
+    Measure memory throughput in MB/s.
 
     calculates actual read speed to compare against theoretical disk limits.
     helps identify whether you're I/O bound or compute bound.
 
-    parameters
+    Parameters
     ----------
-    arr : MboRawArray
+    arr : ScanImageArray
         array to benchmark
     frame_counts : tuple of int
         frame counts to test
@@ -625,7 +595,7 @@ def benchmark_throughput(
     warmup : bool
         run warmup iteration
 
-    returns
+    Returns
     -------
     dict
         throughput stats (MB/s) for each frame count
@@ -676,23 +646,23 @@ def benchmark_scaling(
     warmup: bool = True,
 ) -> dict[str, dict]:
     """
-    analyze read time scaling with frame count.
+    Analyze read time scaling with frame count.
 
     tests whether read time scales linearly with data size or has
     fixed overhead. plots time vs N to identify overhead costs.
 
     returns both raw timings and computed overhead/per-frame costs.
 
-    parameters
+    Parameters
     ----------
-    arr : MboRawArray
+    arr : ScanImageArray
         array to benchmark
     repeats : int
         timing iterations
     warmup : bool
         run warmup iteration
 
-    returns
+    Returns
     -------
     dict
         scaling analysis with overhead estimate
@@ -749,12 +719,12 @@ def benchmark_chunk_sizes(
     keep_files: bool = False,
 ) -> dict[str, TimingStats]:
     """
-    benchmark impact of chunk size on write performance.
+    Benchmark impact of chunk size on write performance.
 
     varies target_chunk_mb parameter to find optimal chunk size
     for your disk and data characteristics.
 
-    parameters
+    Parameters
     ----------
     arr : lazy array
         source array
@@ -769,7 +739,7 @@ def benchmark_chunk_sizes(
     keep_files : bool
         keep output files
 
-    returns
+    Returns
     -------
     dict
         timing stats for each chunk size
@@ -826,7 +796,7 @@ def benchmark_readback(
     repeats: int = 3,
 ) -> dict[str, dict]:
     """
-    benchmark write then read-back performance.
+    Benchmark write then read-back performance.
 
     writes data to each format, then reads it back to measure
     round-trip performance. helps choose format for read-heavy workloads.
@@ -834,7 +804,7 @@ def benchmark_readback(
     note: .bin format is excluded from readback tests because Suite2pArray
     requires matching ops.npy metadata which doesn't work with partial writes.
 
-    parameters
+    Parameters
     ----------
     arr : lazy array
         source array
@@ -847,7 +817,7 @@ def benchmark_readback(
     repeats : int
         timing iterations
 
-    returns
+    Returns
     -------
     dict
         write and read timing for each format
@@ -901,7 +871,7 @@ def benchmark_readback(
                     with _suppress_tifffile_warnings():
                         data = imread(p)
                         # just read the array, don't slice (may fail for some formats)
-                        return np.asarray(data[:write_frames] if hasattr(data, '__getitem__') else data)
+                        return np.asarray(data[:write_frames] if hasattr(data, "__getitem__") else data)
                 try:
                     _, read_elapsed = _time_func(do_read)
                     read_times.append(read_elapsed)
@@ -934,12 +904,12 @@ def benchmark_file_sizes(
     zarr_levels: tuple[int, ...] = (1, 5, 9),
 ) -> dict[str, dict]:
     """
-    measure output file sizes and compression ratios.
+    Measure output file sizes and compression ratios.
 
     writes data to each format and measures resulting file size.
     helps choose format based on storage constraints.
 
-    parameters
+    Parameters
     ----------
     arr : lazy array
         source array
@@ -952,7 +922,7 @@ def benchmark_file_sizes(
     zarr_levels : tuple of int
         compression levels for zarr
 
-    returns
+    Returns
     -------
     dict
         file sizes and compression ratios
@@ -980,7 +950,7 @@ def benchmark_file_sizes(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     def get_dir_size(path: Path) -> int:
-        """get total size of directory in bytes."""
+        """Get total size of directory in bytes."""
         if path.is_file():
             return path.stat().st_size
         total = 0
@@ -1051,11 +1021,11 @@ def benchmark_phase_variants(
     test_phase_fft: bool = True,
 ) -> dict[str, TimingStats]:
     """
-    benchmark phase correction variants.
+    Benchmark phase correction variants.
 
     compares reading frames with different phase correction settings.
 
-    parameters
+    Parameters
     ----------
     files : path or list
         scanimage tiff files
@@ -1070,7 +1040,7 @@ def benchmark_phase_variants(
     test_phase_fft : bool
         test with fix_phase=True, use_fft=True
 
-    returns
+    Returns
     -------
     dict
         timing stats for each variant
@@ -1115,9 +1085,9 @@ def benchmark_writes(
     zarr_sharding: tuple[bool, ...] = (True, False),
 ) -> dict[str, TimingStats]:
     """
-    benchmark writing to different file formats.
+    Benchmark writing to different file formats.
 
-    parameters
+    Parameters
     ----------
     arr : lazy array
         source array to write from
@@ -1136,7 +1106,7 @@ def benchmark_writes(
     zarr_sharding : tuple of bool
         sharding modes to test (True=sharded, False=non-sharded)
 
-    returns
+    Returns
     -------
     dict
         timing stats for each format
@@ -1233,7 +1203,7 @@ def benchmark_writes(
 
 
 def get_memory_mb() -> float:
-    """get current process memory usage in MB."""
+    """Get current process memory usage in MB."""
     try:
         import psutil
         process = psutil.Process()
@@ -1251,12 +1221,12 @@ def benchmark_zarr_chunking(
     keep_files: bool = False,
 ) -> dict[str, dict]:
     """
-    benchmark zarr write/read with various chunk configurations.
+    Benchmark zarr write/read with various chunk configurations.
 
     tests different combinations of shard size (outer) and chunk size (inner)
     to find optimal configuration for specific access patterns.
 
-    parameters
+    Parameters
     ----------
     arr : array
         source array to write (must support imwrite)
@@ -1271,7 +1241,7 @@ def benchmark_zarr_chunking(
     keep_files : bool
         keep output files after benchmark
 
-    returns
+    Returns
     -------
     dict
         results with write_ms, read_ms, fps, ram_mb, file_size_mb for each config
@@ -1339,14 +1309,13 @@ def benchmark_zarr_chunking(
     valid_configs = [
         (sf, cs, lbl) for sf, cs, lbl in configs if cs[0] <= sf
     ]
-    total_configs = len(valid_configs)
+    len(valid_configs)
 
     try:
         from tqdm import tqdm
         config_iter = tqdm(valid_configs, desc="zarr configs", unit="cfg")
     except ImportError:
         config_iter = valid_configs
-        print(f"testing {total_configs} zarr configurations...")
 
     for idx, (shard_frames, chunk_shape, label) in enumerate(config_iter):
         shard_frames_actual = shard_frames
@@ -1372,7 +1341,7 @@ def benchmark_zarr_chunking(
                 write_data = arr[:write_timepoints]
 
             # force load into memory for consistent timing
-            if hasattr(write_data, 'compute'):
+            if hasattr(write_data, "compute"):
                 write_data = write_data.compute()
             elif not isinstance(write_data, np.ndarray):
                 write_data = np.asarray(write_data)
@@ -1443,11 +1412,7 @@ def benchmark_zarr_chunking(
             )
         except AttributeError:
             # no tqdm, print result
-            print(
-                f"  [{idx + 1}/{total_configs}] {label:30s}: "
-                f"write {write_mean:7.1f} ms ({fps_write:5.0f} fps), "
-                f"read {read_mean:7.1f} ms ({fps_read:5.0f} fps)"
-            )
+            pass
 
     # cleanup temp directory
     if cleanup_temp and not keep_files:
@@ -1457,22 +1422,9 @@ def benchmark_zarr_chunking(
 
 
 def print_zarr_benchmark(results: dict):
-    """print zarr chunking benchmark results."""
-    print("\nZARR CHUNKING BENCHMARK")
-    print("-" * 90)
-    print(f"{'config':32s} {'write':>10s} {'read':>10s} {'w-fps':>8s} {'r-fps':>8s} {'size':>8s} {'ratio':>6s}")
-    print("-" * 90)
-
-    for label, data in results.items():
-        print(
-            f"{label:32s} "
-            f"{data['write_ms']:>7.0f} ms "
-            f"{data['read_ms']:>7.0f} ms "
-            f"{data['fps_write']:>7.0f} "
-            f"{data['fps_read']:>7.0f} "
-            f"{data['file_size_mb']:>6.1f} MB "
-            f"{data['compression_ratio']:>5.2f}x"
-        )
+    """Print zarr chunking benchmark results."""
+    for _label, _data in results.items():
+        pass
 
 
 def plot_zarr_benchmark(
@@ -1480,15 +1432,15 @@ def plot_zarr_benchmark(
     output_path: Path | str | None = None,
     show: bool = True,
     title: str = "Zarr Chunking Benchmark",
-) -> "Figure | None":
+) -> Figure | None:
     """
-    generate dark-mode visualization of zarr chunking benchmark.
+    Generate dark-mode visualization of zarr chunking benchmark.
 
     creates a 2-panel figure showing:
     - write/read FPS by configuration (grouped bar chart)
     - file size and compression ratio
 
-    parameters
+    Parameters
     ----------
     results : dict
         benchmark results from benchmark_zarr_chunking()
@@ -1499,7 +1451,7 @@ def plot_zarr_benchmark(
     title : str
         figure title
 
-    returns
+    Returns
     -------
     Figure or None
         matplotlib figure if available
@@ -1557,12 +1509,12 @@ def plot_zarr_benchmark(
     ax1.grid(axis="y", alpha=0.3, color=colors["border"])
 
     # add value labels on bars
-    for bar, val in zip(bars1, write_fps):
+    for bar, val in zip(bars1, write_fps, strict=False):
         if val > 0:
             ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 50,
                     f"{val:.0f}", ha="center", va="bottom",
                     fontsize=7, color=colors["text_muted"])
-    for bar, val in zip(bars2, read_fps):
+    for bar, val in zip(bars2, read_fps, strict=False):
         if val > 0:
             ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 50,
                     f"{val:.0f}", ha="center", va="bottom",
@@ -1589,7 +1541,7 @@ def plot_zarr_benchmark(
     ax2.grid(axis="y", alpha=0.3, color=colors["border"])
 
     # add total time labels
-    for i, (w, r) in enumerate(zip(write_ms, read_ms)):
+    for i, (w, r) in enumerate(zip(write_ms, read_ms, strict=False)):
         total = w + r
         ax2.text(i, total + 20, f"{total:.0f}",
                 ha="center", va="bottom", fontsize=7, color=colors["text_muted"])
@@ -1621,9 +1573,9 @@ def benchmark_mboraw(
     label: str = "",
 ) -> BenchmarkResult:
     """
-    run full benchmark suite on MboRawArray.
+    Run full benchmark suite on ScanImageArray.
 
-    parameters
+    Parameters
     ----------
     data_path : path
         path to scanimage tiff files (file or directory)
@@ -1634,12 +1586,12 @@ def benchmark_mboraw(
     label : str
         label for this benchmark run
 
-    returns
+    Returns
     -------
     BenchmarkResult
         complete benchmark results
 
-    examples
+    Examples
     --------
     >>> result = benchmark_mboraw("/path/to/raw", config=BenchmarkConfig.quick())
     >>> result.save("benchmarks/results/run_001.json")
@@ -1834,75 +1786,54 @@ def benchmark_mboraw(
 
 
 def print_summary(result: BenchmarkResult) -> None:
-    """print a formatted summary of benchmark results."""
-    print("\n" + "=" * 70)
-    print("BENCHMARK SUMMARY")
-    print("=" * 70)
-    print(f"timestamp: {result.timestamp}")
-    print(f"git commit: {result.git_commit}")
-    print(f"label: {result.label}")
-    print(f"\ndata: {result.data_info.get('path', 'unknown')}")
-    print(f"shape: {result.data_info.get('shape')}")
-    print()
-
+    """Print a formatted summary of benchmark results."""
     for category, tests in result.results.items():
-        print(f"\n{category.upper()}")
-        print("-" * 50)
 
         # handle special categories with nested/custom structure
         if category == "throughput":
             for name, data in tests.items():
                 time_stats = data.get("time_ms", {})
                 tp_stats = data.get("throughput_mbs", {})
-                mean_ms = time_stats.get("mean_ms", 0)
-                mean_mbs = tp_stats.get("mean", 0)
-                print(f"  {name:30s}: {mean_ms:7.1f} ms  ({mean_mbs:6.1f} MB/s)")
+                time_stats.get("mean_ms", 0)
+                tp_stats.get("mean", 0)
 
         elif category == "scaling":
             # print frame count timings
             for name, stats in tests.items():
                 if name.startswith("_"):
                     continue  # skip analysis metadata
-                mean = stats.get("mean_ms", 0)
-                std = stats.get("std_ms", 0)
-                print(f"  {name:25s}: {mean:8.1f} ± {std:6.1f} ms")
+                stats.get("mean_ms", 0)
+                stats.get("std_ms", 0)
             # print scaling analysis if present
             if "_scaling_analysis" in tests:
-                analysis = tests["_scaling_analysis"]
-                print(f"\n  scaling model: time = {analysis['overhead_ms']:.1f}ms + {analysis['per_frame_ms']:.2f}ms/frame")
-                print(f"  r² = {analysis['r_squared']:.3f}")
+                tests["_scaling_analysis"]
 
         elif category == "readback":
-            for fmt, data in tests.items():
+            for data in tests.values():
                 write_stats = data.get("write", {})
                 read_stats = data.get("read", {})
-                w_mean = write_stats.get("mean_ms", 0) if write_stats else 0
-                r_mean = read_stats.get("mean_ms", 0) if read_stats else 0
-                print(f"  {fmt:15s}: write {w_mean:7.1f} ms, read {r_mean:7.1f} ms")
+                write_stats.get("mean_ms", 0) if write_stats else 0
+                read_stats.get("mean_ms", 0) if read_stats else 0
 
         elif category == "file_sizes":
-            for fmt, data in tests.items():
-                size_mb = data.get("size_mb", 0)
-                raw_mb = data.get("raw_mb", 0)
-                ratio = data.get("compression_ratio", 0)
-                print(f"  {fmt:20s}: {size_mb:6.1f} MB  (ratio: {ratio:.2f}x)")
+            for data in tests.values():
+                data.get("size_mb", 0)
+                data.get("raw_mb", 0)
+                data.get("compression_ratio", 0)
             # print raw size once
             if tests:
-                first = next(iter(tests.values()))
-                print(f"\n  raw uncompressed: {first.get('raw_mb', 0):.1f} MB")
+                next(iter(tests.values()))
 
         else:
             # standard timing format
             for name, stats in tests.items():
                 if isinstance(stats, dict) and "mean_ms" in stats:
-                    mean = stats.get("mean_ms", 0)
-                    std = stats.get("std_ms", 0)
-                    print(f"  {name:30s}: {mean:8.1f} ± {std:6.1f} ms")
+                    stats.get("mean_ms", 0)
+                    stats.get("std_ms", 0)
                 elif isinstance(stats, dict):
                     # nested dict without mean_ms (skip or show raw)
                     pass
 
-    print("\n" + "=" * 70)
 
 
 # MBO dark theme colors (from docs/_static/custom.css)
@@ -1923,7 +1854,7 @@ MBO_DARK_THEME = {
 
 
 def _apply_mbo_style(ax, fig=None):
-    """apply MBO dark theme to matplotlib axes."""
+    """Apply MBO dark theme to matplotlib axes."""
     colors = MBO_DARK_THEME
 
     ax.set_facecolor(colors["surface"])
@@ -1947,9 +1878,9 @@ def plot_benchmark_results(
     result: BenchmarkResult,
     output_path: Path | str | None = None,
     show: bool = True,
-) -> "Figure | None":
+) -> Figure | None:
     """
-    generate dark-mode visualization of benchmark results.
+    Generate dark-mode visualization of benchmark results.
 
     creates a multi-panel figure showing:
     - scaling analysis (time vs frame count)
@@ -1957,7 +1888,7 @@ def plot_benchmark_results(
     - write format comparison
     - file size comparison
 
-    parameters
+    Parameters
     ----------
     result : BenchmarkResult
         benchmark results from benchmark_mboraw()
@@ -1966,7 +1897,7 @@ def plot_benchmark_results(
     show : bool
         display the figure
 
-    returns
+    Returns
     -------
     Figure or None
         matplotlib figure if available
@@ -2010,7 +1941,7 @@ def plot_benchmark_results(
 
     fig.patch.set_facecolor(colors["background"])
 
-    for ax, panel in zip(axes, panels):
+    for ax, panel in zip(axes, panels, strict=False):
         _apply_mbo_style(ax, fig)
 
         if panel == "scaling":
@@ -2042,7 +1973,7 @@ def plot_benchmark_results(
 
 
 def _plot_scaling(ax, data: dict, colors: dict):
-    """plot scaling analysis: time vs frame count."""
+    """Plot scaling analysis: time vs frame count."""
     frame_counts = []
     times = []
 
@@ -2102,7 +2033,7 @@ def _plot_scaling(ax, data: dict, colors: dict):
 
 
 def _plot_throughput(ax, data: dict, colors: dict):
-    """plot throughput: MB/s for different frame counts."""
+    """Plot throughput: MB/s for different frame counts."""
     names = []
     throughputs = []
 
@@ -2126,7 +2057,7 @@ def _plot_throughput(ax, data: dict, colors: dict):
     )
 
     # add value labels
-    for bar, tp in zip(bars, throughputs):
+    for bar, tp in zip(bars, throughputs, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + max(throughputs) * 0.02,
@@ -2145,7 +2076,7 @@ def _plot_throughput(ax, data: dict, colors: dict):
 
 
 def _plot_writes(ax, data: dict, colors: dict, bar_colors: list):
-    """plot write benchmark: time for each format."""
+    """Plot write benchmark: time for each format."""
     names = []
     times = []
     stds = []
@@ -2165,7 +2096,7 @@ def _plot_writes(ax, data: dict, colors: dict, bar_colors: list):
 
     x = np.arange(len(names))
     bar_cols = [bar_colors[i % len(bar_colors)] for i in range(len(names))]
-    bars = ax.bar(
+    ax.bar(
         x, times,
         yerr=stds,
         color=bar_cols,
@@ -2182,7 +2113,7 @@ def _plot_writes(ax, data: dict, colors: dict, bar_colors: list):
 
 
 def _plot_file_sizes(ax, data: dict, colors: dict, bar_colors: list):
-    """plot file size comparison with compression ratios."""
+    """Plot file size comparison with compression ratios."""
     names = []
     sizes = []
     ratios = []
@@ -2210,7 +2141,7 @@ def _plot_file_sizes(ax, data: dict, colors: dict, bar_colors: list):
     )
 
     # add ratio labels
-    for bar, ratio in zip(bars, ratios):
+    for bar, ratio in zip(bars, ratios, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + max(sizes) * 0.02,
@@ -2252,11 +2183,11 @@ def plot_comparison(
     metric: str = "scaling",
     output_path: Path | str | None = None,
     show: bool = True,
-) -> "Figure | None":
+) -> Figure | None:
     """
-    compare multiple benchmark runs on a single plot.
+    Compare multiple benchmark runs on a single plot.
 
-    parameters
+    Parameters
     ----------
     results : list of BenchmarkResult
         benchmark results to compare
@@ -2267,7 +2198,7 @@ def plot_comparison(
     show : bool
         display the figure
 
-    returns
+    Returns
     -------
     Figure or None
         matplotlib figure
@@ -2382,7 +2313,7 @@ def benchmark_tifffile_baseline(
     repeats: int = 5,
 ) -> dict[str, TimingStats]:
     """
-    benchmark raw TiffFile page read as baseline comparison.
+    Benchmark raw TiffFile page read as baseline comparison.
 
     this shows the theoretical minimum read time without any mbo overhead.
     """
@@ -2455,7 +2386,7 @@ def benchmark_release(
     repeats: int = 5,
 ) -> ReleaseBenchmarkResult:
     """
-    run release-focused benchmarks matching v2.4.0 format.
+    Run release-focused benchmarks matching v2.4.0 format.
 
     measures the operations users care about most:
     - array initialization
@@ -2571,7 +2502,7 @@ def benchmark_release(
     logger.info("  tifffile baseline...")
     baseline = benchmark_tifffile_baseline(data_path, repeats=repeats)
     if baseline:
-        results["tifffile_baseline"] = list(baseline.values())[0]
+        results["tifffile_baseline"] = next(iter(baseline.values()))
 
     logger.info("release benchmark complete")
 
@@ -2587,7 +2518,7 @@ def benchmark_release(
 
 def format_release_markdown(result: ReleaseBenchmarkResult, version: str = "") -> str:
     """
-    format release benchmark results as markdown for copy-paste.
+    Format release benchmark results as markdown for copy-paste.
 
     produces a table matching the v2.4.0 release notes format.
     """
@@ -2616,6 +2547,8 @@ def format_release_markdown(result: ReleaseBenchmarkResult, version: str = "") -
     def fmt_time(ms: float) -> str:
         if ms >= 1000:
             return f"{ms/1000:.2f} s"
+        if ms < 0.1:
+            return f"{ms*1000:.1f} us"
         return f"{ms:.1f} ms"
 
     # init
@@ -2665,16 +2598,7 @@ def format_release_markdown(result: ReleaseBenchmarkResult, version: str = "") -
 
 
 def print_release_summary(result: ReleaseBenchmarkResult) -> None:
-    """print release benchmark summary to console."""
-    print("\n" + "=" * 60)
-    print("RELEASE BENCHMARK RESULTS")
-    print("=" * 60)
-
-    info = result.data_info
-    print(f"\nData: {info.get('num_frames', '?'):,} frames × {info.get('num_zplanes', 1)} z-planes × {info.get('frame_size', '?')}")
-    print(f"Files: {info.get('num_files', 1)} ScanImage TIFFs")
-    print()
-
+    """Print release benchmark summary to console."""
     res = result.results
 
     def fmt_time(ms: float) -> str:
@@ -2682,27 +2606,24 @@ def print_release_summary(result: ReleaseBenchmarkResult) -> None:
             return f"{ms/1000:.2f} s"
         return f"{ms:.1f} ms"
 
-    print(f"{'Operation':<40} {'Time':>12}")
-    print("-" * 54)
 
     if "init" in res:
-        print(f"{'Array initialization':<40} {fmt_time(res['init']['mean_ms']):>12}")
+        pass
     if "single_frame_no_phase" in res:
-        print(f"{'Single frame (no phase)':<40} {fmt_time(res['single_frame_no_phase']['mean_ms']):>12}")
+        pass
     if "single_frame_fft_phase" in res:
-        print(f"{'Single frame (FFT phase)':<40} {fmt_time(res['single_frame_fft_phase']['mean_ms']):>12}")
+        pass
     if "all_zplanes" in res:
-        print(f"{'All z-planes read':<40} {fmt_time(res['all_zplanes']['mean_ms']):>12}")
+        pass
     if "max_projection" in res:
-        print(f"{'Max projection (50 frames)':<40} {fmt_time(res['max_projection']['mean_ms']):>12}")
+        pass
     if "mean_projection" in res:
-        print(f"{'Mean projection (50 frames)':<40} {fmt_time(res['mean_projection']['mean_ms']):>12}")
+        pass
     if "batch_read" in res:
-        print(f"{'Batch read (100 frames)':<40} {fmt_time(res['batch_read']['mean_ms']):>12}")
+        pass
     if "tifffile_baseline" in res:
-        print(f"{'TiffFile baseline':<40} {fmt_time(res['tifffile_baseline']['mean_ms']):>12}")
+        pass
 
-    print("=" * 60)
 
 
 def plot_release_benchmark(
@@ -2710,9 +2631,9 @@ def plot_release_benchmark(
     output_path: Path | str | None = None,
     show: bool = True,
     title: str = "",
-) -> "Figure | None":
+) -> Figure | None:
     """
-    generate dark-mode bar chart for release benchmarks.
+    Generate dark-mode bar chart for release benchmarks.
 
     creates a horizontal bar chart showing operation times, suitable
     for including in release notes or documentation.
@@ -2775,11 +2696,8 @@ def plot_release_benchmark(
     bars = ax.barh(y, values, color=bar_colors, edgecolor=colors["border"], alpha=0.9)
 
     # add value labels
-    for bar, val in zip(bars, values):
-        if val >= 1000:
-            label = f"{val/1000:.2f} s"
-        else:
-            label = f"{val:.1f} ms"
+    for bar, val in zip(bars, values, strict=False):
+        label = f"{val / 1000:.2f} s" if val >= 1000 else f"{val:.1f} ms"
         ax.text(bar.get_width() + max(values) * 0.02, bar.get_y() + bar.get_height()/2,
                 label, va="center", ha="left", fontsize=9, color=colors["text"])
 
@@ -2790,7 +2708,7 @@ def plot_release_benchmark(
 
     # title
     if not title:
-        title = "MboRawArray Benchmarks"
+        title = "ScanImageArray Benchmarks"
     ax.set_title(title, fontsize=12, fontweight="bold", color=colors["text"])
 
     # add data info as subtitle

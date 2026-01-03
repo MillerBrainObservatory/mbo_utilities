@@ -11,9 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import Callable, Sequence
 
-import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities._writers import _try_generic_writers, add_processing_step
@@ -21,8 +19,14 @@ from mbo_utilities.arrays import (
     register_zplanes_s3d,
     validate_s3d_registration,
 )
-from mbo_utilities.metadata import get_param, RoiMode
+from mbo_utilities.metadata import RoiMode, get_param
 from mbo_utilities.util import load_npy
+from typing import TYPE_CHECKING
+import contextlib
+
+if TYPE_CHECKING:
+    import numpy as np
+    from collections.abc import Callable, Sequence
 
 logger = log.get("writer")
 
@@ -38,7 +42,7 @@ def imwrite(
     roi: int | Sequence[int] | None = None,
     metadata: dict | None = None,
     overwrite: bool = False,
-    order: list | tuple = None,
+    order: list | tuple | None = None,
     target_chunk_mb: int = 100,
     progress_callback: Callable | None = None,
     debug: bool = False,
@@ -231,10 +235,8 @@ def imwrite(
         file_metadata["nframes"] = int(num_frames)
 
     if hasattr(lazy_array, "metadata"):
-        try:
+        with contextlib.suppress(AttributeError):
             lazy_array.metadata = file_metadata
-        except AttributeError:
-            pass
 
     s3d_job_dir = None
     if register_z:
@@ -254,7 +256,7 @@ def imwrite(
                     existing_s3d_dir = candidate
                 else:
                     logger.warning(
-                        f"s3d-job in metadata exists but registration is invalid"
+                        "s3d-job in metadata exists but registration is invalid"
                     )
 
             if not existing_s3d_dir:
@@ -289,8 +291,8 @@ def imwrite(
                         logger.info(f"Z-plane registration succeeded: {s3d_job_dir}")
                     else:
                         logger.error(
-                            f"Suite3D job completed but validation failed. "
-                            f"Proceeding without registration."
+                            "Suite3D job completed but validation failed. "
+                            "Proceeding without registration."
                         )
                         s3d_job_dir = None
                         file_metadata["apply_shift"] = False
@@ -305,17 +307,13 @@ def imwrite(
             file_metadata["s3d-job"] = str(s3d_job_dir)
 
         if hasattr(lazy_array, "metadata"):
-            try:
+            with contextlib.suppress(AttributeError):
                 lazy_array.metadata = file_metadata
-            except AttributeError:
-                pass
     else:
         file_metadata["apply_shift"] = False
         if hasattr(lazy_array, "metadata"):
-            try:
+            with contextlib.suppress(AttributeError):
                 lazy_array.metadata = file_metadata
-            except AttributeError:
-                pass
 
     # Collect input files for processing history
     input_files = getattr(lazy_array, "filenames", None)
@@ -326,7 +324,7 @@ def imwrite(
         else:
             input_files = [str(f) for f in input_files]
 
-    # Extract scan-phase correction parameters if available (MboRawArray)
+    # Extract scan-phase correction parameters if available (ScanImageArray)
     scan_phase_params = {}
     if hasattr(lazy_array, "fix_phase"):
         scan_phase_params["fix_phase"] = getattr(lazy_array, "fix_phase", False)
@@ -338,7 +336,7 @@ def imwrite(
         )
 
     # Start timing for processing history
-    write_start_time = time.time()
+    write_start_time = time.perf_counter()
 
     if hasattr(lazy_array, "_imwrite"):
         write_kwargs = kwargs.copy()
@@ -369,7 +367,7 @@ def imwrite(
         result = outpath
 
     # Record processing step in metadata
-    write_duration = time.time() - write_start_time
+    write_duration = time.perf_counter() - write_start_time
 
     # Build extra info for processing history
     processing_extra = {
@@ -399,7 +397,9 @@ def imwrite(
 
     # Add planes info if specified
     if planes is not None:
-        processing_extra["planes"] = list(planes) if hasattr(planes, "__iter__") else planes
+        processing_extra["planes"] = (
+            list(planes) if hasattr(planes, "__iter__") else planes
+        )
 
     # Collect output files
     output_files = None
@@ -423,13 +423,9 @@ def imwrite(
 
     # Update lazy_array metadata with processing history if possible
     if hasattr(lazy_array, "metadata"):
-        try:
+        with contextlib.suppress(AttributeError):
             lazy_array.metadata = file_metadata
-        except AttributeError:
-            pass
 
-    logger.debug(
-        f"Processing step recorded: imwrite to {ext} in {write_duration:.2f}s"
-    )
+    logger.debug(f"Processing step recorded: imwrite to {ext} in {write_duration:.2f}s")
 
     return result
