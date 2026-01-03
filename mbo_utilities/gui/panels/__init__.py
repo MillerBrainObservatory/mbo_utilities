@@ -19,7 +19,9 @@ __all__ = [
     "BasePanel",
     "DebugPanel",
     "MetadataPanel",
+    "PipelinePanel",
     "ProcessPanel",
+    "StatsPanel",
 ]
 
 
@@ -104,4 +106,10 @@ def __getattr__(name: str):
     if name == "MetadataPanel":
         from .metadata import MetadataPanel
         return MetadataPanel
+    if name == "PipelinePanel":
+        from .pipeline import PipelinePanel
+        return PipelinePanel
+    if name == "StatsPanel":
+        from .stats import StatsPanel
+        return StatsPanel
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
