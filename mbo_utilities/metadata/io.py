@@ -100,11 +100,14 @@ def has_mbo_metadata(file: os.PathLike | str) -> bool:
     # Keys that indicate MBO origin (beyond just 'shape' which is generic tifffile)
     MBO_MARKER_KEYS = {"num_planes", "num_rois", "frame_rate", "Ly", "Lx", "fov", "pixel_resolution"}
 
+    # handle list of files - check first file
+    if isinstance(file, (list, tuple)):
+        if not file: # empty
+            return False
+        file = file[0]
+
     if not file or not isinstance(file, (str, os.PathLike)):
-        raise ValueError(
-            "Invalid file path provided: must be a string or os.PathLike object."
-            f"Got: {file} of type {type(file)}"
-        )
+        return False
     if Path(file).suffix not in [".tif", ".tiff"]:
         return False
     try:
