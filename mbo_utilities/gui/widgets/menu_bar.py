@@ -1,26 +1,22 @@
 """
 Menu bar and process status indicator.
 
-This module contains the main menu bar and process status indicator
-for the PreviewDataWidget.
+This module contains the main menu bar and process status indicator.
 """
 
 from __future__ import annotations
 
 import webbrowser
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
 
 from mbo_utilities.preferences import get_last_dir
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
 
-if TYPE_CHECKING:
-    from .imgui import PreviewDataWidget
 
-
-def draw_menu_bar(parent: PreviewDataWidget):
+def draw_menu_bar(parent: Any):
     """Draw the menu bar within the current window/child scope."""
     with imgui_ctx.begin_child(
         "menu",
@@ -103,7 +99,7 @@ def draw_menu_bar(parent: PreviewDataWidget):
             parent._clear_stale_progress()
 
 
-def draw_process_status_indicator(parent: PreviewDataWidget):
+def draw_process_status_indicator(parent: Any):
     """Draw compact process status indicator in top-left with color coding."""
     # Import icons
     try:
