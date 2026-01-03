@@ -50,7 +50,7 @@ def __getattr__(name):
         return download_notebook
     if name == "PreviewDataWidget":
         from . import _setup  # triggers setup on import
-        from .imgui import PreviewDataWidget
+        from .widgets.preview_data import PreviewDataWidget
         return PreviewDataWidget
     if name == "GridSearchViewer":
         from .widgets.grid_search import GridSearchViewer

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui, hello_imgui, portable_file_dialogs as pfd
 
@@ -23,8 +23,49 @@ from mbo_utilities.gui.widgets.process_manager import get_process_manager
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
 import contextlib
 
-if TYPE_CHECKING:
-    from .imgui import PreviewDataWidget
+def _get_array_features(widget: Any) -> dict[str, bool]:
+    """
+    Check which features are available on the current data array.
+
+    Returns a dict mapping feature name to availability.
+    Feature detection uses duck typing based on attribute presence.
+
+    Parameters
+    ----------
+    widget : Any
+        Widget with image_widget.data attribute (PreviewDataWidget, BaseViewer, etc.)
+
+    Features
+    --------
+    phase_correction : bool
+        Array supports bidirectional scan phase correction (ScanImageArray).
+    z_registration : bool
+        Z-plane registration available (suite3d installed + multi-plane data).
+    multi_roi : bool
+        Array has multiple ROIs that can be saved separately.
+    frame_averaging : bool
+        Array supports frame averaging (PiezoArray with frames_per_slice > 1).
+    """
+    try:
+        data = widget.image_widget.data[0]
+    except (IndexError, AttributeError):
+        return {}
+
+    # Get nz from widget (supports both PreviewDataWidget.nz and BaseViewer patterns)
+    nz = getattr(widget, "nz", 1)
+    if nz == 1 and hasattr(data, "shape") and len(data.shape) == 4:
+        nz = data.shape[1]
+
+    return {
+        # Phase correction: presence of phase_correction attribute
+        "phase_correction": hasattr(data, "phase_correction"),
+        # Z-registration: requires suite3d and multi-plane data
+        "z_registration": HAS_SUITE3D and nz > 1,
+        # Multi-ROI: data has multiple ROIs
+        "multi_roi": getattr(data, "num_rois", 1) > 1,
+        # Frame averaging: piezo arrays with multiple frames per slice
+        "frame_averaging": hasattr(data, "can_average") and getattr(data, "can_average", False),
+    }
 
 
 def _save_as_worker(path, **imwrite_kwargs):
@@ -55,7 +96,7 @@ def _save_as_worker(path, **imwrite_kwargs):
     imwrite(data, **imwrite_kwargs)
 
 
-def draw_saveas_popup(parent: PreviewDataWidget):
+def draw_saveas_popup(parent: Any):
     """Draw the Save As popup dialog."""
     just_opened = False
     if parent._saveas_popup_open:
@@ -194,24 +235,22 @@ def draw_saveas_popup(parent: PreviewDataWidget):
         imgui.separator()
 
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Options")
-        set_tooltip(
-            "Note: Current values for upsample and max-offset are applied during scan-phase correction.",
-            True,
-        )
-
         imgui.dummy(imgui.ImVec2(0, 5))
+
+        # Get available features for current data
+        features = _get_array_features(parent)
 
         parent._overwrite = checkbox_with_tooltip(
             "Overwrite", parent._overwrite, "Replace any existing output files."
         )
-        # suite3d z-plane registration - show disabled with reason if unavailable
-        can_register_z = HAS_SUITE3D and parent.nz > 1
-        if not can_register_z:
+
+        # Z-registration: show disabled with reason if unavailable
+        if not features.get("z_registration", False):
             imgui.begin_disabled()
         _changed, _reg_value = imgui.checkbox(
-            "Register Z-Planes Axially", parent._register_z if can_register_z else False
+            "Register Z-Planes Axially", parent._register_z if features.get("z_registration") else False
         )
-        if can_register_z and _changed:
+        if features.get("z_registration") and _changed:
             parent._register_z = _reg_value
         imgui.same_line()
         imgui.text_disabled("(?)")
@@ -226,37 +265,40 @@ def draw_saveas_popup(parent: PreviewDataWidget):
                 imgui.text_unformatted("Register adjacent z-planes to each other using Suite3D.")
             imgui.pop_text_wrap_pos()
             imgui.end_tooltip()
-        if not can_register_z:
+        if not features.get("z_registration", False):
             imgui.end_disabled()
-        fix_phase_changed, fix_phase_value = imgui.checkbox(
-            "Fix Scan Phase", parent.fix_phase
-        )
-        imgui.same_line()
-        imgui.text_disabled("(?)")
-        if imgui.is_item_hovered():
-            imgui.begin_tooltip()
-            imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-            imgui.text_unformatted("Correct for bi-directional scan phase offsets.")
-            imgui.pop_text_wrap_pos()
-            imgui.end_tooltip()
-        if fix_phase_changed:
-            parent.fix_phase = fix_phase_value
 
-        use_fft, use_fft_value = imgui.checkbox(
-            "Subpixel Phase Correction", parent.use_fft
-        )
-        imgui.same_line()
-        imgui.text_disabled("(?)")
-        if imgui.is_item_hovered():
-            imgui.begin_tooltip()
-            imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-            imgui.text_unformatted(
-                "Use FFT-based subpixel registration (slower, more precise)."
+        # Phase correction: only show if data supports it
+        if features.get("phase_correction", False):
+            fix_phase_changed, fix_phase_value = imgui.checkbox(
+                "Fix Scan Phase", parent.fix_phase
             )
-            imgui.pop_text_wrap_pos()
-            imgui.end_tooltip()
-        if use_fft:
-            parent.use_fft = use_fft_value
+            imgui.same_line()
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.begin_tooltip()
+                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+                imgui.text_unformatted("Correct for bi-directional scan phase offsets.")
+                imgui.pop_text_wrap_pos()
+                imgui.end_tooltip()
+            if fix_phase_changed:
+                parent.fix_phase = fix_phase_value
+
+            use_fft_changed, use_fft_value = imgui.checkbox(
+                "Subpixel Phase Correction", parent.use_fft
+            )
+            imgui.same_line()
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.begin_tooltip()
+                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
+                imgui.text_unformatted(
+                    "Use FFT-based subpixel registration (slower, more precise)."
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.end_tooltip()
+            if use_fft_changed:
+                parent.use_fft = use_fft_value
 
         parent._debug = checkbox_with_tooltip(
             "Debug",
@@ -384,7 +426,7 @@ def draw_saveas_popup(parent: PreviewDataWidget):
         imgui.end_popup()
 
 
-def _draw_metadata_section(parent: PreviewDataWidget):
+def _draw_metadata_section(parent: Any):
     """Draw the metadata section of the save dialog."""
     imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Metadata")
     imgui.dummy(imgui.ImVec2(0, 5))
@@ -524,7 +566,7 @@ def _draw_metadata_section(parent: PreviewDataWidget):
     parent._saveas_missing_required = missing_required
 
 
-def _draw_timepoints_section(parent: PreviewDataWidget):
+def _draw_timepoints_section(parent: Any):
     """Draw the timepoints section of the save dialog."""
     imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Timepoints")
     imgui.dummy(imgui.ImVec2(0, 5))
@@ -564,7 +606,7 @@ def _draw_timepoints_section(parent: PreviewDataWidget):
         parent._saveas_num_timepoints = slider_value
 
 
-def _draw_zplane_section(parent: PreviewDataWidget):
+def _draw_zplane_section(parent: Any):
     """Draw the z-plane selection section of the save dialog."""
     imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Z-Plane Selection")
     imgui.dummy(imgui.ImVec2(0, 5))
@@ -651,7 +693,7 @@ def _draw_zplane_section(parent: PreviewDataWidget):
         imgui.end_popup()
 
 
-def _draw_save_button(parent: PreviewDataWidget):
+def _draw_save_button(parent: Any):
     """Draw the save/cancel buttons and handle save logic."""
     # disable save button if required metadata is missing or no z-planes selected
     missing_fields = getattr(parent, "_saveas_missing_required", None)
@@ -689,7 +731,7 @@ def _draw_save_button(parent: PreviewDataWidget):
                 if parent._saveas_rois:
                     if (
                         not parent._saveas_selected_roi
-                        or len(parent._saveas_selected_roi) == set()
+                        or len(parent._saveas_selected_roi) == 0
                     ):
                         # Get mROI count from data array (ScanImage-specific)
                         try:

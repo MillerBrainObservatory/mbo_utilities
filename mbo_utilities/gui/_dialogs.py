@@ -7,7 +7,7 @@ This module contains file/folder dialog handling and data loading logic.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui
 
@@ -15,11 +15,8 @@ from mbo_utilities.reader import imread
 from mbo_utilities.arrays import ScanImageArray
 from mbo_utilities.preferences import add_recent_file, set_last_dir
 
-if TYPE_CHECKING:
-    from .imgui import PreviewDataWidget
 
-
-def check_file_dialogs(parent: PreviewDataWidget):
+def check_file_dialogs(parent: Any):
     """Check if file/folder dialogs have results and load data if so."""
     # Check file dialog
     if parent._file_dialog is not None and parent._file_dialog.ready():
@@ -42,13 +39,13 @@ def check_file_dialogs(parent: PreviewDataWidget):
         parent._folder_dialog = None
 
 
-def load_new_data(parent: PreviewDataWidget, path: str):
+def load_new_data(parent: Any, path: str):
     """
     Load new data from the specified path using iw-array API.
 
     Uses iw.set_data() to swap data arrays, which handles shape changes.
     """
-    from mbo_utilities.metadata import has_mbo_metadata
+    from mbo_utilities.arrays import MBOTiffArray
 
     path_obj = Path(path)
     if not path_obj.exists():
@@ -91,9 +88,10 @@ def load_new_data(parent: PreviewDataWidget, path: str):
         parent.fpath = path
         parent.shape = new_data.shape
 
+        # Check if this is MBO data (ScanImage or processed MBO TIFF)
         parent.is_mbo_scan = (
             isinstance(new_data, ScanImageArray) or
-            has_mbo_metadata(path)
+            MBOTiffArray.can_open(path)
         )
 
         # Suggest s2p output directory if not set
