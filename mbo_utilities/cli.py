@@ -380,7 +380,7 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
 @click.option(
     "--fix-phase/--no-fix-phase",
     default=None,
-    help="Bidirectional phase correction (MboRawArray).",
+    help="Bidirectional phase correction (ScanImageArray).",
 )
 @click.option(
     "--phasecorr-method",
@@ -869,7 +869,7 @@ def benchmark(
     version_tag,
 ):
     r"""
-    Run performance benchmarks on MboRawArray.
+    Run performance benchmarks on ScanImageArray.
 
     Measures initialization, indexing, phase correction, write performance,
     throughput, access patterns, and file size comparisons.
@@ -964,7 +964,7 @@ def benchmark(
                 result,
                 output_path=plot_path,
                 show=False,
-                title=f"{version_tag} Benchmarks" if version_tag else "MboRawArray Benchmarks",
+                title=f"{version_tag} Benchmarks" if version_tag else "ScanImageArray Benchmarks",
             )
             click.secho(f"Plot saved to: {plot_path}", fg="green")
         elif not save:
@@ -972,7 +972,7 @@ def benchmark(
             plot_release_benchmark(
                 result,
                 show=True,
-                title=f"{version_tag} Benchmarks" if version_tag else "MboRawArray Benchmarks",
+                title=f"{version_tag} Benchmarks" if version_tag else "ScanImageArray Benchmarks",
             )
 
         return

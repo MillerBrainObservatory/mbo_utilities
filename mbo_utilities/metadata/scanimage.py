@@ -475,7 +475,7 @@ def extract_roi_slices(metadata: dict) -> list[dict]:
     Notes
     -----
     This function consolidates ROI extraction logic that was previously
-    duplicated in MboRawArray._extract_roi_info().
+    duplicated in ScanImageArray._extract_roi_info().
 
     For multi-ROI acquisitions, the page is divided into strips with
     fly-to lines (dead space) between them. This function computes

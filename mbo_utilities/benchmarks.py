@@ -2,7 +2,7 @@
 benchmarking utilities for mbo_utilities.
 
 provides reproducible performance benchmarks for:
-- MboRawArray initialization and metadata extraction
+- ScanImageArray initialization and metadata extraction
 - frame indexing (single, batch, z-plane selection)
 - phase correction variants (off, correlation, fft)
 - writing to supported formats (.zarr, .tiff, .h5, .bin, .npy)
@@ -300,7 +300,7 @@ def benchmark_init(
     warmup: bool = True,
 ) -> dict[str, TimingStats]:
     """
-    Benchmark MboRawArray initialization.
+    Benchmark ScanImageArray initialization.
 
     measures:
     - total imread() time
@@ -351,7 +351,7 @@ def benchmark_indexing(
 
     Parameters
     ----------
-    arr : MboRawArray
+    arr : ScanImageArray
         array to benchmark
     frame_counts : tuple of int
         number of frames to read in each test
@@ -438,7 +438,7 @@ def benchmark_random_access(
 
     Parameters
     ----------
-    arr : MboRawArray
+    arr : ScanImageArray
         array to benchmark
     num_samples : int
         number of frames to read in each test
@@ -505,7 +505,7 @@ def benchmark_parallel_planes(
 
     Parameters
     ----------
-    arr : MboRawArray
+    arr : ScanImageArray
         array to benchmark (must be 4D with Z dimension)
     repeats : int
         timing iterations per test
@@ -616,7 +616,7 @@ def benchmark_throughput(
 
     Parameters
     ----------
-    arr : MboRawArray
+    arr : ScanImageArray
         array to benchmark
     frame_counts : tuple of int
         frame counts to test
@@ -685,7 +685,7 @@ def benchmark_scaling(
 
     Parameters
     ----------
-    arr : MboRawArray
+    arr : ScanImageArray
         array to benchmark
     repeats : int
         timing iterations
@@ -1603,7 +1603,7 @@ def benchmark_mboraw(
     label: str = "",
 ) -> BenchmarkResult:
     """
-    Run full benchmark suite on MboRawArray.
+    Run full benchmark suite on ScanImageArray.
 
     Parameters
     ----------
@@ -2736,7 +2736,7 @@ def plot_release_benchmark(
 
     # title
     if not title:
-        title = "MboRawArray Benchmarks"
+        title = "ScanImageArray Benchmarks"
     ax.set_title(title, fontsize=12, fontweight="bold", color=colors["text"])
 
     # add data info as subtitle

@@ -222,7 +222,7 @@ class ScanPhaseFileDialog:
                 imgui.text_colored(COL_ACCENT, "Adjusting Parameters")
                 imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
 
-                imgui.text("Based on results, adjust MboRawArray:")
+                imgui.text("Based on results, adjust ScanImageArray:")
                 imgui.text_colored(COL_TEXT_DIM, "  arr = imread(path, fix_phase=True)")
                 imgui.text_colored(COL_TEXT_DIM, "  arr.use_fft = True")
                 imgui.text_colored(COL_TEXT_DIM, "  arr.phasecorr_method = 'mean'")

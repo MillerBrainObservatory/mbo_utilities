@@ -386,8 +386,8 @@ def _write_plane(
         end = start + base + (1 if i < extra else 0)
 
         # Extract chunk - handle plane_index for z-plane selection
-        # NOTE: Use len(data.shape) instead of data.ndim for MboRawArray compatibility
-        # (MboRawArray.ndim returns metadata ndim, not actual dimensions)
+        # NOTE: Use len(data.shape) instead of data.ndim for ScanImageArray compatibility
+        # (ScanImageArray.ndim returns metadata ndim, not actual dimensions)
         if plane_index is not None and len(data.shape) >= 4:
             # For 4D data with plane_index, extract the specific z-plane
             # Index both time and z dimensions in one operation
@@ -531,7 +531,7 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     off = _write_bin._offsets[key]
 
     # Squeeze singleton Z dimension if present (but only Z, not time)
-    # NOTE: Use len(data.shape) instead of data.ndim for MboRawArray compatibility
+    # NOTE: Use len(data.shape) instead of data.ndim for ScanImageArray compatibility
     if len(data.shape) == 4 and data.shape[1] == 1:
         data = data.squeeze(axis=1)
 
