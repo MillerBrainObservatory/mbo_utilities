@@ -17,6 +17,51 @@ from mbo_utilities.metadata import get_param
 
 
 # =============================================================================
+# H5 File Helpers - Unified pollen calibration file structure
+# =============================================================================
+
+def get_pollen_h5_path(filepath):
+    """Get the unified pollen calibration H5 file path.
+
+    Parameters
+    ----------
+    filepath : Path
+        Path to the source data file.
+
+    Returns
+    -------
+    Path
+        Path to the unified pollen calibration H5 file (*_pollen.h5).
+    """
+    return filepath.with_name(filepath.stem + "_pollen.h5")
+
+
+def get_mode_group(h5_file, mode, create=True):
+    """Get or create the group for a calibration mode.
+
+    Parameters
+    ----------
+    h5_file : h5py.File
+        Open HDF5 file handle.
+    mode : str
+        Calibration mode ('auto' or 'manual').
+    create : bool
+        If True, create the group if it doesn't exist.
+
+    Returns
+    -------
+    h5py.Group
+        The group for the specified mode.
+    """
+    if mode not in h5_file:
+        if create:
+            return h5_file.create_group(mode)
+        else:
+            raise KeyError(f"Mode '{mode}' not found in H5 file")
+    return h5_file[mode]
+
+
+# =============================================================================
 # Color Palette - Consistent dark theme colors
 # =============================================================================
 
@@ -132,7 +177,7 @@ def correct_scan_phase(vol, filepath, z_step_um, metadata, mode="auto"):
     Parameters
     ----------
     mode : str
-        'auto' or 'manual' - used for separate output files
+        'auto' or 'manual' - calibration mode stored in separate groups
     """
     scan_corrections = []
     nz, nc, ny, nx = vol.shape
@@ -146,20 +191,16 @@ def correct_scan_phase(vol, filepath, z_step_um, metadata, mode="auto"):
         for z in range(nz):
             vol[z, c, :, :] = fix_scan_phase(vol[z, c, :, :], scan_corrections[c])
 
-    # Save scan corrections - separate file per mode
-    h5_path = filepath.with_name(filepath.stem + f"_pollen_{mode}.h5")
+    # Save scan corrections to unified H5 file with mode-specific group
+    h5_path = get_pollen_h5_path(filepath)
     with h5py.File(h5_path, "a") as f:
-        if "scan_corrections" in f:
-            del f["scan_corrections"]
-        f.create_dataset("scan_corrections", data=np.array(scan_corrections))
-
+        # Store shared metadata at root level (only once)
+        f.attrs["source_file"] = filepath.name
+        f.attrs["pollen_calibration_version"] = "2.0"
         f.attrs["num_planes"] = nc
         f.attrs["roi_width_px"] = nx
         f.attrs["roi_height_px"] = ny
         f.attrs["z_step_um"] = z_step_um
-        f.attrs["source_file"] = filepath.name
-        f.attrs["pollen_calibration_version"] = "2.0"
-        f.attrs["calibration_mode"] = mode
 
         frame_rate = get_param(metadata, "fs")
         if frame_rate is not None:
@@ -169,6 +210,13 @@ def correct_scan_phase(vol, filepath, z_step_um, metadata, mode="auto"):
         dy = get_param(metadata, "dy")
         if dx is not None and dy is not None:
             f.attrs["pixel_resolution"] = f"({dx}, {dy})"
+
+        # Store mode-specific data in group
+        grp = get_mode_group(f, mode)
+        if "scan_corrections" in grp:
+            del grp["scan_corrections"]
+        grp.create_dataset("scan_corrections", data=np.array(scan_corrections))
+        grp.attrs["calibration_mode"] = mode
 
     return vol, scan_corrections
 
@@ -315,13 +363,14 @@ def analyze_z_positions(ZZ, zoi, order, filepath, cavity_info, mode="auto"):
     plt.savefig(filepath.with_name(out_name), dpi=150)
     plt.close()
 
-    # Save fit quality to H5 file
-    h5_path = filepath.with_name(filepath.stem + f"_pollen_{mode}.h5")
+    # Save fit quality to unified H5 file
+    h5_path = get_pollen_h5_path(filepath)
     with h5py.File(h5_path, "a") as f:
+        grp = get_mode_group(f, mode)
         if r_squared is not None:
-            f.attrs["z_fit_r_squared"] = r_squared
+            grp.attrs["z_fit_r_squared"] = r_squared
         if z_slope is not None:
-            f.attrs["z_slope_um_per_beam"] = z_slope
+            grp.attrs["z_slope_um_per_beam"] = z_slope
 
 
 def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"):
@@ -412,15 +461,16 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"
     plt.savefig(filepath.with_name(out_name), dpi=150)
     plt.close()
 
-    # Save decay lengths to H5 file
-    h5_path = filepath.with_name(filepath.stem + f"_pollen_{mode}.h5")
+    # Save decay lengths to unified H5 file
+    h5_path = get_pollen_h5_path(filepath)
     with h5py.File(h5_path, "a") as f:
+        grp = get_mode_group(f, mode)
         if decay_length_a is not None:
-            f.attrs["decay_length_cavity_a_um"] = decay_length_a
+            grp.attrs["decay_length_cavity_a_um"] = decay_length_a
         if decay_length_b is not None:
-            f.attrs["decay_length_cavity_b_um"] = decay_length_b
+            grp.attrs["decay_length_cavity_b_um"] = decay_length_b
         if decay_length_combined is not None:
-            f.attrs["decay_length_um"] = decay_length_combined
+            grp.attrs["decay_length_um"] = decay_length_combined
 
 
 def plot_z_spacing(ZZ, zoi, order, filepath, mode="auto"):
@@ -512,25 +562,29 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info, mode="auto"
         diffy = diffy - min(diffy[0] if n_patches > 0 else 0,
                            diffy[n_cavity_a-1] if n_patches >= n_cavity_a else 0)
 
-    # Separate H5 file per mode
-    h5_path = filepath.with_name(filepath.stem + f"_pollen_{mode}.h5")
+    # Save to unified H5 file with mode-specific group
+    h5_path = get_pollen_h5_path(filepath)
     with h5py.File(h5_path, "a") as f:
-        for key in ["diffx", "diffy", "xs_um", "ys_um", "centroid_offx", "centroid_offy",
-                    "cavity_a_channels", "cavity_b_channels"]:
-            if key in f:
-                del f[key]
-
-        f.create_dataset("diffx", data=diffx)
-        f.create_dataset("diffy", data=diffy)
-        f.create_dataset("xs_um", data=xs_um)
-        f.create_dataset("ys_um", data=ys_um)
-        f.create_dataset("centroid_offx", data=offx)
-        f.create_dataset("centroid_offy", data=offy)
-
-        f.create_dataset("cavity_a_channels", data=np.array(cavity_info["cavity_a"]))
-        f.create_dataset("cavity_b_channels", data=np.array(cavity_info["cavity_b"]))
+        # Store shared cavity info at root level
         f.attrs["is_lbm"] = cavity_info["is_lbm"]
         f.attrs["num_cavities"] = cavity_info["num_cavities"]
+
+        # Store mode-specific data in group
+        grp = get_mode_group(f, mode)
+        for key in ["diffx", "diffy", "xs_um", "ys_um", "centroid_offx", "centroid_offy",
+                    "cavity_a_channels", "cavity_b_channels"]:
+            if key in grp:
+                del grp[key]
+
+        grp.create_dataset("diffx", data=diffx)
+        grp.create_dataset("diffy", data=diffy)
+        grp.create_dataset("xs_um", data=xs_um)
+        grp.create_dataset("ys_um", data=ys_um)
+        grp.create_dataset("centroid_offx", data=offx)
+        grp.create_dataset("centroid_offy", data=offy)
+
+        grp.create_dataset("cavity_a_channels", data=np.array(cavity_info["cavity_a"]))
+        grp.create_dataset("cavity_b_channels", data=np.array(cavity_info["cavity_b"]))
 
 
 
@@ -550,26 +604,30 @@ def plot_comparison(filepath):
     bool
         True if comparison was generated, False if both modes not available.
     """
-    auto_h5 = filepath.with_name(filepath.stem + "_pollen_auto.h5")
-    manual_h5 = filepath.with_name(filepath.stem + "_pollen_manual.h5")
+    h5_path = get_pollen_h5_path(filepath)
 
-    # Check both files exist
-    if not auto_h5.exists() or not manual_h5.exists():
+    # Check file exists
+    if not h5_path.exists():
         return False
 
-    # Load data from both
+    # Load data from both modes
     try:
-        with h5py.File(auto_h5, "r") as f:
-            auto_xs = f["xs_um"][:]
-            auto_ys = f["ys_um"][:]
-            auto_dx = f["diffx"][:]
-            auto_dy = f["diffy"][:]
+        with h5py.File(h5_path, "r") as f:
+            # Check both modes exist
+            if "auto" not in f or "manual" not in f:
+                return False
 
-        with h5py.File(manual_h5, "r") as f:
-            manual_xs = f["xs_um"][:]
-            manual_ys = f["ys_um"][:]
-            manual_dx = f["diffx"][:]
-            manual_dy = f["diffy"][:]
+            auto_grp = f["auto"]
+            auto_xs = auto_grp["xs_um"][:]
+            auto_ys = auto_grp["ys_um"][:]
+            auto_dx = auto_grp["diffx"][:]
+            auto_dy = auto_grp["diffy"][:]
+
+            manual_grp = f["manual"]
+            manual_xs = manual_grp["xs_um"][:]
+            manual_ys = manual_grp["ys_um"][:]
+            manual_dx = manual_grp["diffx"][:]
+            manual_dy = manual_grp["diffy"][:]
     except Exception:
         return False
 
@@ -645,13 +703,16 @@ def plot_comparison(filepath):
     return True
 
 
-def extract_calibration_summary(h5_path: str) -> dict | None:
+def extract_calibration_summary(h5_path: str, mode: str = None) -> dict | None:
     """Extract key metrics from calibration H5 file for display.
 
     Parameters
     ----------
     h5_path : str
         Path to the pollen calibration H5 file.
+    mode : str, optional
+        Calibration mode to extract ('auto' or 'manual').
+        If None, prefers manual if available, else auto.
 
     Returns
     -------
@@ -665,25 +726,41 @@ def extract_calibration_summary(h5_path: str) -> dict | None:
 
     try:
         with h5py.File(h5_path, "r") as f:
+            # Get shared metadata from root
             summary = {
                 "num_beamlets": f.attrs.get("num_planes", 0),
                 "z_step_um": f.attrs.get("z_step_um", 0),
                 "is_lbm": f.attrs.get("is_lbm", False),
                 "num_cavities": f.attrs.get("num_cavities", 1),
-                "calibration_mode": f.attrs.get("calibration_mode", "unknown"),
                 "source_file": f.attrs.get("source_file", ""),
-                # Fit quality metrics
-                "z_fit_r_squared": f.attrs.get("z_fit_r_squared"),
-                "z_slope_um_per_beam": f.attrs.get("z_slope_um_per_beam"),
-                "decay_length_um": f.attrs.get("decay_length_um"),
-                "decay_length_cavity_a_um": f.attrs.get("decay_length_cavity_a_um"),
-                "decay_length_cavity_b_um": f.attrs.get("decay_length_cavity_b_um"),
             }
 
-            # Compute RMS of shifts if available
-            if "diffx" in f and "diffy" in f:
-                diffx = f["diffx"][:]
-                diffy = f["diffy"][:]
+            # Determine which mode to load
+            if mode is None:
+                if "manual" in f:
+                    mode = "manual"
+                elif "auto" in f:
+                    mode = "auto"
+                else:
+                    return None
+
+            if mode not in f:
+                return None
+
+            summary["calibration_mode"] = mode
+            grp = f[mode]
+
+            # Mode-specific fit quality metrics
+            summary["z_fit_r_squared"] = grp.attrs.get("z_fit_r_squared")
+            summary["z_slope_um_per_beam"] = grp.attrs.get("z_slope_um_per_beam")
+            summary["decay_length_um"] = grp.attrs.get("decay_length_um")
+            summary["decay_length_cavity_a_um"] = grp.attrs.get("decay_length_cavity_a_um")
+            summary["decay_length_cavity_b_um"] = grp.attrs.get("decay_length_cavity_b_um")
+
+            # Load arrays from group
+            if "diffx" in grp and "diffy" in grp:
+                diffx = grp["diffx"][:]
+                diffy = grp["diffy"][:]
                 summary["rms_dx"] = float(np.sqrt(np.mean(diffx**2)))
                 summary["rms_dy"] = float(np.sqrt(np.mean(diffy**2)))
                 summary["diffx"] = diffx
@@ -692,13 +769,42 @@ def extract_calibration_summary(h5_path: str) -> dict | None:
                 summary["rms_dx"] = None
                 summary["rms_dy"] = None
 
-            # Load position arrays if available
-            if "xs_um" in f:
-                summary["xs_um"] = f["xs_um"][:]
-            if "ys_um" in f:
-                summary["ys_um"] = f["ys_um"][:]
+            if "xs_um" in grp:
+                summary["xs_um"] = grp["xs_um"][:]
+            if "ys_um" in grp:
+                summary["ys_um"] = grp["ys_um"][:]
 
             return summary
 
     except Exception:
         return None
+
+
+def get_available_modes(h5_path: str) -> list[str]:
+    """Get list of available calibration modes in H5 file.
+
+    Parameters
+    ----------
+    h5_path : str
+        Path to the pollen calibration H5 file.
+
+    Returns
+    -------
+    list[str]
+        List of available mode names ('auto', 'manual').
+    """
+    from pathlib import Path
+    h5_path = Path(h5_path)
+    if not h5_path.exists():
+        return []
+
+    try:
+        with h5py.File(h5_path, "r") as f:
+            modes = []
+            if "auto" in f:
+                modes.append("auto")
+            if "manual" in f:
+                modes.append("manual")
+            return modes
+    except Exception:
+        return []
