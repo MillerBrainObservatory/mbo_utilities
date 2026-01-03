@@ -1,7 +1,98 @@
+import time
 from collections.abc import Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any, Callable
 
 import numpy as np
 from numpy.typing import ArrayLike
+
+
+@contextmanager
+def timed(label: str = "", logger: Any = None):
+    """Context manager for timing code blocks with perf_counter.
+
+    uses time.perf_counter() for high-resolution timing.
+
+    Parameters
+    ----------
+    label : str
+        optional label for the timing output
+    logger : logging.Logger, optional
+        logger to use for output. if None, timing is silent but accessible
+
+    Yields
+    ------
+    dict
+        mutable dict containing 'elapsed_ms' after block completes
+
+    Examples
+    --------
+    >>> with timed("loading data") as t:
+    ...     data = load_something()
+    >>> print(f"took {t['elapsed_ms']:.2f} ms")
+
+    >>> with timed("processing", logger=logger) as t:
+    ...     process_data()
+    # logs: "processing: 123.45 ms"
+    """
+    result = {"elapsed_ms": 0.0}
+    t0 = time.perf_counter()
+    try:
+        yield result
+    finally:
+        result["elapsed_ms"] = (time.perf_counter() - t0) * 1000
+        if logger and label:
+            logger.info(f"{label}: {result['elapsed_ms']:.2f} ms")
+
+
+def time_func(func: Callable, *args, **kwargs) -> tuple[Any, float]:
+    """Time a function call, return (result, elapsed_ms).
+
+    uses time.perf_counter() for high-resolution timing.
+
+    Parameters
+    ----------
+    func : callable
+        function to time
+    *args, **kwargs
+        arguments to pass to func
+
+    Returns
+    -------
+    tuple
+        (result, elapsed_ms) where result is func's return value
+    """
+    t0 = time.perf_counter()
+    result = func(*args, **kwargs)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    return result, elapsed_ms
+
+
+@dataclass
+class TimingStats:
+    """Statistics for a set of timing measurements.
+
+    standardized container for benchmark timing results.
+    """
+
+    times_ms: list[float] = field(default_factory=list)
+    mean_ms: float = 0.0
+    std_ms: float = 0.0
+    min_ms: float = 0.0
+    max_ms: float = 0.0
+
+    @classmethod
+    def from_times(cls, times_ms: list[float]) -> "TimingStats":
+        """Compute stats from raw timing list."""
+        arr = np.array(times_ms)
+        return cls(
+            times_ms=times_ms,
+            mean_ms=float(np.mean(arr)),
+            std_ms=float(np.std(arr)),
+            min_ms=float(np.min(arr)),
+            max_ms=float(np.max(arr)),
+        )
 
 
 def check():

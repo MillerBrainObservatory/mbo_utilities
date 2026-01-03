@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
 from mbo_utilities import log
+from mbo_utilities.util import TimingStats, time_func as _time_func
 
 logger = log.get("benchmarks")
 
@@ -151,29 +152,6 @@ class BenchmarkConfig:
 
 
 @dataclass
-class TimingStats:
-    """statistics for a set of timing measurements."""
-
-    times_ms: list[float] = field(default_factory=list)
-    mean_ms: float = 0.0
-    std_ms: float = 0.0
-    min_ms: float = 0.0
-    max_ms: float = 0.0
-
-    @classmethod
-    def from_times(cls, times_ms: list[float]) -> TimingStats:
-        """Compute stats from raw timing list."""
-        arr = np.array(times_ms)
-        return cls(
-            times_ms=times_ms,
-            mean_ms=float(np.mean(arr)),
-            std_ms=float(np.std(arr)),
-            min_ms=float(np.min(arr)),
-            max_ms=float(np.max(arr)),
-        )
-
-
-@dataclass
 class BenchmarkResult:
     """complete benchmark results with metadata."""
 
@@ -261,14 +239,6 @@ def get_git_commit() -> str:
     except Exception:
         pass
     return ""
-
-
-def _time_func(func, *args, **kwargs) -> tuple[Any, float]:
-    """Time a function call, return (result, time_ms)."""
-    t0 = time.perf_counter()
-    result = func(*args, **kwargs)
-    t1 = time.perf_counter()
-    return result, (t1 - t0) * 1000
 
 
 def _suppress_tifffile_warnings():
@@ -2577,6 +2547,8 @@ def format_release_markdown(result: ReleaseBenchmarkResult, version: str = "") -
     def fmt_time(ms: float) -> str:
         if ms >= 1000:
             return f"{ms/1000:.2f} s"
+        if ms < 0.1:
+            return f"{ms*1000:.1f} us"
         return f"{ms:.1f} ms"
 
     # init

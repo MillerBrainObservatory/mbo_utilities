@@ -954,7 +954,7 @@ def benchmark(
 
             # save markdown
             md_path = results_dir / f"release_benchmark_{label}_{timestamp}.md"
-            md_path.write_text(markdown)
+            md_path.write_text(markdown, encoding="utf-8")
             click.secho(f"Markdown saved to: {md_path}", fg="green")
 
         if plot:

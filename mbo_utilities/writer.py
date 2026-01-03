@@ -336,7 +336,7 @@ def imwrite(
         )
 
     # Start timing for processing history
-    write_start_time = time.time()
+    write_start_time = time.perf_counter()
 
     if hasattr(lazy_array, "_imwrite"):
         write_kwargs = kwargs.copy()
@@ -367,7 +367,7 @@ def imwrite(
         result = outpath
 
     # Record processing step in metadata
-    write_duration = time.time() - write_start_time
+    write_duration = time.perf_counter() - write_start_time
 
     # Build extra info for processing history
     processing_extra = {

@@ -11,9 +11,9 @@ def dir_size_bytes(p: Path) -> int:
 def copy_dir(src: Path, dst: Path) -> dict:
     if dst.exists():
         shutil.rmtree(dst)
-    start = time.time()
+    start = time.perf_counter()
     shutil.copytree(src, dst)
-    elapsed = time.time() - start
+    elapsed = time.perf_counter() - start
     size_bytes = dir_size_bytes(src)
     mb = size_bytes / (1024**2)
     mbps = mb / elapsed if elapsed > 0 else 0
