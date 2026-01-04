@@ -42,9 +42,9 @@ def setup_logging(log_file: str | None = None) -> logging.Logger:
             fh.setLevel(logging.INFO)
             fh.setFormatter(formatter)
             logger.addHandler(fh)
-        except Exception:
+        except Exception as e:
             # print to stderr so it's captured in the redirect if setup fails
-            pass
+            print(f"Failed to setup file logging: {e}", file=sys.stderr)
 
     return logger
 
@@ -93,28 +93,29 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
             json.dump(data, f)
         tmp_file.replace(sidecar)
 
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Failed to update status sidecar: {e}", file=sys.stderr)
 
 
 def main():
     """Main entry point for worker subprocess."""
-    # Disable tqdm's dynamic display for file output (no terminal = no \r updates)
-    # This prevents the flood of progress bar lines in log files
+    # disable tqdm dynamic display for file output (no terminal = no \r updates)
     os.environ["TQDM_DISABLE"] = "1"
 
     # early print so we can see the process started even if logging fails
+    print(f"Worker starting (pid={os.getpid()})", file=sys.stderr, flush=True)
 
     if len(sys.argv) < 3:
+        print("Usage: python -m mbo_utilities.gui._worker <task_type> <args_json>", file=sys.stderr)
         sys.exit(1)
 
     task_type = sys.argv[1]
     args_json = sys.argv[2]
 
-
     try:
         args = json.loads(args_json)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        print(f"Invalid JSON args: {e}", file=sys.stderr)
         sys.exit(1)
 
     # setup logging
@@ -127,6 +128,7 @@ def main():
     # get task function
     if task_type not in TASKS:
         logger.error(f"Unknown task type: {task_type}")
+        print(f"Unknown task type: {task_type}", file=sys.stderr)
         _update_status(os.getpid(), "error", f"Unknown task type: {task_type}", uuid=uuid)
         sys.exit(1)
 
@@ -134,22 +136,13 @@ def main():
 
     # run the task
     try:
-        # Task functions are expected to accept (args, logger)
         task_func(args, logger)
-
         logger.info("Task completed successfully")
-
-        # Explicitly mark as completed in sidecar so ProcessManager knows
         _update_status(os.getpid(), "completed", uuid=uuid)
-
         sys.exit(0)
     except Exception as e:
         logger.exception(f"Task failed: {e}")
-        logger.exception(traceback.format_exc())
-
-        # Explicitly mark as error
         _update_status(os.getpid(), "error", message=str(e), details=traceback.format_exc(), uuid=uuid)
-
         sys.exit(1)
 
 
