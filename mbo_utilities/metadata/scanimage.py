@@ -1,5 +1,5 @@
 """
-scanimage.py
+scanimage.py.
 
 Functions to detect acquisition parameters from ScanImage metadata,
 including stack type, color channels, and timepoints.
@@ -475,7 +475,7 @@ def extract_roi_slices(metadata: dict) -> list[dict]:
     Notes
     -----
     This function consolidates ROI extraction logic that was previously
-    duplicated in MboRawArray._extract_roi_info().
+    duplicated in ScanImageArray._extract_roi_info().
 
     For multi-ROI acquisitions, the page is divided into strips with
     fly-to lines (dead space) between them. This function computes
@@ -520,9 +520,7 @@ def extract_roi_slices(metadata: dict) -> list[dict]:
         if i == len(heights_from_metadata) - 1:
             height = remaining_height
         else:
-            height = int(
-                round(metadata_height * total_available_height / total_metadata_height)
-            )
+            height = round(metadata_height * total_available_height / total_metadata_height)
             remaining_height -= height
         actual_heights.append(height)
 

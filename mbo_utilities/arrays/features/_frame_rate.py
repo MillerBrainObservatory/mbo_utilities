@@ -6,12 +6,9 @@ Provides temporal sampling frequency in Hz.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
-if TYPE_CHECKING:
-    pass
 
 
 class FrameRateFeature(ArrayFeature):
@@ -46,31 +43,31 @@ class FrameRateFeature(ArrayFeature):
 
     @property
     def value(self) -> float | None:
-        """frame rate in Hz"""
+        """Frame rate in Hz."""
         return self._value
 
     @property
     def fs(self) -> float | None:
-        """alias for value - sampling frequency in Hz"""
+        """Alias for value - sampling frequency in Hz."""
         return self._value
 
     @property
     def period(self) -> float | None:
-        """frame interval in seconds (1/fs)"""
+        """Frame interval in seconds (1/fs)."""
         if self._value is None or self._value == 0:
             return None
         return 1.0 / self._value
 
     @property
     def period_ms(self) -> float | None:
-        """frame interval in milliseconds"""
+        """Frame interval in milliseconds."""
         if self._value is None or self._value == 0:
             return None
         return 1000.0 / self._value
 
     @property
     def finterval(self) -> float | None:
-        """alias for period - frame interval in seconds (ImageJ convention)"""
+        """Alias for period - frame interval in seconds (ImageJ convention)."""
         return self.period
 
     def set_value(self, array, value: float | None) -> None:

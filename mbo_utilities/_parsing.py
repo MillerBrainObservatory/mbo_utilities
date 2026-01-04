@@ -7,19 +7,17 @@ import numpy as np
 
 
 def _is_disabled_si_module(value) -> bool:
-    """check if a scanimage module dict has enable=false."""
+    """Check if a scanimage module dict has enable=false."""
     if not isinstance(value, dict):
         return False
     enable_val = value.get("enable")
     if enable_val is False:
         return True
-    if isinstance(enable_val, str) and enable_val.lower() in ("false", "0"):
-        return True
-    return False
+    return bool(isinstance(enable_val, str) and enable_val.lower() in ("false", "0"))
 
 
 def _filter_disabled_modules(metadata: dict, recursive: bool = True) -> dict:
-    """filter out disabled scanimage modules (hXxx with enable=false) from metadata."""
+    """Filter out disabled scanimage modules (hXxx with enable=false) from metadata."""
     if not isinstance(metadata, dict):
         return metadata
     result = {}

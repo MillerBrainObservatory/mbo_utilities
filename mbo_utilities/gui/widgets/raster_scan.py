@@ -5,15 +5,12 @@ shows ui for bidirectional scan phase correction on data
 that supports phase correction (has fix_phase and use_fft attributes).
 """
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui, hello_imgui
 
 from mbo_utilities.gui.widgets._base import Widget
-from mbo_utilities.gui._widgets import set_tooltip
-
-if TYPE_CHECKING:
-    from mbo_utilities.gui.imgui import PreviewDataWidget
+from mbo_utilities.gui._imgui_helpers import set_tooltip
 
 
 class RasterScanWidget(Widget):
@@ -23,12 +20,12 @@ class RasterScanWidget(Widget):
     priority = 50
 
     @classmethod
-    def is_supported(cls, parent: "PreviewDataWidget") -> bool:
-        """show only if data array supports phase correction (cached on parent)."""
+    def is_supported(cls, parent: Any) -> bool:
+        """Show only if data array supports phase correction (cached on parent)."""
         return parent.has_raster_scan_support
 
     def draw(self) -> None:
-        """draw raster scan phase correction controls."""
+        """Draw raster scan phase correction controls."""
         parent = self.parent
 
         imgui.spacing()

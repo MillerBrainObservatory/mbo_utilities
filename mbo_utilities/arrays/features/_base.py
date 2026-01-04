@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from warnings import warn
 
 if TYPE_CHECKING:
-    from typing import Callable
+    from collections.abc import Callable
 
 
 class ArrayFeatureEvent:
@@ -58,15 +58,15 @@ class ArrayFeature:
 
     @property
     def value(self) -> Any:
-        """feature value, must be implemented in subclass"""
+        """Feature value, must be implemented in subclass."""
         raise NotImplementedError
 
     def set_value(self, array, value: Any) -> None:
-        """set feature value, must be implemented in subclass"""
+        """Set feature value, must be implemented in subclass."""
         raise NotImplementedError
 
     def block_events(self, val: bool) -> None:
-        """block or unblock event emission"""
+        """Block or unblock event emission."""
         self._block_events = val
 
     def add_event_handler(self, handler: Callable) -> None:
@@ -82,19 +82,19 @@ class ArrayFeature:
             raise TypeError("event handler must be callable")
 
         if handler in self._event_handlers:
-            warn(f"Event handler {handler} is already registered.")
+            warn(f"Event handler {handler} is already registered.", stacklevel=2)
             return
 
         self._event_handlers.append(handler)
 
     def remove_event_handler(self, handler: Callable) -> None:
-        """remove a registered event handler"""
+        """Remove a registered event handler."""
         if handler not in self._event_handlers:
             raise KeyError(f"event handler {handler} not registered")
         self._event_handlers.remove(handler)
 
     def clear_event_handlers(self) -> None:
-        """clear all event handlers"""
+        """Clear all event handlers."""
         self._event_handlers.clear()
 
     def _call_event_handlers(self, event: ArrayFeatureEvent) -> None:
@@ -104,7 +104,7 @@ class ArrayFeature:
             try:
                 func(event)
             except Exception as e:
-                warn(f"Error in {self.__class__.__name__} event handler: {e}")
+                warn(f"Error in {self.__class__.__name__} event handler: {e}", stacklevel=2)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self._property_name!r})"

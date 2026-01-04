@@ -22,16 +22,15 @@ from mbo_utilities.util import load_npy
 from .params import normalize_resolution, get_param
 
 __all__ = [
-    # file I/O functions
-    "has_mbo_metadata",
-    "is_raw_scanimage",
-    "get_metadata",
-    "get_metadata_single",
-    "get_metadata_batch",
-    "query_tiff_pages",
+    "_build_ome_metadata",
     "clean_scanimage_metadata",
     "default_ops",
-    "_build_ome_metadata",
+    "get_metadata",
+    "get_metadata_batch",
+    "get_metadata_single",
+    # file I/O functions
+    "is_raw_scanimage",
+    "query_tiff_pages",
 ]
 
 logger = log.get("metadata")
@@ -76,51 +75,6 @@ def _metadata_from_ops(ops: dict) -> dict:
     return {k: v for k, v in result.items() if v is not None}
 
 
-def has_mbo_metadata(file: os.PathLike | str) -> bool:
-    """
-    Check if a TIFF file has metadata from the Miller Brain Observatory.
-
-    This checks for MBO-specific keys in the shaped_metadata, not just its presence.
-    Generic TIFFs written by tifffile may have shaped_metadata with only a 'shape' key,
-    which is not sufficient to identify them as MBO files.
-
-    MBO-specific keys include: num_planes, num_rois, frame_rate, pixel_resolution,
-    fov, Ly, Lx, etc.
-
-    Parameters
-    ----------
-    file: os.PathLike
-        Path to the TIFF file.
-
-    Returns
-    -------
-    bool
-        True if the TIFF file has MBO metadata; False otherwise.
-    """
-    # Keys that indicate MBO origin (beyond just 'shape' which is generic tifffile)
-    MBO_MARKER_KEYS = {"num_planes", "num_rois", "frame_rate", "Ly", "Lx", "fov", "pixel_resolution"}
-
-    if not file or not isinstance(file, (str, os.PathLike)):
-        raise ValueError(
-            "Invalid file path provided: must be a string or os.PathLike object."
-            f"Got: {file} of type {type(file)}"
-        )
-    if Path(file).suffix not in [".tif", ".tiff"]:
-        return False
-    try:
-        with tifffile.TiffFile(file) as tiff_file:
-            if not hasattr(tiff_file, "shaped_metadata") or tiff_file.shaped_metadata is None:
-                return False
-            # shaped_metadata is a tuple of dicts, check the first one
-            meta = tiff_file.shaped_metadata[0] if tiff_file.shaped_metadata else {}
-            if not isinstance(meta, dict):
-                return False
-            # Check if any MBO-specific keys are present
-            return bool(MBO_MARKER_KEYS & meta.keys())
-    except Exception:
-        return False
-
-
 def is_raw_scanimage(file: os.PathLike | str) -> bool:
     """
     Check if a TIFF file is a raw ScanImage TIFF.
@@ -135,9 +89,7 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
     bool
         True if the TIFF file is a raw ScanImage TIFF; False otherwise.
     """
-    if not file or not isinstance(file, (str, os.PathLike)):
-        return False
-    elif Path(file).suffix not in [".tif", ".tiff"]:
+    if not file or not isinstance(file, (str, os.PathLike)) or Path(file).suffix not in [".tif", ".tiff"]:
         return False
     try:
         tiff_file = tifffile.TiffFile(file)
@@ -151,11 +103,10 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
         ):
             logger.info(f"File {file} has shaped_metadata; not a raw ScanImage TIFF.")
             return False
-        else:
-            if tiff_file.scanimage_metadata is None:
-                logger.info(f"No ScanImage metadata found in {file}.")
-                return False
-            return True
+        if tiff_file.scanimage_metadata is None:
+            logger.info(f"No ScanImage metadata found in {file}.")
+            return False
+        return True
     except Exception:
         return False
 
@@ -263,12 +214,11 @@ def get_metadata(
         metadata = get_metadata_batch(tiff_files)
         return normalize_resolution(metadata, dx=dx, dy=dy, dz=dz)
 
-    elif file_path.is_file():
+    if file_path.is_file():
         metadata = get_metadata_single(file_path)
         return normalize_resolution(metadata, dx=dx, dy=dy, dz=dz)
 
-    else:
-        raise ValueError(f"Path does not exist or is not accessible: {file_path}")
+    raise ValueError(f"Path does not exist or is not accessible: {file_path}")
 
 
 def get_metadata_single(file: Path):
@@ -357,7 +307,7 @@ def get_metadata_single(file: Path):
 
         raise ValueError(f"No metadata found in {file}.")
 
-    elif hasattr(tiff_file, "scanimage_metadata"):
+    if hasattr(tiff_file, "scanimage_metadata"):
         meta = tiff_file.scanimage_metadata
         # if no ScanImage metadata at all → fallback immediately
         if not meta:
@@ -398,9 +348,7 @@ def get_metadata_single(file: Path):
 
         # Handle single channel case where channelSave is int instead of list
         channel_save = si.get("SI.hChannels.channelSave")
-        if channel_save is None:
-            num_planes = 1
-        elif isinstance(channel_save, (int, float)):
+        if channel_save is None or isinstance(channel_save, (int, float)):
             num_planes = 1
         else:
             num_planes = len(channel_save)
@@ -412,7 +360,7 @@ def get_metadata_single(file: Path):
 
         fly_to_time = float(si.get("SI.hScan2D.flytoTimePerScanfield", 0))
         line_period = float(si.get("SI.hRoiManager.linePeriod", 1))
-        num_fly_to_lines = int(round(fly_to_time / line_period)) if line_period > 0 else 0
+        num_fly_to_lines = round(fly_to_time / line_period) if line_period > 0 else 0
 
         sizes = []
         num_pixel_xys = []
@@ -468,32 +416,31 @@ def get_metadata_single(file: Path):
         }
         return clean_scanimage_metadata(metadata)
 
-    else:
-        logger.info(f"No ScanImage metadata found in {file}, trying ops.npy fallback.")
-        # fallback: no ScanImage metadata, try nearby ops.npy
-        ops_path = Path(file).with_name("ops.npy")
-        if not ops_path.exists():
-            # climb until you find suite2p or root
-            for parent in Path(file).parents:
-                ops_path = parent / "ops.npy"
-                if ops_path.exists():
-                    try:
-                        ops = load_npy(ops_path).item()
-                        result = _metadata_from_ops(ops)
-                        # single-plane suite2p folder → force to 1
-                        if "plane0" in str(ops_path.parent).lower():
-                            result["num_planes"] = 1
-                        return result
-                    except Exception as e:
-                        logger.warning(f"Failed ops.npy fallback for {file}: {e}")
-        if ops_path.exists():
-            logger.info(f"Found ops.npy at {ops_path}, attempting to load.")
-            try:
-                ops = load_npy(ops_path).item()
-                return _metadata_from_ops(ops)
-            except Exception as e:
-                logger.warning(f"Failed ops.npy fallback for {file}: {e}")
-        return {"source": "no_metadata"}
+    logger.info(f"No ScanImage metadata found in {file}, trying ops.npy fallback.")
+    # fallback: no ScanImage metadata, try nearby ops.npy
+    ops_path = Path(file).with_name("ops.npy")
+    if not ops_path.exists():
+        # climb until you find suite2p or root
+        for parent in Path(file).parents:
+            ops_path = parent / "ops.npy"
+            if ops_path.exists():
+                try:
+                    ops = load_npy(ops_path).item()
+                    result = _metadata_from_ops(ops)
+                    # single-plane suite2p folder → force to 1
+                    if "plane0" in str(ops_path.parent).lower():
+                        result["num_planes"] = 1
+                    return result
+                except Exception as e:
+                    logger.warning(f"Failed ops.npy fallback for {file}: {e}")
+    if ops_path.exists():
+        logger.info(f"Found ops.npy at {ops_path}, attempting to load.")
+        try:
+            ops = load_npy(ops_path).item()
+            return _metadata_from_ops(ops)
+        except Exception as e:
+            logger.warning(f"Failed ops.npy fallback for {file}: {e}")
+    return {"source": "no_metadata"}
 
 
 def get_metadata_batch(file_paths: list | tuple):
@@ -698,10 +645,9 @@ def clean_scanimage_metadata(meta: dict) -> dict:
         return out
 
     def _nest_into_si(root_dict, dotted_key, value):
-        """Nest 'SI.hChannels.channelSave' into root_dict as ['hChannels']['channelSave']"""
+        """Nest 'SI.hChannels.channelSave' into root_dict as ['hChannels']['channelSave']."""
         # Strip 'SI.' prefix
-        if dotted_key.startswith("SI."):
-            dotted_key = dotted_key[3:]
+        dotted_key = dotted_key.removeprefix("SI.")
 
         parts = dotted_key.split(".")
         cur = root_dict
@@ -783,7 +729,7 @@ def clean_scanimage_metadata(meta: dict) -> dict:
 
 
 def default_ops():
-    """default options to run pipeline"""
+    """Default options to run pipeline."""
     return {
         # file input/output settings
         "look_one_level_down": False,  # whether to look in all subfolders when searching for tiffs
@@ -926,14 +872,14 @@ def _params_from_metadata_caiman(metadata):
     gSiz = (4 * gSig + 1, 4 * gSig + 1)
     params["main"]["gSiz"] = gSiz
 
-    max_shifts = [int(round(10 / px)) for px in metadata["pixel_resolution"]]
+    max_shifts = [round(10 / px) for px in metadata["pixel_resolution"]]
     params["main"]["max_shifts"] = max_shifts
 
-    strides = [int(round(64 / px)) for px in metadata["pixel_resolution"]]
+    strides = [round(64 / px) for px in metadata["pixel_resolution"]]
     params["main"]["strides"] = strides
 
     # overlap should be ~neuron diameter
-    overlaps = [int(round(gSig / px)) for px in metadata["pixel_resolution"]]
+    overlaps = [round(gSig / px) for px in metadata["pixel_resolution"]]
     if overlaps[0] < gSig:
         logger.info("Overlaps too small. Increasing to neuron diameter.")
         overlaps = [int(gSig)] * 2
@@ -1036,7 +982,7 @@ def _build_ome_metadata(
     dict
         Complete OME-NGFF v0.5 metadata attributes
     """
-    T, Z, Y, X = shape
+    _T, _Z, _Y, _X = shape
 
     pixel_resolution = metadata.get("pixel_resolution", [1.0, 1.0])
     frame_rate = metadata.get("frame_rate", metadata.get("fs", 1.0))
@@ -1240,7 +1186,7 @@ def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
     """
     import numpy as np
 
-    T, Z, Y, X = shape
+    _T, Z, _Y, _X = shape
 
     # Determine data range for window settings
     if np.issubdtype(dtype, np.integer):
@@ -1294,7 +1240,7 @@ def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
     if not channels:
         return {}
 
-    omero = {
+    return {
         "channels": channels,
         "rdefs": {
             "defaultT": 0,
@@ -1304,4 +1250,3 @@ def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
         "version": "0.5",
     }
 
-    return omero

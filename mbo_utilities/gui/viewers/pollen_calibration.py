@@ -1,11 +1,13 @@
 """
-Pollen calibration widget for LBM beamlet calibration.
+Pollen calibration viewer for LBM beamlet calibration.
 
-This widget handles pollen calibration data (ZCYX) and provides:
+This viewer handles pollen calibration data (ZCYX) and provides:
 - Info panel showing beamlet count, cavities, z-step, pixel size
 - Automatic background calibration (detection + analysis)
 - Manual calibration mode: click through beamlets in the viewer
 """
+
+from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,10 +16,11 @@ import threading
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 
-from imgui_bundle import imgui, hello_imgui
+from imgui_bundle import imgui, implot, portable_file_dialogs as pfd
 
-from mbo_utilities.gui.main_widgets._base import MainWidget
-from mbo_utilities.gui._widgets import set_tooltip
+from . import BaseViewer
+from mbo_utilities.gui.panels import DebugPanel, ProcessPanel, MetadataPanel
+from mbo_utilities.gui._imgui_helpers import set_tooltip, style_seaborn_dark
 from mbo_utilities.metadata import get_param
 from mbo_utilities.metadata.scanimage import (
     get_lbm_ai_sources,
@@ -25,7 +28,9 @@ from mbo_utilities.metadata.scanimage import (
 )
 
 if TYPE_CHECKING:
-    from mbo_utilities.gui.imgui import PreviewDataWidget
+    from fastplotlib.widgets import ImageWidget
+
+__all__ = ["PollenCalibrationViewer"]
 
 
 def get_cavity_indices(metadata: dict, nc: int) -> dict:
@@ -33,50 +38,53 @@ def get_cavity_indices(metadata: dict, nc: int) -> dict:
     from mbo_utilities.metadata.scanimage import is_lbm_stack
 
     result = {
-        'cavity_a': [],
-        'cavity_b': [],
-        'is_lbm': False,
-        'num_cavities': 1,
+        "cavity_a": [],
+        "cavity_b": [],
+        "is_lbm": False,
+        "num_cavities": 1,
     }
 
     if not is_lbm_stack(metadata):
         half = nc // 2
-        result['cavity_a'] = list(range(half))
-        result['cavity_b'] = list(range(half, nc))
+        result["cavity_a"] = list(range(half))
+        result["cavity_b"] = list(range(half, nc))
         return result
 
-    result['is_lbm'] = True
+    result["is_lbm"] = True
     ai_sources = get_lbm_ai_sources(metadata)
 
     if not ai_sources:
         half = nc // 2
-        result['cavity_a'] = list(range(half))
-        result['cavity_b'] = list(range(half, nc))
+        result["cavity_a"] = list(range(half))
+        result["cavity_b"] = list(range(half, nc))
         return result
 
     sorted_sources = sorted(ai_sources.keys())
 
     if len(sorted_sources) >= 1:
         cavity_a_channels = ai_sources.get(sorted_sources[0], [])
-        result['cavity_a'] = sorted([ch - 1 if ch > 0 else ch for ch in cavity_a_channels])
+        result["cavity_a"] = sorted([ch - 1 if ch > 0 else ch for ch in cavity_a_channels])
 
     if len(sorted_sources) >= 2:
         cavity_b_channels = ai_sources.get(sorted_sources[1], [])
-        result['cavity_b'] = sorted([ch - 1 if ch > 0 else ch for ch in cavity_b_channels])
-        result['num_cavities'] = 2
+        result["cavity_b"] = sorted([ch - 1 if ch > 0 else ch for ch in cavity_b_channels])
+        result["num_cavities"] = 2
 
     return result
 
 
-class PollenCalibrationWidget(MainWidget):
+class PollenCalibrationViewer(BaseViewer):
     """
-    Main widget for pollen calibration data.
+    Viewer for pollen calibration data (ZCYX).
 
-    Handles ZCYX pollen stacks for LBM beamlet calibration.
-    Runs automatic calibration in background, provides manual mode.
+    This viewer is specialized for LBM beamlet calibration using
+    pollen grain stacks. It provides:
+    - Automatic bead detection and calibration
+    - Interactive manual calibration mode
+    - Results visualization and comparison
     """
 
-    name = "Pollen Calibration"
+    name = "Pollen Calibration Viewer"
 
     # Default beam order for 30-channel system
     DEFAULT_ORDER_30 = [
@@ -84,8 +92,18 @@ class PollenCalibrationWidget(MainWidget):
         2, 16, 17, 18, 19, 20, 21, 3, 22, 23, 24, 25, 26, 27, 28, 29
     ]
 
-    def __init__(self, parent: "PreviewDataWidget"):
-        super().__init__(parent)
+    def __init__(
+        self,
+        image_widget: ImageWidget,
+        fpath: str | list[str],
+        parent=None,
+        **kwargs,
+    ):
+        super().__init__(image_widget, fpath, parent=parent, **kwargs)
+
+        # Pollen calibration has its own specialized UI
+        # so we don't use the generic feature system
+        self._features = []
 
         # Pollen-specific state
         self._z_step_um = 1.0
@@ -131,6 +149,47 @@ class PollenCalibrationWidget(MainWidget):
         self._max_projections = None  # Max projections for viewing
         self._original_metadata = None  # Store metadata before replacing with numpy array
 
+        # External file loading state
+        self._external_h5_dialog = None  # pfd file dialog for loading external H5
+        self._loaded_external = None     # External calibration data dict
+        self._existing_h5_files = []     # H5 files found in current directory
+
+        # ImPlot comparison popup state
+        self._show_shift_popup = False
+        self._shift_popup_open = False
+
+        # Only initialize panels when not using legacy delegation
+        if parent is None:
+            self._panels["debug"] = DebugPanel(self)
+            self._panels["processes"] = ProcessPanel(self)
+            self._panels["metadata"] = MetadataPanel(self)
+            self._setup_logging()
+
+    @property
+    def data(self):
+        """Access the loaded data arrays."""
+        if self.parent is not None:
+            return self.parent.image_widget.data if self.parent.image_widget else None
+        return self.image_widget.data if self.image_widget else None
+
+    @property
+    def logger(self):
+        """Access the GUI logger."""
+        if self.parent is not None:
+            return self.parent.logger
+        import logging
+        return logging.getLogger("mbo_utilities")
+
+    def _setup_logging(self) -> None:
+        """Set up log handler to route to debug panel."""
+        try:
+            import logging
+            from mbo_utilities.gui.panels.debug_log import GuiLogHandler
+            handler = GuiLogHandler(self._panels["debug"])
+            logging.getLogger("mbo_utilities").addHandler(handler)
+        except Exception:
+            pass
+
     def _init_from_data(self):
         """Initialize calibration parameters from loaded data."""
         try:
@@ -143,7 +202,7 @@ class PollenCalibrationWidget(MainWidget):
         except (TypeError, IndexError):
             return
 
-        metadata = getattr(arr, 'metadata', {})
+        metadata = getattr(arr, "metadata", {})
 
         z_step = get_z_step_size(metadata)
         if z_step is not None:
@@ -156,7 +215,7 @@ class PollenCalibrationWidget(MainWidget):
             nx = arr.shape[-1]
             self._pixel_size_um = self._fov_um / self._zoom / nx
 
-        nc = getattr(arr, 'num_channels', arr.shape[1] if arr.ndim >= 2 else 1)
+        nc = getattr(arr, "num_channels", arr.shape[1] if arr.ndim >= 2 else 1)
         self._cavity_info = get_cavity_indices(metadata, nc)
 
         if nc == 30:
@@ -178,7 +237,7 @@ class PollenCalibrationWidget(MainWidget):
 
     def _get_fpath(self):
         """Get the file path."""
-        parent_fpath = self.parent.fpath
+        parent_fpath = self.parent.fpath if self.parent is not None else self.fpath
         if isinstance(parent_fpath, (list, tuple)):
             parent_fpath = parent_fpath[0] if parent_fpath else None
         return Path(parent_fpath) if parent_fpath else None
@@ -190,9 +249,9 @@ class PollenCalibrationWidget(MainWidget):
         if arr is None:
             return 0
         # For ZCYX data: shape is (Z, C, Y, X), so channels is shape[1]
-        if hasattr(arr, 'num_beamlets'):
+        if hasattr(arr, "num_beamlets"):
             return arr.num_beamlets
-        if hasattr(arr, 'num_channels'):
+        if hasattr(arr, "num_channels"):
             return arr.num_channels
         # Fallback: for 4D ZCYX, channels is dim 1
         if arr.ndim == 4:
@@ -204,14 +263,29 @@ class PollenCalibrationWidget(MainWidget):
         arr = self._get_array()
         if arr is None:
             return 0
-        return getattr(arr, 'num_zplanes', arr.shape[0])
+        return getattr(arr, "num_zplanes", arr.shape[0])
 
     def draw(self) -> None:
         """Draw the pollen calibration UI."""
+        if self.parent is not None:
+            # Legacy mode: full calibration UI in sidebar
+            self._draw_calibration_ui()
+        else:
+            # New mode: panel-based with menu bar
+            self.draw_menu_bar()
+            self._draw_calibration_ui()
+            for panel in self._panels.values():
+                panel.draw()
+
+    def _draw_calibration_ui(self) -> None:
+        """Draw the main calibration UI."""
         if not self._initialized:
             self._init_from_data()
             if self._initialized and not self._processing and not self._done:
                 self._start_auto_calibration()
+
+        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+        imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
 
         imgui.dummy(imgui.ImVec2(0, 5))
 
@@ -226,26 +300,87 @@ class PollenCalibrationWidget(MainWidget):
         if self._manual_mode:
             self._draw_manual_mode()
         else:
+            # Load previous section
+            self._draw_load_previous_section()
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            # Shift preview (only if we have data)
+            self._draw_shift_preview()
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
             self._draw_auto_status()
             imgui.spacing()
             imgui.separator()
             imgui.spacing()
             self._draw_manual_button()
 
+        imgui.pop_style_var()
+        imgui.pop_style_var()
+
     def _draw_info_section(self):
-        """Draw info panel."""
+        """Draw info panel with meaningful calibration metrics."""
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Pollen Calibration")
         imgui.spacing()
 
         arr = self._get_array()
         if arr is not None:
-            imgui.text(f"Shape: {arr.shape} (Z, C, Y, X)")
-            imgui.text(f"Beamlets: {self.num_beamlets}")
-            imgui.text(f"Z-planes: {self.num_z_planes}")
-            if self._cavity_info and self._cavity_info['is_lbm']:
-                imgui.text(f"Cavities: {self._cavity_info['num_cavities']}")
+            # Shape info (compact)
+            imgui.text(f"Shape: {arr.shape}")
+            set_tooltip("(Z-piezo, Channels, Y, X)")
+
+            # Core parameters
+            imgui.text(f"Z-step: {self._z_step_um:.2f} um")
+            imgui.text(f"Pixel: {self._pixel_size_um:.3f} um")
+
+            # Get calibration summary data if available
+            summary = self._get_active_calibration_summary()
+            if summary:
+                imgui.spacing()
+                # RMS shifts - key metric
+                if summary.get("rms_dx") is not None and summary.get("rms_dy") is not None:
+                    imgui.text_colored(
+                        imgui.ImVec4(0.6, 0.8, 0.6, 1.0),
+                        f"RMS dX: {summary['rms_dx']:.2f} um"
+                    )
+                    imgui.same_line()
+                    imgui.text_colored(
+                        imgui.ImVec4(0.6, 0.8, 0.6, 1.0),
+                        f"dY: {summary['rms_dy']:.2f} um"
+                    )
+
+                # Fit quality metrics
+                r2 = summary.get("z_fit_r_squared")
+                decay = summary.get("decay_length_um")
+                if r2 is not None or decay is not None:
+                    parts = []
+                    if r2 is not None:
+                        parts.append(f"R\u00b2: {r2:.3f}")
+                    if decay is not None:
+                        parts.append(f"Decay: {decay:.0f} um")
+                    if parts:
+                        imgui.text_colored(
+                            imgui.ImVec4(0.6, 0.7, 0.9, 1.0),
+                            "  ".join(parts)
+                        )
         else:
             imgui.text_disabled("No data loaded")
+
+    def _get_active_calibration_summary(self) -> dict | None:
+        """Get the most recent calibration summary for display."""
+        # Prefer manual if available, then auto, then external
+        if self._calibration_data_manual:
+            return self._calibration_data_manual
+        if self._calibration_data_auto:
+            return self._calibration_data_auto
+        if self._loaded_external:
+            return self._loaded_external
+        return None
 
     def _draw_auto_status(self):
         """Draw automatic calibration status and results for both modes."""
@@ -285,6 +420,14 @@ class PollenCalibrationWidget(MainWidget):
                 self._load_calibration_data("manual")
             imgui.spacing()
 
+        # External loaded results
+        if self._loaded_external:
+            mode = self._loaded_external.get("calibration_mode", "external")
+            imgui.text_colored(imgui.ImVec4(0.9, 0.6, 0.9, 1.0), f"Loaded: {mode}")
+            if imgui.button("Clear##external"):
+                self._loaded_external = None
+            imgui.spacing()
+
         # Comparison button - appears when both auto and manual are done
         if self._results_auto and self._results_manual:
             imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "Comparison")
@@ -299,6 +442,305 @@ class PollenCalibrationWidget(MainWidget):
         # Draw popups
         self._draw_image_popup()
         self._draw_results_table()
+        self._draw_shift_comparison_popup()
+
+    def _draw_load_previous_section(self):
+        """Draw UI for loading previous calibration files."""
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.9, 1.0), "Load Previous")
+        imgui.spacing()
+
+        # Scan for existing H5 files if not already done
+        if not self._existing_h5_files:
+            self._scan_existing_h5_files()
+
+        # Show existing files from current dataset directory
+        if self._existing_h5_files:
+            imgui.text_disabled(f"Found {len(self._existing_h5_files)} file(s)")
+            for h5_path in self._existing_h5_files:
+                name = h5_path.name
+                # Truncate long names
+                display_name = name if len(name) < 25 else name[:22] + "..."
+                if imgui.button(display_name):
+                    self._load_h5_file(str(h5_path))
+                set_tooltip(str(h5_path))
+
+        imgui.spacing()
+
+        # Browse for external file
+        if imgui.button("Browse H5..."):
+            fpath = self._get_fpath()
+            start_dir = str(fpath.parent) if fpath else str(Path.home())
+            self._external_h5_dialog = pfd.open_file(
+                "Select Calibration H5",
+                start_dir,
+                ["H5 Files", "*.h5", "All Files", "*"],
+            )
+
+        # Check dialog result
+        if self._external_h5_dialog is not None and self._external_h5_dialog.ready():
+            result = self._external_h5_dialog.result()
+            if result and len(result) > 0:
+                self._load_h5_file(result[0])
+            self._external_h5_dialog = None
+
+    def _scan_existing_h5_files(self):
+        """Scan current file's directory for existing pollen H5 files."""
+        self._existing_h5_files = []
+        fpath = self._get_fpath()
+        if fpath is None:
+            return
+
+        parent_dir = fpath.parent
+        if not parent_dir.exists():
+            return
+
+        # Find pollen calibration H5 files
+        for h5_file in parent_dir.glob("*_pollen.h5"):
+            self._existing_h5_files.append(h5_file)
+
+        # Sort by modification time (newest first)
+        self._existing_h5_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+    def _load_h5_file(self, path: str):
+        """Load calibration data from an H5 file."""
+        from mbo_utilities.gui._pollen_analysis import extract_calibration_summary
+
+        summary = extract_calibration_summary(path)
+        if summary:
+            self._loaded_external = summary
+            self._loaded_external["h5_path"] = path
+            self.logger.info(f"Loaded calibration from: {path}")
+        else:
+            self.logger.error(f"Failed to load calibration from: {path}")
+
+    def _draw_shift_preview(self):
+        """Draw small inline XY shift scatter plot preview."""
+        summary = self._get_active_calibration_summary()
+        if not summary:
+            return
+
+        diffx = summary.get("diffx")
+        diffy = summary.get("diffy")
+        if diffx is None or diffy is None:
+            return
+
+        diffx = np.asarray(diffx, dtype=np.float64)
+        diffy = np.asarray(diffy, dtype=np.float64)
+
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.9, 1.0), "X/Y Shifts")
+        imgui.spacing()
+
+        plot_height = 120
+        style_seaborn_dark()
+
+        if implot.begin_plot("##shift_preview", imgui.ImVec2(-1, plot_height)):
+            implot.setup_axes("dX (um)", "dY (um)",
+                              implot.AxisFlags_.auto_fit.value,
+                              implot.AxisFlags_.auto_fit.value)
+
+            # Plot scatter
+            implot.push_style_color(implot.Col_.marker_fill.value, (0.2, 0.6, 0.9, 0.8))
+            implot.plot_scatter("Shifts", diffx, diffy)
+            implot.pop_style_color()
+
+            implot.end_plot()
+
+        # Click to enlarge button
+        if imgui.button("Enlarge", imgui.ImVec2(-1, 0)):
+            self._show_shift_popup = True
+
+    def _draw_shift_comparison_popup(self):
+        """Draw full X/Y shift comparison popup with multiple plots."""
+        if self._show_shift_popup:
+            self._shift_popup_open = True
+            imgui.open_popup("X/Y Shift Analysis")
+            self._show_shift_popup = False
+
+        imgui.set_next_window_size(imgui.ImVec2(700, 550), imgui.Cond_.first_use_ever)
+
+        opened, visible = imgui.begin_popup_modal(
+            "X/Y Shift Analysis",
+            p_open=True if self._shift_popup_open else None,
+            flags=imgui.WindowFlags_.no_saved_settings
+        )
+
+        if opened:
+            if not visible:
+                self._shift_popup_open = False
+                imgui.close_current_popup()
+                imgui.end_popup()
+                return
+
+            style_seaborn_dark()
+
+            # Get data from both sources if available
+            auto_data = self._calibration_data_auto
+            manual_data = self._calibration_data_manual
+            external_data = self._loaded_external
+
+            # Use whatever data is available
+            primary_data = manual_data or auto_data or external_data
+            secondary_data = auto_data if manual_data else external_data
+
+            if not primary_data:
+                imgui.text_disabled("No calibration data available")
+                if imgui.button("Close"):
+                    self._shift_popup_open = False
+                    imgui.close_current_popup()
+                imgui.end_popup()
+                return
+
+            avail = imgui.get_content_region_avail()
+            plot_w = (avail.x - 20) / 2
+            plot_h = (avail.y - 60) / 2
+
+            # Row 1: XY Scatter and dX bar chart
+            self._draw_xy_scatter_plot(primary_data, secondary_data, plot_w, plot_h)
+            imgui.same_line()
+            self._draw_dx_bar_chart(primary_data, secondary_data, plot_w, plot_h)
+
+            # Row 2: dY bar chart and difference plot
+            self._draw_dy_bar_chart(primary_data, secondary_data, plot_w, plot_h)
+            imgui.same_line()
+            self._draw_difference_plot(primary_data, secondary_data, plot_w, plot_h)
+
+            imgui.spacing()
+            if imgui.button("Close", imgui.ImVec2(100, 0)):
+                self._shift_popup_open = False
+                imgui.close_current_popup()
+
+            imgui.end_popup()
+
+    def _draw_xy_scatter_plot(self, primary, secondary, width, height):
+        """Draw XY scatter plot comparing positions."""
+        if implot.begin_plot("XY Positions", imgui.ImVec2(width, height)):
+            implot.setup_axes("X (um)", "Y (um)",
+                              implot.AxisFlags_.auto_fit.value,
+                              implot.AxisFlags_.auto_fit.value)
+
+            # Primary data
+            xs = np.asarray(primary.get("xs_um", primary.get("diffx", [])), dtype=np.float64)
+            ys = np.asarray(primary.get("ys_um", primary.get("diffy", [])), dtype=np.float64)
+            if len(xs) > 0 and len(ys) > 0:
+                mode1 = primary.get("calibration_mode", "primary")
+                implot.push_style_color(implot.Col_.marker_fill.value, (0.0, 0.75, 1.0, 0.8))
+                implot.plot_scatter(mode1.capitalize(), xs, ys)
+                implot.pop_style_color()
+
+            # Secondary data
+            if secondary:
+                xs2 = np.asarray(secondary.get("xs_um", secondary.get("diffx", [])), dtype=np.float64)
+                ys2 = np.asarray(secondary.get("ys_um", secondary.get("diffy", [])), dtype=np.float64)
+                if len(xs2) > 0 and len(ys2) > 0:
+                    mode2 = secondary.get("calibration_mode", "secondary")
+                    implot.push_style_color(implot.Col_.marker_fill.value, (0.4, 1.0, 0.4, 0.8))
+                    implot.plot_scatter(mode2.capitalize(), xs2, ys2)
+                    implot.pop_style_color()
+
+            implot.end_plot()
+
+    def _draw_dx_bar_chart(self, primary, secondary, width, height):
+        """Draw dX per-beamlet bar chart."""
+        if implot.begin_plot("dX per Beamlet", imgui.ImVec2(width, height)):
+            implot.setup_axes("Beam", "dX (um)",
+                              implot.AxisFlags_.auto_fit.value,
+                              implot.AxisFlags_.auto_fit.value)
+
+            dx1 = np.asarray(primary.get("diffx", []), dtype=np.float64)
+            if len(dx1) > 0:
+                x_pos = np.arange(1, len(dx1) + 1, dtype=np.float64)
+                bar_width = 0.35 if secondary else 0.7
+                offset = -bar_width/2 if secondary else 0
+
+                implot.push_style_color(implot.Col_.fill.value, (0.0, 0.75, 1.0, 0.8))
+                implot.plot_bars("Primary", x_pos + offset, dx1, bar_width)
+                implot.pop_style_color()
+
+            if secondary:
+                dx2 = np.asarray(secondary.get("diffx", []), dtype=np.float64)
+                if len(dx2) > 0:
+                    x_pos = np.arange(1, len(dx2) + 1, dtype=np.float64)
+                    implot.push_style_color(implot.Col_.fill.value, (0.4, 1.0, 0.4, 0.8))
+                    implot.plot_bars("Secondary", x_pos + bar_width/2, dx2, bar_width)
+                    implot.pop_style_color()
+
+            implot.end_plot()
+
+    def _draw_dy_bar_chart(self, primary, secondary, width, height):
+        """Draw dY per-beamlet bar chart."""
+        if implot.begin_plot("dY per Beamlet", imgui.ImVec2(width, height)):
+            implot.setup_axes("Beam", "dY (um)",
+                              implot.AxisFlags_.auto_fit.value,
+                              implot.AxisFlags_.auto_fit.value)
+
+            dy1 = np.asarray(primary.get("diffy", []), dtype=np.float64)
+            if len(dy1) > 0:
+                x_pos = np.arange(1, len(dy1) + 1, dtype=np.float64)
+                bar_width = 0.35 if secondary else 0.7
+                offset = -bar_width/2 if secondary else 0
+
+                implot.push_style_color(implot.Col_.fill.value, (0.0, 0.75, 1.0, 0.8))
+                implot.plot_bars("Primary", x_pos + offset, dy1, bar_width)
+                implot.pop_style_color()
+
+            if secondary:
+                dy2 = np.asarray(secondary.get("diffy", []), dtype=np.float64)
+                if len(dy2) > 0:
+                    x_pos = np.arange(1, len(dy2) + 1, dtype=np.float64)
+                    implot.push_style_color(implot.Col_.fill.value, (0.4, 1.0, 0.4, 0.8))
+                    implot.plot_bars("Secondary", x_pos + bar_width/2, dy2, bar_width)
+                    implot.pop_style_color()
+
+            implot.end_plot()
+
+    def _draw_difference_plot(self, primary, secondary, width, height):
+        """Draw difference plot (secondary - primary) with RMS annotation."""
+        if implot.begin_plot("Difference", imgui.ImVec2(width, height)):
+            implot.setup_axes("Beam", "Diff (um)",
+                              implot.AxisFlags_.auto_fit.value,
+                              implot.AxisFlags_.auto_fit.value)
+
+            if secondary:
+                dx1 = np.asarray(primary.get("diffx", []), dtype=np.float64)
+                dy1 = np.asarray(primary.get("diffy", []), dtype=np.float64)
+                dx2 = np.asarray(secondary.get("diffx", []), dtype=np.float64)
+                dy2 = np.asarray(secondary.get("diffy", []), dtype=np.float64)
+
+                n = min(len(dx1), len(dx2), len(dy1), len(dy2))
+                if n > 0:
+                    diff_x = dx2[:n] - dx1[:n]
+                    diff_y = dy2[:n] - dy1[:n]
+                    x_pos = np.arange(1, n + 1, dtype=np.float64)
+
+                    bar_width = 0.35
+                    implot.push_style_color(implot.Col_.fill.value, (1.0, 0.4, 0.4, 0.8))
+                    implot.plot_bars("dX diff", x_pos - bar_width/2, diff_x, bar_width)
+                    implot.pop_style_color()
+
+                    implot.push_style_color(implot.Col_.fill.value, (1.0, 0.67, 0.0, 0.8))
+                    implot.plot_bars("dY diff", x_pos + bar_width/2, diff_y, bar_width)
+                    implot.pop_style_color()
+
+                    # Add zero line
+                    implot.push_style_color(implot.Col_.line.value, (1.0, 1.0, 1.0, 0.5))
+                    zeros = np.zeros_like(x_pos)
+                    implot.plot_line("##zero", x_pos, zeros)
+                    implot.pop_style_color()
+
+                    # Show RMS in annotation
+                    rms_x = np.sqrt(np.mean(diff_x**2))
+                    rms_y = np.sqrt(np.mean(diff_y**2))
+                    implot.annotation(
+                        float(x_pos[-1]), float(max(diff_x.max(), diff_y.max())),
+                        imgui.ImVec4(1, 1, 1, 1),
+                        imgui.ImVec2(-10, -10),
+                        True,
+                        f"RMS: X={rms_x:.2f}, Y={rms_y:.2f}"
+                    )
+            else:
+                imgui.text_disabled("Need two datasets")
+
+            implot.end_plot()
 
     def _draw_manual_button(self):
         """Draw manual calibration button."""
@@ -368,7 +810,7 @@ class PollenCalibrationWidget(MainWidget):
         self._manual_z_indices = []
 
         # Store original metadata before we replace viewer data with numpy array
-        self._original_metadata = getattr(arr, 'metadata', {})
+        self._original_metadata = getattr(arr, "metadata", {})
 
         # Load volume into memory for click analysis
         self.logger.info("Loading volume for manual calibration...")
@@ -379,7 +821,7 @@ class PollenCalibrationWidget(MainWidget):
         # Z = piezo positions (typically many, e.g. 224)
         # C = beamlet channels (typically fewer, e.g. 14)
         self.logger.info(f"Volume shape: {self._vol.shape} (Z, C, Y, X)")
-        nz, nc, ny, nx = self._vol.shape
+        nz, nc, _ny, _nx = self._vol.shape
         self.logger.info(f"Z-planes: {nz}, Channels: {nc}")
 
         # Store channel count for UI
@@ -426,21 +868,21 @@ class PollenCalibrationWidget(MainWidget):
                         x, y = world_pos[0], world_pos[1]
                         self._handle_click(x, y)
                 except Exception as e:
-                    self.logger.error(f"Click mapping error: {e}")
+                    self.logger.exception(f"Click mapping error: {e}")
 
             subplot.renderer.add_event_handler(on_click, "click")
             self._click_handler = on_click
             self.logger.info("Click handler registered")
 
         except Exception as e:
-            self.logger.error(f"Failed to set up click handler: {e}")
+            self.logger.exception(f"Failed to set up click handler: {e}")
 
     def _handle_click(self, x, y):
         """Handle a click event during manual calibration."""
         if not self._manual_mode or self._vol is None:
             return
 
-        nz, nc, ny, nx = self._vol.shape
+        _nz, nc, ny, nx = self._vol.shape
         current = self._manual_channel_idx
 
         # Don't process clicks if we're already past the last beamlet
@@ -457,7 +899,7 @@ class PollenCalibrationWidget(MainWidget):
         self.logger.info(f"Beamlet {current + 1}: clicked at ({x:.1f}, {y:.1f})")
 
         # Find best z at this position
-        ix, iy = int(round(x)), int(round(y))
+        ix, iy = round(x), round(y)
         patch_size = 10
         y0 = max(0, iy - patch_size)
         y1 = min(ny, iy + patch_size + 1)
@@ -465,7 +907,7 @@ class PollenCalibrationWidget(MainWidget):
         x1 = min(nx, ix + patch_size + 1)
 
         patch = self._vol[:, channel, y0:y1, x0:x1]
-        smoothed = uniform_filter1d(patch.max(axis=(1, 2)), size=3, mode='nearest')
+        smoothed = uniform_filter1d(patch.max(axis=(1, 2)), size=3, mode="nearest")
         best_z = int(np.argmax(smoothed))
 
         # Store position
@@ -504,7 +946,7 @@ class PollenCalibrationWidget(MainWidget):
                 self.image_widget.indices = [channel]
 
         except Exception as e:
-            self.logger.error(f"Failed to update display: {e}")
+            self.logger.exception(f"Failed to update display: {e}")
 
     def _manual_prev(self):
         """Go to previous beamlet."""
@@ -524,7 +966,7 @@ class PollenCalibrationWidget(MainWidget):
         if self._vol is None:
             return
 
-        nz, nc, ny, nx = self._vol.shape
+        _nz, _nc, ny, nx = self._vol.shape
         current = self._manual_channel_idx
         channel = self._beam_order[current] if current < len(self._beam_order) else current
 
@@ -540,7 +982,7 @@ class PollenCalibrationWidget(MainWidget):
         x1 = min(nx, ix + patch_size + 1)
 
         patch = self._vol[:, channel, y0:y1, x0:x1]
-        smoothed = uniform_filter1d(patch.max(axis=(1, 2)), size=3, mode='nearest')
+        smoothed = uniform_filter1d(patch.max(axis=(1, 2)), size=3, mode="nearest")
         best_z = int(np.argmax(smoothed))
 
         if current < len(self._manual_positions):
@@ -584,7 +1026,7 @@ class PollenCalibrationWidget(MainWidget):
             self.image_widget.figure[0, 0].auto_scale()
             self.logger.info("Restored original data view")
         except Exception as e:
-            self.logger.error(f"Failed to restore view: {e}")
+            self.logger.exception(f"Failed to restore view: {e}")
 
     def _finish_manual_calibration(self):
         """Complete manual calibration and run analysis."""
@@ -628,7 +1070,7 @@ class PollenCalibrationWidget(MainWidget):
 
             nz, nc, ny, nx = vol.shape
 
-            from mbo_utilities.gui.main_widgets._pollen_analysis import (
+            from mbo_utilities.gui._pollen_analysis import (
                 correct_scan_phase,
                 analyze_power_vs_z,
                 analyze_z_positions,
@@ -640,7 +1082,7 @@ class PollenCalibrationWidget(MainWidget):
 
             self._progress = 0.2
             # Use stored metadata (arr may be numpy array now)
-            metadata = self._original_metadata if self._original_metadata else getattr(arr, 'metadata', {})
+            metadata = self._original_metadata if self._original_metadata else getattr(arr, "metadata", {})
             vol, _ = correct_scan_phase(vol, fpath, self._z_step_um, metadata, mode="manual")
 
             self._progress = 0.3
@@ -670,9 +1112,9 @@ class PollenCalibrationWidget(MainWidget):
             self._progress = 1.0
             self._done = True
             self._results_manual = {
-                'output_dir': str(fpath.parent),
-                'h5_file': str(fpath.with_name(fpath.stem + "_pollen_manual.h5")),
-                'mode': 'manual',
+                "output_dir": str(fpath.parent),
+                "h5_file": str(fpath.with_name(fpath.stem + "_pollen.h5")),
+                "mode": "manual",
             }
             self.logger.info(f"Manual calibration complete! Results saved to {fpath.parent}")
 
@@ -680,7 +1122,7 @@ class PollenCalibrationWidget(MainWidget):
             self._generate_comparison_if_ready()
 
         except Exception as e:
-            self.logger.error(f"Calibration failed: {e}")
+            self.logger.exception(f"Calibration failed: {e}")
             self._error = str(e)
         finally:
             self._processing = False
@@ -724,7 +1166,7 @@ class PollenCalibrationWidget(MainWidget):
             self._status = "Running calibration..."
             self._progress = 0.4
 
-            from mbo_utilities.gui.main_widgets._pollen_analysis import (
+            from mbo_utilities.gui._pollen_analysis import (
                 correct_scan_phase,
                 analyze_power_vs_z,
                 analyze_z_positions,
@@ -761,48 +1203,63 @@ class PollenCalibrationWidget(MainWidget):
             self._progress = 1.0
             self._done = True
             self._results_auto = {
-                'output_dir': str(fpath.parent),
-                'h5_file': str(fpath.with_name(fpath.stem + "_pollen_auto.h5")),
-                'mode': 'auto',
+                "output_dir": str(fpath.parent),
+                "h5_file": str(fpath.with_name(fpath.stem + "_pollen.h5")),
+                "mode": "auto",
             }
             self.logger.info(f"Auto calibration complete! Results saved to {fpath.parent}")
 
         except Exception as e:
-            self.logger.error(f"Auto calibration failed: {e}")
+            self.logger.exception(f"Auto calibration failed: {e}")
             self._error = str(e)
         finally:
             self._processing = False
 
     def _detect_beads(self, vol):
-        """Detect bead positions in each channel."""
-        nz, nc, ny, nx = vol.shape
+        """Detect bead positions in each channel following beam order.
+
+        Returns positions and z_indices in beam order (matching manual calibration),
+        not raw channel order.
+        """
+        _nz, nc, ny, nx = vol.shape
         positions = []
         z_indices = []
+        patch_size = 10
 
-        for c in range(nc):
-            img = vol[:, c, :, :].max(axis=0)
-            threshold = np.percentile(img, 95)
+        # Iterate in beam order so positions match manual calibration order
+        for idx in range(nc):
+            channel = self._beam_order[idx] if idx < len(self._beam_order) else idx
+
+            # Max projection over Z for this channel
+            img = vol[:, channel, :, :].max(axis=0)
+
+            # Find brightest region using adaptive threshold
+            # Use a more robust approach: find peak then refine with centroid
+            threshold = np.percentile(img, 90)
             mask = img > threshold
 
             if mask.sum() > 0:
+                # Find weighted centroid of bright region
                 yy, xx = np.where(mask)
                 weights = img[mask]
                 cx = np.average(xx, weights=weights)
                 cy = np.average(yy, weights=weights)
             else:
-                cx, cy = nx / 2, ny / 2
+                # Fallback: find global maximum
+                peak_idx = np.argmax(img)
+                cy, cx = np.unravel_index(peak_idx, img.shape)
 
             positions.append((cx, cy))
 
-            ix, iy = int(round(cx)), int(round(cy))
-            patch_size = 10
+            # Find best Z for this position
+            ix, iy = round(cx), round(cy)
             y0 = max(0, iy - patch_size)
             y1 = min(ny, iy + patch_size + 1)
             x0 = max(0, ix - patch_size)
             x1 = min(nx, ix + patch_size + 1)
 
-            patch = vol[:, c, y0:y1, x0:x1]
-            smoothed = uniform_filter1d(patch.max(axis=(1, 2)), size=3, mode='nearest')
+            patch = vol[:, channel, y0:y1, x0:x1]
+            smoothed = uniform_filter1d(patch.max(axis=(1, 2)), size=3, mode="nearest")
             best_z = int(np.argmax(smoothed))
             z_indices.append(best_z)
 
@@ -810,14 +1267,14 @@ class PollenCalibrationWidget(MainWidget):
 
     def _extract_traces(self, vol, positions, z_indices):
         """Extract intensity traces and patches."""
-        nz, nc, ny, nx = vol.shape
+        _nz, _nc, ny, nx = vol.shape
         Iz = []
         III = []
         patch_size = 10
 
         for idx, (x, y) in enumerate(positions):
             channel = self._beam_order[idx] if idx < len(self._beam_order) else idx
-            ix, iy = int(round(x)), int(round(y))
+            ix, iy = round(x), round(y)
 
             y0 = max(0, iy - patch_size)
             y1 = min(ny, iy + patch_size + 1)
@@ -825,8 +1282,8 @@ class PollenCalibrationWidget(MainWidget):
             x1 = min(nx, ix + patch_size + 1)
 
             patch = vol[:, channel, y0:y1, x0:x1]
-            smoothed = uniform_filter1d(patch, size=3, axis=1, mode='nearest')
-            smoothed = uniform_filter1d(smoothed, size=3, axis=2, mode='nearest')
+            smoothed = uniform_filter1d(patch, size=3, axis=1, mode="nearest")
+            smoothed = uniform_filter1d(smoothed, size=3, axis=2, mode="nearest")
             trace = smoothed.max(axis=(1, 2))
             Iz.append(trace)
 
@@ -855,7 +1312,7 @@ class PollenCalibrationWidget(MainWidget):
         if not results:
             return
 
-        out_dir = results.get('output_dir', '')
+        out_dir = results.get("output_dir", "")
         if not out_dir:
             return
 
@@ -865,7 +1322,7 @@ class PollenCalibrationWidget(MainWidget):
 
         # Find images matching the mode prefix (pollen_auto_* or pollen_manual_*)
         prefix = f"pollen_{mode}_"
-        for ext in ('*.png', '*.jpg', '*.jpeg', '*.svg'):
+        for ext in ("*.png", "*.jpg", "*.jpeg", "*.svg"):
             for img in out_path.glob(ext):
                 if img.name.startswith(prefix):
                     self._saved_images.append(img)
@@ -926,15 +1383,15 @@ class PollenCalibrationWidget(MainWidget):
         import sys
 
         try:
-            if sys.platform == 'win32':
+            if sys.platform == "win32":
                 import os
                 os.startfile(str(path))
-            elif sys.platform == 'darwin':
-                subprocess.run(['open', str(path)])
+            elif sys.platform == "darwin":
+                subprocess.run(["open", str(path)], check=False)
             else:
-                subprocess.run(['xdg-open', str(path)])
+                subprocess.run(["xdg-open", str(path)], check=False)
         except Exception as e:
-            self.logger.error(f"Failed to open image: {e}")
+            self.logger.exception(f"Failed to open image: {e}")
 
     def _open_output_folder(self, mode: str = "auto"):
         """Open the output folder in file explorer."""
@@ -945,20 +1402,20 @@ class PollenCalibrationWidget(MainWidget):
         if not results:
             return
 
-        out_dir = results.get('output_dir', '')
+        out_dir = results.get("output_dir", "")
         if not out_dir:
             return
 
         try:
-            if sys.platform == 'win32':
+            if sys.platform == "win32":
                 import os
                 os.startfile(out_dir)
-            elif sys.platform == 'darwin':
-                subprocess.run(['open', out_dir])
+            elif sys.platform == "darwin":
+                subprocess.run(["open", out_dir], check=False)
             else:
-                subprocess.run(['xdg-open', out_dir])
+                subprocess.run(["xdg-open", out_dir], check=False)
         except Exception as e:
-            self.logger.error(f"Failed to open folder: {e}")
+            self.logger.exception(f"Failed to open folder: {e}")
 
     def _show_comparison(self):
         """Generate and show comparison plot between auto and manual results."""
@@ -967,7 +1424,7 @@ class PollenCalibrationWidget(MainWidget):
             self.logger.error("No file path for comparison")
             return
 
-        from mbo_utilities.gui.main_widgets._pollen_analysis import plot_comparison
+        from mbo_utilities.gui._pollen_analysis import plot_comparison
 
         success = plot_comparison(fpath)
         if success:
@@ -987,54 +1444,72 @@ class PollenCalibrationWidget(MainWidget):
         if fpath is None:
             return
 
-        from mbo_utilities.gui.main_widgets._pollen_analysis import plot_comparison
+        from mbo_utilities.gui._pollen_analysis import plot_comparison
 
         try:
             plot_comparison(fpath)
             self.logger.info("Generated auto vs manual comparison plot")
         except Exception as e:
-            self.logger.error(f"Failed to generate comparison: {e}")
+            self.logger.exception(f"Failed to generate comparison: {e}")
 
     def _load_calibration_data(self, mode: str = "auto"):
         """Load calibration data from HDF5 file for results table."""
         import h5py
 
-        # Store which mode we're displaying
         self._results_table_mode = mode
 
         results = self._results_auto if mode == "auto" else self._results_manual
         if not results:
             return
 
-        h5_file = results.get('h5_file', '')
+        h5_file = results.get("h5_file", "")
         if not h5_file or not Path(h5_file).exists():
             return
 
         try:
-            with h5py.File(h5_file, 'r') as f:
+            with h5py.File(h5_file, "r") as f:
+                if mode not in f:
+                    self.logger.error(f"Mode '{mode}' not found in H5 file")
+                    return
+
+                # Get shared metadata from root level
                 data = {
-                    'num_beamlets': f.attrs.get('num_planes', 0),
-                    'z_step_um': f.attrs.get('z_step_um', 0),
-                    'is_lbm': f.attrs.get('is_lbm', False),
-                    'num_cavities': f.attrs.get('num_cavities', 1),
-                    'mode': mode,
+                    "num_beamlets": f.attrs.get("num_planes", 0),
+                    "z_step_um": f.attrs.get("z_step_um", 0),
+                    "is_lbm": f.attrs.get("is_lbm", False),
+                    "num_cavities": f.attrs.get("num_cavities", 1),
+                    "calibration_mode": mode,
                 }
 
-                # Load arrays
-                if 'diffx' in f:
-                    data['diffx'] = f['diffx'][:]
-                if 'diffy' in f:
-                    data['diffy'] = f['diffy'][:]
-                if 'xs_um' in f:
-                    data['xs_um'] = f['xs_um'][:]
-                if 'ys_um' in f:
-                    data['ys_um'] = f['ys_um'][:]
-                if 'scan_corrections' in f:
-                    data['scan_corrections'] = f['scan_corrections'][:]
-                if 'cavity_a_channels' in f:
-                    data['cavity_a'] = f['cavity_a_channels'][:]
-                if 'cavity_b_channels' in f:
-                    data['cavity_b'] = f['cavity_b_channels'][:]
+                grp = f[mode]
+
+                # Mode-specific fit quality metrics
+                data["z_fit_r_squared"] = grp.attrs.get("z_fit_r_squared")
+                data["z_slope_um_per_beam"] = grp.attrs.get("z_slope_um_per_beam")
+                data["decay_length_um"] = grp.attrs.get("decay_length_um")
+                data["decay_length_cavity_a_um"] = grp.attrs.get("decay_length_cavity_a_um")
+                data["decay_length_cavity_b_um"] = grp.attrs.get("decay_length_cavity_b_um")
+
+                # Load arrays from group
+                if "diffx" in grp:
+                    data["diffx"] = grp["diffx"][:]
+                if "diffy" in grp:
+                    data["diffy"] = grp["diffy"][:]
+                if "xs_um" in grp:
+                    data["xs_um"] = grp["xs_um"][:]
+                if "ys_um" in grp:
+                    data["ys_um"] = grp["ys_um"][:]
+                if "scan_corrections" in grp:
+                    data["scan_corrections"] = grp["scan_corrections"][:]
+                if "cavity_a_channels" in grp:
+                    data["cavity_a"] = grp["cavity_a_channels"][:]
+                if "cavity_b_channels" in grp:
+                    data["cavity_b"] = grp["cavity_b_channels"][:]
+
+                # Compute RMS of shifts
+                if "diffx" in data and "diffy" in data:
+                    data["rms_dx"] = float(np.sqrt(np.mean(data["diffx"]**2)))
+                    data["rms_dy"] = float(np.sqrt(np.mean(data["diffy"]**2)))
 
                 # Store in appropriate slot
                 if mode == "auto":
@@ -1045,18 +1520,18 @@ class PollenCalibrationWidget(MainWidget):
                 self.logger.info(f"Loaded {mode} calibration data: {len(data)} fields")
 
         except Exception as e:
-            self.logger.error(f"Failed to load calibration data: {e}")
+            self.logger.exception(f"Failed to load calibration data: {e}")
 
     def _draw_results_table(self):
         """Draw popup window with calibration results table."""
         if self._show_results_table:
             self._results_table_open = True
-            mode = getattr(self, '_results_table_mode', 'auto')
+            mode = getattr(self, "_results_table_mode", "auto")
             mode_label = "Manual" if mode == "manual" else "Auto"
             imgui.open_popup(f"Results ({mode_label})")
             self._show_results_table = False
 
-        mode = getattr(self, '_results_table_mode', 'auto')
+        mode = getattr(self, "_results_table_mode", "auto")
         mode_label = "Manual" if mode == "manual" else "Auto"
         imgui.set_next_window_size(imgui.ImVec2(500, 450), imgui.Cond_.first_use_ever)
 
@@ -1088,7 +1563,7 @@ class PollenCalibrationWidget(MainWidget):
             imgui.text_colored(color, f"{mode_label} Calibration Summary")
             imgui.separator()
             imgui.text(f"Beamlets: {data.get('num_beamlets', 'N/A')}")
-            z_step = data.get('z_step_um', 0)
+            z_step = data.get("z_step_um", 0)
             imgui.text(f"Z-step: {z_step:.2f} um" if z_step else "Z-step: N/A")
             imgui.text(f"LBM: {'Yes' if data.get('is_lbm') else 'No'}")
             imgui.text(f"Cavities: {data.get('num_cavities', 1)}")
@@ -1117,10 +1592,10 @@ class PollenCalibrationWidget(MainWidget):
                 imgui.table_headers_row()
 
                 # Data rows
-                xs = data.get('xs_um', [])
-                ys = data.get('ys_um', [])
-                dx = data.get('diffx', [])
-                dy = data.get('diffy', [])
+                xs = data.get("xs_um", [])
+                ys = data.get("ys_um", [])
+                dx = data.get("diffx", [])
+                dy = data.get("diffy", [])
                 n_rows = max(len(xs), len(ys), len(dx), len(dy)) if any([len(xs), len(ys), len(dx), len(dy)]) else 0
 
                 for i in range(n_rows):
@@ -1157,7 +1632,7 @@ class PollenCalibrationWidget(MainWidget):
             imgui.same_line()
             results = self._results_auto if mode == "auto" else self._results_manual
             if imgui.button("Open H5 File"):
-                h5_file = results.get('h5_file', '') if results else ''
+                h5_file = results.get("h5_file", "") if results else ""
                 if h5_file:
                     self._open_image(Path(h5_file))
             imgui.same_line()
@@ -1166,6 +1641,29 @@ class PollenCalibrationWidget(MainWidget):
                 imgui.close_current_popup()
 
             imgui.end_popup()
+
+    def draw_menu_bar(self) -> None:
+        """Render the menu bar."""
+        if imgui.begin_menu_bar():
+            if imgui.begin_menu("File"):
+                if imgui.menu_item("Open File", "Ctrl+O")[0]:
+                    pass
+                imgui.end_menu()
+
+            if imgui.begin_menu("View"):
+                if imgui.menu_item("Metadata", "M")[0]:
+                    self._panels["metadata"].toggle()
+                if imgui.menu_item("Debug Log")[0]:
+                    self._panels["debug"].toggle()
+                imgui.end_menu()
+
+            if imgui.begin_menu("Help"):
+                if imgui.menu_item("Documentation")[0]:
+                    import webbrowser
+                    webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/")
+                imgui.end_menu()
+
+            imgui.end_menu_bar()
 
     def on_data_loaded(self) -> None:
         """Reinitialize when new data is loaded."""
@@ -1183,7 +1681,7 @@ class PollenCalibrationWidget(MainWidget):
             self._start_auto_calibration()
 
     def cleanup(self) -> None:
-        """Clean up resources."""
+        """Clean up resources when viewer closes."""
         self._vol = None
         self._num_channels = None
         self._max_projections = None
@@ -1191,3 +1689,4 @@ class PollenCalibrationWidget(MainWidget):
         self._calibration_data_auto = None
         self._calibration_data_manual = None
         self._manual_mode = False
+        super().cleanup()

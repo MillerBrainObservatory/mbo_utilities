@@ -1,9 +1,11 @@
-import os, logging
+import os
+import logging
 
 try:
     from icecream import ic
 except ImportError:
-    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)
+    def ic(*a):
+        return None if not a else (a[0] if len(a) == 1 else a)
 
 _level_override: int | None = None
 

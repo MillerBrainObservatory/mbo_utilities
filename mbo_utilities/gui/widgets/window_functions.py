@@ -5,15 +5,12 @@ controls for projection type and window size (temporal operations).
 always shows for any data with temporal dimension.
 """
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from imgui_bundle import imgui, hello_imgui
 
 from mbo_utilities.gui.widgets._base import Widget
-from mbo_utilities.gui._widgets import set_tooltip
-
-if TYPE_CHECKING:
-    from mbo_utilities.gui.imgui import PreviewDataWidget
+from mbo_utilities.gui._imgui_helpers import set_tooltip
 
 
 class WindowFunctionsWidget(Widget):
@@ -23,12 +20,12 @@ class WindowFunctionsWidget(Widget):
     priority = 10  # show first
 
     @classmethod
-    def is_supported(cls, parent: "PreviewDataWidget") -> bool:
-        """always supported for any array with temporal dimension."""
+    def is_supported(cls, parent: Any) -> bool:
+        """Always supported for any array with temporal dimension."""
         return True
 
     def draw(self) -> None:
-        """draw window functions controls."""
+        """Draw window functions controls."""
         parent = self.parent
 
         imgui.spacing()
@@ -74,12 +71,12 @@ class SpatialFunctionsWidget(Widget):
     priority = 11  # show after window functions
 
     @classmethod
-    def is_supported(cls, parent: "PreviewDataWidget") -> bool:
-        """always supported."""
+    def is_supported(cls, parent: Any) -> bool:
+        """Always supported."""
         return True
 
     def draw(self) -> None:
-        """draw spatial functions controls."""
+        """Draw spatial functions controls."""
         parent = self.parent
 
         imgui.spacing()

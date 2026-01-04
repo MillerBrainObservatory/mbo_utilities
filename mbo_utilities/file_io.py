@@ -42,8 +42,8 @@ def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
     if not files:
         raise ValueError("No input files provided.")
 
-    has_plane = any(re.search(r"(plane|z|chan)[_-]?\d+", f.stem, re.I) for f in files)
-    has_roi = any(re.search(r"roi[_-]?\d+", f.stem, re.I) for f in files)
+    has_plane = any(re.search(r"(plane|z|chan)[_-]?\d+", f.stem, re.IGNORECASE) for f in files)
+    has_roi = any(re.search(r"roi[_-]?\d+", f.stem, re.IGNORECASE) for f in files)
 
     # lazy-load utility inline
     def load_lazy(f):
@@ -53,13 +53,13 @@ def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
             arr = tifffile.memmap(f, mode="r")
         else:
             raise ValueError(f"Unsupported file type: {f}")
-        chunks = (min(chunk_t, arr.shape[0]),) + arr.shape[1:]
+        chunks = (min(chunk_t, arr.shape[0]), *arr.shape[1:])
         return da.from_array(arr, chunks=chunks)
 
     if has_roi:
         roi_groups = defaultdict(list)
         for f in files:
-            m = re.search(r"roi[_-]?(\d+)", f.stem, re.I)
+            m = re.search(r"roi[_-]?(\d+)", f.stem, re.IGNORECASE)
             roi_idx = int(m.group(1)) if m else 0
             roi_groups[roi_idx].append(f)
 
@@ -76,12 +76,12 @@ def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
     if has_plane:
         plane_groups = defaultdict(list)
         for f in files:
-            m = re.search(r"(plane|z|chan)[_-]?(\d+)", f.stem, re.I)
+            m = re.search(r"(plane|z|chan)[_-]?(\d+)", f.stem, re.IGNORECASE)
             plane_idx = int(m.group(2)) if m else 0
             plane_groups[plane_idx].append(f)
 
         plane_stacks = []
-        for z, group in sorted(plane_groups.items()):
+        for _z, group in sorted(plane_groups.items()):
             arrays = [load_lazy(f) for f in sorted(group)]
             plane = da.concatenate(arrays, axis=0)
             plane_stacks.append(plane)
@@ -96,7 +96,7 @@ def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
 
 
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
-    """
+    r"""
     Expand a path, list of paths, or wildcard pattern into a sorted list of actual files.
 
     This is a handy wrapper for loading images or data files when you’ve got a folder,
@@ -142,9 +142,7 @@ def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
 
 def sort_by_si_filename(filename):
-    """
-    Sort ScanImage files by the last number in the filename (e.g., _00001, _00002, etc.).
-    """
+    """Sort ScanImage files by the last number in the filename (e.g., _00001, _00002, etc.)."""
     numbers = re.findall(r"\d+", str(filename))
     return int(numbers[-1]) if numbers else 0
 
@@ -155,7 +153,7 @@ def _is_leaf_zarr(path: Path) -> bool:
     A leaf zarr store contains chunk data (numbered directories like 0/, 1/)
     and metadata files, but no nested .zarr directories.
     """
-    if not path.is_dir() or not path.suffix == ".zarr":
+    if not path.is_dir() or path.suffix != ".zarr":
         return False
     # Check if any immediate subdirectory is also a .zarr
     try:
@@ -175,7 +173,7 @@ def _walk_with_zarr_filter(base_path: Path, max_depth: int, exclude_dirs: list):
     - Excluded directories
     - Directories beyond max_depth
     """
-    base_depth = len(base_path.parts)
+    len(base_path.parts)
 
     def _walk(current: Path, depth: int):
         if depth > max_depth:
@@ -263,7 +261,7 @@ def get_files(
     base_path = Path(base_dir).expanduser()
     # Only resolve non-UNC paths (UNC paths start with \\)
     path_str = str(base_path)
-    if not path_str.startswith('\\\\'):
+    if not path_str.startswith("\\\\"):
         base_path = base_path.resolve()
     if not base_path.exists():
         raise FileNotFoundError(f"Directory '{base_path}' does not exist.")
@@ -344,7 +342,7 @@ def get_package_assets_path() -> Path:
     uses importlib.resources for robust installed package support.
     """
     try:
-        import importlib.resources as resources
+        from importlib import resources
         # for python 3.9+, use files() API
         return Path(str(resources.files("mbo_utilities").joinpath("assets")))
     except (ImportError, TypeError):
@@ -436,13 +434,11 @@ def save_last_savedir(path: Path):
 def print_tree(path, max_depth=1, prefix=""):
     path = Path(path)
     if not path.is_dir():
-        print(path)
         return
 
     entries = sorted([p for p in path.iterdir() if p.is_dir()])
     for i, entry in enumerate(entries):
-        connector = "└── " if i == len(entries) - 1 else "├── "
-        print(prefix + connector + entry.name + "/")
+        "└── " if i == len(entries) - 1 else "├── "
 
         if max_depth > 1:
             extension = "    " if i == len(entries) - 1 else "│   "

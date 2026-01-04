@@ -32,37 +32,37 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
-    # phasecorr
-    "bidir_phasecorr",
     "ALL_PHASECORR_METHODS",
-    "TWO_DIM_PHASECORR_METHODS",
     "THREE_DIM_PHASECORR_METHODS",
+    "TWO_DIM_PHASECORR_METHODS",
     # scanphase
     "ScanPhaseAnalyzer",
     "ScanPhaseResults",
-    "analyze_scanphase",
-    "run_scanphase_analysis",
-    # metrics
-    "snr_roi",
-    "mean_row_misalignment",
-    "temporal_corr",
-    "sharpness_metric",
-    "avg_sharpness",
-    "frame_correlations",
-    # cellpose/lbm_suite2p_python (optional)
-    "save_cellpose_results",
-    "load_cellpose_results",
-    "open_cellpose_gui",
-    "masks_to_stat",
-    "stat_to_masks",
-    "save_cellpose_comparison",
-    "export_suite2p_for_cellpose",
-    "import_cellpose_to_suite2p",
-    "get_results",
-    "ensure_cellpose_format",
-    "detect_format",
     # helpers
     "_patch_qt_checkbox",
+    "analyze_scanphase",
+    "avg_sharpness",
+    # phasecorr
+    "bidir_phasecorr",
+    "detect_format",
+    "ensure_cellpose_format",
+    "export_suite2p_for_cellpose",
+    "frame_correlations",
+    "get_results",
+    "import_cellpose_to_suite2p",
+    "load_cellpose_results",
+    "masks_to_stat",
+    "mean_row_misalignment",
+    "open_cellpose_gui",
+    "run_scanphase_analysis",
+    "save_cellpose_comparison",
+    # cellpose/lbm_suite2p_python (optional)
+    "save_cellpose_results",
+    "sharpness_metric",
+    # metrics
+    "snr_roi",
+    "stat_to_masks",
+    "temporal_corr",
 ]
 
 # Lazy import mapping: name -> (module, attr)
@@ -109,7 +109,7 @@ def _patch_qt_checkbox():
     """Patch QCheckBox for Qt5/Qt6 compatibility with cellpose."""
     try:
         from qtpy.QtWidgets import QCheckBox
-        if not hasattr(QCheckBox, 'checkStateChanged'):
+        if not hasattr(QCheckBox, "checkStateChanged"):
             QCheckBox.checkStateChanged = QCheckBox.stateChanged
     except ImportError:
         pass

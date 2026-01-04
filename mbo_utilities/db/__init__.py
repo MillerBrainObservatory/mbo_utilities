@@ -25,20 +25,20 @@ usage:
 """
 
 __all__ = [
-    # database operations
-    "get_db_path",
-    "init_db",
-    "scan_directory",
-    "get_datasets",
-    "get_dataset",
-    "link_datasets",
-    "add_tag",
-    "remove_tag",
     # models
     "Dataset",
     "DatasetLink",
+    "add_tag",
+    "get_dataset",
+    "get_datasets",
+    # database operations
+    "get_db_path",
+    "init_db",
     # gui
     "launch_browser",
+    "link_datasets",
+    "remove_tag",
+    "scan_directory",
 ]
 
 

@@ -5,7 +5,6 @@ provides a gui for browsing, filtering, and managing indexed datasets.
 """
 
 from pathlib import Path
-from typing import Optional
 
 from mbo_utilities import log
 
@@ -28,7 +27,7 @@ class DatasetBrowser:
         self._pipeline_options = [""]  # populated on first refresh
 
     def refresh(self):
-        """reload datasets from database."""
+        """Reload datasets from database."""
         from mbo_utilities.db.database import get_datasets, get_stats
         from mbo_utilities.db.models import DatasetStatus
 
@@ -49,12 +48,12 @@ class DatasetBrowser:
         # get unique pipelines for filter dropdown
         stats = get_stats()
         pipelines = list(stats.get("by_pipeline", {}).keys())
-        self._pipeline_options = [""] + sorted(pipelines)
+        self._pipeline_options = ["", *sorted(pipelines)]
 
         self._needs_refresh = False
 
     def render(self):
-        """render the browser ui."""
+        """Render the browser ui."""
         from imgui_bundle import imgui
 
         if self._needs_refresh:
@@ -179,15 +178,15 @@ class DatasetBrowser:
                 self._show_in_explorer(ds.path)
 
     def _open_dataset(self, dataset):
-        """open dataset in the mbo viewer."""
+        """Open dataset in the mbo viewer."""
         try:
             from mbo_utilities.gui.run_gui import run_gui
             run_gui(dataset.path)
         except Exception as e:
-            logger.error(f"failed to open dataset: {e}")
+            logger.exception(f"failed to open dataset: {e}")
 
     def _show_in_explorer(self, path: str):
-        """open containing folder in system file browser."""
+        """Open containing folder in system file browser."""
         import subprocess
         import sys
 
@@ -203,7 +202,7 @@ class DatasetBrowser:
 
 
 def launch_browser():
-    """launch the dataset browser gui."""
+    """Launch the dataset browser gui."""
     from imgui_bundle import immapp, hello_imgui
     from mbo_utilities.gui._setup import get_default_ini_path
     from mbo_utilities.db.database import init_db

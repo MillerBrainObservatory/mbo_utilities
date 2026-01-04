@@ -23,7 +23,6 @@ import re
 import time
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Sequence
 
 import numpy as np
 from tifffile import TiffFile
@@ -41,7 +40,7 @@ from mbo_utilities.metadata.scanimage import (
     get_frames_per_slice,
     get_log_average_factor,
 )
-from mbo_utilities.analysis.phasecorr import bidir_phasecorr, ALL_PHASECORR_METHODS
+from mbo_utilities.analysis.phasecorr import bidir_phasecorr
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
 from mbo_utilities.arrays.features import (
@@ -49,10 +48,11 @@ from mbo_utilities.arrays.features import (
     PhaseCorrectionFeature,
     RoiFeatureMixin,
 )
-from mbo_utilities.arrays.features._phase_correction import PhaseCorrMethod
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import Sequence
+
 
 logger = log.get("arrays.tiff")
 
@@ -159,13 +159,10 @@ class _SingleTiffPlaneReader:
         self._frames_per_file = []
         self._num_frames = 0
 
-        for i, (tfile, fpath) in enumerate(zip(self.tiff_files, self.filenames)):
+        for i, (tfile, fpath) in enumerate(zip(self.tiff_files, self.filenames, strict=False)):
             nframes = None
 
-            if i == 0:
-                desc = page0.description
-            else:
-                desc = tfile.pages.first.description
+            desc = page0.description if i == 0 else tfile.pages.first.description
 
             if desc:
                 try:
@@ -224,7 +221,7 @@ class _SingleTiffPlaneReader:
 
         frames = listify_index(t_key, self._num_frames)
         if not frames:
-            return np.empty((0,) + self._page_shape, dtype=self._dtype)
+            return np.empty((0, *self._page_shape), dtype=self._dtype)
 
         out = self._read_frames(frames)
 
@@ -244,7 +241,7 @@ class _SingleTiffPlaneReader:
         start = 0
         frame_to_buf_idx = {f: i for i, f in enumerate(frames)}
 
-        for tf, nframes in zip(self.tiff_files, self._frames_per_file):
+        for tf, nframes in zip(self.tiff_files, self._frames_per_file, strict=False):
             end = start + nframes
             file_frames = [f for f in frames if start <= f < end]
             if not file_frames:
@@ -257,14 +254,14 @@ class _SingleTiffPlaneReader:
                 try:
                     chunk = tf.asarray(key=local_indices)
                 except Exception as e:
-                    raise IOError(
+                    raise OSError(
                         f"Failed to read frames {local_indices} from {tf.filename}: {e}"
                     ) from e
 
             if chunk.ndim == 2:
                 chunk = chunk[np.newaxis, ...]
 
-            for local_idx, global_frame in zip(local_indices, file_frames):
+            for local_idx, global_frame in zip(local_indices, file_frames, strict=False):
                 buf_idx = frame_to_buf_idx[global_frame]
                 chunk_idx = local_indices.index(local_idx)
                 buf[buf_idx] = chunk[chunk_idx]
@@ -321,9 +318,32 @@ class TiffArray(ReductionMixin):
     True
     """
 
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by TiffArray.
+
+        Returns True for any valid TIFF file. This is the fallback
+        array type for TIFF files.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is a TIFF file.
+        """
+        if not file:
+            return False
+        path = Path(file)
+        return path.suffix.lower() in (".tif", ".tiff")
+
     def __init__(
         self,
-        files: str | Path | List[str] | List[Path],
+        files: str | Path | list[str] | list[Path],
         dims: str | Sequence[str] | None = None,
     ):
         self._planes: list[_SingleTiffPlaneReader] = []
@@ -625,7 +645,7 @@ class TiffArray(ReductionMixin):
 
         histogram_widget = kwargs.get("histogram_widget", True)
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
-        window_funcs = kwargs.get("window_funcs", None)
+        window_funcs = kwargs.get("window_funcs")
         return fpl.ImageWidget(
             data=self,
             histogram_widget=histogram_widget,
@@ -685,6 +705,44 @@ class MBOTiffArray(ReductionMixin):
         Dimension labels.
     """
 
+    # Keys that indicate MBO-processed TIFF (in shaped_metadata)
+    _MBO_MARKER_KEYS = {"num_planes", "num_rois", "frame_rate", "Ly", "Lx", "fov", "pixel_resolution"}
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by MBOTiffArray.
+
+        Returns True for TIFF files with MBO-specific shaped_metadata,
+        indicating they were processed/assembled by mbo_utilities.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file has MBO shaped_metadata.
+        """
+        if not file or not isinstance(file, (str, Path)):
+            return False
+        path = Path(file)
+        if path.suffix.lower() not in (".tif", ".tiff"):
+            return False
+        try:
+            with TiffFile(file) as tf:
+                if not hasattr(tf, "shaped_metadata") or tf.shaped_metadata is None:
+                    return False
+                meta = tf.shaped_metadata[0] if tf.shaped_metadata else {}
+                if not isinstance(meta, dict):
+                    return False
+                # Check if any MBO-specific keys are present
+                return bool(cls._MBO_MARKER_KEYS & meta.keys())
+        except Exception:
+            return False
+
     def __init__(
         self,
         filenames: list[Path],
@@ -710,13 +768,10 @@ class MBOTiffArray(ReductionMixin):
         self._frames_per_file = []
         self._num_frames = 0
 
-        for i, (tfile, fpath) in enumerate(zip(self.tiff_files, self.filenames)):
+        for i, (tfile, fpath) in enumerate(zip(self.tiff_files, self.filenames, strict=False)):
             nframes = None
 
-            if i == 0:
-                desc = page0.description
-            else:
-                desc = tfile.pages.first.description
+            desc = page0.description if i == 0 else tfile.pages.first.description
 
             if desc:
                 try:
@@ -827,7 +882,7 @@ class MBOTiffArray(ReductionMixin):
 
         frames = listify_index(t_key, self._num_frames)
         if not frames:
-            return np.empty((0, 1) + self._page_shape, dtype=self.dtype)
+            return np.empty((0, 1, *self._page_shape), dtype=self.dtype)
 
         out = self._read_frames(frames)
 
@@ -860,7 +915,7 @@ class MBOTiffArray(ReductionMixin):
         start = 0
         frame_to_buf_idx = {f: i for i, f in enumerate(frames)}
 
-        for tf, nframes in zip(self.tiff_files, self._frames_per_file):
+        for tf, nframes in zip(self.tiff_files, self._frames_per_file, strict=False):
             end = start + nframes
             file_frames = [f for f in frames if start <= f < end]
             if not file_frames:
@@ -873,7 +928,7 @@ class MBOTiffArray(ReductionMixin):
                 try:
                     chunk = tf.asarray(key=local_indices)
                 except Exception as e:
-                    raise IOError(
+                    raise OSError(
                         f"MBOTiffArray: Failed to read frames {local_indices} from {tf.filename}\n"
                         f"File may be corrupted or incomplete.\n"
                         f": {type(e).__name__}: {e}"
@@ -882,7 +937,7 @@ class MBOTiffArray(ReductionMixin):
             if chunk.ndim == 2:
                 chunk = chunk[np.newaxis, ...]
 
-            for local_idx, global_frame in zip(local_indices, file_frames):
+            for local_idx, global_frame in zip(local_indices, file_frames, strict=False):
                 buf_idx = frame_to_buf_idx[global_frame]
                 chunk_idx = local_indices.index(local_idx)
                 buf[buf_idx, 0] = chunk[chunk_idx]
@@ -908,7 +963,7 @@ class MBOTiffArray(ReductionMixin):
 
         histogram_widget = kwargs.get("histogram_widget", True)
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
-        window_funcs = kwargs.get("window_funcs", None)
+        window_funcs = kwargs.get("window_funcs")
         return fpl.ImageWidget(
             data=self,
             histogram_widget=histogram_widget,
@@ -991,6 +1046,44 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
     stack_type : StackType
         Detected stack type: "lbm", "piezo", or "single_plane".
     """
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by ScanImageArray.
+
+        Returns True for raw ScanImage TIFFs that have scanimage_metadata
+        and no shaped_metadata (indicating unprocessed acquisition data).
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is a raw ScanImage TIFF.
+        """
+        if not file or not isinstance(file, (str, Path)):
+            return False
+        path = Path(file)
+        if path.suffix.lower() not in (".tif", ".tiff"):
+            return False
+        try:
+            with TiffFile(file) as tf:
+                # If shaped_metadata exists, it's a processed file (not raw)
+                if (
+                    hasattr(tf, "shaped_metadata")
+                    and tf.shaped_metadata is not None
+                    and isinstance(tf.shaped_metadata, (list, tuple))
+                    and len(tf.shaped_metadata) > 0
+                ):
+                    return False
+                # Must have ScanImage metadata
+                return tf.scanimage_metadata is not None
+        except Exception:
+            return False
 
     # contextual descriptions for metadata params (shown in GUI tooltips)
     # subclasses can override to provide array-type-specific context
@@ -1311,7 +1404,7 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
 
         start = 0
         tiff_iterator = (
-            zip(self.tiff_files, (f * self.num_channels for f in self._frames_per_file))
+            zip(self.tiff_files, (f * self.num_channels for f in self._frames_per_file), strict=False)
             if self._frames_per_file is not None
             else ((tf, len(tf.pages)) for tf in self.tiff_files)
         )
@@ -1330,8 +1423,8 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
                     try:
                         chunk = tf.asarray(key=frame_idx)
                     except Exception as e:
-                        raise IOError(
-                            f"MboRawArray: Failed to read pages {frame_idx} from {tf.filename}\n"
+                        raise OSError(
+                            f"ScanImageArray: Failed to read pages {frame_idx} from {tf.filename}\n"
                             f"File may be corrupted or incomplete.\n"
                             f": {type(e).__name__}: {e}"
                         ) from e
@@ -1342,8 +1435,8 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
                         try:
                             c = tf.asarray(key=fi)
                         except Exception as e:
-                            raise IOError(
-                                f"MboRawArray: Failed to read page {fi} from {tf.filename}\n"
+                            raise OSError(
+                                f"ScanImageArray: Failed to read page {fi} from {tf.filename}\n"
                                 f"File may be corrupted or incomplete.\n"
                                 f": {type(e).__name__}: {e}"
                             ) from e
@@ -1454,7 +1547,7 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
                 return tuple(
                     full_data[:, :, self._rois[r - 1]["slice"], :] for r in self.roi
                 )
-            elif self.roi == 0:
+            if self.roi == 0:
                 pass  # Already handled by splitting in calling code or higher level
 
         total_width = sum(roi["width"] for roi in self._rois)
@@ -1507,16 +1600,15 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
 
     @property
     def shape(self):
-        if self.roi is not None:
-            if not isinstance(self.roi, (list, tuple)):
-                if self.roi > 0:
-                    roi = self._rois[self.roi - 1]
-                    return (
-                        self.num_frames,
-                        self.num_channels,
-                        roi["height"],
-                        roi["width"],
-                    )
+        if self.roi is not None and not isinstance(self.roi, (list, tuple)):
+            if self.roi > 0:
+                roi = self._rois[self.roi - 1]
+                return (
+                    self.num_frames,
+                    self.num_channels,
+                    roi["height"],
+                    roi["width"],
+                )
         total_width = sum(roi["width"] for roi in self._rois)
         max_height = max(roi["height"] for roi in self._rois)
         return (
@@ -1596,7 +1688,7 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
         figure_shape = (1, len(arrays))
         histogram_widget = kwargs.get("histogram_widget", True)
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (600, 600)})
-        window_funcs = kwargs.get("window_funcs", None)
+        window_funcs = kwargs.get("window_funcs")
 
         sample_frame = arrays[0][0]
         vmin, vmax = float(sample_frame.min()), float(sample_frame.max())
@@ -1638,6 +1730,31 @@ class LBMArray(ScanImageArray):
     ValueError
         If the data is not an LBM stack.
     """
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by LBMArray.
+
+        Returns True for raw ScanImage TIFFs with LBM stack type.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is an LBM stack.
+        """
+        if not ScanImageArray.can_open(file):
+            return False
+        try:
+            meta = get_metadata(file)
+            return detect_stack_type(meta) == "lbm"
+        except Exception:
+            return False
 
     METADATA_CONTEXT: dict[str, str] = {
         "Ly": (
@@ -1698,6 +1815,31 @@ class PiezoArray(ScanImageArray):
     can_average : bool
         True if frame averaging is possible (not pre-averaged, >1 frame/slice).
     """
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by PiezoArray.
+
+        Returns True for raw ScanImage TIFFs with piezo stack type.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is a piezo stack.
+        """
+        if not ScanImageArray.can_open(file):
+            return False
+        try:
+            meta = get_metadata(file)
+            return detect_stack_type(meta) == "piezo"
+        except Exception:
+            return False
 
     METADATA_CONTEXT: dict[str, str] = {
         "Ly": "Frame height in pixels.",
@@ -1794,7 +1936,7 @@ class PiezoArray(ScanImageArray):
         frames = listify_index(t_key, n_volumes)
 
         if not frames:
-            return np.empty((0,) + self.shape[1:], dtype=self.dtype)
+            return np.empty((0, *self.shape[1:]), dtype=self.dtype)
 
         fps = self.frames_per_slice
         results = []
@@ -1804,7 +1946,7 @@ class PiezoArray(ScanImageArray):
             start_frame = vol_idx * fps
             end_frame = start_frame + fps
             # get data for all frames in this volume
-            vol_data = super().__getitem__((slice(start_frame, end_frame),) + rest_key)
+            vol_data = super().__getitem__((slice(start_frame, end_frame), *rest_key))
             # average over the first axis (frames within volume)
             averaged = np.mean(vol_data, axis=0, keepdims=True)
             results.append(averaged)
@@ -1836,6 +1978,31 @@ class SinglePlaneArray(ScanImageArray):
     ValueError
         If the data is not a single-plane acquisition.
     """
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by SinglePlaneArray.
+
+        Returns True for raw ScanImage TIFFs with single-plane stack type.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is a single-plane acquisition.
+        """
+        if not ScanImageArray.can_open(file):
+            return False
+        try:
+            meta = get_metadata(file)
+            return detect_stack_type(meta) == "single_plane"
+        except Exception:
+            return False
 
     METADATA_CONTEXT: dict[str, str] = {
         "Ly": "Frame height in pixels.",
@@ -1888,6 +2055,31 @@ class CalibrationArray(ScanImageArray):
     num_beamlets : int
         Number of LBM beamlet channels.
     """
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        """
+        Check if this file can be opened by CalibrationArray.
+
+        Returns True for raw ScanImage TIFFs with pollen/calibration stack type.
+
+        Parameters
+        ----------
+        file : Path or str
+            Path to check.
+
+        Returns
+        -------
+        bool
+            True if file is a pollen/calibration stack.
+        """
+        if not ScanImageArray.can_open(file):
+            return False
+        try:
+            meta = get_metadata(file)
+            return detect_stack_type(meta) == "pollen"
+        except Exception:
+            return False
 
     METADATA_CONTEXT: dict[str, str] = {
         "Ly": "Frame height in pixels.",
@@ -1966,26 +2158,24 @@ def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
             # LBMArray doesn't use average_frames
             kwargs.pop("average_frames", None)
             return LBMArray(files, metadata=metadata, **kwargs)
-        elif stack_type == "pollen":
+        if stack_type == "pollen":
             # Pollen calibration: LBM beamlets + piezo z-scanning
             kwargs.pop("average_frames", None)
             return CalibrationArray(files, metadata=metadata, **kwargs)
-        elif stack_type == "piezo":
+        if stack_type == "piezo":
             return PiezoArray(files, metadata=metadata, **kwargs)
-        else:
-            # single_plane
-            kwargs.pop("average_frames", None)
-            return SinglePlaneArray(files, metadata=metadata, **kwargs)
+        # single_plane
+        kwargs.pop("average_frames", None)
+        return SinglePlaneArray(files, metadata=metadata, **kwargs)
     except TypeError:
         # Fallback if subclasses don't support metadata arg (safety)
         if stack_type == "lbm":
             kwargs.pop("average_frames", None)
             return LBMArray(files, **kwargs)
-        elif stack_type == "pollen":
+        if stack_type == "pollen":
             kwargs.pop("average_frames", None)
             return CalibrationArray(files, **kwargs)
-        elif stack_type == "piezo":
+        if stack_type == "piezo":
             return PiezoArray(files, **kwargs)
-        else:
-            kwargs.pop("average_frames", None)
-            return SinglePlaneArray(files, **kwargs)
+        kwargs.pop("average_frames", None)
+        return SinglePlaneArray(files, **kwargs)

@@ -6,14 +6,11 @@ Provides chunking configuration for lazy/dask arrays.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 import numpy as np
 
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
-if TYPE_CHECKING:
-    pass
 
 
 # default chunk patterns
@@ -134,17 +131,17 @@ class ChunkSizeFeature(ArrayFeature):
 
     @property
     def value(self) -> tuple[int, ...]:
-        """chunk sizes"""
+        """Chunk sizes."""
         return self._chunks
 
     @property
     def shape(self) -> tuple[int, ...]:
-        """array shape"""
+        """Array shape."""
         return self._shape
 
     @property
     def ndim(self) -> int:
-        """number of dimensions"""
+        """Number of dimensions."""
         return len(self._chunks)
 
     def set_value(self, array, value: tuple | dict | None) -> None:
@@ -215,7 +212,7 @@ class ChunkSizeFeature(ArrayFeature):
         if not self._shape or not self._chunks:
             return 0
         n = 1
-        for s, c in zip(self._shape, self._chunks):
+        for s, c in zip(self._shape, self._chunks, strict=False):
             n *= (s + c - 1) // c
         return n
 
@@ -286,7 +283,7 @@ class ChunkSizeFeature(ArrayFeature):
         dict
             {axis: size} mapping
         """
-        return {i: c for i, c in enumerate(self._chunks)}
+        return dict(enumerate(self._chunks))
 
     def __repr__(self) -> str:
         if not self._chunks:

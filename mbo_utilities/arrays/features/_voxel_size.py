@@ -6,13 +6,10 @@ Provides physical dimensions (dx, dy, dz) in micrometers.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 from mbo_utilities.metadata.base import VoxelSize
 
-if TYPE_CHECKING:
-    pass
 
 
 class VoxelSizeFeature(ArrayFeature):
@@ -53,32 +50,32 @@ class VoxelSizeFeature(ArrayFeature):
 
     @property
     def value(self) -> VoxelSize:
-        """current voxel size as VoxelSize namedtuple"""
+        """Current voxel size as VoxelSize namedtuple."""
         return self._value
 
     @property
     def dx(self) -> float:
-        """pixel size in X (µm)"""
+        """Pixel size in X (µm)."""
         return self._value.dx
 
     @property
     def dy(self) -> float:
-        """pixel size in Y (µm)"""
+        """Pixel size in Y (µm)."""
         return self._value.dy
 
     @property
     def dz(self) -> float | None:
-        """voxel size in Z (µm), None if not set"""
+        """Voxel size in Z (µm), None if not set."""
         return self._value.dz
 
     @property
     def pixel_resolution(self) -> tuple[float, float]:
-        """(dx, dy) tuple for 2D resolution"""
+        """(dx, dy) tuple for 2D resolution."""
         return self._value.pixel_resolution
 
     @property
     def is_isotropic_xy(self) -> bool:
-        """True if dx == dy"""
+        """True if dx == dy."""
         return abs(self._value.dx - self._value.dy) < 1e-9
 
     def set_value(self, array, value) -> None:

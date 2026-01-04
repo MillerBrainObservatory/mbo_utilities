@@ -37,7 +37,7 @@ class ProcessInfo:
     error_details: dict | str | None = None
 
     def elapsed_seconds(self) -> float:
-        """seconds since process started."""
+        """Seconds since process started."""
         return time.time() - self.start_time
 
     def elapsed_str(self) -> str:
@@ -45,10 +45,9 @@ class ProcessInfo:
         elapsed = self.elapsed_seconds()
         if elapsed < 60:
             return f"{int(elapsed)} seconds ago"
-        elif elapsed < 3600:
+        if elapsed < 3600:
             return f"{int(elapsed / 60)} minutes ago"
-        else:
-            return f"{elapsed / 3600:.1f} hours ago"
+        return f"{elapsed / 3600:.1f} hours ago"
 
     def update_from_sidecar(self, verbose=False):
         """Read progress_{uuid}.json (preferred) or progress_{pid}.json."""
@@ -83,14 +82,12 @@ class ProcessInfo:
 
         if sidecar and sidecar.exists():
             try:
-                with open(sidecar, "r") as f:
+                with open(sidecar) as f:
                     data = json.load(f)
 
                     # Validate: either UUID matches or PID matches
                     valid = False
-                    if uuid and data.get("uuid") == uuid:
-                        valid = True
-                    elif data.get("pid") == self.pid:
+                    if (uuid and data.get("uuid") == uuid) or data.get("pid") == self.pid:
                         valid = True
 
                     if valid:
@@ -103,12 +100,11 @@ class ProcessInfo:
             except Exception as e:
                 # Silently ignore read errors - atomic writes should prevent most issues
                 logger.debug(f"Failed to read sidecar for pid {self.pid}: {e}")
-        else:
-            if verbose:
-                logger.debug(f"No sidecar found for PID {self.pid}.")
+        elif verbose:
+            logger.debug(f"No sidecar found for PID {self.pid}.")
 
     def is_alive(self) -> bool:
-        """check if process is still running."""
+        """Check if process is still running."""
         try:
             # cross-platform check using os.kill with signal 0
             # on windows, this uses ctypes internally
@@ -121,24 +117,22 @@ class ProcessInfo:
                 if handle:
                     k32.CloseHandle(handle)
                     return True
-                else:
-                    err = ctypes.get_last_error()
-                    if err == 5:
-                        # ERROR_ACCESS_DENIED: Process exists but we can't query it. Assume alive.
-                        return True
-                    # ERROR_INVALID_PARAMETER (87) usually means PID found no process (Dead).
-                    if err != 87:
-                        # Log unusual errors
-                        logger.debug(f"PID {self.pid} is_alive check failed. OpenProcess err={err}")
-                    return False
-            else:
-                os.kill(self.pid, 0)
-                return True
+                err = ctypes.get_last_error()
+                if err == 5:
+                    # ERROR_ACCESS_DENIED: Process exists but we can't query it. Assume alive.
+                    return True
+                # ERROR_INVALID_PARAMETER (87) usually means PID found no process (Dead).
+                if err != 87:
+                    # Log unusual errors
+                    logger.debug(f"PID {self.pid} is_alive check failed. OpenProcess err={err}")
+                return False
+            os.kill(self.pid, 0)
+            return True
         except (OSError, ProcessLookupError):
             return False
 
     def kill(self) -> bool:
-        """attempt to kill the process."""
+        """Attempt to kill the process."""
         try:
             if sys.platform == "win32":
                 subprocess.run(["taskkill", "/F", "/PID", str(self.pid)], check=True, capture_output=True)
@@ -183,7 +177,7 @@ class ProcessInfo:
         if not p.is_file():
             return []
         try:
-            with open(p, "r", encoding="utf-8", errors="replace") as f:
+            with open(p, encoding="utf-8", errors="replace") as f:
                 return f.readlines()[-n:]
         except Exception:
             return []
@@ -205,12 +199,12 @@ class ProcessManager:
         self._load()
 
     def _load(self) -> None:
-        """load process info from disk."""
+        """Load process info from disk."""
         if not self.PROCESS_FILE.exists():
             return
 
         try:
-            with open(self.PROCESS_FILE, "r") as f:
+            with open(self.PROCESS_FILE) as f:
                 data = json.load(f)
 
             for entry in data.get("processes", []):
@@ -222,7 +216,7 @@ class ProcessManager:
             logger.warning(f"Failed to load process file: {e}")
 
     def _save(self) -> None:
-        """save process info to disk."""
+        """Save process info to disk."""
         self.PROCESS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
@@ -243,9 +237,9 @@ class ProcessManager:
         output_path: str | None = None,
     ) -> int | None:
         """
-        spawn a subprocess for a background task.
+        Spawn a subprocess for a background task.
 
-        parameters
+        Parameters
         ----------
         task_type : str
             type of task: "save_zarr", "suite2p", etc.
@@ -256,7 +250,7 @@ class ProcessManager:
         output_path : str, optional
             output path for display purposes.
 
-        returns
+        Returns
         -------
         int or None
             pid of spawned process, or None if spawn failed.
@@ -343,31 +337,28 @@ class ProcessManager:
             return proc.pid
 
         except Exception as e:
-            logger.error(f"Failed to spawn process: {e}")
+            logger.exception(f"Failed to spawn process: {e}")
             return None
 
     def get_all(self) -> list[ProcessInfo]:
-        """get all tracked processes."""
+        """Get all tracked processes."""
         return list(self._processes.values())
 
     def get_running(self) -> list[ProcessInfo]:
-        """get active processes (running or failed/pending view)."""
+        """Get active processes (running or failed/pending view)."""
         active = []
         for p in self._processes.values():
             # Always update from sidecar first to get latest status
             p.update_from_sidecar()
 
             # if alive, it's running.
-            if p.is_alive():
-                active.append(p)
-            # if not alive but error, it's "active" in the sense of needing attention
-            elif p.status == "error":
+            if p.is_alive() or p.status == "error":
                 active.append(p)
         return active
 
     def cleanup_finished(self) -> int:
         """
-        remove entries for processes that have finished successfully.
+        Remove entries for processes that have finished successfully.
         failed processes are kept until dismissed (killed) or cleared.
 
         returns number of entries removed.
@@ -416,7 +407,7 @@ class ProcessManager:
         return len(to_remove)
 
     def kill(self, pid: int) -> bool:
-        """kill a tracked process by pid."""
+        """Kill a tracked process by pid."""
         if pid not in self._processes:
             return False
 
@@ -428,7 +419,7 @@ class ProcessManager:
         return False
 
     def kill_all(self) -> int:
-        """kill all tracked processes. returns count killed."""
+        """Kill all tracked processes. returns count killed."""
         killed = 0
         for pid in list(self._processes.keys()):
             if self.kill(pid):
@@ -436,7 +427,7 @@ class ProcessManager:
         return killed
 
     def has_running(self) -> bool:
-        """check if any tracked processes are still running."""
+        """Check if any tracked processes are still running."""
         return len(self.get_running()) > 0
 
 
@@ -445,7 +436,7 @@ _manager: ProcessManager | None = None
 
 
 def get_process_manager() -> ProcessManager:
-    """get the global process manager instance."""
+    """Get the global process manager instance."""
     global _manager
     if _manager is None:
         _manager = ProcessManager()

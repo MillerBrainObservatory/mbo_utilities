@@ -1,6 +1,4 @@
-from pathlib import Path
 import threading
-import math
 
 from imgui_bundle import (
     hello_imgui,
@@ -9,22 +7,18 @@ from imgui_bundle import (
     portable_file_dialogs as pfd,
     icons_fontawesome_6 as fa,
 )
-from mbo_utilities.gui._widgets import set_tooltip
 from mbo_utilities.gui import _setup  # triggers setup on import
 from mbo_utilities.preferences import (
     get_default_open_dir,
-    get_last_dir,
     set_last_dir,
     add_recent_file,
-    get_gui_preference,
-    set_gui_preference,
 )
-from mbo_utilities.gui.upgrade_manager import UpgradeManager, CheckStatus, UpgradeStatus
+from mbo_utilities.gui.widgets.upgrade_manager import UpgradeManager, CheckStatus, UpgradeStatus
 from mbo_utilities.install import check_installation, Status
 
 # re-export for backwards compatibility
 setup_imgui = _setup.setup_imgui
-__all__ = ["setup_imgui", "FileDialog"]
+__all__ = ["FileDialog", "setup_imgui"]
 
 # dark theme
 COL_BG = imgui.ImVec4(0.11, 0.11, 0.12, 1.0)
@@ -124,7 +118,7 @@ class FileDialog:
         # cached install status (computed on first render)
         self._install_status = None
         self._check_thread = None
-        
+
         # GUI Modes
         self.gui_modes = ["Standard Viewer", "Pollen Calibration", "Napari", "Cellpose", "Suite2p"]
         self.selected_mode_index = 0
@@ -141,7 +135,7 @@ class FileDialog:
         pass
 
     def _get_feature(self, name: str):
-        """get feature status by name from install status."""
+        """Get feature status by name from install status."""
         if self._install_status is None:
             return None
         for f in self._install_status.features:
@@ -150,7 +144,7 @@ class FileDialog:
         return None
 
     def _draw_version_status(self):
-        """draw version with update status inline."""
+        """Draw version with update status inline."""
         version = self._install_status.mbo_version if self._install_status else "?"
 
         checking = self.upgrade_manager.check_status == CheckStatus.CHECKING
@@ -205,7 +199,7 @@ class FileDialog:
                 imgui.text_colored(COL_ERR, "failed")
 
     def _draw_dependency_group(self, name: str, pipeline_feature: str, requires: list[tuple[str, str]]):
-        """draw a single dependency group inline: Name - Requirement vX.X (GPU/CPU)."""
+        """Draw a single dependency group inline: Name - Requirement vX.X (GPU/CPU)."""
         pipeline = self._get_feature(pipeline_feature)
 
         # not installed
@@ -267,16 +261,31 @@ class FileDialog:
             msg = getattr(self, "_check_message", "Checking system configuration...")
             text_w = imgui.calc_text_size(msg).x
             avail_w = imgui.get_content_region_avail().x
-            
+
             imgui.set_cursor_pos_x(max(0.0, (avail_w - text_w) * 0.5))
             imgui.text_colored(COL_TEXT_DIM, msg)
 
             # Vertical spacing
             imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + hello_imgui.em_size(0.5))
 
-            # Progress bar from callback
+            # Progress bar with centered percentage overlay
             p = getattr(self, "_check_progress", 0.0)
-            imgui.progress_bar(p)
+            pct_text = f"{int(p * 100)}%"
+            imgui.progress_bar(p, imgui.ImVec2(-1, 0), "")
+
+            # Draw percentage text centered on the progress bar
+            bar_min = imgui.get_item_rect_min()
+            bar_max = imgui.get_item_rect_max()
+            bar_center_x = (bar_min.x + bar_max.x) * 0.5
+            bar_center_y = (bar_min.y + bar_max.y) * 0.5
+            text_size = imgui.calc_text_size(pct_text)
+
+            draw_list = imgui.get_window_draw_list()
+            draw_list.add_text(
+                imgui.ImVec2(bar_center_x - text_size.x * 0.5, bar_center_y - text_size.y * 0.5),
+                imgui.get_color_u32(imgui.Col_.text),
+                pct_text
+            )
             return
 
         # version line
@@ -412,17 +421,17 @@ class FileDialog:
             # Mode Selector
             self._center_widget(btn_w)
             imgui.set_next_item_width(btn_w)
-            
+
             # Simple combo
             # ret, idx = imgui.combo("##mode", current_item, items)
-            changed, self.selected_mode_index = imgui.combo(
-                "##mode", 
-                self.selected_mode_index, 
+            _changed, self.selected_mode_index = imgui.combo(
+                "##mode",
+                self.selected_mode_index,
                 self.gui_modes
             )
             if imgui.is_item_hovered():
                 imgui.set_tooltip(f"Select Application: {self.gui_modes[self.selected_mode_index]}")
-            
+
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
             self._center_widget(btn_w)

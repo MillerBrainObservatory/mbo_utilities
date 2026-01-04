@@ -1,21 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-import numpy as np
 
 if TYPE_CHECKING:
+    import numpy as np
+    from pathlib import Path
     from numpy.typing import DTypeLike
 
 ARRAY_LIKE_ATTRS = ["shape", "ndim", "__getitem__"]
 
 # re-export from features module for backwards compatibility
-from mbo_utilities.arrays.features._dim_labels import (
-    get_dims,
-    get_num_planes,
-    infer_dims,
-)
 
 
 @runtime_checkable
@@ -34,7 +29,7 @@ class LazyArrayProtocol(Protocol):
     """
     Protocol for lazy array types used in mbo_utilities.
 
-    All array types (MboRawArray, Suite2pArray, ZarrArray, etc.) should implement
+    All array types (ScanImageArray, Suite2pArray, ZarrArray, etc.) should implement
     this protocol to ensure compatibility with imread/imwrite and downstream
     processing pipelines like Suite2p.
 
@@ -144,7 +139,7 @@ class LazyArrayProtocol(Protocol):
     def shape(self) -> tuple[int, ...]: ...
 
     @property
-    def dtype(self) -> "DTypeLike": ...
+    def dtype(self) -> DTypeLike: ...
 
     @property
     def ndim(self) -> int: ...

@@ -248,7 +248,7 @@ class DiagnosticsWidget:
 
     def _check_for_external_changes(self):
         """Check if iscell.npy was modified externally (e.g., by Suite2p GUI)."""
-        if not self._watch_for_changes or not hasattr(self, '_save_path'):
+        if not self._watch_for_changes or not hasattr(self, "_save_path"):
             return
 
         current_time = time.time()
@@ -276,7 +276,7 @@ class DiagnosticsWidget:
 
     def _reload_iscell(self):
         """Reload iscell.npy from disk (called when external changes detected)."""
-        if not hasattr(self, '_save_path'):
+        if not hasattr(self, "_save_path"):
             return
 
         from mbo_utilities.util import load_npy
@@ -291,9 +291,8 @@ class DiagnosticsWidget:
                 self.iscell = new_iscell
                 # Update modification time
                 self._last_iscell_mtime = iscell_path.stat().st_mtime
-                print(f"Reloaded iscell.npy from {iscell_path} (external change detected)")
-        except Exception as e:
-            print(f"Error reloading iscell.npy: {e}")
+        except Exception:
+            pass
 
     @property
     def n_rois(self):
@@ -653,7 +652,7 @@ class DiagnosticsWidget:
             return
 
         # Use _save_path if available (the actual suite2p output path), else loaded_path
-        save_path = getattr(self, '_save_path', self.loaded_path)
+        save_path = getattr(self, "_save_path", self.loaded_path)
         if save_path is None:
             return
 
@@ -665,11 +664,9 @@ class DiagnosticsWidget:
             self._last_iscell_mtime = iscell_path.stat().st_mtime
             self._save_status_msg = "Saved! Reload in Suite2p"
             self._save_status_time = time.time()
-            print(f"Saved iscell to {iscell_path}")
         except Exception as e:
             self._save_status_msg = f"Save error: {e}"
             self._save_status_time = time.time()
-            print(f"Error saving iscell: {e}")
 
     def _draw_stats_popup(self):
         """Draw ROI statistics popup."""

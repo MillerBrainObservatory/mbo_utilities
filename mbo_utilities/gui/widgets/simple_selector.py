@@ -1,7 +1,6 @@
 from pathlib import Path
-from typing import Optional, Union, Literal
+from typing import Literal
 from imgui_bundle import imgui, immapp, hello_imgui, portable_file_dialogs as pfd
-from mbo_utilities.gui import _setup  # triggers setup on import
 from mbo_utilities.gui._setup import get_default_ini_path
 
 
@@ -10,8 +9,8 @@ class SimpleSelector:
         self,
         mode: Literal["folder", "files"] = "files",
         title: str = "Select",
-        filters: Optional[list[str]] = None,
-        start_path: Optional[Union[str, Path]] = None,
+        filters: list[str] | None = None,
+        start_path: str | Path | None = None,
     ):
         self.mode = mode
         self.title = title
@@ -34,18 +33,17 @@ class SimpleSelector:
                 else:
                     self.cancelled = True
 
-        elif self.mode == "files":
-            if imgui.button("Select File(s)"):
-                result = pfd.open_file(
-                    self.title,
-                    self.start_path,
-                    self.filters,
-                    pfd.opt.multiselect
-                )
-                if result and result.result():
-                    self.selected_paths = [Path(p) for p in result.result()]
-                else:
-                    self.cancelled = True
+        elif self.mode == "files" and imgui.button("Select File(s)"):
+            result = pfd.open_file(
+                self.title,
+                self.start_path,
+                self.filters,
+                pfd.opt.multiselect
+            )
+            if result and result.result():
+                self.selected_paths = [Path(p) for p in result.result()]
+            else:
+                self.cancelled = True
 
         imgui.spacing()
 
@@ -67,8 +65,8 @@ class SimpleSelector:
 
 def select_folder(
     title: str = "Select Folder",
-    start_path: Optional[Union[str, Path]] = None,
-) -> Optional[Path]:
+    start_path: str | Path | None = None,
+) -> Path | None:
     """Select a folder using native OS dialog.
 
     Note: Native folder dialogs don't show files - this is an OS limitation.
@@ -92,8 +90,8 @@ def select_folder(
 
 def select_files(
     title: str = "Select File(s)",
-    filters: Optional[list[str]] = None,
-    start_path: Optional[Union[str, Path]] = None,
+    filters: list[str] | None = None,
+    start_path: str | Path | None = None,
 ) -> list[Path]:
     """Select one or more files using native OS dialog.
 
@@ -124,6 +122,6 @@ if __name__ == "__main__":
     )
 
     if selected:
-        print(f"You selected: {selected}")
+        pass
     else:
-        print("No files selected")
+        pass

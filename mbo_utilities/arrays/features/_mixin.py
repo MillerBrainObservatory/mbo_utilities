@@ -2,17 +2,18 @@
 Mixin for adding feature support to array classes.
 
 Provides a standardized way to integrate features like DimLabels
-into array classes. 
+into array classes.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Sequence
 
 from mbo_utilities.arrays.features._dim_labels import DimLabels
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import Sequence
+
 
 
 class DimLabelsMixin:
