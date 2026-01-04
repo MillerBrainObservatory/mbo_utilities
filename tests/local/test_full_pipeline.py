@@ -236,6 +236,7 @@ class TestFullPipeline:
 
         # write bin file directly (not using imwrite to avoid issues with lazy arrays)
         bin_file = bin_dir / "data_raw.bin"
+        ops_file = bin_dir / "ops.npy"
 
         ops = {
             "nframes": n_frames,
@@ -246,6 +247,7 @@ class TestFullPipeline:
             "plane": SUITE2P_PLANE,
             "raw_file": str(bin_file),
             "save_path": str(bin_dir),
+            "ops_path": str(ops_file),
         }
         t0 = time.perf_counter()
 

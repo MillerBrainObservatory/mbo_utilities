@@ -195,9 +195,13 @@ class H5Array(ReductionMixin):
             data = data.astype(self._target_dtype)
         return data
 
-    def __array__(self):
-        n = min(10, self.shape[0])
-        return self._d[:n]
+    def __array__(self, dtype=None, copy=None):
+        data = self._d[:]
+        if self._target_dtype is not None:
+            data = data.astype(self._target_dtype)
+        if dtype is not None:
+            data = data.astype(dtype)
+        return data
 
     def close(self):
         """Close the HDF5 file."""

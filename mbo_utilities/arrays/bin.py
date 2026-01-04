@@ -140,10 +140,12 @@ class BinArray(ReductionMixin):
     def __len__(self):
         return self.shape[0]
 
-    def __array__(self):
-        """Return first 10 frames for quick inspection."""
-        n = min(10, self.shape[0]) if self.shape[0] >= 10 else self.shape[0]
-        return np.array([self._file[i] for i in range(n)])
+    def __array__(self, dtype=None, copy=None):
+        """Materialize full array into memory."""
+        data = np.array([self._file[i] for i in range(self.shape[0])])
+        if dtype is not None:
+            data = data.astype(dtype)
+        return data
 
     @property
     def ndim(self):

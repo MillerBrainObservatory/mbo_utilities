@@ -439,13 +439,16 @@ class Suite2pArray(ReductionMixin):
             out = out.astype(self._target_dtype)
         return out
 
-    def __array__(self) -> np.ndarray:
-        """Materialize array into memory."""
+    def __array__(self, dtype=None, copy=None) -> np.ndarray:
+        """Materialize full array into memory."""
         if self._is_volumetric:
             arrs = [p._file[:self._nframes] for p in self._planes]
-            return np.stack(arrs, axis=1)
-        n = min(10, self._nframes)
-        return np.stack([self._planes[0][i] for i in range(n)], axis=0)
+            data = np.stack(arrs, axis=1)
+        else:
+            data = np.stack([self._planes[0][i] for i in range(self._nframes)], axis=0)
+        if dtype is not None:
+            data = data.astype(dtype)
+        return data
 
     def switch_channel(self, use_raw: bool = False):
         """Switch all planes between raw and registered data."""
