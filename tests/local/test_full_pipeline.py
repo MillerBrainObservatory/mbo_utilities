@@ -213,9 +213,13 @@ class TestFullPipeline:
 
         # extract plane data - handle different array structures
         if arr.ndim == 4 and arr.shape[1] > SUITE2P_PLANE:
+            # multi-plane 4D array, extract specific plane
             plane_data = np.asarray(arr[:, SUITE2P_PLANE, :, :])
+        elif arr.ndim == 4 and arr.shape[1] == 1:
+            # single plane stored as 4D, squeeze z dimension
+            plane_data = np.asarray(arr[:, 0, :, :])
         elif arr.ndim == 3:
-            # already single plane
+            # already single plane (T, Y, X)
             plane_data = np.asarray(arr)
         else:
             pytest.skip(f"Cannot extract plane {SUITE2P_PLANE} from shape {arr.shape}")
@@ -230,16 +234,19 @@ class TestFullPipeline:
         n_frames = plane_data.shape[0]
         Ly, Lx = plane_data.shape[-2:]
 
+        # write bin file directly (not using imwrite to avoid issues with lazy arrays)
+        bin_file = bin_dir / "data_raw.bin"
+
         ops = {
             "nframes": n_frames,
+            "nframes_chan1": n_frames,
             "Ly": Ly,
             "Lx": Lx,
             "fs": getattr(arr, "frame_rate", 10.0) or 10.0,
             "plane": SUITE2P_PLANE,
+            "raw_file": str(bin_file),
+            "save_path": str(bin_dir),
         }
-
-        # write bin file directly (not using imwrite to avoid issues with lazy arrays)
-        bin_file = bin_dir / "data_raw.bin"
         t0 = time.perf_counter()
 
         # ensure int16
@@ -364,11 +371,12 @@ class TestFullPipeline:
             return None
 
         elif ext_clean == "bin":
-            # look for planeXX/ops.npy
+            # look for planeXX*/ops.npy (may have _stitched suffix)
             for pattern in plane_patterns:
-                plane_dir = out_dir / pattern
-                if (plane_dir / "ops.npy").exists():
-                    return plane_dir
+                matches = list(out_dir.glob(f"{pattern}*"))
+                for match in matches:
+                    if match.is_dir() and (match / "ops.npy").exists():
+                        return match
             return None
 
         elif ext_clean in ("h5", "hdf5"):
