@@ -370,17 +370,8 @@ class ProcessManager:
             p.update_from_sidecar()
 
             if not p.is_alive():
-                # verify status from sidecar one last time - verbose to debug missing file
-                p.update_from_sidecar(verbose=True)
-
-                # Retry if sidecar read failed (race condition w/ file writing)
-                retries = 0
-                while p.status == "running" and retries < 10:
-                    time.sleep(0.1)
-                    p.update_from_sidecar(verbose=False)
-                    if p.status == "running":
-                        logger.debug(f"PID {pid} Retry {retries+1}/10")
-                    retries += 1
+                # verify status from sidecar one last time
+                p.update_from_sidecar()
 
                 if p.status == "error":
                     # Keep errors visible
