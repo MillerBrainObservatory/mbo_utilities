@@ -303,12 +303,12 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
     def size(self):
         return np.prod(self.shape)
 
-    def __array__(self):
-        """Materialize full array into memory: (T, Z, H, W)."""
-        if len(self.zs) == 1 and len(self.zs[0].shape) == 4:
-            return np.asarray(self.zs[0][:])
-        arrs = [z[:] for z in self.zs]
-        return np.stack(arrs, axis=1)
+    def __array__(self, dtype=None, copy=None):
+        # return single frame for fast histogram/preview (prevents accidental full load)
+        data = self[0]
+        if dtype is not None:
+            data = data.astype(dtype)
+        return data
 
 
     @property

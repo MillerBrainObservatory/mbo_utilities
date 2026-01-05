@@ -753,8 +753,16 @@ class PreviewDataWidget(EdgeWindow):
 
     def update(self):
         """Main render callback."""
+        import time
+        t0 = time.perf_counter()
         draw_menu_bar(self)
+        t1 = time.perf_counter()
         self._viewer.draw()
+        t2 = time.perf_counter()
+        menu_ms = (t1 - t0) * 1000
+        draw_ms = (t2 - t1) * 1000
+        if menu_ms > 50 or draw_ms > 50:
+            print(f"SLOW FRAME: menu={menu_ms:.1f}ms, draw={draw_ms:.1f}ms")
 
         # Update mean subtraction when z-plane changes
         names = self.image_widget._slider_dim_names or ()

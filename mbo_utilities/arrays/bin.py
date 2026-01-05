@@ -141,8 +141,8 @@ class BinArray(ReductionMixin):
         return self.shape[0]
 
     def __array__(self, dtype=None, copy=None):
-        """Materialize full array into memory."""
-        data = np.array([self._file[i] for i in range(self.shape[0])])
+        # return single frame for fast histogram/preview (prevents accidental full load)
+        data = self._file[0]
         if dtype is not None:
             data = data.astype(dtype)
         return data

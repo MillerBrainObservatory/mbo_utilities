@@ -440,12 +440,12 @@ class Suite2pArray(ReductionMixin):
         return out
 
     def __array__(self, dtype=None, copy=None) -> np.ndarray:
-        """Materialize full array into memory."""
+        # return single frame for fast histogram/preview (prevents accidental full load)
         if self._is_volumetric:
-            arrs = [p._file[:self._nframes] for p in self._planes]
-            data = np.stack(arrs, axis=1)
+            arrs = [p._file[0] for p in self._planes]
+            data = np.stack(arrs, axis=0)
         else:
-            data = np.stack([self._planes[0][i] for i in range(self._nframes)], axis=0)
+            data = self._planes[0][0]
         if dtype is not None:
             data = data.astype(dtype)
         return data
