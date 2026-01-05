@@ -625,6 +625,62 @@ function Show-EnvLocationPrompt {
     return $customPath
 }
 
+function Get-MboVersionFromEnv {
+    <#
+    .SYNOPSIS
+    Query the installed mbo_utilities version from a virtual environment.
+    Returns hashtable with version, source (pypi/git), and commit if applicable.
+    #>
+    param([string]$PythonPath)
+
+    if (-not (Test-Path $PythonPath)) {
+        return $null
+    }
+
+    try {
+        # Get version and install location
+        $versionOutput = & $PythonPath -c "
+import sys
+try:
+    from importlib.metadata import version, distribution
+    v = version('mbo_utilities')
+    d = distribution('mbo_utilities')
+    # Check if installed from git
+    direct_url = None
+    try:
+        import json
+        from pathlib import Path
+        dist_info = Path(d._path)
+        direct_url_file = dist_info / 'direct_url.json'
+        if direct_url_file.exists():
+            direct_url = json.loads(direct_url_file.read_text())
+    except: pass
+    if direct_url and 'vcs_info' in direct_url:
+        vcs = direct_url['vcs_info']
+        commit = vcs.get('commit_id', 'unknown')[:8]
+        branch = vcs.get('requested_revision', 'unknown')
+        print(f'{v}|git|{branch}|{commit}')
+    else:
+        print(f'{v}|pypi||')
+except Exception as e:
+    print(f'error|{e}||')
+" 2>$null
+
+        if ($versionOutput -and $versionOutput -notmatch '^error') {
+            $parts = $versionOutput.Trim() -split '\|'
+            return @{
+                Version = $parts[0]
+                Source = $parts[1]
+                Branch = $parts[2]
+                Commit = $parts[3]
+            }
+        }
+    }
+    catch {}
+
+    return $null
+}
+
 function Install-DevEnvironment {
     param(
         [string]$EnvPath,
@@ -648,37 +704,97 @@ function Install-DevEnvironment {
                         (Test-Path (Join-Path $EnvPath "setup.py"))
 
         if ($isProjectDir) {
+            # Check if .venv already exists inside project
+            $venvPath = Join-Path $EnvPath ".venv"
+            $venvPythonPath = Join-Path $venvPath "Scripts\python.exe"
+            $venvExists = Test-Path $venvPythonPath
+
             Write-Host ""
             Write-Warn "This looks like a project directory: $EnvPath"
-            Write-Host ""
-            Write-Host "  [1] Create .venv inside - Create environment at $EnvPath\.venv (Recommended)" -ForegroundColor Cyan
-            Write-Host "  [2] Skip                - Don't create dev environment" -ForegroundColor Cyan
-            Write-Host ""
 
-            do {
-                $choice = Read-Host "Select option (1-2)"
-                $valid = $choice -match '^[12]$'
-                if (-not $valid) { Write-Warn "Invalid selection." }
-            } while (-not $valid)
+            if ($venvExists) {
+                # Query existing installation
+                $installedInfo = Get-MboVersionFromEnv -PythonPath $venvPythonPath
 
-            switch ($choice) {
-                "1" {
-                    $EnvPath = Join-Path $EnvPath ".venv"
-                    Write-Info "Will create environment at: $EnvPath"
-                    $pythonPath = Join-Path $EnvPath "Scripts\python.exe"
-                    $envExists = Test-Path $pythonPath
+                Write-Host ""
+                Write-Host "  Existing .venv found:" -ForegroundColor White
+                if ($installedInfo) {
+                    Write-Host "    mbo_utilities: " -NoNewline -ForegroundColor Gray
+                    Write-Host "v$($installedInfo.Version)" -NoNewline -ForegroundColor Cyan
+                    if ($installedInfo.Source -eq "git") {
+                        Write-Host " (git: $($installedInfo.Branch)@$($installedInfo.Commit))" -ForegroundColor Gray
+                    } else {
+                        Write-Host " (PyPI)" -ForegroundColor Gray
+                    }
+                } else {
+                    Write-Host "    mbo_utilities: " -NoNewline -ForegroundColor Gray
+                    Write-Host "not installed or error reading" -ForegroundColor Yellow
                 }
-                "2" {
-                    Write-Info "Skipping dev environment."
-                    return $null
+                Write-Host "    Python: $venvPythonPath" -ForegroundColor Gray
+                Write-Host ""
+                Write-Host "  [1] Overwrite - Delete .venv and recreate" -ForegroundColor Cyan
+                Write-Host "  [2] Update    - Install/upgrade mbo_utilities in existing .venv" -ForegroundColor Cyan
+                Write-Host "  [3] Skip      - Don't modify dev environment" -ForegroundColor Cyan
+                Write-Host ""
+
+                do {
+                    $choice = Read-Host "Select option (1-3)"
+                    $valid = $choice -match '^[123]$'
+                    if (-not $valid) { Write-Warn "Invalid selection." }
+                } while (-not $valid)
+
+                switch ($choice) {
+                    "1" {
+                        Write-Info "Removing existing .venv..."
+                        Remove-Item -Recurse -Force $venvPath
+                        $EnvPath = $venvPath
+                        $pythonPath = $venvPythonPath
+                        $envExists = $false
+                    }
+                    "2" {
+                        Write-Info "Updating existing .venv..."
+                        $EnvPath = $venvPath
+                        $pythonPath = $venvPythonPath
+                        $envExists = $true
+                    }
+                    "3" {
+                        Write-Info "Skipping dev environment."
+                        return $null
+                    }
+                }
+            } else {
+                # No .venv exists, offer to create one
+                Write-Host ""
+                Write-Host "  [1] Create .venv - Create environment at $venvPath (Recommended)" -ForegroundColor Cyan
+                Write-Host "  [2] Skip         - Don't create dev environment" -ForegroundColor Cyan
+                Write-Host ""
+
+                do {
+                    $choice = Read-Host "Select option (1-2)"
+                    $valid = $choice -match '^[12]$'
+                    if (-not $valid) { Write-Warn "Invalid selection." }
+                } while (-not $valid)
+
+                switch ($choice) {
+                    "1" {
+                        $EnvPath = $venvPath
+                        $pythonPath = $venvPythonPath
+                        $envExists = $false
+                    }
+                    "2" {
+                        Write-Info "Skipping dev environment."
+                        return $null
+                    }
                 }
             }
         }
         else {
+            # Not a project directory, but directory exists without venv
+            $venvPath = Join-Path $EnvPath ".venv"
             Write-Host ""
             Write-Warn "Directory exists but is not a virtual environment: $EnvPath"
             Write-Host ""
-            Write-Host "  [1] Create .venv inside - Create environment at $EnvPath\.venv" -ForegroundColor Cyan
+            Write-Host "  [1] Create .venv inside - Create environment at $venvPath" -ForegroundColor Cyan
             Write-Host "  [2] Skip                - Don't create dev environment" -ForegroundColor Cyan
             Write-Host ""
 
@@ -690,10 +806,9 @@ function Install-DevEnvironment {
 
             switch ($choice) {
                 "1" {
-                    $EnvPath = Join-Path $EnvPath ".venv"
-                    Write-Info "Will create environment at: $EnvPath"
+                    $EnvPath = $venvPath
                     $pythonPath = Join-Path $EnvPath "Scripts\python.exe"
-                    $envExists = Test-Path $pythonPath
+                    $envExists = $false
                 }
                 "2" {
                     Write-Info "Skipping dev environment."
@@ -702,20 +817,33 @@ function Install-DevEnvironment {
             }
         }
     }
-
-    if ($envExists) {
+    elseif ($envExists) {
+        # EnvPath itself is a valid venv
         if ($env:MBO_OVERWRITE -eq "1") {
             Write-Warn "Removing existing environment..."
             Remove-Item -Recurse -Force $EnvPath
             $envExists = $false
         }
         else {
+            # Query existing installation
+            $installedInfo = Get-MboVersionFromEnv -PythonPath $pythonPath
+
             Write-Host ""
             Write-Warn "Environment already exists at: $EnvPath"
             Write-Host ""
+            if ($installedInfo) {
+                Write-Host "  Installed: " -NoNewline -ForegroundColor Gray
+                Write-Host "mbo_utilities v$($installedInfo.Version)" -NoNewline -ForegroundColor Cyan
+                if ($installedInfo.Source -eq "git") {
+                    Write-Host " (git: $($installedInfo.Branch)@$($installedInfo.Commit))" -ForegroundColor Gray
+                } else {
+                    Write-Host " (PyPI)" -ForegroundColor Gray
+                }
+                Write-Host ""
+            }
             Write-Host "  [1] Overwrite - Delete and recreate" -ForegroundColor Cyan
             Write-Host "  [2] Update    - Install into existing" -ForegroundColor Cyan
-            Write-Host "  [3] Skip      - Don't create dev environment" -ForegroundColor Cyan
+            Write-Host "  [3] Skip      - Don't modify dev environment" -ForegroundColor Cyan
             Write-Host ""
 
             do {
