@@ -178,7 +178,42 @@ class LoadingSpinner:
             i += 1
 
 
+def _get_version_info() -> str:
+    """Get version string with install location info."""
+    from mbo_utilities import __version__
+    exe_path = Path(sys.executable)
+
+    # Determine install type based on executable path
+    exe_str = str(exe_path).lower()
+    if ".local" in exe_str or ("uv" in exe_str and "tools" in exe_str):
+        install_type = "uv tool"
+    elif "envs" in exe_str or "venv" in exe_str or ".venv" in exe_str:
+        install_type = "environment"
+    elif "conda" in exe_str or "miniconda" in exe_str or "anaconda" in exe_str:
+        install_type = "conda"
+    else:
+        install_type = "system"
+
+    return f"mbo_utilities {__version__}\nPython: {exe_path}\nInstall: {install_type}"
+
+
+def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+    """Custom version callback to show extended version info."""
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo(_get_version_info())
+    ctx.exit()
+
+
 @click.group(cls=PathAwareGroup, invoke_without_command=True)
+@click.option(
+    "-V", "--version",
+    is_flag=True,
+    callback=_version_callback,
+    expose_value=False,
+    is_eager=True,
+    help="Show version and installation info.",
+)
 @click.option(
     "--download-notebook",
     is_flag=True,
