@@ -29,6 +29,19 @@ class UpgradeStatus(Enum):
     ERROR = "error"
 
 
+def _get_install_type() -> str:
+    """Determine the installation type based on executable path."""
+    exe_str = sys.executable.lower()
+    if ".local" in exe_str or ("uv" in exe_str and "tools" in exe_str):
+        return "uv tool"
+    elif "envs" in exe_str or "venv" in exe_str or ".venv" in exe_str:
+        return "environment"
+    elif "conda" in exe_str or "miniconda" in exe_str or "anaconda" in exe_str:
+        return "conda"
+    else:
+        return "system"
+
+
 @dataclass
 class UpgradeManager:
     """
@@ -44,11 +57,15 @@ class UpgradeManager:
     upgrade_status: UpgradeStatus = UpgradeStatus.IDLE
     error_message: str = ""
     upgrade_message: str = ""
+    executable_path: str = ""
+    install_type: str = ""
     _check_thread: threading.Thread | None = field(default=None, repr=False)
     _upgrade_thread: threading.Thread | None = field(default=None, repr=False)
 
     def __post_init__(self):
         self._load_current_version()
+        self.executable_path = sys.executable
+        self.install_type = _get_install_type()
 
     def _load_current_version(self):
         """Load the current installed version."""
@@ -169,16 +186,25 @@ def draw_upgrade_manager(manager: UpgradeManager):
     imgui.spacing()
 
     # header
-    imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Updates")
+    imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Version Info")
     imgui.spacing()
 
-    # current version
+    # current version and install type
     imgui.text(f"Installed: v{manager.current_version}")
+    imgui.same_line()
+    imgui.text_disabled(f"({manager.install_type})")
+
+    # executable path (truncated, with tooltip for full path)
+    exe_display = manager.executable_path
+    if len(exe_display) > 50:
+        exe_display = "..." + exe_display[-47:]
+    imgui.text_disabled(f"Python: {exe_display}")
+    if imgui.is_item_hovered():
+        imgui.set_tooltip(manager.executable_path)
 
     # latest version (if checked)
     if manager.check_status == CheckStatus.DONE and manager.latest_version:
-        imgui.same_line()
-        imgui.text_disabled(f"| PyPI: v{manager.latest_version}")
+        imgui.text_disabled(f"PyPI: v{manager.latest_version}")
 
     imgui.spacing()
 

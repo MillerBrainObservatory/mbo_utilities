@@ -822,6 +822,129 @@ function Get-UvToolBinDir {
     return $null
 }
 
+function Test-ConflictingMboInstalls {
+    <#
+    .SYNOPSIS
+    Check for mbo installations that could conflict with the uv tool installation.
+    Returns list of paths that are NOT the uv tool bin directory.
+    #>
+    $uvBinDir = Get-UvToolBinDir
+    $conflicts = @()
+
+    # Check PATH for any mbo executables
+    try {
+        $mboLocations = where.exe mbo 2>$null
+        if ($mboLocations) {
+            foreach ($loc in $mboLocations) {
+                $locDir = Split-Path $loc -Parent
+                # Skip if this is the uv tool directory
+                if ($uvBinDir -and $locDir -eq $uvBinDir) { continue }
+                $conflicts += $loc
+            }
+        }
+    }
+    catch {}
+
+    # Also check User PATH for env Scripts directories
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($userPath) {
+        $pathDirs = $userPath -split ';'
+        foreach ($dir in $pathDirs) {
+            if ($dir -match 'envs.*Scripts|\.venv.*Scripts|venv.*Scripts') {
+                $mboExe = Join-Path $dir "mbo.exe"
+                if (Test-Path $mboExe) {
+                    if ($conflicts -notcontains $mboExe) {
+                        $conflicts += $mboExe
+                    }
+                }
+            }
+        }
+    }
+
+    return $conflicts
+}
+
+function Remove-ConflictingPathEntries {
+    <#
+    .SYNOPSIS
+    Remove environment Scripts directories from User PATH.
+    #>
+    param([string[]]$ConflictPaths)
+
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if (-not $userPath) { return }
+
+    $dirsToRemove = $ConflictPaths | ForEach-Object { Split-Path $_ -Parent }
+    $pathDirs = $userPath -split ';'
+    $newPathDirs = $pathDirs | Where-Object {
+        $dir = $_
+        $shouldRemove = $false
+        foreach ($removeDir in $dirsToRemove) {
+            if ($dir -eq $removeDir) {
+                $shouldRemove = $true
+                Write-Info "Removing from PATH: $dir"
+                break
+            }
+        }
+        -not $shouldRemove
+    }
+
+    $newPath = ($newPathDirs | Where-Object { $_ }) -join ';'
+    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+    # Update current session
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + $newPath
+    Write-Success "PATH cleaned up"
+}
+
+function Show-ConflictingInstallsCheck {
+    <#
+    .SYNOPSIS
+    Check for and handle conflicting mbo installations.
+    Returns $true if installation should proceed, $false to abort.
+    #>
+    $conflicts = Test-ConflictingMboInstalls
+
+    if ($conflicts.Count -eq 0) {
+        return $true
+    }
+
+    Write-Host ""
+    Write-Warn "Found existing mbo installation(s) that may conflict:"
+    Write-Host ""
+    foreach ($conflict in $conflicts) {
+        Write-Host "    $conflict" -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Host "  These will take precedence over the uv tool installation." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  [1] Clean up  - Remove conflicting entries from PATH (Recommended)" -ForegroundColor Cyan
+    Write-Host "  [2] Continue  - Keep existing (may cause version conflicts)" -ForegroundColor Cyan
+    Write-Host "  [3] Cancel    - Exit installation" -ForegroundColor Cyan
+    Write-Host ""
+
+    do {
+        $choice = Read-Host "Select option (1-3)"
+        $valid = $choice -match '^[123]$'
+        if (-not $valid) { Write-Warn "Invalid selection." }
+    } while (-not $valid)
+
+    switch ($choice) {
+        "1" {
+            Remove-ConflictingPathEntries -ConflictPaths $conflicts
+            return $true
+        }
+        "2" {
+            Write-Warn "Proceeding with existing installations. You may experience version conflicts."
+            return $true
+        }
+        "3" {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function New-DesktopShortcut {
     param([string]$BranchRef = $null)
 
@@ -956,6 +1079,12 @@ function Main {
     # check/install uv
     if (-not (Test-UvInstalled)) {
         Install-Uv
+    }
+
+    # step 0.5: check for conflicting mbo installations
+    $shouldContinue = Show-ConflictingInstallsCheck
+    if (-not $shouldContinue) {
+        exit 0
     }
 
     # step 1: choose installation type (env, CLI, or both)
