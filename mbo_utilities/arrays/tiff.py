@@ -632,9 +632,12 @@ class TiffArray(ReductionMixin):
         self._target_dtype = np.dtype(dtype)
         return self
 
-    def __array__(self):
-        n = min(10, self._nframes)
-        return self[:n]
+    def __array__(self, dtype=None, copy=None):
+        # return single frame for fast histogram/preview (prevents accidental full load)
+        data = self[0]
+        if dtype is not None:
+            data = data.astype(dtype)
+        return data
 
     def close(self):
         for plane in self._planes:
@@ -950,9 +953,12 @@ class MBOTiffArray(ReductionMixin):
         self._target_dtype = np.dtype(dtype)
         return self
 
-    def __array__(self):
-        n = min(10, self._num_frames)
-        return self[:n]
+    def __array__(self, dtype=None, copy=None):
+        # return single frame for fast histogram/preview (prevents accidental full load)
+        data = self[0]
+        if dtype is not None:
+            data = data.astype(dtype)
+        return data
 
     def close(self):
         for tf in self.tiff_files:
@@ -1635,15 +1641,12 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
     def _page_width(self):
         return self._metadata.get("page_width")
 
-    def __array__(self, max_frames: int = 100):
-        if self.num_frames <= max_frames:
-            return np.asarray(self[:])
-
-        rng = np.random.default_rng(42)
-        sample_frames = sorted(
-            rng.choice(self.num_frames, max_frames, replace=False).tolist()
-        )
-        return np.asarray(self[sample_frames])
+    def __array__(self, dtype=None, copy=None):
+        # return single frame for fast histogram/preview (prevents accidental full load)
+        data = self[0]
+        if dtype is not None:
+            data = data.astype(dtype)
+        return data
 
     def _imwrite(
         self,

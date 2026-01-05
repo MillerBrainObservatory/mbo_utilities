@@ -162,8 +162,12 @@ class NumpyArray(ReductionMixin):
         """Return length of first dimension (number of frames for 3D/4D)."""
         return self.shape[0]
 
-    def __array__(self):
-        return np.asarray(self.data)
+    def __array__(self, dtype=None, copy=None):
+        # return single frame for fast histogram/preview (prevents accidental full load)
+        data = self.data[0] if self.ndim >= 1 else self.data
+        if dtype is not None:
+            data = np.asarray(data).astype(dtype)
+        return np.asarray(data)
 
     def __repr__(self) -> str:
         mem_str = " (in-memory)" if self._is_in_memory else ""
