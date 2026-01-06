@@ -60,15 +60,15 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 # Suite2p alone will not include torch
 suite2p = [
     "numba>=0.60.0",
-    "lbm_suite2p_python>=2.5.1",
+    "lbm_suite2p_python>=2.5.2",
     "suite2p_mbo>=2.0.1",
 ]
-# Suite3D volumetric registration (requires CUDA GPU)
+# Suite3D - requires CUPY
 suite3d = [
     "mbo-suite3d>=0.0.6",
     "cupy-cuda12x",
 ]
-# Rastermap dimensionality reduction
+# Rastermap for activity sorting
 rastermap = [
     "rastermap",
 ]
