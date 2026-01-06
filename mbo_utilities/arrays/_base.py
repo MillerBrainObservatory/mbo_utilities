@@ -614,8 +614,9 @@ class ReductionMixin:
         chunk_threshold = 100_000_000  # ~100M elements, ~800MB for float64
 
         if total_elements <= chunk_threshold:
-            # Small enough to load entirely
-            data = np.asarray(self)
+            # Small enough to load entirely - use explicit slicing, not np.asarray
+            # (np.asarray only returns single frame for fast preview)
+            data = self[:]
             np_func = getattr(np, func)
             # Not all numpy functions accept dtype (max/min don't)
             if func in ("max", "min"):

@@ -197,7 +197,11 @@ class H5Array(ReductionMixin):
 
     def __array__(self, dtype=None, copy=None):
         # return single frame for fast histogram/preview (prevents accidental full load)
-        data = self._d[0]
+        # for 1D/2D data, return all (small anyway)
+        if self.ndim <= 2:
+            data = self._d[:]
+        else:
+            data = self._d[0]
         if self._target_dtype is not None:
             data = data.astype(self._target_dtype)
         if dtype is not None:

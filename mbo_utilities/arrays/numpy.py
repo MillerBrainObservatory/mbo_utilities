@@ -164,7 +164,11 @@ class NumpyArray(ReductionMixin):
 
     def __array__(self, dtype=None, copy=None):
         # return single frame for fast histogram/preview (prevents accidental full load)
-        data = self.data[0] if self.ndim >= 1 else self.data
+        # for 1D/2D data, return all (small anyway)
+        if self.ndim <= 2:
+            data = self.data
+        else:
+            data = self.data[0]
         if dtype is not None:
             data = np.asarray(data).astype(dtype)
         return np.asarray(data)
