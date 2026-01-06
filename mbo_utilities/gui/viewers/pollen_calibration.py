@@ -20,7 +20,7 @@ from imgui_bundle import imgui, implot, portable_file_dialogs as pfd
 
 from . import BaseViewer
 from mbo_utilities.gui.panels import DebugPanel, ProcessPanel, MetadataPanel
-from mbo_utilities.gui._imgui_helpers import set_tooltip, style_seaborn_dark
+from mbo_utilities.gui._imgui_helpers import set_tooltip
 from mbo_utilities.metadata import get_param
 from mbo_utilities.metadata.scanimage import (
     get_lbm_ai_sources,
@@ -108,8 +108,6 @@ class PollenCalibrationViewer(BaseViewer):
         # Pollen-specific state
         self._z_step_um = 1.0
         self._pixel_size_um = 1.0
-        self._fov_um = 600.0
-        self._zoom = 1.0
 
         self._cavity_info = None
         self._beam_order = None
@@ -126,17 +124,13 @@ class PollenCalibrationViewer(BaseViewer):
         self._results_auto = None
         self._results_manual = None
 
-        # Image preview state
+        # Results viewing state
         self._saved_images: list[Path] = []
-        self._show_image_popup = False
-        self._image_popup_open = False
-        self._image_popup_mode = None  # Which mode's images to show
-
-        # Results table state
-        self._show_results_table = False
-        self._results_table_open = False
-        self._calibration_data_auto = None
-        self._calibration_data_manual = None
+        self._show_figures_popup = False
+        self._figures_popup_mode = "auto"
+        self._current_figure_idx = 0
+        self._calibration_data_auto = None   # cached H5 data for auto mode
+        self._calibration_data_manual = None  # cached H5 data for manual mode
 
         # Manual calibration state
         self._manual_mode = False
@@ -153,10 +147,11 @@ class PollenCalibrationViewer(BaseViewer):
         self._external_h5_dialog = None  # pfd file dialog for loading external H5
         self._loaded_external = None     # External calibration data dict
         self._existing_h5_files = []     # H5 files found in current directory
+        self._original_data_array = None  # Store original array for restoration
 
-        # ImPlot comparison popup state
-        self._show_shift_popup = False
-        self._shift_popup_open = False
+        # Drag detection state for click handler
+        self._pointer_down_pos = None  # (x, y) on pointer_down
+        self._drag_threshold = 5.0     # pixels moved to consider it a drag
 
         # Only initialize panels when not using legacy delegation
         if parent is None:
@@ -171,6 +166,13 @@ class PollenCalibrationViewer(BaseViewer):
         if self.parent is not None:
             return self.parent.image_widget.data if self.parent.image_widget else None
         return self.image_widget.data if self.image_widget else None
+
+    def get_metadata(self) -> dict:
+        """Get metadata, using stored original if in manual mode."""
+        if self._original_metadata:
+            return self._original_metadata
+        arr = self._get_array()
+        return getattr(arr, "metadata", {}) if arr is not None else {}
 
     @property
     def logger(self):
@@ -210,10 +212,24 @@ class PollenCalibrationViewer(BaseViewer):
         else:
             self._z_step_um = get_param(metadata, "dz", default=1.0)
 
-        self._zoom = get_param(metadata, "zoom_factor", default=1.0)
-        if arr.ndim >= 2:
-            nx = arr.shape[-1]
-            self._pixel_size_um = self._fov_um / self._zoom / nx
+        # get pixel size from metadata (already calculated in microns)
+        pixel_res = get_param(metadata, "pixel_resolution", default=None)
+        if pixel_res is not None:
+            # pixel_resolution is (dx, dy) tuple in microns
+            self._pixel_size_um = float(pixel_res[0]) if hasattr(pixel_res, '__getitem__') else float(pixel_res)
+        else:
+            # fallback: use fov_um if available, otherwise warn and use default
+            fov_um = get_param(metadata, "fov_um", default=None)
+            if fov_um is not None and arr.ndim >= 2:
+                nx = arr.shape[-1]
+                fov_x = fov_um[0] if hasattr(fov_um, '__getitem__') else fov_um
+                self._pixel_size_um = float(fov_x) / nx
+            elif arr.ndim >= 2:
+                # last resort: use default 600um FOV with zoom
+                zoom = get_param(metadata, "zoom_factor", default=1.0)
+                nx = arr.shape[-1]
+                self._pixel_size_um = 600.0 / zoom / nx
+                self.logger.warning("pixel_resolution not in metadata, using default FOV=600um")
 
         nc = getattr(arr, "num_channels", arr.shape[1] if arr.ndim >= 2 else 1)
         self._cavity_info = get_cavity_indices(metadata, nc)
@@ -277,6 +293,10 @@ class PollenCalibrationViewer(BaseViewer):
             for panel in self._panels.values():
                 panel.draw()
 
+        # Always draw popup (works in both modes)
+        if self._show_figures_popup:
+            self._draw_figures_popup()
+
     def _draw_calibration_ui(self) -> None:
         """Draw the main calibration UI."""
         if not self._initialized:
@@ -307,13 +327,6 @@ class PollenCalibrationViewer(BaseViewer):
             imgui.separator()
             imgui.spacing()
 
-            # Shift preview (only if we have data)
-            self._draw_shift_preview()
-
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
             self._draw_auto_status()
             imgui.spacing()
             imgui.separator()
@@ -332,58 +345,18 @@ class PollenCalibrationViewer(BaseViewer):
         if arr is not None:
             # Shape info (compact)
             imgui.text(f"Shape: {arr.shape}")
-            set_tooltip("(Z-piezo, Channels, Y, X)")
+            set_tooltip("(Z-piezo, Channels, Y, X)", show_mark=False)
 
-            # Core parameters
+            # Core parameters with tooltips
             imgui.text(f"Z-step: {self._z_step_um:.2f} um")
+            set_tooltip("Piezo z-step size between each slice (from stackZStepSize)", show_mark=False)
             imgui.text(f"Pixel: {self._pixel_size_um:.3f} um")
-
-            # Get calibration summary data if available
-            summary = self._get_active_calibration_summary()
-            if summary:
-                imgui.spacing()
-                # RMS shifts - key metric
-                if summary.get("rms_dx") is not None and summary.get("rms_dy") is not None:
-                    imgui.text_colored(
-                        imgui.ImVec4(0.6, 0.8, 0.6, 1.0),
-                        f"RMS dX: {summary['rms_dx']:.2f} um"
-                    )
-                    imgui.same_line()
-                    imgui.text_colored(
-                        imgui.ImVec4(0.6, 0.8, 0.6, 1.0),
-                        f"dY: {summary['rms_dy']:.2f} um"
-                    )
-
-                # Fit quality metrics
-                r2 = summary.get("z_fit_r_squared")
-                decay = summary.get("decay_length_um")
-                if r2 is not None or decay is not None:
-                    parts = []
-                    if r2 is not None:
-                        parts.append(f"R\u00b2: {r2:.3f}")
-                    if decay is not None:
-                        parts.append(f"Decay: {decay:.0f} um")
-                    if parts:
-                        imgui.text_colored(
-                            imgui.ImVec4(0.6, 0.7, 0.9, 1.0),
-                            "  ".join(parts)
-                        )
+            set_tooltip("Pixel size in microns (from metadata pixel_resolution)", show_mark=False)
         else:
             imgui.text_disabled("No data loaded")
 
-    def _get_active_calibration_summary(self) -> dict | None:
-        """Get the most recent calibration summary for display."""
-        # Prefer manual if available, then auto, then external
-        if self._calibration_data_manual:
-            return self._calibration_data_manual
-        if self._calibration_data_auto:
-            return self._calibration_data_auto
-        if self._loaded_external:
-            return self._loaded_external
-        return None
-
     def _draw_auto_status(self):
-        """Draw automatic calibration status and results for both modes."""
+        """Draw automatic calibration status and results."""
         # Show processing status
         if self._processing:
             imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.8, 1.0), "Processing...")
@@ -394,94 +367,46 @@ class PollenCalibrationViewer(BaseViewer):
             imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), f"Error: {self._error}")
             imgui.spacing()
 
-        # Auto calibration results
-        if self._results_auto:
-            imgui.text_colored(imgui.ImVec4(0.4, 0.7, 1.0, 1.0), "Auto Results")
-            if imgui.button("Graphs##auto"):
-                self._image_popup_mode = "auto"
-                self._show_image_popup = True
-                self._scan_saved_images("auto")
+        # Check if we have any results
+        has_auto = self._results_auto is not None
+        has_manual = self._results_manual is not None
+
+        if has_auto or has_manual:
+            imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.9, 1.0), "Results")
+            imgui.spacing()
+
+            # Buttons - mode selection is in the popup
+            if imgui.button("Open Folder"):
+                # Open folder for whichever result exists (prefer manual)
+                mode = "manual" if has_manual else "auto"
+                self._open_output_folder(mode)
             imgui.same_line()
-            if imgui.button("Table##auto"):
-                self._show_results_table = True
-                self._load_calibration_data("auto")
-            imgui.spacing()
+            if imgui.button("View Figures"):
+                # Default to auto if available, otherwise manual
+                mode = "auto" if has_auto else "manual"
+                self._open_all_graphs(mode)
 
-        # Manual calibration results
-        if self._results_manual:
-            imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.6, 1.0), "Manual Results")
-            if imgui.button("Graphs##manual"):
-                self._image_popup_mode = "manual"
-                self._show_image_popup = True
-                self._scan_saved_images("manual")
-            imgui.same_line()
-            if imgui.button("Table##manual"):
-                self._show_results_table = True
-                self._load_calibration_data("manual")
-            imgui.spacing()
-
-        # External loaded results
-        if self._loaded_external:
-            mode = self._loaded_external.get("calibration_mode", "external")
-            imgui.text_colored(imgui.ImVec4(0.9, 0.6, 0.9, 1.0), f"Loaded: {mode}")
-            if imgui.button("Clear##external"):
-                self._loaded_external = None
-            imgui.spacing()
-
-        # Comparison button - appears when both auto and manual are done
-        if self._results_auto and self._results_manual:
-            imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "Comparison")
-            if imgui.button("Auto vs Manual"):
-                self._show_comparison()
-            imgui.spacing()
-
-        # Show waiting if nothing is done yet
-        if not self._processing and not self._results_auto and not self._results_manual and not self._error:
+        elif not self._processing and not self._error:
             imgui.text_disabled("Waiting...")
 
-        # Draw popups
-        self._draw_image_popup()
-        self._draw_results_table()
-        self._draw_shift_comparison_popup()
-
     def _draw_load_previous_section(self):
-        """Draw UI for loading previous calibration files."""
-        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.9, 1.0), "Load Previous")
-        imgui.spacing()
-
+        """Draw UI for loading previous calibration results."""
         # Scan for existing H5 files if not already done
         if not self._existing_h5_files:
             self._scan_existing_h5_files()
 
-        # Show existing files from current dataset directory
-        if self._existing_h5_files:
-            imgui.text_disabled(f"Found {len(self._existing_h5_files)} file(s)")
-            for h5_path in self._existing_h5_files:
-                name = h5_path.name
-                # Truncate long names
-                display_name = name if len(name) < 25 else name[:22] + "..."
-                if imgui.button(display_name):
-                    self._load_h5_file(str(h5_path))
-                set_tooltip(str(h5_path))
+        # Auto-load first existing result if available and not already loaded
+        if self._existing_h5_files and not self._loaded_external:
+            self._load_h5_file(str(self._existing_h5_files[0]))
 
-        imgui.spacing()
-
-        # Browse for external file
-        if imgui.button("Browse H5..."):
-            fpath = self._get_fpath()
-            start_dir = str(fpath.parent) if fpath else str(Path.home())
-            self._external_h5_dialog = pfd.open_file(
-                "Select Calibration H5",
-                start_dir,
-                ["H5 Files", "*.h5", "All Files", "*"],
-            )
-
-        # Check dialog result
-        if self._external_h5_dialog is not None and self._external_h5_dialog.ready():
-            result = self._external_h5_dialog.result()
-            if result and len(result) > 0:
-                self._load_h5_file(result[0])
-            self._external_h5_dialog = None
+        # Show loaded results status
+        if self._loaded_external:
+            mode = self._loaded_external.get("calibration_mode", "previous")
+            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 0.6, 1.0), f"Loaded: {mode}")
+            h5_path = self._loaded_external.get("h5_path", "")
+            if h5_path:
+                name = Path(h5_path).name
+                imgui.text_disabled(name[:30] + "..." if len(name) > 30 else name)
 
     def _scan_existing_h5_files(self):
         """Scan current file's directory for existing pollen H5 files."""
@@ -513,247 +438,32 @@ class PollenCalibrationViewer(BaseViewer):
         else:
             self.logger.error(f"Failed to load calibration from: {path}")
 
-    def _draw_shift_preview(self):
-        """Draw small inline XY shift scatter plot preview."""
-        summary = self._get_active_calibration_summary()
-        if not summary:
-            return
-
-        diffx = summary.get("diffx")
-        diffy = summary.get("diffy")
-        if diffx is None or diffy is None:
-            return
-
-        diffx = np.asarray(diffx, dtype=np.float64)
-        diffy = np.asarray(diffy, dtype=np.float64)
-
-        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.9, 1.0), "X/Y Shifts")
-        imgui.spacing()
-
-        plot_height = 120
-        style_seaborn_dark()
-
-        if implot.begin_plot("##shift_preview", imgui.ImVec2(-1, plot_height)):
-            implot.setup_axes("dX (um)", "dY (um)",
-                              implot.AxisFlags_.auto_fit.value,
-                              implot.AxisFlags_.auto_fit.value)
-
-            # Plot scatter
-            implot.push_style_color(implot.Col_.marker_fill.value, (0.2, 0.6, 0.9, 0.8))
-            implot.plot_scatter("Shifts", diffx, diffy)
-            implot.pop_style_color()
-
-            implot.end_plot()
-
-        # Click to enlarge button
-        if imgui.button("Enlarge", imgui.ImVec2(-1, 0)):
-            self._show_shift_popup = True
-
-    def _draw_shift_comparison_popup(self):
-        """Draw full X/Y shift comparison popup with multiple plots."""
-        if self._show_shift_popup:
-            self._shift_popup_open = True
-            imgui.open_popup("X/Y Shift Analysis")
-            self._show_shift_popup = False
-
-        imgui.set_next_window_size(imgui.ImVec2(700, 550), imgui.Cond_.first_use_ever)
-
-        opened, visible = imgui.begin_popup_modal(
-            "X/Y Shift Analysis",
-            p_open=True if self._shift_popup_open else None,
-            flags=imgui.WindowFlags_.no_saved_settings
-        )
-
-        if opened:
-            if not visible:
-                self._shift_popup_open = False
-                imgui.close_current_popup()
-                imgui.end_popup()
-                return
-
-            style_seaborn_dark()
-
-            # Get data from both sources if available
-            auto_data = self._calibration_data_auto
-            manual_data = self._calibration_data_manual
-            external_data = self._loaded_external
-
-            # Use whatever data is available
-            primary_data = manual_data or auto_data or external_data
-            secondary_data = auto_data if manual_data else external_data
-
-            if not primary_data:
-                imgui.text_disabled("No calibration data available")
-                if imgui.button("Close"):
-                    self._shift_popup_open = False
-                    imgui.close_current_popup()
-                imgui.end_popup()
-                return
-
-            avail = imgui.get_content_region_avail()
-            plot_w = (avail.x - 20) / 2
-            plot_h = (avail.y - 60) / 2
-
-            # Row 1: XY Scatter and dX bar chart
-            self._draw_xy_scatter_plot(primary_data, secondary_data, plot_w, plot_h)
-            imgui.same_line()
-            self._draw_dx_bar_chart(primary_data, secondary_data, plot_w, plot_h)
-
-            # Row 2: dY bar chart and difference plot
-            self._draw_dy_bar_chart(primary_data, secondary_data, plot_w, plot_h)
-            imgui.same_line()
-            self._draw_difference_plot(primary_data, secondary_data, plot_w, plot_h)
-
-            imgui.spacing()
-            if imgui.button("Close", imgui.ImVec2(100, 0)):
-                self._shift_popup_open = False
-                imgui.close_current_popup()
-
-            imgui.end_popup()
-
-    def _draw_xy_scatter_plot(self, primary, secondary, width, height):
-        """Draw XY scatter plot comparing positions."""
-        if implot.begin_plot("XY Positions", imgui.ImVec2(width, height)):
-            implot.setup_axes("X (um)", "Y (um)",
-                              implot.AxisFlags_.auto_fit.value,
-                              implot.AxisFlags_.auto_fit.value)
-
-            # Primary data
-            xs = np.asarray(primary.get("xs_um", primary.get("diffx", [])), dtype=np.float64)
-            ys = np.asarray(primary.get("ys_um", primary.get("diffy", [])), dtype=np.float64)
-            if len(xs) > 0 and len(ys) > 0:
-                mode1 = primary.get("calibration_mode", "primary")
-                implot.push_style_color(implot.Col_.marker_fill.value, (0.0, 0.75, 1.0, 0.8))
-                implot.plot_scatter(mode1.capitalize(), xs, ys)
-                implot.pop_style_color()
-
-            # Secondary data
-            if secondary:
-                xs2 = np.asarray(secondary.get("xs_um", secondary.get("diffx", [])), dtype=np.float64)
-                ys2 = np.asarray(secondary.get("ys_um", secondary.get("diffy", [])), dtype=np.float64)
-                if len(xs2) > 0 and len(ys2) > 0:
-                    mode2 = secondary.get("calibration_mode", "secondary")
-                    implot.push_style_color(implot.Col_.marker_fill.value, (0.4, 1.0, 0.4, 0.8))
-                    implot.plot_scatter(mode2.capitalize(), xs2, ys2)
-                    implot.pop_style_color()
-
-            implot.end_plot()
-
-    def _draw_dx_bar_chart(self, primary, secondary, width, height):
-        """Draw dX per-beamlet bar chart."""
-        if implot.begin_plot("dX per Beamlet", imgui.ImVec2(width, height)):
-            implot.setup_axes("Beam", "dX (um)",
-                              implot.AxisFlags_.auto_fit.value,
-                              implot.AxisFlags_.auto_fit.value)
-
-            dx1 = np.asarray(primary.get("diffx", []), dtype=np.float64)
-            if len(dx1) > 0:
-                x_pos = np.arange(1, len(dx1) + 1, dtype=np.float64)
-                bar_width = 0.35 if secondary else 0.7
-                offset = -bar_width/2 if secondary else 0
-
-                implot.push_style_color(implot.Col_.fill.value, (0.0, 0.75, 1.0, 0.8))
-                implot.plot_bars("Primary", x_pos + offset, dx1, bar_width)
-                implot.pop_style_color()
-
-            if secondary:
-                dx2 = np.asarray(secondary.get("diffx", []), dtype=np.float64)
-                if len(dx2) > 0:
-                    x_pos = np.arange(1, len(dx2) + 1, dtype=np.float64)
-                    implot.push_style_color(implot.Col_.fill.value, (0.4, 1.0, 0.4, 0.8))
-                    implot.plot_bars("Secondary", x_pos + bar_width/2, dx2, bar_width)
-                    implot.pop_style_color()
-
-            implot.end_plot()
-
-    def _draw_dy_bar_chart(self, primary, secondary, width, height):
-        """Draw dY per-beamlet bar chart."""
-        if implot.begin_plot("dY per Beamlet", imgui.ImVec2(width, height)):
-            implot.setup_axes("Beam", "dY (um)",
-                              implot.AxisFlags_.auto_fit.value,
-                              implot.AxisFlags_.auto_fit.value)
-
-            dy1 = np.asarray(primary.get("diffy", []), dtype=np.float64)
-            if len(dy1) > 0:
-                x_pos = np.arange(1, len(dy1) + 1, dtype=np.float64)
-                bar_width = 0.35 if secondary else 0.7
-                offset = -bar_width/2 if secondary else 0
-
-                implot.push_style_color(implot.Col_.fill.value, (0.0, 0.75, 1.0, 0.8))
-                implot.plot_bars("Primary", x_pos + offset, dy1, bar_width)
-                implot.pop_style_color()
-
-            if secondary:
-                dy2 = np.asarray(secondary.get("diffy", []), dtype=np.float64)
-                if len(dy2) > 0:
-                    x_pos = np.arange(1, len(dy2) + 1, dtype=np.float64)
-                    implot.push_style_color(implot.Col_.fill.value, (0.4, 1.0, 0.4, 0.8))
-                    implot.plot_bars("Secondary", x_pos + bar_width/2, dy2, bar_width)
-                    implot.pop_style_color()
-
-            implot.end_plot()
-
-    def _draw_difference_plot(self, primary, secondary, width, height):
-        """Draw difference plot (secondary - primary) with RMS annotation."""
-        if implot.begin_plot("Difference", imgui.ImVec2(width, height)):
-            implot.setup_axes("Beam", "Diff (um)",
-                              implot.AxisFlags_.auto_fit.value,
-                              implot.AxisFlags_.auto_fit.value)
-
-            if secondary:
-                dx1 = np.asarray(primary.get("diffx", []), dtype=np.float64)
-                dy1 = np.asarray(primary.get("diffy", []), dtype=np.float64)
-                dx2 = np.asarray(secondary.get("diffx", []), dtype=np.float64)
-                dy2 = np.asarray(secondary.get("diffy", []), dtype=np.float64)
-
-                n = min(len(dx1), len(dx2), len(dy1), len(dy2))
-                if n > 0:
-                    diff_x = dx2[:n] - dx1[:n]
-                    diff_y = dy2[:n] - dy1[:n]
-                    x_pos = np.arange(1, n + 1, dtype=np.float64)
-
-                    bar_width = 0.35
-                    implot.push_style_color(implot.Col_.fill.value, (1.0, 0.4, 0.4, 0.8))
-                    implot.plot_bars("dX diff", x_pos - bar_width/2, diff_x, bar_width)
-                    implot.pop_style_color()
-
-                    implot.push_style_color(implot.Col_.fill.value, (1.0, 0.67, 0.0, 0.8))
-                    implot.plot_bars("dY diff", x_pos + bar_width/2, diff_y, bar_width)
-                    implot.pop_style_color()
-
-                    # Add zero line
-                    implot.push_style_color(implot.Col_.line.value, (1.0, 1.0, 1.0, 0.5))
-                    zeros = np.zeros_like(x_pos)
-                    implot.plot_line("##zero", x_pos, zeros)
-                    implot.pop_style_color()
-
-                    # Show RMS in annotation
-                    rms_x = np.sqrt(np.mean(diff_x**2))
-                    rms_y = np.sqrt(np.mean(diff_y**2))
-                    implot.annotation(
-                        float(x_pos[-1]), float(max(diff_x.max(), diff_y.max())),
-                        imgui.ImVec4(1, 1, 1, 1),
-                        imgui.ImVec2(-10, -10),
-                        True,
-                        f"RMS: X={rms_x:.2f}, Y={rms_y:.2f}"
-                    )
-            else:
-                imgui.text_disabled("Need two datasets")
-
-            implot.end_plot()
-
     def _draw_manual_button(self):
         """Draw manual calibration button."""
-        imgui.text_colored(imgui.ImVec4(0.8, 0.6, 0.2, 1.0), "Interactive Mode")
+        # Centered header with help
+        avail_w = imgui.get_content_region_avail().x
+        text = "Interactive Calibration"
+        text_w = imgui.calc_text_size(text).x
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_w - text_w - 20) / 2)
+        imgui.text_colored(imgui.ImVec4(0.8, 0.6, 0.2, 1.0), text)
+        # set_tooltip adds its own (?) mark
+        set_tooltip(
+            "Manual pollen calibration mode.\n\n"
+            "Click on the same pollen bead in each beamlet.\n"
+            "The viewer will show one beamlet at a time.\n\n"
+            "Navigation:\n"
+            "  - Drag to pan the view\n"
+            "  - Scroll wheel to zoom\n"
+            "  - Single click (no drag) to mark bead position"
+        )
+
         imgui.spacing()
 
-        if imgui.button("Start Manual Calibration", imgui.ImVec2(-1, 0)):
+        # Centered button
+        btn_w = 180
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_w - btn_w) / 2)
+        if imgui.button("Start", imgui.ImVec2(btn_w, 0)):
             self._start_manual_mode()
-
-        set_tooltip(
-            "Click on the same pollen bead in each beamlet.\n"
-            "The viewer will show one beamlet at a time."
-        )
 
     def _draw_manual_mode(self):
         """Draw manual calibration UI."""
@@ -809,7 +519,8 @@ class PollenCalibrationViewer(BaseViewer):
         self._manual_positions = []
         self._manual_z_indices = []
 
-        # Store original metadata before we replace viewer data with numpy array
+        # Store original data array and metadata before we replace viewer data
+        self._original_data_array = arr
         self._original_metadata = getattr(arr, "metadata", {})
 
         # Load volume into memory for click analysis
@@ -849,7 +560,7 @@ class PollenCalibrationViewer(BaseViewer):
         self.logger.info("Manual calibration started. Click on pollen beads.")
 
     def _setup_click_handler(self):
-        """Set up click event handler on the image."""
+        """Set up click event handler on the image with drag detection."""
         if self.image_widget is None:
             return
 
@@ -857,9 +568,26 @@ class PollenCalibrationViewer(BaseViewer):
         try:
             subplot = self.image_widget.figure[0, 0]
 
+            def on_pointer_down(ev):
+                """Track pointer down position for drag detection."""
+                if not self._manual_mode:
+                    return
+                self._pointer_down_pos = (ev.x, ev.y)
+
             def on_click(ev):
                 if not self._manual_mode:
                     return
+
+                # Check if this was a drag (mouse moved significantly)
+                if self._pointer_down_pos is not None:
+                    dx = abs(ev.x - self._pointer_down_pos[0])
+                    dy = abs(ev.y - self._pointer_down_pos[1])
+                    if dx > self._drag_threshold or dy > self._drag_threshold:
+                        # This was a drag, not a click - skip marking
+                        self._pointer_down_pos = None
+                        return
+
+                self._pointer_down_pos = None
 
                 # Map screen coords to world coords
                 try:
@@ -870,9 +598,10 @@ class PollenCalibrationViewer(BaseViewer):
                 except Exception as e:
                     self.logger.exception(f"Click mapping error: {e}")
 
+            subplot.renderer.add_event_handler(on_pointer_down, "pointer_down")
             subplot.renderer.add_event_handler(on_click, "click")
             self._click_handler = on_click
-            self.logger.info("Click handler registered")
+            self.logger.info("Click handler registered with drag detection")
 
         except Exception as e:
             self.logger.exception(f"Failed to set up click handler: {e}")
@@ -1003,16 +732,23 @@ class PollenCalibrationViewer(BaseViewer):
         self._vol = None
         self._num_channels = None
         self._max_projections = None
-        self._original_metadata = None
 
-        # Restore original data view
+        # Restore original data view before clearing references
         self._restore_original_view()
+
+        # Clear stored references after restore
+        self._original_metadata = None
+        self._original_data_array = None
         self.logger.info("Manual calibration cancelled")
 
     def _restore_original_view(self):
         """Restore the original full data view."""
-        arr = self._get_array()
-        if arr is None or self.image_widget is None:
+        if self.image_widget is None:
+            return
+
+        # Use stored original array if available
+        arr = self._original_data_array if self._original_data_array is not None else self._get_array()
+        if arr is None:
             return
 
         try:
@@ -1040,8 +776,12 @@ class PollenCalibrationViewer(BaseViewer):
 
         self.logger.info(f"Running calibration with {len(positions)} marked positions...")
 
-        # Restore view
+        # Restore view before running background calibration
         self._restore_original_view()
+
+        # Clear max projections (no longer needed)
+        self._max_projections = None
+        self._num_channels = None
 
         # Run calibration in background
         self._processing = True
@@ -1118,20 +858,29 @@ class PollenCalibrationViewer(BaseViewer):
             }
             self.logger.info(f"Manual calibration complete! Results saved to {fpath.parent}")
 
-            # Auto-generate comparison if auto results are also available
-            self._generate_comparison_if_ready()
-
         except Exception as e:
             self.logger.exception(f"Calibration failed: {e}")
             self._error = str(e)
         finally:
             self._processing = False
             self._vol = None
+            self._original_metadata = None
+            self._original_data_array = None
 
     # === Auto calibration methods ===
 
     def _start_auto_calibration(self):
         """Start automatic background calibration."""
+        # Check if previous results exist
+        self._scan_existing_h5_files()
+        if self._existing_h5_files:
+            # Load previous results instead of running calibration
+            self._load_h5_file(str(self._existing_h5_files[0]))
+            self._done = True
+            self._status = "Loaded previous results"
+            self.logger.info("Found previous calibration results, skipping auto calibration")
+            return
+
         self._processing = True
         self._progress = 0.0
         self._done = False
@@ -1216,42 +965,94 @@ class PollenCalibrationViewer(BaseViewer):
             self._processing = False
 
     def _detect_beads(self, vol):
-        """Detect bead positions in each channel following beam order.
+        """Detect bead positions by tracking a reference bead across channels.
 
-        Returns positions and z_indices in beam order (matching manual calibration),
-        not raw channel order.
+        Uses the same approach as manual mode: find a bead in the first channel,
+        then track that same bead in other channels using cross-correlation.
+
+        Returns positions and z_indices in beam order (matching manual calibration).
         """
+        from scipy.signal import correlate2d
+
         _nz, nc, ny, nx = vol.shape
         positions = []
         z_indices = []
         patch_size = 10
+        template_size = 25  # larger template for better matching
 
-        # Iterate in beam order so positions match manual calibration order
+        # get max projections for all channels (same as manual mode shows)
+        max_projs = vol.max(axis=0)  # (nc, ny, nx)
+
+        # find reference bead in first channel (beam order)
+        first_channel = self._beam_order[0] if len(self._beam_order) > 0 else 0
+        ref_img = max_projs[first_channel]
+
+        # find brightest region in reference channel
+        threshold = np.percentile(ref_img, 90)
+        mask = ref_img > threshold
+        if mask.sum() > 0:
+            yy, xx = np.where(mask)
+            weights = ref_img[mask]
+            ref_cx = np.average(xx, weights=weights)
+            ref_cy = np.average(yy, weights=weights)
+        else:
+            peak_idx = np.argmax(ref_img)
+            ref_cy, ref_cx = np.unravel_index(peak_idx, ref_img.shape)
+
+        # extract reference template
+        ix, iy = round(ref_cx), round(ref_cy)
+        t_y0 = max(0, iy - template_size)
+        t_y1 = min(ny, iy + template_size + 1)
+        t_x0 = max(0, ix - template_size)
+        t_x1 = min(nx, ix + template_size + 1)
+        template = ref_img[t_y0:t_y1, t_x0:t_x1].copy()
+
+        # normalize template for correlation
+        template = template - template.mean()
+        template_std = template.std()
+        if template_std > 0:
+            template = template / template_std
+
+        # track bead in each channel using cross-correlation
         for idx in range(nc):
             channel = self._beam_order[idx] if idx < len(self._beam_order) else idx
+            img = max_projs[channel]
 
-            # Max projection over Z for this channel
-            img = vol[:, channel, :, :].max(axis=0)
-
-            # Find brightest region using adaptive threshold
-            # Use a more robust approach: find peak then refine with centroid
-            threshold = np.percentile(img, 90)
-            mask = img > threshold
-
-            if mask.sum() > 0:
-                # Find weighted centroid of bright region
-                yy, xx = np.where(mask)
-                weights = img[mask]
-                cx = np.average(xx, weights=weights)
-                cy = np.average(yy, weights=weights)
+            if idx == 0:
+                # first channel uses reference position directly
+                cx, cy = ref_cx, ref_cy
             else:
-                # Fallback: find global maximum
-                peak_idx = np.argmax(img)
-                cy, cx = np.unravel_index(peak_idx, img.shape)
+                # cross-correlate template with this channel's image
+                img_norm = img - img.mean()
+                img_std = img.std()
+                if img_std > 0:
+                    img_norm = img_norm / img_std
 
-            positions.append((cx, cy))
+                # use normalized cross-correlation
+                corr = correlate2d(img_norm, template, mode='same')
 
-            # Find best Z for this position
+                # find peak in correlation map
+                peak_idx = np.argmax(corr)
+                cy, cx = np.unravel_index(peak_idx, corr.shape)
+
+                # refine with centroid around peak
+                p_y0 = max(0, cy - 5)
+                p_y1 = min(ny, cy + 6)
+                p_x0 = max(0, cx - 5)
+                p_x1 = min(nx, cx + 6)
+                peak_region = corr[p_y0:p_y1, p_x0:p_x1]
+
+                if peak_region.max() > 0:
+                    # weighted centroid refinement
+                    peak_region = peak_region - peak_region.min()
+                    if peak_region.sum() > 0:
+                        yy, xx = np.mgrid[0:peak_region.shape[0], 0:peak_region.shape[1]]
+                        cx = p_x0 + np.average(xx, weights=peak_region)
+                        cy = p_y0 + np.average(yy, weights=peak_region)
+
+            positions.append((float(cx), float(cy)))
+
+            # find best Z for this position
             ix, iy = round(cx), round(cy)
             y0 = max(0, iy - patch_size)
             y1 = min(ny, iy + patch_size + 1)
@@ -1330,53 +1131,6 @@ class PollenCalibrationViewer(BaseViewer):
         # Sort by name
         self._saved_images.sort(key=lambda p: p.name)
 
-    def _draw_image_popup(self):
-        """Draw popup window listing saved images."""
-        if self._show_image_popup:
-            self._image_popup_open = True
-            mode_label = "Manual" if self._image_popup_mode == "manual" else "Auto"
-            imgui.open_popup(f"Outputs ({mode_label})")
-            self._show_image_popup = False
-
-        mode_label = "Manual" if self._image_popup_mode == "manual" else "Auto"
-        imgui.set_next_window_size(imgui.ImVec2(400, 400), imgui.Cond_.first_use_ever)
-
-        opened, visible = imgui.begin_popup_modal(
-            f"Outputs ({mode_label})",
-            p_open=True if self._image_popup_open else None,
-            flags=imgui.WindowFlags_.no_saved_settings
-        )
-
-        if opened:
-            if not visible:
-                self._image_popup_open = False
-                imgui.close_current_popup()
-                imgui.end_popup()
-                return
-
-            imgui.text(f"Found {len(self._saved_images)} {mode_label.lower()} images")
-            imgui.separator()
-            imgui.spacing()
-
-            # Scrollable list of images
-            if imgui.begin_child("image_list", imgui.ImVec2(0, -30)):
-                for img_path in self._saved_images:
-                    # Show filename without prefix for cleaner display
-                    display_name = img_path.name.replace(f"pollen_{self._image_popup_mode}_", "")
-                    if imgui.button(display_name, imgui.ImVec2(-1, 0)):
-                        self._open_image(img_path)
-                imgui.end_child()
-
-            imgui.spacing()
-            if imgui.button("Open Folder"):
-                self._open_output_folder(self._image_popup_mode)
-            imgui.same_line()
-            if imgui.button("Close"):
-                self._image_popup_open = False
-                imgui.close_current_popup()
-
-            imgui.end_popup()
-
     def _open_image(self, path: Path):
         """Open an image in the system default viewer."""
         import subprocess
@@ -1417,230 +1171,185 @@ class PollenCalibrationViewer(BaseViewer):
         except Exception as e:
             self.logger.exception(f"Failed to open folder: {e}")
 
-    def _show_comparison(self):
-        """Generate and show comparison plot between auto and manual results."""
-        fpath = self._get_fpath()
-        if fpath is None:
-            self.logger.error("No file path for comparison")
-            return
+    def _open_all_graphs(self, mode: str = "auto"):
+        """Show figures popup with implot graphs."""
+        self._figures_popup_mode = mode
+        self._show_figures_popup = True
 
-        from mbo_utilities.gui._pollen_analysis import plot_comparison
+    def _load_calibration_data(self, mode: str):
+        """Load calibration data from H5 file for plotting."""
+        from mbo_utilities.gui._pollen_analysis import extract_calibration_summary
 
-        success = plot_comparison(fpath)
-        if success:
-            # Open the comparison image
-            comparison_path = fpath.with_name("pollen_comparison.png")
-            if comparison_path.exists():
-                self._open_image(comparison_path)
-        else:
-            self.logger.warning("Could not generate comparison - both modes required")
+        # Check cache first
+        if mode == "auto" and self._calibration_data_auto is not None:
+            return self._calibration_data_auto
+        if mode == "manual" and self._calibration_data_manual is not None:
+            return self._calibration_data_manual
 
-    def _generate_comparison_if_ready(self):
-        """Generate comparison plot if both auto and manual results are available."""
-        if not self._results_auto or not self._results_manual:
-            return
-
-        fpath = self._get_fpath()
-        if fpath is None:
-            return
-
-        from mbo_utilities.gui._pollen_analysis import plot_comparison
-
-        try:
-            plot_comparison(fpath)
-            self.logger.info("Generated auto vs manual comparison plot")
-        except Exception as e:
-            self.logger.exception(f"Failed to generate comparison: {e}")
-
-    def _load_calibration_data(self, mode: str = "auto"):
-        """Load calibration data from HDF5 file for results table."""
-        import h5py
-
-        self._results_table_mode = mode
-
+        # Find H5 file
         results = self._results_auto if mode == "auto" else self._results_manual
         if not results:
-            return
+            # Try loaded external
+            if self._loaded_external and self._loaded_external.get("h5_path"):
+                h5_path = self._loaded_external["h5_path"]
+            else:
+                return None
+        else:
+            h5_path = results.get("h5_file", "")
 
-        h5_file = results.get("h5_file", "")
-        if not h5_file or not Path(h5_file).exists():
-            return
+        if not h5_path:
+            return None
 
-        try:
-            with h5py.File(h5_file, "r") as f:
-                if mode not in f:
-                    self.logger.error(f"Mode '{mode}' not found in H5 file")
-                    return
+        data = extract_calibration_summary(h5_path, mode=mode)
+        if data:
+            if mode == "auto":
+                self._calibration_data_auto = data
+            else:
+                self._calibration_data_manual = data
 
-                # Get shared metadata from root level
-                data = {
-                    "num_beamlets": f.attrs.get("num_planes", 0),
-                    "z_step_um": f.attrs.get("z_step_um", 0),
-                    "is_lbm": f.attrs.get("is_lbm", False),
-                    "num_cavities": f.attrs.get("num_cavities", 1),
-                    "calibration_mode": mode,
-                }
+        return data
 
-                grp = f[mode]
+    def _draw_figures_popup(self):
+        """Draw popup window with calibration plots using implot."""
+        io = imgui.get_io()
+        screen_w, screen_h = io.display_size.x, io.display_size.y
+        win_w, win_h = min(600, screen_w * 0.5), min(550, screen_h * 0.7)
 
-                # Mode-specific fit quality metrics
-                data["z_fit_r_squared"] = grp.attrs.get("z_fit_r_squared")
-                data["z_slope_um_per_beam"] = grp.attrs.get("z_slope_um_per_beam")
-                data["decay_length_um"] = grp.attrs.get("decay_length_um")
-                data["decay_length_cavity_a_um"] = grp.attrs.get("decay_length_cavity_a_um")
-                data["decay_length_cavity_b_um"] = grp.attrs.get("decay_length_cavity_b_um")
-
-                # Load arrays from group
-                if "diffx" in grp:
-                    data["diffx"] = grp["diffx"][:]
-                if "diffy" in grp:
-                    data["diffy"] = grp["diffy"][:]
-                if "xs_um" in grp:
-                    data["xs_um"] = grp["xs_um"][:]
-                if "ys_um" in grp:
-                    data["ys_um"] = grp["ys_um"][:]
-                if "scan_corrections" in grp:
-                    data["scan_corrections"] = grp["scan_corrections"][:]
-                if "cavity_a_channels" in grp:
-                    data["cavity_a"] = grp["cavity_a_channels"][:]
-                if "cavity_b_channels" in grp:
-                    data["cavity_b"] = grp["cavity_b_channels"][:]
-
-                # Compute RMS of shifts
-                if "diffx" in data and "diffy" in data:
-                    data["rms_dx"] = float(np.sqrt(np.mean(data["diffx"]**2)))
-                    data["rms_dy"] = float(np.sqrt(np.mean(data["diffy"]**2)))
-
-                # Store in appropriate slot
-                if mode == "auto":
-                    self._calibration_data_auto = data
-                else:
-                    self._calibration_data_manual = data
-
-                self.logger.info(f"Loaded {mode} calibration data: {len(data)} fields")
-
-        except Exception as e:
-            self.logger.exception(f"Failed to load calibration data: {e}")
-
-    def _draw_results_table(self):
-        """Draw popup window with calibration results table."""
-        if self._show_results_table:
-            self._results_table_open = True
-            mode = getattr(self, "_results_table_mode", "auto")
-            mode_label = "Manual" if mode == "manual" else "Auto"
-            imgui.open_popup(f"Results ({mode_label})")
-            self._show_results_table = False
-
-        mode = getattr(self, "_results_table_mode", "auto")
-        mode_label = "Manual" if mode == "manual" else "Auto"
-        imgui.set_next_window_size(imgui.ImVec2(500, 450), imgui.Cond_.first_use_ever)
-
-        opened, visible = imgui.begin_popup_modal(
-            f"Results ({mode_label})",
-            p_open=True if self._results_table_open else None,
-            flags=imgui.WindowFlags_.no_saved_settings
+        imgui.set_next_window_pos(
+            imgui.ImVec2((screen_w - win_w) / 2, (screen_h - win_h) / 2),
+            imgui.Cond_.first_use_ever,
         )
+        imgui.set_next_window_size(imgui.ImVec2(win_w, win_h), imgui.Cond_.first_use_ever)
 
-        if opened:
-            if not visible:
-                self._results_table_open = False
-                imgui.close_current_popup()
-                imgui.end_popup()
+        flags = imgui.WindowFlags_.no_collapse
+        expanded, opened = imgui.begin("Calibration Results", True, flags)
+        if not opened:
+            self._show_figures_popup = False
+            imgui.end()
+            return
+
+        if expanded:
+            # Load data for both modes
+            data_auto = self._load_calibration_data("auto")
+            data_manual = self._load_calibration_data("manual")
+
+            has_auto = data_auto is not None and "xs_um" in data_auto
+            has_manual = data_manual is not None and "xs_um" in data_manual
+
+            if not has_auto and not has_manual:
+                imgui.text_disabled("No calibration data available")
+                if imgui.button("Open Saved Figures"):
+                    self._scan_saved_images(self._figures_popup_mode)
+                    for img_path in self._saved_images:
+                        self._open_image(img_path)
+                imgui.end()
                 return
 
-            # Get data for current mode
-            data = self._calibration_data_auto if mode == "auto" else self._calibration_data_manual
-            if data is None:
-                imgui.text("No calibration data available")
-                if imgui.button("Close"):
-                    self._results_table_open = False
-                    imgui.close_current_popup()
-                imgui.end_popup()
-                return
+            # Colors for auto/manual - match pollen_analysis.py
+            color_auto = imgui.ImVec4(0.0, 0.75, 1.0, 1.0)   # cyan
+            color_manual = imgui.ImVec4(0.4, 1.0, 0.4, 1.0)  # green
 
-            # Summary section with mode indicator
-            color = imgui.ImVec4(0.4, 0.7, 1.0, 1.0) if mode == "auto" else imgui.ImVec4(0.4, 1.0, 0.6, 1.0)
-            imgui.text_colored(color, f"{mode_label} Calibration Summary")
-            imgui.separator()
-            imgui.text(f"Beamlets: {data.get('num_beamlets', 'N/A')}")
-            z_step = data.get("z_step_um", 0)
-            imgui.text(f"Z-step: {z_step:.2f} um" if z_step else "Z-step: N/A")
-            imgui.text(f"LBM: {'Yes' if data.get('is_lbm') else 'No'}")
-            imgui.text(f"Cavities: {data.get('num_cavities', 1)}")
+            # Legend
+            imgui.text("Legend:")
+            imgui.same_line()
+            imgui.text_colored(color_auto, "Auto")
+            imgui.same_line()
+            imgui.text_colored(color_manual, "Manual")
             imgui.spacing()
 
-            # Beamlet table
-            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 0.6, 1.0), "Per-Beamlet Values")
-            imgui.separator()
+            # XY Positions plot
+            plot_h = 220
+            if implot.begin_plot("XY Positions (um)", imgui.ImVec2(-1, plot_h)):
+                implot.setup_axes("X (um)", "Y (um)")
+                implot.setup_axis_limits(implot.ImAxis_.x1, -150, 150, implot.Cond_.once)
+                implot.setup_axis_limits(implot.ImAxis_.y1, -150, 150, implot.Cond_.once)
 
-            # Table with scroll
-            table_flags = (
-                imgui.TableFlags_.borders |
-                imgui.TableFlags_.row_bg |
-                imgui.TableFlags_.scroll_y |
-                imgui.TableFlags_.resizable
-            )
+                # Plot auto data
+                if has_auto:
+                    xs_auto = np.asarray(data_auto["xs_um"], dtype=np.float64)
+                    ys_auto = np.asarray(data_auto["ys_um"], dtype=np.float64)
+                    implot.push_style_color(implot.Col_.marker_fill, color_auto)
+                    implot.push_style_var(implot.StyleVar_.marker_size, 6.0)
+                    implot.set_next_marker_style(implot.Marker_.circle)
+                    implot.plot_scatter("Auto", xs_auto, ys_auto)
+                    implot.pop_style_var()
+                    implot.pop_style_color()
 
-            if imgui.begin_table("beamlet_table", 5, table_flags, imgui.ImVec2(0, 250)):
-                # Headers
-                imgui.table_setup_column("Beam", imgui.TableColumnFlags_.width_fixed, 45)
-                imgui.table_setup_column("X (um)", imgui.TableColumnFlags_.width_fixed, 70)
-                imgui.table_setup_column("Y (um)", imgui.TableColumnFlags_.width_fixed, 70)
-                imgui.table_setup_column("dX (um)", imgui.TableColumnFlags_.width_fixed, 70)
-                imgui.table_setup_column("dY (um)", imgui.TableColumnFlags_.width_fixed, 70)
-                imgui.table_setup_scroll_freeze(0, 1)
-                imgui.table_headers_row()
+                # Plot manual data
+                if has_manual:
+                    xs_manual = np.asarray(data_manual["xs_um"], dtype=np.float64)
+                    ys_manual = np.asarray(data_manual["ys_um"], dtype=np.float64)
+                    implot.push_style_color(implot.Col_.marker_fill, color_manual)
+                    implot.push_style_var(implot.StyleVar_.marker_size, 6.0)
+                    implot.set_next_marker_style(implot.Marker_.square)
+                    implot.plot_scatter("Manual", xs_manual, ys_manual)
+                    implot.pop_style_var()
+                    implot.pop_style_color()
 
-                # Data rows
-                xs = data.get("xs_um", [])
-                ys = data.get("ys_um", [])
-                dx = data.get("diffx", [])
-                dy = data.get("diffy", [])
-                n_rows = max(len(xs), len(ys), len(dx), len(dy)) if any([len(xs), len(ys), len(dx), len(dy)]) else 0
-
-                for i in range(n_rows):
-                    imgui.table_next_row()
-
-                    imgui.table_next_column()
-                    imgui.text(f"{i + 1}")
-
-                    imgui.table_next_column()
-                    if i < len(xs):
-                        imgui.text(f"{xs[i]:.1f}")
-
-                    imgui.table_next_column()
-                    if i < len(ys):
-                        imgui.text(f"{ys[i]:.1f}")
-
-                    imgui.table_next_column()
-                    if i < len(dx):
-                        imgui.text(f"{dx[i]:.1f}")
-
-                    imgui.table_next_column()
-                    if i < len(dy):
-                        imgui.text(f"{dy[i]:.1f}")
-
-                imgui.end_table()
+                implot.end_plot()
 
             imgui.spacing()
 
-            # Buttons row
-            if imgui.button("View Graphs"):
-                self._image_popup_mode = mode
-                self._show_image_popup = True
-                self._scan_saved_images(mode)
-            imgui.same_line()
-            results = self._results_auto if mode == "auto" else self._results_manual
-            if imgui.button("Open H5 File"):
-                h5_file = results.get("h5_file", "") if results else ""
-                if h5_file:
-                    self._open_image(Path(h5_file))
-            imgui.same_line()
-            if imgui.button("Close"):
-                self._results_table_open = False
-                imgui.close_current_popup()
+            # X/Y offsets bar chart
+            if implot.begin_plot("XY Offsets (um)", imgui.ImVec2(-1, plot_h)):
+                implot.setup_axes("Beam #", "Offset (um)")
 
-            imgui.end_popup()
+                # Determine beam count
+                n_beams = 0
+                if has_auto and "diffx" in data_auto:
+                    n_beams = max(n_beams, len(data_auto["diffx"]))
+                if has_manual and "diffx" in data_manual:
+                    n_beams = max(n_beams, len(data_manual["diffx"]))
+
+                if n_beams > 0:
+                    beam_nums = np.arange(1, n_beams + 1, dtype=np.float64)
+                    bar_width = 0.35
+
+                    # Auto X offsets
+                    if has_auto and "diffx" in data_auto:
+                        diffx_auto = np.asarray(data_auto["diffx"], dtype=np.float64)
+                        implot.push_style_color(implot.Col_.fill, color_auto)
+                        implot.plot_bars("dX Auto", beam_nums - bar_width/2, diffx_auto, bar_width)
+                        implot.pop_style_color()
+
+                    # Manual X offsets
+                    if has_manual and "diffx" in data_manual:
+                        diffx_manual = np.asarray(data_manual["diffx"], dtype=np.float64)
+                        implot.push_style_color(implot.Col_.fill, color_manual)
+                        implot.plot_bars("dX Manual", beam_nums + bar_width/2, diffx_manual, bar_width)
+                        implot.pop_style_color()
+
+                implot.end_plot()
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            # Summary stats
+            imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.9, 1.0), "Summary:")
+            if has_auto:
+                rms_dx = data_auto.get("rms_dx")
+                rms_dy = data_auto.get("rms_dy")
+                if rms_dx is not None and rms_dy is not None:
+                    imgui.text_colored(color_auto, f"  Auto RMS: dX={rms_dx:.2f}um, dY={rms_dy:.2f}um")
+
+            if has_manual:
+                rms_dx = data_manual.get("rms_dx")
+                rms_dy = data_manual.get("rms_dy")
+                if rms_dx is not None and rms_dy is not None:
+                    imgui.text_colored(color_manual, f"  Manual RMS: dX={rms_dx:.2f}um, dY={rms_dy:.2f}um")
+
+            imgui.spacing()
+
+            # Open full figures button
+            if imgui.button("Open All Saved Figures"):
+                # Open figures for both modes if available
+                for mode in ["auto", "manual"]:
+                    self._scan_saved_images(mode)
+                    for img_path in self._saved_images:
+                        self._open_image(img_path)
+
+        imgui.end()
 
     def draw_menu_bar(self) -> None:
         """Render the menu bar."""
@@ -1674,6 +1383,7 @@ class PollenCalibrationViewer(BaseViewer):
         self._results_manual = None
         self._manual_mode = False
         self._saved_images = []
+        self._show_figures_popup = False
         self._calibration_data_auto = None
         self._calibration_data_manual = None
 
@@ -1686,7 +1396,9 @@ class PollenCalibrationViewer(BaseViewer):
         self._num_channels = None
         self._max_projections = None
         self._original_metadata = None
+        self._original_data_array = None
+        self._manual_mode = False
+        self._pointer_down_pos = None
         self._calibration_data_auto = None
         self._calibration_data_manual = None
-        self._manual_mode = False
         super().cleanup()
