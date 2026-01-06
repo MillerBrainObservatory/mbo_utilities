@@ -366,17 +366,35 @@ def pollen_calibration_mbo(filepath, order=None, zoom=None, fov_um=None, dz_over
         else:
             pass
 
-    # Get zoom factor - from CLI, metadata, or default
-    if zoom is None:
-        zoom = get_param(metadata, "zoom_factor", default=1.0)
-
-    # FOV at zoom=1 (standard for MIMMS systems)
-    if fov_um is None:
-        fov_um = 600.0
-
-    # Calculate pixel size in microns: dx = fov / zoom / pixels
-    dx = fov_um / zoom / nx
-    dy = fov_um / zoom / ny
+    # get pixel size from metadata (already calculated in microns)
+    pixel_res = get_param(metadata, "pixel_resolution", default=None)
+    if pixel_res is not None:
+        dx = float(pixel_res[0]) if hasattr(pixel_res, '__getitem__') else float(pixel_res)
+        dy = float(pixel_res[1]) if hasattr(pixel_res, '__getitem__') and len(pixel_res) > 1 else dx
+    else:
+        # fallback: use fov_um if provided or from metadata
+        if fov_um is None:
+            fov_um_meta = get_param(metadata, "fov_um", default=None)
+            if fov_um_meta is not None:
+                fov_x = fov_um_meta[0] if hasattr(fov_um_meta, '__getitem__') else fov_um_meta
+                fov_y = fov_um_meta[1] if hasattr(fov_um_meta, '__getitem__') and len(fov_um_meta) > 1 else fov_x
+                dx = fov_x / nx
+                dy = fov_y / ny
+            else:
+                # last resort: use default 600um FOV with zoom
+                if zoom is None:
+                    zoom = get_param(metadata, "zoom_factor", default=1.0)
+                fov_um = 600.0
+                dx = fov_um / zoom / nx
+                dy = fov_um / zoom / ny
+                import logging
+                logging.getLogger("mbo_utilities").warning("pixel_resolution not in metadata, using default FOV=600um")
+        else:
+            # CLI provided fov_um
+            if zoom is None:
+                zoom = get_param(metadata, "zoom_factor", default=1.0)
+            dx = fov_um / zoom / nx
+            dy = fov_um / zoom / ny
 
     # Set up beam order
     if order is None:
