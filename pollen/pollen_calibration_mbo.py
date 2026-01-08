@@ -366,17 +366,35 @@ def pollen_calibration_mbo(filepath, order=None, zoom=None, fov_um=None, dz_over
         else:
             pass
 
-    # Get zoom factor - from CLI, metadata, or default
-    if zoom is None:
-        zoom = get_param(metadata, "zoom_factor", default=1.0)
-
-    # FOV at zoom=1 (standard for MIMMS systems)
-    if fov_um is None:
-        fov_um = 600.0
-
-    # Calculate pixel size in microns: dx = fov / zoom / pixels
-    dx = fov_um / zoom / nx
-    dy = fov_um / zoom / ny
+    # get pixel size from metadata (already calculated in microns)
+    pixel_res = get_param(metadata, "pixel_resolution", default=None)
+    if pixel_res is not None:
+        dx = float(pixel_res[0]) if hasattr(pixel_res, '__getitem__') else float(pixel_res)
+        dy = float(pixel_res[1]) if hasattr(pixel_res, '__getitem__') and len(pixel_res) > 1 else dx
+    else:
+        # fallback: use fov_um if provided or from metadata
+        if fov_um is None:
+            fov_um_meta = get_param(metadata, "fov_um", default=None)
+            if fov_um_meta is not None:
+                fov_x = fov_um_meta[0] if hasattr(fov_um_meta, '__getitem__') else fov_um_meta
+                fov_y = fov_um_meta[1] if hasattr(fov_um_meta, '__getitem__') and len(fov_um_meta) > 1 else fov_x
+                dx = fov_x / nx
+                dy = fov_y / ny
+            else:
+                # last resort: use default 600um FOV with zoom
+                if zoom is None:
+                    zoom = get_param(metadata, "zoom_factor", default=1.0)
+                fov_um = 600.0
+                dx = fov_um / zoom / nx
+                dy = fov_um / zoom / ny
+                import logging
+                logging.getLogger("mbo_utilities").warning("pixel_resolution not in metadata, using default FOV=600um")
+        else:
+            # CLI provided fov_um
+            if zoom is None:
+                zoom = get_param(metadata, "zoom_factor", default=1.0)
+            dx = fov_um / zoom / nx
+            dy = fov_um / zoom / ny
 
     # Set up beam order
     if order is None:
@@ -968,7 +986,7 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info):
     offx = np.zeros(n_patches)
     offy = np.zeros(n_patches)
 
-    # Calculate centroid offsets for each patch (like MATLAB)
+    # Calculate centroid offsets for each patch
     for zz in range(n_patches):
         IOI = III[:, :, zz].copy()
         # Binarize
@@ -984,21 +1002,10 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info):
     xs_refined = xs + offx
     ys_refined = ys + offy
 
-    # Convert to physical coordinates (microns from center)
-    vx = (np.arange(-nx//2, nx//2 + 1)) * dx
-    vy = (np.arange(-ny//2, ny//2 + 1)) * dy
-
-    # Map pixel positions to microns
-    xs_um = np.zeros(n_patches)
-    ys_um = np.zeros(n_patches)
-
-    for i in range(n_patches):
-        xi = round(xs_refined[i])
-        yi = round(ys_refined[i])
-        xi = np.clip(xi, 0, len(vx) - 1)
-        yi = np.clip(yi, 0, len(vy) - 1)
-        xs_um[i] = vx[xi]
-        ys_um[i] = vy[yi]
+    # Convert pixel positions to microns, centered at image center
+    # pixel 0 -> -nx/2 * dx, pixel nx/2 -> 0, pixel nx -> +nx/2 * dx
+    xs_um = (xs_refined - nx / 2) * dx
+    ys_um = (ys_refined - ny / 2) * dy
 
     # Plot XY offsets in microns - show ALL selected beads
     _fig, ax = plt.subplots(figsize=(6, 6))

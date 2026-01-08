@@ -146,44 +146,49 @@ class MetadataPanel(BasePanel):
         self._visible = opened
 
         if expanded:
-            # Get data array
-            data_arrays = self.viewer._get_data_arrays()
+            # Get metadata - prefer viewer's get_metadata() if available
+            metadata = None
+            if hasattr(self.viewer, "get_metadata"):
+                metadata = self.viewer.get_metadata()
 
-            if not data_arrays:
-                imgui.text("No data loaded")
+            if metadata is None:
+                # Fallback to data array metadata
+                data_arrays = self.viewer._get_data_arrays()
+                if data_arrays:
+                    data_arr = data_arrays[0]
+                    if hasattr(data_arr, "metadata"):
+                        metadata = data_arr.metadata
+
+            if metadata:
+                # Search filter
+                imgui.set_next_item_width(200)
+                _changed, self._filter_text = imgui.input_text_with_hint(
+                    "##meta_search", "Search...", self._filter_text
+                )
+
+                imgui.separator()
+
+                # Scrollable content
+                if imgui.begin_child("##metadata_content"):
+                    if isinstance(metadata, dict):
+                        for key, value in sorted(metadata.items()):
+                            # Determine color based on key
+                            if any(k in key.lower() for k in ["imaging", "scan", "pixel", "zoom", "resolution"]):
+                                color = _NAME_COLORS["imaging"]
+                            elif any(k in key.lower() for k in ["acq", "frame", "channel", "stack"]):
+                                color = _NAME_COLORS["acquisition"]
+                            else:
+                                color = _NAME_COLORS["other"]
+
+                            _render_item(key, value, "", 0, self._filter_text, color)
+                    else:
+                        imgui.text(f"Metadata: {metadata}")
+                    imgui.end_child()
             else:
-                data_arr = data_arrays[0]
-
-                # Check if data has metadata
-                if hasattr(data_arr, "metadata"):
-                    metadata = data_arr.metadata
-
-                    # Search filter
-                    imgui.set_next_item_width(200)
-                    _changed, self._filter_text = imgui.input_text_with_hint(
-                        "##meta_search", "Search...", self._filter_text
-                    )
-
-                    imgui.separator()
-
-                    # Scrollable content
-                    if imgui.begin_child("##metadata_content"):
-                        if isinstance(metadata, dict):
-                            for key, value in sorted(metadata.items()):
-                                # Determine color based on key
-                                if any(k in key.lower() for k in ["imaging", "scan", "pixel", "zoom", "resolution"]):
-                                    color = _NAME_COLORS["imaging"]
-                                elif any(k in key.lower() for k in ["acq", "frame", "channel", "stack"]):
-                                    color = _NAME_COLORS["acquisition"]
-                                else:
-                                    color = _NAME_COLORS["other"]
-
-                                _render_item(key, value, "", 0, self._filter_text, color)
-                        else:
-                            imgui.text(f"Metadata: {metadata}")
-                        imgui.end_child()
-                else:
-                    imgui.text("No metadata available")
+                imgui.text("No metadata available")
+                data_arrays = self.viewer._get_data_arrays()
+                if data_arrays:
+                    data_arr = data_arrays[0]
                     imgui.text(f"Data type: {type(data_arr).__name__}")
                     if hasattr(data_arr, "shape"):
                         imgui.text(f"Shape: {data_arr.shape}")

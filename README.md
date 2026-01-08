@@ -20,7 +20,8 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 - **Modern Image Reader/Writer**: Fast, lazy I/O for ScanImage/generic TIFFs, Suite2p `.bin`, Zarr, HDF5, and Numpy (in memeory or saved to `.npy`)
 - **Run processing pipelines** for calcium imaging - motion correction, cell extraction, and signal analysis
-- **Visualize data interactively** with a GPU-accelerated GUI for exploring large datasets
+- Operates on **3D timeseries** natively and is extendable to ND-arrays
+- **Visualize data interactively** with a GPU-accelerated GUI for exploring large datasets with [fastplotlib](https://fastplotlib.org/user_guide/guide.html#what-is-fastplotlib)
 
 <p align="center">
   <img src="docs/_images/gui/readme/01_step_file_dialog.png" height="280" alt="File Selection" />
@@ -75,8 +76,8 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 
 The [user-guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html) covers usage in a jupyter notebook.
 The [CLI Guide](https://millerbrainobservatory.github.io/mbo_utilities/cli.html) provides a more in-depth overview of the CLI commands.
-The [GUI Guide](https://millerbrainobservatory.github.io/mbo_utilities/guides/gui.html) provides a more in-depth overview of the GUI.
-The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/guides/scanphase.html) describes the bi-direcitonal scan-phase analaysis tool with output figures and figure descriptions.
+The [GUI Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/gui_guide.html) provides a more in-depth overview of the GUI.
+The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/cli.html#scan-phase-analysis) describes the bi-directional scan-phase analysis tool with output figures and figure descriptions.
 
 | Command | Description |
 |---------|-------------|
@@ -101,7 +102,7 @@ mbo /path/to/data      # open file directly
 mbo --check-install    # verify GPU configuration
 ```
 
-→ [GUI Guide](https://millerbrainobservatory.github.io/mbo_utilities/guides/gui.html)
+→ [GUI Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/gui_guide.html)
 
 ### Scan-Phase Analysis
 
@@ -111,7 +112,7 @@ Measure and correct bidirectional scan-phase offset in resonant scanning microsc
 mbo scanphase /path/to/data.tiff -o ./output
 ```
 
-→ [Scan-Phase Guide](https://millerbrainobservatory.github.io/mbo_utilities/guides/scanphase.html)
+→ [Scan-Phase Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/cli.html#scan-phase-analysis)
 
 ### Supported Formats
 

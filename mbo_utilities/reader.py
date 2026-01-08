@@ -231,6 +231,15 @@ def imread(
         )
     paths = filtered
 
+    # filter out pollen calibration result files (*_pollen.h5)
+    # these are output files, not source data
+    paths = [p for p in paths if not p.name.endswith("_pollen.h5")]
+    if not paths:
+        raise ValueError(
+            f"No source data files found in {inputs}. "
+            f"Only pollen calibration result files (*_pollen.h5) were found."
+        )
+
     parent = paths[0].parent if paths else None
     ops_file = parent / "ops.npy" if parent else None
 

@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BaseViewer",
-    "PollenCalibrationViewer",
     "TimeSeriesViewer",
     "get_viewer_class",
 ]
@@ -143,6 +142,43 @@ class BaseViewer(ABC):
         # If using legacy main_widget, delegate
         if self._main_widget is not None:
             self._main_widget.on_data_loaded()
+
+    def _on_data_shape_changed(self) -> None:
+        """
+        Called when the data shape changes dynamically.
+
+        This can happen when toggling frame averaging on piezo stacks.
+        Subclasses should override to update sliders or other UI elements.
+        """
+        if self.image_widget is None:
+            return
+
+        try:
+            data_arrays = self._get_data_arrays()
+            if not data_arrays:
+                return
+
+            arr = data_arrays[0]
+            new_shape = arr.shape
+            n_dims = len(new_shape) - 2  # exclude Y, X
+
+            # update slider dimension names if array has dims property
+            if hasattr(arr, "dims"):
+                from mbo_utilities.arrays.features import get_slider_dims
+                new_slider_dims = get_slider_dims(arr)
+                if new_slider_dims:
+                    self.image_widget._slider_dim_names = new_slider_dims
+
+            # clamp current indices to new valid range
+            if self.image_widget.n_sliders > 0:
+                current = list(self.image_widget.indices)
+                for i in range(min(len(current), n_dims)):
+                    max_val = new_shape[i] - 1
+                    if current[i] > max_val:
+                        current[i] = max_val
+                self.image_widget.indices = current[:n_dims]
+        except Exception:
+            pass
 
     def cleanup(self) -> None:
         """

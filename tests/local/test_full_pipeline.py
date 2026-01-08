@@ -212,6 +212,7 @@ class TestFullPipeline:
         print(f"  Loaded array: {arr.shape}, ndim={arr.ndim}")
 
         # extract plane data - handle different array structures
+        # use explicit slicing arr[:] to get full data (np.asarray returns single frame)
         if arr.ndim == 4 and arr.shape[1] > SUITE2P_PLANE:
             # multi-plane 4D array, extract specific plane
             plane_data = np.asarray(arr[:, SUITE2P_PLANE, :, :])
@@ -219,8 +220,8 @@ class TestFullPipeline:
             # single plane stored as 4D, squeeze z dimension
             plane_data = np.asarray(arr[:, 0, :, :])
         elif arr.ndim == 3:
-            # already single plane (T, Y, X)
-            plane_data = np.asarray(arr)
+            # already single plane (T, Y, X) - use explicit slice for full data
+            plane_data = np.asarray(arr[:])
         else:
             pytest.skip(f"Cannot extract plane {SUITE2P_PLANE} from shape {arr.shape}")
 

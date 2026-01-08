@@ -267,24 +267,34 @@ class ScanPhaseAnalyzer:
         logger.info(f"per-frame: mean={stats['mean']:.3f}, std={stats['std']:.3f}")
         return self.results.offsets_fft
 
-    def analyze_window_sizes(self, upsample=10, border=4, max_offset=10, num_samples=5):
+    def analyze_window_sizes(self, upsample=10, border=4, max_offset=10, num_samples=5,
+                              target_windows=None):
         """
         Analyze how offset estimate varies with temporal window size.
 
         key diagnostic - shows how many frames are needed for stable estimation.
         small windows = noisy estimates, large windows = converged estimate.
+
+        Parameters
+        ----------
+        target_windows : list, optional
+            specific window sizes to analyze (e.g., [1, 100, 200, 500]).
+            if None, uses logarithmic spacing.
         """
-        # window sizes from 1 to num_frames
-        sizes = []
-        for base in [1, 2, 5]:
-            for mult in [1, 10, 100, 1000, 10000]:
-                val = base * mult
-                if val <= self.num_frames:
-                    sizes.append(val)
-        sizes = sorted(set(sizes))
-        if self.num_frames not in sizes:
+        # window sizes - use target_windows if provided, otherwise log spacing
+        if target_windows is not None:
+            sizes = [w for w in target_windows if w <= self.num_frames]
+        else:
+            sizes = []
+            for base in [1, 2, 5]:
+                for mult in [1, 10, 100, 1000, 10000]:
+                    val = base * mult
+                    if val <= self.num_frames:
+                        sizes.append(val)
+            sizes = sorted(set(sizes))
+        if self.num_frames not in sizes and self.num_frames > 0:
             sizes.append(self.num_frames)
-        sizes = sorted(sizes)
+        sizes = sorted(set(sizes))
 
         self.results.window_sizes = np.array(sizes)
         window_offsets = []
@@ -707,7 +717,8 @@ class ScanPhaseAnalyzer:
             ("per-frame", lambda: self.analyze_per_frame(
                 upsample=upsample, border=border, max_offset=max_offset)),
             ("window sizes", lambda: self.analyze_window_sizes(
-                upsample=upsample, border=border, max_offset=max_offset)),
+                upsample=upsample, border=border, max_offset=max_offset,
+                target_windows=[1, 100, 200, 500])),
             ("spatial grid", lambda: self.analyze_spatial_grid(
                 patch_sizes=(32, 64), upsample=upsample, max_offset=max_offset)),
             ("horizontal tiles", lambda: self.analyze_horizontal_tiles(
@@ -732,7 +743,14 @@ class ScanPhaseAnalyzer:
         return self.results
 
     def generate_figures(self, output_dir=None, fmt="png", dpi=150, show=False):
-        """Generate analysis figures with MBO dark theme."""
+        """Generate analysis figures with MBO dark theme.
+
+        Generates focused figures:
+        - summary: key metrics dashboard (X/Y profiles, histogram, convergence)
+        - temporal_drift: smoothed drift with std bands for each window size
+        - window_comparison: all windows on same normalized plot
+        - zplanes: offset vs depth (if multi-plane)
+        """
         import matplotlib.pyplot as plt
 
         colors = MBO_DARK_THEME
@@ -754,47 +772,22 @@ class ScanPhaseAnalyzer:
             plt.close(fig)
 
         # 1. Summary dashboard - key metrics at a glance
-        fig = self._fig_summary()
+        fig = self._fig_summary_v2()
         _save_fig(fig, "summary")
 
-        # 2. Temporal: per-frame offset over movie
-        fig = self._fig_temporal()
-        _save_fig(fig, "temporal")
+        # 2. Temporal drift - smoothed line with std bands per window
+        fig = self._fig_temporal_drift()
+        _save_fig(fig, "temporal_drift")
 
-        # 3. Window sizes: convergence analysis
+        # 3. Window comparison - all windows on same normalized plot
         if len(self.results.window_sizes) > 0:
-            fig = self._fig_windows()
-            _save_fig(fig, "windows")
+            fig = self._fig_window_comparison()
+            _save_fig(fig, "window_comparison")
 
-        # 4. Spatial heatmaps
-        if self.results.grid_offsets:
-            fig = self._fig_spatial()
-            _save_fig(fig, "spatial")
-
-        # 5. Horizontal tile analysis
-        if len(self.results.horizontal_positions) > 0:
-            fig = self._fig_horizontal()
-            _save_fig(fig, "horizontal")
-
-        # 6. Vertical tile analysis
-        if len(self.results.vertical_positions) > 0:
-            fig = self._fig_vertical()
-            _save_fig(fig, "vertical")
-
-        # 7. Temporal-spatial heatmap
-        if self.results.temporal_spatial_offsets.size > 0:
-            fig = self._fig_temporal_spatial()
-            _save_fig(fig, "temporal_spatial")
-
-        # 8. Z-planes
+        # 4. Z-planes - offset vs depth (only if multi-plane)
         if len(self.results.plane_offsets) > 1:
-            fig = self._fig_zplanes()
+            fig = self._fig_zplanes_simple()
             _save_fig(fig, "zplanes")
-
-        # 9. Parameters (intensity analysis)
-        if len(self.results.intensity_bins) > 0:
-            fig = self._fig_parameters()
-            _save_fig(fig, "parameters")
 
         return saved
 
@@ -1488,6 +1481,435 @@ class ScanPhaseAnalyzer:
         ax.set_xlabel("Signal Intensity (a.u.)")
         ax.set_ylabel("Offset / Std")
         ax.set_title("Detection Confidence", fontweight="bold")
+
+        fig.tight_layout()
+        return fig
+
+    # === New streamlined figures ===
+
+    def _fig_summary_v2(self):
+        """Streamlined summary dashboard - no tables, visual focus."""
+        import matplotlib.pyplot as plt
+        colors = MBO_DARK_THEME
+
+        fig = plt.figure(figsize=(14, 8))
+        fig.patch.set_facecolor(colors["background"])
+
+        gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3,
+                             left=0.06, right=0.94, top=0.90, bottom=0.08)
+
+        offsets = self.results.offsets_fft
+        valid = offsets[~np.isnan(offsets)]
+        stats = self.results.compute_stats(valid) if len(valid) > 0 else {}
+
+        # title with key metric
+        if stats:
+            title = f"Scan-Phase Analysis  |  Mean Offset: {stats['mean']:+.3f} px  |  Std: {stats['std']:.3f} px"
+        else:
+            title = "Scan-Phase Analysis"
+        fig.suptitle(title, fontsize=14, fontweight="bold", color=colors["text"], y=0.96)
+
+        # 1. Smoothed temporal drift (top left, spans 2 cols)
+        ax1 = fig.add_subplot(gs[0, :2])
+        _apply_mbo_style(ax1)
+        if len(valid) > 10:
+            # use rolling average to show drift, not noise
+            window = max(10, len(offsets) // 50)
+            rolling = np.convolve(offsets, np.ones(window)/window, mode="valid")
+            x = np.arange(window//2, len(rolling) + window//2)
+            ax1.fill_between(x, rolling - stats['std'], rolling + stats['std'],
+                            alpha=0.2, color=colors["primary"])
+            ax1.plot(x, rolling, color=colors["primary"], lw=2, label=f"{window}-frame avg")
+            ax1.axhline(stats["mean"], color=colors["error"], ls="--", lw=2, alpha=0.8)
+        ax1.set_xlabel("Frame", fontsize=10)
+        ax1.set_ylabel("Offset (px)", fontsize=10)
+        ax1.set_title("Temporal Drift (smoothed)", fontsize=11, fontweight="bold")
+
+        # 2. Histogram (top right)
+        ax2 = fig.add_subplot(gs[0, 2])
+        _apply_mbo_style(ax2)
+        if len(valid) > 0:
+            ax2.hist(valid, bins=30, alpha=0.85, color=colors["primary"],
+                    edgecolor=colors["surface"], orientation="horizontal")
+            ax2.axhline(stats["mean"], color=colors["error"], ls="--", lw=2)
+            ax2.axhline(stats["median"], color=colors["warning"], ls="--", lw=1.5, alpha=0.7)
+        ax2.set_xlabel("Count", fontsize=10)
+        ax2.set_ylabel("Offset (px)", fontsize=10)
+        ax2.set_title("Distribution", fontsize=11, fontweight="bold")
+
+        # 3. X position profile (bottom left)
+        ax3 = fig.add_subplot(gs[1, 0])
+        _apply_mbo_style(ax3)
+        if len(self.results.horizontal_positions) > 0:
+            pos = self.results.horizontal_positions
+            offs = self.results.horizontal_offsets
+            stds = self.results.horizontal_stds
+            ax3.fill_between(pos, offs - stds, offs + stds, alpha=0.3, color=colors["secondary"])
+            ax3.plot(pos, offs, "o-", color=colors["secondary"], ms=5, lw=2)
+            ax3.axhline(np.nanmean(offs), color=colors["error"], ls="--", lw=1.5, alpha=0.7)
+        ax3.set_xlabel("X Position (px)", fontsize=10)
+        ax3.set_ylabel("Offset (px)", fontsize=10)
+        ax3.set_title("X Profile (left→right)", fontsize=11, fontweight="bold")
+
+        # 4. Y position profile (bottom center)
+        ax4 = fig.add_subplot(gs[1, 1])
+        _apply_mbo_style(ax4)
+        if len(self.results.vertical_positions) > 0:
+            pos = self.results.vertical_positions
+            offs = self.results.vertical_offsets
+            stds = self.results.vertical_stds
+            ax4.fill_between(pos, offs - stds, offs + stds, alpha=0.3, color=colors["accent"])
+            ax4.plot(pos, offs, "o-", color=colors["accent"], ms=5, lw=2)
+            ax4.axhline(np.nanmean(offs), color=colors["error"], ls="--", lw=1.5, alpha=0.7)
+        ax4.set_xlabel("Y Position (px)", fontsize=10)
+        ax4.set_ylabel("Offset (px)", fontsize=10)
+        ax4.set_title("Y Profile (top→bottom)", fontsize=11, fontweight="bold")
+
+        # 5. Window convergence (bottom right)
+        ax5 = fig.add_subplot(gs[1, 2])
+        _apply_mbo_style(ax5)
+        if len(self.results.window_sizes) > 0:
+            ws = self.results.window_sizes
+            stds = self.results.window_stds
+            ax5.fill_between(ws, 0, stds, alpha=0.3, color=colors["success"])
+            ax5.plot(ws, stds, "o-", color=colors["success"], ms=5, lw=2)
+            ax5.set_xscale("log")
+            ax5.axhline(0.1, color=colors["warning"], ls="--", lw=1.5, alpha=0.8)
+            ax5.xaxis.set_major_formatter(lambda x, p: f"{int(x)}" if x >= 1 else "")
+        ax5.set_xlabel("Window Size (frames)", fontsize=10)
+        ax5.set_ylabel("Estimation Std (px)", fontsize=10)
+        ax5.set_title("Convergence", fontsize=11, fontweight="bold")
+
+        return fig
+
+    def _fig_temporal_drift(self):
+        """Temporal drift - single smoothed line with std band."""
+        import matplotlib.pyplot as plt
+        colors = MBO_DARK_THEME
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        fig.patch.set_facecolor(colors["background"])
+        _apply_mbo_style(ax)
+
+        offsets = self.results.offsets_fft
+        valid = offsets[~np.isnan(offsets)]
+        stats = self.results.compute_stats(valid) if len(valid) > 0 else {}
+
+        if len(valid) < 10:
+            ax.text(0.5, 0.5, "Insufficient data", transform=ax.transAxes,
+                   ha="center", va="center", color=colors["text_muted"])
+            return fig
+
+        # use a reasonable smoothing window (2% of data or 100 frames, whichever is larger)
+        window = max(100, len(offsets) // 50)
+        if window >= len(offsets) // 2:
+            window = max(10, len(offsets) // 10)
+
+        rolling = np.convolve(offsets, np.ones(window)/window, mode="valid")
+        x = np.arange(window//2, len(rolling) + window//2)
+
+        # compute rolling std for error band
+        rolling_std = np.array([
+            np.std(offsets[max(0, i - window//2):min(len(offsets), i + window//2)])
+            for i in x
+        ])
+
+        # plot smoothed line with std band
+        ax.fill_between(x, rolling - rolling_std, rolling + rolling_std,
+                       alpha=0.25, color=colors["primary"], label="±1 std")
+        ax.plot(x, rolling, color=colors["primary"], lw=2.5,
+               label=f"{window}-frame rolling mean")
+
+        # global mean line
+        ax.axhline(stats["mean"], color=colors["error"], ls="--", lw=2,
+                  label=f"Global mean: {stats['mean']:.3f} px")
+
+        ax.legend(loc="upper right", facecolor=colors["surface"],
+                 edgecolor=colors["border"], labelcolor=colors["text"], fontsize=10)
+        ax.set_xlabel("Frame", fontsize=11)
+        ax.set_ylabel("Offset (px)", fontsize=11)
+        ax.set_title(f"Temporal Drift  |  Mean: {stats['mean']:.3f} px  |  Std: {stats['std']:.3f} px",
+                    fontsize=12, fontweight="bold", color=colors["text"])
+
+        fig.tight_layout()
+        return fig
+
+    def _fig_window_comparison(self):
+        """All window sizes on same normalized plot."""
+        import matplotlib.pyplot as plt
+        colors = MBO_DARK_THEME
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        fig.patch.set_facecolor(colors["background"])
+        _apply_mbo_style(ax)
+
+        ws = self.results.window_sizes
+        offs = self.results.window_offsets
+        stds = self.results.window_stds
+
+        if len(ws) == 0:
+            ax.text(0.5, 0.5, "No window data", transform=ax.transAxes,
+                   ha="center", va="center", color=colors["text_muted"])
+            return fig
+
+        # normalize: subtract final (most stable) offset value
+        final_offset = offs[-1] if len(offs) > 0 else 0
+        offs_norm = offs - final_offset
+
+        # plot offset vs window size with error bars
+        ax.errorbar(ws, offs_norm, yerr=stds, fmt="o-", color=colors["primary"],
+                   capsize=5, ms=8, lw=2, ecolor=colors["error"], capthick=1.5,
+                   label="Offset (normalized)")
+
+        # highlight target windows (1, 100, 200, 500)
+        targets = [1, 100, 200, 500]
+        target_colors = [colors["error"], colors["warning"], colors["success"], colors["accent"]]
+        for t, tc in zip(targets, target_colors):
+            if t in ws:
+                idx = np.where(ws == t)[0][0]
+                ax.scatter([t], [offs_norm[idx]], s=150, c=tc, zorder=5, edgecolor="white", lw=2)
+                ax.annotate(f"{offs[idx]:.3f}±{stds[idx]:.3f}",
+                           (t, offs_norm[idx]), textcoords="offset points",
+                           xytext=(10, 10), fontsize=9, color=tc,
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor=colors["surface"],
+                                    edgecolor=tc, alpha=0.9))
+
+        ax.axhline(0, color=colors["text_muted"], ls="--", lw=1.5, alpha=0.7,
+                  label=f"Converged: {final_offset:.3f} px")
+        ax.set_xscale("log")
+        ax.xaxis.set_major_formatter(lambda x, p: f"{int(x)}" if x >= 1 else "")
+
+        ax.legend(loc="upper right", facecolor=colors["surface"],
+                 edgecolor=colors["border"], labelcolor=colors["text"], fontsize=10)
+        ax.set_xlabel("Window Size (frames)", fontsize=11)
+        ax.set_ylabel("Offset - Converged Value (px)", fontsize=11)
+        ax.set_title("Window Size Comparison (normalized to converged value)",
+                    fontsize=12, fontweight="bold", color=colors["text"])
+
+        fig.tight_layout()
+        return fig
+
+    def _fig_zplanes_simple(self):
+        """Simple offset vs depth plot."""
+        import matplotlib.pyplot as plt
+        colors = MBO_DARK_THEME
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        fig.patch.set_facecolor(colors["background"])
+        _apply_mbo_style(ax)
+
+        offsets = self.results.plane_offsets
+        depths = self.results.plane_depths_um
+
+        if len(offsets) == 0:
+            ax.text(0.5, 0.5, "No z-plane data", transform=ax.transAxes,
+                   ha="center", va="center", color=colors["text_muted"])
+            return fig
+
+        valid = offsets[~np.isnan(offsets)]
+        mean_val = np.mean(valid) if len(valid) > 0 else 0
+        std_val = np.std(valid) if len(valid) > 0 else 0
+
+        # use depth in um if available, otherwise plane index
+        if self.pixel_resolution_um > 0 and len(depths) == len(offsets):
+            x = depths
+            xlabel = "Depth (µm)"
+        else:
+            x = np.arange(len(offsets))
+            xlabel = "Z-plane Index"
+
+        # plot with error band around mean
+        ax.fill_between([x.min(), x.max()], mean_val - std_val, mean_val + std_val,
+                       alpha=0.2, color=colors["primary"])
+        ax.plot(x, offsets, "o-", color=colors["primary"], ms=10, lw=2.5)
+        ax.axhline(mean_val, color=colors["error"], ls="--", lw=2,
+                  label=f"Mean: {mean_val:.3f} ± {std_val:.3f} px")
+
+        ax.legend(loc="upper right", facecolor=colors["surface"],
+                 edgecolor=colors["border"], labelcolor=colors["text"], fontsize=10)
+        ax.set_xlabel(xlabel, fontsize=11)
+        ax.set_ylabel("Offset (px)", fontsize=11)
+        ax.set_title(f"Offset by Imaging Depth  |  {len(offsets)} planes",
+                    fontsize=12, fontweight="bold", color=colors["text"])
+
+        fig.tight_layout()
+        return fig
+
+    def _fig_spatial_xy(self):
+        """Separate X and Y spatial profiles on distinct axes."""
+        import matplotlib.pyplot as plt
+        colors = MBO_DARK_THEME
+
+        fig, axes = _mbo_fig(2, 1, figsize=(12, 8))
+
+        # X profile (top) - horizontal variation
+        ax = axes[0]
+        if len(self.results.horizontal_positions) > 0:
+            pos = self.results.horizontal_positions
+            offs = self.results.horizontal_offsets
+            stds = self.results.horizontal_stds
+
+            # background fill for error bands
+            ax.fill_between(pos, offs - 2*stds, offs + 2*stds, alpha=0.15, color=colors["secondary"])
+            ax.fill_between(pos, offs - stds, offs + stds, alpha=0.3, color=colors["secondary"])
+            ax.plot(pos, offs, "o-", color=colors["secondary"], ms=8, lw=2.5)
+
+            # mean line
+            mean_off = np.nanmean(offs)
+            ax.axhline(mean_off, color=colors["error"], ls="--", lw=2,
+                      label=f"Mean: {mean_off:.3f} px")
+
+            # add range annotation
+            range_val = np.nanmax(offs) - np.nanmin(offs)
+            ax.text(0.02, 0.95, f"Range: {range_val:.3f} px", transform=ax.transAxes,
+                   fontsize=11, color=colors["text"], va="top",
+                   bbox=dict(boxstyle="round", facecolor=colors["surface"], edgecolor=colors["border"]))
+
+            ax.legend(loc="upper right", facecolor=colors["surface"],
+                     edgecolor=colors["border"], labelcolor=colors["text"])
+
+        ax.set_xlabel("X Position (pixels)", fontsize=11)
+        ax.set_ylabel("Offset (px)", fontsize=11)
+        ax.set_title("Horizontal Profile: Offset vs X Position (left → right)", fontsize=12, fontweight="bold")
+
+        # Y profile (bottom) - vertical variation
+        ax = axes[1]
+        if len(self.results.vertical_positions) > 0:
+            pos = self.results.vertical_positions
+            offs = self.results.vertical_offsets
+            stds = self.results.vertical_stds
+
+            # background fill for error bands
+            ax.fill_between(pos, offs - 2*stds, offs + 2*stds, alpha=0.15, color=colors["accent"])
+            ax.fill_between(pos, offs - stds, offs + stds, alpha=0.3, color=colors["accent"])
+            ax.plot(pos, offs, "o-", color=colors["accent"], ms=8, lw=2.5)
+
+            # mean line
+            mean_off = np.nanmean(offs)
+            ax.axhline(mean_off, color=colors["error"], ls="--", lw=2,
+                      label=f"Mean: {mean_off:.3f} px")
+
+            # add range annotation
+            range_val = np.nanmax(offs) - np.nanmin(offs)
+            ax.text(0.02, 0.95, f"Range: {range_val:.3f} px", transform=ax.transAxes,
+                   fontsize=11, color=colors["text"], va="top",
+                   bbox=dict(boxstyle="round", facecolor=colors["surface"], edgecolor=colors["border"]))
+
+            ax.legend(loc="upper right", facecolor=colors["surface"],
+                     edgecolor=colors["border"], labelcolor=colors["text"])
+
+        ax.set_xlabel("Y Position (pixels)", fontsize=11)
+        ax.set_ylabel("Offset (px)", fontsize=11)
+        ax.set_title("Vertical Profile: Offset vs Y Position (top → bottom)", fontsize=12, fontweight="bold")
+
+        fig.tight_layout()
+        return fig
+
+    def _fig_spatial_heatmap(self):
+        """2D spatial heatmap showing offset variation across FOV."""
+        from matplotlib.colors import TwoSlopeNorm
+        import matplotlib.pyplot as plt
+        colors = MBO_DARK_THEME
+
+        # use largest patch size available
+        if not self.results.grid_offsets:
+            return plt.figure()  # empty figure
+
+        ps = max(self.results.grid_offsets.keys())
+        offsets = self.results.grid_offsets[ps]
+        valid = self.results.grid_valid[ps]
+        display = np.where(valid, offsets, np.nan)
+
+        fig, axes = _mbo_fig(1, 2, figsize=(12, 5))
+
+        vmax = max(0.5, np.nanmax(np.abs(display)))
+        norm = TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+
+        # 1. Main heatmap
+        ax = axes[0]
+        ax.grid(False)
+        im = ax.imshow(display, cmap="coolwarm", norm=norm,
+                      aspect="equal", interpolation="nearest")
+        _mbo_colorbar(im, ax, "Offset (px)")
+
+        valid_vals = offsets[valid]
+        if len(valid_vals) > 0:
+            mean_val = np.mean(valid_vals)
+            std_val = np.std(valid_vals)
+            range_val = np.max(valid_vals) - np.min(valid_vals)
+            ax.set_title(f"Spatial Offset Map ({ps}×{ps} patches)\n"
+                        f"Mean: {mean_val:.3f}, Std: {std_val:.3f}, Range: {range_val:.3f} px",
+                        fontsize=11, fontweight="bold")
+        ax.set_xlabel("X (patches)")
+        ax.set_ylabel("Y (patches)")
+
+        # 2. Deviation from mean
+        ax = axes[1]
+        ax.grid(False)
+        if len(valid_vals) > 0:
+            deviation = np.where(valid, offsets - mean_val, np.nan)
+            im2 = ax.imshow(deviation, cmap="coolwarm", norm=norm,
+                           aspect="equal", interpolation="nearest")
+            _mbo_colorbar(im2, ax, "Deviation (px)")
+            ax.set_title("Deviation from Mean", fontsize=11, fontweight="bold")
+        ax.set_xlabel("X (patches)")
+        ax.set_ylabel("Y (patches)")
+
+        fig.tight_layout()
+        return fig
+
+    def _fig_drift_pattern(self):
+        """Temporal-spatial drift pattern - how offset changes over time and space."""
+        from matplotlib.colors import TwoSlopeNorm
+        import matplotlib.pyplot as plt
+        colors = MBO_DARK_THEME
+
+        heatmap = self.results.temporal_spatial_offsets
+
+        fig, axes = _mbo_fig(1, 3, figsize=(14, 5))
+
+        vmax = max(0.5, np.nanmax(np.abs(heatmap)))
+        norm = TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+
+        # 1. Main heatmap
+        ax = axes[0]
+        ax.grid(False)
+        im = ax.imshow(heatmap, cmap="coolwarm", norm=norm, aspect="auto",
+                      interpolation="nearest", origin="upper")
+        _mbo_colorbar(im, ax, "Offset (px)")
+        ax.set_xlabel("X Position (bin)")
+        ax.set_ylabel("Time (bin)")
+        ax.set_title("Offset Over Time and Space", fontsize=11, fontweight="bold")
+
+        # 2. Temporal profile (mean over space)
+        ax = axes[1]
+        time_means = np.nanmean(heatmap, axis=1)
+        time_stds = np.nanstd(heatmap, axis=1)
+        x = np.arange(len(time_means))
+        ax.fill_between(x, time_means - time_stds, time_means + time_stds,
+                       alpha=0.3, color=colors["primary"])
+        ax.plot(x, time_means, "o-", color=colors["primary"], ms=5, lw=2)
+        ax.axhline(np.nanmean(time_means), color=colors["error"], ls="--", lw=2)
+
+        drift = np.nanmax(time_means) - np.nanmin(time_means)
+        ax.set_title(f"Temporal Mean (drift: {drift:.3f} px)", fontsize=11, fontweight="bold")
+        ax.set_xlabel("Time Bin")
+        ax.set_ylabel("Mean Offset (px)")
+
+        # 3. Spatial profile (mean over time)
+        ax = axes[2]
+        spatial_means = np.nanmean(heatmap, axis=0)
+        spatial_stds = np.nanstd(heatmap, axis=0)
+        x = np.arange(len(spatial_means))
+        ax.fill_between(x, spatial_means - spatial_stds, spatial_means + spatial_stds,
+                       alpha=0.3, color=colors["secondary"])
+        ax.plot(x, spatial_means, "o-", color=colors["secondary"], ms=5, lw=2)
+        ax.axhline(np.nanmean(spatial_means), color=colors["error"], ls="--", lw=2)
+
+        spatial_range = np.nanmax(spatial_means) - np.nanmin(spatial_means)
+        ax.set_title(f"Spatial Mean (range: {spatial_range:.3f} px)", fontsize=11, fontweight="bold")
+        ax.set_xlabel("X Position Bin")
+        ax.set_ylabel("Mean Offset (px)")
 
         fig.tight_layout()
         return fig

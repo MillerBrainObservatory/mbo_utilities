@@ -10,6 +10,9 @@ from enum import Enum
 
 from imgui_bundle import imgui
 
+# minimum version to show in version selector
+MIN_VERSION = "2.2.0"
+
 
 class CheckStatus(Enum):
     """status of the version check."""
@@ -27,6 +30,23 @@ class UpgradeStatus(Enum):
     RUNNING = "running"
     SUCCESS = "success"
     ERROR = "error"
+
+
+def _parse_version(v: str) -> tuple:
+    """parse version string to tuple for comparison."""
+    try:
+        # handle versions like "2.2.0", "2.10.1", "3.0.0a1"
+        # strip any pre-release suffixes for comparison
+        base = v.split("a")[0].split("b")[0].split("rc")[0].split(".dev")[0]
+        parts = base.split(".")
+        return tuple(int(p) for p in parts)
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
+
+
+def _version_gte(v1: str, v2: str) -> bool:
+    """check if v1 >= v2."""
+    return _parse_version(v1) >= _parse_version(v2)
 
 
 def _get_install_type() -> str:
@@ -53,6 +73,8 @@ class UpgradeManager:
     enabled: bool = True
     current_version: str = "unknown"
     latest_version: str | None = None
+    available_versions: list[str] = field(default_factory=list)
+    selected_version_idx: int = 0
     check_status: CheckStatus = CheckStatus.IDLE
     upgrade_status: UpgradeStatus = UpgradeStatus.IDLE
     error_message: str = ""
@@ -89,6 +111,29 @@ class UpgradeManager:
                 with urllib.request.urlopen(url, timeout=10) as response:
                     data = json.loads(response.read().decode())
                     self.latest_version = data["info"]["version"]
+
+                    # get all available versions >= MIN_VERSION
+                    all_versions = list(data.get("releases", {}).keys())
+
+                    # filter to stable releases >= MIN_VERSION
+                    valid_versions = []
+                    for v in all_versions:
+                        # skip pre-release versions (alpha, beta, rc, dev)
+                        if any(tag in v for tag in ["a", "b", "rc", "dev"]):
+                            continue
+                        if _version_gte(v, MIN_VERSION):
+                            valid_versions.append(v)
+
+                    # sort descending (newest first)
+                    valid_versions.sort(key=_parse_version, reverse=True)
+                    self.available_versions = valid_versions
+
+                    # set selected to current version if available
+                    if self.current_version in valid_versions:
+                        self.selected_version_idx = valid_versions.index(self.current_version)
+                    else:
+                        self.selected_version_idx = 0
+
                     self.check_status = CheckStatus.DONE
             except Exception as e:
                 self.error_message = str(e)
@@ -98,18 +143,25 @@ class UpgradeManager:
         self._check_thread.start()
 
     def start_upgrade(self):
-        """Start async upgrade process."""
+        """Start async upgrade to latest version."""
+        if self.latest_version:
+            self.install_version(self.latest_version)
+
+    def install_version(self, version: str):
+        """Start async install of a specific version."""
         if self.upgrade_status == UpgradeStatus.RUNNING:
             return  # already running
 
         self.upgrade_status = UpgradeStatus.RUNNING
         self.upgrade_message = ""
 
-        def _upgrade():
+        def _install():
             try:
+                package_spec = f"mbo-utilities=={version}"
+
                 # try uv first, fall back to pip
                 result = subprocess.run(
-                    [sys.executable, "-m", "uv", "pip", "install", "--upgrade", "mbo-utilities"],
+                    [sys.executable, "-m", "uv", "pip", "install", package_spec],
                     check=False, capture_output=True,
                     text=True,
                     timeout=300,
@@ -118,7 +170,7 @@ class UpgradeManager:
                 if result.returncode != 0:
                     # try regular pip
                     result = subprocess.run(
-                        [sys.executable, "-m", "pip", "install", "--upgrade", "mbo-utilities"],
+                        [sys.executable, "-m", "pip", "install", package_spec],
                         check=False, capture_output=True,
                         text=True,
                         timeout=300,
@@ -126,20 +178,20 @@ class UpgradeManager:
 
                 if result.returncode == 0:
                     self.upgrade_status = UpgradeStatus.SUCCESS
-                    self.upgrade_message = "upgrade complete. restart the application to use the new version."
+                    self.upgrade_message = f"installed v{version}. restart to use."
                     # reload version
                     self._load_current_version()
                 else:
                     self.upgrade_status = UpgradeStatus.ERROR
-                    self.upgrade_message = result.stderr or "upgrade failed"
+                    self.upgrade_message = result.stderr or "install failed"
             except subprocess.TimeoutExpired:
                 self.upgrade_status = UpgradeStatus.ERROR
-                self.upgrade_message = "upgrade timed out"
+                self.upgrade_message = "install timed out"
             except Exception as e:
                 self.upgrade_status = UpgradeStatus.ERROR
                 self.upgrade_message = str(e)
 
-        self._upgrade_thread = threading.Thread(target=_upgrade, daemon=True)
+        self._upgrade_thread = threading.Thread(target=_install, daemon=True)
         self._upgrade_thread.start()
 
     @property
@@ -176,7 +228,7 @@ def draw_upgrade_manager(manager: UpgradeManager):
     """
     Draw the upgrade manager ui.
 
-    shows current version, check button, and upgrade option if available.
+    shows current version, check button, version selector, and install option.
     """
     if not manager.enabled:
         return
@@ -204,13 +256,13 @@ def draw_upgrade_manager(manager: UpgradeManager):
 
     # latest version (if checked)
     if manager.check_status == CheckStatus.DONE and manager.latest_version:
-        imgui.text_disabled(f"PyPI: v{manager.latest_version}")
+        imgui.text_disabled(f"Latest: v{manager.latest_version}")
 
     imgui.spacing()
 
     # status display
     if manager.check_status == CheckStatus.CHECKING:
-        imgui.text_disabled("Checking for updates...")
+        imgui.text_disabled("Checking PyPI...")
     elif manager.check_status == CheckStatus.ERROR:
         imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), f"Error: {manager.error_message[:50]}")
     elif manager.check_status == CheckStatus.DONE:
@@ -222,7 +274,7 @@ def draw_upgrade_manager(manager: UpgradeManager):
         elif manager.is_dev_build:
             imgui.text_colored(
                 imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
-                "Running development build"
+                "Development build"
             )
         else:
             imgui.text_colored(
@@ -232,45 +284,80 @@ def draw_upgrade_manager(manager: UpgradeManager):
 
     imgui.spacing()
 
-    # buttons
-    button_width = 120
-
     # check button
+    button_width = 100
     checking = manager.check_status == CheckStatus.CHECKING
+    upgrading = manager.upgrade_status == UpgradeStatus.RUNNING
+
     if checking:
         imgui.begin_disabled()
 
-    if imgui.button("Check for Updates", imgui.ImVec2(button_width, 0)):
+    if imgui.button("Check", imgui.ImVec2(button_width, 0)):
         manager.check_for_upgrade()
 
     if checking:
         imgui.end_disabled()
 
-    # upgrade button (only if upgrade available)
-    if manager.upgrade_available:
-        imgui.same_line()
+    # version selector (only show if we have versions)
+    if manager.check_status == CheckStatus.DONE and manager.available_versions:
+        imgui.spacing()
+        imgui.text("Switch version:")
 
-        upgrading = manager.upgrade_status == UpgradeStatus.RUNNING
         if upgrading:
             imgui.begin_disabled()
 
-        imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.6, 0.2, 1.0))
-        if imgui.button("Upgrade", imgui.ImVec2(button_width, 0)):
-            manager.start_upgrade()
+        # version dropdown
+        imgui.set_next_item_width(120)
+        changed, new_idx = imgui.combo(
+            "##version_select",
+            manager.selected_version_idx,
+            manager.available_versions
+        )
+        if changed:
+            manager.selected_version_idx = new_idx
+
+        imgui.same_line()
+
+        # install button
+        selected_ver = manager.available_versions[manager.selected_version_idx]
+        is_current = selected_ver == manager.current_version
+
+        if is_current:
+            imgui.begin_disabled()
+
+        # color button based on action
+        if _version_gte(selected_ver, manager.current_version):
+            # upgrade (green)
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.6, 0.2, 1.0))
+            btn_label = "Upgrade" if selected_ver != manager.current_version else "Current"
+        else:
+            # downgrade (orange)
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.7, 0.5, 0.2, 1.0))
+            btn_label = "Downgrade"
+
+        if imgui.button(btn_label, imgui.ImVec2(button_width, 0)):
+            manager.install_version(selected_ver)
+
         imgui.pop_style_color()
+
+        if is_current:
+            imgui.end_disabled()
 
         if upgrading:
             imgui.end_disabled()
 
-    # upgrade status
+        # show version count
+        imgui.text_disabled(f"{len(manager.available_versions)} versions (>= {MIN_VERSION})")
+
+    # install status
     if manager.upgrade_status == UpgradeStatus.RUNNING:
         imgui.spacing()
-        imgui.text_disabled("Upgrading...")
+        imgui.text_disabled("Installing...")
     elif manager.upgrade_status == UpgradeStatus.SUCCESS:
         imgui.spacing()
         imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), manager.upgrade_message)
     elif manager.upgrade_status == UpgradeStatus.ERROR:
         imgui.spacing()
-        imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), f"Error: {manager.upgrade_message[:80]}")
+        imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), f"Error: {manager.upgrade_message[:60]}")
 
     imgui.spacing()
