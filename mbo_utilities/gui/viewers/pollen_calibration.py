@@ -1149,25 +1149,30 @@ class PollenCalibrationViewer(BaseViewer):
 
     def _open_output_folder(self, mode: str = "auto"):
         """Open the output folder in file explorer."""
-        import subprocess
-        import sys
-
         results = self._results_auto if mode == "auto" else self._results_manual
         if not results:
             return
 
         out_dir = results.get("output_dir", "")
-        if not out_dir:
+        if out_dir:
+            self._open_output_folder_path(out_dir)
+
+    def _open_output_folder_path(self, folder_path: str):
+        """Open a folder path in file explorer."""
+        import subprocess
+        import sys
+
+        if not folder_path:
             return
 
         try:
             if sys.platform == "win32":
                 import os
-                os.startfile(out_dir)
+                os.startfile(folder_path)
             elif sys.platform == "darwin":
-                subprocess.run(["open", out_dir], check=False)
+                subprocess.run(["open", folder_path], check=False)
             else:
-                subprocess.run(["xdg-open", out_dir], check=False)
+                subprocess.run(["xdg-open", folder_path], check=False)
         except Exception as e:
             self.logger.exception(f"Failed to open folder: {e}")
 
@@ -1257,17 +1262,19 @@ class PollenCalibrationViewer(BaseViewer):
             imgui.text_colored(color_manual, "Manual")
             imgui.spacing()
 
-            # XY Positions plot
+            # XY Positions plot - normalized (subtract mean to center)
             plot_h = 220
-            if implot.begin_plot("XY Positions (um)", imgui.ImVec2(-1, plot_h)):
-                implot.setup_axes("X (um)", "Y (um)")
-                implot.setup_axis_limits(implot.ImAxis_.x1, -150, 150, implot.Cond_.once)
-                implot.setup_axis_limits(implot.ImAxis_.y1, -150, 150, implot.Cond_.once)
+            if implot.begin_plot("XY Positions (normalized)", imgui.ImVec2(-1, plot_h)):
+                implot.setup_axes("dX (um)", "dY (um)")
+                implot.setup_axis_limits(implot.ImAxis_.x1, -50, 50, implot.Cond_.once)
+                implot.setup_axis_limits(implot.ImAxis_.y1, -50, 50, implot.Cond_.once)
 
-                # Plot auto data
+                # Plot auto data - normalized
                 if has_auto:
                     xs_auto = np.asarray(data_auto["xs_um"], dtype=np.float64)
                     ys_auto = np.asarray(data_auto["ys_um"], dtype=np.float64)
+                    xs_auto = xs_auto - xs_auto.mean()
+                    ys_auto = ys_auto - ys_auto.mean()
                     implot.push_style_color(implot.Col_.marker_fill, color_auto)
                     implot.push_style_var(implot.StyleVar_.marker_size, 6.0)
                     implot.set_next_marker_style(implot.Marker_.circle)
@@ -1275,10 +1282,12 @@ class PollenCalibrationViewer(BaseViewer):
                     implot.pop_style_var()
                     implot.pop_style_color()
 
-                # Plot manual data
+                # Plot manual data - normalized
                 if has_manual:
                     xs_manual = np.asarray(data_manual["xs_um"], dtype=np.float64)
                     ys_manual = np.asarray(data_manual["ys_um"], dtype=np.float64)
+                    xs_manual = xs_manual - xs_manual.mean()
+                    ys_manual = ys_manual - ys_manual.mean()
                     implot.push_style_color(implot.Col_.marker_fill, color_manual)
                     implot.push_style_var(implot.StyleVar_.marker_size, 6.0)
                     implot.set_next_marker_style(implot.Marker_.square)
@@ -1290,8 +1299,8 @@ class PollenCalibrationViewer(BaseViewer):
 
             imgui.spacing()
 
-            # X/Y offsets bar chart
-            if implot.begin_plot("XY Offsets (um)", imgui.ImVec2(-1, plot_h)):
+            # X/Y offsets bar chart - normalized (relative to first beam)
+            if implot.begin_plot("XY Offsets (relative)", imgui.ImVec2(-1, plot_h)):
                 implot.setup_axes("Beam #", "Offset (um)")
 
                 # Determine beam count
@@ -1305,16 +1314,18 @@ class PollenCalibrationViewer(BaseViewer):
                     beam_nums = np.arange(1, n_beams + 1, dtype=np.float64)
                     bar_width = 0.35
 
-                    # Auto X offsets
+                    # Auto X offsets - normalize to first beam
                     if has_auto and "diffx" in data_auto:
                         diffx_auto = np.asarray(data_auto["diffx"], dtype=np.float64)
+                        diffx_auto = diffx_auto - diffx_auto[0]
                         implot.push_style_color(implot.Col_.fill, color_auto)
                         implot.plot_bars("dX Auto", beam_nums - bar_width/2, diffx_auto, bar_width)
                         implot.pop_style_color()
 
-                    # Manual X offsets
+                    # Manual X offsets - normalize to first beam
                     if has_manual and "diffx" in data_manual:
                         diffx_manual = np.asarray(data_manual["diffx"], dtype=np.float64)
+                        diffx_manual = diffx_manual - diffx_manual[0]
                         implot.push_style_color(implot.Col_.fill, color_manual)
                         implot.plot_bars("dX Manual", beam_nums + bar_width/2, diffx_manual, bar_width)
                         implot.pop_style_color()
@@ -1341,13 +1352,18 @@ class PollenCalibrationViewer(BaseViewer):
 
             imgui.spacing()
 
-            # Open full figures button
-            if imgui.button("Open All Saved Figures"):
-                # Open figures for both modes if available
-                for mode in ["auto", "manual"]:
-                    self._scan_saved_images(mode)
-                    for img_path in self._saved_images:
-                        self._open_image(img_path)
+            # Open output folder button
+            if imgui.button("Open Output Folder"):
+                # Open the folder containing saved figures
+                if self._results_auto:
+                    self._open_output_folder("auto")
+                elif self._results_manual:
+                    self._open_output_folder("manual")
+                elif self._loaded_external and self._loaded_external.get("h5_path"):
+                    # Open folder containing loaded h5 file
+                    h5_path = Path(self._loaded_external["h5_path"])
+                    if h5_path.parent.exists():
+                        self._open_output_folder_path(str(h5_path.parent))
 
         imgui.end()
 

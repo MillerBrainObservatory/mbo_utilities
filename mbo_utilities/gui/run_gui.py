@@ -550,10 +550,9 @@ def _run_gui_impl(
 
 
         # Dispatch based on Mode
+        # Note: pollen calibration is auto-detected in Standard Viewer via get_viewer_class()
         if mode == "Standard Viewer":
             return _launch_standard_viewer(data_in, roi, widget, metadata_only)
-        if mode == "Pollen Calibration":
-            return _launch_pollen_calibration(data_in, widget)
         if mode == "Napari":
             return _launch_napari(data_in)
         if mode == "Cellpose":
@@ -583,30 +582,6 @@ def _launch_standard_viewer(data_in, roi, widget, metadata_only):
         return None
 
     import fastplotlib as fpl
-    iw = _create_image_widget(data_array, widget=widget)
-
-    if _is_jupyter():
-        return iw
-    fpl.loop.run()
-    return None
-
-
-def _launch_pollen_calibration(data_in, widget: bool = True):
-    """Launch viewer in pollen calibration mode.
-
-    Loads data with dims="ZCYX" for pollen calibration stacks where:
-    - Z = piezo z-positions
-    - C = beamlet channels
-    - Y, X = spatial dimensions
-    """
-    from mbo_utilities.arrays import open_scanimage
-    import fastplotlib as fpl
-
-    # Load with pollen-specific dims
-    data_array = open_scanimage(data_in, dims="ZCYX")
-    # CalibrationArray has num_beamlets/num_zplanes, others have num_channels
-    getattr(data_array, "num_beamlets", data_array.num_channels)
-
     iw = _create_image_widget(data_array, widget=widget)
 
     if _is_jupyter():
