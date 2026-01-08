@@ -259,6 +259,114 @@ def get_z_step_size(metadata: dict) -> float | None:
     return dz
 
 
+def get_num_volumes(metadata: dict) -> int | None:
+    """
+    Get number of volumes from ScanImage hStackManager.
+
+    Parameters
+    ----------
+    metadata : dict
+        Metadata dict containing 'si' key.
+
+    Returns
+    -------
+    int or None
+        Number of volumes requested, or None if not a piezo stack.
+
+    Notes
+    -----
+    Uses si.hStackManager.numVolumes for piezo/pollen stacks.
+    For LBM, volumes are the same as timepoints (each frame is a volume).
+    """
+    stack_type = detect_stack_type(metadata)
+
+    if stack_type == "lbm":
+        # LBM: not applicable, use num_timepoints instead
+        return None
+
+    if stack_type == "single_plane":
+        return None
+
+    si = metadata.get("si", {})
+    stack_mgr = si.get("hStackManager", {})
+
+    # prefer actualNumVolumes over numVolumes
+    num_vol = stack_mgr.get("actualNumVolumes")
+    if num_vol is None:
+        num_vol = stack_mgr.get("numVolumes")
+
+    return num_vol
+
+
+def get_num_slices(metadata: dict) -> int | None:
+    """
+    Get number of z-slices per volume from ScanImage hStackManager.
+
+    Parameters
+    ----------
+    metadata : dict
+        Metadata dict containing 'si' key.
+
+    Returns
+    -------
+    int or None
+        Number of z-slices per volume, or None if not a piezo stack.
+
+    Notes
+    -----
+    Uses si.hStackManager.numSlices for piezo/pollen stacks.
+    For LBM, slices are represented as channels (beamlets).
+    """
+    stack_type = detect_stack_type(metadata)
+
+    if stack_type == "lbm":
+        # LBM: slices are channels
+        return None
+
+    if stack_type == "single_plane":
+        return None
+
+    si = metadata.get("si", {})
+    stack_mgr = si.get("hStackManager", {})
+
+    # prefer actualNumSlices over numSlices
+    num_slices = stack_mgr.get("actualNumSlices")
+    if num_slices is None:
+        num_slices = stack_mgr.get("numSlices")
+
+    return num_slices
+
+
+def get_frames_per_volume(metadata: dict) -> int | None:
+    """
+    Get total frames per volume from ScanImage hStackManager.
+
+    Parameters
+    ----------
+    metadata : dict
+        Metadata dict containing 'si' key.
+
+    Returns
+    -------
+    int or None
+        Frames per volume (numSlices * framesPerSlice if not averaged),
+        or None if not a piezo stack.
+
+    Notes
+    -----
+    Uses si.hStackManager.numFramesPerVolume for piezo/pollen stacks.
+    """
+    stack_type = detect_stack_type(metadata)
+
+    if stack_type in ("lbm", "single_plane"):
+        return None
+
+    si = metadata.get("si", {})
+    stack_mgr = si.get("hStackManager", {})
+
+    return stack_mgr.get("numFramesPerVolume")
+
+
 def compute_num_timepoints(total_frames: int, metadata: dict) -> int:
     """
     Compute number of timepoints from total frames and metadata.
