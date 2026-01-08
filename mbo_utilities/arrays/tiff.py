@@ -1782,15 +1782,22 @@ class LBMArray(ScanImageArray):
                 f"LBMArray requires LBM stack data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
+        # clear _dim_labels so get_dims() uses our dims property instead
+        self._dim_labels = None
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        """Dimension labels for LBM arrays: (timepoints, z-planes, Y, X)."""
+        return ("timepoints", "z-planes", "Y", "X")
 
 
 class PiezoArray(ScanImageArray):
     """
-    Piezo z-stack array reader with optional frame averaging.
+    Piezo z-stack array reader with proper volumetric shape.
 
-    For piezo stacks, the z-piezo moves sequentially through slices.
-    May have multiple frames per slice (framesPerSlice > 1) that can
-    optionally be averaged together.
+    For piezo stacks, the z-piezo moves sequentially through slices,
+    capturing one or more frames at each position. The data is organized
+    as (T, Z, Y, X) where T is volumes and Z is z-slices.
 
     Parameters
     ----------
@@ -1809,6 +1816,10 @@ class PiezoArray(ScanImageArray):
 
     Attributes
     ----------
+    num_volumes : int
+        Number of volumes (T dimension).
+    num_slices : int
+        Number of z-slices per volume (Z dimension).
     frames_per_slice : int
         Number of frames acquired per z-slice.
     log_average_factor : int
@@ -1817,6 +1828,12 @@ class PiezoArray(ScanImageArray):
         Whether to average frames per slice.
     can_average : bool
         True if frame averaging is possible (not pre-averaged, >1 frame/slice).
+
+    Notes
+    -----
+    Shape is (num_volumes, num_slices, Ly, Lx) for proper volumetric data.
+    The raw TIFF frames are organized as:
+    - total_frames = num_volumes * num_slices * frames_per_slice / log_average_factor
     """
 
     @classmethod
@@ -1847,7 +1864,8 @@ class PiezoArray(ScanImageArray):
     METADATA_CONTEXT: dict[str, str] = {
         "Ly": "Frame height in pixels.",
         "Lx": "Frame width in pixels.",
-        "num_zplanes": "Number of z-slices per volume (from hStackManager.numSlices).",
+        "num_slices": "Number of z-slices per volume (from hStackManager.numSlices).",
+        "num_volumes": "Number of volumes (from hStackManager.numVolumes).",
         "dz": "Z-step size in µm (from hStackManager.stackZStepSize).",
         "frames_per_slice": "Frames acquired at each z-position before piezo moves.",
         "log_average_factor": "If >1, frames were averaged during acquisition.",
@@ -1861,6 +1879,14 @@ class PiezoArray(ScanImageArray):
         metadata: dict | None = None,
         **kwargs,
     ):
+        # initialize piezo-specific state before super().__init__ since shape depends on it
+        self._average_frames = False
+        self._frames_per_slice = 1
+        self._log_average_factor = 1
+        self._num_slices = 1
+        self._num_volumes = 1
+        self._raw_tiff_frames = 0
+
         super().__init__(files, metadata=metadata, **kwargs)
         if self.stack_type != "piezo":
             raise ValueError(
@@ -1868,9 +1894,52 @@ class PiezoArray(ScanImageArray):
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
 
-        self.frames_per_slice = get_frames_per_slice(self._metadata)
-        self.log_average_factor = get_log_average_factor(self._metadata)
+        # extract piezo-specific parameters from metadata
+        from mbo_utilities.metadata.scanimage import (
+            get_num_slices,
+            get_num_volumes,
+            get_frames_per_volume,
+        )
+
+        self._frames_per_slice = get_frames_per_slice(self._metadata)
+        self._log_average_factor = get_log_average_factor(self._metadata)
+        self._raw_tiff_frames = self.num_frames  # raw count from parent
+
+        # get num_slices from metadata
+        num_slices = get_num_slices(self._metadata)
+        self._num_slices = num_slices if num_slices else 1
+
+        # get num_volumes from metadata, or compute from raw frames
+        num_volumes = get_num_volumes(self._metadata)
+        if num_volumes:
+            self._num_volumes = num_volumes
+        else:
+            # compute from raw frames: total = volumes * slices * frames_per_slice
+            # if pre-averaged, frames_per_slice is already factored out
+            if self._log_average_factor > 1:
+                frames_per_volume = self._num_slices
+            else:
+                frames_per_volume = self._num_slices * self._frames_per_slice
+
+            if frames_per_volume > 0:
+                self._num_volumes = self._raw_tiff_frames // frames_per_volume
+            else:
+                self._num_volumes = 1
+
         self._average_frames = average_frames and self.can_average
+
+        # clear _dim_labels so get_dims() uses our dims property instead
+        self._dim_labels = None
+
+    @property
+    def num_slices(self) -> int:
+        """Number of z-slices per volume (from hStackManager.numSlices)."""
+        return self._num_slices
+
+    @property
+    def num_volumes(self) -> int:
+        """Number of volumes (from hStackManager.numVolumes)."""
+        return self._num_volumes
 
     @property
     def frames_per_slice(self) -> int:
@@ -1912,55 +1981,137 @@ class PiezoArray(ScanImageArray):
 
     @property
     def shape(self):
+        """
+        Return shape as (num_volumes, frames_dim, Ly, Lx).
+
+        The second dimension depends on averaging state:
+        - When averaging or pre-averaged: num_slices (one averaged frame per z-slice)
+        - When not averaging: num_slices * frames_per_slice (all raw frames)
+        """
         base_shape = super().shape
-        if self.average_frames and self.can_average:
-            # when averaging, we have fewer timepoints
-            # original: (total_frames, num_planes, H, W)
-            # where total_frames = num_volumes * frames_per_slice
-            # after averaging: (num_volumes, num_planes, H, W)
-            n_frames, n_planes, h, w = base_shape
-            n_volumes = n_frames // self.frames_per_slice
-            return (n_volumes, n_planes, h, w)
-        return base_shape
+        h, w = base_shape[2], base_shape[3]
+
+        if self._average_frames or self._log_average_factor > 1:
+            # averaging enabled or pre-averaged: one frame per slice
+            frames_dim = self._num_slices
+        else:
+            # not averaging: show all raw frames
+            frames_dim = self._num_slices * self._frames_per_slice
+
+        return (self._num_volumes, frames_dim, h, w)
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        """
+        Dimension labels for piezo arrays.
+
+        Returns ("volumes", "z-slices", "Y", "X") when averaging/pre-averaged,
+        or ("volumes", "frames", "Y", "X") when showing all raw frames.
+        """
+        if self._average_frames or self._log_average_factor > 1:
+            return ("volumes", "z-slices", "Y", "X")
+        else:
+            return ("volumes", "frames", "Y", "X")
+
+    def _volume_slice_to_raw_frame(self, vol_idx: int, slice_idx: int) -> int:
+        """
+        Convert (volume, slice) indices to raw TIFF frame index.
+
+        Parameters
+        ----------
+        vol_idx : int
+            Volume index (0-based).
+        slice_idx : int
+            Z-slice index within volume (0-based).
+
+        Returns
+        -------
+        int
+            Raw TIFF frame index.
+        """
+        if self._log_average_factor > 1:
+            # pre-averaged: 1 frame per slice
+            frames_per_volume = self._num_slices
+            return vol_idx * frames_per_volume + slice_idx
+        else:
+            # not pre-averaged: multiple frames per slice
+            frames_per_volume = self._num_slices * self._frames_per_slice
+            return vol_idx * frames_per_volume + slice_idx * self._frames_per_slice
 
     def __getitem__(self, key):
-        if not self.average_frames or not self.can_average:
-            return super().__getitem__(key)
+        """
+        Index into piezo array with (volume, frame_idx, y, x) semantics.
 
-        # frame averaging mode: need to read multiple frames and average
+        When averaging: frame_idx maps to z-slices (averaged)
+        When not averaging: frame_idx maps to raw frames (flattened z * frames_per_slice)
+        """
         if not isinstance(key, tuple):
             key = (key,)
 
-        t_key = key[0] if len(key) > 0 else slice(None)
-        rest_key = key[1:] if len(key) > 1 else ()
+        # pad key to full dimensions
+        while len(key) < 4:
+            key = key + (slice(None),)
 
-        # convert t_key to list of volume indices
-        n_volumes = self.shape[0]
-        frames = listify_index(t_key, n_volumes)
+        vol_key, frame_key, y_key, x_key = key
 
-        if not frames:
-            return np.empty((0, *self.shape[1:]), dtype=self.dtype)
+        # determine frame dimension size based on averaging state
+        if self._average_frames or self._log_average_factor > 1:
+            frame_dim_size = self._num_slices
+        else:
+            frame_dim_size = self._num_slices * self._frames_per_slice
 
-        fps = self.frames_per_slice
+        vol_indices = listify_index(vol_key, self._num_volumes)
+        frame_indices = listify_index(frame_key, frame_dim_size)
+
+        if not vol_indices or not frame_indices:
+            return np.empty((0, 0, *self.shape[2:]), dtype=self.dtype)
+
+        needs_averaging = self._average_frames and self.can_average
+
         results = []
+        for vol_idx in vol_indices:
+            vol_frames = []
+            for f_idx in frame_indices:
+                if needs_averaging:
+                    # f_idx is a z-slice index, average all frames at this slice
+                    raw_frame = self._volume_slice_to_raw_frame(vol_idx, f_idx)
+                    frame_data = []
+                    for f in range(self._frames_per_slice):
+                        data = super().__getitem__((raw_frame + f, 0, y_key, x_key))
+                        frame_data.append(data)
+                    averaged = np.mean(frame_data, axis=0)
+                    vol_frames.append(averaged)
+                elif self._log_average_factor > 1:
+                    # pre-averaged: f_idx is a z-slice, 1 frame per slice
+                    raw_frame = self._volume_slice_to_raw_frame(vol_idx, f_idx)
+                    data = super().__getitem__((raw_frame, 0, y_key, x_key))
+                    vol_frames.append(data)
+                else:
+                    # not averaging: f_idx is a raw frame index within volume
+                    frames_per_volume = self._num_slices * self._frames_per_slice
+                    raw_frame = vol_idx * frames_per_volume + f_idx
+                    data = super().__getitem__((raw_frame, 0, y_key, x_key))
+                    vol_frames.append(data)
 
-        for vol_idx in frames:
-            # read all frames for this volume and average
-            start_frame = vol_idx * fps
-            end_frame = start_frame + fps
-            # get data for all frames in this volume
-            vol_data = super().__getitem__((slice(start_frame, end_frame), *rest_key))
-            # average over the first axis (frames within volume)
-            averaged = np.mean(vol_data, axis=0, keepdims=True)
-            results.append(averaged)
+            results.append(np.stack(vol_frames, axis=0))
 
-        out = np.concatenate(results, axis=0)
+        out = np.stack(results, axis=0)
 
-        # handle integer indexing (squeeze first dim)
-        if isinstance(t_key, int):
+        # handle integer indexing - squeeze appropriate dimensions
+        if isinstance(vol_key, int):
             out = out[0]
+        if isinstance(frame_key, int):
+            if out.ndim > 0:
+                out = out[..., 0, :, :] if isinstance(vol_key, int) else out[:, 0, :, :]
 
         return out
+
+    def __array__(self, dtype=None):
+        """Return full array as numpy array."""
+        data = self[:]
+        if dtype is not None:
+            return data.astype(dtype)
+        return data
 
 
 class SinglePlaneArray(ScanImageArray):
@@ -2023,6 +2174,13 @@ class SinglePlaneArray(ScanImageArray):
                 f"SinglePlaneArray requires single-plane data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
+        # clear _dim_labels so get_dims() uses our dims property instead
+        self._dim_labels = None
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        """Dimension labels for single-plane arrays: (timepoints, channels, Y, X)."""
+        return ("timepoints", "channels", "Y", "X")
 
 
 class CalibrationArray(ScanImageArray):
@@ -2102,6 +2260,13 @@ class CalibrationArray(ScanImageArray):
                 f"CalibrationArray requires pollen calibration data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
+        # clear _dim_labels so get_dims() uses our dims property instead
+        self._dim_labels = None
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        """Dimension labels for calibration arrays: (z-planes, beamlets, Y, X)."""
+        return ("z-planes", "beamlets", "Y", "X")
 
     @property
     def num_zplanes(self) -> int:
