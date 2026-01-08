@@ -341,7 +341,14 @@ def _imwrite_base(
     num_planes = get_num_planes(arr)
 
     # Extract shape info
-    nframes = arr.shape[0] if "T" in dims else 1
+    # for 4D arrays, first dim is always the iteration dimension (frames/volumes)
+    # for 3D arrays, check if there's a time dimension
+    if len(arr.shape) == 4:
+        nframes = arr.shape[0]
+    elif len(arr.shape) == 3 and dims[0] in {"T", "timepoints"}:
+        nframes = arr.shape[0]
+    else:
+        nframes = 1
     Ly, Lx = arr.shape[-2], arr.shape[-1]
 
     # validate num_planes against actual shape (metadata may not match data)
