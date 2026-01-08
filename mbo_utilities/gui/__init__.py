@@ -20,16 +20,16 @@ See docs/gui_refactor_plan.md for the full architecture documentation.
 __all__ = [
     # Panels
     "BasePanel",
-    # Viewer architecture
-    "BaseViewer",
     "DebugPanel",
-    "GridSearchViewer",
     "MetadataPanel",
-    "PollenCalibrationViewer",
-    # Legacy exports (backwards compatibility)
-    "PreviewDataWidget",
     "ProcessPanel",
+    # Viewer architecture (auto-selected based on data type)
+    "BaseViewer",
     "TimeSeriesViewer",
+    # Widgets
+    "GridSearchViewer",
+    "PreviewDataWidget",
+    # Entry points
     "download_notebook",
     "get_default_ini_path",
     "run_gui",
@@ -73,9 +73,6 @@ def __getattr__(name):
     if name == "TimeSeriesViewer":
         from .viewers import TimeSeriesViewer
         return TimeSeriesViewer
-    if name == "PollenCalibrationViewer":
-        from .viewers import PollenCalibrationViewer
-        return PollenCalibrationViewer
 
     # === Panels ===
 
