@@ -338,7 +338,7 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_custom_value = ""
 
         # Output suffix
-        self._saveas_output_suffix = "_stitched"
+        self._saveas_output_suffix = ""
 
     def _init_viewer(self):
         """Initialize the viewer based on data type."""

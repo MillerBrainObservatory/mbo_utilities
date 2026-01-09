@@ -1067,7 +1067,7 @@ def _write_volumetric_tiff(
                 pbar.update(chunk_end - chunk_start)
 
             if progress_callback:
-                progress_callback(chunk_end / n_frames, f"Writing frame {chunk_end}/{n_frames}")
+                progress_callback(chunk_end / n_frames)
 
         if pbar:
             pbar.close()

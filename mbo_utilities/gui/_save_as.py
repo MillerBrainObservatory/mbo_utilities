@@ -16,6 +16,7 @@ from imgui_bundle import imgui, hello_imgui, portable_file_dialogs as pfd
 from mbo_utilities.reader import MBO_SUPPORTED_FTYPES, imread
 from mbo_utilities.writer import imwrite
 from mbo_utilities.arrays import _sanitize_suffix
+from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities.gui._imgui_helpers import set_tooltip, checkbox_with_tooltip, draw_checkbox_grid
 from mbo_utilities.gui._availability import HAS_SUITE3D
@@ -142,28 +143,12 @@ def draw_saveas_popup(parent: Any):
         imgui.set_next_item_width(hello_imgui.em_size(25))
 
         # Directory + Ext
-        current_dir_str = (
-            str(Path(parent._saveas_outdir).expanduser().resolve())
-            if parent._saveas_outdir
-            else ""
-        )
+        # use the raw string from parent, not resolved Path (allows free typing)
+        current_dir_str = parent._saveas_outdir or ""
 
-        # Track last known value to detect external changes (e.g., from Browse dialog)
-        if not hasattr(parent, "_saveas_input_last_value"):
-            parent._saveas_input_last_value = current_dir_str
-
-        # Check if value changed externally (e.g., Browse dialog selected a new folder)
-        # If so, we need to force imgui to update its internal buffer
-        value_changed_externally = (parent._saveas_input_last_value != current_dir_str)
-        if value_changed_externally:
-            parent._saveas_input_last_value = current_dir_str
-
-        # Use unique ID that changes when value updates externally to reset imgui's buffer
-        input_id = f"Save Dir##{hash(current_dir_str) if value_changed_externally else 'stable'}"
-        changed, new_str = imgui.input_text(input_id, current_dir_str)
+        changed, new_str = imgui.input_text("Save Dir", current_dir_str)
         if changed:
             parent._saveas_outdir = new_str
-            parent._saveas_input_last_value = new_str
 
         imgui.same_line()
         if imgui.button("Browse"):
@@ -321,42 +306,6 @@ def draw_saveas_popup(parent: Any):
             v_max=1024,
         )
 
-        # Output suffix section (only show for multi-ROI data when stitching)
-        if num_rois > 1 and not parent._saveas_rois:
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            imgui.text("Filename Suffix")
-            imgui.same_line()
-            imgui.text_disabled("(?)")
-            if imgui.is_item_hovered():
-                imgui.begin_tooltip()
-                imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-                imgui.text_unformatted(
-                    "Custom suffix appended to output filenames.\n"
-                    "Default: '_stitched' for stitched multi-ROI data.\n"
-                    "Examples: '_stitched', '_processed', '_session1'\n\n"
-                    'Illegal characters (<>:"/\\|?*) are removed.\n'
-                    "Underscore prefix is added if missing."
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.end_tooltip()
-
-            imgui.set_next_item_width(hello_imgui.em_size(15))
-            changed, new_suffix = imgui.input_text(
-                "##output_suffix",
-                parent._saveas_output_suffix,
-            )
-            if changed:
-                parent._saveas_output_suffix = new_suffix
-
-            # Live filename preview
-            sanitized = _sanitize_suffix(parent._saveas_output_suffix)
-            preview_ext = parent._ext.lstrip(".")
-            preview_name = f"plane01{sanitized}.{preview_ext}"
-            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"Preview: {preview_name}")
-
         # Format-specific options
         if parent._ext in (".zarr",):
             imgui.spacing()
@@ -395,14 +344,8 @@ def draw_saveas_popup(parent: Any):
         imgui.spacing()
         imgui.separator()
 
-        # Timepoints section
-        _draw_timepoints_section(parent)
-
-        imgui.spacing()
-        imgui.separator()
-
-        # Z-Plane Selection section
-        _draw_zplane_section(parent)
+        # Selection section (timepoints, z-planes, suffix, preview)
+        _draw_selection_section(parent)
 
         imgui.spacing()
         imgui.separator()
@@ -566,50 +509,34 @@ def _draw_metadata_section(parent: Any):
     parent._saveas_missing_required = missing_required
 
 
-def _draw_timepoints_section(parent: Any):
-    """Draw the timepoints section of the save dialog."""
-    imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Timepoints")
+def _draw_selection_section(parent: Any):
+    """Draw the selection section with table layout for dimension slicing and output path."""
+    imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Selection")
+    imgui.same_line()
+    imgui.text_disabled("(?)")
+    if imgui.is_item_hovered():
+        imgui.begin_tooltip()
+        imgui.push_text_wrap_pos(imgui.get_font_size() * 25.0)
+        imgui.text_unformatted(
+            "Select which data to save using start:stop:step notation.\n\n"
+            "start: first index to include (1-based)\n"
+            "stop: last index to include (1-based, inclusive)\n"
+            "step: interval between indices (1 = every item)\n\n"
+            "Examples:\n"
+            "  1:100:1 = indices 1-100 (every one)\n"
+            "  1:100:2 = indices 1,3,5,...,99 (every other)\n"
+            "  5:10:1 = indices 5-10 only"
+        )
+        imgui.pop_text_wrap_pos()
+        imgui.end_tooltip()
     imgui.dummy(imgui.ImVec2(0, 5))
 
-    # Get max frames from data
+    # get data dimensions
     try:
         first_array = parent.image_widget.data[0]
         max_frames = first_array.shape[0]
     except (IndexError, AttributeError):
         max_frames = 1000
-
-    # initialize num_timepoints if not set or if max changed
-    if not hasattr(parent, "_saveas_num_timepoints") or parent._saveas_num_timepoints is None:
-        parent._saveas_num_timepoints = max_frames
-    if not hasattr(parent, "_saveas_last_max_timepoints"):
-        parent._saveas_last_max_timepoints = max_frames
-    elif parent._saveas_last_max_timepoints != max_frames:
-        parent._saveas_last_max_timepoints = max_frames
-        parent._saveas_num_timepoints = max_frames
-
-    imgui.set_next_item_width(hello_imgui.em_size(8))
-    changed, new_value = imgui.input_int("##timepoints_input", parent._saveas_num_timepoints, step=1, step_fast=100)
-    if changed:
-        parent._saveas_num_timepoints = max(1, min(new_value, max_frames))
-    imgui.same_line()
-    imgui.text(f"/ {max_frames}")
-    set_tooltip(
-        f"Number of timepoints to save (1-{max_frames}). "
-        "Useful for testing on subsets before full conversion."
-    )
-
-    imgui.set_next_item_width(hello_imgui.em_size(20))
-    slider_changed, slider_value = imgui.slider_int(
-        "##timepoints_slider", parent._saveas_num_timepoints, 1, max_frames
-    )
-    if slider_changed:
-        parent._saveas_num_timepoints = slider_value
-
-
-def _draw_zplane_section(parent: Any):
-    """Draw the z-plane selection section of the save dialog."""
-    imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Z-Plane Selection")
-    imgui.dummy(imgui.ImVec2(0, 5))
 
     try:
         data = parent.image_widget.data[0]
@@ -623,74 +550,218 @@ def _draw_zplane_section(parent: Any):
             num_planes = 1
     except Exception as e:
         num_planes = 1
-        hello_imgui.log(
-            hello_imgui.LogLevel.error,
-            f"Could not read number of planes: {e}",
-        )
+        hello_imgui.log(hello_imgui.LogLevel.error, f"Could not read number of planes: {e}")
 
-    # default to all planes selected (only on first open, not when user selects "None")
-    if parent._selected_planes is None:
-        parent._selected_planes = set(range(num_planes))
+    # initialize state
+    if not hasattr(parent, "_saveas_tp_start"):
+        parent._saveas_tp_start = 1
+    if not hasattr(parent, "_saveas_tp_stop"):
+        parent._saveas_tp_stop = max_frames
+    if not hasattr(parent, "_saveas_tp_step"):
+        parent._saveas_tp_step = 1
+    if not hasattr(parent, "_saveas_last_max_tp"):
+        parent._saveas_last_max_tp = max_frames
+    elif parent._saveas_last_max_tp != max_frames:
+        parent._saveas_last_max_tp = max_frames
+        parent._saveas_tp_stop = max_frames
 
-    # show summary and button to open selector popup
-    n_selected = len(parent._selected_planes)
-    if n_selected == num_planes:
-        summary = "All planes"
-    elif n_selected == 0:
-        summary = "None"
-    elif n_selected <= 3:
-        summary = ", ".join(str(p + 1) for p in sorted(parent._selected_planes))
-    else:
-        summary = f"{n_selected} of {num_planes}"
+    if not hasattr(parent, "_saveas_z_start"):
+        parent._saveas_z_start = 1
+    if not hasattr(parent, "_saveas_z_stop"):
+        parent._saveas_z_stop = num_planes
+    if not hasattr(parent, "_saveas_z_step"):
+        parent._saveas_z_step = 1
+    if not hasattr(parent, "_saveas_last_num_planes"):
+        parent._saveas_last_num_planes = num_planes
+    elif parent._saveas_last_num_planes != num_planes:
+        parent._saveas_last_num_planes = num_planes
+        parent._saveas_z_stop = num_planes
 
-    imgui.text(f"Z-planes: {summary}")
+    # table with columns: dim label, start, stop, step, All button, info
+    table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
+    if imgui.begin_table("selection_table", 7, table_flags):
+        # column headers in dark gray
+        imgui.table_setup_column("dim", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(6))
+        imgui.table_setup_column("start", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(5))
+        imgui.table_setup_column("stop", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(5))
+        imgui.table_setup_column("step", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(4))
+        imgui.table_setup_column("all", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
+        imgui.table_setup_column("info", imgui.TableColumnFlags_.width_stretch)
+        imgui.table_setup_column("spacer", imgui.TableColumnFlags_.width_fixed)
+
+        # header row
+        imgui.table_next_row()
+        imgui.table_next_column()
+        imgui.text("")  # dim label column
+        imgui.table_next_column()
+        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "start")
+        imgui.table_next_column()
+        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "stop")
+        imgui.table_next_column()
+        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "step")
+        imgui.table_next_column()
+        imgui.text("")  # all button
+        imgui.table_next_column()
+        imgui.text("")  # info
+        imgui.table_next_column()
+
+        # timepoints row
+        imgui.table_next_row()
+        imgui.table_next_column()
+        imgui.text("Timepoints")
+
+        imgui.table_next_column()
+        imgui.set_next_item_width(hello_imgui.em_size(4.5))
+        changed, val = imgui.input_int("##tp_start", parent._saveas_tp_start, step=0)
+        if changed:
+            parent._saveas_tp_start = max(1, min(val, parent._saveas_tp_stop))
+
+        imgui.table_next_column()
+        imgui.set_next_item_width(hello_imgui.em_size(4.5))
+        changed, val = imgui.input_int("##tp_stop", parent._saveas_tp_stop, step=0)
+        if changed:
+            parent._saveas_tp_stop = max(parent._saveas_tp_start, min(val, max_frames))
+
+        imgui.table_next_column()
+        imgui.set_next_item_width(hello_imgui.em_size(3.5))
+        changed, val = imgui.input_int("##tp_step", parent._saveas_tp_step, step=0)
+        if changed:
+            parent._saveas_tp_step = max(1, min(val, parent._saveas_tp_stop - parent._saveas_tp_start + 1))
+
+        imgui.table_next_column()
+        if imgui.small_button("All##tp"):
+            parent._saveas_tp_start = 1
+            parent._saveas_tp_stop = max_frames
+            parent._saveas_tp_step = 1
+
+        imgui.table_next_column()
+        n_frames = len(range(parent._saveas_tp_start, parent._saveas_tp_stop + 1, parent._saveas_tp_step))
+        imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames}/{max_frames}")
+
+        imgui.table_next_column()
+
+        # z-planes row (only if multi-plane data)
+        if num_planes > 1:
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text("Z-Planes")
+
+            imgui.table_next_column()
+            imgui.set_next_item_width(hello_imgui.em_size(4.5))
+            changed, val = imgui.input_int("##z_start", parent._saveas_z_start, step=0)
+            if changed:
+                parent._saveas_z_start = max(1, min(val, parent._saveas_z_stop))
+
+            imgui.table_next_column()
+            imgui.set_next_item_width(hello_imgui.em_size(4.5))
+            changed, val = imgui.input_int("##z_stop", parent._saveas_z_stop, step=0)
+            if changed:
+                parent._saveas_z_stop = max(parent._saveas_z_start, min(val, num_planes))
+
+            imgui.table_next_column()
+            imgui.set_next_item_width(hello_imgui.em_size(3.5))
+            changed, val = imgui.input_int("##z_step", parent._saveas_z_step, step=0)
+            if changed:
+                parent._saveas_z_step = max(1, min(val, parent._saveas_z_stop - parent._saveas_z_start + 1))
+
+            imgui.table_next_column()
+            if imgui.small_button("All##z"):
+                parent._saveas_z_start = 1
+                parent._saveas_z_stop = num_planes
+                parent._saveas_z_step = 1
+
+            imgui.table_next_column()
+            selected_planes = list(range(parent._saveas_z_start, parent._saveas_z_stop + 1, parent._saveas_z_step))
+            n_planes = len(selected_planes)
+            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_planes}/{num_planes}")
+
+            imgui.table_next_column()
+
+            # update legacy _selected_planes for compatibility
+            parent._selected_planes = set(p - 1 for p in selected_planes)
+        else:
+            # single plane - select all
+            parent._selected_planes = {0}
+
+        imgui.end_table()
+
+    imgui.spacing()
+
+    # output suffix
+    imgui.text("Suffix:")
     imgui.same_line()
-    if imgui.button("Select...##zplanes"):
-        imgui.open_popup("Select Z-Planes##saveas")
+    imgui.set_next_item_width(hello_imgui.em_size(12))
+    suffix = getattr(parent, "_saveas_output_suffix", "")
+    changed, new_suffix = imgui.input_text("##suffix", suffix)
+    if changed:
+        parent._saveas_output_suffix = new_suffix
+    imgui.same_line()
+    imgui.text_disabled("(?)")
+    if imgui.is_item_hovered():
+        imgui.begin_tooltip()
+        imgui.push_text_wrap_pos(imgui.get_font_size() * 25.0)
+        imgui.text_unformatted(
+            "Optional suffix to append to output filenames.\n"
+            "Leave empty for default naming.\n"
+            "Examples: 'processed', 'session1', 'corrected'"
+        )
+        imgui.pop_text_wrap_pos()
+        imgui.end_tooltip()
 
-    # plane selection popup
-    popup_height = min(400, 130 + num_planes * 24)
-    imgui.set_next_window_size(imgui.ImVec2(300, popup_height), imgui.Cond_.first_use_ever)
-    if imgui.begin_popup_modal("Select Z-Planes##saveas", flags=imgui.WindowFlags_.no_saved_settings)[0]:
-        # get current z for highlighting
-        names = parent.image_widget._slider_dim_names or ()
-        try:
-            current_z = parent.image_widget.indices["z"] if "z" in names else 0
-        except (IndexError, KeyError):
-            current_z = 0
+    imgui.spacing()
 
-        imgui.text("Select planes to save:")
-        imgui.spacing()
+    # build filename preview
+    ext = getattr(parent, "_ext", ".tiff").lstrip(".")
+    tags = []
 
-        if imgui.button("All"):
-            parent._selected_planes = set(range(num_planes))
-        imgui.same_line()
-        if imgui.button("None"):
-            parent._selected_planes = set()
-        imgui.same_line()
-        if imgui.button("Current"):
-            parent._selected_planes = {current_z}
+    # timepoint tag
+    tp_start = getattr(parent, "_saveas_tp_start", 1)
+    tp_stop = getattr(parent, "_saveas_tp_stop", 1)
+    tp_step = getattr(parent, "_saveas_tp_step", 1)
+    if tp_start != tp_stop or tp_step != 1:
+        t_tag = DimensionTag(
+            TAG_REGISTRY["T"],
+            start=tp_start,
+            stop=tp_stop if tp_stop != tp_start else None,
+            step=tp_step if tp_step != 1 else 1,
+        )
+        tags.append(t_tag)
 
-        imgui.separator()
-        imgui.spacing()
+    # z-plane tag
+    z_start = getattr(parent, "_saveas_z_start", 1)
+    z_stop = getattr(parent, "_saveas_z_stop", 1)
+    z_step = getattr(parent, "_saveas_z_step", 1)
+    if z_start != z_stop or z_step != 1:
+        z_tag = DimensionTag(
+            TAG_REGISTRY["Z"],
+            start=z_start,
+            stop=z_stop if z_stop != z_start else None,
+            step=z_step if z_step != 1 else 1,
+        )
+        tags.append(z_tag)
+    elif z_start == z_stop:
+        z_tag = DimensionTag(TAG_REGISTRY["Z"], start=z_start, stop=None, step=1)
+        tags.append(z_tag)
 
-        # adaptive grid of checkboxes
-        items = [(f"Plane {i + 1}", i in parent._selected_planes) for i in range(num_planes)]
+    # build filename
+    sanitized_suffix = _sanitize_suffix(suffix).lstrip("_") if suffix else ""
+    if tags:
+        dim_parts = "_".join(tag.to_string() for tag in tags)
+        if sanitized_suffix:
+            filename = f"{dim_parts}_{sanitized_suffix}.{ext}"
+        else:
+            filename = f"{dim_parts}.{ext}"
+    else:
+        filename = f"{sanitized_suffix}.{ext}" if sanitized_suffix else f"output.{ext}"
 
-        def on_plane_change(idx, checked):
-            if checked:
-                parent._selected_planes.add(idx)
-            else:
-                parent._selected_planes.discard(idx)
-
-        draw_checkbox_grid(items, "saveas_plane", on_plane_change)
-
-        imgui.spacing()
-        imgui.separator()
-        if imgui.button("Done", imgui.ImVec2(-1, 0)):
-            imgui.close_current_popup()
-
-        imgui.end_popup()
+    # show output preview
+    outdir = getattr(parent, "_saveas_outdir", "")
+    if outdir:
+        # normalize path separators for display
+        display_path = str(Path(outdir)).replace("\\", "/")
+        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), f"{display_path}/{filename}")
+    else:
+        imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), f"(output dir)/{filename}")
 
 
 def _draw_save_button(parent: Any):
@@ -748,14 +819,23 @@ def _draw_save_button(parent: Any):
                 if not outdir.exists():
                     outdir.mkdir(parents=True, exist_ok=True)
 
-                # Get num_timepoints (None means all timepoints)
-                num_timepoints = getattr(parent, "_saveas_num_timepoints", None)
+                # build frames list from start:stop:step (1-based)
+                tp_start = getattr(parent, "_saveas_tp_start", 1)
+                tp_stop = getattr(parent, "_saveas_tp_stop", None)
+                tp_step = getattr(parent, "_saveas_tp_step", 1)
+
                 try:
                     max_timepoints = parent.image_widget.data[0].shape[0]
-                    if num_timepoints is not None and num_timepoints >= max_timepoints:
-                        num_timepoints = None  # All timepoints, don't limit
+                    if tp_stop is None:
+                        tp_stop = max_timepoints
                 except (IndexError, AttributeError):
-                    pass
+                    max_timepoints = tp_stop or 1000
+
+                # check if selecting all frames (None means all)
+                if tp_start == 1 and tp_stop == max_timepoints and tp_step == 1:
+                    frames = None
+                else:
+                    frames = list(range(tp_start, tp_stop + 1, tp_step))
 
                 # Build metadata overrides dict from custom metadata
                 metadata_overrides = dict(parent._saveas_custom_metadata)
@@ -774,13 +854,13 @@ def _draw_save_button(parent: Any):
                     "path": parent.fpath,
                     "outpath": parent._saveas_outdir,
                     "planes": save_planes,
+                    "frames": frames,
                     "roi": rois,
                     "roi_mode": roi_mode,
                     "overwrite": parent._overwrite,
                     "debug": parent._debug,
                     "ext": parent._ext,
                     "target_chunk_mb": parent._saveas_chunk_mb,
-                    "num_timepoints": num_timepoints,
                     # scan-phase correction settings
                     "fix_phase": parent.fix_phase,
                     "use_fft": parent.use_fft,
@@ -801,7 +881,8 @@ def _draw_save_button(parent: Any):
                     save_kwargs["ome"] = parent._zarr_ome
                     save_kwargs["level"] = parent._zarr_compression_level
 
-                frames_msg = f"{num_timepoints} timepoints" if num_timepoints else "all timepoints"
+                n_frames = len(frames) if frames else max_timepoints
+                frames_msg = f"{n_frames} frames ({tp_start}:{tp_stop}:{tp_step})" if frames else "all frames"
                 roi_msg = f"ROIs {rois}" if rois else roi_mode.description
                 parent.logger.info(f"Saving planes {save_planes} ({frames_msg}), {roi_msg}")
                 parent.logger.info(
@@ -825,7 +906,7 @@ def _draw_save_button(parent: Any):
                         "output_path": str(parent._saveas_outdir),
                         "ext": parent._ext,
                         "planes": save_planes,
-                        "num_timepoints": num_timepoints,
+                        "frames": frames,
                         "rois": rois,
                         "fix_phase": parent.fix_phase,
                         "use_fft": parent.use_fft,

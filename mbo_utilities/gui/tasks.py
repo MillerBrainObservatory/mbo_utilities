@@ -100,7 +100,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
     # Optional params
     planes = args.get("planes")
     rois = args.get("rois")
-    num_timepoints = args.get("num_timepoints")
+    frames = args.get("frames")  # list of 1-based frame indices or None
     metadata = args.get("metadata", {})
 
     # Load array
@@ -214,7 +214,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
                 outpath=output_path,
                 ext=ext,
                 planes=planes,
-                num_frames=num_timepoints,
+                frames=frames,
                 roi=rois,
                 overwrite=True,
                 metadata_overrides=metadata,
@@ -228,7 +228,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
                 output_path,
                 ext=ext,
                 planes=planes,
-                num_frames=num_timepoints,
+                frames=frames,
                 roi=rois,
                 overwrite=True,
                 metadata=metadata,
