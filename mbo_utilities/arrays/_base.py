@@ -19,7 +19,7 @@ from dask import array as da
 
 from mbo_utilities import log
 from mbo_utilities.arrays.features._dim_labels import get_dims, get_num_planes
-from mbo_utilities._writers import _write_plane
+from mbo_utilities._writers import _write_plane, _write_volumetric_tiff
 from mbo_utilities.metadata import RoiMode
 from numpy.exceptions import AxisError
 
@@ -266,25 +266,20 @@ def _imwrite_base(
     arr,
     outpath: Path | str,
     planes: int | list | tuple | None = None,
+    frames: int | list | tuple | None = None,
     ext: str = ".tiff",
     overwrite: bool = False,
     target_chunk_mb: int = 50,
     progress_callback: Callable | None = None,
     debug: bool = False,
     show_progress: bool = True,
-    roi_iterator=None,
-    output_suffix: str | None = None,
-    roi_mode: RoiMode | str | None = None,
     **kwargs,
 ) -> Path:
     """
-    Common implementation for array _imwrite() methods.
+    Write array to file.
 
-    This function handles the common pattern of:
-    1. Normalizing planes argument (1-based to 0-based)
-    2. Iterating over ROIs (if applicable)
-    3. Building output paths
-    4. Calling _write_plane() for each plane
+    For tiff output, writes volumetric TZYX data as single ImageJ hyperstack.
+    For other formats (zarr, bin, h5), uses streaming per-plane writes.
 
     Parameters
     ----------
@@ -294,6 +289,8 @@ def _imwrite_base(
         Output directory.
     planes : int | list | tuple | None
         Planes to write (1-based indexing). None means all planes.
+    frames : int | list | tuple | None
+        Frames to write (1-based indexing). None means all frames.
     ext : str
         Output format extension (e.g., '.tiff', '.bin', '.zarr').
     overwrite : bool
@@ -304,45 +301,73 @@ def _imwrite_base(
         Progress callback function.
     debug : bool
         Enable debug output.
-    roi_iterator : iterator | None
-        Custom ROI iterator for arrays with ROI support.
-        If None, uses iter_rois(arr) which yields [None] for arrays without ROIs.
-    output_suffix : str | None
-        Custom suffix to append to output filenames. If None, defaults to
-        "_stitched" for multi-ROI data when roi is None.
-        Examples: "_stitched", "_processed", "_mydata"
+    show_progress : bool
+        Show progress bar.
     **kwargs
-        Additional arguments passed to _write_plane().
+        Additional arguments passed to format-specific writers.
 
     Returns
     -------
     Path
-        Output directory path.
+        Output path (file for tiff, directory for other formats).
     """
     outpath = Path(outpath)
     outpath.mkdir(parents=True, exist_ok=True)
 
     ext_clean = ext.lower().lstrip(".")
 
-    # Get metadata
+    # get metadata
     md = dict(arr.metadata) if arr.metadata else {}
 
-    # Merge metadata overrides if present
+    # merge metadata overrides if present
     if "metadata_overrides" in kwargs:
-        overrides = kwargs.get("metadata_overrides")
+        overrides = kwargs.pop("metadata_overrides", None)
         if overrides and isinstance(overrides, dict):
             md.update(overrides)
 
-    # Sanitize metadata for serialization (e.g. JSON in Zarr/Tiff)
+    # sanitize metadata for serialization
     md = _sanitize_metadata(md)
 
-    # Get dimensions using protocol helpers
-    dims = get_dims(arr)
+    # normalize plane selection to 1-based list
     num_planes = get_num_planes(arr)
+    if planes is not None:
+        if isinstance(planes, int):
+            planes_list = [planes]
+        else:
+            planes_list = list(planes)
+    else:
+        planes_list = None  # all planes
 
-    # Extract shape info
-    # for 4D arrays, first dim is always the iteration dimension (frames/volumes)
-    # for 3D arrays, check if there's a time dimension
+    # normalize frame selection to 1-based list
+    if frames is not None:
+        if isinstance(frames, int):
+            frames_list = [frames]
+        else:
+            frames_list = list(frames)
+    else:
+        frames_list = None  # all frames
+
+    # tiff: use volumetric writer
+    if ext_clean in ("tiff", "tif"):
+        result = _write_volumetric_tiff(
+            arr,
+            outpath,
+            metadata=md,
+            planes=planes_list,
+            frames=frames_list,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            show_progress=show_progress,
+            debug=debug,
+        )
+        return result
+
+    # other formats: use per-plane streaming writer
+    # (zarr, bin, h5, npy)
+    dims = get_dims(arr)
+
+    # extract shape info
     if len(arr.shape) == 4:
         nframes = arr.shape[0]
     elif len(arr.shape) == 3 and dims[0] in {"T", "timepoints"}:
@@ -351,91 +376,59 @@ def _imwrite_base(
         nframes = 1
     Ly, Lx = arr.shape[-2], arr.shape[-1]
 
-    # validate num_planes against actual shape (metadata may not match data)
+    # validate num_planes against actual shape
     if len(arr.shape) == 4:
-        actual_z_size = arr.shape[1]  # TZYX format
+        actual_z_size = arr.shape[1]
         if num_planes > actual_z_size:
-            logger.debug(
-                f"num_planes ({num_planes}) > actual Z dim ({actual_z_size}), using shape"
-            )
             num_planes = actual_z_size
     elif len(arr.shape) == 3:
-        # 3D data (TYX) has no Z dimension, treat as single plane
         num_planes = 1
 
-    # Update metadata
+    # update metadata
     md["Ly"] = Ly
     md["Lx"] = Lx
     md["num_timepoints"] = nframes
-    md["nframes"] = nframes  # suite2p alias
-    md["num_frames"] = nframes  # legacy alias
+    md["nframes"] = nframes
+    md["num_frames"] = nframes
 
-    # normalize and store roi_mode
-    if roi_mode is not None:
-        if isinstance(roi_mode, str):
-            roi_mode = RoiMode.from_string(roi_mode)
-        md["roi_mode"] = roi_mode.value
+    # normalize planes to 0-indexed list for iteration
+    planes_0idx = _normalize_planes(planes_list, num_planes)
 
-    # Normalize planes to 0-indexed list
-    planes_list = _normalize_planes(planes, num_planes)
+    for plane_idx in planes_0idx:
+        from mbo_utilities.arrays.features import OutputFilename, TAG_REGISTRY, DimensionTag
 
-    # Use provided ROI iterator or detect via duck typing
-    # Arrays with roi_mode attribute support multi-ROI operations
-    if roi_iterator is not None:
-        roi_iter = roi_iterator
-    elif hasattr(arr, "roi_mode") and hasattr(arr, "iter_rois"):
-        roi_iter = arr.iter_rois()
-    else:
-        roi_iter = iter([None])  # No ROI support, single iteration
+        # build filename with dimension tags
+        z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
+        t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes, frames_list)
+        tags = [t_tag, z_tag] if nframes > 1 else [z_tag]
+        filename = OutputFilename(tags, suffix="stack").build(f".{ext_clean}")
+        target = outpath / filename
 
-    # Check if array has multiple ROIs (for "_stitched" suffix)
-    has_multiple_rois = getattr(arr, "num_rois", 1) > 1
+        if target.exists() and not overwrite:
+            logger.warning(f"File {target} already exists. Skipping write.")
+            continue
 
-    for roi in roi_iter:
-        # Update array's ROI if it supports ROI operations
-        if roi is not None and hasattr(arr, "roi_mode"):
-            arr.roi = roi
+        # build plane-specific metadata
+        plane_md = md.copy()
+        plane_md["plane"] = plane_idx + 1
 
-        for plane_idx in planes_list:
-            target = _build_output_path(
-                outpath,
-                plane_idx,
-                roi,
-                ext_clean,
-                output_name=kwargs.get("output_name"),
-                structural=kwargs.get("structural", False),
-                has_multiple_rois=has_multiple_rois,
-                output_suffix=output_suffix,
-            )
-
-            if target.exists() and not overwrite:
-                logger.warning(f"File {target} already exists. Skipping write.")
-                continue
-
-            # Build plane-specific metadata
-            plane_md = md.copy()
-            plane_md["plane"] = plane_idx + 1  # 1-based in metadata
-            if roi is not None:
-                plane_md["roi"] = roi
-                plane_md["mroi"] = roi  # alias
-
-            _write_plane(
-                arr,
-                target,
-                overwrite=overwrite,
-                target_chunk_mb=target_chunk_mb,
-                metadata=plane_md,
-                progress_callback=progress_callback,
-                debug=debug,
-                show_progress=show_progress,
-                dshape=(nframes, Ly, Lx),
-                plane_index=plane_idx,
-                **kwargs,
-            )
+        _write_plane(
+            arr,
+            target,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            metadata=plane_md,
+            progress_callback=progress_callback,
+            debug=debug,
+            show_progress=show_progress,
+            dshape=(nframes, Ly, Lx),
+            plane_index=plane_idx,
+            **kwargs,
+        )
 
     # signal completion
     if progress_callback:
-        progress_callback(1.0, len(planes_list))
+        progress_callback(1.0, "Complete")
 
     return outpath
 

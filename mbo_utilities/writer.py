@@ -35,7 +35,8 @@ def imwrite(
     lazy_array,
     outpath: str | Path,
     ext: str = ".tiff",
-    planes: list | tuple | None = None,
+    planes: list | tuple | int | None = None,
+    frames: list | tuple | int | None = None,
     num_frames: int | None = None,
     register_z: bool = False,
     roi_mode: RoiMode | str = RoiMode.concat_y,
@@ -82,6 +83,13 @@ def imwrite(
         - None (default) : Export all planes
         - int : Single plane, e.g. `planes=7` exports only plane 7
         - list/tuple : Specific planes, e.g. `planes=[1, 7, 14]`
+
+    frames : list | tuple | int | None, optional
+        Timepoints to export (1-based indexing). Options:
+        - None (default) : Export all frames
+        - int : Single frame, e.g. `frames=100` exports only frame 100
+        - list/tuple : Specific frames, e.g. `frames=[1, 50, 100]`
+        - range : Range of frames, e.g. `frames=list(range(1, 101))`
 
     roi_mode : RoiMode | str, default=RoiMode.concat_y
         Mode for handling multi-ROI data. Options:
@@ -350,6 +358,7 @@ def imwrite(
             ext=ext,
             progress_callback=progress_callback,
             planes=planes,
+            frames=frames,
             debug=debug,
             show_progress=show_progress,
             output_name=output_name,
@@ -399,6 +408,12 @@ def imwrite(
     if planes is not None:
         processing_extra["planes"] = (
             list(planes) if hasattr(planes, "__iter__") else planes
+        )
+
+    # Add frames info if specified
+    if frames is not None:
+        processing_extra["frames"] = (
+            list(frames) if hasattr(frames, "__iter__") else frames
         )
 
     # Collect output files

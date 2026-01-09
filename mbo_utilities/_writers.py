@@ -868,6 +868,216 @@ def _write_tiff(path, data, overwrite=True, metadata=None, imagej=True, **kwargs
     _write_tiff._first_write[filename] = False
 
 
+def _write_volumetric_tiff(
+    data,
+    path: Path,
+    metadata: dict | None = None,
+    planes: list | None = None,
+    frames: list | None = None,
+    overwrite: bool = True,
+    target_chunk_mb: int = 50,
+    progress_callback=None,
+    show_progress: bool = True,
+    debug: bool = False,
+):
+    """
+    Write volumetric TZYX data as single ImageJ hyperstack tiff.
+
+    parameters
+    ----------
+    data : array-like
+        data with shape (T, Z, Y, X), (T, Y, X), or (Z, Y, X)
+    path : Path
+        output directory (filename auto-generated from dims)
+    metadata : dict
+        imaging metadata for resolution, spacing, etc.
+    planes : list | None
+        z-plane selection (1-based indices). None = all planes.
+    frames : list | None
+        timepoint selection (1-based indices). None = all frames.
+    overwrite : bool
+        overwrite existing files
+    target_chunk_mb : int
+        chunk size for streaming writes
+    progress_callback : callable
+        progress callback(fraction, message)
+    show_progress : bool
+        show tqdm progress bar
+    debug : bool
+        verbose logging
+    """
+    from mbo_utilities.arrays.features import OutputFilename, get_dims
+
+    if metadata is None:
+        metadata = {}
+
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+
+    # get dims and shape
+    dims = get_dims(data)
+    shape = data.shape
+
+    # build output filename from dims
+    output_fn = OutputFilename.from_array(data, planes=planes, frames=frames)
+    filename = path / output_fn.build(".tif")
+
+    if filename.exists() and not overwrite:
+        logger.warning(f"File {filename} exists and overwrite=False. Skipping.")
+        return filename
+
+    if filename.exists():
+        filename.unlink()
+
+    # determine slicing based on selections
+    t_slice = slice(None)
+    z_slice = slice(None)
+
+    if frames is not None:
+        if isinstance(frames, int):
+            frames = [frames]
+        # convert 1-based to 0-based
+        frame_indices = [f - 1 for f in frames]
+        t_slice = frame_indices
+
+    if planes is not None:
+        if isinstance(planes, int):
+            planes = [planes]
+        # convert 1-based to 0-based
+        plane_indices = [p - 1 for p in planes]
+        z_slice = plane_indices
+
+    # get target shape after selection
+    if "T" in dims:
+        t_idx = dims.index("T")
+        if isinstance(t_slice, list):
+            n_frames = len(t_slice)
+        else:
+            n_frames = shape[t_idx]
+    else:
+        n_frames = 1
+
+    if "Z" in dims:
+        z_idx = dims.index("Z")
+        if isinstance(z_slice, list):
+            n_planes = len(z_slice)
+        else:
+            n_planes = shape[z_idx]
+    else:
+        n_planes = 1
+
+    Ly, Lx = shape[-2], shape[-1]
+    target_shape = (n_frames, n_planes, Ly, Lx)
+
+    # update metadata for imagej
+    md = dict(metadata)
+    md["shape"] = target_shape
+    md["nframes"] = n_frames
+    md["num_frames"] = n_frames
+
+    # build imagej metadata
+    ij_meta, resolution = _build_imagej_metadata(md, target_shape)
+
+    # store full metadata as JSON
+    import json
+    json_meta = _make_json_serializable(md)
+    json_bytes = json.dumps(json_meta).encode("utf-8")
+    extratags = [(50839, 2, len(json_bytes), json_bytes, True)]
+
+    if debug:
+        logger.info(f"Writing volumetric tiff: {filename}")
+        logger.info(f"  Shape: {target_shape} (TZYX)")
+        logger.info(f"  ImageJ meta: frames={ij_meta.get('frames')}, slices={ij_meta.get('slices')}")
+
+    # calculate chunk size in frames
+    bytes_per_frame = n_planes * Ly * Lx * np.dtype(data.dtype).itemsize
+    chunk_size_bytes = target_chunk_mb * 1024 * 1024
+    frames_per_chunk = max(1, chunk_size_bytes // bytes_per_frame)
+
+    # open writer
+    with TiffWriter(filename, bigtiff=True, imagej=True) as writer:
+        first_write = True
+
+        # iterate over timepoints in chunks
+        pbar = None
+        if show_progress:
+            pbar = tqdm(total=n_frames, desc="Writing TIFF", unit="frames")
+
+        for chunk_start in range(0, n_frames, frames_per_chunk):
+            chunk_end = min(chunk_start + frames_per_chunk, n_frames)
+
+            # slice data for this chunk
+            if len(dims) == 4 and dims == ("T", "Z", "Y", "X"):
+                # TZYX - most common case
+                if isinstance(t_slice, list):
+                    t_indices = t_slice[chunk_start:chunk_end]
+                    if isinstance(z_slice, list):
+                        chunk_data = data[np.ix_(t_indices, z_slice)]
+                    else:
+                        chunk_data = data[t_indices, :, :, :]
+                else:
+                    if isinstance(z_slice, list):
+                        chunk_data = data[chunk_start:chunk_end, z_slice, :, :]
+                    else:
+                        chunk_data = data[chunk_start:chunk_end, :, :, :]
+            elif len(dims) == 3 and dims == ("T", "Y", "X"):
+                # TYX - add Z dim
+                if isinstance(t_slice, list):
+                    t_indices = t_slice[chunk_start:chunk_end]
+                    chunk_data = data[t_indices, :, :]
+                else:
+                    chunk_data = data[chunk_start:chunk_end, :, :]
+                chunk_data = chunk_data[:, np.newaxis, :, :]  # add Z=1
+            elif len(dims) == 3 and dims == ("Z", "Y", "X"):
+                # ZYX - single timepoint
+                if chunk_start > 0:
+                    break  # only one "frame" for ZYX
+                if isinstance(z_slice, list):
+                    chunk_data = data[z_slice, :, :]
+                else:
+                    chunk_data = data[:, :, :]
+                chunk_data = chunk_data[np.newaxis, :, :, :]  # add T=1
+            else:
+                # generic case - try to get TZYX
+                chunk_data = np.asarray(data[chunk_start:chunk_end])
+                if chunk_data.ndim == 3:
+                    chunk_data = chunk_data[:, np.newaxis, :, :]
+
+            # ensure contiguous
+            chunk_data = np.ascontiguousarray(chunk_data)
+
+            # reshape to TZCYX for imagej (add C=1)
+            # chunk_data is (T_chunk, Z, Y, X) -> (T_chunk, Z, 1, Y, X)
+            chunk_5d = chunk_data[:, :, np.newaxis, :, :]
+
+            # write each frame (T) with all its Z slices
+            for t in range(chunk_5d.shape[0]):
+                frame_data = chunk_5d[t]  # (Z, C, Y, X)
+                writer.write(
+                    frame_data,
+                    contiguous=True,
+                    photometric="minisblack",
+                    resolution=resolution if first_write else None,
+                    metadata=ij_meta if first_write else None,
+                    extratags=extratags if first_write else None,
+                )
+                first_write = False
+
+            if pbar:
+                pbar.update(chunk_end - chunk_start)
+
+            if progress_callback:
+                progress_callback(chunk_end / n_frames, f"Writing frame {chunk_end}/{n_frames}")
+
+        if pbar:
+            pbar.close()
+
+    if debug:
+        logger.info(f"Wrote {filename} ({filename.stat().st_size / 1e9:.2f} GB)")
+
+    return filename
+
+
 def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
     """
     Build OME-Zarr NGFF v0.5 compliant metadata.
