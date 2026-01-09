@@ -49,6 +49,13 @@ from mbo_utilities.arrays.features._dim_labels import (
     infer_dims,
     parse_dims,
 )
+from mbo_utilities.arrays.features._dim_tags import (
+    DimensionTag,
+    OutputFilename,
+    SPATIAL_DIMS,
+    TAG_REGISTRY,
+    TagDefinition,
+)
 from mbo_utilities.arrays.features._display_range import (
     DisplayRange,
     DisplayRangeFeature,
@@ -87,6 +94,8 @@ __all__ = [
     "DEFAULT_DIMS",
     "DIM_DESCRIPTIONS",
     "KNOWN_ORDERINGS",
+    "SPATIAL_DIMS",
+    "TAG_REGISTRY",
     # base
     "ArrayFeature",
     "ArrayFeatureEvent",
@@ -101,6 +110,10 @@ __all__ = [
     # dim labels
     "DimLabels",
     "DimLabelsMixin",
+    # dim tags
+    "DimensionTag",
+    "OutputFilename",
+    "TagDefinition",
     # display range
     "DisplayRange",
     "DisplayRangeFeature",
