@@ -254,38 +254,14 @@ class FileDialog:
 
     def _draw_formats_card_content(self):
         if self._install_status is None:
-            # Vertical spacing
-            imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + hello_imgui.em_size(1.0))
-
-            # Progress text from callback (or default)
-            msg = getattr(self, "_check_message", "Checking system configuration...")
+            # small dark "checking" message - no progress bar
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            msg = "Checking installed packages..."
             text_w = imgui.calc_text_size(msg).x
             avail_w = imgui.get_content_region_avail().x
-
             imgui.set_cursor_pos_x(max(0.0, (avail_w - text_w) * 0.5))
-            imgui.text_colored(COL_TEXT_DIM, msg)
-
-            # Vertical spacing
-            imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + hello_imgui.em_size(0.5))
-
-            # Progress bar with centered percentage overlay
-            p = getattr(self, "_check_progress", 0.0)
-            pct_text = f"{int(p * 100)}%"
-            imgui.progress_bar(p, imgui.ImVec2(-1, 0), "")
-
-            # Draw percentage text centered on the progress bar
-            bar_min = imgui.get_item_rect_min()
-            bar_max = imgui.get_item_rect_max()
-            bar_center_x = (bar_min.x + bar_max.x) * 0.5
-            bar_center_y = (bar_min.y + bar_max.y) * 0.5
-            text_size = imgui.calc_text_size(pct_text)
-
-            draw_list = imgui.get_window_draw_list()
-            draw_list.add_text(
-                imgui.ImVec2(bar_center_x - text_size.x * 0.5, bar_center_y - text_size.y * 0.5),
-                imgui.get_color_u32(imgui.Col_.text),
-                pct_text
-            )
+            imgui.text_colored(imgui.ImVec4(0.4, 0.4, 0.4, 1.0), msg)
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
             return
 
         # version line
@@ -328,7 +304,6 @@ class FileDialog:
                 ("HDF5", ".h5, .hdf5"),
                 ("Suite2p", ".bin, ops.npy"),
                 ("NumPy", ".npy"),
-                ("NWB", ".nwb"),
             ]
             for name, ext in array_types:
                 imgui.table_next_row()

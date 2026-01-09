@@ -31,7 +31,6 @@ kernelspec:
 | **`.h5` / `.hdf5`** | `H5Array` | varies | HDF5 datasets | [<i class="fa-solid fa-book"></i>](#h5array) |
 | **`.zarr`** | `ZarrArray` | (T, Z, Y, X) | Zarr v3 / OME-Zarr stores | [<i class="fa-solid fa-book"></i>](#zarrarray) |
 | **`.npy` / `np.ndarray`** | `NumpyArray` | varies | Memory-mapped or in-memory arrays | [<i class="fa-solid fa-book"></i>](#numpyarray) |
-| **`.nwb`** | `NWBArray` | varies | Neurodata Without Borders files | [<i class="fa-solid fa-book"></i>](#nwbarray) |
 | **Directory** | | | | |
 | ↳ `ops.npy` | `Suite2pArray` | (T, Y, X) | Suite2p workflow integration | [<i class="fa-solid fa-book"></i>](#suite2parray) |
 | ↳ `planeXX/ops.npy` | `Suite2pArray` | (T, Z, Y, X) | Multi-plane Suite2p output | [<i class="fa-solid fa-book"></i>](#suite2parray) |
@@ -46,7 +45,6 @@ imread(path)
 ├── np.ndarray? ──────────────────────────────► NumpyArray
 │
 ├── .npy ─────────────────────────────────────► NumpyArray (memory-mapped)
-├── .nwb ─────────────────────────────────────► NWBArray
 ├── .h5 / .hdf5 ──────────────────────────────► H5Array
 ├── .zarr ────────────────────────────────────► ZarrArray
 ├── .bin ─────────────────────────────────────► BinArray
@@ -488,31 +486,6 @@ mbo.imwrite(arr, "output", ext=".zarr", planes=[1, 7, 14])
 - Full `imwrite()` support with all output formats
 - Chunked reduction operations (`mean`, `std`, `max`, `min`)
 - Metadata auto-generation from array shape
-
----
-
-(nwbarray)=
-### NWBArray
-
-**Returned when:** Reading NWB (Neurodata Without Borders) files
-
-```python
-# NWB file with TwoPhotonSeries
-arr = mbo.imread("/path/to/experiment.nwb")
-# Returns: NWBArray
-
-print(type(arr))   # <class 'NWBArray'>
-print(arr.shape)   # Shape from TwoPhotonSeries data
-
-# Access data
-frame = arr[0]
-```
-
-**Key Features:**
-
-- Reads `TwoPhotonSeries` acquisition data from NWB files
-- Requires `pynwb` package (`pip install pynwb`)
-- Exposes underlying NWB data object
 
 ---
 
