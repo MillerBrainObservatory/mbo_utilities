@@ -3,16 +3,12 @@ TIFF array readers.
 
 This module provides array readers for TIFF files:
 - TiffArray: Lazy TIFF reader, auto-detects single file vs volume directory
-- MBOTiffArray: Lazy TIFF reader for MBO processed TIFFs
 - ScanImageArray: Base class for raw ScanImage TIFFs with phase correction
 - LBMArray: LBM (Light Beads Microscopy) stacks, z-planes as channels
 - PiezoArray: Piezo z-stacks with optional frame averaging
 - CalibrationArray: Pollen/bead calibration stacks (LBM + piezo)
 - SinglePlaneArray: Single-plane time series
 - open_scanimage: Factory function that auto-detects stack type
-
-Legacy alias:
-- MboRawArray: Alias for ScanImageArray (backwards compatibility)
 """
 
 from __future__ import annotations
@@ -28,11 +24,8 @@ import numpy as np
 from tifffile import TiffFile
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import (
-    _imwrite_base,
-    ReductionMixin,
-)
-from mbo_utilities.file_io import derive_tag_from_filename, expand_paths
+from mbo_utilities.arrays._base import ReductionMixin, TiffReaderMixin
+from mbo_utilities.file_io import expand_paths
 from mbo_utilities.metadata import get_metadata, get_param, extract_roi_slices
 from mbo_utilities.metadata.scanimage import (
     StackType,
@@ -275,7 +268,7 @@ class _SingleTiffPlaneReader:
             tf.close()
 
 
-class TiffArray(ReductionMixin):
+class TiffArray(TiffReaderMixin, ReductionMixin):
     """
     Lazy TIFF array reader with auto-detection of single file vs volume.
 
@@ -566,22 +559,6 @@ class TiffArray(ReductionMixin):
             raise TypeError(f"metadata must be a dict, got {type(value)}")
         self._metadata = value
 
-    def _compute_frame_vminmax(self):
-        if not hasattr(self, "_cached_vmin"):
-            frame = np.asarray(self[0, 0])
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        self._compute_frame_vminmax()
-        return self._cached_vmax
-
     def __len__(self) -> int:
         return self._nframes
 
@@ -628,385 +605,163 @@ class TiffArray(ReductionMixin):
             out = out.astype(self._target_dtype)
         return out
 
-    def astype(self, dtype, copy=True):
-        self._target_dtype = np.dtype(dtype)
-        return self
-
-    def __array__(self, dtype=None, copy=None):
-        # return single frame for fast histogram/preview (prevents accidental full load)
-        data = self[0]
-        if dtype is not None:
-            data = data.astype(dtype)
-        return data
-
     def close(self):
         for plane in self._planes:
             plane.close()
 
-    def imshow(self, **kwargs):
-        import fastplotlib as fpl
 
-        histogram_widget = kwargs.get("histogram_widget", True)
-        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
-        window_funcs = kwargs.get("window_funcs")
-        return fpl.ImageWidget(
-            data=self,
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
-            window_funcs=window_funcs,
-        )
-
-    def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite=False,
-        target_chunk_mb=50,
-        ext=".tiff",
-        progress_callback=None,
-        debug=None,
-        planes=None,
-        **kwargs,
-    ):
-        return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            **kwargs,
-        )
-
-
-class MBOTiffArray(ReductionMixin):
+class ImageJHyperstackArray(TiffReaderMixin, ReductionMixin):
     """
-    Lazy TIFF array reader for MBO processed TIFFs.
+    Lazy reader for ImageJ hyperstack TIFFs with TZYX format.
 
-    Uses TiffFile handles for lazy, memory-efficient access without dask.
-    Reads frames on-demand using metadata to determine array structure.
-    Output is always in TZYX format.
-
-    Parameters
-    ----------
-    filenames : list[Path]
-        List of TIFF file paths.
-    roi : int, optional
-        ROI index (not used for processed TIFFs).
-    dims : str | Sequence[str] | None, optional
-        Dimension labels. If None, inferred from shape (TZYX).
-
-    Attributes
-    ----------
-    shape : tuple[int, ...]
-        Array shape in TZYX format.
-    dtype : np.dtype
-        Data type.
-    dims : tuple[str, ...]
-        Dimension labels.
+    Reads shape from custom metadata tag 50839 or imagej_metadata.
+    Only reads first page for metadata - avoids parsing all IFDs.
     """
-
-    # Keys that indicate MBO-processed TIFF (in shaped_metadata)
-    _MBO_MARKER_KEYS = {"num_planes", "num_rois", "frame_rate", "Ly", "Lx", "fov", "pixel_resolution"}
 
     @classmethod
     def can_open(cls, file: Path | str) -> bool:
-        """
-        Check if this file can be opened by MBOTiffArray.
-
-        Returns True for TIFF files with MBO-specific shaped_metadata,
-        indicating they were processed/assembled by mbo_utilities.
-
-        Parameters
-        ----------
-        file : Path or str
-            Path to check.
-
-        Returns
-        -------
-        bool
-            True if file has MBO shaped_metadata.
-        """
-        if not file or not isinstance(file, (str, Path)):
+        """Check if file is an ImageJ hyperstack with Z > 1."""
+        if not file:
             return False
         path = Path(file)
         if path.suffix.lower() not in (".tif", ".tiff"):
             return False
+
         try:
-            with TiffFile(file) as tf:
-                if not hasattr(tf, "shaped_metadata") or tf.shaped_metadata is None:
+            with TiffFile(path) as tf:
+                if not tf.is_imagej:
                     return False
-                meta = tf.shaped_metadata[0] if tf.shaped_metadata else {}
-                if not isinstance(meta, dict):
+                ij_meta = tf.imagej_metadata
+                if not ij_meta:
                     return False
-                # Check if any MBO-specific keys are present
-                return bool(cls._MBO_MARKER_KEYS & meta.keys())
+                return ij_meta.get("slices", 1) > 1
         except Exception:
             return False
 
     def __init__(
         self,
-        filenames: list[Path],
-        roi: int | None = None,
+        files: str | Path | list[str] | list[Path],
         dims: str | Sequence[str] | None = None,
     ):
-        from mbo_utilities.metadata import query_tiff_pages
+        if isinstance(files, (list, tuple)):
+            files = files[0]
 
-        if not filenames:
-            raise ValueError("No filenames provided.")
+        self._path = Path(files)
+        self._tiff = TiffFile(self._path)
+        self._lock = threading.Lock()
 
-        self.filenames = [Path(f) for f in filenames]
-        self.roi = roi
-
-        self.tiff_files = [TiffFile(f) for f in self.filenames]
-        self._tiff_lock = threading.Lock()
-
-        tf = self.tiff_files[0]
-        page0 = tf.pages.first
+        # read first page only
+        page0 = self._tiff.pages.first
         self._page_shape = page0.shape
         self._dtype = page0.dtype
-
-        self._frames_per_file = []
-        self._num_frames = 0
-
-        for i, (tfile, fpath) in enumerate(zip(self.tiff_files, self.filenames, strict=False)):
-            nframes = None
-
-            desc = page0.description if i == 0 else tfile.pages.first.description
-
-            if desc:
-                try:
-                    meta = json.loads(desc)
-                    if "shape" in meta and isinstance(meta["shape"], list):
-                        if len(meta["shape"]) >= 3:
-                            nframes = meta["shape"][0]
-                except (json.JSONDecodeError, TypeError, KeyError):
-                    pass
-
-            if nframes is None:
-                try:
-                    est = query_tiff_pages(fpath)
-                    if est > 1:
-                        nframes = est
-                except Exception:
-                    pass
-
-            if nframes is None:
-                logger.debug(f"Using len(pages) fallback for {fpath}")
-                nframes = len(tfile.pages)
-
-            self._frames_per_file.append(nframes)
-            self._num_frames += nframes
-
-        self._metadata = get_metadata(self.filenames)
-        self._metadata.update(
-            {
-                "shape": self.shape,
-                "dtype": str(self._dtype),
-                "nframes": self._num_frames,
-                "num_frames": self._num_frames,
-                "frames_per_file": self._frames_per_file,
-                "file_paths": [str(p) for p in self.filenames],
-                "num_files": len(self.filenames),
-            }
-        )
-        self.num_rois = get_param(self._metadata, "num_mrois", default=1)
-        self.tags = [derive_tag_from_filename(f) for f in self.filenames]
         self._target_dtype = None
-        self._dim_labels = DimLabels(dims, ndim=self.ndim)
+
+        # get T and Z from imagej_metadata
+        ij_meta = self._tiff.imagej_metadata or {}
+
+        # try to parse our JSON from Info field
+        meta = {}
+        try:
+            info_str = ij_meta.get("Info", "")
+            if info_str:
+                meta = json.loads(info_str)
+        except Exception:
+            pass
+
+        if "shape" in meta and len(meta["shape"]) >= 4:
+            self._n_frames = meta["shape"][0]
+            self._n_planes = meta["shape"][1]
+        else:
+            self._n_frames = ij_meta.get("frames", 1)
+            self._n_planes = ij_meta.get("slices", 1)
+
+        self._ly, self._lx = self._page_shape[-2], self._page_shape[-1]
+        self.filenames = [self._path]
+        self.num_rois = 1
+
+        self._metadata = meta
+        self._metadata.update({
+            "shape": self.shape,
+            "dtype": str(self._dtype),
+            "nframes": self._n_frames,
+            "num_frames": self._n_frames,
+            "num_planes": self._n_planes,
+            "nplanes": self._n_planes,
+            "file_path": str(self._path),
+        })
+
+        self._dim_labels = DimLabels(dims or ("T", "Z", "Y", "X"), ndim=4)
 
     @property
     def dims(self) -> tuple[str, ...]:
         return self._dim_labels.value
 
     @property
-    def metadata(self) -> dict:
-        """Return metadata as dict. Always returns dict, never None."""
-        return self._metadata if self._metadata is not None else {}
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise TypeError(f"metadata must be a dict, got {type(value)}")
-        self._metadata = value
-
-    @property
     def shape(self) -> tuple[int, ...]:
-        return self._num_frames, 1, self._page_shape[0], self._page_shape[1]
+        return (self._n_frames, self._n_planes, self._ly, self._lx)
 
     @property
     def dtype(self):
         from mbo_utilities.util import get_dtype
-
-        return (
-            self._target_dtype
-            if self._target_dtype is not None
-            else get_dtype(self._dtype)
-        )
-
-    def _compute_frame_vminmax(self):
-        if not hasattr(self, "_cached_vmin"):
-            frame = np.asarray(self[0, 0])
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        self._compute_frame_vminmax()
-        return self._cached_vmax
+        return self._target_dtype if self._target_dtype else get_dtype(self._dtype)
 
     @property
     def ndim(self) -> int:
         return 4
 
-    def __len__(self) -> int:
-        return self._num_frames
+    @property
+    def num_planes(self) -> int:
+        return self._n_planes
+
+    @property
+    def metadata(self) -> dict:
+        return self._metadata or {}
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        self._metadata = value
 
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
 
-        t_key = key[0] if len(key) > 0 else slice(None)
-        z_key = key[1] if len(key) > 1 else slice(None)
-        y_key = key[2] if len(key) > 2 else slice(None)
-        x_key = key[3] if len(key) > 3 else slice(None)
+        while len(key) < 4:
+            key = key + (slice(None),)
 
-        t_key = _convert_range_to_slice(t_key)
-        z_key = _convert_range_to_slice(z_key)
-        y_key = _convert_range_to_slice(y_key)
-        x_key = _convert_range_to_slice(x_key)
+        t_key, z_key, y_key, x_key = key[:4]
 
-        frames = listify_index(t_key, self._num_frames)
-        if not frames:
-            return np.empty((0, 1, *self._page_shape), dtype=self.dtype)
+        t_indices = listify_index(t_key, self._n_frames)
+        z_indices = listify_index(z_key, self._n_planes)
 
-        out = self._read_frames(frames)
+        with self._lock:
+            frames = []
+            for t_idx in t_indices:
+                z_frames = []
+                for z_idx in z_indices:
+                    page_idx = t_idx * self._n_planes + z_idx
+                    frame = self._tiff.pages[page_idx].asarray()
+                    z_frames.append(frame)
+                frames.append(np.stack(z_frames, axis=0))
+            out = np.stack(frames, axis=0)
 
         if y_key != slice(None) or x_key != slice(None):
             out = out[:, :, y_key, x_key]
 
-        z_indices = listify_index(z_key, 1)
-        if z_indices != [0]:
-            out = out[:, z_indices, :, :]
-
-        squeeze_axes = []
         if isinstance(t_key, int):
-            squeeze_axes.append(0)
-        if isinstance(z_key, int):
-            squeeze_axes.append(1)
-        if squeeze_axes:
-            out = np.squeeze(out, axis=tuple(squeeze_axes))
+            out = out[0]
+        if isinstance(z_key, int) and out.ndim >= 3:
+            out = out[:, 0] if out.ndim == 4 else out[0]
 
         if self._target_dtype is not None:
             out = out.astype(self._target_dtype)
 
         return out
 
-    def _read_frames(self, frames: list[int]) -> np.ndarray:
-        buf = np.empty(
-            (len(frames), 1, self._page_shape[0], self._page_shape[1]),
-            dtype=self._dtype,
-        )
-
-        start = 0
-        frame_to_buf_idx = {f: i for i, f in enumerate(frames)}
-
-        for tf, nframes in zip(self.tiff_files, self._frames_per_file, strict=False):
-            end = start + nframes
-            file_frames = [f for f in frames if start <= f < end]
-            if not file_frames:
-                start = end
-                continue
-
-            local_indices = [f - start for f in file_frames]
-
-            with self._tiff_lock:
-                try:
-                    chunk = tf.asarray(key=local_indices)
-                except Exception as e:
-                    raise OSError(
-                        f"MBOTiffArray: Failed to read frames {local_indices} from {tf.filename}\n"
-                        f"File may be corrupted or incomplete.\n"
-                        f": {type(e).__name__}: {e}"
-                    ) from e
-
-            if chunk.ndim == 2:
-                chunk = chunk[np.newaxis, ...]
-
-            for local_idx, global_frame in zip(local_indices, file_frames, strict=False):
-                buf_idx = frame_to_buf_idx[global_frame]
-                chunk_idx = local_indices.index(local_idx)
-                buf[buf_idx, 0] = chunk[chunk_idx]
-
-            start = end
-
-        return buf
-
-    def astype(self, dtype, copy=True):
-        self._target_dtype = np.dtype(dtype)
-        return self
-
-    def __array__(self, dtype=None, copy=None):
-        # return single frame for fast histogram/preview (prevents accidental full load)
-        data = self[0]
-        if dtype is not None:
-            data = data.astype(dtype)
-        return data
-
     def close(self):
-        for tf in self.tiff_files:
-            tf.close()
-
-    def imshow(self, **kwargs):
-        import fastplotlib as fpl
-
-        histogram_widget = kwargs.get("histogram_widget", True)
-        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
-        window_funcs = kwargs.get("window_funcs")
-        return fpl.ImageWidget(
-            data=self,
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
-            window_funcs=window_funcs,
-        )
-
-    def save(self, outpath, **kwargs):
-        """Save array to disk."""
-        return self._imwrite(outpath, **kwargs)
-
-    def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite=False,
-        target_chunk_mb=50,
-        ext=".tiff",
-        progress_callback=None,
-        debug=None,
-        planes=None,
-        **kwargs,
-    ):
-        return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            **kwargs,
-        )
+        self._tiff.close()
 
 
-class ScanImageArray(RoiFeatureMixin, ReductionMixin):
+class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
     """
     Base class for raw ScanImage TIFF readers with phase correction support.
 
@@ -1570,36 +1325,6 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
 
         return out
 
-    def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite=False,
-        target_chunk_mb=50,
-        ext=".tiff",
-        progress_callback=None,
-        debug=None,
-        planes=None,
-        **kwargs,
-    ):
-        """Write ScanImage array to disk."""
-        from mbo_utilities.arrays._base import _imwrite_base
-
-        return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            **kwargs,
-        )
-
-    def save(self, outpath, **kwargs):
-        """Save array to disk."""
-        return self._imwrite(outpath, **kwargs)
-
     @property
     def num_planes(self):
         return self.num_channels
@@ -1629,10 +1354,6 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
         max_height = max(roi["height"] for roi in self._rois)
         return self.num_frames * self.num_channels * max_height * total_width
 
-    def astype(self, dtype, copy=True):
-        self._target_dtype = np.dtype(dtype)
-        return self
-
     @property
     def _page_height(self):
         return self._metadata.get("page_height")
@@ -1640,37 +1361,6 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
     @property
     def _page_width(self):
         return self._metadata.get("page_width")
-
-    def __array__(self, dtype=None, copy=None):
-        # return single frame for fast histogram/preview (prevents accidental full load)
-        data = self[0]
-        if dtype is not None:
-            data = data.astype(dtype)
-        return data
-
-    def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite=False,
-        target_chunk_mb=50,
-        ext=".tiff",
-        progress_callback=None,
-        debug=None,
-        planes=None,
-        **kwargs,
-    ):
-        return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            roi_iterator=self.iter_rois(),
-            **kwargs,
-        )
 
     def imshow(self, **kwargs):
         import fastplotlib as fpl
@@ -1705,10 +1395,6 @@ class ScanImageArray(RoiFeatureMixin, ReductionMixin):
             graphic_kwargs={"vmin": vmin, "vmax": vmax},
             window_funcs=window_funcs,
         )
-
-
-# backwards compatibility alias
-MboRawArray = ScanImageArray
 
 
 class LBMArray(ScanImageArray):

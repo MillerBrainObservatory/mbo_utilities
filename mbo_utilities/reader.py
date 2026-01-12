@@ -18,9 +18,9 @@ from mbo_utilities.arrays import (
     BinArray,
     CalibrationArray,
     H5Array,
+    ImageJHyperstackArray,
     IsoviewArray,
     LBMArray,
-    MBOTiffArray,
     NumpyArray,
     PiezoArray,
     ScanImageArray,
@@ -38,7 +38,10 @@ if TYPE_CHECKING:
 
 logger = log.get("reader")
 
-MBO_SUPPORTED_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy"]
+# UI dropdown shows these formats (excludes .tif to avoid duplication)
+MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".npy"]
+# reading accepts .tif as alias for .tiff
+MBO_READABLE_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy"]
 
 # Re-export PIPELINE_TAGS for backward compatibility (canonical location is file_io.py)
 
@@ -223,11 +226,11 @@ def imread(
     if not paths:
         raise ValueError("No input files found.")
 
-    filtered = [p for p in paths if p.suffix.lower() in MBO_SUPPORTED_FTYPES]
+    filtered = [p for p in paths if p.suffix.lower() in MBO_READABLE_FTYPES]
     if not filtered:
         raise ValueError(
             f"No supported files in {inputs}. \n"
-            f"Supported file types are: {MBO_SUPPORTED_FTYPES}"
+            f"Supported file types are: {MBO_READABLE_FTYPES}"
         )
     paths = filtered
 
@@ -281,8 +284,8 @@ def imread(
             (SinglePlaneArray, "single-plane ScanImage"),
             # Generic ScanImage (raw acquisition data)
             (ScanImageArray, "raw ScanImage"),
-            # Processed MBO TIFFs
-            (MBOTiffArray, "MBO processed TIFF"),
+            # ImageJ hyperstacks (TZYX volumetric)
+            (ImageJHyperstackArray, "ImageJ hyperstack"),
             # Fallback (any TIFF)
             (TiffArray, "generic TIFF"),
         ]

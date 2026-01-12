@@ -490,6 +490,107 @@ def _safe_get_metadata(path: Path) -> dict:
         return {}
 
 
+class TiffReaderMixin:
+    """
+    Mixin providing common functionality for all TIFF array readers.
+
+    Adds shared methods:
+    - astype(): lazy dtype conversion
+    - vmin/vmax: cached display range from first frame
+    - __array__(): return first frame for fast preview
+    - _imwrite(): delegate to _imwrite_base
+    - save(): alias for _imwrite
+    - imshow(): fastplotlib viewer
+
+    Required attributes (duck-typed):
+        shape : tuple[int, ...]
+        dtype : np.dtype
+        __getitem__ : callable
+    """
+
+    _target_dtype = None
+    _cached_vmin = None
+    _cached_vmax = None
+
+    def astype(self, dtype, copy=True):
+        """Set target dtype for lazy conversion on read."""
+        self._target_dtype = np.dtype(dtype)
+        return self
+
+    def _compute_frame_vminmax(self):
+        """Compute and cache vmin/vmax from first frame."""
+        if self._cached_vmin is None:
+            # get first frame (handles both 3D and 4D)
+            if len(self.shape) == 4:
+                frame = np.asarray(self[0, 0])
+            else:
+                frame = np.asarray(self[0])
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
+
+    @property
+    def vmin(self) -> float:
+        """Minimum value from first frame (cached)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmin
+
+    @property
+    def vmax(self) -> float:
+        """Maximum value from first frame (cached)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmax
+
+    def __array__(self, dtype=None, copy=None):
+        """Return first frame for fast preview (prevents accidental full load)."""
+        data = self[0]
+        if dtype is not None:
+            data = data.astype(dtype)
+        return data
+
+    def _imwrite(
+        self,
+        outpath,
+        overwrite=False,
+        target_chunk_mb=50,
+        ext=".tiff",
+        progress_callback=None,
+        debug=None,
+        planes=None,
+        **kwargs,
+    ):
+        """Write array to disk."""
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
+
+    def save(self, outpath, **kwargs):
+        """Save array to disk (alias for _imwrite)."""
+        return self._imwrite(outpath, **kwargs)
+
+    def imshow(self, **kwargs):
+        """Display array using fastplotlib ImageWidget."""
+        import fastplotlib as fpl
+
+        histogram_widget = kwargs.get("histogram_widget", True)
+        figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
+        window_funcs = kwargs.get("window_funcs")
+        return fpl.ImageWidget(
+            data=self,
+            histogram_widget=histogram_widget,
+            figure_kwargs=figure_kwargs,
+            graphic_kwargs={"vmin": self.vmin, "vmax": self.vmax},
+            window_funcs=window_funcs,
+        )
+
+
 class ReductionMixin:
     """
     Mixin providing numpy-compatible reduction methods for arrays.
