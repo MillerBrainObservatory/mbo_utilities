@@ -115,13 +115,17 @@ class FileDialog:
         # upgrade manager - auto-check on startup
         self.upgrade_manager = UpgradeManager(enabled=True)
         self.upgrade_manager.check_for_upgrade()
-        # cached install status (computed on first render)
+        # cached install status (computed in background)
         self._install_status = None
         self._check_thread = None
+        self._show_deps_popup = False
 
         # GUI Modes (pollen calibration auto-detected, not user-selectable)
         self.gui_modes = ["Standard Viewer", "Napari", "Cellpose", "Suite2p"]
         self.selected_mode_index = 0
+
+        # start dependency check immediately in background
+        self._start_dependency_check()
 
     @property
     def widget_enabled(self):
@@ -133,6 +137,17 @@ class FileDialog:
 
     def _save_gui_preferences(self):
         pass
+
+    def _start_dependency_check(self):
+        """Start background thread to check dependencies."""
+        if self._check_thread is not None:
+            return
+
+        def _run_check():
+            self._install_status = check_installation()
+
+        self._check_thread = threading.Thread(target=_run_check, daemon=True)
+        self._check_thread.start()
 
     def _get_feature(self, name: str):
         """Get feature status by name from install status."""
@@ -253,23 +268,13 @@ class FileDialog:
                 imgui.set_tooltip("\n".join(tooltip_parts))
 
     def _draw_formats_card_content(self):
-        if self._install_status is None:
-            # small dark "checking" message - no progress bar
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-            msg = "Checking installed packages..."
-            text_w = imgui.calc_text_size(msg).x
-            avail_w = imgui.get_content_region_avail().x
-            imgui.set_cursor_pos_x(max(0.0, (avail_w - text_w) * 0.5))
-            imgui.text_colored(imgui.ImVec4(0.4, 0.4, 0.4, 1.0), msg)
-            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-            return
-
-        # version line
+        """Draw supported formats - always shown immediately."""
+        # version line (shows ? while loading)
         self._draw_version_status()
 
         imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
-        # supported formats section
+        # supported formats section - always visible
         imgui.text_colored(COL_ACCENT, "Supported Formats")
         imgui.same_line()
         push_button_style(primary=False)
@@ -282,7 +287,7 @@ class FileDialog:
 
         imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
 
-        # calculate table width to fit content (not full available width)
+        # calculate table width to fit content
         col1_width = hello_imgui.em_size(6)
         col2_width = hello_imgui.em_size(9)
         table_width = col1_width + col2_width
@@ -314,37 +319,85 @@ class FileDialog:
             imgui.end_table()
 
         imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-        imgui.separator()
-        imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
 
-        # optional dependencies section
-        imgui.text_colored(COL_ACCENT, "Optional Dependencies")
-        imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+        # dependency status - small inline section
+        self._draw_dependency_status_line()
 
-        # suite2p group
-        self._draw_dependency_group(
-            "Suite2p",
-            "Suite2p",
-            [("PyTorch", "PyTorch")]
-        )
+    def _draw_dependency_status_line(self):
+        """Draw compact dependency status with popup for details."""
+        checking = self._install_status is None
 
-        # suite3d group
-        self._draw_dependency_group(
-            "Suite3D",
-            "Suite3D",
-            [("CuPy", "CuPy")]
-        )
-
-        # rastermap (no additional requirements)
-        rastermap = self._get_feature("Rastermap")
-        if rastermap is None or rastermap.status == Status.MISSING:
-            imgui.text_colored(COL_NA, "Rastermap - not installed")
+        if checking:
+            # show spinner while checking
+            imgui.text_colored(COL_TEXT_DIM, f"{fa.ICON_FA_CIRCLE_NOTCH}  checking dependencies...")
         else:
-            ver = f" v{rastermap.version}" if rastermap.version and rastermap.version != "installed" else ""
-            if rastermap.status == Status.OK:
-                imgui.text_colored(COL_OK, f"Rastermap{ver}")
+            # count ok/warn/missing
+            ok_count = 0
+            issue_count = 0
+            deps = ["Suite2p", "Suite3D", "Rastermap", "PyTorch", "CuPy"]
+            for name in deps:
+                feat = self._get_feature(name)
+                if feat is None or feat.status == Status.MISSING:
+                    continue
+                if feat.status == Status.OK:
+                    ok_count += 1
+                else:
+                    issue_count += 1
+
+            # status icon and text
+            if issue_count > 0:
+                imgui.text_colored(COL_WARN, f"{fa.ICON_FA_CIRCLE_EXCLAMATION}")
             else:
-                imgui.text_colored(COL_WARN, f"Rastermap{ver}")
+                imgui.text_colored(COL_OK, f"{fa.ICON_FA_CIRCLE_CHECK}")
+            imgui.same_line()
+
+            # clickable text to show popup
+            push_button_style(primary=False)
+            if imgui.small_button(f"dependencies ({ok_count} installed)"):
+                self._show_deps_popup = True
+            pop_button_style()
+
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Click for details")
+
+        # popup with full dependency info
+        if self._show_deps_popup:
+            imgui.open_popup("##deps_popup")
+            self._show_deps_popup = False
+
+        popup_flags = imgui.WindowFlags_.always_auto_resize
+        if imgui.begin_popup("##deps_popup", popup_flags):
+            imgui.text_colored(COL_ACCENT, "Optional Dependencies")
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+            # suite2p group
+            self._draw_dependency_group(
+                "Suite2p",
+                "Suite2p",
+                [("PyTorch", "PyTorch")]
+            )
+
+            # suite3d group
+            self._draw_dependency_group(
+                "Suite3D",
+                "Suite3D",
+                [("CuPy", "CuPy")]
+            )
+
+            # rastermap
+            rastermap = self._get_feature("Rastermap")
+            if rastermap is None or rastermap.status == Status.MISSING:
+                imgui.text_colored(COL_NA, "Rastermap - not installed")
+            else:
+                ver = f" v{rastermap.version}" if rastermap.version and rastermap.version != "installed" else ""
+                if rastermap.status == Status.OK:
+                    imgui.text_colored(COL_OK, f"Rastermap{ver}")
+                else:
+                    imgui.text_colored(COL_WARN, f"Rastermap{ver}")
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+            imgui.end_popup()
 
     def _center_text(self, text, color=None):
         """Draw centered text."""
@@ -436,21 +489,6 @@ class FileDialog:
                 self._select_folder = pfd.select_folder("Select folder", self._default_dir)
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.4))
-
-            # lazy load install status
-            if self._install_status is None and self._check_thread is None:
-                self._check_progress = 0.0
-                self._check_message = "Starting..."
-
-                def _progress_cb(p: float, msg: str):
-                    self._check_progress = p
-                    self._check_message = msg
-
-                def _run_check():
-                    self._install_status = check_installation(callback=_progress_cb)
-
-                self._check_thread = threading.Thread(target=_run_check, daemon=True)
-                self._check_thread.start()
 
             # card - use available width minus small margin
             avail_w = imgui.get_content_region_avail().x
