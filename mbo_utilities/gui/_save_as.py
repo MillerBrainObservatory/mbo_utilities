@@ -16,7 +16,7 @@ from imgui_bundle import imgui, hello_imgui, portable_file_dialogs as pfd
 from mbo_utilities.reader import MBO_SUPPORTED_FTYPES, imread
 from mbo_utilities.writer import imwrite
 from mbo_utilities.arrays import _sanitize_suffix
-from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY
+from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY, parse_timepoint_selection, TimeSelection
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities.gui._imgui_helpers import set_tooltip, checkbox_with_tooltip, draw_checkbox_grid
 from mbo_utilities.gui._availability import HAS_SUITE3D
@@ -111,8 +111,18 @@ def draw_saveas_popup(parent: Any):
     if not hasattr(parent, "_saveas_modal_open"):
         parent._saveas_modal_open = True
 
+    # track options popup state
+    if not hasattr(parent, "_saveas_options_open"):
+        parent._saveas_options_open = False
+
+    # initialize timepoint selection state (used by save button)
+    if not hasattr(parent, "_saveas_tp_error"):
+        parent._saveas_tp_error = ""
+    if not hasattr(parent, "_saveas_tp_parsed"):
+        parent._saveas_tp_parsed = None
+
     # set initial size (resizable by user)
-    imgui.set_next_window_size(imgui.ImVec2(500, 650), imgui.Cond_.first_use_ever)
+    imgui.set_next_window_size(imgui.ImVec2(500, 550), imgui.Cond_.first_use_ever)
 
     # modal_open is a bool, so we handle the 'X' button manually
     # by checking the second return value of begin_popup_modal.
@@ -140,19 +150,20 @@ def draw_saveas_popup(parent: Any):
         parent._saveas_modal_open = True
         imgui.dummy(imgui.ImVec2(0, 5))
 
+        # === PATH SECTION ===
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Output")
+        imgui.dummy(imgui.ImVec2(0, 5))
+
         imgui.set_next_item_width(hello_imgui.em_size(25))
 
-        # Directory + Ext
-        # use the raw string from parent, not resolved Path (allows free typing)
+        # Directory
         current_dir_str = parent._saveas_outdir or ""
-
         changed, new_str = imgui.input_text("Save Dir", current_dir_str)
         if changed:
             parent._saveas_outdir = new_str
 
         imgui.same_line()
         if imgui.button("Browse"):
-            # Use save_as context-specific directory, fall back to home
             default_dir = parent._saveas_outdir or str(get_last_dir("save_as") or Path.home())
             parent._saveas_folder_dialog = pfd.select_folder("Select output folder", default_dir)
 
@@ -164,66 +175,101 @@ def draw_saveas_popup(parent: Any):
                 set_last_dir("save_as", result)
             parent._saveas_folder_dialog = None
 
+        # Extension
         imgui.set_next_item_width(hello_imgui.em_size(25))
         _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_SUPPORTED_FTYPES)
         parent._ext = MBO_SUPPORTED_FTYPES[parent._ext_idx]
 
         imgui.spacing()
         imgui.separator()
-        imgui.spacing()
 
-        # Options Section - Multi-ROI only for raw ScanImage data with multiple ROIs
-        try:
-            num_rois = parent.image_widget.data[0].num_rois
-        except (AttributeError, Exception):
-            num_rois = 1
-
-        # Only show multi-ROI option if data actually has multiple ROIs
-        if num_rois > 1:
-            parent._saveas_rois = checkbox_with_tooltip(
-                "Save ScanImage multi-ROI Separately",
-                parent._saveas_rois,
-                "Enable to save each mROI individually."
-                " mROI's are saved to subfolders: plane1_roi1, plane1_roi2, etc."
-                " These subfolders can be merged later using mbo_utilities.merge_rois()."
-                " This can be helpful as often mROI's are non-contiguous and can drift in orthogonal directions over time.",
-            )
-            if parent._saveas_rois:
-                imgui.spacing()
-                imgui.separator()
-                imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose mROI(s):")
-                imgui.dummy(imgui.ImVec2(0, 5))
-
-                if imgui.button("All##roi"):
-                    parent._saveas_selected_roi = set(range(num_rois))
-                imgui.same_line()
-                if imgui.button("None##roi"):
-                    parent._saveas_selected_roi = set()
-
-                imgui.columns(2, borders=False)
-                for i in range(num_rois):
-                    imgui.push_id(f"roi_{i}")
-                    selected = i in parent._saveas_selected_roi
-                    _, selected = imgui.checkbox(f"mROI {i + 1}", selected)
-                    if selected:
-                        parent._saveas_selected_roi.add(i)
-                    else:
-                        parent._saveas_selected_roi.discard(i)
-                    imgui.pop_id()
-                    imgui.next_column()
-                imgui.columns(1)
-        else:
-            # Reset multi-ROI state when not applicable
-            parent._saveas_rois = False
+        # === SELECTION SECTION ===
+        _draw_selection_section(parent)
 
         imgui.spacing()
         imgui.separator()
+        imgui.spacing()
 
+        # === SAVE/OPTIONS BUTTONS ===
+        _draw_save_button(parent)
+
+        # Options popup (opened by button in _draw_save_button)
+        _draw_options_popup(parent)
+
+        # Metadata popup (opened by button in _draw_save_button)
+        _draw_metadata_popup(parent)
+
+        imgui.end_popup()
+
+        # mROI section - commented out for later use
+        # try:
+        #     num_rois = parent.image_widget.data[0].num_rois
+        # except (AttributeError, Exception):
+        #     num_rois = 1
+        #
+        # # Only show multi-ROI option if data actually has multiple ROIs
+        # if num_rois > 1:
+        #     parent._saveas_rois = checkbox_with_tooltip(
+        #         "Save ScanImage multi-ROI Separately",
+        #         parent._saveas_rois,
+        #         "Enable to save each mROI individually."
+        #         " mROI's are saved to subfolders: plane1_roi1, plane1_roi2, etc."
+        #         " These subfolders can be merged later using mbo_utilities.merge_rois()."
+        #         " This can be helpful as often mROI's are non-contiguous and can drift in orthogonal directions over time.",
+        #     )
+        #     if parent._saveas_rois:
+        #         imgui.spacing()
+        #         imgui.separator()
+        #         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Choose mROI(s):")
+        #         imgui.dummy(imgui.ImVec2(0, 5))
+        #
+        #         if imgui.button("All##roi"):
+        #             parent._saveas_selected_roi = set(range(num_rois))
+        #         imgui.same_line()
+        #         if imgui.button("None##roi"):
+        #             parent._saveas_selected_roi = set()
+        #
+        #         imgui.columns(2, borders=False)
+        #         for i in range(num_rois):
+        #             imgui.push_id(f"roi_{i}")
+        #             selected = i in parent._saveas_selected_roi
+        #             _, selected = imgui.checkbox(f"mROI {i + 1}", selected)
+        #             if selected:
+        #                 parent._saveas_selected_roi.add(i)
+        #             else:
+        #                 parent._saveas_selected_roi.discard(i)
+        #             imgui.pop_id()
+        #             imgui.next_column()
+        #         imgui.columns(1)
+        # else:
+        #     # Reset multi-ROI state when not applicable
+        #     parent._saveas_rois = False
+
+
+def _draw_options_popup(parent: Any):
+    """Draw the options popup for advanced save settings."""
+    if parent._saveas_options_open:
+        imgui.open_popup("Save Options")
+        parent._saveas_options_open = False
+
+    imgui.set_next_window_size(imgui.ImVec2(350, 400), imgui.Cond_.first_use_ever)
+    if imgui.begin_popup("Save Options"):
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Options")
         imgui.dummy(imgui.ImVec2(0, 5))
 
         # Get available features for current data
         features = _get_array_features(parent)
+
+        # run in background option
+        if not hasattr(parent, "_saveas_background"):
+            parent._saveas_background = True
+        _, parent._saveas_background = imgui.checkbox(
+            "Run in background", parent._saveas_background
+        )
+        set_tooltip(
+            "Run save operation as a separate process that continues after closing the GUI. "
+            "Progress will be logged to a file in the output directory."
+        )
 
         parent._overwrite = checkbox_with_tooltip(
             "Overwrite", parent._overwrite, "Replace any existing output files."
@@ -297,7 +343,7 @@ def draw_saveas_popup(parent: Any):
             "The size of the chunk, in MB, to read and write at a time. Larger chunks may be faster but use more memory.",
         )
 
-        imgui.set_next_item_width(hello_imgui.em_size(20))
+        imgui.set_next_item_width(hello_imgui.em_size(15))
         _, parent._saveas_chunk_mb = imgui.drag_int(
             "##chunk_size_mb_mb",
             parent._saveas_chunk_mb,
@@ -336,210 +382,245 @@ def draw_saveas_popup(parent: Any):
             )
 
         imgui.spacing()
-        imgui.separator()
-
-        # Metadata section
-        _draw_metadata_section(parent)
-
-        imgui.spacing()
-        imgui.separator()
-
-        # Selection section (timepoints, z-planes, suffix, preview)
-        _draw_selection_section(parent)
-
-        imgui.spacing()
-        imgui.separator()
-
-        # run in background option (default to True)
-        if not hasattr(parent, "_saveas_background"):
-            parent._saveas_background = True
-        _, parent._saveas_background = imgui.checkbox(
-            "Run in background", parent._saveas_background
-        )
-        set_tooltip(
-            "Run save operation as a separate process that continues after closing the GUI. "
-            "Progress will be logged to a file in the output directory."
-        )
-
-        imgui.spacing()
-
-        # Save button
-        _draw_save_button(parent)
+        if imgui.button("Close", imgui.ImVec2(80, 0)):
+            imgui.close_current_popup()
 
         imgui.end_popup()
 
 
-def _draw_metadata_section(parent: Any):
-    """Draw the metadata section of the save dialog."""
-    imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Metadata")
-    imgui.dummy(imgui.ImVec2(0, 5))
-
-    # get array data and metadata
+def _get_suggested_metadata(parent: Any) -> list:
+    """Get suggested metadata fields from array."""
     try:
         current_data = parent.image_widget.data[0]
     except (IndexError, AttributeError):
-        current_data = None
+        return []
 
-    # check for required metadata fields from the array
-    required_fields = []
-    if current_data and hasattr(current_data, "get_required_metadata"):
-        required_fields = current_data.get_required_metadata()
+    fields = []
 
-    # track which required fields are missing (not in source metadata or custom)
-    missing_required = []
-    for field in required_fields:
+    # get array-specific suggested fields (e.g., from LBMArray)
+    if current_data and hasattr(current_data, "get_suggested_metadata"):
+        fields.extend(current_data.get_suggested_metadata())
+    # fallback to old name for backwards compat
+    elif current_data and hasattr(current_data, "get_required_metadata"):
+        fields.extend(current_data.get_required_metadata())
+
+    return fields
+
+
+def _check_missing_metadata(parent: Any) -> list:
+    """Check for missing suggested metadata fields."""
+    fields = _get_suggested_metadata(parent)
+
+    missing = []
+    for field in fields:
         canonical = field["canonical"]
-        # check if value exists in custom metadata or source
         custom_val = parent._saveas_custom_metadata.get(canonical)
-        source_val = field.get("value")  # from get_required_metadata
+        source_val = field.get("value")
         if custom_val is None and source_val is None:
-            missing_required.append(field)
+            missing.append(field)
 
-    # show required metadata fields (always visible, red/green status)
-    if required_fields:
-        imgui.text("Required:")
-        imgui.dummy(imgui.ImVec2(0, 2))
+    return missing
 
-        for field in required_fields:
-            canonical = field["canonical"]
-            label = field["label"]
-            unit = field["unit"]
-            dtype = field["dtype"]
-            desc = field["description"]
 
-            # check current value (custom overrides source)
-            custom_val = parent._saveas_custom_metadata.get(canonical)
-            source_val = field.get("value")
-            value = custom_val if custom_val is not None else source_val
+def _draw_metadata_popup(parent: Any):
+    """Draw the metadata popup for editing metadata fields."""
+    if not hasattr(parent, "_saveas_metadata_open"):
+        parent._saveas_metadata_open = False
 
-            # row: label | value/input | set button
-            is_set = value is not None
-            label_color = imgui.ImVec4(0.4, 0.9, 0.4, 1.0) if is_set else imgui.ImVec4(1.0, 0.4, 0.4, 1.0)
-            imgui.text_colored(label_color, f"{label}")
-            imgui.same_line(hello_imgui.em_size(8))
+    if parent._saveas_metadata_open:
+        imgui.open_popup("Metadata")
+        parent._saveas_metadata_open = False
 
-            if is_set:
-                imgui.text_colored(imgui.ImVec4(0.4, 0.9, 0.4, 1.0), f"{value} {unit}")
-            else:
-                imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), "required")
+    imgui.set_next_window_size(imgui.ImVec2(380, 320), imgui.Cond_.first_use_ever)
+    if imgui.begin_popup("Metadata"):
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Metadata")
+        imgui.dummy(imgui.ImVec2(0, 5))
 
-            # tooltip with description
-            imgui.same_line()
-            imgui.text_disabled("(?)")
-            if imgui.is_item_hovered():
-                imgui.begin_tooltip()
-                imgui.push_text_wrap_pos(imgui.get_font_size() * 25.0)
-                imgui.text_unformatted(desc)
-                imgui.pop_text_wrap_pos()
-                imgui.end_tooltip()
+        # get array data
+        try:
+            current_data = parent.image_widget.data[0]
+        except (IndexError, AttributeError):
+            current_data = None
 
-            # input field
-            imgui.same_line(hello_imgui.em_size(18))
-            input_key = f"_meta_input_{canonical}"
-            if not hasattr(parent, input_key):
-                setattr(parent, input_key, "")
+        # build list of suggested fields
+        suggested_fields = _get_suggested_metadata(parent)
 
-            imgui.set_next_item_width(hello_imgui.em_size(6))
-            flags = imgui.InputTextFlags_.chars_decimal if dtype in (float, int) else 0
-            _, new_val = imgui.input_text(f"##{canonical}_input", getattr(parent, input_key), flags=flags)
-            setattr(parent, input_key, new_val)
+        # add axial step as a standard suggested field
+        axial_field = {
+            "canonical": "axial_step_um",
+            "label": "Axial Step",
+            "unit": "\u03bcm",
+            "dtype": float,
+            "description": "Distance between Z-planes in micrometers.",
+        }
+        # check if already in suggested (from array)
+        if not any(f["canonical"] == "axial_step_um" for f in suggested_fields):
+            # try to get existing value from metadata
+            if current_data and hasattr(current_data, "metadata"):
+                meta = current_data.metadata
+                if isinstance(meta, dict):
+                    val = meta.get("axial_step_um") or meta.get("z_step_um")
+                    if val:
+                        axial_field["value"] = val
+            suggested_fields.append(axial_field)
 
-            # set button
-            imgui.same_line()
-            if imgui.small_button(f"Set##{canonical}"):
-                input_val = getattr(parent, input_key).strip()
-                if input_val:
-                    try:
-                        parsed = dtype(input_val)
-                        parent._saveas_custom_metadata[canonical] = parsed
-                        if current_data and hasattr(current_data, "metadata"):
-                            if isinstance(current_data.metadata, dict):
-                                current_data.metadata[canonical] = parsed
+        # draw suggested fields in a clean table
+        if suggested_fields:
+            table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
+            if imgui.begin_table("suggested_meta", 4, table_flags):
+                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(8))
+                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(8))
+                imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(6))
+                imgui.table_setup_column("btn", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
+
+                for field in suggested_fields:
+                    canonical = field["canonical"]
+                    label = field["label"]
+                    unit = field.get("unit", "")
+                    dtype = field.get("dtype", str)
+                    desc = field.get("description", "")
+
+                    # get current value
+                    custom_val = parent._saveas_custom_metadata.get(canonical)
+                    source_val = field.get("value")
+                    value = custom_val if custom_val is not None else source_val
+                    is_set = value is not None
+
+                    imgui.table_next_row()
+
+                    # label column
+                    imgui.table_next_column()
+                    color = imgui.ImVec4(0.5, 0.8, 0.5, 1.0) if is_set else imgui.ImVec4(0.8, 0.7, 0.3, 1.0)
+                    imgui.text_colored(color, label)
+                    if desc and imgui.is_item_hovered():
+                        imgui.set_tooltip(desc)
+
+                    # value column
+                    imgui.table_next_column()
+                    if is_set:
+                        imgui.text_colored(imgui.ImVec4(0.5, 0.8, 0.5, 1.0), f"{value} {unit}")
+                    else:
+                        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "-")
+
+                    # input column
+                    imgui.table_next_column()
+                    input_key = f"_meta_input_{canonical}"
+                    if not hasattr(parent, input_key):
                         setattr(parent, input_key, "")
-                    except (ValueError, TypeError):
-                        pass
+
+                    imgui.set_next_item_width(hello_imgui.em_size(5.5))
+                    flags = imgui.InputTextFlags_.chars_decimal if dtype in (float, int) else 0
+                    _, new_val = imgui.input_text(f"##{canonical}", getattr(parent, input_key), flags=flags)
+                    setattr(parent, input_key, new_val)
+
+                    # set button column
+                    imgui.table_next_column()
+                    if imgui.small_button(f"Set##{canonical}"):
+                        input_val = getattr(parent, input_key).strip()
+                        if input_val:
+                            try:
+                                parsed = dtype(input_val)
+                                parent._saveas_custom_metadata[canonical] = parsed
+                                if current_data and hasattr(current_data, "metadata"):
+                                    if isinstance(current_data.metadata, dict):
+                                        current_data.metadata[canonical] = parsed
+                                setattr(parent, input_key, "")
+                            except (ValueError, TypeError):
+                                pass
+
+                imgui.end_table()
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+        # custom metadata section - clean table layout
+        imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Add Custom")
+
+        # show existing custom entries as removable tags
+        suggested_keys = {f["canonical"] for f in suggested_fields}
+        custom_entries = [(k, v) for k, v in parent._saveas_custom_metadata.items() if k not in suggested_keys]
+
+        if custom_entries:
+            imgui.dummy(imgui.ImVec2(0, 2))
+            to_remove = None
+            for key, value in custom_entries:
+                imgui.push_id(f"custom_{key}")
+                # tag style: key=value [x]
+                imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.25, 0.3, 1.0))
+                imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.35, 0.4, 1.0))
+                tag_text = f"{key}={value}"
+                if imgui.small_button(f"{tag_text}  \u00d7"):
+                    to_remove = key
+                imgui.pop_style_color(2)
+                imgui.same_line()
+                imgui.pop_id()
+            if to_remove:
+                del parent._saveas_custom_metadata[to_remove]
+            imgui.new_line()
+
+        # add new entry row
+        imgui.dummy(imgui.ImVec2(0, 2))
+        imgui.set_next_item_width(hello_imgui.em_size(8))
+        _, parent._saveas_custom_key = imgui.input_text("##key", parent._saveas_custom_key)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Key name")
+        imgui.same_line()
+        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "=")
+        imgui.same_line()
+        imgui.set_next_item_width(hello_imgui.em_size(8))
+        _, parent._saveas_custom_value = imgui.input_text("##val", parent._saveas_custom_value)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Value")
+        imgui.same_line()
+        if imgui.button("+", imgui.ImVec2(hello_imgui.em_size(2), 0)) and parent._saveas_custom_key.strip():
+            val = parent._saveas_custom_value
+            with contextlib.suppress(ValueError):
+                val = float(val) if "." in val else int(val)
+            parent._saveas_custom_metadata[parent._saveas_custom_key.strip()] = val
+            parent._saveas_custom_key = ""
+            parent._saveas_custom_value = ""
 
         imgui.spacing()
+        imgui.spacing()
+        if imgui.button("Close", imgui.ImVec2(80, 0)):
+            imgui.close_current_popup()
 
-    # custom metadata section (always visible, no dropdown)
-    imgui.text("Custom:")
-    imgui.dummy(imgui.ImVec2(0, 2))
-
-    # show existing custom metadata entries
-    to_remove = None
-    for key, value in list(parent._saveas_custom_metadata.items()):
-        # skip required fields (shown above)
-        if any(f["canonical"] == key for f in required_fields):
-            continue
-        imgui.push_id(f"custom_{key}")
-        imgui.text(f"  {key}:")
-        imgui.same_line()
-        imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), str(value))
-        imgui.same_line()
-        if imgui.small_button("X"):
-            to_remove = key
-        imgui.pop_id()
-    if to_remove:
-        del parent._saveas_custom_metadata[to_remove]
-
-    # add new key-value pair
-    imgui.set_next_item_width(hello_imgui.em_size(8))
-    _, parent._saveas_custom_key = imgui.input_text(
-        "##custom_key", parent._saveas_custom_key
-    )
-    imgui.same_line()
-    imgui.text("=")
-    imgui.same_line()
-    imgui.set_next_item_width(hello_imgui.em_size(10))
-    _, parent._saveas_custom_value = imgui.input_text(
-        "##custom_value", parent._saveas_custom_value
-    )
-    imgui.same_line()
-    if imgui.button("Add") and parent._saveas_custom_key.strip():
-        val = parent._saveas_custom_value
-        with contextlib.suppress(ValueError):
-            val = float(val) if "." in val else int(val)
-        parent._saveas_custom_metadata[parent._saveas_custom_key.strip()] = val
-        parent._saveas_custom_key = ""
-        parent._saveas_custom_value = ""
-
-    imgui.spacing()
-
-    # store missing required state for save button validation
-    parent._saveas_missing_required = missing_required
+        imgui.end_popup()
 
 
 def _draw_selection_section(parent: Any):
-    """Draw the selection section with table layout for dimension slicing and output path."""
+    """Draw the selection section with text input for dimension slicing and output path."""
     imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Selection")
     imgui.same_line()
     imgui.text_disabled("(?)")
     if imgui.is_item_hovered():
         imgui.begin_tooltip()
-        imgui.push_text_wrap_pos(imgui.get_font_size() * 25.0)
+        imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
         imgui.text_unformatted(
             "Select which data to save using start:stop:step notation.\n\n"
-            "start: first index to include (1-based)\n"
-            "stop: last index to include (1-based, inclusive)\n"
-            "step: interval between indices (1 = every item)\n\n"
+            "Format: start:stop or start:stop:step\n"
+            "  start = first index (1-based)\n"
+            "  stop = last index (inclusive)\n"
+            "  step = interval (default 1)\n\n"
+            "To exclude frames, add comma + exclude range:\n"
+            "  1:100,50:60 = frames 1-100 excluding 50-60\n\n"
             "Examples:\n"
-            "  1:100:1 = indices 1-100 (every one)\n"
-            "  1:100:2 = indices 1,3,5,...,99 (every other)\n"
-            "  5:10:1 = indices 5-10 only"
+            "  1:100 = frames 1-100\n"
+            "  1:100:2 = every other frame (1,3,5...99)\n"
+            "  1:1000,200:300 = 1-1000 excluding 200-300"
         )
         imgui.pop_text_wrap_pos()
         imgui.end_tooltip()
     imgui.dummy(imgui.ImVec2(0, 5))
 
-    # get data dimensions
-    try:
-        first_array = parent.image_widget.data[0]
-        max_frames = first_array.shape[0]
-    except (IndexError, AttributeError):
-        max_frames = 1000
-
+    # get data dimensions - store reference once
+    data = None
+    max_frames = 1000
+    num_planes = 1
     try:
         data = parent.image_widget.data[0]
+        max_frames = data.shape[0]
         if hasattr(data, "num_planes"):
             num_planes = data.num_planes
         elif hasattr(data, "num_channels"):
@@ -549,22 +630,24 @@ def _draw_selection_section(parent: Any):
         else:
             num_planes = 1
     except Exception as e:
-        num_planes = 1
-        hello_imgui.log(hello_imgui.LogLevel.error, f"Could not read number of planes: {e}")
+        hello_imgui.log(hello_imgui.LogLevel.error, f"Could not read data dimensions: {e}")
 
-    # initialize state
-    if not hasattr(parent, "_saveas_tp_start"):
-        parent._saveas_tp_start = 1
-    if not hasattr(parent, "_saveas_tp_stop"):
-        parent._saveas_tp_stop = max_frames
-    if not hasattr(parent, "_saveas_tp_step"):
-        parent._saveas_tp_step = 1
+    # initialize timepoint selection state (new single text input)
+    if not hasattr(parent, "_saveas_tp_selection"):
+        parent._saveas_tp_selection = f"1:{max_frames}"
+    if not hasattr(parent, "_saveas_tp_error"):
+        parent._saveas_tp_error = ""
+    if not hasattr(parent, "_saveas_tp_parsed"):
+        parent._saveas_tp_parsed = None
     if not hasattr(parent, "_saveas_last_max_tp"):
         parent._saveas_last_max_tp = max_frames
     elif parent._saveas_last_max_tp != max_frames:
+        # update default selection when data changes
         parent._saveas_last_max_tp = max_frames
-        parent._saveas_tp_stop = max_frames
+        if parent._saveas_tp_selection == f"1:{parent._saveas_last_max_tp}":
+            parent._saveas_tp_selection = f"1:{max_frames}"
 
+    # initialize z-plane selection state
     if not hasattr(parent, "_saveas_z_start"):
         parent._saveas_z_start = 1
     if not hasattr(parent, "_saveas_z_stop"):
@@ -577,33 +660,13 @@ def _draw_selection_section(parent: Any):
         parent._saveas_last_num_planes = num_planes
         parent._saveas_z_stop = num_planes
 
-    # table with columns: dim label, start, stop, step, All button, info
+    # timepoints row with single text input
     table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
-    if imgui.begin_table("selection_table", 7, table_flags):
-        # column headers in dark gray
+    if imgui.begin_table("selection_table", 4, table_flags):
         imgui.table_setup_column("dim", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(6))
-        imgui.table_setup_column("start", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(5))
-        imgui.table_setup_column("stop", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(5))
-        imgui.table_setup_column("step", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(4))
+        imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(16))
         imgui.table_setup_column("all", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
         imgui.table_setup_column("info", imgui.TableColumnFlags_.width_stretch)
-        imgui.table_setup_column("spacer", imgui.TableColumnFlags_.width_fixed)
-
-        # header row
-        imgui.table_next_row()
-        imgui.table_next_column()
-        imgui.text("")  # dim label column
-        imgui.table_next_column()
-        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "start")
-        imgui.table_next_column()
-        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "stop")
-        imgui.table_next_column()
-        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "step")
-        imgui.table_next_column()
-        imgui.text("")  # all button
-        imgui.table_next_column()
-        imgui.text("")  # info
-        imgui.table_next_column()
 
         # timepoints row
         imgui.table_next_row()
@@ -611,34 +674,52 @@ def _draw_selection_section(parent: Any):
         imgui.text("Timepoints")
 
         imgui.table_next_column()
-        imgui.set_next_item_width(hello_imgui.em_size(4.5))
-        changed, val = imgui.input_int("##tp_start", parent._saveas_tp_start, step=0)
-        if changed:
-            parent._saveas_tp_start = max(1, min(val, parent._saveas_tp_stop))
+        imgui.set_next_item_width(hello_imgui.em_size(15))
 
-        imgui.table_next_column()
-        imgui.set_next_item_width(hello_imgui.em_size(4.5))
-        changed, val = imgui.input_int("##tp_stop", parent._saveas_tp_stop, step=0)
-        if changed:
-            parent._saveas_tp_stop = max(parent._saveas_tp_start, min(val, max_frames))
+        # red border if error - track if we pushed so we can pop correctly
+        had_error_style = bool(parent._saveas_tp_error)
+        if had_error_style:
+            imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.3, 0.1, 0.1, 1.0))
 
-        imgui.table_next_column()
-        imgui.set_next_item_width(hello_imgui.em_size(3.5))
-        changed, val = imgui.input_int("##tp_step", parent._saveas_tp_step, step=0)
+        changed, new_val = imgui.input_text("##tp_selection", parent._saveas_tp_selection)
         if changed:
-            parent._saveas_tp_step = max(1, min(val, parent._saveas_tp_stop - parent._saveas_tp_start + 1))
+            parent._saveas_tp_selection = new_val
+            # try to parse on change
+            try:
+                parent._saveas_tp_parsed = parse_timepoint_selection(new_val, max_frames)
+                parent._saveas_tp_error = ""
+            except ValueError as e:
+                parent._saveas_tp_error = str(e)
+                parent._saveas_tp_parsed = None
+
+        if had_error_style:
+            imgui.pop_style_color()
+
+        # show error tooltip
+        if parent._saveas_tp_error and imgui.is_item_hovered():
+            imgui.set_tooltip(parent._saveas_tp_error)
 
         imgui.table_next_column()
         if imgui.small_button("All##tp"):
-            parent._saveas_tp_start = 1
-            parent._saveas_tp_stop = max_frames
-            parent._saveas_tp_step = 1
+            parent._saveas_tp_selection = f"1:{max_frames}"
+            parent._saveas_tp_parsed = parse_timepoint_selection(f"1:{max_frames}", max_frames)
+            parent._saveas_tp_error = ""
 
         imgui.table_next_column()
-        n_frames = len(range(parent._saveas_tp_start, parent._saveas_tp_stop + 1, parent._saveas_tp_step))
-        imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames}/{max_frames}")
-
-        imgui.table_next_column()
+        # show frame count info
+        if parent._saveas_tp_parsed:
+            n_frames = parent._saveas_tp_parsed.count
+            if parent._saveas_tp_parsed.exclude_str:
+                n_excluded = len(parent._saveas_tp_parsed.exclude_indices)
+                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames}/{max_frames}")
+                imgui.same_line()
+                imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.4, 1.0), f"(-{n_excluded})")
+            else:
+                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames}/{max_frames}")
+        elif parent._saveas_tp_error:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "invalid")
+        else:
+            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"?/{max_frames}")
 
         # z-planes row (only if multi-plane data)
         if num_planes > 1:
@@ -647,19 +728,24 @@ def _draw_selection_section(parent: Any):
             imgui.text("Z-Planes")
 
             imgui.table_next_column()
-            imgui.set_next_item_width(hello_imgui.em_size(4.5))
+            # z-planes still use start:stop:step format with three int inputs for now
+            imgui.set_next_item_width(hello_imgui.em_size(4))
             changed, val = imgui.input_int("##z_start", parent._saveas_z_start, step=0)
             if changed:
                 parent._saveas_z_start = max(1, min(val, parent._saveas_z_stop))
 
-            imgui.table_next_column()
-            imgui.set_next_item_width(hello_imgui.em_size(4.5))
+            imgui.same_line()
+            imgui.text(":")
+            imgui.same_line()
+            imgui.set_next_item_width(hello_imgui.em_size(4))
             changed, val = imgui.input_int("##z_stop", parent._saveas_z_stop, step=0)
             if changed:
                 parent._saveas_z_stop = max(parent._saveas_z_start, min(val, num_planes))
 
-            imgui.table_next_column()
-            imgui.set_next_item_width(hello_imgui.em_size(3.5))
+            imgui.same_line()
+            imgui.text(":")
+            imgui.same_line()
+            imgui.set_next_item_width(hello_imgui.em_size(3))
             changed, val = imgui.input_int("##z_step", parent._saveas_z_step, step=0)
             if changed:
                 parent._saveas_z_step = max(1, min(val, parent._saveas_z_stop - parent._saveas_z_start + 1))
@@ -675,8 +761,6 @@ def _draw_selection_section(parent: Any):
             n_planes = len(selected_planes)
             imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_planes}/{num_planes}")
 
-            imgui.table_next_column()
-
             # update legacy _selected_planes for compatibility
             parent._selected_planes = set(p - 1 for p in selected_planes)
         else:
@@ -684,6 +768,13 @@ def _draw_selection_section(parent: Any):
             parent._selected_planes = {0}
 
         imgui.end_table()
+
+    # parse selection if not already done (initial load)
+    if parent._saveas_tp_parsed is None and not parent._saveas_tp_error:
+        try:
+            parent._saveas_tp_parsed = parse_timepoint_selection(parent._saveas_tp_selection, max_frames)
+        except ValueError as e:
+            parent._saveas_tp_error = str(e)
 
     imgui.spacing()
 
@@ -714,33 +805,49 @@ def _draw_selection_section(parent: Any):
     ext = getattr(parent, "_ext", ".tiff").lstrip(".")
     tags = []
 
-    # timepoint tag
-    tp_start = getattr(parent, "_saveas_tp_start", 1)
-    tp_stop = getattr(parent, "_saveas_tp_stop", 1)
-    tp_step = getattr(parent, "_saveas_tp_step", 1)
-    if tp_start != tp_stop or tp_step != 1:
-        t_tag = DimensionTag(
-            TAG_REGISTRY["T"],
-            start=tp_start,
-            stop=tp_stop if tp_stop != tp_start else None,
-            step=tp_step if tp_step != 1 else 1,
-        )
-        tags.append(t_tag)
+    # timepoint tag from parsed selection
+    tp_parsed = parent._saveas_tp_parsed
+    if tp_parsed:
+        final_indices = tp_parsed.final_indices
+        if final_indices:
+            # convert 0-based back to 1-based for display
+            tp_start_1 = final_indices[0] + 1
+            tp_stop_1 = final_indices[-1] + 1
+            # detect step from indices
+            if len(final_indices) > 1:
+                tp_step = final_indices[1] - final_indices[0]
+            else:
+                tp_step = 1
 
-    # z-plane tag
+            if tp_start_1 == tp_stop_1:
+                t_tag = DimensionTag(TAG_REGISTRY["T"], start=tp_start_1, stop=None, step=1)
+            else:
+                t_tag = DimensionTag(
+                    TAG_REGISTRY["T"],
+                    start=tp_start_1,
+                    stop=tp_stop_1,
+                    step=tp_step if tp_step != 1 else 1,
+                )
+            tags.append(t_tag)
+        n_frames = tp_parsed.count
+    else:
+        # fallback if no valid selection
+        n_frames = 0
+
+    # z-plane tag - always include if multi-plane
     z_start = getattr(parent, "_saveas_z_start", 1)
     z_stop = getattr(parent, "_saveas_z_stop", 1)
     z_step = getattr(parent, "_saveas_z_step", 1)
-    if z_start != z_stop or z_step != 1:
-        z_tag = DimensionTag(
-            TAG_REGISTRY["Z"],
-            start=z_start,
-            stop=z_stop if z_stop != z_start else None,
-            step=z_step if z_step != 1 else 1,
-        )
-        tags.append(z_tag)
-    elif z_start == z_stop:
-        z_tag = DimensionTag(TAG_REGISTRY["Z"], start=z_start, stop=None, step=1)
+    if num_planes > 1:
+        if z_start == z_stop:
+            z_tag = DimensionTag(TAG_REGISTRY["Z"], start=z_start, stop=None, step=1)
+        else:
+            z_tag = DimensionTag(
+                TAG_REGISTRY["Z"],
+                start=z_start,
+                stop=z_stop,
+                step=z_step if z_step != 1 else 1,
+            )
         tags.append(z_tag)
 
     # build filename
@@ -754,39 +861,107 @@ def _draw_selection_section(parent: Any):
     else:
         filename = f"{sanitized_suffix}.{ext}" if sanitized_suffix else f"output.{ext}"
 
-    # show output preview
-    outdir = getattr(parent, "_saveas_outdir", "")
-    if outdir:
-        # normalize path separators for display
-        display_path = str(Path(outdir)).replace("\\", "/")
-        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), f"{display_path}/{filename}")
+    # calculate output info
+    n_planes_out = len(range(z_start, z_stop + 1, z_step)) if num_planes > 1 else 1
+
+    # get image dimensions and dtype for size estimate
+    Ly, Lx = 512, 512
+    dtype_size = 2  # default assume uint16
+    if data is not None:
+        try:
+            # try shape directly (Y, X are last two dims)
+            if hasattr(data, "shape") and len(data.shape) >= 2:
+                Ly, Lx = data.shape[-2], data.shape[-1]
+            # fallback to metadata if shape is lazy/not available
+            elif hasattr(data, "metadata") and isinstance(data.metadata, dict):
+                meta = data.metadata
+                Ly = meta.get("Ly") or meta.get("height") or meta.get("frame_height") or 512
+                Lx = meta.get("Lx") or meta.get("width") or meta.get("frame_width") or 512
+            if hasattr(data, "dtype"):
+                dtype_size = data.dtype.itemsize
+        except Exception:
+            pass  # keep defaults
+
+    # estimate file size (raw data size, compression varies)
+    raw_bytes = n_frames * n_planes_out * Ly * Lx * dtype_size
+    if raw_bytes >= 1e9:
+        size_str = f"~{raw_bytes / 1e9:.1f} GB"
+    elif raw_bytes >= 1e6:
+        size_str = f"~{raw_bytes / 1e6:.0f} MB"
     else:
-        imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), f"(output dir)/{filename}")
+        size_str = f"~{raw_bytes / 1e3:.0f} KB"
+
+    # output shape string
+    if num_planes > 1:
+        shape_str = f"({n_frames}, {n_planes_out}, {Ly}, {Lx})"
+        dims_str = "TZYX"
+    else:
+        shape_str = f"({n_frames}, {Ly}, {Lx})"
+        dims_str = "TYX"
+
+    imgui.spacing()
+
+    # output preview table
+    table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
+    if imgui.begin_table("output_preview", 2, table_flags):
+        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(6))
+        imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+
+        # filename row
+        imgui.table_next_row()
+        imgui.table_next_column()
+        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "Filename")
+        imgui.table_next_column()
+        imgui.text_colored(imgui.ImVec4(0.6, 0.9, 0.6, 1.0), filename)
+        outdir = getattr(parent, "_saveas_outdir", "")
+        if imgui.is_item_hovered() and outdir:
+            imgui.begin_tooltip()
+            display_path = str(Path(outdir)).replace("\\", "/")
+            imgui.text_unformatted(f"{display_path}/{filename}")
+            imgui.end_tooltip()
+
+        # size row
+        imgui.table_next_row()
+        imgui.table_next_column()
+        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "Size")
+        imgui.table_next_column()
+        imgui.text(size_str)
+
+        # shape row
+        imgui.table_next_row()
+        imgui.table_next_column()
+        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "Shape")
+        imgui.table_next_column()
+        imgui.text(f"{shape_str} {dims_str}")
+
+        imgui.end_table()
 
 
 def _draw_save_button(parent: Any):
     """Draw the save/cancel buttons and handle save logic."""
-    # disable save button if required metadata is missing or no z-planes selected
-    missing_fields = getattr(parent, "_saveas_missing_required", None)
+    # check for missing metadata (for warning indicator, not blocking)
+    missing_fields = _check_missing_metadata(parent)
     no_planes = parent._selected_planes is not None and len(parent._selected_planes) == 0
+    no_valid_tp = parent._saveas_tp_error or parent._saveas_tp_parsed is None
 
-    if missing_fields or no_planes:
+    if no_planes:
         imgui.begin_disabled()
         imgui.button("Save", imgui.ImVec2(100, 0))
         imgui.end_disabled()
         imgui.same_line()
-        # show error message
-        if no_planes:
-            imgui.text_colored(
-                imgui.ImVec4(1.0, 0.4, 0.4, 1.0),
-                "Select at least one z-plane"
-            )
-        elif missing_fields:
-            missing_names = ", ".join(f["label"] for f in missing_fields)
-            imgui.text_colored(
-                imgui.ImVec4(1.0, 0.4, 0.4, 1.0),
-                f"Please set required metadata: {missing_names}"
-            )
+        imgui.text_colored(
+            imgui.ImVec4(1.0, 0.4, 0.4, 1.0),
+            "Select at least one z-plane"
+        )
+    elif no_valid_tp:
+        imgui.begin_disabled()
+        imgui.button("Save", imgui.ImVec2(100, 0))
+        imgui.end_disabled()
+        imgui.same_line()
+        imgui.text_colored(
+            imgui.ImVec4(1.0, 0.4, 0.4, 1.0),
+            "Invalid timepoint selection"
+        )
     elif imgui.button("Save", imgui.ImVec2(100, 0)):
         if not parent._saveas_outdir:
             last_dir = get_last_dir("save_as") or Path().home()
@@ -819,26 +994,30 @@ def _draw_save_button(parent: Any):
                 if not outdir.exists():
                     outdir.mkdir(parents=True, exist_ok=True)
 
-                # build frames list from start:stop:step (1-based)
-                tp_start = getattr(parent, "_saveas_tp_start", 1)
-                tp_stop = getattr(parent, "_saveas_tp_stop", None)
-                tp_step = getattr(parent, "_saveas_tp_step", 1)
-
+                # build frames list from parsed timepoint selection
+                tp_parsed = parent._saveas_tp_parsed
                 try:
                     max_timepoints = parent.image_widget.data[0].shape[0]
-                    if tp_stop is None:
-                        tp_stop = max_timepoints
                 except (IndexError, AttributeError):
-                    max_timepoints = tp_stop or 1000
+                    max_timepoints = 1000
+
+                # get final frame indices (0-based)
+                final_indices_0 = tp_parsed.final_indices if tp_parsed else list(range(max_timepoints))
 
                 # check if selecting all frames (None means all)
-                if tp_start == 1 and tp_stop == max_timepoints and tp_step == 1:
+                if len(final_indices_0) == max_timepoints and final_indices_0 == list(range(max_timepoints)):
                     frames = None
                 else:
-                    frames = list(range(tp_start, tp_stop + 1, tp_step))
+                    # convert to 1-based for imwrite
+                    frames = [i + 1 for i in final_indices_0]
 
                 # Build metadata overrides dict from custom metadata
                 metadata_overrides = dict(parent._saveas_custom_metadata)
+
+                # add timepoint selection metadata (include/exclude info)
+                if tp_parsed:
+                    tp_meta = tp_parsed.to_metadata()
+                    metadata_overrides["timepoint_selection"] = tp_meta
 
                 # Determine output_suffix: only use custom suffix for multi-ROI stitched data
                 output_suffix = None
@@ -882,7 +1061,13 @@ def _draw_save_button(parent: Any):
                     save_kwargs["level"] = parent._zarr_compression_level
 
                 n_frames = len(frames) if frames else max_timepoints
-                frames_msg = f"{n_frames} frames ({tp_start}:{tp_stop}:{tp_step})" if frames else "all frames"
+                # build frames message from parsed selection
+                if tp_parsed and tp_parsed.exclude_str:
+                    frames_msg = f"{n_frames} frames ({tp_parsed.include_str} excl. {tp_parsed.exclude_str})"
+                elif tp_parsed:
+                    frames_msg = f"{n_frames} frames ({tp_parsed.include_str})"
+                else:
+                    frames_msg = "all frames"
                 roi_msg = f"ROIs {rois}" if rois else roi_mode.description
                 parent.logger.info(f"Saving planes {save_planes} ({frames_msg}), {roi_msg}")
                 parent.logger.info(
@@ -952,6 +1137,28 @@ def _draw_save_button(parent: Any):
             parent.logger.info(f"Error saving data: {e}")
             parent._saveas_modal_open = False
             imgui.close_current_popup()
+
+    imgui.same_line()
+
+    # metadata button - yellow if missing required fields
+    if missing_fields:
+        # yellow/warning style for button
+        imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.7, 0.6, 0.1, 1.0))
+        imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.8, 0.7, 0.2, 1.0))
+        imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.6, 0.5, 0.1, 1.0))
+        if imgui.button("Metadata", imgui.ImVec2(80, 0)):
+            parent._saveas_metadata_open = True
+        imgui.pop_style_color(3)
+        if imgui.is_item_hovered():
+            missing_names = ", ".join(f["label"] for f in missing_fields)
+            imgui.set_tooltip(f"Missing: {missing_names}")
+    else:
+        if imgui.button("Metadata", imgui.ImVec2(80, 0)):
+            parent._saveas_metadata_open = True
+
+    imgui.same_line()
+    if imgui.button("Options", imgui.ImVec2(80, 0)):
+        parent._saveas_options_open = True
 
     imgui.same_line()
     if imgui.button("Cancel"):
