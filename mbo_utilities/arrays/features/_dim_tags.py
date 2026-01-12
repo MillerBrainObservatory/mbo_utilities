@@ -21,6 +21,31 @@ if TYPE_CHECKING:
 # spatial dims that don't appear in filenames
 SPATIAL_DIMS = {"Y", "X"}
 
+# map dimension name aliases to canonical single-letter keys
+DIM_ALIASES = {
+    "timepoints": "T",
+    "timepoint": "T",
+    "time": "T",
+    "frames": "T",
+    "z-planes": "Z",
+    "z-plane": "Z",
+    "zplane": "Z",
+    "zplanes": "Z",
+    "plane": "Z",
+    "planes": "Z",
+    "channel": "C",
+    "channels": "C",
+    "view": "V",
+    "views": "V",
+    "roi": "R",
+    "rois": "R",
+    "region": "R",
+    "beamlet": "B",
+    "beamlets": "B",
+    "camera": "A",
+    "cameras": "A",
+}
+
 
 @dataclass(frozen=True)
 class TagDefinition:
@@ -40,7 +65,7 @@ TAG_REGISTRY: dict[str, TagDefinition] = {
     "R": TagDefinition("roi", "region", zero_pad=2),
     # future extensions
     "B": TagDefinition("beamlet", "beamlet", zero_pad=2),
-    "A": TagDefinition("cam", "camera", zero_pad=1),
+    "A": TagDefinition("cm", "camera", zero_pad=2),
 }
 
 
@@ -232,21 +257,24 @@ class OutputFilename:
         shape = arr.shape
         tags = []
 
-        for i, dim_char in enumerate(dims):
-            if dim_char in SPATIAL_DIMS:
+        for i, dim_name in enumerate(dims):
+            if dim_name in SPATIAL_DIMS:
                 continue
 
-            if dim_char not in TAG_REGISTRY:
+            # normalize dimension name to canonical key (T, Z, C, etc.)
+            dim_key = DIM_ALIASES.get(dim_name.lower(), dim_name.upper())
+
+            if dim_key not in TAG_REGISTRY:
                 continue
 
-            definition = TAG_REGISTRY[dim_char]
+            definition = TAG_REGISTRY[dim_key]
             dim_size = shape[i]
 
             # apply selection if matching dimension
             selection = None
-            if dim_char == "Z" and planes is not None:
+            if dim_key == "Z" and planes is not None:
                 selection = [planes] if isinstance(planes, int) else planes
-            elif dim_char == "T" and frames is not None:
+            elif dim_key == "T" and frames is not None:
                 selection = [frames] if isinstance(frames, int) else frames
 
             tag = DimensionTag.from_dim_size(definition, dim_size, selection)
