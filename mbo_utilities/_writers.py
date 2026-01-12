@@ -906,7 +906,11 @@ def _write_volumetric_tiff(
     debug : bool
         verbose logging
     """
-    from mbo_utilities.arrays.features import OutputFilename, get_dims
+    from mbo_utilities.arrays.features import (
+        OutputFilename,
+        ArraySlicing,
+        read_chunk,
+    )
 
     if metadata is None:
         metadata = {}
@@ -914,9 +918,15 @@ def _write_volumetric_tiff(
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
 
-    # get dims and shape
-    dims = get_dims(data)
-    shape = data.shape
+    # build selections dict for ArraySlicing
+    selections = {}
+    if frames is not None:
+        selections["T"] = [frames] if isinstance(frames, int) else frames
+    if planes is not None:
+        selections["Z"] = [planes] if isinstance(planes, int) else planes
+
+    # create slicing state (handles dim normalization, 1-based conversion)
+    slicing = ArraySlicing.from_array(data, selections=selections, one_based=True)
 
     # build output filename from dims
     output_fn = OutputFilename.from_array(data, planes=planes, frames=frames)
@@ -929,44 +939,11 @@ def _write_volumetric_tiff(
     if filename.exists():
         filename.unlink()
 
-    # determine slicing based on selections
-    t_slice = slice(None)
-    z_slice = slice(None)
-
-    if frames is not None:
-        if isinstance(frames, int):
-            frames = [frames]
-        # convert 1-based to 0-based
-        frame_indices = [f - 1 for f in frames]
-        t_slice = frame_indices
-
-    if planes is not None:
-        if isinstance(planes, int):
-            planes = [planes]
-        # convert 1-based to 0-based
-        plane_indices = [p - 1 for p in planes]
-        z_slice = plane_indices
-
     # get target shape after selection
-    if "T" in dims:
-        t_idx = dims.index("T")
-        if isinstance(t_slice, list):
-            n_frames = len(t_slice)
-        else:
-            n_frames = shape[t_idx]
-    else:
-        n_frames = 1
-
-    if "Z" in dims:
-        z_idx = dims.index("Z")
-        if isinstance(z_slice, list):
-            n_planes = len(z_slice)
-        else:
-            n_planes = shape[z_idx]
-    else:
-        n_planes = 1
-
-    Ly, Lx = shape[-2], shape[-1]
+    output_shape = slicing.output_shape
+    n_frames = slicing.selections["T"].count if "T" in slicing.selections else 1
+    n_planes = slicing.selections["Z"].count if "Z" in slicing.selections else 1
+    Ly, Lx = slicing.spatial_shape
     target_shape = (n_frames, n_planes, Ly, Lx)
 
     # update metadata for imagej
@@ -978,76 +955,41 @@ def _write_volumetric_tiff(
     # build imagej metadata
     ij_meta, resolution = _build_imagej_metadata(md, target_shape)
 
-    # store full metadata as JSON
+    # store full metadata as JSON in ImageJ's Info field
+    # use imagej_metadata_tag to create both 50838 and 50839 tags properly
+    from tifffile import imagej_metadata_tag
     import json
     json_meta = _make_json_serializable(md)
-    json_bytes = json.dumps(json_meta).encode("utf-8")
-    extratags = [(50839, 2, len(json_bytes), json_bytes, True)]
+    json_str = json.dumps(json_meta)
+    ij_extratags = imagej_metadata_tag({"Info": json_str}, "<")
+    extratags = list(ij_extratags) if ij_extratags else []
 
     if debug:
         logger.info(f"Writing volumetric tiff: {filename}")
         logger.info(f"  Shape: {target_shape} (TZYX)")
         logger.info(f"  ImageJ meta: frames={ij_meta.get('frames')}, slices={ij_meta.get('slices')}")
 
-    # calculate chunk size in frames
-    bytes_per_frame = n_planes * Ly * Lx * np.dtype(data.dtype).itemsize
-    chunk_size_bytes = target_chunk_mb * 1024 * 1024
-    frames_per_chunk = max(1, chunk_size_bytes // bytes_per_frame)
-
     # open writer
     with TiffWriter(filename, bigtiff=True, imagej=True) as writer:
         first_write = True
 
-        # iterate over timepoints in chunks
+        # iterate over chunks using unified slicing
         pbar = None
         if show_progress:
             pbar = tqdm(total=n_frames, desc="Writing TIFF", unit="frames")
 
-        for chunk_start in range(0, n_frames, frames_per_chunk):
-            chunk_end = min(chunk_start + frames_per_chunk, n_frames)
+        for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
+            # read chunk using unified reader
+            chunk_data = read_chunk(data, chunk_info, slicing.dims)
 
-            # slice data for this chunk
-            if len(dims) == 4 and dims == ("T", "Z", "Y", "X"):
-                # TZYX - most common case
-                if isinstance(t_slice, list):
-                    t_indices = t_slice[chunk_start:chunk_end]
-                    if isinstance(z_slice, list):
-                        chunk_data = data[np.ix_(t_indices, z_slice)]
-                    else:
-                        chunk_data = data[t_indices, :, :, :]
-                else:
-                    if isinstance(z_slice, list):
-                        chunk_data = data[chunk_start:chunk_end, z_slice, :, :]
-                    else:
-                        chunk_data = data[chunk_start:chunk_end, :, :, :]
-            elif len(dims) == 3 and dims == ("T", "Y", "X"):
-                # TYX - add Z dim
-                if isinstance(t_slice, list):
-                    t_indices = t_slice[chunk_start:chunk_end]
-                    chunk_data = data[t_indices, :, :]
-                else:
-                    chunk_data = data[chunk_start:chunk_end, :, :]
-                chunk_data = chunk_data[:, np.newaxis, :, :]  # add Z=1
-            elif len(dims) == 3 and dims == ("Z", "Y", "X"):
-                # ZYX - single timepoint
-                if chunk_start > 0:
-                    break  # only one "frame" for ZYX
-                if isinstance(z_slice, list):
-                    chunk_data = data[z_slice, :, :]
-                else:
-                    chunk_data = data[:, :, :]
-                chunk_data = chunk_data[np.newaxis, :, :, :]  # add T=1
-            else:
-                # generic case - try to get TZYX
-                chunk_data = np.asarray(data[chunk_start:chunk_end])
-                if chunk_data.ndim == 3:
-                    chunk_data = chunk_data[:, np.newaxis, :, :]
+            # ensure 4D (T, Z, Y, X)
+            if chunk_data.ndim == 3:
+                chunk_data = chunk_data[:, np.newaxis, :, :]
 
             # ensure contiguous
             chunk_data = np.ascontiguousarray(chunk_data)
 
             # reshape to TZCYX for imagej (add C=1)
-            # chunk_data is (T_chunk, Z, Y, X) -> (T_chunk, Z, 1, Y, X)
             chunk_5d = chunk_data[:, :, np.newaxis, :, :]
 
             # write each frame (T) with all its Z slices
@@ -1064,10 +1006,11 @@ def _write_volumetric_tiff(
                 first_write = False
 
             if pbar:
-                pbar.update(chunk_end - chunk_start)
+                frames_in_chunk = len(chunk_info.selections.get("T", [1]))
+                pbar.update(frames_in_chunk)
 
             if progress_callback:
-                progress_callback(chunk_end / n_frames)
+                progress_callback(chunk_info.progress)
 
         if pbar:
             pbar.close()
