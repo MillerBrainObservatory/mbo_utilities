@@ -50,6 +50,7 @@ from mbo_utilities.arrays.features._dim_labels import (
     parse_dims,
 )
 from mbo_utilities.arrays.features._dim_tags import (
+    DIM_ALIASES,
     DimensionTag,
     OutputFilename,
     SPATIAL_DIMS,
@@ -86,12 +87,23 @@ from mbo_utilities.arrays.features._stats import (
     StatsFeature,
     ZStatsFeature,
 )
+from mbo_utilities.arrays.features._slicing import (
+    ArraySlicing,
+    ChunkInfo,
+    DimSelection,
+    TimeSelection,
+    normalize_dim_key,
+    parse_selection,
+    parse_timepoint_selection,
+    read_chunk,
+)
 
 __all__ = [
     "CHUNKS_2D",
     "CHUNKS_3D",
     "CHUNKS_4D",
     "DEFAULT_DIMS",
+    "DIM_ALIASES",
     "DIM_DESCRIPTIONS",
     "KNOWN_ORDERINGS",
     "SPATIAL_DIMS",
@@ -149,4 +161,13 @@ __all__ = [
     "normalize_chunks",
     "parse_dims",
     "stat_to_masks",
+    # slicing
+    "ArraySlicing",
+    "ChunkInfo",
+    "DimSelection",
+    "TimeSelection",
+    "normalize_dim_key",
+    "parse_selection",
+    "parse_timepoint_selection",
+    "read_chunk",
 ]
