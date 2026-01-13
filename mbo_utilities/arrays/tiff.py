@@ -6,7 +6,7 @@ This module provides array readers for TIFF files:
 - ScanImageArray: Base class for raw ScanImage TIFFs with phase correction
 - LBMArray: LBM (Light Beads Microscopy) stacks, z-planes as channels
 - PiezoArray: Piezo z-stacks with optional frame averaging
-- CalibrationArray: Pollen/bead calibration stacks (LBM + piezo)
+- LBMPiezoArray: Combined LBM + piezo stacks (e.g., pollen calibration)
 - SinglePlaneArray: Single-plane time series
 - open_scanimage: Factory function that auto-detects stack type
 """
@@ -1869,13 +1869,14 @@ class SinglePlaneArray(ScanImageArray):
         return ("timepoints", "channels", "Y", "X")
 
 
-class CalibrationArray(ScanImageArray):
+class LBMPiezoArray(ScanImageArray):
     """
-    Calibration array reader for pollen/bead calibration data.
+    Combined LBM + piezo array reader.
 
-    For calibration stacks that combine LBM beamlet channels with piezo z-scanning.
-    This is specifically for pollen calibration where the z-piezo scans through
-    different focal planes while LBM channels capture individual beamlet data.
+    For stacks that have both LBM characteristics (>2 channels/beamlets) and
+    piezo characteristics (hStackManager enabled). Common use case is pollen
+    calibration where the z-piezo scans through different focal planes while
+    LBM channels capture individual beamlet data.
 
     The data has dimensions ZCYX where:
     - Z: piezo z-positions (focal planes)
@@ -1893,7 +1894,7 @@ class CalibrationArray(ScanImageArray):
     Raises
     ------
     ValueError
-        If the data is not a pollen/calibration stack.
+        If the data is not an LBM+piezo (pollen) stack.
 
     Attributes
     ----------
@@ -1906,7 +1907,7 @@ class CalibrationArray(ScanImageArray):
     @classmethod
     def can_open(cls, file: Path | str) -> bool:
         """
-        Check if this file can be opened by CalibrationArray.
+        Check if this file can be opened by LBMPiezoArray.
 
         Returns True for raw ScanImage TIFFs with pollen/calibration stack type.
 
@@ -1943,7 +1944,7 @@ class CalibrationArray(ScanImageArray):
         super().__init__(files, metadata=metadata, **kwargs)
         if self.stack_type != "pollen":
             raise ValueError(
-                f"CalibrationArray requires pollen calibration data, but detected '{self.stack_type}'. "
+                f"LBMPiezoArray requires pollen calibration data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
         # clear _dim_labels so get_dims() uses our dims property instead
@@ -1983,8 +1984,8 @@ def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
     Returns
     -------
     ScanImageArray
-        One of LBMArray, PiezoArray, CalibrationArray, or SinglePlaneArray.
-        Pollen calibration stacks (LBM + piezo) return CalibrationArray.
+        One of LBMArray, PiezoArray, LBMPiezoArray, or SinglePlaneArray.
+        Pollen calibration stacks (LBM + piezo) return LBMPiezoArray.
 
     Examples
     --------
@@ -2015,7 +2016,7 @@ def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
         if stack_type == "pollen":
             # Pollen calibration: LBM beamlets + piezo z-scanning
             kwargs.pop("average_frames", None)
-            return CalibrationArray(files, metadata=metadata, **kwargs)
+            return LBMPiezoArray(files, metadata=metadata, **kwargs)
         if stack_type == "piezo":
             return PiezoArray(files, metadata=metadata, **kwargs)
         # single_plane
@@ -2028,7 +2029,7 @@ def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
             return LBMArray(files, **kwargs)
         if stack_type == "pollen":
             kwargs.pop("average_frames", None)
-            return CalibrationArray(files, **kwargs)
+            return LBMPiezoArray(files, **kwargs)
         if stack_type == "piezo":
             return PiezoArray(files, **kwargs)
         kwargs.pop("average_frames", None)

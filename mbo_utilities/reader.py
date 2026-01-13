@@ -16,7 +16,7 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays import (
     BinArray,
-    CalibrationArray,
+    LBMPiezoArray,
     H5Array,
     ImageJHyperstackArray,
     IsoviewArray,
@@ -280,7 +280,7 @@ def imread(
             # Specialized ScanImage subclasses (most specific)
             (LBMArray, "LBM stack"),
             (PiezoArray, "piezo stack"),
-            (CalibrationArray, "calibration/pollen stack"),
+            (LBMPiezoArray, "LBM+piezo stack"),
             (SinglePlaneArray, "single-plane ScanImage"),
             # Generic ScanImage (raw acquisition data)
             (ScanImageArray, "raw ScanImage"),
