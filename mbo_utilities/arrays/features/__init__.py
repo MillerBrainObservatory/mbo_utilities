@@ -97,6 +97,16 @@ from mbo_utilities.arrays.features._slicing import (
     parse_timepoint_selection,
     read_chunk,
 )
+from mbo_utilities.arrays.features._pyramid import (
+    DownsampleMethod,
+    PyramidConfig,
+    PyramidLevel,
+    build_multiscales_metadata,
+    build_napari_scale_attrs,
+    compute_pyramid_shapes,
+    downsample_block,
+    generate_pyramid,
+)
 
 __all__ = [
     "CHUNKS_2D",
@@ -170,4 +180,13 @@ __all__ = [
     "parse_selection",
     "parse_timepoint_selection",
     "read_chunk",
+    # pyramid
+    "DownsampleMethod",
+    "PyramidConfig",
+    "PyramidLevel",
+    "build_multiscales_metadata",
+    "build_napari_scale_attrs",
+    "compute_pyramid_shapes",
+    "downsample_block",
+    "generate_pyramid",
 ]
