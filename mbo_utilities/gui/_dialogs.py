@@ -116,6 +116,18 @@ def load_new_data(parent: Any, path: str):
         parent.logger.info(f"Loaded successfully, shape: {new_data.shape}")
         parent.set_context_info()
 
+        # update image widget subplot title with new filename
+        try:
+            base_name = path_obj.stem
+            # for suite2p arrays (data.bin), use parent folder name
+            if base_name in ("data", "data_raw"):
+                base_name = path_obj.parent.name
+            if len(base_name) > 24:
+                base_name = base_name[:21] + "..."
+            parent.image_widget.figure[0, 0].title = base_name
+        except Exception:
+            pass  # ignore if subplot title update fails
+
         # refresh widgets based on new data capabilities
         parent._refresh_widgets()
 
