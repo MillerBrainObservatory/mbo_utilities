@@ -19,7 +19,7 @@ from dask import array as da
 
 from mbo_utilities import log
 from mbo_utilities.arrays.features._dim_labels import get_dims, get_num_planes
-from mbo_utilities._writers import _write_plane, _write_volumetric_tiff
+from mbo_utilities._writers import _write_plane, _write_volumetric_tiff, _write_volumetric_zarr
 from mbo_utilities.metadata import RoiMode
 from numpy.exceptions import AxisError
 
@@ -349,6 +349,8 @@ def _imwrite_base(
 
     # tiff: use volumetric writer
     if ext_clean in ("tiff", "tif"):
+        # extract output_suffix from kwargs if present
+        output_suffix = kwargs.pop("output_suffix", None)
         result = _write_volumetric_tiff(
             arr,
             outpath,
@@ -360,11 +362,34 @@ def _imwrite_base(
             progress_callback=progress_callback,
             show_progress=show_progress,
             debug=debug,
+            output_suffix=output_suffix,
+        )
+        return result
+
+    # zarr: use volumetric writer
+    if ext_clean == "zarr":
+        output_suffix = kwargs.pop("output_suffix", None)
+        sharded = kwargs.pop("sharded", True)
+        compression_level = kwargs.pop("compression_level", 1)
+        result = _write_volumetric_zarr(
+            arr,
+            outpath,
+            metadata=md,
+            planes=planes_list,
+            frames=frames_list,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            show_progress=show_progress,
+            debug=debug,
+            output_suffix=output_suffix,
+            sharded=sharded,
+            compression_level=compression_level,
         )
         return result
 
     # other formats: use per-plane streaming writer
-    # (zarr, bin, h5, npy)
+    # (bin, h5, npy)
     dims = get_dims(arr)
 
     # extract shape info
@@ -384,12 +409,33 @@ def _imwrite_base(
     elif len(arr.shape) == 3:
         num_planes = 1
 
-    # update metadata
+    # use OutputMetadata for reactive dz/fs values
+    from mbo_utilities.metadata import OutputMetadata
+    from mbo_utilities.arrays.features import parse_selection
+
+    # convert 1-based selections to 0-based indices for OutputMetadata
+    frame_indices_0 = None
+    plane_indices_0 = None
+    if frames_list is not None:
+        frame_indices_0 = [f - 1 for f in frames_list]
+    if planes_list is not None:
+        plane_indices_0 = [p - 1 for p in planes_list]
+
+    out_meta = OutputMetadata(
+        source=md,
+        frame_indices=frame_indices_0,
+        plane_indices=plane_indices_0,
+        source_num_frames=nframes,
+        source_num_planes=num_planes,
+    )
+
+    # get adjusted metadata dict with reactive dz/fs values
+    md = out_meta.to_dict()
     md["Ly"] = Ly
     md["Lx"] = Lx
-    md["num_timepoints"] = nframes
-    md["nframes"] = nframes
-    md["num_frames"] = nframes
+    md["num_timepoints"] = out_meta.num_frames or nframes
+    md["nframes"] = out_meta.num_frames or nframes
+    md["num_frames"] = out_meta.num_frames or nframes
 
     # normalize planes to 0-indexed list for iteration
     planes_0idx = _normalize_planes(planes_list, num_planes)
