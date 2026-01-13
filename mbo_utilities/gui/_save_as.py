@@ -381,6 +381,47 @@ def _draw_options_popup(parent: Any):
                 "##zarr_level", parent._zarr_compression_level, 0, 9
             )
 
+            imgui.spacing()
+            imgui.separator()
+            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), "Pyramid (Multi-resolution)")
+            imgui.dummy(imgui.ImVec2(0, 3))
+
+            _, parent._zarr_pyramid = imgui.checkbox("Generate Pyramid", parent._zarr_pyramid)
+            set_tooltip(
+                "Generate multi-resolution pyramid for faster navigation in napari. "
+                "Creates additional downsampled copies (2x per level) of Y and X dimensions. "
+                "Increases file size by ~33% but enables smooth zooming in large datasets.",
+            )
+
+            if parent._zarr_pyramid:
+                imgui.text("Max Levels")
+                set_tooltip(
+                    "Maximum pyramid levels (0 = full resolution only). "
+                    "Each level is 2x smaller in Y and X. "
+                    "Default 4 = up to 5 levels (1x, 2x, 4x, 8x, 16x).",
+                )
+                imgui.set_next_item_width(hello_imgui.em_size(8))
+                _, parent._zarr_pyramid_max_layers = imgui.slider_int(
+                    "##pyramid_levels", parent._zarr_pyramid_max_layers, 1, 6
+                )
+
+                imgui.text("Method")
+                set_tooltip(
+                    "Downsampling method. 'mean' averages pixels (best for intensity data). "
+                    "'nearest' uses nearest neighbor (best for labels/masks).",
+                )
+                methods = ["mean", "nearest", "gaussian"]
+                current_idx = methods.index(parent._zarr_pyramid_method) if parent._zarr_pyramid_method in methods else 0
+                imgui.set_next_item_width(hello_imgui.em_size(10))
+                if imgui.begin_combo("##pyramid_method", parent._zarr_pyramid_method):
+                    for method in methods:
+                        selected = method == parent._zarr_pyramid_method
+                        if imgui.selectable(method, selected)[0]:
+                            parent._zarr_pyramid_method = method
+                        if selected:
+                            imgui.set_item_default_focus()
+                    imgui.end_combo()
+
         imgui.spacing()
         if imgui.button("Close", imgui.ImVec2(80, 0)):
             imgui.close_current_popup()
@@ -422,6 +463,72 @@ def _check_missing_metadata(parent: Any) -> list:
     return missing
 
 
+def _build_suggested_fields(parent: Any) -> list[dict]:
+    """Build the complete list of suggested metadata fields."""
+    from mbo_utilities.metadata import parse_filename_metadata, get_filename_suggestions
+
+    # get array data
+    try:
+        current_data = parent.image_widget.data[0]
+    except (IndexError, AttributeError):
+        current_data = None
+
+    # get array-specific suggested fields
+    suggested_fields = _get_suggested_metadata(parent)
+    existing_canonicals = {f["canonical"] for f in suggested_fields}
+
+    # add z-step if not already provided
+    z_step_canonicals = ("dz", "z_step_um", "axial_step_um")
+    if not any(c in existing_canonicals for c in z_step_canonicals):
+        z_step_field = {
+            "canonical": "dz",
+            "label": "Z Step",
+            "unit": "\u03bcm",
+            "dtype": float,
+            "description": "Distance between Z-planes in micrometers.",
+        }
+        if current_data and hasattr(current_data, "metadata"):
+            meta = current_data.metadata
+            if isinstance(meta, dict):
+                val = meta.get("dz") or meta.get("z_step_um") or meta.get("axial_step_um")
+                if val:
+                    z_step_field["value"] = val
+        suggested_fields.append(z_step_field)
+        existing_canonicals.add("dz")
+
+    # parse filename for auto-detected metadata
+    filename_meta = None
+    if hasattr(parent, "fpath") and parent.fpath:
+        fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
+        if fpath:
+            filename_meta = parse_filename_metadata(str(fpath))
+
+    # add user-provided metadata fields from standard suggestions
+    user_fields = get_filename_suggestions()
+    for canonical, field_def in user_fields.items():
+        if canonical in existing_canonicals:
+            continue
+
+        field = dict(field_def)
+        # check if value detected from filename
+        if filename_meta:
+            detected_val = getattr(filename_meta, canonical, None)
+            if detected_val:
+                field["value"] = detected_val
+                field["detected"] = True  # mark as auto-detected
+
+        # check if value in array metadata
+        if current_data and hasattr(current_data, "metadata"):
+            meta = current_data.metadata
+            if isinstance(meta, dict) and canonical in meta:
+                field["value"] = meta[canonical]
+
+        suggested_fields.append(field)
+        existing_canonicals.add(canonical)
+
+    return suggested_fields
+
+
 def _draw_metadata_popup(parent: Any):
     """Draw the metadata popup for editing metadata fields."""
     if not hasattr(parent, "_saveas_metadata_open"):
@@ -431,7 +538,7 @@ def _draw_metadata_popup(parent: Any):
         imgui.open_popup("Metadata")
         parent._saveas_metadata_open = False
 
-    imgui.set_next_window_size(imgui.ImVec2(380, 320), imgui.Cond_.first_use_ever)
+    imgui.set_next_window_size(imgui.ImVec2(420, 400), imgui.Cond_.first_use_ever)
     if imgui.begin_popup("Metadata"):
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Metadata")
         imgui.dummy(imgui.ImVec2(0, 5))
@@ -442,35 +549,16 @@ def _draw_metadata_popup(parent: Any):
         except (IndexError, AttributeError):
             current_data = None
 
-        # build list of suggested fields
-        suggested_fields = _get_suggested_metadata(parent)
+        # build suggested fields (includes filename detection)
+        suggested_fields = _build_suggested_fields(parent)
 
-        # add axial step as a standard suggested field
-        axial_field = {
-            "canonical": "axial_step_um",
-            "label": "Axial Step",
-            "unit": "\u03bcm",
-            "dtype": float,
-            "description": "Distance between Z-planes in micrometers.",
-        }
-        # check if already in suggested (from array)
-        if not any(f["canonical"] == "axial_step_um" for f in suggested_fields):
-            # try to get existing value from metadata
-            if current_data and hasattr(current_data, "metadata"):
-                meta = current_data.metadata
-                if isinstance(meta, dict):
-                    val = meta.get("axial_step_um") or meta.get("z_step_um")
-                    if val:
-                        axial_field["value"] = val
-            suggested_fields.append(axial_field)
-
-        # draw suggested fields in a clean table
+        # draw suggested fields in a table
         if suggested_fields:
             table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
             if imgui.begin_table("suggested_meta", 4, table_flags):
-                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(8))
-                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(8))
-                imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(6))
+                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(7))
+                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(10))
+                imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(8))
                 imgui.table_setup_column("btn", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
 
                 for field in suggested_fields:
@@ -479,8 +567,10 @@ def _draw_metadata_popup(parent: Any):
                     unit = field.get("unit", "")
                     dtype = field.get("dtype", str)
                     desc = field.get("description", "")
+                    examples = field.get("examples", [])
+                    detected = field.get("detected", False)
 
-                    # get current value
+                    # get current value (custom overrides source)
                     custom_val = parent._saveas_custom_metadata.get(canonical)
                     source_val = field.get("value")
                     value = custom_val if custom_val is not None else source_val
@@ -490,15 +580,28 @@ def _draw_metadata_popup(parent: Any):
 
                     # label column
                     imgui.table_next_column()
-                    color = imgui.ImVec4(0.5, 0.8, 0.5, 1.0) if is_set else imgui.ImVec4(0.8, 0.7, 0.3, 1.0)
+                    if is_set:
+                        color = imgui.ImVec4(0.5, 0.8, 0.5, 1.0)
+                    else:
+                        color = imgui.ImVec4(0.6, 0.6, 0.6, 1.0)
                     imgui.text_colored(color, label)
-                    if desc and imgui.is_item_hovered():
-                        imgui.set_tooltip(desc)
+                    if imgui.is_item_hovered():
+                        tooltip = desc
+                        if examples:
+                            tooltip += f"\n\nExamples: {', '.join(examples[:5])}"
+                        imgui.set_tooltip(tooltip)
 
                     # value column
                     imgui.table_next_column()
                     if is_set:
-                        imgui.text_colored(imgui.ImVec4(0.5, 0.8, 0.5, 1.0), f"{value} {unit}")
+                        val_str = f"{value} {unit}".strip()
+                        if detected and custom_val is None:
+                            # show detected values in cyan
+                            imgui.text_colored(imgui.ImVec4(0.4, 0.8, 0.9, 1.0), val_str)
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip("Detected from filename")
+                        else:
+                            imgui.text_colored(imgui.ImVec4(0.5, 0.8, 0.5, 1.0), val_str)
                     else:
                         imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "-")
 
@@ -508,10 +611,17 @@ def _draw_metadata_popup(parent: Any):
                     if not hasattr(parent, input_key):
                         setattr(parent, input_key, "")
 
-                    imgui.set_next_item_width(hello_imgui.em_size(5.5))
+                    imgui.set_next_item_width(hello_imgui.em_size(7.5))
                     flags = imgui.InputTextFlags_.chars_decimal if dtype in (float, int) else 0
                     _, new_val = imgui.input_text(f"##{canonical}", getattr(parent, input_key), flags=flags)
                     setattr(parent, input_key, new_val)
+                    if imgui.is_item_hovered():
+                        tip = "Type a value and click Set to save"
+                        if dtype == str:
+                            tip += " (text)"
+                        elif dtype == float:
+                            tip += " (number)"
+                        imgui.set_tooltip(tip)
 
                     # set button column
                     imgui.table_next_column()
@@ -531,11 +641,6 @@ def _draw_metadata_popup(parent: Any):
                 imgui.end_table()
 
             imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-        # custom metadata section - clean table layout
-        imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Add Custom")
 
         # show existing custom entries as removable tags
         suggested_keys = {f["canonical"] for f in suggested_fields}
@@ -546,7 +651,6 @@ def _draw_metadata_popup(parent: Any):
             to_remove = None
             for key, value in custom_entries:
                 imgui.push_id(f"custom_{key}")
-                # tag style: key=value [x]
                 imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.25, 0.3, 1.0))
                 imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.35, 0.4, 1.0))
                 tag_text = f"{key}={value}"
@@ -559,19 +663,19 @@ def _draw_metadata_popup(parent: Any):
                 del parent._saveas_custom_metadata[to_remove]
             imgui.new_line()
 
-        # add new entry row
+        # add new custom entry row
         imgui.dummy(imgui.ImVec2(0, 2))
         imgui.set_next_item_width(hello_imgui.em_size(8))
         _, parent._saveas_custom_key = imgui.input_text("##key", parent._saveas_custom_key)
         if imgui.is_item_hovered():
-            imgui.set_tooltip("Key name")
+            imgui.set_tooltip("Custom key name")
         imgui.same_line()
         imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "=")
         imgui.same_line()
         imgui.set_next_item_width(hello_imgui.em_size(8))
         _, parent._saveas_custom_value = imgui.input_text("##val", parent._saveas_custom_value)
         if imgui.is_item_hovered():
-            imgui.set_tooltip("Value")
+            imgui.set_tooltip("Custom value (auto-detects number vs text)")
         imgui.same_line()
         if imgui.button("+", imgui.ImVec2(hello_imgui.em_size(2), 0)) and parent._saveas_custom_key.strip():
             val = parent._saveas_custom_value
@@ -632,6 +736,27 @@ def _draw_selection_section(parent: Any):
     except Exception as e:
         hello_imgui.log(hello_imgui.LogLevel.error, f"Could not read data dimensions: {e}")
 
+    # track file path to reset state when file changes
+    current_fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
+    current_fpath = str(current_fpath) if current_fpath else ""
+    file_changed = False
+    if not hasattr(parent, "_saveas_last_fpath"):
+        parent._saveas_last_fpath = current_fpath
+    elif parent._saveas_last_fpath != current_fpath:
+        file_changed = True
+        parent._saveas_last_fpath = current_fpath
+
+    # reset selection state when file changes
+    if file_changed:
+        parent._saveas_tp_selection = f"1:{max_frames}"
+        parent._saveas_tp_error = ""
+        parent._saveas_tp_parsed = None
+        parent._saveas_last_max_tp = max_frames
+        parent._saveas_z_start = 1
+        parent._saveas_z_stop = num_planes
+        parent._saveas_z_step = 1
+        parent._saveas_last_num_planes = num_planes
+
     # initialize timepoint selection state (new single text input)
     if not hasattr(parent, "_saveas_tp_selection"):
         parent._saveas_tp_selection = f"1:{max_frames}"
@@ -644,8 +769,9 @@ def _draw_selection_section(parent: Any):
     elif parent._saveas_last_max_tp != max_frames:
         # update default selection when data changes
         parent._saveas_last_max_tp = max_frames
-        if parent._saveas_tp_selection == f"1:{parent._saveas_last_max_tp}":
-            parent._saveas_tp_selection = f"1:{max_frames}"
+        parent._saveas_tp_selection = f"1:{max_frames}"
+        parent._saveas_tp_parsed = None
+        parent._saveas_tp_error = ""
 
     # initialize z-plane selection state
     if not hasattr(parent, "_saveas_z_start"):
@@ -658,7 +784,9 @@ def _draw_selection_section(parent: Any):
         parent._saveas_last_num_planes = num_planes
     elif parent._saveas_last_num_planes != num_planes:
         parent._saveas_last_num_planes = num_planes
+        parent._saveas_z_start = 1
         parent._saveas_z_stop = num_planes
+        parent._saveas_z_step = 1
 
     # timepoints row with single text input
     table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
@@ -1059,6 +1187,10 @@ def _draw_save_button(parent: Any):
                     save_kwargs["sharded"] = parent._zarr_sharded
                     save_kwargs["ome"] = parent._zarr_ome
                     save_kwargs["level"] = parent._zarr_compression_level
+                    save_kwargs["pyramid"] = parent._zarr_pyramid
+                    if parent._zarr_pyramid:
+                        save_kwargs["pyramid_max_layers"] = parent._zarr_pyramid_max_layers
+                        save_kwargs["pyramid_method"] = parent._zarr_pyramid_method
 
                 n_frames = len(frames) if frames else max_timepoints
                 # build frames message from parsed selection
@@ -1100,7 +1232,10 @@ def _draw_save_button(parent: Any):
                         "kwargs": {
                             "sharded": parent._zarr_sharded if parent._ext == ".zarr" else False,
                             "ome": parent._zarr_ome if parent._ext == ".zarr" else False,
-                            "output_suffix": output_suffix
+                            "output_suffix": output_suffix,
+                            "pyramid": parent._zarr_pyramid if parent._ext == ".zarr" else False,
+                            "pyramid_max_layers": parent._zarr_pyramid_max_layers if parent._ext == ".zarr" and parent._zarr_pyramid else 4,
+                            "pyramid_method": parent._zarr_pyramid_method if parent._ext == ".zarr" and parent._zarr_pyramid else "mean",
                         }
                     }
                     pid = pm.spawn(

@@ -311,6 +311,9 @@ class PreviewDataWidget(EdgeWindow):
         self._zarr_sharded = True
         self._zarr_ome = True
         self._zarr_compression_level = 1
+        self._zarr_pyramid = False
+        self._zarr_pyramid_max_layers = 4
+        self._zarr_pyramid_method = "mean"
 
         # Save dialog state
         self._saveas_popup_open = False
