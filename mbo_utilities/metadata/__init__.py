@@ -60,6 +60,16 @@ from .io import (
     _build_ome_metadata,
 )
 
+# output metadata for subsetted data
+from .output import OutputMetadata
+
+# filename metadata parsing
+from ._filename_parser import (
+    FilenameMetadata,
+    parse_filename_metadata,
+    get_filename_suggestions,
+)
+
 __all__ = [
     "ALIAS_MAP",
     # imaging metadata (core params for display/editing)
@@ -105,4 +115,10 @@ __all__ = [
     "normalize_metadata",
     "normalize_resolution",
     "query_tiff_pages",
+    # output metadata
+    "OutputMetadata",
+    # filename parsing
+    "FilenameMetadata",
+    "parse_filename_metadata",
+    "get_filename_suggestions",
 ]
