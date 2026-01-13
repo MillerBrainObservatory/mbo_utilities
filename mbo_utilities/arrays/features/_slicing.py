@@ -129,8 +129,16 @@ def parse_selection(
     indices = list(selection)
     if one_based:
         indices = [i - 1 for i in indices]
-    # clamp to valid range
-    return [max(0, min(i, dim_size - 1)) for i in indices]
+    # filter to valid range instead of clamping (clamping causes duplicate frames)
+    valid_indices = [i for i in indices if 0 <= i < dim_size]
+    if len(valid_indices) < len(indices):
+        # log warning about out-of-range indices being filtered
+        import logging
+        logging.getLogger("mbo_utilities").warning(
+            f"Selection contains {len(indices) - len(valid_indices)} out-of-range indices "
+            f"(max valid index: {dim_size - 1}). These will be skipped."
+        )
+    return valid_indices
 
 
 @dataclass
