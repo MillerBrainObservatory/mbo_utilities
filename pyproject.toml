@@ -65,7 +65,7 @@ suite2p = [
 ]
 # Suite3D - requires CUPY
 suite3d = [
-    "mbo-suite3d>=0.0.6",
+    "mbo-suite3d>=0.0.7",
     "cupy-cuda12x",
 ]
 # Rastermap for activity sorting
