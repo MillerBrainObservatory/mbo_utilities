@@ -879,6 +879,7 @@ def _write_volumetric_tiff(
     progress_callback=None,
     show_progress: bool = True,
     debug: bool = False,
+    output_suffix: str | None = None,
 ):
     """
     Write volumetric TZYX data as single ImageJ hyperstack tiff.
@@ -929,7 +930,8 @@ def _write_volumetric_tiff(
     slicing = ArraySlicing.from_array(data, selections=selections, one_based=True)
 
     # build output filename from dims
-    output_fn = OutputFilename.from_array(data, planes=planes, frames=frames)
+    suffix = output_suffix if output_suffix else "stack"
+    output_fn = OutputFilename.from_array(data, planes=planes, frames=frames, suffix=suffix)
     filename = path / output_fn.build(".tif")
 
     if filename.exists() and not overwrite:
@@ -944,16 +946,65 @@ def _write_volumetric_tiff(
     n_frames = slicing.selections["T"].count if "T" in slicing.selections else 1
     n_planes = slicing.selections["Z"].count if "Z" in slicing.selections else 1
     Ly, Lx = slicing.spatial_shape
-    target_shape = (n_frames, n_planes, Ly, Lx)
 
-    # update metadata for imagej
-    md = dict(metadata)
+    # check for z-registration shift application
+    apply_shift = metadata.get("apply_shift", False) if metadata else False
+    plane_shifts = None
+    pt, pb, pl, pr = 0, 0, 0, 0  # padding values
+
+    if apply_shift:
+        # load plane shifts from s3d-job
+        s3d_job_dir = metadata.get("s3d-job", "")
+        summary_path = Path(s3d_job_dir).joinpath("summary/summary.npy") if s3d_job_dir else None
+
+        if summary_path and summary_path.is_file():
+            try:
+                summary = load_npy(summary_path).item()
+                if isinstance(summary, dict) and "plane_shifts" in summary:
+                    plane_shifts = np.asarray(summary["plane_shifts"])
+                    pt, pb, pl, pr = compute_pad_from_shifts(plane_shifts)
+                    if debug:
+                        logger.info(f"Applying z-registration shifts with padding: top={pt}, bottom={pb}, left={pl}, right={pr}")
+            except Exception as e:
+                logger.warning(f"Failed to load plane shifts: {e}. Proceeding without registration.")
+                apply_shift = False
+        else:
+            logger.warning(f"apply_shift=True but no valid s3d-job summary found. Proceeding without registration.")
+            apply_shift = False
+
+    # compute padded output dimensions if shifts are applied
+    if apply_shift and plane_shifts is not None:
+        Ly_out = Ly + pt + pb
+        Lx_out = Lx + pl + pr
+    else:
+        Ly_out, Lx_out = Ly, Lx
+
+    target_shape = (n_frames, n_planes, Ly_out, Lx_out)
+
+    # update metadata for imagej using OutputMetadata for reactive values
+    from mbo_utilities.metadata import OutputMetadata
+
+    # get 0-based indices for OutputMetadata
+    t_indices = slicing.selections["T"].indices if "T" in slicing.selections else None
+    z_indices_list = slicing.selections["Z"].indices if "Z" in slicing.selections else None
+
+    out_meta = OutputMetadata(
+        source=metadata or {},
+        frame_indices=t_indices,
+        plane_indices=z_indices_list,
+        source_num_frames=data.shape[0] if len(data.shape) >= 3 else 1,
+        source_num_planes=data.shape[1] if len(data.shape) == 4 else 1,
+    )
+
+    # get adjusted metadata dict
+    md = out_meta.to_dict()
     md["shape"] = target_shape
-    md["nframes"] = n_frames
-    md["num_frames"] = n_frames
+    if apply_shift and plane_shifts is not None:
+        md["padded_shape"] = (Ly_out, Lx_out)
+        md["original_shape"] = (Ly, Lx)
 
-    # build imagej metadata
-    ij_meta, resolution = _build_imagej_metadata(md, target_shape)
+    # build imagej metadata with adjusted dz and finterval
+    ij_meta, resolution = out_meta.to_imagej(target_shape)
 
     # store full metadata as JSON in ImageJ's Info field
     # use imagej_metadata_tag to create both 50838 and 50839 tags properly
@@ -968,6 +1019,9 @@ def _write_volumetric_tiff(
         logger.info(f"Writing volumetric tiff: {filename}")
         logger.info(f"  Shape: {target_shape} (TZYX)")
         logger.info(f"  ImageJ meta: frames={ij_meta.get('frames')}, slices={ij_meta.get('slices')}")
+        logger.info(f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}")
+        if out_meta.z_step_factor > 1:
+            logger.info(f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)")
 
     # open writer
     with TiffWriter(filename, bigtiff=True, imagej=True) as writer:
@@ -977,6 +1031,9 @@ def _write_volumetric_tiff(
         pbar = None
         if show_progress:
             pbar = tqdm(total=n_frames, desc="Writing TIFF", unit="frames")
+
+        # get z-plane indices being written (0-based)
+        z_indices = slicing.selections["Z"].indices if "Z" in slicing.selections else list(range(n_planes))
 
         for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
             # read chunk using unified reader
@@ -988,6 +1045,27 @@ def _write_volumetric_tiff(
 
             # ensure contiguous
             chunk_data = np.ascontiguousarray(chunk_data)
+
+            # apply z-registration shifts if enabled
+            if apply_shift and plane_shifts is not None:
+                n_t, n_z_chunk, h, w = chunk_data.shape
+                # create padded output buffer
+                shifted_chunk = np.zeros((n_t, n_z_chunk, Ly_out, Lx_out), dtype=chunk_data.dtype)
+
+                for z_local in range(n_z_chunk):
+                    # get the actual z-plane index in the original data
+                    z_global = z_indices[z_local]
+                    if z_global < len(plane_shifts):
+                        iy, ix = map(int, plane_shifts[z_global])
+                        # compute destination slice for this plane
+                        yy = slice(pt + iy, pt + iy + h)
+                        xx = slice(pl + ix, pl + ix + w)
+                        shifted_chunk[:, z_local, yy, xx] = chunk_data[:, z_local, :, :]
+                    else:
+                        # no shift for this plane, center it
+                        shifted_chunk[:, z_local, pt:pt+h, pl:pl+w] = chunk_data[:, z_local, :, :]
+
+                chunk_data = shifted_chunk
 
             # reshape to TZCYX for imagej (add C=1)
             chunk_5d = chunk_data[:, :, np.newaxis, :, :]
@@ -1017,6 +1095,373 @@ def _write_volumetric_tiff(
 
     if debug:
         logger.info(f"Wrote {filename} ({filename.stat().st_size / 1e9:.2f} GB)")
+
+    return filename
+
+
+def _write_volumetric_zarr(
+    data,
+    path: Path,
+    metadata: dict | None = None,
+    planes: list | None = None,
+    frames: list | None = None,
+    overwrite: bool = True,
+    target_chunk_mb: int = 50,
+    progress_callback=None,
+    show_progress: bool = True,
+    debug: bool = False,
+    output_suffix: str | None = None,
+    sharded: bool = True,
+    compression_level: int = 1,
+    pyramid: bool = False,
+    pyramid_max_layers: int = 4,
+    pyramid_method: str = "mean",
+):
+    """
+    Write volumetric TZYX data as single OME-NGFF zarr.
+
+    parameters
+    ----------
+    data : array-like
+        data with shape (T, Z, Y, X), (T, Y, X), or (Z, Y, X)
+    path : Path
+        output directory (filename auto-generated from dims)
+    metadata : dict
+        imaging metadata for resolution, spacing, etc.
+    planes : list | None
+        z-plane selection (1-based indices). None = all planes.
+    frames : list | None
+        timepoint selection (1-based indices). None = all frames.
+    overwrite : bool
+        overwrite existing files
+    target_chunk_mb : int
+        target chunk size in MB for streaming writes
+    progress_callback : callable
+        progress callback(fraction, message)
+    show_progress : bool
+        show tqdm progress bar
+    debug : bool
+        verbose logging
+    output_suffix : str | None
+        suffix for output filename
+    sharded : bool
+        use zarr v3 sharding codec
+    compression_level : int
+        gzip compression level (0=none, 1-9)
+    pyramid : bool
+        generate multi-resolution pyramid (default False).
+        enables napari multiscale viewing and faster navigation.
+    pyramid_max_layers : int
+        max additional resolution levels (default 4 = levels 0-4).
+        only spatial dims (Y, X) are downsampled by 2x per level.
+    pyramid_method : str
+        downsampling method: "mean" (default), "nearest", "gaussian".
+        use "nearest" for label/mask data.
+    """
+    import zarr
+    from zarr.codecs import BytesCodec, GzipCodec, ShardingCodec, Crc32cCodec
+
+    from mbo_utilities.arrays.features import (
+        OutputFilename,
+        ArraySlicing,
+        read_chunk,
+    )
+    from mbo_utilities.arrays.features._pyramid import (
+        PyramidConfig,
+        compute_pyramid_shapes,
+        downsample_block,
+    )
+    from mbo_utilities.metadata import OutputMetadata
+
+    if metadata is None:
+        metadata = {}
+
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+
+    # build selections dict for ArraySlicing
+    selections = {}
+    if frames is not None:
+        selections["T"] = [frames] if isinstance(frames, int) else frames
+    if planes is not None:
+        selections["Z"] = [planes] if isinstance(planes, int) else planes
+
+    # create slicing state (handles dim normalization, 1-based conversion)
+    slicing = ArraySlicing.from_array(data, selections=selections, one_based=True)
+
+    # build output filename from dims
+    suffix = output_suffix if output_suffix else "stack"
+    output_fn = OutputFilename.from_array(data, planes=planes, frames=frames, suffix=suffix)
+    filename = path / output_fn.build(".zarr")
+
+    if filename.exists() and not overwrite:
+        logger.warning(f"File {filename} exists and overwrite=False. Skipping.")
+        return filename
+
+    if filename.exists():
+        shutil.rmtree(filename)
+
+    # get target shape after selection
+    n_frames = slicing.selections["T"].count if "T" in slicing.selections else 1
+    n_planes = slicing.selections["Z"].count if "Z" in slicing.selections else 1
+    Ly, Lx = slicing.spatial_shape
+
+    target_shape = (n_frames, n_planes, Ly, Lx)
+
+    # update metadata using OutputMetadata for reactive values
+    t_indices = slicing.selections["T"].indices if "T" in slicing.selections else None
+    z_indices_list = slicing.selections["Z"].indices if "Z" in slicing.selections else None
+
+    out_meta = OutputMetadata(
+        source=metadata or {},
+        frame_indices=t_indices,
+        plane_indices=z_indices_list,
+        source_num_frames=data.shape[0] if len(data.shape) >= 3 else 1,
+        source_num_planes=data.shape[1] if len(data.shape) == 4 else 1,
+    )
+
+    # get adjusted metadata dict
+    md = out_meta.to_dict()
+    md["shape"] = target_shape
+
+    if debug:
+        logger.info(f"Writing volumetric zarr: {filename}")
+        logger.info(f"  Shape: {target_shape} (TZYX)")
+        logger.info(f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}")
+        if out_meta.z_step_factor > 1:
+            logger.info(f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)")
+
+    # determine chunking based on target_chunk_mb
+    # for 4D TZYX, chunk along T dimension
+    bytes_per_frame = n_planes * Ly * Lx * np.dtype(data.dtype).itemsize
+    target_bytes = target_chunk_mb * 1024 * 1024
+    frames_per_chunk = max(1, int(target_bytes / bytes_per_frame))
+    frames_per_chunk = min(frames_per_chunk, n_frames)
+
+    # inner chunk shape: 1 frame at a time for efficient random access
+    inner_chunk = (1, n_planes, Ly, Lx)
+
+    # build codec chain
+    if compression_level == 0:
+        inner_codecs = [BytesCodec()]
+    else:
+        inner_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+
+    if sharded:
+        # shard size: multiple frames per shard for efficient sequential reads
+        shard_t = min(n_frames, frames_per_chunk)
+        shard_shape = (shard_t, n_planes, Ly, Lx)
+
+        codec = ShardingCodec(
+            chunk_shape=inner_chunk,
+            codecs=inner_codecs,
+            index_codecs=[BytesCodec(), Crc32cCodec()],
+        )
+        codecs = [codec]
+        chunks = shard_shape
+    else:
+        codecs = inner_codecs
+        chunks = inner_chunk
+
+    # create zarr v3 group with OME-NGFF structure
+    root = zarr.open_group(str(filename), mode="w", zarr_format=3)
+
+    # compute pyramid levels if enabled
+    if pyramid:
+        pyramid_config = PyramidConfig(
+            max_layers=pyramid_max_layers,
+            scale_factors=(1, 1, 2, 2),  # TZYX: only downsample Y, X
+            method=pyramid_method,
+            min_size=64,
+        )
+        pyramid_levels = compute_pyramid_shapes(target_shape, pyramid_config)
+        if debug:
+            logger.info(f"  Pyramid: {len(pyramid_levels)} levels")
+            for lvl in pyramid_levels:
+                logger.info(f"    Level {lvl.level}: {lvl.shape}")
+    else:
+        pyramid_levels = None
+
+    # create the array as "0" (full resolution level)
+    z = zarr.create(
+        store=root.store,
+        path="0",
+        shape=target_shape,
+        chunks=chunks,
+        dtype=data.dtype,
+        codecs=codecs,
+        overwrite=True,
+    )
+
+    # build OME-NGFF metadata using OutputMetadata
+    ome_meta = out_meta.to_ome_ngff(dims=("T", "Z", "Y", "X"))
+    base_scale = ome_meta["coordinateTransformations"][0]["scale"]
+
+    # build full OME-NGFF v0.5 structure with pyramid datasets
+    if pyramid_levels:
+        datasets = []
+        for lvl in pyramid_levels:
+            # compute physical scale for this level
+            # pyramid scale is relative (e.g., 1, 2, 4), multiply with base
+            physical_scale = [
+                base_scale[i] * lvl.scale[i] for i in range(len(base_scale))
+            ]
+            datasets.append({
+                "path": lvl.path,
+                "coordinateTransformations": [
+                    {"type": "scale", "scale": physical_scale}
+                ],
+            })
+
+        multiscales = [
+            {
+                "version": "0.5",
+                "name": metadata.get("name", filename.stem),
+                "axes": ome_meta["axes"],
+                "datasets": datasets,
+                "type": pyramid_method,
+            }
+        ]
+    else:
+        multiscales = [
+            {
+                "version": "0.5",
+                "name": metadata.get("name", filename.stem),
+                "axes": ome_meta["axes"],
+                "datasets": [
+                    {
+                        "path": "0",
+                        "coordinateTransformations": ome_meta["coordinateTransformations"],
+                    }
+                ],
+            }
+        ]
+
+    ome_content = {
+        "version": "0.5",
+        "multiscales": multiscales,
+    }
+
+    # set OME metadata on the group
+    root.attrs["ome"] = ome_content
+
+    # also store full metadata as JSON-serializable attrs
+    serializable_md = _make_json_serializable(md)
+    for k, v in serializable_md.items():
+        root.attrs[k] = v
+
+    # set napari-compatible scale on level 0 array
+    z.attrs["scale"] = base_scale
+
+    # write data in chunks
+    pbar = None
+    total_work = n_frames * (len(pyramid_levels) if pyramid_levels else 1)
+    if show_progress:
+        pbar = tqdm(total=total_work, desc="Writing Zarr", unit="frames")
+
+    # track output offset (since ChunkInfo doesn't have offset)
+    t_offset = 0
+
+    # iterate over chunks using unified slicing
+    for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
+        # read chunk using unified reader
+        chunk_data = read_chunk(data, chunk_info, slicing.dims)
+
+        # ensure 4D (T, Z, Y, X)
+        if chunk_data.ndim == 3:
+            chunk_data = chunk_data[:, np.newaxis, :, :]
+
+        # ensure contiguous for efficient writes
+        chunk_data = np.ascontiguousarray(chunk_data)
+
+        # get the output T range for this chunk
+        t_start = t_offset
+        t_end = t_start + chunk_data.shape[0]
+
+        # write to zarr level 0
+        z[t_start:t_end, :, :, :] = chunk_data
+
+        # update offset
+        t_offset = t_end
+
+        if pbar:
+            pbar.update(chunk_data.shape[0])
+
+        if progress_callback:
+            progress_callback(chunk_info.progress / (len(pyramid_levels) if pyramid_levels else 1))
+
+    if pbar:
+        pbar.close()
+
+    # generate pyramid levels from level 0 data
+    if pyramid_levels and len(pyramid_levels) > 1:
+        if show_progress:
+            pbar = tqdm(
+                total=len(pyramid_levels) - 1,
+                desc="Building pyramid",
+                unit="levels",
+            )
+
+        scale_factors = pyramid_config.get_scale_factors_for_ndim(4)
+
+        for lvl in pyramid_levels[1:]:
+            prev_level = lvl.level - 1
+            prev_path = str(prev_level)
+
+            # read previous level data
+            prev_z = root[prev_path]
+            prev_data = prev_z[:]
+
+            # downsample
+            level_data = downsample_block(prev_data, scale_factors, pyramid_method)
+
+            # compute chunks for this level
+            lvl_shape = level_data.shape
+            lvl_chunks = (
+                min(chunks[0], lvl_shape[0]),
+                min(chunks[1], lvl_shape[1]),
+                min(chunks[2], lvl_shape[2]),
+                min(chunks[3], lvl_shape[3]),
+            )
+
+            # create array for this level (simpler codec for smaller levels)
+            if compression_level == 0:
+                lvl_codecs = [BytesCodec()]
+            else:
+                lvl_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+
+            lvl_z = zarr.create(
+                store=root.store,
+                path=lvl.path,
+                shape=lvl_shape,
+                chunks=lvl_chunks,
+                dtype=data.dtype,
+                codecs=lvl_codecs,
+                overwrite=True,
+            )
+
+            # write data
+            lvl_z[:] = level_data
+
+            # set napari-compatible scale on this level's array
+            physical_scale = [
+                base_scale[i] * lvl.scale[i] for i in range(len(base_scale))
+            ]
+            lvl_z.attrs["scale"] = physical_scale
+
+            if debug:
+                logger.info(f"  Wrote level {lvl.level}: {lvl_shape}")
+
+            if pbar:
+                pbar.update(1)
+
+        if pbar:
+            pbar.close()
+
+    if debug:
+        # estimate size (zarr stores are directories)
+        total_size = sum(f.stat().st_size for f in filename.rglob("*") if f.is_file())
+        logger.info(f"Wrote {filename} ({total_size / 1e9:.2f} GB)")
 
     return filename
 

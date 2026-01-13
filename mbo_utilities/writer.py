@@ -148,6 +148,23 @@ def imwrite(
     **kwargs
         Additional format-specific options passed to writer backends.
 
+        Zarr-specific options (ext=".zarr"):
+        - sharded : bool, default True
+            Use Zarr v3 sharding codec for efficient large file access.
+        - level : int, default 1
+            Gzip compression level (0=none, 1-9).
+        - ome : bool, default True
+            Write OME-NGFF v0.5 metadata for napari/OMERO compatibility.
+        - pyramid : bool, default False
+            Generate multi-resolution pyramid for faster navigation.
+            Enables napari multiscale viewing.
+        - pyramid_max_layers : int, default 4
+            Maximum additional resolution levels (0-4 = 5 total levels).
+            Only spatial dims (Y, X) are downsampled by 2x per level.
+        - pyramid_method : str, default "mean"
+            Downsampling method: "mean" (default), "nearest", "gaussian".
+            Use "nearest" for label/mask data to preserve integer values.
+
     Returns
     -------
     Path
