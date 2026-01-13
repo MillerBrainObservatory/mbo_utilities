@@ -54,7 +54,7 @@ from mbo_utilities.gui.widgets import get_supported_widgets, draw_all_widgets
 from mbo_utilities import log
 
 # Import modular components
-from mbo_utilities.gui.widgets.menu_bar import draw_menu_bar
+from mbo_utilities.gui.widgets.menu_bar import draw_menu_bar, draw_keybinds_popup
 from mbo_utilities.gui._popups import draw_tools_popups, draw_process_console_popup
 from mbo_utilities.gui._save_as import draw_saveas_popup
 from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts
@@ -147,11 +147,11 @@ class PreviewDataWidget(EdgeWindow):
         self.num_graphics = len(self.image_widget.graphics)
         self.shape = self.image_widget.data[0].shape
 
-        # Determine data type (ScanImage or processed MBO TIFF)
-        from mbo_utilities.arrays import MBOTiffArray
+        # Determine data type (ScanImage or ImageJ hyperstack)
+        from mbo_utilities.arrays import ImageJHyperstackArray
         self.is_mbo_scan = (
             isinstance(self.image_widget.data[0], ScanImageArray) or
-            (MBOTiffArray.can_open(self.fpath) if self.fpath else False)
+            (ImageJHyperstackArray.can_open(self.fpath) if self.fpath else False)
         )
         self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
@@ -311,6 +311,9 @@ class PreviewDataWidget(EdgeWindow):
         self._zarr_sharded = True
         self._zarr_ome = True
         self._zarr_compression_level = 1
+        self._zarr_pyramid = False
+        self._zarr_pyramid_max_layers = 4
+        self._zarr_pyramid_method = "mean"
 
         # Save dialog state
         self._saveas_popup_open = False
@@ -338,7 +341,10 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_custom_value = ""
 
         # Output suffix
-        self._saveas_output_suffix = "_stitched"
+        self._saveas_output_suffix = ""
+
+        # Options
+        self._saveas_background = True
 
     def _init_viewer(self):
         """Initialize the viewer based on data type."""
@@ -748,6 +754,7 @@ class PreviewDataWidget(EdgeWindow):
         draw_tools_popups(self)
         draw_saveas_popup(self)
         draw_process_console_popup(self)
+        draw_keybinds_popup(self)
 
         super().draw_window()
 

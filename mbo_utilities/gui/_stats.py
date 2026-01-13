@@ -33,7 +33,10 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         # Still need to compute mean images for visualization
         means = []
         tiff_lock = threading.Lock()
-        for z in [0] if arr.ndim == 3 else range(parent.nz):
+        # determine actual z-planes for this array
+        z_range = [0] if arr.ndim == 3 else list(range(parent.nz))
+        n_z_planes = len(z_range)
+        for i, z in enumerate(z_range):
             with tiff_lock:
                 stack = (
                     arr[::10]
@@ -42,7 +45,7 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
                 )
                 mean_img = np.mean(stack, axis=0)
                 means.append(mean_img)
-                parent._zstats_progress[idx - 1] = (z + 1) / parent.nz
+                parent._zstats_progress[idx - 1] = (i + 1) / n_z_planes
                 parent._zstats_current_z[idx - 1] = z
         means_stack = np.stack(means)
         parent._zstats_means[idx - 1] = means_stack
@@ -55,7 +58,11 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     stats, means = {"mean": [], "std": [], "snr": []}, []
     tiff_lock = threading.Lock()
 
-    for z in [0] if arr.ndim == 3 else range(parent.nz):
+    # determine actual z-planes for this array
+    z_range = [0] if arr.ndim == 3 else list(range(parent.nz))
+    n_z_planes = len(z_range)
+
+    for i, z in enumerate(z_range):
         with tiff_lock:
             stack = (
                 arr[::10].astype(np.float32)
@@ -72,7 +79,7 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
             stats["snr"].append(float(np.mean(snr_img)))
 
             means.append(mean_img)
-            parent._zstats_progress[idx - 1] = (z + 1) / parent.nz
+            parent._zstats_progress[idx - 1] = (i + 1) / n_z_planes
             parent._zstats_current_z[idx - 1] = z
 
     parent._zstats[idx - 1] = stats

@@ -47,6 +47,25 @@ Non-rigid-registration
 pixel-resolution
   The length of each pixel, in micron (px/um).
 
+LBM
+  Light Beads Microscopy. A volumetric imaging technique where z-planes are acquired as ScanImage channels using multiple beamlets.
 
+piezo
+  Piezo z-stack acquisition. Uses a piezo actuator to step through z-positions, acquiring frames at each depth before moving.
+
+LBMPiezo
+  Combined LBM and piezo acquisition. Has both LBM characteristics (>2 channels as beamlets) and piezo stepping. Used for pollen calibration workflows.
+
+OutputMetadata
+  A class that computes adjusted metadata when writing subsets of data. Automatically scales z-step when selecting every Nth plane, and invalidates frame rate for non-contiguous frame selections.
+
+OME-NGFF
+  Open Microscopy Environment Next Generation File Format. A specification for storing multidimensional imaging data in Zarr format with standardized metadata for coordinate transforms and axis definitions.
+
+volumetric output
+  Writing 4D data (T, Z, Y, X) to a single file with plane/frame selection support. Both TIFF (ImageJ hyperstack) and Zarr (OME-NGFF v0.5) formats are supported.
+
+reactive metadata
+  Metadata that automatically adjusts based on data selection. For example, `dz` doubles when selecting every 2nd z-plane, and `fs` becomes invalid for non-contiguous frame selections.
 
 ```

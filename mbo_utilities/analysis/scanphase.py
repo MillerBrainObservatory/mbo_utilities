@@ -898,7 +898,7 @@ class ScanPhaseAnalyzer:
             valid_grid = self.results.grid_valid[ps]
             display = np.where(valid_grid, offsets_grid, np.nan)
             vmax = max(0.5, np.nanmax(np.abs(display)))
-            im = ax5.imshow(display, cmap="coolwarm", vmin=-vmax, vmax=vmax,
+            im = ax5.imshow(display, cmap="matplotlib:coolwarm", vmin=-vmax, vmax=vmax,
                            aspect="auto", interpolation="nearest")
             _mbo_colorbar(im, ax5, "px")
             ax5.set_title("Spatial Variation", fontsize=11, fontweight="bold")
@@ -940,7 +940,7 @@ class ScanPhaseAnalyzer:
         if self.results.temporal_spatial_offsets.size > 0:
             heatmap = self.results.temporal_spatial_offsets
             vmax = max(0.5, np.nanmax(np.abs(heatmap)))
-            im = ax8.imshow(heatmap, cmap="coolwarm", vmin=-vmax, vmax=vmax,
+            im = ax8.imshow(heatmap, cmap="matplotlib:coolwarm", vmin=-vmax, vmax=vmax,
                            aspect="auto", interpolation="nearest")
             _mbo_colorbar(im, ax8, "px")
             ax8.set_xlabel("X Position")
@@ -1127,7 +1127,7 @@ class ScanPhaseAnalyzer:
             ax = axes[0, col]
             ax.grid(False)
             norm = TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
-            im = ax.imshow(display, cmap="coolwarm", norm=norm,
+            im = ax.imshow(display, cmap="matplotlib:coolwarm", norm=norm,
                           aspect="equal", interpolation="nearest")
             _mbo_colorbar(im, ax, "Offset (px)")
 
@@ -1298,7 +1298,7 @@ class ScanPhaseAnalyzer:
         # 1. Main heatmap (top left)
         ax = axes[0, 0]
         ax.grid(False)
-        im = ax.imshow(heatmap, cmap="coolwarm", norm=norm, aspect="auto",
+        im = ax.imshow(heatmap, cmap="matplotlib:coolwarm", norm=norm, aspect="auto",
                       interpolation="nearest", origin="upper")
         _mbo_colorbar(im, ax, "Offset (px)")
         ax.set_xlabel("Spatial Bin (X position)")
@@ -1828,7 +1828,7 @@ class ScanPhaseAnalyzer:
         # 1. Main heatmap
         ax = axes[0]
         ax.grid(False)
-        im = ax.imshow(display, cmap="coolwarm", norm=norm,
+        im = ax.imshow(display, cmap="matplotlib:coolwarm", norm=norm,
                       aspect="equal", interpolation="nearest")
         _mbo_colorbar(im, ax, "Offset (px)")
 
@@ -1848,7 +1848,7 @@ class ScanPhaseAnalyzer:
         ax.grid(False)
         if len(valid_vals) > 0:
             deviation = np.where(valid, offsets - mean_val, np.nan)
-            im2 = ax.imshow(deviation, cmap="coolwarm", norm=norm,
+            im2 = ax.imshow(deviation, cmap="matplotlib:coolwarm", norm=norm,
                            aspect="equal", interpolation="nearest")
             _mbo_colorbar(im2, ax, "Deviation (px)")
             ax.set_title("Deviation from Mean", fontsize=11, fontweight="bold")
@@ -1874,7 +1874,7 @@ class ScanPhaseAnalyzer:
         # 1. Main heatmap
         ax = axes[0]
         ax.grid(False)
-        im = ax.imshow(heatmap, cmap="coolwarm", norm=norm, aspect="auto",
+        im = ax.imshow(heatmap, cmap="matplotlib:coolwarm", norm=norm, aspect="auto",
                       interpolation="nearest", origin="upper")
         _mbo_colorbar(im, ax, "Offset (px)")
         ax.set_xlabel("X Position (bin)")

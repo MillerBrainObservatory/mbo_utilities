@@ -27,7 +27,7 @@ def draw_menu_bar(parent: Any):
         if imgui.begin_menu_bar():
             if imgui.begin_menu("File", True):
                 # Open File - iw-array API
-                if imgui.menu_item("Open File", "Ctrl+O", p_selected=False, enabled=True)[0]:
+                if imgui.menu_item("Open File", "o", p_selected=False, enabled=True)[0]:
                     # Handle fpath being a list or a string
                     fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
                     if fpath and Path(fpath).exists():
@@ -42,7 +42,7 @@ def draw_menu_bar(parent: Any):
                         pfd.opt.multiselect
                     )
                 # Open Folder - iw-array API
-                if imgui.menu_item("Open Folder", "Ctrl+Shift+O", p_selected=False, enabled=True)[0]:
+                if imgui.menu_item("Open Folder", "Shift+O", p_selected=False, enabled=True)[0]:
                     # Handle fpath being a list or a string
                     fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
                     if fpath and Path(fpath).exists():
@@ -74,6 +74,10 @@ def draw_menu_bar(parent: Any):
                     webbrowser.open(
                         "https://millerbrainobservatory.github.io/mbo_utilities/"
                     )
+                if imgui.menu_item(
+                    "Keybinds", "/", p_selected=False, enabled=True
+                )[0]:
+                    parent._show_keybinds_popup = True
                 imgui.end_menu()
             if imgui.begin_menu("Settings", True):
                 imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
@@ -184,3 +188,74 @@ def draw_process_status_indicator(parent: Any):
 
     imgui.pop_style_color(4)
     imgui.pop_style_var()  # frame_rounding
+
+
+def draw_keybinds_popup(parent: Any):
+    """Draw the keybinds cheatsheet popup."""
+    if not hasattr(parent, "_show_keybinds_popup"):
+        parent._show_keybinds_popup = False
+
+    if parent._show_keybinds_popup:
+        imgui.open_popup("Keybinds")
+        parent._show_keybinds_popup = False
+
+    imgui.set_next_window_size(imgui.ImVec2(320, 380), imgui.Cond_.first_use_ever)
+    if imgui.begin_popup_modal("Keybinds", flags=imgui.WindowFlags_.no_saved_settings)[0]:
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Keyboard Shortcuts")
+        imgui.separator()
+        imgui.dummy(imgui.ImVec2(0, 5))
+
+        # keybinds data: (key, description)
+        keybinds = [
+            ("Navigation", None),
+            ("\u2190 / \u2192", "Previous / Next frame (T)"),
+            ("\u2191 / \u2193", "Previous / Next z-plane (Z)"),
+            ("Shift + \u2190/\u2192", "Jump 10 frames (T)"),
+            ("Shift + \u2191/\u2193", "Jump 10 z-planes (Z)"),
+            ("", ""),
+            ("File", None),
+            ("o", "Open file"),
+            ("Shift + O", "Open folder"),
+            ("s", "Save as"),
+            ("", ""),
+            ("View", None),
+            ("m", "Toggle metadata viewer"),
+            ("[", "Toggle side panel"),
+            ("v / Enter", "Reset vmin/vmax"),
+            ("", ""),
+            ("Other", None),
+            ("/", "Toggle keybinds popup"),
+        ]
+
+        table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
+        if imgui.begin_table("keybinds_table", 2, table_flags):
+            imgui.table_setup_column("key", imgui.TableColumnFlags_.width_fixed, 80)
+            imgui.table_setup_column("desc", imgui.TableColumnFlags_.width_stretch)
+
+            for key, desc in keybinds:
+                if desc is None:
+                    # section header
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    imgui.dummy(imgui.ImVec2(0, 3))
+                    imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), key)
+                    imgui.table_next_column()
+                elif key == "":
+                    # spacer
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    imgui.table_next_column()
+                else:
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    imgui.text_colored(imgui.ImVec4(0.9, 0.9, 0.5, 1.0), key)
+                    imgui.table_next_column()
+                    imgui.text(desc)
+
+            imgui.end_table()
+
+        imgui.dummy(imgui.ImVec2(0, 10))
+        if imgui.button("Close", imgui.ImVec2(80, 0)):
+            imgui.close_current_popup()
+
+        imgui.end_popup()

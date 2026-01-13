@@ -5,11 +5,10 @@ This package provides lazy array readers for various imaging data formats:
 - Suite2pArray: Suite2p binary files (.bin + ops.npy)
 - H5Array: HDF5 datasets
 - TiffArray: Generic TIFF files
-- MBOTiffArray: Dask-backed MBO processed TIFFs
 - ScanImageArray: Base class for raw ScanImage TIFFs with phase correction
 - LBMArray: LBM (Light Beads Microscopy) stacks
 - PiezoArray: Piezo z-stacks with optional frame averaging
-- CalibrationArray: Pollen/bead calibration stacks (LBM + piezo)
+- LBMPiezoArray: Combined LBM + piezo stacks (e.g., pollen calibration)
 - SinglePlaneArray: Single-plane time series
 - open_scanimage: Factory function for auto-detecting ScanImage stack type
 - NumpyArray: NumPy arrays and .npy files
@@ -17,9 +16,6 @@ This package provides lazy array readers for various imaging data formats:
 - ZarrArray: Zarr v3 stores (including OME-Zarr)
 - BinArray: Raw binary files without ops.npy
 - IsoviewArray: Isoview lightsheet microscopy data
-
-Legacy aliases:
-- MboRawArray: Alias for ScanImageArray (backwards compatibility)
 
 Also provides:
 - Registration utilities (validate_s3d_registration, register_zplanes_s3d)
@@ -65,10 +61,9 @@ if TYPE_CHECKING:
         find_suite2p_plane_dirs as find_suite2p_plane_dirs,
     )
     from mbo_utilities.arrays.tiff import (
-        CalibrationArray as CalibrationArray,
+        LBMPiezoArray as LBMPiezoArray,
+        ImageJHyperstackArray as ImageJHyperstackArray,
         LBMArray as LBMArray,
-        MBOTiffArray as MBOTiffArray,
-        MboRawArray as MboRawArray,
         PiezoArray as PiezoArray,
         ScanImageArray as ScanImageArray,
         SinglePlaneArray as SinglePlaneArray,
@@ -85,13 +80,12 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "find_suite2p_plane_dirs": (".suite2p", "find_suite2p_plane_dirs"),
     "H5Array": (".h5", "H5Array"),
     "TiffArray": (".tiff", "TiffArray"),
-    "MBOTiffArray": (".tiff", "MBOTiffArray"),
     "ScanImageArray": (".tiff", "ScanImageArray"),
-    "MboRawArray": (".tiff", "ScanImageArray"),  # backwards compat alias
     "LBMArray": (".tiff", "LBMArray"),
     "PiezoArray": (".tiff", "PiezoArray"),
-    "CalibrationArray": (".tiff", "CalibrationArray"),
+    "LBMPiezoArray": (".tiff", "LBMPiezoArray"),
     "SinglePlaneArray": (".tiff", "SinglePlaneArray"),
+    "ImageJHyperstackArray": (".tiff", "ImageJHyperstackArray"),
     "open_scanimage": (".tiff", "open_scanimage"),
     "find_tiff_plane_files": (".tiff", "find_tiff_plane_files"),
     "NumpyArray": (".numpy", "NumpyArray"),
@@ -152,12 +146,11 @@ __all__ = [
     "CHUNKS_3D",
     "CHUNKS_4D",
     "BinArray",
-    "CalibrationArray",
+    "LBMPiezoArray",
     "H5Array",
+    "ImageJHyperstackArray",
     "IsoviewArray",
     "LBMArray",
-    "MBOTiffArray",
-    "MboRawArray",  # backwards compat alias
     "NWBArray",
     "NumpyArray",
     "PiezoArray",

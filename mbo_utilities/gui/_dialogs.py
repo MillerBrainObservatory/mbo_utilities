@@ -45,7 +45,7 @@ def load_new_data(parent: Any, path: str):
 
     Uses iw.set_data() to swap data arrays, which handles shape changes.
     """
-    from mbo_utilities.arrays import MBOTiffArray
+    from mbo_utilities.arrays import ImageJHyperstackArray
 
     path_obj = Path(path)
     if not path_obj.exists():
@@ -88,10 +88,10 @@ def load_new_data(parent: Any, path: str):
         parent.fpath = path
         parent.shape = new_data.shape
 
-        # Check if this is MBO data (ScanImage or processed MBO TIFF)
+        # Check if this is MBO data (ScanImage or ImageJ hyperstack)
         parent.is_mbo_scan = (
             isinstance(new_data, ScanImageArray) or
-            MBOTiffArray.can_open(path)
+            ImageJHyperstackArray.can_open(path)
         )
 
         # Suggest s2p output directory if not set
@@ -115,6 +115,18 @@ def load_new_data(parent: Any, path: str):
         parent._load_status_color = imgui.ImVec4(0.3, 1.0, 0.3, 1.0)
         parent.logger.info(f"Loaded successfully, shape: {new_data.shape}")
         parent.set_context_info()
+
+        # update image widget subplot title with new filename
+        try:
+            base_name = path_obj.stem
+            # for suite2p arrays (data.bin), use parent folder name
+            if base_name in ("data", "data_raw"):
+                base_name = path_obj.parent.name
+            if len(base_name) > 24:
+                base_name = base_name[:21] + "..."
+            parent.image_widget.figure[0, 0].title = base_name
+        except Exception:
+            pass  # ignore if subplot title update fails
 
         # refresh widgets based on new data capabilities
         parent._refresh_widgets()

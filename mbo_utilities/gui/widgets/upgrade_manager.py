@@ -260,7 +260,7 @@ def draw_upgrade_manager(manager: UpgradeManager):
 
     imgui.spacing()
 
-    # status display
+    # status display (only show messages, not "up to date")
     if manager.check_status == CheckStatus.CHECKING:
         imgui.text_disabled("Checking PyPI...")
     elif manager.check_status == CheckStatus.ERROR:
@@ -275,11 +275,6 @@ def draw_upgrade_manager(manager: UpgradeManager):
             imgui.text_colored(
                 imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
                 "Development build"
-            )
-        else:
-            imgui.text_colored(
-                imgui.ImVec4(0.6, 0.6, 0.6, 1.0),
-                "Up to date"
             )
 
     imgui.spacing()
@@ -297,6 +292,9 @@ def draw_upgrade_manager(manager: UpgradeManager):
 
     if checking:
         imgui.end_disabled()
+
+    # show version count always (before check completes too)
+    imgui.text_disabled(f"{len(manager.available_versions)} versions (>= {MIN_VERSION})")
 
     # version selector (only show if we have versions)
     if manager.check_status == CheckStatus.DONE and manager.available_versions:
@@ -345,9 +343,6 @@ def draw_upgrade_manager(manager: UpgradeManager):
 
         if upgrading:
             imgui.end_disabled()
-
-        # show version count
-        imgui.text_disabled(f"{len(manager.available_versions)} versions (>= {MIN_VERSION})")
 
     # install status
     if manager.upgrade_status == UpgradeStatus.RUNNING:

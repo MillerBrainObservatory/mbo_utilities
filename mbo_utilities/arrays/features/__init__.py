@@ -49,6 +49,14 @@ from mbo_utilities.arrays.features._dim_labels import (
     infer_dims,
     parse_dims,
 )
+from mbo_utilities.arrays.features._dim_tags import (
+    DIM_ALIASES,
+    DimensionTag,
+    OutputFilename,
+    SPATIAL_DIMS,
+    TAG_REGISTRY,
+    TagDefinition,
+)
 from mbo_utilities.arrays.features._display_range import (
     DisplayRange,
     DisplayRangeFeature,
@@ -79,14 +87,37 @@ from mbo_utilities.arrays.features._stats import (
     StatsFeature,
     ZStatsFeature,
 )
+from mbo_utilities.arrays.features._slicing import (
+    ArraySlicing,
+    ChunkInfo,
+    DimSelection,
+    TimeSelection,
+    normalize_dim_key,
+    parse_selection,
+    parse_timepoint_selection,
+    read_chunk,
+)
+from mbo_utilities.arrays.features._pyramid import (
+    DownsampleMethod,
+    PyramidConfig,
+    PyramidLevel,
+    build_multiscales_metadata,
+    build_napari_scale_attrs,
+    compute_pyramid_shapes,
+    downsample_block,
+    generate_pyramid,
+)
 
 __all__ = [
     "CHUNKS_2D",
     "CHUNKS_3D",
     "CHUNKS_4D",
     "DEFAULT_DIMS",
+    "DIM_ALIASES",
     "DIM_DESCRIPTIONS",
     "KNOWN_ORDERINGS",
+    "SPATIAL_DIMS",
+    "TAG_REGISTRY",
     # base
     "ArrayFeature",
     "ArrayFeatureEvent",
@@ -101,6 +132,10 @@ __all__ = [
     # dim labels
     "DimLabels",
     "DimLabelsMixin",
+    # dim tags
+    "DimensionTag",
+    "OutputFilename",
+    "TagDefinition",
     # display range
     "DisplayRange",
     "DisplayRangeFeature",
@@ -136,4 +171,22 @@ __all__ = [
     "normalize_chunks",
     "parse_dims",
     "stat_to_masks",
+    # slicing
+    "ArraySlicing",
+    "ChunkInfo",
+    "DimSelection",
+    "TimeSelection",
+    "normalize_dim_key",
+    "parse_selection",
+    "parse_timepoint_selection",
+    "read_chunk",
+    # pyramid
+    "DownsampleMethod",
+    "PyramidConfig",
+    "PyramidLevel",
+    "build_multiscales_metadata",
+    "build_napari_scale_attrs",
+    "compute_pyramid_shapes",
+    "downsample_block",
+    "generate_pyramid",
 ]

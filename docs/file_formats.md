@@ -24,6 +24,7 @@ kernelspec:
 | ↳ ScanImage | `ScanImageArray` | (T, Z, Y, X) | Multi-ROI volumetric with phase correction | [<i class="fa-solid fa-book"></i>](#scanimage-arrays) |
 | &emsp;↳ LBM | `LBMArray` | (T, Z, Y, X) | Z-planes as ScanImage channels | [<i class="fa-solid fa-book"></i>](#lbmarray) |
 | &emsp;↳ Piezo | `PiezoArray` | (T, Z, Y, X) | Piezo z-stacks, optional averaging | [<i class="fa-solid fa-book"></i>](#piezoarray) |
+| &emsp;↳ LBMPiezo | `LBMPiezoArray` | (T, Z, Y, X) | Combined LBM + piezo (calibration) | [<i class="fa-solid fa-book"></i>](#lbmpiezoarray) |
 | &emsp;↳ Single-plane | `SinglePlaneArray` | (T, 1, Y, X) | Single-plane time series | [<i class="fa-solid fa-book"></i>](#singleplanearray) |
 | ↳ Standard | `TiffArray` | (T, Z, Y, X) | Lazy page access, auto-detects volumetric | [<i class="fa-solid fa-book"></i>](#tiffarray) |
 | ↳ MBO metadata | `MBOTiffArray` | (T, Z, Y, X) | Dask-backed with MBO metadata | [<i class="fa-solid fa-book"></i>](#mbotiffarray) |
@@ -31,7 +32,6 @@ kernelspec:
 | **`.h5` / `.hdf5`** | `H5Array` | varies | HDF5 datasets | [<i class="fa-solid fa-book"></i>](#h5array) |
 | **`.zarr`** | `ZarrArray` | (T, Z, Y, X) | Zarr v3 / OME-Zarr stores | [<i class="fa-solid fa-book"></i>](#zarrarray) |
 | **`.npy` / `np.ndarray`** | `NumpyArray` | varies | Memory-mapped or in-memory arrays | [<i class="fa-solid fa-book"></i>](#numpyarray) |
-| **`.nwb`** | `NWBArray` | varies | Neurodata Without Borders files | [<i class="fa-solid fa-book"></i>](#nwbarray) |
 | **Directory** | | | | |
 | ↳ `ops.npy` | `Suite2pArray` | (T, Y, X) | Suite2p workflow integration | [<i class="fa-solid fa-book"></i>](#suite2parray) |
 | ↳ `planeXX/ops.npy` | `Suite2pArray` | (T, Z, Y, X) | Multi-plane Suite2p output | [<i class="fa-solid fa-book"></i>](#suite2parray) |
@@ -46,13 +46,13 @@ imread(path)
 ├── np.ndarray? ──────────────────────────────► NumpyArray
 │
 ├── .npy ─────────────────────────────────────► NumpyArray (memory-mapped)
-├── .nwb ─────────────────────────────────────► NWBArray
 ├── .h5 / .hdf5 ──────────────────────────────► H5Array
 ├── .zarr ────────────────────────────────────► ZarrArray
 ├── .bin ─────────────────────────────────────► BinArray
 │
 ├── .tif / .tiff
 │   ├── Has ScanImage ROI metadata?
+│   │   ├── LBM + Piezo? ─────────────────────► LBMPiezoArray
 │   │   ├── LBM acquisition? ─────────────────► LBMArray
 │   │   ├── Piezo enabled? ───────────────────► PiezoArray
 │   │   └── Single-plane? ────────────────────► SinglePlaneArray
@@ -87,8 +87,9 @@ The ScanImage array hierarchy handles different acquisition types from ScanImage
 
 ```text
 ScanImageArray (base class)
-    ├── LBMArray        # Light Beads Microscopy (z-planes as channels)
-    ├── PiezoArray      # Piezo z-stacks with optional frame averaging
+    ├── LBMArray         # Light Beads Microscopy (z-planes as channels)
+    ├── PiezoArray       # Piezo z-stacks with optional frame averaging
+    ├── LBMPiezoArray    # Combined LBM + piezo (e.g., pollen calibration)
     └── SinglePlaneArray # Single-plane time series
 ```
 
@@ -169,6 +170,29 @@ print(arr.shape)  # Reduced T dimension when averaging
 # - frames_per_slice: Frames at each z-position before piezo moves
 # - log_average_factor: If >1, frames were pre-averaged during acquisition
 # - dz: Z-step size from hStackManager.stackZStepSize
+```
+
+(lbmpiezoarray)=
+
+#### LBMPiezoArray
+
+For stacks that have both LBM characteristics (>2 channels/beamlets) and piezo characteristics (hStackManager enabled). Commonly used for pollen calibration data.
+
+```python
+from mbo_utilities.arrays import LBMPiezoArray, open_scanimage
+
+# Auto-detect combined LBM+piezo stack
+arr = open_scanimage("/path/to/pollen_calibration.tif")
+# arr is LBMPiezoArray if both LBM and piezo detected
+
+print(arr.stack_type)       # 'pollen'
+print(arr.num_planes)       # Z-planes from LBM channels
+print(arr.frames_per_slice) # Frames per piezo position
+
+# Key metadata context:
+# - Combines LBM's channel-as-z with piezo's z-stepping
+# - dz from hStackManager.stackZStepSize
+# - Used for pollen bead calibration workflows
 ```
 
 (singleplanearray)=
@@ -491,31 +515,6 @@ mbo.imwrite(arr, "output", ext=".zarr", planes=[1, 7, 14])
 
 ---
 
-(nwbarray)=
-### NWBArray
-
-**Returned when:** Reading NWB (Neurodata Without Borders) files
-
-```python
-# NWB file with TwoPhotonSeries
-arr = mbo.imread("/path/to/experiment.nwb")
-# Returns: NWBArray
-
-print(type(arr))   # <class 'NWBArray'>
-print(arr.shape)   # Shape from TwoPhotonSeries data
-
-# Access data
-frame = arr[0]
-```
-
-**Key Features:**
-
-- Reads `TwoPhotonSeries` acquisition data from NWB files
-- Requires `pynwb` package (`pip install pynwb`)
-- Exposes underlying NWB data object
-
----
-
 (isoviewarray)=
 ### IsoviewArray
 
@@ -586,8 +585,72 @@ PiezoArray-specific properties:
 | `.can_average` | `bool` | True if frame averaging is possible |
 | `.average_frames` | `bool` | Toggle frame averaging on/off |
 
+## Volumetric Output
+
+Both TIFF and Zarr formats support volumetric output with unified capabilities:
+
+### Features
+
+- **Plane/frame selection**: Write subsets of data with `planes=[0, 2, 4]` or `frames=range(100)`
+- **Reactive metadata**: Z-step (`dz`) automatically scales when selecting every Nth plane
+- **Consistent naming**: Output filenames include suffix tags (e.g., `data_planes-0-14-2.zarr`)
+- **Format-specific metadata**: ImageJ hyperstack for TIFF, OME-NGFF v0.5 for Zarr
+
+### Usage
+
+```python
+import mbo_utilities as mbo
+
+arr = mbo.imread("/path/to/volume.tif")
+
+# write full volume to zarr (OME-NGFF v0.5 compliant)
+mbo.imwrite(arr, "output", ext=".zarr")
+
+# write every 2nd plane - dz automatically doubles
+mbo.imwrite(arr, "output", ext=".zarr", planes=[0, 2, 4, 6, 8])
+
+# write specific frame range to tiff
+mbo.imwrite(arr, "output", ext=".tiff", frames=range(0, 500))
+
+# non-contiguous frames - fs is invalidated in output metadata
+mbo.imwrite(arr, "output", ext=".tiff", frames=[0, 10, 50, 100])
+```
+
+### OutputMetadata
+
+The `OutputMetadata` class computes adjusted metadata for subsetted output:
+
+```python
+from mbo_utilities.metadata import OutputMetadata
+
+# source metadata with dz=5um and fs=30Hz
+meta = {"dz": 5.0, "fs": 30.0}
+
+# every 2nd plane -> dz doubles to 10um
+out = OutputMetadata(meta, plane_indices=[0, 2, 4, 6])
+print(out.dz)  # 10.0
+
+# non-contiguous frames -> fs invalidated
+out = OutputMetadata(meta, frame_indices=[0, 5, 10])
+print(out.fs)  # None (no valid frame rate for non-contiguous selection)
+```
+
+### Zarr Output Options
+
+```python
+# sharded zarr with compression (default)
+mbo.imwrite(arr, "output", ext=".zarr", sharded=True, compression_level=1)
+
+# unsharded zarr (more compatible with older tools)
+mbo.imwrite(arr, "output", ext=".zarr", sharded=False)
+
+# custom chunk size target
+mbo.imwrite(arr, "output", ext=".zarr", target_chunk_mb=50)
+```
+
 ## API Reference
 
 - `mbo_utilities.imread()` - Smart file reader
 - `mbo_utilities.imwrite()` - Universal file writer
 - `mbo_utilities.arrays` - Direct access to array classes
+- `mbo_utilities.metadata.OutputMetadata` - Reactive metadata for subsetted output
