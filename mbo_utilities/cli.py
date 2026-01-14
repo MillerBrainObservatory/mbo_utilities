@@ -179,22 +179,30 @@ class LoadingSpinner:
 
 
 def _get_version_info() -> str:
-    """Get version string with install location info."""
+    """get version string with install location info (cached)."""
     from mbo_utilities import __version__
-    exe_path = Path(sys.executable)
 
-    # Determine install type based on executable path
-    exe_str = str(exe_path).lower()
-    if ".local" in exe_str or ("uv" in exe_str and "tools" in exe_str):
-        install_type = "uv tool"
-    elif "envs" in exe_str or "venv" in exe_str or ".venv" in exe_str:
-        install_type = "environment"
-    elif "conda" in exe_str or "miniconda" in exe_str or "anaconda" in exe_str:
-        install_type = "conda"
-    else:
-        install_type = "system"
+    # try cache first for install type
+    install_type = None
+    try:
+        from mbo_utilities.env_cache import get_cached_install_type
+        install_type = get_cached_install_type()
+    except Exception:
+        pass
 
-    return f"mbo_utilities {__version__}\nPython: {exe_path}\nInstall: {install_type}"
+    if not install_type:
+        # compute install type from executable path
+        exe_str = sys.executable.lower()
+        if ".local" in exe_str or ("uv" in exe_str and "tools" in exe_str):
+            install_type = "uv tool"
+        elif "envs" in exe_str or "venv" in exe_str or ".venv" in exe_str:
+            install_type = "environment"
+        elif "conda" in exe_str or "miniconda" in exe_str or "anaconda" in exe_str:
+            install_type = "conda"
+        else:
+            install_type = "system"
+
+    return f"mbo_utilities {__version__}\nPython: {sys.executable}\nInstall: {install_type}"
 
 
 def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -> None:
@@ -244,6 +252,16 @@ def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -
     is_flag=True,
     help="Verify the installation of mbo_utilities and dependencies.",
 )
+@click.option(
+    "--no-cache",
+    is_flag=True,
+    help="Bypass environment cache (forces fresh checks).",
+)
+@click.option(
+    "--clear-cache",
+    is_flag=True,
+    help="Clear environment cache and exit.",
+)
 @click.pass_context
 def main(
     ctx,
@@ -252,6 +270,8 @@ def main(
     download_file_url=None,
     output_path=None,
     check_install=False,
+    no_cache=False,
+    clear_cache=False,
 ):
     r"""
     MBO Utilities CLI - data preview and processing tools.
@@ -274,6 +294,16 @@ def main(
       mbo --download-notebook             Download user guide notebook
       mbo --check-install                 Verify installation
     """
+    # handle --clear-cache early
+    if clear_cache:
+        from mbo_utilities.env_cache import clear_cache as do_clear, get_cache_path
+        path = get_cache_path()
+        if do_clear():
+            click.secho(f"Cache cleared: {path}", fg="green")
+        else:
+            click.secho("No cache to clear.", fg="yellow")
+        return
+
     if download_file_url:
         download_file(download_file_url, output_path)
         return
@@ -284,6 +314,10 @@ def main(
         return
 
     if check_install:
+        # force cache rebuild when checking install
+        from mbo_utilities.env_cache import build_full_cache, save_cache
+        cache = build_full_cache()
+        save_cache(cache)
         from mbo_utilities.gui.run_gui import _check_installation
         _check_installation()
         return
@@ -296,6 +330,14 @@ def main(
     first_run = _is_first_run()
     if first_run:
         click.secho("First run detected - initial startup may take longer while caches are built.", fg="yellow")
+
+    # ensure environment cache exists (build if missing/invalid)
+    if not no_cache:
+        try:
+            from mbo_utilities.env_cache import ensure_cache
+            ensure_cache()
+        except Exception:
+            pass  # don't crash if cache fails
 
     # show loading spinner while importing heavy dependencies
     spinner = LoadingSpinner("Loading GUI")
@@ -1237,6 +1279,104 @@ def processes(kill_all, kill, cleanup):
 
     if len(all_procs) > len(running):
         click.echo("\nTip: Run 'mbo processes --cleanup' to remove finished entries.")
+
+
+@main.command("notebook")
+@click.argument("template", required=False, default=None)
+@click.option(
+    "-o", "--output",
+    "output_path",
+    type=click.Path(),
+    default=None,
+    help="Output directory or file path. Default: current directory.",
+)
+@click.option(
+    "-n", "--name",
+    "name",
+    type=str,
+    default=None,
+    help="Custom notebook name (without date prefix or .ipynb extension).",
+)
+@click.option(
+    "-d", "--data",
+    "data_path",
+    type=click.Path(),
+    default=None,
+    help="Data path to prepopulate in the notebook.",
+)
+@click.option(
+    "-l", "--list",
+    "list_templates",
+    is_flag=True,
+    help="List available templates.",
+)
+@click.option(
+    "--templates-dir",
+    is_flag=True,
+    help="Show path to custom templates directory.",
+)
+def notebook(template, output_path, name, data_path, list_templates, templates_dir):
+    r"""
+    Generate a notebook from a template.
+
+    Creates a Jupyter notebook with the naming convention yyyy-mm-dd_<template>.ipynb.
+
+    \b
+    Examples:
+      mbo notebook --list              # List available templates
+      mbo notebook lsp                  # Create LBM-Suite2p-Python notebook
+      mbo notebook lsp -d /path/to/raw  # With data path prepopulated
+      mbo notebook basic -n my_analysis # Custom name: 2025-01-14_my_analysis.ipynb
+      mbo notebook --templates-dir      # Show custom templates location
+    """
+    from mbo_utilities.templates import (
+        TEMPLATES,
+        create_notebook,
+        list_templates as get_templates,
+        get_template_path,
+    )
+
+    if templates_dir:
+        tpl_path = get_template_path()
+        click.echo(f"Custom templates directory: {tpl_path}")
+        click.echo("\nPlace .py files here to add custom templates.")
+        click.echo("See documentation for template format.")
+        return
+
+    if list_templates or template is None:
+        templates = get_templates()
+        if not templates:
+            click.echo("No templates available.")
+            return
+
+        click.echo("\nAvailable notebook templates:\n")
+        max_name = max(len(t[0]) for t in templates)
+        for tpl_name, description in templates:
+            click.echo(f"  {tpl_name:<{max_name}}  {description}")
+        click.echo(f"\nUsage: mbo notebook <template> [-o output_dir] [-n name] [-d data_path]")
+        return
+
+    if template not in TEMPLATES:
+        click.secho(f"Unknown template: {template}", fg="red")
+        click.echo(f"Available: {', '.join(TEMPLATES.keys())}")
+        return
+
+    # build kwargs for template
+    kwargs = {}
+    if data_path:
+        kwargs["data_path"] = data_path
+
+    try:
+        out_file = create_notebook(
+            template,
+            output_path=output_path,
+            name=name,
+            **kwargs
+        )
+        click.secho(f"Created: {out_file}", fg="green")
+    except Exception as e:
+        click.secho(f"Error creating notebook: {e}", fg="red")
+        raise click.Abort()
 
 
 if __name__ == "__main__":
