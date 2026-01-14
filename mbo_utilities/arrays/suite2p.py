@@ -123,24 +123,30 @@ class _SinglePlaneReader:
 
         self.Ly = get_param(self.metadata, "Ly")
         self.Lx = get_param(self.metadata, "Lx")
-        self.nframes = get_param(self.metadata, "nframes")
-        self.shape = (self.nframes, self.Ly, self.Lx)
         self.dtype = np.int16
 
-        # validate file size
-        expected_bytes = int(np.prod(self.shape)) * np.dtype(self.dtype).itemsize
+        # calculate actual frame count from file size (ops.npy may have stale nframes)
         actual_bytes = self.active_file.stat().st_size
-        if actual_bytes < expected_bytes:
-            raise ValueError(
-                f"Binary file {self.active_file.name} is too small!\n"
-                f"Expected: {expected_bytes:,} bytes for shape {self.shape}\n"
-                f"Actual: {actual_bytes:,} bytes"
+        bytes_per_frame = self.Ly * self.Lx * np.dtype(self.dtype).itemsize
+        actual_nframes = actual_bytes // bytes_per_frame
+
+        ops_nframes = get_param(self.metadata, "nframes")
+        if actual_nframes != ops_nframes:
+            logger.debug(
+                f"ops.npy nframes={ops_nframes} differs from file size ({actual_nframes} frames). "
+                f"Using actual frame count."
             )
+
+        self.nframes = actual_nframes
+        self.shape = (self.nframes, self.Ly, self.Lx)
+
+        # warn if file has leftover bytes
+        expected_bytes = int(np.prod(self.shape)) * np.dtype(self.dtype).itemsize
         if actual_bytes > expected_bytes:
+            leftover = actual_bytes - expected_bytes
             warnings.warn(
-                f"Binary file {self.active_file.name} is larger than expected.\n"
-                f"Expected: {expected_bytes:,} bytes\n"
-                f"Actual: {actual_bytes:,} bytes\nExtra data will be ignored.",
+                f"Binary file {self.active_file.name} has {leftover:,} extra bytes. "
+                f"Ignoring partial frame data.",
                 UserWarning, stacklevel=2,
             )
 
