@@ -866,6 +866,7 @@ def _draw_selection_section(parent: Any):
         tags.append(z_tag)
 
     # build filename
+    suffix = getattr(parent, "_saveas_output_suffix", "")
     sanitized_suffix = _sanitize_suffix(suffix).lstrip("_") if suffix else ""
     if tags:
         dim_parts = "_".join(tag.to_string() for tag in tags)
