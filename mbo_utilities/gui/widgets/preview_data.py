@@ -149,9 +149,10 @@ class PreviewDataWidget(EdgeWindow):
 
         # Determine data type (ScanImage or ImageJ hyperstack)
         from mbo_utilities.arrays import ImageJHyperstackArray
+        fpath_single = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
         self.is_mbo_scan = (
             isinstance(self.image_widget.data[0], ScanImageArray) or
-            (ImageJHyperstackArray.can_open(self.fpath) if self.fpath else False)
+            (ImageJHyperstackArray.can_open(fpath_single) if fpath_single else False)
         )
         self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
@@ -198,17 +199,31 @@ class PreviewDataWidget(EdgeWindow):
         start_output_capture()
 
     def _init_suite2p(self):
-        """Initialize Suite2p settings."""
-        if HAS_SUITE2P:
-            from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings
-            self.s2p = Suite2pSettings()
-        else:
-            self.s2p = None
+        """Initialize Suite2p settings and start background preload."""
+        # start background preload of pipeline widgets (non-blocking)
+        from mbo_utilities.gui.widgets.pipelines import start_preload
+        start_preload()
+
+        # defer Suite2pSettings creation until actually needed
+        self._s2p = None  # lazy init
         self._s2p_dir = ""
         self._s2p_savepath_flash_start = None
         self._s2p_savepath_flash_count = 0
         self._s2p_show_savepath_popup = False
         self._s2p_folder_dialog = None
+
+    @property
+    def s2p(self):
+        """Get Suite2pSettings (lazy init)."""
+        if self._s2p is None and HAS_SUITE2P:
+            from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings
+            self._s2p = Suite2pSettings()
+        return self._s2p
+
+    @s2p.setter
+    def s2p(self, value):
+        """Set Suite2pSettings."""
+        self._s2p = value
 
     def _init_fonts(self):
         """Initialize ImGui fonts."""
