@@ -561,33 +561,6 @@ def _draw_s2p_selection_popup(self):
             self.s2p.target_timepoints = tp_parsed.count
 
         imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # === PROCESSING OPTIONS ===
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Processing")
-        imgui.dummy(imgui.ImVec2(0, 2))
-
-        if not hasattr(self, "_s2p_background"):
-            self._s2p_background = True
-        _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
-        set_tooltip("Run as separate process that continues after closing GUI")
-
-        if not hasattr(self, "_parallel_processing"):
-            self._parallel_processing = False
-        if not hasattr(self, "_max_parallel_jobs"):
-            self._max_parallel_jobs = 2
-
-        if num_planes > 1 and len(self._selected_planes) > 1:
-            _, self._parallel_processing = imgui.checkbox("Parallel plane processing", self._parallel_processing)
-            set_tooltip("Process multiple planes simultaneously (uses more memory)")
-
-            if self._parallel_processing:
-                imgui.set_next_item_width(hello_imgui.em_size(5))
-                _, self._max_parallel_jobs = imgui.input_int("Max parallel jobs", self._max_parallel_jobs, step=1)
-                self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, len(self._selected_planes)))
-
-        imgui.spacing()
         imgui.spacing()
         if imgui.button("Close", imgui.ImVec2(80, 0)):
             imgui.close_current_popup()
@@ -650,6 +623,44 @@ def _draw_s2p_settings_popup(self):
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.dff_smooth_window = imgui.input_int("Smooth", self.s2p.dff_smooth_window)
         set_tooltip("Smooth ΔF/F trace with rolling window (0 = disabled)")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # processing options
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Processing")
+
+        if not hasattr(self, "_s2p_background"):
+            self._s2p_background = True
+        _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
+        set_tooltip("Run as separate process that continues after closing GUI")
+
+        if not hasattr(self, "_parallel_processing"):
+            self._parallel_processing = False
+        if not hasattr(self, "_max_parallel_jobs"):
+            self._max_parallel_jobs = 2
+
+        # get num_planes from data
+        num_planes = 1
+        n_selected = 1
+        try:
+            if hasattr(self, "image_widget") and self.image_widget.data:
+                data = self.image_widget.data[0]
+                if data.ndim == 4:
+                    num_planes = data.shape[1]
+            n_selected = len(getattr(self, "_selected_planes", {1}))
+        except Exception:
+            pass
+
+        if num_planes > 1 and n_selected > 1:
+            _, self._parallel_processing = imgui.checkbox("Parallel plane processing", self._parallel_processing)
+            set_tooltip("Process multiple planes simultaneously (uses more memory)")
+
+            if self._parallel_processing:
+                imgui.set_next_item_width(INPUT_WIDTH)
+                _, self._max_parallel_jobs = imgui.input_int("Max parallel jobs", self._max_parallel_jobs, step=1)
+                self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, n_selected))
 
         imgui.spacing()
         imgui.spacing()
