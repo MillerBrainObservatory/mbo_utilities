@@ -20,6 +20,7 @@ from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY, parse_time
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities.gui._imgui_helpers import set_tooltip, checkbox_with_tooltip, draw_checkbox_grid
 from mbo_utilities.gui._availability import HAS_SUITE3D
+from mbo_utilities.gui._selection_ui import draw_selection_table
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
 import contextlib
@@ -788,114 +789,22 @@ def _draw_selection_section(parent: Any):
         parent._saveas_z_stop = num_planes
         parent._saveas_z_step = 1
 
-    # timepoints row with single text input
-    table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
-    if imgui.begin_table("selection_table", 4, table_flags):
-        imgui.table_setup_column("dim", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(6))
-        imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(16))
-        imgui.table_setup_column("all", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
-        imgui.table_setup_column("info", imgui.TableColumnFlags_.width_stretch)
+    # draw selection table using shared component
+    tp_parsed, z_start, z_stop, z_step = draw_selection_table(
+        parent,
+        max_frames,
+        num_planes,
+        tp_attr="_saveas_tp",
+        z_attr="_saveas_z",
+        id_suffix="_saveas",
+    )
 
-        # timepoints row
-        imgui.table_next_row()
-        imgui.table_next_column()
-        imgui.text("Timepoints")
-
-        imgui.table_next_column()
-        imgui.set_next_item_width(hello_imgui.em_size(15))
-
-        # red border if error - track if we pushed so we can pop correctly
-        had_error_style = bool(parent._saveas_tp_error)
-        if had_error_style:
-            imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.3, 0.1, 0.1, 1.0))
-
-        changed, new_val = imgui.input_text("##tp_selection", parent._saveas_tp_selection)
-        if changed:
-            parent._saveas_tp_selection = new_val
-            # try to parse on change
-            try:
-                parent._saveas_tp_parsed = parse_timepoint_selection(new_val, max_frames)
-                parent._saveas_tp_error = ""
-            except ValueError as e:
-                parent._saveas_tp_error = str(e)
-                parent._saveas_tp_parsed = None
-
-        if had_error_style:
-            imgui.pop_style_color()
-
-        # show error tooltip
-        if parent._saveas_tp_error and imgui.is_item_hovered():
-            imgui.set_tooltip(parent._saveas_tp_error)
-
-        imgui.table_next_column()
-        if imgui.small_button("All##tp"):
-            parent._saveas_tp_selection = f"1:{max_frames}"
-            parent._saveas_tp_parsed = parse_timepoint_selection(f"1:{max_frames}", max_frames)
-            parent._saveas_tp_error = ""
-
-        imgui.table_next_column()
-        # show frame count info
-        if parent._saveas_tp_parsed:
-            n_frames = parent._saveas_tp_parsed.count
-            if parent._saveas_tp_parsed.exclude_str:
-                n_excluded = len(parent._saveas_tp_parsed.exclude_indices)
-                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames}/{max_frames}")
-                imgui.same_line()
-                imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.4, 1.0), f"(-{n_excluded})")
-            else:
-                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames}/{max_frames}")
-        elif parent._saveas_tp_error:
-            imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "invalid")
-        else:
-            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"?/{max_frames}")
-
-        # z-planes row (only if multi-plane data)
-        if num_planes > 1:
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.text("Z-Planes")
-
-            imgui.table_next_column()
-            # z-planes still use start:stop:step format with three int inputs for now
-            imgui.set_next_item_width(hello_imgui.em_size(4))
-            changed, val = imgui.input_int("##z_start", parent._saveas_z_start, step=0)
-            if changed:
-                parent._saveas_z_start = max(1, min(val, parent._saveas_z_stop))
-
-            imgui.same_line()
-            imgui.text(":")
-            imgui.same_line()
-            imgui.set_next_item_width(hello_imgui.em_size(4))
-            changed, val = imgui.input_int("##z_stop", parent._saveas_z_stop, step=0)
-            if changed:
-                parent._saveas_z_stop = max(parent._saveas_z_start, min(val, num_planes))
-
-            imgui.same_line()
-            imgui.text(":")
-            imgui.same_line()
-            imgui.set_next_item_width(hello_imgui.em_size(3))
-            changed, val = imgui.input_int("##z_step", parent._saveas_z_step, step=0)
-            if changed:
-                parent._saveas_z_step = max(1, min(val, parent._saveas_z_stop - parent._saveas_z_start + 1))
-
-            imgui.table_next_column()
-            if imgui.small_button("All##z"):
-                parent._saveas_z_start = 1
-                parent._saveas_z_stop = num_planes
-                parent._saveas_z_step = 1
-
-            imgui.table_next_column()
-            selected_planes = list(range(parent._saveas_z_start, parent._saveas_z_stop + 1, parent._saveas_z_step))
-            n_planes = len(selected_planes)
-            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_planes}/{num_planes}")
-
-            # update legacy _selected_planes for compatibility
-            parent._selected_planes = set(p - 1 for p in selected_planes)
-        else:
-            # single plane - select all
-            parent._selected_planes = {0}
-
-        imgui.end_table()
+    # update legacy _selected_planes for compatibility
+    if num_planes > 1:
+        selected_planes = list(range(z_start, z_stop + 1, z_step))
+        parent._selected_planes = set(p - 1 for p in selected_planes)
+    else:
+        parent._selected_planes = {0}
 
     # parse selection if not already done (initial load)
     if parent._saveas_tp_parsed is None and not parent._saveas_tp_error:

@@ -9,6 +9,7 @@ import numpy as np
 from imgui_bundle import imgui, portable_file_dialogs as pfd, hello_imgui
 
 from mbo_utilities.gui._imgui_helpers import set_tooltip, settings_row_with_popup, _popup_states
+from mbo_utilities.gui._selection_ui import draw_selection_table
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities._parsing import _convert_paths_to_strings
 
@@ -539,113 +540,25 @@ def _draw_s2p_selection_popup(self):
             imgui.end_tooltip()
         imgui.dummy(imgui.ImVec2(0, 3))
 
-        # tabular layout like save-as
-        table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
-        if imgui.begin_table("s2p_selection_table", 4, table_flags):
-            imgui.table_setup_column("dim", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(6))
-            imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(16))
-            imgui.table_setup_column("all", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
-            imgui.table_setup_column("info", imgui.TableColumnFlags_.width_stretch)
-
-            # timepoints row
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.text("Timepoints")
-
-            imgui.table_next_column()
-            imgui.set_next_item_width(hello_imgui.em_size(15))
-
-            had_error = bool(self._s2p_tp_error)
-            if had_error:
-                imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.3, 0.1, 0.1, 1.0))
-
-            changed, new_val = imgui.input_text("##s2p_tp", self._s2p_tp_selection)
-            if changed:
-                self._s2p_tp_selection = new_val
-                try:
-                    self._s2p_tp_parsed = parse_timepoint_selection(new_val, max_frames)
-                    self._s2p_tp_error = ""
-                except ValueError as e:
-                    self._s2p_tp_error = str(e)
-                    self._s2p_tp_parsed = None
-
-            if had_error:
-                imgui.pop_style_color()
-
-            if self._s2p_tp_error and imgui.is_item_hovered():
-                imgui.set_tooltip(self._s2p_tp_error)
-
-            imgui.table_next_column()
-            if imgui.small_button("All##tp"):
-                self._s2p_tp_selection = f"1:{max_frames}"
-                self._s2p_tp_parsed = parse_timepoint_selection(f"1:{max_frames}", max_frames)
-                self._s2p_tp_error = ""
-
-            imgui.table_next_column()
-            if self._s2p_tp_parsed:
-                n_frames = self._s2p_tp_parsed.count
-                if self._s2p_tp_parsed.exclude_str:
-                    n_excluded = len(self._s2p_tp_parsed.exclude_indices)
-                    imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames}/{max_frames}")
-                    imgui.same_line()
-                    imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.4, 1.0), f"(-{n_excluded})")
-                else:
-                    imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames}/{max_frames}")
-            elif self._s2p_tp_error:
-                imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "invalid")
-            else:
-                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"?/{max_frames}")
-
-            # z-planes row (only if multi-plane)
-            if num_planes > 1:
-                imgui.table_next_row()
-                imgui.table_next_column()
-                imgui.text("Z-Planes")
-
-                imgui.table_next_column()
-                imgui.set_next_item_width(hello_imgui.em_size(4))
-                changed, val = imgui.input_int("##s2p_z_start", self._s2p_z_start, step=0)
-                if changed:
-                    self._s2p_z_start = max(1, min(val, self._s2p_z_stop))
-
-                imgui.same_line()
-                imgui.text(":")
-                imgui.same_line()
-                imgui.set_next_item_width(hello_imgui.em_size(4))
-                changed, val = imgui.input_int("##s2p_z_stop", self._s2p_z_stop, step=0)
-                if changed:
-                    self._s2p_z_stop = max(self._s2p_z_start, min(val, num_planes))
-
-                imgui.same_line()
-                imgui.text(":")
-                imgui.same_line()
-                imgui.set_next_item_width(hello_imgui.em_size(3))
-                changed, val = imgui.input_int("##s2p_z_step", self._s2p_z_step, step=0)
-                if changed:
-                    self._s2p_z_step = max(1, min(val, self._s2p_z_stop - self._s2p_z_start + 1))
-
-                imgui.table_next_column()
-                if imgui.small_button("All##z"):
-                    self._s2p_z_start = 1
-                    self._s2p_z_stop = num_planes
-                    self._s2p_z_step = 1
-
-                imgui.table_next_column()
-                selected_planes = list(range(self._s2p_z_start, self._s2p_z_stop + 1, self._s2p_z_step))
-                n_planes = len(selected_planes)
-                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_planes}/{num_planes}")
-
-            imgui.end_table()
+        # draw selection table using shared component
+        tp_parsed, z_start, z_stop, z_step = draw_selection_table(
+            self,
+            max_frames,
+            num_planes,
+            tp_attr="_s2p_tp",
+            z_attr="_s2p_z",
+            id_suffix="_s2p",
+        )
 
         # update _selected_planes for run_process
         if num_planes > 1:
-            self._selected_planes = set(range(self._s2p_z_start, self._s2p_z_stop + 1, self._s2p_z_step))
+            self._selected_planes = set(range(z_start, z_stop + 1, z_step))
         else:
             self._selected_planes = {1}
 
         # update s2p.target_timepoints from selection
-        if self._s2p_tp_parsed:
-            self.s2p.target_timepoints = self._s2p_tp_parsed.count
+        if tp_parsed:
+            self.s2p.target_timepoints = tp_parsed.count
 
         imgui.spacing()
         imgui.separator()
