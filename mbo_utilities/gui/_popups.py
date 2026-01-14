@@ -62,9 +62,11 @@ def draw_tools_popups(parent: Any):
 
 
 def draw_process_console_popup(parent: Any):
-    """Draw popup showing process outputs and debug logs."""
+    """Draw popup showing active tasks and background processes."""
     if not hasattr(parent, "_show_process_console"):
         parent._show_process_console = False
+    if not hasattr(parent, "_process_console_size"):
+        parent._process_console_size = ImVec2(500, 350)
 
     if parent._show_process_console:
         imgui.open_popup("Process Console")
@@ -72,125 +74,162 @@ def draw_process_console_popup(parent: Any):
 
     center = imgui.get_main_viewport().get_center()
     imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
-    imgui.set_next_window_size_constraints(imgui.ImVec2(400, 100), imgui.ImVec2(900, 600))
+    imgui.set_next_window_size(parent._process_console_size, imgui.Cond_.appearing)
+    imgui.set_next_window_size_constraints(imgui.ImVec2(350, 200), imgui.ImVec2(1200, 800))
 
-    if imgui.begin_popup_modal("Process Console", flags=imgui.WindowFlags_.always_auto_resize)[0]:
-        pm = get_process_manager()
-        pm.cleanup_finished()
-        running = pm.get_running()
+    # use resizable modal (no auto_resize flag)
+    opened, visible = imgui.begin_popup_modal(
+        "Process Console",
+        p_open=True,
+        flags=imgui.WindowFlags_.none,
+    )
 
-        # Use tabs instead of collapsible headers
-        if imgui.begin_tab_bar("ProcessConsoleTabs"):
-            # Tab 1: Processes
-            if imgui.begin_tab_item("Processes")[0]:
-                with imgui_ctx.begin_child("##BGTasksContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.auto_resize_y):
-                    from mbo_utilities.gui.widgets.progress_bar import _get_active_progress_items
-                    progress_items = _get_active_progress_items(parent)
+    if opened:
+        if not visible:
+            imgui.close_current_popup()
+        else:
+            # save current size for next time
+            parent._process_console_size = imgui.get_window_size()
 
-                    if progress_items:
-                        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), f"Active Tasks ({len(progress_items)})")
-                        imgui.separator()
-                        for item in progress_items:
-                            pct = int(item["progress"] * 100)
-                            if item.get("done", False):
-                                imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), f"{item['text']} [Done]")
-                            else:
-                                imgui.text(f"{item['text']} [{pct}%]")
+            pm = get_process_manager()
+            pm.cleanup_finished()
+            running = pm.get_running()
 
-                            imgui.progress_bar(item["progress"], imgui.ImVec2(-1, 0), "")
-                            imgui.spacing()
-                        imgui.separator()
+            from mbo_utilities.gui.widgets.progress_bar import _get_active_progress_items
+            progress_items = _get_active_progress_items(parent)
+
+            # calculate content area (leave space for close button)
+            avail = imgui.get_content_region_avail()
+            content_height = avail.y - 35  # space for separator + close button
+
+            # scrollable content area
+            if imgui.begin_child("##ProcessContent", ImVec2(0, content_height), imgui.ChildFlags_.none):
+                # active tasks section
+                if progress_items:
+                    imgui.text_colored(imgui.ImVec4(0.5, 0.8, 1.0, 1.0), "Active Tasks")
+                    imgui.separator()
+                    imgui.spacing()
+
+                    for item in progress_items:
+                        pct = int(item["progress"] * 100)
+                        if item.get("done", False):
+                            imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), f"[Done] {item['text']}")
+                        else:
+                            imgui.text(f"{item['text']}")
+
+                        # progress bar with percentage overlay
+                        imgui.progress_bar(item["progress"], ImVec2(-1, 0), f"{pct}%")
                         imgui.spacing()
 
-                    if not running and not progress_items:
-                        imgui.text_disabled("No active tasks or background processes.")
-                    elif running:
-                        if progress_items:
-                            imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), f"Background Processes ({len(running)})")
-                            imgui.separator()
+                    if running:
+                        imgui.spacing()
 
-                        for proc in running:
-                            imgui.push_id(f"proc_{proc.pid}")
-                            imgui.bullet()
+                # background processes section
+                if running:
+                    imgui.text_colored(imgui.ImVec4(0.5, 0.8, 1.0, 1.0), "Background Processes")
+                    imgui.separator()
+                    imgui.spacing()
 
-                            # Color code status
-                            if proc.status == "error":
-                                imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), f"[ERROR] {proc.description}")
-                            elif proc.status == "completed":
-                                imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), f"[DONE] {proc.description}")
-                            else:
-                                imgui.text(proc.description)
+                    for proc in running:
+                        _draw_process_entry(pm, proc)
 
-                            imgui.indent()
-                            imgui.text_disabled(f"PID: {proc.pid} | Started: {proc.elapsed_str()}")
+                # empty state
+                if not running and not progress_items:
+                    imgui.spacing()
+                    imgui.text_disabled("No active tasks or background processes.")
 
-                            # Move Kill button here (next to PID) if active
-                            if proc.is_alive():
-                                imgui.same_line()
-                                if imgui.small_button(f"Kill##{proc.pid}"):
-                                    pm.kill(proc.pid)
+                imgui.end_child()
 
-                            # Show error message prominently if status is error
-                            if proc.status == "error" and proc.status_message:
-                                imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.6, 1.0), f"Error: {proc.status_message}")
-
-                            # Show process output (tail of log)
-                            if proc.output_path and Path(proc.output_path).is_file():
-                                if imgui.tree_node(f"Output##proc_{proc.pid}"):
-                                    lines = proc.tail_log(20)
-                                    # Calculate height to fit content, max 150px
-                                    line_height = imgui.get_text_line_height_with_spacing()
-                                    output_content_height = len(lines) * line_height + 10
-                                    output_height = min(output_content_height, 150) if lines else line_height + 10
-                                    if imgui.begin_child(f"##proc_output_{proc.pid}", imgui.ImVec2(0, output_height), imgui.ChildFlags_.borders):
-                                        for line in lines:
-                                            line_stripped = line.strip()
-                                            if "error" in line_stripped.lower():
-                                                imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), line_stripped)
-                                            elif "warning" in line_stripped.lower():
-                                                imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.2, 1.0), line_stripped)
-                                            else:
-                                                imgui.text(line_stripped)
-                                        imgui.end_child()
-                                    imgui.tree_pop()
-
-                            # Control buttons (Dismiss / Copy)
-                            if not proc.is_alive():
-                                if imgui.small_button(f"Dismiss##{proc.pid}"):
-                                    if proc.pid in pm._processes:
-                                        del pm._processes[proc.pid]
-                                        pm._save()
-                                imgui.same_line()
-
-                            # Copy Log Button (always available if log exists)
-                            if proc.output_path and Path(proc.output_path).is_file():
-                                if imgui.small_button(f"Copy Log##{proc.pid}"):
-                                    try:
-                                        with open(proc.output_path, encoding="utf-8") as f:
-                                            full_log = f.read()
-                                        imgui.set_clipboard_text(full_log)
-                                    except Exception:
-                                        pass
-
-                            imgui.unindent()
-                            imgui.spacing()
-                            imgui.pop_id()
-                imgui.end_tab_item()
-
-            # Tab 2: System Logs
-            if imgui.begin_tab_item("System Logs")[0]:
-                with imgui_ctx.begin_child("##SysLogsContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.auto_resize_y):
-                    parent.debug_panel.draw()
-                imgui.end_tab_item()
-
-            imgui.end_tab_bar()
-
-        # Close button
-        imgui.separator()
-        if imgui.button("Close", imgui.ImVec2(100, 0)):
-            imgui.close_current_popup()
+            # footer with close button
+            imgui.separator()
+            imgui.spacing()
+            btn_width = 80
+            imgui.set_cursor_pos_x((imgui.get_window_width() - btn_width) * 0.5)
+            if imgui.button("Close", ImVec2(btn_width, 0)):
+                imgui.close_current_popup()
 
         imgui.end_popup()
+
+
+def _draw_process_entry(pm: Any, proc: Any) -> None:
+    """Draw a single process entry in the console."""
+    imgui.push_id(f"proc_{proc.pid}")
+
+    # status indicator + description
+    if proc.status == "error":
+        imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), "[ERR]")
+    elif proc.status == "completed":
+        imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), "[OK]")
+    else:
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "[...]")
+
+    imgui.same_line()
+
+    # wrap description text
+    avail_width = imgui.get_content_region_avail().x - 80  # leave space for buttons
+    imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + avail_width)
+    imgui.text(proc.description)
+    imgui.pop_text_wrap_pos()
+
+    # info line with buttons
+    imgui.text_disabled(f"PID {proc.pid} | {proc.elapsed_str()}")
+
+    imgui.same_line()
+
+    # action buttons
+    if proc.is_alive():
+        if imgui.small_button("Kill"):
+            pm.kill(proc.pid)
+    else:
+        if imgui.small_button("Dismiss"):
+            if proc.pid in pm._processes:
+                del pm._processes[proc.pid]
+                pm._save()
+
+    # copy log button
+    if proc.output_path and Path(proc.output_path).is_file():
+        imgui.same_line()
+        if imgui.small_button("Copy"):
+            try:
+                with open(proc.output_path, encoding="utf-8") as f:
+                    imgui.set_clipboard_text(f.read())
+            except Exception:
+                pass
+
+    # error message
+    if proc.status == "error" and proc.status_message:
+        imgui.push_text_wrap_pos(0)
+        imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.6, 1.0), f"  {proc.status_message}")
+        imgui.pop_text_wrap_pos()
+
+    # collapsible log output
+    if proc.output_path and Path(proc.output_path).is_file():
+        if imgui.tree_node(f"Log Output##proc_{proc.pid}"):
+            lines = proc.tail_log(30)
+            line_height = imgui.get_text_line_height_with_spacing()
+            max_height = 180
+            content_h = min(len(lines) * line_height + 8, max_height) if lines else line_height + 8
+
+            child_flags = imgui.ChildFlags_.borders
+            if imgui.begin_child(f"##log_{proc.pid}", ImVec2(-1, content_h), child_flags):
+                for line in lines:
+                    line_stripped = line.strip()
+                    # color code log lines
+                    if "error" in line_stripped.lower():
+                        imgui.text_colored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), line_stripped)
+                    elif "warning" in line_stripped.lower():
+                        imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.2, 1.0), line_stripped)
+                    elif "success" in line_stripped.lower() or "complete" in line_stripped.lower():
+                        imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), line_stripped)
+                    else:
+                        imgui.text(line_stripped)
+                # auto-scroll to bottom
+                imgui.set_scroll_here_y(1.0)
+                imgui.end_child()
+            imgui.tree_pop()
+
+    imgui.spacing()
+    imgui.pop_id()
 
 
 def draw_background_processes_section(parent: Any):
