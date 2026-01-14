@@ -4,6 +4,7 @@ checks for proper GPU configuration of suite2p (pytorch), suite3d (cupy),
 and rastermap. provides structured data for CLI and GUI display.
 
 also provides HAS_* flags for quick import checks without actually importing.
+uses environment cache for faster repeated checks.
 """
 
 from dataclasses import dataclass, field
@@ -16,41 +17,56 @@ import contextlib
 
 # quick import availability checks (no actual imports)
 def _check_import(module_name: str) -> bool:
-    """Check if a module can be imported without actually importing it."""
+    """check if a module can be imported without actually importing it."""
     return importlib.util.find_spec(module_name) is not None
 
 
-# suite2p pipeline (lbm_suite2p_python is the main entry point)
-HAS_SUITE2P: bool = _check_import("lbm_suite2p_python")
+def _get_cached_flag(key: str, fallback_check: callable) -> bool:
+    """get flag from cache if valid, otherwise compute and return."""
+    try:
+        from mbo_utilities.env_cache import get_cached_packages
+        cached = get_cached_packages()
+        if cached and key in cached:
+            return cached[key].get("available", False)
+    except Exception:
+        pass
+    return fallback_check()
 
-# suite3d volumetric registration (requires both suite3d AND cupy for GPU)
-HAS_SUITE3D: bool = _check_import("suite3d") and _check_import("cupy")
 
-# cupy for GPU acceleration (used by suite3d and cusignal)
-HAS_CUPY: bool = _check_import("cupy")
-
-# pytorch for neural network operations
-HAS_TORCH: bool = _check_import("torch")
-
-# rastermap for dimensionality reduction
-HAS_RASTERMAP: bool = _check_import("rastermap")
-
-# gui dependencies
-# imgui bundle - core GUI framework
-HAS_IMGUI: bool = _check_import("imgui_bundle")
-
-# fastplotlib - visualization
-HAS_FASTPLOTLIB: bool = _check_import("fastplotlib")
-
-# pyqt6 - Qt backend for GUI (compatible with cellpose/suite2p)
-HAS_PYQT6: bool = _check_import("PyQt6")
-
-# napari - interactive multi-dimensional image viewer
-HAS_NAPARI: bool = _check_import("napari")
-
-# napari plugins
-HAS_NAPARI_OME_ZARR: bool = _check_import("napari_ome_zarr")
-HAS_NAPARI_ANIMATION: bool = _check_import("napari_animation")
+# HAS_* flags - use cache when available, fallback to direct check
+HAS_SUITE2P: bool = _get_cached_flag(
+    "suite2p", lambda: _check_import("lbm_suite2p_python")
+)
+HAS_SUITE3D: bool = _get_cached_flag(
+    "suite3d", lambda: _check_import("suite3d") and _check_import("cupy")
+)
+HAS_CUPY: bool = _get_cached_flag(
+    "cupy", lambda: _check_import("cupy")
+)
+HAS_TORCH: bool = _get_cached_flag(
+    "torch", lambda: _check_import("torch")
+)
+HAS_RASTERMAP: bool = _get_cached_flag(
+    "rastermap", lambda: _check_import("rastermap")
+)
+HAS_IMGUI: bool = _get_cached_flag(
+    "imgui_bundle", lambda: _check_import("imgui_bundle")
+)
+HAS_FASTPLOTLIB: bool = _get_cached_flag(
+    "fastplotlib", lambda: _check_import("fastplotlib")
+)
+HAS_PYQT6: bool = _get_cached_flag(
+    "pyqt6", lambda: _check_import("PyQt6")
+)
+HAS_NAPARI: bool = _get_cached_flag(
+    "napari", lambda: _check_import("napari")
+)
+HAS_NAPARI_OME_ZARR: bool = _get_cached_flag(
+    "napari_ome_zarr", lambda: _check_import("napari_ome_zarr")
+)
+HAS_NAPARI_ANIMATION: bool = _get_cached_flag(
+    "napari_animation", lambda: _check_import("napari_animation")
+)
 
 
 class Status(Enum):
