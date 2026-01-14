@@ -12,13 +12,17 @@ from mbo_utilities.gui._imgui_helpers import set_tooltip, settings_row_with_popu
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities._parsing import _convert_paths_to_strings
 
-try:
-    from lbm_suite2p_python.run_lsp import run_plane, run_plane_bin
+# lazy availability check - avoid heavy import at module load
+_HAS_LSP: bool | None = None
 
-    HAS_LSP = True
-except ImportError:
-    HAS_LSP = False
-    run_plane = None
+
+def _check_lsp_available() -> bool:
+    """check if lbm_suite2p_python is available (lazy, cached)."""
+    global _HAS_LSP
+    if _HAS_LSP is None:
+        import importlib.util
+        _HAS_LSP = importlib.util.find_spec("lbm_suite2p_python") is not None
+    return _HAS_LSP
 
 
 USER_PIPELINES = ["suite2p"]
@@ -382,367 +386,636 @@ def draw_tab_process(self):
         imgui.text("MaskNMF pipeline not yet implemented.")
 
 
-def draw_section_suite2p(self):
-    """Draw Suite2p configuration UI with collapsible sections and proper styling."""
-    imgui.spacing()
+def _init_s2p_selection_state(self):
+    """Initialize selection state for suite2p run dialog."""
+    from mbo_utilities.arrays.features._slicing import parse_timepoint_selection
 
-    # Consistent input width matching pipeline selector
+    # get data dimensions
+    max_frames = 1000
+    num_planes = 1
+    try:
+        if hasattr(self, "image_widget") and self.image_widget.data:
+            data = self.image_widget.data[0]
+            max_frames = data.shape[0]
+            if data.ndim == 4:
+                num_planes = data.shape[1]
+    except Exception:
+        pass
+
+    # track file to reset state on file change
+    current_fpath = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
+    current_fpath = str(current_fpath) if current_fpath else ""
+    file_changed = False
+    if not hasattr(self, "_s2p_last_fpath"):
+        self._s2p_last_fpath = current_fpath
+    elif self._s2p_last_fpath != current_fpath:
+        file_changed = True
+        self._s2p_last_fpath = current_fpath
+
+    # initialize or reset selection state
+    if file_changed or not hasattr(self, "_s2p_tp_selection"):
+        self._s2p_tp_selection = f"1:{max_frames}"
+        self._s2p_tp_error = ""
+        self._s2p_tp_parsed = None
+        self._s2p_last_max_tp = max_frames
+        self._s2p_z_start = 1
+        self._s2p_z_stop = num_planes
+        self._s2p_z_step = 1
+        self._s2p_last_num_planes = num_planes
+
+    # check if max changed
+    if not hasattr(self, "_s2p_last_max_tp"):
+        self._s2p_last_max_tp = max_frames
+    elif self._s2p_last_max_tp != max_frames:
+        self._s2p_last_max_tp = max_frames
+        self._s2p_tp_selection = f"1:{max_frames}"
+        self._s2p_tp_parsed = None
+        self._s2p_tp_error = ""
+
+    # z-plane state
+    if not hasattr(self, "_s2p_z_start"):
+        self._s2p_z_start = 1
+    if not hasattr(self, "_s2p_z_stop"):
+        self._s2p_z_stop = num_planes
+    if not hasattr(self, "_s2p_z_step"):
+        self._s2p_z_step = 1
+    if not hasattr(self, "_s2p_last_num_planes"):
+        self._s2p_last_num_planes = num_planes
+    elif self._s2p_last_num_planes != num_planes:
+        self._s2p_last_num_planes = num_planes
+        self._s2p_z_start = 1
+        self._s2p_z_stop = num_planes
+        self._s2p_z_step = 1
+
+    # ensure _selected_planes is initialized (used by run_process)
+    if not hasattr(self, "_selected_planes"):
+        self._selected_planes = set(range(1, num_planes + 1))
+
+    # parse timepoint selection if needed
+    if self._s2p_tp_parsed is None and not self._s2p_tp_error:
+        try:
+            self._s2p_tp_parsed = parse_timepoint_selection(self._s2p_tp_selection, max_frames)
+        except ValueError as e:
+            self._s2p_tp_error = str(e)
+
+    return max_frames, num_planes
+
+
+def _draw_s2p_selection_preview(self, max_frames, num_planes):
+    """Draw compact selection preview with frame/plane counts."""
+    # calculate counts
+    if self._s2p_tp_parsed:
+        n_frames = self._s2p_tp_parsed.count
+    else:
+        n_frames = max_frames
+
+    n_planes = len(range(self._s2p_z_start, self._s2p_z_stop + 1, self._s2p_z_step))
+
+    # compact preview line
+    if num_planes > 1:
+        imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames} frames, {n_planes} planes")
+    else:
+        imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames} frames")
+
+
+def _draw_s2p_selection_popup(self):
+    """Draw selection popup with output path and timepoint/z-plane selection."""
+    from mbo_utilities.arrays.features._slicing import parse_timepoint_selection
+
+    if getattr(self, "_s2p_selection_open", False):
+        imgui.open_popup("Selection##s2p")
+        self._s2p_selection_open = False
+
+    imgui.set_next_window_size(imgui.ImVec2(480, 0), imgui.Cond_.first_use_ever)
+    if imgui.begin_popup("Selection##s2p"):
+        max_frames = getattr(self, "_s2p_last_max_tp", 1000)
+        num_planes = getattr(self, "_s2p_last_num_planes", 1)
+
+        # === OUTPUT PATH ===
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Output")
+        imgui.dummy(imgui.ImVec2(0, 2))
+
+        s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
+
+        imgui.text("Path:")
+        imgui.same_line()
+        display_path = s2p_path if s2p_path else "(not set)"
+        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x - 80)
+        if s2p_path:
+            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), display_path)
+        else:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.4, 1.0), display_path)
+        imgui.pop_text_wrap_pos()
+
+        imgui.same_line()
+        if imgui.button("Browse##s2p_sel"):
+            default_dir = s2p_path or str(get_last_dir("suite2p_output") or pathlib.Path().home())
+            self._s2p_folder_dialog = pfd.select_folder("Select Suite2p output folder", default_dir)
+
+        # check async folder dialog
+        if self._s2p_folder_dialog is not None and self._s2p_folder_dialog.ready():
+            result = self._s2p_folder_dialog.result()
+            if result:
+                self._s2p_outdir = str(result)
+                set_last_dir("suite2p_output", result)
+            self._s2p_folder_dialog = None
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # === SLICING SECTION ===
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Slicing")
+        imgui.same_line()
+        imgui.text_disabled("(?)")
+        if imgui.is_item_hovered():
+            imgui.begin_tooltip()
+            imgui.push_text_wrap_pos(imgui.get_font_size() * 30.0)
+            imgui.text_unformatted(
+                "Format: start:stop or start:stop:step\n"
+                "Exclude: 1:100,50:60 = 1-100 excluding 50-60"
+            )
+            imgui.pop_text_wrap_pos()
+            imgui.end_tooltip()
+        imgui.dummy(imgui.ImVec2(0, 3))
+
+        # tabular layout like save-as
+        table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
+        if imgui.begin_table("s2p_selection_table", 4, table_flags):
+            imgui.table_setup_column("dim", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(6))
+            imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(16))
+            imgui.table_setup_column("all", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
+            imgui.table_setup_column("info", imgui.TableColumnFlags_.width_stretch)
+
+            # timepoints row
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text("Timepoints")
+
+            imgui.table_next_column()
+            imgui.set_next_item_width(hello_imgui.em_size(15))
+
+            had_error = bool(self._s2p_tp_error)
+            if had_error:
+                imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.3, 0.1, 0.1, 1.0))
+
+            changed, new_val = imgui.input_text("##s2p_tp", self._s2p_tp_selection)
+            if changed:
+                self._s2p_tp_selection = new_val
+                try:
+                    self._s2p_tp_parsed = parse_timepoint_selection(new_val, max_frames)
+                    self._s2p_tp_error = ""
+                except ValueError as e:
+                    self._s2p_tp_error = str(e)
+                    self._s2p_tp_parsed = None
+
+            if had_error:
+                imgui.pop_style_color()
+
+            if self._s2p_tp_error and imgui.is_item_hovered():
+                imgui.set_tooltip(self._s2p_tp_error)
+
+            imgui.table_next_column()
+            if imgui.small_button("All##tp"):
+                self._s2p_tp_selection = f"1:{max_frames}"
+                self._s2p_tp_parsed = parse_timepoint_selection(f"1:{max_frames}", max_frames)
+                self._s2p_tp_error = ""
+
+            imgui.table_next_column()
+            if self._s2p_tp_parsed:
+                n_frames = self._s2p_tp_parsed.count
+                if self._s2p_tp_parsed.exclude_str:
+                    n_excluded = len(self._s2p_tp_parsed.exclude_indices)
+                    imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames}/{max_frames}")
+                    imgui.same_line()
+                    imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.4, 1.0), f"(-{n_excluded})")
+                else:
+                    imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames}/{max_frames}")
+            elif self._s2p_tp_error:
+                imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "invalid")
+            else:
+                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"?/{max_frames}")
+
+            # z-planes row (only if multi-plane)
+            if num_planes > 1:
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.text("Z-Planes")
+
+                imgui.table_next_column()
+                imgui.set_next_item_width(hello_imgui.em_size(4))
+                changed, val = imgui.input_int("##s2p_z_start", self._s2p_z_start, step=0)
+                if changed:
+                    self._s2p_z_start = max(1, min(val, self._s2p_z_stop))
+
+                imgui.same_line()
+                imgui.text(":")
+                imgui.same_line()
+                imgui.set_next_item_width(hello_imgui.em_size(4))
+                changed, val = imgui.input_int("##s2p_z_stop", self._s2p_z_stop, step=0)
+                if changed:
+                    self._s2p_z_stop = max(self._s2p_z_start, min(val, num_planes))
+
+                imgui.same_line()
+                imgui.text(":")
+                imgui.same_line()
+                imgui.set_next_item_width(hello_imgui.em_size(3))
+                changed, val = imgui.input_int("##s2p_z_step", self._s2p_z_step, step=0)
+                if changed:
+                    self._s2p_z_step = max(1, min(val, self._s2p_z_stop - self._s2p_z_start + 1))
+
+                imgui.table_next_column()
+                if imgui.small_button("All##z"):
+                    self._s2p_z_start = 1
+                    self._s2p_z_stop = num_planes
+                    self._s2p_z_step = 1
+
+                imgui.table_next_column()
+                selected_planes = list(range(self._s2p_z_start, self._s2p_z_stop + 1, self._s2p_z_step))
+                n_planes = len(selected_planes)
+                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_planes}/{num_planes}")
+
+            imgui.end_table()
+
+        # update _selected_planes for run_process
+        if num_planes > 1:
+            self._selected_planes = set(range(self._s2p_z_start, self._s2p_z_stop + 1, self._s2p_z_step))
+        else:
+            self._selected_planes = {1}
+
+        # update s2p.target_timepoints from selection
+        if self._s2p_tp_parsed:
+            self.s2p.target_timepoints = self._s2p_tp_parsed.count
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # === PROCESSING OPTIONS ===
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Processing")
+        imgui.dummy(imgui.ImVec2(0, 2))
+
+        if not hasattr(self, "_s2p_background"):
+            self._s2p_background = True
+        _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
+        set_tooltip("Run as separate process that continues after closing GUI")
+
+        if not hasattr(self, "_parallel_processing"):
+            self._parallel_processing = False
+        if not hasattr(self, "_max_parallel_jobs"):
+            self._max_parallel_jobs = 2
+
+        if num_planes > 1 and len(self._selected_planes) > 1:
+            _, self._parallel_processing = imgui.checkbox("Parallel plane processing", self._parallel_processing)
+            set_tooltip("Process multiple planes simultaneously (uses more memory)")
+
+            if self._parallel_processing:
+                imgui.set_next_item_width(hello_imgui.em_size(5))
+                _, self._max_parallel_jobs = imgui.input_int("Max parallel jobs", self._max_parallel_jobs, step=1)
+                self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, len(self._selected_planes)))
+
+        imgui.spacing()
+        imgui.spacing()
+        if imgui.button("Close", imgui.ImVec2(80, 0)):
+            imgui.close_current_popup()
+
+        imgui.end_popup()
+
+
+def _draw_s2p_settings_popup(self):
+    """Draw settings popup with main Suite2p parameters."""
     INPUT_WIDTH = 120
 
-    # Set proper padding and spacing
+    if getattr(self, "_s2p_settings_open", False):
+        imgui.open_popup("Settings##s2p_main")
+        self._s2p_settings_open = False
+
+    imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
+    if imgui.begin_popup("Settings##s2p_main"):
+        # tau
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
+        set_tooltip(
+            "Calcium indicator decay timescale in seconds.\n"
+            "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
+        )
+
+        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
+        set_tooltip("Denoise binned movie before cell detection.")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # processing control options
+        _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
+        set_tooltip("Keep data_raw.bin after processing (uses disk space)")
+
+        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
+        set_tooltip("Keep data.bin after processing (useful for QC)")
+
+        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
+        set_tooltip("Force re-registration even if already processed")
+
+        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
+        set_tooltip("Force ROI detection even if stat.npy exists")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # dF/F settings
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "ΔF/F")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_window_size = imgui.input_int("Window", self.s2p.dff_window_size)
+        set_tooltip("Frames for rolling percentile baseline (default: 300)")
+
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_percentile = imgui.input_int("Percentile", self.s2p.dff_percentile)
+        set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
+
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_smooth_window = imgui.input_int("Smooth", self.s2p.dff_smooth_window)
+        set_tooltip("Smooth ΔF/F trace with rolling window (0 = disabled)")
+
+        imgui.spacing()
+        imgui.spacing()
+        if imgui.button("Close", imgui.ImVec2(80, 0)):
+            imgui.close_current_popup()
+
+        imgui.end_popup()
+
+
+# def _load_suite2p_results(self):
+#     """Load Suite2p results (stat.npy) from a folder."""
+#     s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
+#     default_dir = s2p_path or str(get_last_dir("suite2p_output") or pathlib.Path().home())
+#
+#     # open folder dialog
+#     self._s2p_load_dialog = pfd.select_folder("Select Suite2p results folder", default_dir)
+#     self._s2p_load_type = "suite2p"
+#
+#
+# def _load_cellpose_results(self):
+#     """Load Cellpose masks from a file."""
+#     s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
+#     default_dir = s2p_path or str(get_last_dir("cellpose_masks") or pathlib.Path().home())
+#
+#     # open file dialog
+#     self._s2p_load_dialog = pfd.open_file(
+#         "Select Cellpose masks file",
+#         default_dir,
+#         ["*.npy", "*.png", "*_seg.npy"],
+#     )
+#     self._s2p_load_type = "cellpose"
+#
+#
+# def _check_load_results_dialog(self):
+#     """Check if load results dialog has finished and process results."""
+#     if not hasattr(self, "_s2p_load_dialog") or self._s2p_load_dialog is None:
+#         return
+#
+#     if not self._s2p_load_dialog.ready():
+#         return
+#
+#     result = self._s2p_load_dialog.result()
+#     self._s2p_load_dialog = None
+#
+#     if not result:
+#         return
+#
+#     load_type = getattr(self, "_s2p_load_type", "suite2p")
+#
+#     if load_type == "suite2p":
+#         _process_suite2p_load(self, result)
+#     elif load_type == "cellpose":
+#         # result is a list of files
+#         if result:
+#             _process_cellpose_load(self, result[0])
+#
+#
+# def _process_suite2p_load(self, folder_path: str):
+#     """Process loaded Suite2p results folder."""
+#     import numpy as np
+#     from pathlib import Path
+#
+#     folder = Path(folder_path)
+#     try:
+#         # find stat.npy
+#         stat_files = list(folder.rglob("stat.npy"))
+#         if not stat_files:
+#             self.logger.error(f"No stat.npy found in {folder}")
+#             return
+#
+#         stat_path = stat_files[0]
+#         ops_path = stat_path.parent / "ops.npy"
+#         iscell_path = stat_path.parent / "iscell.npy"
+#
+#         stat = np.load(stat_path, allow_pickle=True)
+#         ops = np.load(ops_path, allow_pickle=True).item() if ops_path.exists() else {}
+#         iscell = np.load(iscell_path, allow_pickle=True)[:, 0].astype(bool) if iscell_path.exists() else np.ones(len(stat), dtype=bool)
+#
+#         n_cells = iscell.sum()
+#         self.logger.info(f"Loaded {n_cells} cells from {stat_path}")
+#
+#         # store for visualization
+#         self._s2p_stat = stat
+#         self._s2p_ops = ops
+#         self._s2p_iscell = iscell
+#
+#         set_last_dir("suite2p_output", folder_path)
+#
+#     except Exception as e:
+#         self.logger.error(f"Failed to load Suite2p results: {e}")
+#
+#
+# def _process_cellpose_load(self, file_path: str):
+#     """Process loaded Cellpose masks file."""
+#     import numpy as np
+#     from pathlib import Path
+#
+#     try:
+#         masks = np.load(file_path, allow_pickle=True)
+#         if isinstance(masks, np.ndarray) and masks.dtype == object:
+#             # may be a dict stored in npy
+#             masks = masks.item() if masks.ndim == 0 else masks
+#
+#         self.logger.info(f"Loaded Cellpose masks from {file_path}")
+#         self._cellpose_masks = masks
+#
+#         set_last_dir("cellpose_masks", str(Path(file_path).parent))
+#
+#     except Exception as e:
+#         self.logger.error(f"Failed to load Cellpose masks: {e}")
+
+
+def _draw_data_options_content(self):
+    """Draw data options content showing settings that affect Suite2p processing."""
+    from mbo_utilities.gui._availability import HAS_SUITE3D
+
+    INPUT_WIDTH = 100
+    has_phase_support = getattr(self, "has_raster_scan_support", False)
+    nz = getattr(self, "nz", 1)
+    has_z_reg = HAS_SUITE3D and nz > 1
+
+    has_any_options = has_phase_support or has_z_reg or (nz > 1)
+
+    # scan-phase correction section
+    if has_phase_support:
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Scan-Phase Correction")
+        imgui.spacing()
+
+        # fix phase
+        phase_changed, phase_value = imgui.checkbox("Fix Phase", self.fix_phase)
+        set_tooltip("Apply bidirectional scan-phase correction to output data")
+        if phase_changed:
+            self.fix_phase = phase_value
+
+        # fft subpixel
+        fft_changed, fft_value = imgui.checkbox("Sub-Pixel (FFT)", self.use_fft)
+        set_tooltip("Use FFT-based sub-pixel registration (slower but more accurate)")
+        if fft_changed:
+            self.use_fft = fft_value
+
+        # border exclusion
+        imgui.set_next_item_width(INPUT_WIDTH)
+        border_changed, border_val = imgui.input_int("Border (px)", self.border, step=1)
+        set_tooltip("Pixels to exclude from edges when computing phase offset")
+        if border_changed:
+            self.border = max(0, border_val)
+
+        # max offset
+        imgui.set_next_item_width(INPUT_WIDTH)
+        max_offset_changed, max_offset_val = imgui.input_int("Max Offset", self.max_offset, step=1)
+        set_tooltip("Maximum allowed pixel shift for phase correction")
+        if max_offset_changed:
+            self.max_offset = max(1, max_offset_val)
+
+        # upsample factor
+        imgui.set_next_item_width(INPUT_WIDTH)
+        upsample_changed, upsample_val = imgui.input_int("Upsample", self.phase_upsample, step=1)
+        set_tooltip("Upsampling factor for sub-pixel alignment")
+        if upsample_changed:
+            self.phase_upsample = max(1, upsample_val)
+
+        # show current offset values
+        imgui.spacing()
+        imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Current offsets:")
+        for i, ofs in enumerate(self.current_offset):
+            imgui.text(f"  Array {i + 1}: {ofs:.3f} px")
+
+    # z-registration section (suite3d)
+    if nz > 1:
+        if has_phase_support:
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Z-Registration (Suite3D)")
+        imgui.spacing()
+
+        if has_z_reg:
+            reg_z_val = getattr(self, "_register_z", False)
+            reg_changed, reg_value = imgui.checkbox("Register Z-Planes Axially", reg_z_val)
+            set_tooltip(
+                "Use Suite3D to register z-planes axially before processing.\n"
+                "This corrects for z-drift between planes."
+            )
+            if reg_changed:
+                self._register_z = reg_value
+        else:
+            # show disabled option with install hint
+            imgui.begin_disabled()
+            imgui.checkbox("Register Z-Planes Axially", False)
+            imgui.end_disabled()
+            imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Install suite3d to enable")
+
+    if not has_any_options:
+        imgui.text_disabled("No data-specific options available.")
+
+
+def draw_section_suite2p(self):
+    """Draw Suite2p configuration UI with button-based popups."""
+    imgui.spacing()
+
+    # consistent input width
+    INPUT_WIDTH = 120
+
+    # set proper padding and spacing
     imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4))
     imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 2))
 
-    imgui.spacing()
-    imgui.separator_text("Processing Controls")
-    imgui.spacing()
+    # initialize selection state (timepoints, z-planes)
+    max_frames, num_planes = _init_s2p_selection_state(self)
 
-    # Suite2p output path (separate from save_as dialog path)
-    # Use _s2p_outdir, defaulting to _saveas_outdir if not set
-    s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
-
-    imgui.text("Output path:")
-    imgui.same_line()
-
-    # Flash animation logic for "(not set)" text
-    text_color = imgui.ImVec4(0.6, 0.8, 1.0, 1.0)  # Default cyan color
-    if not s2p_path and self._s2p_savepath_flash_start is not None:
-        elapsed = time.time() - self._s2p_savepath_flash_start
-        flash_duration = 0.3  # Duration of each flash in seconds
-        total_flashes = 4
-
-        if elapsed < total_flashes * flash_duration:
-            # Determine if we should show red or cyan
-            current_flash = int(elapsed / flash_duration)
-            if current_flash % 2 == 0:  # Even flashes = red
-                text_color = imgui.ImVec4(1.0, 0.2, 0.2, 1.0)  # Red
-        else:
-            # Animation finished, reset
-            self._s2p_savepath_flash_start = None
-
-    # Display path with wrapping to prevent clipping
-    display_path = s2p_path if s2p_path else "(not set)"
-    imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
-    imgui.text_colored(text_color, display_path)
-    imgui.pop_text_wrap_pos()
-
-    # Browse button
-    if imgui.button("Browse##s2p_outpath"):
-        default_dir = s2p_path or str(
-            get_last_dir("suite2p_output") or pathlib.Path().home()
-        )
-        self._s2p_folder_dialog = pfd.select_folder(
-            "Select Suite2p output folder", default_dir
-        )
-
-    # Check if async folder dialog has a result
-    if self._s2p_folder_dialog is not None and self._s2p_folder_dialog.ready():
-        result = self._s2p_folder_dialog.result()
-        if result:
-            self._s2p_outdir = str(result)
-            set_last_dir("suite2p_output", result)
-        self._s2p_folder_dialog = None
-
-    # Get max frames from data
-    # iw-array API: data is an ImageWidgetProperty indexer, access with data[0]
-    if hasattr(self, "image_widget") and self.image_widget.data:
-        try:
-            first_array = self.image_widget.data[0]
-            max_frames = first_array.shape[0]
-        except (IndexError, AttributeError):
-            max_frames = 1000
-    else:
-        max_frames = 1000
-
-    # Frames to process slider
-    imgui.spacing()
-    # Initialize target_timepoints only once, or when max changes
-    if not hasattr(self, "_timepoints_initialized"):
-        self._timepoints_initialized = True
-        self._last_max_timepoints = max_frames
-        if self.s2p.target_timepoints == -1:
-            self.s2p.target_timepoints = max_frames
-    elif (
-        hasattr(self, "_last_max_timepoints")
-        and self._last_max_timepoints != max_frames
-    ):
-        # max timepoints changed (different data loaded), reset to new max
-        self._last_max_timepoints = max_frames
-        self.s2p.target_timepoints = max_frames
-
-    # timepoints input with slider
-    imgui.set_next_item_width(INPUT_WIDTH)
-    changed, new_value = imgui.input_int(
-        "##timepoints_input", self.s2p.target_timepoints, step=1, step_fast=100
-    )
-    if changed:
-        self.s2p.target_timepoints = max(1, min(new_value, max_frames))
-    imgui.same_line()
-    imgui.text("Timepoints")
-    set_tooltip(
-        f"Number of timepoints to process (1-{max_frames}). "
-        "Use arrows or type exact value. Useful for testing on subsets."
-    )
-
-    imgui.set_next_item_width(INPUT_WIDTH)
-    slider_changed, slider_value = imgui.slider_int(
-        "##timepoints_slider", self.s2p.target_timepoints, 1, max_frames
-    )
-    if slider_changed:
-        self.s2p.target_timepoints = slider_value
-
-    # Get current z index and total planes from image widget
-    # iw-array API: use indices property with named dimension access
-    names = self.image_widget._slider_dim_names or ()
-    try:
-        current_z = self.image_widget.indices["z"] if "z" in names else 0
-    except (IndexError, KeyError):
-        current_z = 0
-    current_plane = current_z + 1  # Convert 0-indexed to 1-indexed
-
-    # Get number of planes from data shape
-    try:
-        first_array = self.image_widget.data[0]
-        if first_array.ndim == 4:
-            num_planes = first_array.shape[1]  # (T, Z, H, W)
-        else:
-            num_planes = 1
-    except (IndexError, AttributeError):
-        num_planes = 1
-
-    # Initialize multi-z state
-    if not hasattr(self, "_selected_planes"):
-        self._selected_planes = {current_plane}
-    if not hasattr(self, "_show_plane_popup"):
-        self._show_plane_popup = False
-    if not hasattr(self, "_parallel_processing"):
-        self._parallel_processing = False
-    if not hasattr(self, "_max_parallel_jobs"):
-        self._max_parallel_jobs = 2
-
-    imgui.spacing()
-    imgui.separator_text("Plane Selection")
-
-    # Check if multi-z mode (more than just current plane selected)
-    is_multi_z = len(self._selected_planes) > 1 or (
-        len(self._selected_planes) == 1 and current_plane not in self._selected_planes
-    )
-
-    if num_planes > 1:
-        # Show selected planes summary
-        if is_multi_z:
-            selected_str = ", ".join(str(p) for p in sorted(self._selected_planes))
-            imgui.text(f"Selected: {selected_str}")
-            # Clear button on next line, only when multiple planes selected
-            if len(self._selected_planes) > 1:
-                # Match Browse button size
-                if imgui.button("Clear Selection", imgui.ImVec2(100, 0)):
-                    self._selected_planes = {current_plane}
-        else:
-            imgui.text(f"Current plane: {current_plane}")
-
-        # Smaller rounded button for plane selection
-        imgui.push_style_var(imgui.StyleVar_.frame_rounding, 8.0)
-        if imgui.button("Z-Planes...", imgui.ImVec2(80, 0)):
-            self._show_plane_popup = True
-        imgui.pop_style_var()
-        set_tooltip("Click to select which z-planes to process")
-    else:
-        self._selected_planes = {1}
-        imgui.text("Single plane data")
-
-    # Plane selection popup
-    if self._show_plane_popup:
-        imgui.open_popup("Select Z-Planes##popup")
-        if not hasattr(self, "_plane_popup_open"):
-            self._plane_popup_open = True
-
-    # Calculate popup size to fit all planes (resizable by user)
-    popup_height = 130 + num_planes * 24
-    popup_height = max(150, min(400, popup_height))
-    imgui.set_next_window_size(
-        imgui.ImVec2(250, popup_height), imgui.Cond_.first_use_ever
-    )
-
-    opened, visible = imgui.begin_popup_modal(
-        "Select Z-Planes##popup",
-        p_open=True if getattr(self, "_plane_popup_open", True) else None,
-        flags=imgui.WindowFlags_.no_saved_settings,
-    )
-
-    if opened:
-        if not visible:
-            # user closed via X button
-            self._plane_popup_open = False
-            self._show_plane_popup = False
-            imgui.close_current_popup()
-            imgui.end_popup()
-        else:
-            self._plane_popup_open = True
-            imgui.text("Select planes to process:")
-            imgui.spacing()
-
-            if imgui.button("All"):
-                self._selected_planes = set(range(1, num_planes + 1))
-            imgui.same_line()
-            if imgui.button("None"):
-                self._selected_planes = set()
-            imgui.same_line()
-            if imgui.button("Current"):
-                self._selected_planes = {current_plane}
-
-            imgui.separator()
-            imgui.spacing()
-
-            for i in range(num_planes):
-                plane_num = i + 1
-                checked = plane_num in self._selected_planes
-                label = f"Plane {plane_num}"
-                if plane_num == current_plane:
-                    label += " (current)"
-                changed, checked = imgui.checkbox(label, checked)
-                if changed:
-                    if checked:
-                        self._selected_planes.add(plane_num)
-                    else:
-                        self._selected_planes.discard(plane_num)
-
-            imgui.spacing()
-            imgui.separator()
-
-            if imgui.button("Done", imgui.ImVec2(-1, 0)):
-                self._plane_popup_open = False
-                self._show_plane_popup = False
-                imgui.close_current_popup()
-
-            imgui.end_popup()
-    else:
-        self._show_plane_popup = False
-
-    # Parallel processing options (only show when multiple planes selected)
-    if len(self._selected_planes) > 1:
-        imgui.spacing()
-        imgui.separator_text("Multi-Plane Processing")
-
-        _, self._parallel_processing = imgui.checkbox(
-            "Parallel Processing", self._parallel_processing
-        )
-        set_tooltip(
-            "Process multiple planes simultaneously. Faster but uses more memory.\n"
-            "Sequential processing is safer for large datasets."
-        )
-
-        if self._parallel_processing:
-            imgui.set_next_item_width(hello_imgui.em_size(5))
-            _, self._max_parallel_jobs = imgui.input_int(
-                "Max parallel jobs", self._max_parallel_jobs, step=1, step_fast=2
-            )
-            self._max_parallel_jobs = max(
-                1, min(self._max_parallel_jobs, len(self._selected_planes))
-            )
-            set_tooltip("Maximum number of planes to process simultaneously")
-
-            # Memory warning estimate
-            try:
-                arr = self.image_widget.data[0]
-                # Estimate memory per plane: shape * dtype size * 2 (for processing overhead)
-                plane_shape = arr.shape
-                if len(plane_shape) == 4:  # T, Z, H, W
-                    frames_per_plane = plane_shape[0] * plane_shape[2] * plane_shape[3]
-                else:  # T, H, W
-                    frames_per_plane = plane_shape[0] * plane_shape[1] * plane_shape[2]
-                bytes_per_element = 2  # assume uint16
-                mem_per_plane_gb = (frames_per_plane * bytes_per_element) / (1024**3)
-                total_mem_gb = (
-                    mem_per_plane_gb * self._max_parallel_jobs * 2
-                )  # 2x for processing overhead
-
-                if total_mem_gb > 16:
-                    imgui.text_colored(
-                        imgui.ImVec4(1.0, 0.3, 0.3, 1.0),
-                        f"Warning: ~{total_mem_gb:.1f} GB RAM needed",
-                    )
-                elif total_mem_gb > 8:
-                    imgui.text_colored(
-                        imgui.ImVec4(1.0, 0.7, 0.2, 1.0),
-                        f"Est. memory: ~{total_mem_gb:.1f} GB",
-                    )
-                else:
-                    imgui.text(f"Est. memory: ~{total_mem_gb:.1f} GB")
-            except Exception:
-                pass  # Skip memory estimate if we can't calculate
-
-    imgui.spacing()
-
-    # Run in background checkbox
-    if not hasattr(self, "_s2p_background"):
-        self._s2p_background = True  # default to background
-    _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
-    set_tooltip(
-        "Run Suite2p as a separate process that continues even if the GUI is closed.\n"
-        "Click the process status indicator to monitor progress."
-    )
-
-    imgui.spacing()
-
-    # Green Run button - disabled if no output path
+    # get output path
     s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
     has_save_path = bool(s2p_path)
 
-    # Green button color
+    # === SELECTION BUTTON + PREVIEW ===
+    imgui.spacing()
+    if imgui.button("Selection"):
+        self._s2p_selection_open = True
+    set_tooltip("Output path and frame/plane selection")
+
+    # draw the selection popup
+    _draw_s2p_selection_popup(self)
+
+    # selection preview info underneath
+    imgui.indent(8)
+    _draw_s2p_selection_preview(self, max_frames, num_planes)
+    # show output path
+    if s2p_path:
+        # truncate long paths
+        display_path = s2p_path
+        if len(display_path) > 50:
+            display_path = "..." + display_path[-47:]
+        imgui.text_colored(imgui.ImVec4(0.5, 0.7, 0.9, 1.0), display_path)
+    else:
+        imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.4, 1.0), "(output path not set)")
+    imgui.unindent(8)
+
+    imgui.spacing()
+
+    # === RUN SUITE2P BUTTON (centered) ===
+    imgui.spacing()
+    avail_width = imgui.get_content_region_avail().x
+    button_width = 120
+    imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_width - button_width) / 2)
+
     imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
-    imgui.push_style_color(
-        imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0)
-    )
+    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0))
     imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.45, 0.1, 1.0))
 
     if not has_save_path:
         imgui.begin_disabled()
 
-    button_clicked = imgui.button("Run Suite2p", imgui.ImVec2(100, 0))
+    button_clicked = imgui.button("Run Suite2p", imgui.ImVec2(button_width, 0))
 
     if not has_save_path:
         imgui.end_disabled()
 
     imgui.pop_style_color(3)
 
-    # Show tooltip on button hover when disabled
-    if not has_save_path and imgui.is_item_hovered(
-        imgui.HoveredFlags_.allow_when_disabled
-    ):
-        imgui.begin_tooltip()
-        imgui.text("Set an output path first (see 'Output path:' above)")
-        imgui.end_tooltip()
+    if not has_save_path and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+        imgui.set_tooltip("Set output path via Selection button")
 
+    # handle run button click
     if button_clicked and has_save_path:
-        self.logger.info(
-            f"Running Suite2p pipeline on {len(self._selected_planes)} planes..."
-        )
+        self.logger.info(f"Running Suite2p pipeline on {len(self._selected_planes)} planes...")
         run_process(self)
-        if self._s2p_background:
-            self.logger.info(
-                "Suite2p processing started in background. Click the process status indicator to monitor."
-            )
+        if getattr(self, "_s2p_background", True):
+            self.logger.info("Suite2p processing started in background.")
         else:
-            self.logger.info(
-                "Suite2p processing submitted (running in background thread)."
-            )
+            self.logger.info("Suite2p processing submitted.")
 
     if self._install_error:
-        imgui.same_line()
         if self._show_red_text:
-            imgui.text_colored(
-                imgui.ImVec4(1.0, 0.0, 0.0, 1.0),
-                "Error: lbm_suite2p_python is not installed.",
-            )
+            imgui.text_colored(imgui.ImVec4(1.0, 0.0, 0.0, 1.0), "Error: lbm_suite2p_python is not installed.")
         if self._show_green_text:
-            imgui.text_colored(
-                imgui.ImVec4(1.0, 0.0, 0.0, 1.0),
-                "lbm_suite2p_python install success.",
-            )
+            imgui.text_colored(imgui.ImVec4(0.0, 1.0, 0.0, 1.0), "lbm_suite2p_python install success.")
         if self._show_install_button and imgui.button("Install"):
             import subprocess
-
             self.logger.log("info", "Installing lbm_suite2p_python...")
             try:
                 subprocess.check_call(["pip", "install", "lbm_suite2p_python"])
@@ -754,64 +1027,13 @@ def draw_section_suite2p(self):
             except Exception as e:
                 self.logger.log("error", f"Installation failed: {e}")
 
-    # Tau setting (main processing parameter)
-    imgui.set_next_item_width(INPUT_WIDTH)
-    _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
-    set_tooltip(
-        "Calcium indicator decay timescale in seconds. Used to determine bin size "
-        "for activity-based detection (bin_size = tau * fs).\n"
-        "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
-    )
-
-    _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
-    set_tooltip(
-        "Denoise binned movie before cell detection. Applied BEFORE the detection "
-        "branch (anatomical or functional). Recommended for noisy recordings."
-    )
-
     imgui.spacing()
 
-    # Processing control options
-    _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
-    set_tooltip("Keep data_raw.bin after processing (uses disk space)")
+    # === PIPELINE SETTINGS ===
+    imgui.separator_text("Pipeline Settings")
 
-    _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
-    set_tooltip("Keep data.bin after processing (useful for QC)")
-
-    _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
-    set_tooltip("Force re-registration even if already processed")
-
-    _, self.s2p.force_detect = imgui.checkbox(
-        "Force Re-detection", self.s2p.force_detect
-    )
-    set_tooltip("Force ROI detection even if stat.npy exists")
-
-    imgui.spacing()
-
-    # ΔF/F settings
-    imgui.set_next_item_width(INPUT_WIDTH)
-    _, self.s2p.dff_window_size = imgui.input_int(
-        "ΔF/F Window", self.s2p.dff_window_size
-    )
-    set_tooltip("Frames for rolling percentile baseline in ΔF/F (default: 300)")
-
-    imgui.set_next_item_width(INPUT_WIDTH)
-    _, self.s2p.dff_percentile = imgui.input_int(
-        "ΔF/F Percentile", self.s2p.dff_percentile
-    )
-    set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
-
-    imgui.set_next_item_width(INPUT_WIDTH)
-    _, self.s2p.dff_smooth_window = imgui.input_int(
-        "ΔF/F Smooth", self.s2p.dff_smooth_window
-    )
-    set_tooltip("Smooth ΔF/F trace with rolling window (0 = disabled)")
-
-    # pipeline step toggles with settings popups
-    imgui.spacing()
-    imgui.separator_text("Pipeline Steps")
-
-    # determine detection mode for greying out
+    # draw the main settings popup (triggered from table below)
+    _draw_s2p_settings_popup(self)
 
     # --- Registration ---
     def draw_registration_settings():
@@ -956,16 +1178,6 @@ def draw_section_suite2p(self):
 
             imgui.end_disabled()
             imgui.tree_pop()
-
-    _, self.s2p.do_registration = settings_row_with_popup(
-        "reg_settings",
-        "Registration",
-        self.s2p.do_registration,
-        draw_registration_settings,
-        tooltip="Configure motion correction and registration parameters",
-        checkbox_tooltip="Enable/disable motion registration",
-        popup_width=450,
-    )
 
     # --- ROI Detection ---
     def draw_roi_detection_settings():
@@ -1140,16 +1352,6 @@ def draw_section_suite2p(self):
         imgui.pop_text_wrap_pos()
         set_tooltip("Path to external classifier if not using built-in.")
 
-    _, self.s2p.roidetect = settings_row_with_popup(
-        "roi_settings",
-        "ROI Detection",
-        self.s2p.roidetect,
-        draw_roi_detection_settings,
-        tooltip="Configure cell detection, extraction, and classification",
-        checkbox_tooltip="Enable/disable ROI detection and signal extraction",
-        popup_width=450,
-    )
-
     # --- Spike Deconvolution ---
     def draw_spike_deconv_settings():
         imgui.set_next_item_width(INPUT_WIDTH)
@@ -1195,19 +1397,7 @@ def draw_section_suite2p(self):
         )
         set_tooltip("Percentile of trace for constant_percentile baseline method.")
 
-    _, self.s2p.spikedetect = settings_row_with_popup(
-        "spike_settings",
-        "Spike Deconv",
-        self.s2p.spikedetect,
-        draw_spike_deconv_settings,
-        tooltip="Configure spike deconvolution parameters",
-        checkbox_tooltip="Enable/disable spike deconvolution",
-        popup_width=400,
-    )
-
-    imgui.spacing()
-
-    # --- Output Settings (no checkbox, just a settings button) ---
+    # --- Output Settings ---
     def draw_output_settings():
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.preclassify = imgui.input_float(
@@ -1238,29 +1428,188 @@ def draw_section_suite2p(self):
         )
         set_tooltip("Threshold for calling ROI detected on channel 2.")
 
-    if imgui.button("Output Settings"):
-        _popup_states["output_settings"] = True
-        imgui.open_popup("Output Settings##output_settings")
+    # === PIPELINE SETTINGS TABLE ===
+    # tabular layout: [checkbox/empty] | [label] | [settings button]
+    table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
+    if imgui.begin_table("pipeline_settings_table", 3, table_flags):
+        imgui.table_setup_column("checkbox", imgui.TableColumnFlags_.width_fixed, 24)
+        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, 100)
+        imgui.table_setup_column("button", imgui.TableColumnFlags_.width_stretch)
 
-    # Draw output settings popup
-    imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
-    opened, visible = imgui.begin_popup_modal(
-        "Output Settings##output_settings",
-        p_open=True,
-        flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-    )
-    if opened:
-        if not visible:
-            _popup_states["output_settings"] = False
-            imgui.close_current_popup()
-        else:
-            draw_output_settings()
-            imgui.spacing()
-            imgui.separator()
-            if imgui.button("Close", imgui.ImVec2(80, 0)):
+        # --- Main settings row (no checkbox) ---
+        imgui.table_next_row()
+        imgui.table_next_column()  # empty checkbox column
+        imgui.table_next_column()
+        imgui.text("Main")
+        imgui.table_next_column()
+        if imgui.button("Settings##main"):
+            self._s2p_settings_open = True
+        set_tooltip("Main Suite2p parameters (Tau, denoise, dF/F, etc.)")
+
+        # --- Data Options row (no checkbox) - shows available data-specific widgets ---
+        imgui.table_next_row()
+        imgui.table_next_column()  # empty checkbox column
+        imgui.table_next_column()
+        imgui.text("Data Options")
+        imgui.table_next_column()
+        if imgui.button("Settings##data_opts"):
+            _popup_states["data_options"] = True
+            imgui.open_popup("Data Options##data_options")
+        set_tooltip("Data-specific options (scan-phase correction, frame averaging, etc.)")
+
+        # --- Registration row (with checkbox) ---
+        imgui.table_next_row()
+        imgui.table_next_column()
+        _, self.s2p.do_registration = imgui.checkbox("##reg_cb", self.s2p.do_registration)
+        set_tooltip("Enable/disable motion registration")
+        imgui.table_next_column()
+        imgui.text("Registration")
+        imgui.table_next_column()
+        if imgui.button("Settings##reg"):
+            _popup_states["reg_settings"] = True
+            imgui.open_popup("Registration##reg_settings")
+        set_tooltip("Configure motion correction and registration parameters")
+
+        # --- ROI Detection row (with checkbox) ---
+        imgui.table_next_row()
+        imgui.table_next_column()
+        _, self.s2p.roidetect = imgui.checkbox("##roi_cb", self.s2p.roidetect)
+        set_tooltip("Enable/disable ROI detection and signal extraction")
+        imgui.table_next_column()
+        imgui.text("ROI Detection")
+        imgui.table_next_column()
+        if imgui.button("Settings##roi"):
+            _popup_states["roi_settings"] = True
+            imgui.open_popup("ROI Detection##roi_settings")
+        set_tooltip("Configure cell detection, extraction, and classification")
+
+        # --- Spike Deconvolution row (with checkbox) ---
+        imgui.table_next_row()
+        imgui.table_next_column()
+        _, self.s2p.spikedetect = imgui.checkbox("##spike_cb", self.s2p.spikedetect)
+        set_tooltip("Enable/disable spike deconvolution")
+        imgui.table_next_column()
+        imgui.text("Spike Deconv")
+        imgui.table_next_column()
+        if imgui.button("Settings##spike"):
+            _popup_states["spike_settings"] = True
+            imgui.open_popup("Spike Deconv##spike_settings")
+        set_tooltip("Configure spike deconvolution parameters")
+
+        # --- Output row (no checkbox) ---
+        imgui.table_next_row()
+        imgui.table_next_column()  # empty checkbox column
+        imgui.table_next_column()
+        imgui.text("Output")
+        imgui.table_next_column()
+        if imgui.button("Settings##output"):
+            _popup_states["output_settings"] = True
+            imgui.open_popup("Output##output_settings")
+        set_tooltip("Configure output options")
+
+        # --- Draw all popups (inside table context) ---
+
+        # Registration popup
+        imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)
+        opened, visible = imgui.begin_popup_modal(
+            "Registration##reg_settings",
+            p_open=True,
+            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+        )
+        if opened:
+            if not visible:
+                _popup_states["reg_settings"] = False
+                imgui.close_current_popup()
+            else:
+                draw_registration_settings()
+                imgui.spacing()
+                imgui.separator()
+                if imgui.button("Close##reg", imgui.ImVec2(80, 0)):
+                    _popup_states["reg_settings"] = False
+                    imgui.close_current_popup()
+            imgui.end_popup()
+
+        # ROI Detection popup
+        imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)
+        opened, visible = imgui.begin_popup_modal(
+            "ROI Detection##roi_settings",
+            p_open=True,
+            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+        )
+        if opened:
+            if not visible:
+                _popup_states["roi_settings"] = False
+                imgui.close_current_popup()
+            else:
+                draw_roi_detection_settings()
+                imgui.spacing()
+                imgui.separator()
+                if imgui.button("Close##roi", imgui.ImVec2(80, 0)):
+                    _popup_states["roi_settings"] = False
+                    imgui.close_current_popup()
+            imgui.end_popup()
+
+        # Spike Deconv popup
+        imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
+        opened, visible = imgui.begin_popup_modal(
+            "Spike Deconv##spike_settings",
+            p_open=True,
+            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+        )
+        if opened:
+            if not visible:
+                _popup_states["spike_settings"] = False
+                imgui.close_current_popup()
+            else:
+                draw_spike_deconv_settings()
+                imgui.spacing()
+                imgui.separator()
+                if imgui.button("Close##spike", imgui.ImVec2(80, 0)):
+                    _popup_states["spike_settings"] = False
+                    imgui.close_current_popup()
+            imgui.end_popup()
+
+        # Output popup
+        imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
+        opened, visible = imgui.begin_popup_modal(
+            "Output##output_settings",
+            p_open=True,
+            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+        )
+        if opened:
+            if not visible:
                 _popup_states["output_settings"] = False
                 imgui.close_current_popup()
-        imgui.end_popup()
+            else:
+                draw_output_settings()
+                imgui.spacing()
+                imgui.separator()
+                if imgui.button("Close##output", imgui.ImVec2(80, 0)):
+                    _popup_states["output_settings"] = False
+                    imgui.close_current_popup()
+            imgui.end_popup()
+
+        # Data Options popup - shows data settings that affect Suite2p processing
+        imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
+        opened, visible = imgui.begin_popup_modal(
+            "Data Options##data_options",
+            p_open=True,
+            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+        )
+        if opened:
+            if not visible:
+                _popup_states["data_options"] = False
+                imgui.close_current_popup()
+            else:
+                _draw_data_options_content(self)
+                imgui.spacing()
+                imgui.separator()
+                if imgui.button("Close##data_opts", imgui.ImVec2(80, 0)):
+                    _popup_states["data_options"] = False
+                    imgui.close_current_popup()
+            imgui.end_popup()
+
+        imgui.end_table()
 
     # Pop style variables
     imgui.pop_style_var(2)  # Pop both style vars
@@ -1325,7 +1674,7 @@ def run_process(self):
         return
 
     self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
-    if not HAS_LSP:
+    if not _check_lsp_available():
         self.logger.warning(
             "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline."
             "`uv pip install lbm_suite2p_python`",
@@ -1474,7 +1823,7 @@ def run_process(self):
 
 
 def run_plane_from_data(self, arr_idx, z_plane=None):
-    if not HAS_LSP:
+    if not _check_lsp_available():
         self.logger.error("lbm_suite2p_python is not installed.")
         self._install_error = True
         return
