@@ -923,7 +923,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
         border: int | tuple[int, int, int, int] = 3,
         upsample: int = 5,
         max_offset: int = 4,
-        use_fft: bool = False,
+        use_fft: bool = True,
         metadata: dict | None = None,
         dims: str | Sequence[str] | None = None,
     ):
