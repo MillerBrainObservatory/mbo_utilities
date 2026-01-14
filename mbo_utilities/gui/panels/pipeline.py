@@ -76,13 +76,22 @@ class PipelinePanel(BasePanel):
 
         from mbo_utilities.gui.widgets.pipelines import (
             get_available_pipelines,
-            any_pipeline_available,
+            is_ready,
+            start_preload,
         )
 
-        # Register pipelines if needed
+        # start preload if not already started
+        start_preload()
+
+        # show loading indicator if imports still in progress
+        if not is_ready():
+            imgui.text_disabled("Loading pipelines...")
+            return
+
+        # get registered pipelines (should be instant now)
         pipeline_classes = get_available_pipelines()
 
-        # Check if any pipelines available
+        # check if any pipelines available
         if not pipeline_classes:
             imgui.text_colored(
                 imgui.ImVec4(1.0, 0.7, 0.2, 1.0),

@@ -22,14 +22,11 @@ _HAS_LSP: bool | None = None
 
 
 def _check_lsp_available() -> bool:
-    """Check if lbm_suite2p_python is available (lazy, cached)."""
+    """check if lbm_suite2p_python is available (lazy, cached, no actual import)."""
     global _HAS_LSP
     if _HAS_LSP is None:
-        try:
-            import lbm_suite2p_python
-            _HAS_LSP = True
-        except ImportError:
-            _HAS_LSP = False
+        import importlib.util
+        _HAS_LSP = importlib.util.find_spec("lbm_suite2p_python") is not None
     return _HAS_LSP
 
 
@@ -130,8 +127,9 @@ class Suite2pPipelineWidget(PipelineWidget):
         """Draw suite2p configuration ui."""
         from mbo_utilities.gui.widgets.pipelines.settings import draw_section_suite2p
 
-        self._draw_diagnostics_button()
-        imgui.separator()
+        # load results disabled for now (commented out)
+        # self._draw_diagnostics_button()
+        # imgui.separator()
         imgui.spacing()
 
         # sync widget state to parent before drawing

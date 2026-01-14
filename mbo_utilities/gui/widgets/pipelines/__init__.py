@@ -3,9 +3,12 @@ pipeline widget registry.
 
 pipelines are processing workflows (suite2p, masknmf, etc) that can be
 run on imaging data. each pipeline has config and results views.
+
+imports are done in a background thread to avoid blocking the GUI.
 """
 
 from typing import Any
+import threading
 
 from imgui_bundle import imgui
 
@@ -14,25 +17,72 @@ import contextlib
 
 # registry of available pipeline classes
 _PIPELINE_CLASSES: list[type[PipelineWidget]] = []
+_REGISTRATION_LOCK = threading.Lock()
+_REGISTRATION_STARTED = False
+_REGISTRATION_COMPLETE = False
+
+
+def _register_pipelines_sync() -> None:
+    """Register pipeline widgets (called from background thread)."""
+    global _PIPELINE_CLASSES, _REGISTRATION_COMPLETE
+
+    with _REGISTRATION_LOCK:
+        if _PIPELINE_CLASSES:
+            _REGISTRATION_COMPLETE = True
+            return
+
+        # preload settings module first (it's imported by Suite2pPipelineWidget.__init__)
+        try:
+            from mbo_utilities.gui.widgets.pipelines import settings as _  # noqa: F401
+        except Exception:
+            pass
+
+        # import pipeline widgets - they register themselves based on availability
+        try:
+            from mbo_utilities.gui.widgets.pipelines.suite2p import Suite2pPipelineWidget
+            _PIPELINE_CLASSES.append(Suite2pPipelineWidget)
+        except Exception:
+            pass
+
+        # future: add more pipelines here
+        # from .masknmf import MaskNMFPipelineWidget
+        # _PIPELINE_CLASSES.append(MaskNMFPipelineWidget)
+
+        _REGISTRATION_COMPLETE = True
+
+
+def start_preload() -> None:
+    """Start background preloading of pipeline widgets.
+
+    Call this early (e.g., on GUI startup) to warm up imports
+    before the user clicks the Run tab.
+    """
+    global _REGISTRATION_STARTED
+
+    if _REGISTRATION_STARTED:
+        return
+
+    _REGISTRATION_STARTED = True
+    thread = threading.Thread(target=_register_pipelines_sync, daemon=True)
+    thread.start()
+
+
+def is_ready() -> bool:
+    """Check if pipeline registration is complete."""
+    return _REGISTRATION_COMPLETE
 
 
 def _register_pipelines() -> None:
-    """Register available pipeline widgets."""
-    global _PIPELINE_CLASSES
+    """Register available pipeline widgets (blocking if not preloaded)."""
+    if not _REGISTRATION_STARTED:
+        start_preload()
 
-    if _PIPELINE_CLASSES:
+    # if already complete, return immediately
+    if _REGISTRATION_COMPLETE:
         return
 
-    # import pipeline widgets - they register themselves based on availability
-    try:
-        from mbo_utilities.gui.widgets.pipelines.suite2p import Suite2pPipelineWidget
-        _PIPELINE_CLASSES.append(Suite2pPipelineWidget)
-    except Exception:
-        pass
-
-    # future: add more pipelines here
-    # from .masknmf import MaskNMFPipelineWidget
-    # _PIPELINE_CLASSES.append(MaskNMFPipelineWidget)
+    # wait for background thread to complete (blocking)
+    _register_pipelines_sync()
 
 
 def get_available_pipelines() -> list[type[PipelineWidget]]:
@@ -133,11 +183,21 @@ def cleanup_pipelines(parent: Any) -> None:
     parent._pipeline_instances.clear()
 
 
-from mbo_utilities.gui.widgets.pipelines.settings import (
-    Suite2pSettings,
-    draw_suite2p_settings_panel,
-    draw_section_suite2p,
-)
+# lazy imports for settings - use __getattr__ for module-level lazy loading
+_settings_cache = {}
+
+
+def __getattr__(name: str):
+    """Lazy load settings module exports on first access."""
+    if name in ("Suite2pSettings", "draw_suite2p_settings_panel", "draw_section_suite2p"):
+        if name not in _settings_cache:
+            from mbo_utilities.gui.widgets.pipelines import settings
+            _settings_cache["Suite2pSettings"] = settings.Suite2pSettings
+            _settings_cache["draw_suite2p_settings_panel"] = settings.draw_suite2p_settings_panel
+            _settings_cache["draw_section_suite2p"] = settings.draw_section_suite2p
+        return _settings_cache[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "PipelineWidget",
@@ -149,4 +209,6 @@ __all__ = [
     "draw_suite2p_settings_panel",
     "get_available_pipelines",
     "get_pipeline_names",
+    "is_ready",
+    "start_preload",
 ]
