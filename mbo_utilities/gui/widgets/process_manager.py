@@ -22,6 +22,10 @@ logger = log.get("gui.process_manager")
 
 
 
+# how long to keep completed processes visible (seconds)
+COMPLETED_RETENTION_SECONDS = 300  # 5 minutes
+
+
 @dataclass
 class ProcessInfo:
     pid: int
@@ -35,6 +39,7 @@ class ProcessInfo:
     progress: float = 0.0
     status_message: str = ""
     error_details: dict | str | None = None
+    completed_time: float | None = None  # when process finished
 
     def elapsed_seconds(self) -> float:
         """Seconds since process started."""
@@ -207,11 +212,22 @@ class ProcessManager:
             with open(self.PROCESS_FILE) as f:
                 data = json.load(f)
 
+            now = time.time()
+            max_age_seconds = 24 * 3600  # 24 hours max age for any process
+
             for entry in data.get("processes", []):
                 info = ProcessInfo(**entry)
+                # skip processes older than 24 hours
+                age = now - info.start_time
+                if age > max_age_seconds:
+                    logger.debug(f"Discarding old process {info.pid} (age: {age/3600:.1f}h)")
+                    continue
                 self._processes[info.pid] = info
 
-            # note: don't auto-cleanup on load so user can see finished/failed processes
+            # save to disk if we filtered any out
+            if len(self._processes) < len(data.get("processes", [])):
+                self._save()
+
         except Exception as e:
             logger.warning(f"Failed to load process file: {e}")
 
@@ -345,26 +361,26 @@ class ProcessManager:
         return list(self._processes.values())
 
     def get_running(self) -> list[ProcessInfo]:
-        """Get active processes (running or failed/pending view)."""
+        """Get processes to display (running, completed, or errored)."""
         active = []
         for p in self._processes.values():
-            # Always update from sidecar first to get latest status
+            # always update from sidecar first to get latest status
             p.update_from_sidecar()
-
-            # if alive, it's running.
-            if p.is_alive() or p.status == "error":
-                active.append(p)
+            active.append(p)
         return active
 
     def cleanup_finished(self) -> int:
         """
-        Remove entries for processes that have finished successfully.
-        failed processes are kept until dismissed (killed) or cleared.
+        Remove entries for processes that have finished successfully and
+        exceeded the retention period. failed processes are kept until
+        dismissed or cleared.
 
         returns number of entries removed.
         """
-        # check all processes
+        now = time.time()
         to_remove = []
+        changed = False
+
         for pid, p in list(self._processes.items()):
             # check sidecar one last time to capture final state
             p.update_from_sidecar()
@@ -374,26 +390,33 @@ class ProcessManager:
                 p.update_from_sidecar()
 
                 if p.status == "error":
-                    # Keep errors visible
+                    # keep errors visible until dismissed
                     continue
 
                 if p.status != "completed":
-                    # Process died without reporting completion or error -> Crash
-                    # But if we just missed the update, give it one more grace check?
-                    # No, update_from_sidecar() above should have caught it.
+                    # process died without reporting completion or error
                     p.status = "error"
                     p.status_message = "Process crashed unexpectedly"
                     p.error_details = {"traceback": "Process exited without reporting results. Check worker logs."}
+                    changed = True
                     continue
 
-                to_remove.append(pid)
+                # mark completion time if not already set
+                if p.completed_time is None:
+                    p.completed_time = now
+                    changed = True
+
+                # check if retention period has passed
+                if now - p.completed_time > COMPLETED_RETENTION_SECONDS:
+                    to_remove.append(pid)
 
         for pid in to_remove:
             del self._processes[pid]
 
-        if to_remove:
+        if to_remove or changed:
             self._save()
-            logger.debug(f"Cleaned up {len(to_remove)} finished processes")
+            if to_remove:
+                logger.debug(f"Cleaned up {len(to_remove)} finished processes")
 
         return len(to_remove)
 
