@@ -440,14 +440,21 @@ def _imwrite_base(
     # normalize planes to 0-indexed list for iteration
     planes_0idx = _normalize_planes(planes_list, num_planes)
 
-    for plane_idx in planes_0idx:
-        from mbo_utilities.arrays.features import OutputFilename, TAG_REGISTRY, DimensionTag
+    # extract output_name if provided (e.g., "data_raw.bin" for suite2p)
+    output_name = kwargs.pop("output_name", None)
 
-        # build filename with dimension tags
-        z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
-        t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes, frames_list)
-        tags = [t_tag, z_tag] if nframes > 1 else [z_tag]
-        filename = OutputFilename(tags, suffix="stack").build(f".{ext_clean}")
+    for plane_idx in planes_0idx:
+        # use explicit output_name if provided, otherwise generate from tags
+        if output_name:
+            filename = output_name
+        else:
+            from mbo_utilities.arrays.features import OutputFilename, TAG_REGISTRY, DimensionTag
+
+            # build filename with dimension tags
+            z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
+            t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes, frames_list)
+            tags = [t_tag, z_tag] if nframes > 1 else [z_tag]
+            filename = OutputFilename(tags, suffix="stack").build(f".{ext_clean}")
         target = outpath / filename
 
         if target.exists() and not overwrite:

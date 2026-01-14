@@ -21,11 +21,14 @@ def check_file_dialogs(parent: Any):
     # Check file dialog
     if parent._file_dialog is not None and parent._file_dialog.ready():
         result = parent._file_dialog.result()
+        parent.logger.info(f"File dialog result: {result}")
         if result and len(result) > 0:
             # Save to recent files and context-specific preferences
             add_recent_file(result[0], file_type="file")
             set_last_dir("open_file", result[0])
             load_new_data(parent, result[0])
+        else:
+            parent.logger.info("File dialog cancelled or empty result")
         parent._file_dialog = None
 
     # Check folder dialog
@@ -59,7 +62,9 @@ def load_new_data(parent: Any, path: str):
         parent._load_status_msg = "Loading..."
         parent._load_status_color = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
 
+        parent.logger.debug(f"Calling imread on: {path}")
         new_data = imread(path)
+        parent.logger.debug(f"imread returned: type={type(new_data).__name__}, shape={getattr(new_data, 'shape', 'N/A')}")
 
         # Check if dimensionality is changing - if so, reset window functions
         # to avoid IndexError in fastplotlib's _apply_window_function
