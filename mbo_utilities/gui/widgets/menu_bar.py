@@ -111,42 +111,55 @@ def draw_process_status_indicator(parent: Any):
         ICON_IDLE = fa.ICON_FA_CIRCLE
         ICON_RUNNING = fa.ICON_FA_SPINNER
         ICON_ERROR = fa.ICON_FA_EXCLAMATION_TRIANGLE
+        ICON_CHECK = fa.ICON_FA_CHECK_CIRCLE
     except (ImportError, AttributeError):
         # Fallback to unicode
         ICON_IDLE = "\uf111"  # circle
         ICON_RUNNING = "\uf110"  # spinner
         ICON_ERROR = "\uf071"  # exclamation-triangle
+        ICON_CHECK = "\uf058"  # check-circle
 
     pm = get_process_manager()
     pm.cleanup_finished()
-    running_procs = pm.get_running()
+    all_procs = pm.get_running()
 
     # Get in-app progress items
     from mbo_utilities.gui.widgets.progress_bar import _get_active_progress_items
     progress_items = _get_active_progress_items(parent)
 
-    total_active = len(running_procs) + len(progress_items)
+    # categorize processes
+    running_procs = [p for p in all_procs if p.is_alive()]
+    completed_procs = [p for p in all_procs if not p.is_alive() and p.status == "completed"]
+    error_procs = [p for p in all_procs if not p.is_alive() and p.status == "error"]
+
+    n_running = len(running_procs) + len(progress_items)
+    n_completed = len(completed_procs)
+    n_errors = len(error_procs)
 
     # Determine status color and icon
-    if total_active == 0:
-        status_color = imgui.ImVec4(0.15, 0.55, 0.15, 1.0)  # Dark Green - idle
-        status_text = f"{ICON_IDLE} Idle"
-    else:
-        # Check if any have errors (only relevant for procs currently)
-        has_error = any(p.status == "error" for p in running_procs)
+    if n_errors > 0:
+        # errors take priority
+        status_color = imgui.ImVec4(0.8, 0.2, 0.2, 1.0)  # Dark Red
+        status_text = f"{ICON_ERROR} Error ({n_errors})"
+    elif n_running > 0:
+        # actively running tasks
+        status_color = imgui.ImVec4(0.85, 0.45, 0.0, 1.0)  # Dark Orange
 
-        if has_error:
-            status_color = imgui.ImVec4(0.8, 0.2, 0.2, 1.0)  # Dark Red - error
-            status_text = f"{ICON_ERROR} {total_active} Error"
+        # Add percentage if we have progress items
+        if progress_items:
+            avg_progress = sum(item["progress"] for item in progress_items) / len(progress_items)
+            status_text = f"{ICON_RUNNING} Running ({n_running}) {int(avg_progress * 100)}%"
         else:
-            status_color = imgui.ImVec4(0.85, 0.45, 0.0, 1.0)  # Dark Orange - running
-
-            # Add percentage if we have progress items
-            if progress_items:
-                avg_progress = sum(item["progress"] for item in progress_items) / len(progress_items)
-                status_text = f"{ICON_RUNNING} Running ({total_active}) {int(avg_progress * 100)}%"
-            else:
-                status_text = f"{ICON_RUNNING} Running ({total_active})"
+            status_text = f"{ICON_RUNNING} Running ({n_running})"
+    elif n_completed > 0:
+        # completed tasks waiting to be acknowledged
+        status_color = imgui.ImVec4(0.15, 0.55, 0.15, 1.0)  # Dark Green
+        task_word = "task" if n_completed == 1 else "tasks"
+        status_text = f"{ICON_CHECK} Completed {n_completed} {task_word}"
+    else:
+        # idle
+        status_color = imgui.ImVec4(0.15, 0.55, 0.15, 1.0)  # Dark Green
+        status_text = f"{ICON_IDLE} Idle"
 
     # Draw rounded buttons
     imgui.push_style_var(imgui.StyleVar_.frame_rounding, 5.0)

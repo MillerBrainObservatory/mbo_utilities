@@ -105,6 +105,10 @@ class TimeSeriesViewer(BaseViewer):
 
         # Only initialize panels when not using legacy delegation
         if parent is None:
+            # start pipeline preload early (before user clicks Run tab)
+            from mbo_utilities.gui.widgets.pipelines import start_preload
+            start_preload()
+
             self._panels["debug"] = DebugPanel(self)
             self._panels["processes"] = ProcessPanel(self)
             self._panels["metadata"] = MetadataPanel(self)

@@ -1804,7 +1804,7 @@ wheels = [
 
 [[package]]
 name = "mbo-suite3d"
-version = "0.0.6"
+version = "0.0.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1834,9 +1834,9 @@ dependencies = [
     { name = "torch", version = "2.9.1+cu126", source = { registry = "https://download.pytorch.org/whl/cu126" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "zarr" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/85/e2/f20268ac960180c8ee494ebeb60cbbe439f86a05eb488718619b8276c8fc/mbo_suite3d-0.0.6.tar.gz", hash = "sha256:4cb7032a33e9fc1ddb2af7240aea08d5c03fc10f743835f44e96ecc6e0da6a3f", size = 161386, upload-time = "2025-11-05T16:53:52.605Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/b1/cae07a0b1748cbade88978e34d50347ff4b2356b0c8cc7116f22e72affd4/mbo_suite3d-0.0.7.tar.gz", hash = "sha256:bc7e961b4e4ccad844f56c3117f41c43cfed658dfbfc8603ffd0c0b8ff6871a1", size = 161756, upload-time = "2026-01-13T17:28:53.478Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/48/3f/21ceb2f772c04a50073aa8a725244994e200daefc3f2e33e05bdf1ea7185/mbo_suite3d-0.0.6-py3-none-any.whl", hash = "sha256:66547294eb1952ad6745cf3843d66c432d05baa422b1afe06aefd21e0856abe2", size = 173517, upload-time = "2025-11-05T16:53:51.482Z" },
+    { url = "https://files.pythonhosted.org/packages/39/8d/f9d8ca4578dd8d1b9226dadafe42ec27e8353724d24d922411f9f11d5d60/mbo_suite3d-0.0.7-py3-none-any.whl", hash = "sha256:5d2fb4e48f531c5d7f6aa1fc0ae3c64e231d9434c8d5f5ce2c7158e6e5b021c3", size = 173850, upload-time = "2026-01-13T17:28:51.795Z" },
 ]
 
 [[package]]
@@ -1994,7 +1994,7 @@ requires-dist = [
     { name = "llvmlite", specifier = ">=0.43.0" },
     { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "mbo-fastplotlib", specifier = ">=0.7.3" },
-    { name = "mbo-suite3d", marker = "extra == 'suite3d'", specifier = ">=0.0.6" },
+    { name = "mbo-suite3d", marker = "extra == 'suite3d'", specifier = ">=0.0.7" },
     { name = "mbo-utilities", extras = ["processing", "docs"], marker = "extra == 'all'" },
     { name = "mbo-utilities", extras = ["suite2p", "suite3d", "rastermap", "torch"], marker = "extra == 'processing'" },
     { name = "mkl-fft", specifier = ">=2.0.0" },
