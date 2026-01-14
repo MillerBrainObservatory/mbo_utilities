@@ -789,7 +789,7 @@ def _draw_selection_section(parent: Any):
         parent._saveas_z_stop = num_planes
         parent._saveas_z_step = 1
 
-    # draw selection table using shared component
+    # draw selection table using shared component (includes suffix row)
     tp_parsed, z_start, z_stop, z_step = draw_selection_table(
         parent,
         max_frames,
@@ -797,6 +797,7 @@ def _draw_selection_section(parent: Any):
         tp_attr="_saveas_tp",
         z_attr="_saveas_z",
         id_suffix="_saveas",
+        suffix_attr="_saveas_output_suffix",
     )
 
     # update legacy _selected_planes for compatibility
@@ -812,29 +813,6 @@ def _draw_selection_section(parent: Any):
             parent._saveas_tp_parsed = parse_timepoint_selection(parent._saveas_tp_selection, max_frames)
         except ValueError as e:
             parent._saveas_tp_error = str(e)
-
-    imgui.spacing()
-
-    # output suffix
-    imgui.text("Suffix:")
-    imgui.same_line()
-    imgui.set_next_item_width(hello_imgui.em_size(12))
-    suffix = getattr(parent, "_saveas_output_suffix", "")
-    changed, new_suffix = imgui.input_text("##suffix", suffix)
-    if changed:
-        parent._saveas_output_suffix = new_suffix
-    imgui.same_line()
-    imgui.text_disabled("(?)")
-    if imgui.is_item_hovered():
-        imgui.begin_tooltip()
-        imgui.push_text_wrap_pos(imgui.get_font_size() * 25.0)
-        imgui.text_unformatted(
-            "Optional suffix to append to output filenames.\n"
-            "Leave empty for default naming.\n"
-            "Examples: 'processed', 'session1', 'corrected'"
-        )
-        imgui.pop_text_wrap_pos()
-        imgui.end_tooltip()
 
     imgui.spacing()
 

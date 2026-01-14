@@ -97,6 +97,12 @@ def handle_keyboard_shortcuts(parent: Any):
 
 def handle_arrow_keys(parent: Any):
     """Handle arrow key navigation for T and Z dimensions."""
+    io = imgui.get_io()
+
+    # skip arrow keys when typing in text fields
+    if io.want_text_input:
+        return
+
     if not parent.image_widget or not parent.image_widget.data:
         return
 
@@ -109,7 +115,6 @@ def handle_arrow_keys(parent: Any):
     if not isinstance(shape, tuple) or len(shape) < 3:
         return
 
-    io = imgui.get_io()
     current_indices = list(parent.image_widget.indices)
 
     # jump step: 10 when shift held, 1 otherwise

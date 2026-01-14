@@ -63,6 +63,7 @@ def draw_selection_table(
     tp_attr: str = "_saveas_tp",
     z_attr: str = "_saveas_z",
     id_suffix: str = "",
+    suffix_attr: str | None = None,
 ):
     """
     Draw a selection table for timepoints and z-planes.
@@ -81,6 +82,8 @@ def draw_selection_table(
         Attribute prefix for z-plane state (e.g., "_saveas_z" or "_s2p_z").
     id_suffix : str
         Suffix for imgui IDs to avoid conflicts.
+    suffix_attr : str | None
+        If provided, adds a Suffix row with this attribute name for output suffix.
     """
     # get/set attributes dynamically
     tp_selection = getattr(parent, f"{tp_attr}_selection", f"1:{max_frames}")
@@ -224,6 +227,34 @@ def draw_selection_table(
                 imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "invalid")
             else:
                 imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_planes_selected}/{num_planes}")
+
+        # suffix row (optional)
+        if suffix_attr:
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text("Suffix")
+
+            imgui.table_next_column()
+            imgui.set_next_item_width(INPUT_WIDTH)
+            suffix_val = getattr(parent, suffix_attr, "")
+            changed, new_suffix = imgui.input_text(f"##suffix{id_suffix}", suffix_val)
+            if changed:
+                setattr(parent, suffix_attr, new_suffix)
+
+            imgui.table_next_column()
+            # empty - no "All" button for suffix
+
+            imgui.table_next_column()
+            imgui.text_disabled("(?)")
+            if imgui.is_item_hovered():
+                imgui.begin_tooltip()
+                imgui.push_text_wrap_pos(imgui.get_font_size() * 25.0)
+                imgui.text_unformatted(
+                    "Optional suffix for output filenames.\n"
+                    "Examples: 'processed', 'session1'"
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.end_tooltip()
 
         imgui.end_table()
 
