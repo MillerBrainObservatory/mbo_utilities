@@ -136,3 +136,8 @@ html_theme_options = {
         },
     ],
 }
+
+# force dark mode, hide light/dark toggle
+html_context = {
+    "default_mode": "dark",
+}
