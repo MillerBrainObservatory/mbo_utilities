@@ -60,6 +60,7 @@ from mbo_utilities.gui._save_as import draw_saveas_popup
 from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts
 from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
+from mbo_utilities.gui._help_viewer import draw_help_popup
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
@@ -360,6 +361,11 @@ class PreviewDataWidget(EdgeWindow):
 
         # Options
         self._saveas_background = True
+
+        # Scan-phase correction for save/export (separate from display settings)
+        # defaults to True for save operations
+        self._saveas_fix_phase = True
+        self._saveas_use_fft = True
 
     def _init_viewer(self):
         """Initialize the viewer based on data type."""
@@ -770,6 +776,7 @@ class PreviewDataWidget(EdgeWindow):
         draw_saveas_popup(self)
         draw_process_console_popup(self)
         draw_keybinds_popup(self)
+        draw_help_popup(self)
 
         super().draw_window()
 

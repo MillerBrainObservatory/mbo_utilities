@@ -789,17 +789,17 @@ def _draw_data_options_content(self):
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Scan-Phase Correction")
         imgui.spacing()
 
-        # fix phase
-        phase_changed, phase_value = imgui.checkbox("Fix Phase", self.fix_phase)
+        # fix phase (uses separate _s2p_* settings, defaults True for s2p runs)
+        phase_changed, phase_value = imgui.checkbox("Fix Phase", self._s2p_fix_phase)
         set_tooltip("Apply bidirectional scan-phase correction to output data")
         if phase_changed:
-            self.fix_phase = phase_value
+            self._s2p_fix_phase = phase_value
 
-        # fft subpixel
-        fft_changed, fft_value = imgui.checkbox("Sub-Pixel (FFT)", self.use_fft)
+        # fft subpixel (uses separate _s2p_* settings, defaults True for s2p runs)
+        fft_changed, fft_value = imgui.checkbox("Sub-Pixel (FFT)", self._s2p_use_fft)
         set_tooltip("Use FFT-based sub-pixel registration (slower but more accurate)")
         if fft_changed:
-            self.use_fft = fft_value
+            self._s2p_use_fft = fft_value
 
         # border exclusion
         imgui.set_next_item_width(INPUT_WIDTH)
@@ -1658,6 +1658,8 @@ def run_process(self):
                 "roi": roi,
                 "num_timepoints": self.s2p.target_timepoints,
                 "ops": self.s2p.to_dict(),
+                "fix_phase": self._s2p_fix_phase,
+                "use_fft": self._s2p_use_fft,
                 "s2p_settings": {
                     "keep_raw": self.s2p.keep_raw,
                     "keep_reg": self.s2p.keep_reg,
@@ -1876,6 +1878,8 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
         roi=roi,
         metadata=defaults,
         num_frames=self.s2p.target_timepoints,
+        fix_phase=self._s2p_fix_phase,
+        use_fft=self._s2p_use_fft,
     )
 
     # Use run_plane instead of run_plane_bin - it handles initialization properly

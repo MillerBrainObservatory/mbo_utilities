@@ -301,9 +301,10 @@ def _draw_options_popup(parent: Any):
             imgui.end_disabled()
 
         # Phase correction: only show if data supports it
+        # uses separate _saveas_* settings (default True) instead of display settings
         if features.get("phase_correction", False):
             fix_phase_changed, fix_phase_value = imgui.checkbox(
-                "Fix Scan Phase", parent.fix_phase
+                "Fix Scan Phase", parent._saveas_fix_phase
             )
             imgui.same_line()
             imgui.text_disabled("(?)")
@@ -314,10 +315,10 @@ def _draw_options_popup(parent: Any):
                 imgui.pop_text_wrap_pos()
                 imgui.end_tooltip()
             if fix_phase_changed:
-                parent.fix_phase = fix_phase_value
+                parent._saveas_fix_phase = fix_phase_value
 
             use_fft_changed, use_fft_value = imgui.checkbox(
-                "Subpixel Phase Correction", parent.use_fft
+                "Subpixel Phase Correction", parent._saveas_use_fft
             )
             imgui.same_line()
             imgui.text_disabled("(?)")
@@ -330,7 +331,7 @@ def _draw_options_popup(parent: Any):
                 imgui.pop_text_wrap_pos()
                 imgui.end_tooltip()
             if use_fft_changed:
-                parent.use_fft = use_fft_value
+                parent._saveas_use_fft = use_fft_value
 
         parent._debug = checkbox_with_tooltip(
             "Debug",
@@ -1056,9 +1057,9 @@ def _draw_save_button(parent: Any):
                     "debug": parent._debug,
                     "ext": parent._ext,
                     "target_chunk_mb": parent._saveas_chunk_mb,
-                    # scan-phase correction settings
-                    "fix_phase": parent.fix_phase,
-                    "use_fft": parent.use_fft,
+                    # scan-phase correction settings (separate from display)
+                    "fix_phase": parent._saveas_fix_phase,
+                    "use_fft": parent._saveas_use_fft,
                     "phase_upsample": parent.phase_upsample,
                     "border": parent.border,
                     "register_z": parent._register_z,
@@ -1113,8 +1114,8 @@ def _draw_save_button(parent: Any):
                         "planes": save_planes,
                         "frames": frames,
                         "rois": rois,
-                        "fix_phase": parent.fix_phase,
-                        "use_fft": parent.use_fft,
+                        "fix_phase": parent._saveas_fix_phase,
+                        "use_fft": parent._saveas_use_fft,
                         "register_z": parent._register_z,
                         "metadata": metadata_overrides if metadata_overrides else {},
                         "kwargs": {

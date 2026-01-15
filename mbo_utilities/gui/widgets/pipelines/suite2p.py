@@ -68,6 +68,10 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._show_plane_popup = False
         self._parallel_processing = False
         self._max_parallel_jobs = 2
+
+        # scan-phase correction for suite2p run (separate from display, default True)
+        self._s2p_fix_phase = True
+        self._s2p_use_fft = True
         self._savepath_flash_start = None
         self._show_savepath_popup = False
 
