@@ -88,6 +88,16 @@ def handle_keyboard_shortcuts(parent: Any):
         parent.logger.info("Shortcut: '/' (Keybinds)")
         parent._show_keybinds_popup = not getattr(parent, "_show_keybinds_popup", False)
 
+    # ?: show help popup (shift + / = ?)
+    if not io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.slash, False):
+        parent.logger.info("Shortcut: '?' (Help)")
+        parent._show_help_popup = True
+
+    # F1: show help popup
+    if imgui.is_key_pressed(imgui.Key.f1, False):
+        parent.logger.info("Shortcut: 'F1' (Help)")
+        parent._show_help_popup = True
+
     # arrow keys for slider dimensions (only when data is loaded)
     try:
         handle_arrow_keys(parent)
