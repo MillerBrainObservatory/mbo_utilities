@@ -221,52 +221,37 @@ class SharedDataModel(QObject):
 
         plane_dir = Path(plane_dir)
         self._plane_dir = plane_dir
-        print(f"[SharedDataModel] plane_dir: {plane_dir}")
 
         # load ops first to get save_path
         ops_path = plane_dir / "ops.npy"
         if ops_path.exists():
-            print(f"[SharedDataModel] loading ops from: {ops_path}")
             ops_arr = load_npy(ops_path)
             self._ops = ops_arr.item() if ops_arr.ndim == 0 else ops_arr
             save_path = Path(self._ops.get("save_path", plane_dir))
             if not save_path.exists():
                 save_path = plane_dir
         else:
-            print(f"[SharedDataModel] ops.npy not found at {ops_path}")
             self._ops = {}
             save_path = plane_dir
 
         self._save_path = save_path
-        print(f"[SharedDataModel] save_path: {save_path}")
 
         # load arrays
         stat_path = save_path / "stat.npy"
         if stat_path.exists():
-            print(f"[SharedDataModel] loading stat from: {stat_path}")
             self._stat = load_npy(stat_path)
-            print(f"[SharedDataModel] stat loaded: {len(self._stat)} ROIs")
-        else:
-            print(f"[SharedDataModel] stat.npy not found at {stat_path}")
 
         iscell_path = save_path / "iscell.npy"
         if iscell_path.exists():
-            print(f"[SharedDataModel] loading iscell from: {iscell_path}")
             self._iscell = load_npy(iscell_path)
             self._iscell_original = self._iscell.copy()
-        else:
-            print(f"[SharedDataModel] iscell.npy not found at {iscell_path}")
 
         f_path = save_path / "F.npy"
         if f_path.exists():
-            print(f"[SharedDataModel] loading F from: {f_path}")
             self._F = load_npy(f_path)
-        else:
-            print(f"[SharedDataModel] F.npy not found at {f_path}")
 
         fneu_path = save_path / "Fneu.npy"
         if fneu_path.exists():
-            print(f"[SharedDataModel] loading Fneu from: {fneu_path}")
             self._Fneu = load_npy(fneu_path)
 
         # clear cached metrics
@@ -277,7 +262,6 @@ class SharedDataModel(QObject):
         self._merge_list = []
 
         # emit signal
-        print("[SharedDataModel] emitting data_loaded signal")
         self.data_loaded.emit()
 
     def _clear_cached_metrics(self):
