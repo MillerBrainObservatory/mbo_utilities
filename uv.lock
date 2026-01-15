@@ -1969,7 +1969,9 @@ torch = [
 [package.dev-dependencies]
 dev = [
     { name = "graphviz" },
+    { name = "pillow" },
     { name = "pyautogui" },
+    { name = "pygetwindow" },
     { name = "pytest" },
 ]
 
@@ -2044,7 +2046,9 @@ provides-extras = ["suite2p", "suite3d", "rastermap", "napari", "torch", "proces
 [package.metadata.requires-dev]
 dev = [
     { name = "graphviz", specifier = ">=0.21" },
+    { name = "pillow", specifier = ">=12.1.0" },
     { name = "pyautogui", specifier = ">=0.9.54" },
+    { name = "pygetwindow", specifier = ">=0.0.9" },
     { name = "pytest", specifier = ">=8.4.2" },
 ]
 
