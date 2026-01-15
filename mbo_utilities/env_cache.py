@@ -84,14 +84,52 @@ def clear_all_caches() -> int:
     return count
 
 
-def is_cache_valid(cache: dict | None, max_age_hours: int = 24) -> bool:
-    """check if cache is still valid (not expired, same mbo version)."""
+def get_env_fingerprint() -> str:
+    """generate fingerprint of installed packages to detect env changes.
+
+    uses a hash of package names + versions for key dependencies.
+    if this changes, the environment has been modified.
+    """
+    try:
+        from importlib.metadata import version, PackageNotFoundError
+        # check specific packages directly (faster than iterating all)
+        key_packages = [
+            "mbo-utilities", "torch", "cupy", "suite3d", "lbm-suite2p-python",
+            "rastermap", "imgui-bundle", "fastplotlib", "pyqt6", "napari",
+        ]
+        installed = []
+        for pkg in key_packages:
+            try:
+                ver = version(pkg)
+                installed.append(f"{pkg}:{ver}")
+            except PackageNotFoundError:
+                pass  # not installed
+        fingerprint = hashlib.md5("|".join(installed).encode()).hexdigest()[:12]
+        return fingerprint
+    except Exception:
+        return "unknown"
+
+
+def is_cache_valid(cache: dict | None, max_age_hours: int = 168) -> bool:
+    """check if cache is still valid.
+
+    cache is valid if:
+    - env fingerprint matches (packages haven't changed)
+    - mbo version matches
+    - not older than max_age_hours (default 7 days)
+    """
     if not cache:
         return False
     try:
         from mbo_utilities import __version__
+        # check mbo version
         if cache.get("mbo_version") != __version__:
-            return False  # invalidate on version change
+            return False
+        # check env fingerprint (detects package installs/updates)
+        cached_fingerprint = cache.get("env_fingerprint")
+        if cached_fingerprint and cached_fingerprint != get_env_fingerprint():
+            return False
+        # check age (7 day default - fingerprint handles most changes)
         updated = datetime.fromisoformat(cache["last_updated"])
         return datetime.now() - updated < timedelta(hours=max_age_hours)
     except Exception:
@@ -155,8 +193,98 @@ def build_full_cache() -> dict:
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "install_type": _detect_install_type(),
         "packages": _check_all_packages(),
+        "env_fingerprint": get_env_fingerprint(),
     }
     return cache
+
+
+def build_full_cache_with_install_status() -> dict:
+    """build complete cache including full install status (slower, includes GPU checks)."""
+    from mbo_utilities import __version__
+    from mbo_utilities.install import check_installation
+
+    # run full installation check
+    status = check_installation()
+
+    # serialize install status to cache
+    cache = {
+        "mbo_version": __version__,
+        "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        "install_type": _detect_install_type(),
+        "packages": _check_all_packages(),
+        "env_fingerprint": get_env_fingerprint(),
+        "install_status": _serialize_install_status(status),
+    }
+    return cache
+
+
+def _serialize_install_status(status) -> dict:
+    """serialize InstallStatus to dict for caching."""
+    return {
+        "mbo_version": status.mbo_version,
+        "python_version": status.python_version,
+        "cuda_info": {
+            "nvcc_version": status.cuda_info.nvcc_version,
+            "driver_version": status.cuda_info.driver_version,
+            "pytorch_cuda": status.cuda_info.pytorch_cuda,
+            "cupy_cuda": status.cuda_info.cupy_cuda,
+            "device_name": status.cuda_info.device_name,
+            "device_count": status.cuda_info.device_count,
+        },
+        "features": [
+            {
+                "name": f.name,
+                "status": f.status.value,
+                "version": f.version,
+                "message": f.message,
+                "gpu_ok": f.gpu_ok,
+            }
+            for f in status.features
+        ],
+    }
+
+
+def get_cached_install_status():
+    """get cached InstallStatus object, or None if cache invalid."""
+    cache = load_cache()
+    if not is_cache_valid(cache):
+        return None
+    cached_status = cache.get("install_status")
+    if not cached_status:
+        return None
+    return _deserialize_install_status(cached_status)
+
+
+def _deserialize_install_status(data: dict):
+    """deserialize dict to InstallStatus object."""
+    from mbo_utilities.install import InstallStatus, FeatureStatus, Status, CudaInfo
+
+    cuda_data = data.get("cuda_info", {})
+    cuda_info = CudaInfo(
+        nvcc_version=cuda_data.get("nvcc_version"),
+        driver_version=cuda_data.get("driver_version"),
+        pytorch_cuda=cuda_data.get("pytorch_cuda"),
+        cupy_cuda=cuda_data.get("cupy_cuda"),
+        device_name=cuda_data.get("device_name"),
+        device_count=cuda_data.get("device_count", 0),
+    )
+
+    features = []
+    for f in data.get("features", []):
+        features.append(FeatureStatus(
+            name=f["name"],
+            status=Status(f["status"]),
+            version=f.get("version", ""),
+            message=f.get("message", ""),
+            gpu_ok=f.get("gpu_ok"),
+        ))
+
+    return InstallStatus(
+        mbo_version=data.get("mbo_version", ""),
+        python_version=data.get("python_version", ""),
+        cuda_info=cuda_info,
+        features=features,
+    )
 
 
 def _detect_install_type() -> str:

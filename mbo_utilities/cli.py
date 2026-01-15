@@ -314,9 +314,9 @@ def main(
         return
 
     if check_install:
-        # force cache rebuild when checking install
-        from mbo_utilities.env_cache import build_full_cache, save_cache
-        cache = build_full_cache()
+        # force full cache rebuild including install status
+        from mbo_utilities.env_cache import build_full_cache_with_install_status, save_cache
+        cache = build_full_cache_with_install_status()
         save_cache(cache)
         from mbo_utilities.gui.run_gui import _check_installation
         _check_installation()
