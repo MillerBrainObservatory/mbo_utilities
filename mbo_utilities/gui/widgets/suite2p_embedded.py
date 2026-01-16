@@ -106,17 +106,21 @@ class Suite2pEmbedded(QWidget):
 
     def _connect_model(self):
         """Connect to SharedDataModel signals."""
+        print("[Suite2pEmbedded] connecting model signals")
         self.model.roi_selected.connect(self._on_roi_selected)
         self.model.iscell_changed.connect(self._on_iscell_changed)
         self.model.iscell_batch_changed.connect(self._on_iscell_batch_changed)
         self.model.data_loaded.connect(self._on_data_loaded)
+        print("[Suite2pEmbedded] signals connected")
 
     def _on_data_loaded(self):
         """Handle new data load."""
+        print("[Suite2pEmbedded] _on_data_loaded called")
         self._init_views()
         self._init_masks()
         self._update_labels()
         self._update_trace()
+        print("[Suite2pEmbedded] _on_data_loaded done")
 
     def _on_roi_selected(self, roi_idx):
         """Handle ROI selection change."""
@@ -124,9 +128,11 @@ class Suite2pEmbedded(QWidget):
 
     def _on_iscell_changed(self, roi_idx, is_cell):
         """Handle single cell toggle."""
-        print(f"[Suite2pEmbedded] _on_iscell_changed: roi={roi_idx}, is_cell={is_cell}")
-        self._flip_roi(roi_idx, is_cell)
+        print(f"[_on_iscell_changed] roi_idx={roi_idx}, is_cell={is_cell}")
+        # full redraw is simpler and more reliable than partial updates
+        self._init_masks()
         self._update_labels()
+        print("[_on_iscell_changed] done")
 
     def _on_iscell_batch_changed(self):
         """Handle batch iscell update (from slider filtering)."""
@@ -164,14 +170,11 @@ class Suite2pEmbedded(QWidget):
 
     def _init_masks(self):
         """Initialize ROI masks using suite2p-style layered approach."""
-        print("[Suite2pEmbedded] _init_masks called")
         if self.model.stat is None:
-            print("[Suite2pEmbedded] stat is None, skipping")
             return
 
         stat = self.model.stat
         ncells = len(stat)
-        print(f"[Suite2pEmbedded] initializing masks for {ncells} ROIs, Ly={self.Ly}, Lx={self.Lx}")
 
         # suite2p uses 3 layers for overlapping ROIs
         # iROI: pixel -> ROI index (-1 if none)
@@ -235,11 +238,6 @@ class Suite2pEmbedded(QWidget):
         self.rois["LamMean"] = lam_mean
         self.rois["LamNorm"] = np.clip(0.75 * self.rois["Lam"][:, 0] / lam_mean, 0, 1)
 
-        # debug: count ROIs in each panel
-        cells_in_panel0 = np.sum(self.rois["iROI"][0, 0] >= 0)
-        cells_in_panel1 = np.sum(self.rois["iROI"][1, 0] >= 0)
-        print(f"[Suite2pEmbedded] pixels with ROIs: panel0={cells_in_panel0}, panel1={cells_in_panel1}")
-
         # draw RGB masks
         self._draw_all_masks()
 
@@ -269,8 +267,10 @@ class Suite2pEmbedded(QWidget):
 
     def _flip_roi(self, roi_idx, to_cells):
         """Flip ROI between panels (like suite2p's flip_roi)."""
-        print(f"[Suite2pEmbedded] _flip_roi: roi={roi_idx}, to_cells={to_cells}")
         if self.model.stat is None:
+            return
+
+        if "iROI" not in self.rois or "LamMean" not in self.rois:
             return
 
         stat = self.model.stat
@@ -311,21 +311,21 @@ class Suite2pEmbedded(QWidget):
 
     def _remove_roi_from_panel(self, roi_idx, panel, ypix, xpix):
         """Remove ROI from panel and push up layers."""
-        # find where this ROI is in each layer
-        for layer in range(3):
-            mask = self.rois["iROI"][panel, layer, ypix, xpix] == roi_idx
-            if mask.any():
-                yp = ypix[mask]
-                xp = xpix[mask]
-                # shift layers up
-                if layer < 2:
-                    self.rois["iROI"][panel, layer, yp, xp] = self.rois["iROI"][panel, layer + 1, yp, xp]
-                    self.rois["Lam"][panel, layer, yp, xp] = self.rois["Lam"][panel, layer + 1, yp, xp]
-                    if layer < 1:
-                        self.rois["iROI"][panel, layer + 1, yp, xp] = self.rois["iROI"][panel, 2, yp, xp]
-                        self.rois["Lam"][panel, layer + 1, yp, xp] = self.rois["Lam"][panel, 2, yp, xp]
-                self.rois["iROI"][panel, 2, yp, xp] = -1
-                self.rois["Lam"][panel, 2, yp, xp] = 0
+        # for each pixel, find which layer contains this ROI and shift up
+        for idx in range(len(ypix)):
+            yp, xp = ypix[idx], xpix[idx]
+
+            # find which layer has this ROI
+            for layer in range(3):
+                if self.rois["iROI"][panel, layer, yp, xp] == roi_idx:
+                    # shift all subsequent layers up
+                    for l in range(layer, 2):
+                        self.rois["iROI"][panel, l, yp, xp] = self.rois["iROI"][panel, l + 1, yp, xp]
+                        self.rois["Lam"][panel, l, yp, xp] = self.rois["Lam"][panel, l + 1, yp, xp]
+                    # clear bottom layer
+                    self.rois["iROI"][panel, 2, yp, xp] = -1
+                    self.rois["Lam"][panel, 2, yp, xp] = 0
+                    break  # roi found and removed, done with this pixel
 
         # update Sroi
         self.rois["Sroi"][panel, ypix, xpix] = self.rois["iROI"][panel, 0, ypix, xpix] >= 0
@@ -415,21 +415,27 @@ class Suite2pEmbedded(QWidget):
         is_right_click : bool
             Whether this was a right click.
         """
+        print(f"[click] panel={panel_idx}, x={x}, y={y}, right={is_right_click}")
+
         if "iROI" not in self.rois:
+            print("[click] no iROI")
             return
 
         # get ROI at this position (top layer)
         roi_idx = self.rois["iROI"][panel_idx, 0, y, x]
+        print(f"[click] roi_idx={roi_idx}")
 
         if roi_idx < 0:
             return
 
+        # select the ROI
+        self.model.selected_roi = roi_idx
+
         if is_right_click:
             # toggle cell status
+            print(f"[click] calling toggle_cell({roi_idx})")
             self.model.toggle_cell(roi_idx)
-        else:
-            # just select
-            self.model.selected_roi = roi_idx
+            print(f"[click] toggle_cell returned")
 
         self.cell_clicked.emit(roi_idx, is_right_click)
 

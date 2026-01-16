@@ -361,20 +361,23 @@ class SharedDataModel(QObject):
         roi_idx : int
             ROI index to toggle.
         """
+        print(f"[toggle_cell] roi_idx={roi_idx}")
         if self._iscell is None:
+            print("[toggle_cell] iscell is None")
             return
 
         was_cell = self.is_cell(roi_idx)
         new_val = 0.0 if was_cell else 1.0
+        print(f"[toggle_cell] was_cell={was_cell}, new_val={new_val}")
 
         if self._iscell.ndim == 2:
             self._iscell[roi_idx, 0] = new_val
         else:
             self._iscell[roi_idx] = new_val
 
-        print(f"[SharedDataModel] toggle_cell: roi={roi_idx}, was_cell={was_cell}, now_cell={not was_cell}")
-        print(f"[SharedDataModel] emitting iscell_changed signal")
+        print(f"[toggle_cell] emitting iscell_changed({roi_idx}, {not was_cell})")
         self.iscell_changed.emit(roi_idx, not was_cell)
+        print("[toggle_cell] signal emitted")
 
     def set_cell(self, roi_idx, is_cell):
         """Set cell status for an ROI.

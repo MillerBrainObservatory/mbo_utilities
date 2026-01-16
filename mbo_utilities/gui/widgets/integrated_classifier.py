@@ -536,16 +536,21 @@ class IntegratedClassifierWindow(QMainWindow):
             Path to plane directory.
         """
         plane_dir = Path(plane_dir)
-        print(f"Loading data from: {plane_dir}")
+        print(f"[IntegratedClassifierWindow] load_data: {plane_dir}")
 
         try:
+            print("[IntegratedClassifierWindow] calling model.load_data...")
             self.model.load_data(plane_dir)
-            print(f"Loaded {self.model.n_rois} ROIs, {self.model.n_cells} cells")
+            print("[IntegratedClassifierWindow] model.load_data returned")
             self.setWindowTitle(f"ROI Classifier - {plane_dir.name}")
+            self.statusBar().showMessage(
+                f"Loaded {self.model.n_rois} ROIs, {self.model.n_cells} cells", 5000
+            )
         except Exception as e:
-            print(f"Error loading data: {e}")
+            print(f"[IntegratedClassifierWindow] error: {e}")
             import traceback
             traceback.print_exc()
+            self.statusBar().showMessage(f"Error loading: {e}", 5000)
 
     def _on_load(self):
         """Handle File > Load."""
