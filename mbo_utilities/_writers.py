@@ -14,6 +14,7 @@ import h5py
 from . import log
 from ._parsing import _make_json_serializable, _convert_paths_to_strings
 from .util import load_npy
+from .metadata.io import _build_ome_metadata
 
 from tqdm.auto import tqdm
 
@@ -1037,8 +1038,12 @@ def _write_volumetric_tiff(
     Ly, Lx = slicing.spatial_shape
 
     # check for z-registration shift application (shared logic)
+    if debug:
+        logger.info(f"  TIFF metadata: apply_shift={metadata.get('apply_shift')}, s3d-job={metadata.get('s3d-job')}")
     apply_shift, plane_shifts, padding = load_registration_shifts(metadata, debug)
     pt, pb, pl, pr = padding
+    if debug:
+        logger.info(f"  Registration result: apply_shift={apply_shift}, has_shifts={plane_shifts is not None}")
 
     # compute padded output dimensions if shifts are applied
     if apply_shift and plane_shifts is not None:
@@ -1218,6 +1223,7 @@ def _write_volumetric_zarr(
         OutputFilename,
         ArraySlicing,
         read_chunk,
+        get_dims,
     )
     from mbo_utilities.arrays.features._pyramid import (
         PyramidConfig,
@@ -1228,6 +1234,9 @@ def _write_volumetric_zarr(
 
     if metadata is None:
         metadata = {}
+
+    # get dimension labels from array (canonical form)
+    dims = get_dims(data)
 
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
@@ -1362,9 +1371,14 @@ def _write_volumetric_zarr(
         overwrite=True,
     )
 
-    # build OME-NGFF metadata using OutputMetadata
-    ome_meta = out_meta.to_ome_ngff(dims=("T", "Z", "Y", "X"))
+    # build OME-NGFF metadata using OutputMetadata with array's dims
+    # for 4D output, use TZYX ordering
+    output_dims = ("T", "Z", "Y", "X")
+    ome_meta = out_meta.to_ome_ngff(dims=output_dims)
     base_scale = ome_meta["coordinateTransformations"][0]["scale"]
+
+    # store dims in metadata for readers
+    md["dims"] = output_dims
 
     # build full OME-NGFF v0.5 structure with pyramid datasets
     if pyramid_levels:
@@ -1421,6 +1435,8 @@ def _write_volumetric_zarr(
 
     # set napari-compatible scale on level 0 array
     z.attrs["scale"] = base_scale
+    # set dimension_names for NGFF 0.5 compliance (lowercase)
+    z.attrs["dimension_names"] = [d.lower() for d in output_dims]
 
     # write data in chunks
     pbar = None
@@ -1544,114 +1560,6 @@ def _write_volumetric_zarr(
     return filename
 
 
-def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
-    """
-    Build OME-Zarr NGFF v0.5 compliant metadata.
-
-    Parameters
-    ----------
-    shape : tuple
-        Shape of the array (T, Y, X) or (T, Z, Y, X)
-    metadata : dict
-        Metadata dict containing optional keys:
-        - pixel_resolution : tuple (x, y) pixel size in micrometers
-        - frame_rate : float, sampling rate in Hz
-        - fs : float, alias for frame_rate
-        - dx, dy : float, pixel sizes in micrometers
-        - dz : float, z-step in micrometers (for 4D data)
-        - z_step : float, alias for dz
-        - voxel_size : tuple (dx, dy, dz) in micrometers
-
-    Returns
-    -------
-    dict
-        OME-Zarr NGFF v0.5 metadata dictionary ready for zarr.attrs.update()
-    """
-    from mbo_utilities.metadata import get_voxel_size, get_param
-
-    ndim = len(shape)
-
-    # extract spatial scales using standardized resolution getter
-    vs = get_voxel_size(metadata)
-    pixel_x = vs.dx
-    pixel_y = vs.dy
-    z_scale = vs.dz
-
-    # extract temporal scale using canonical parameter access
-    frame_rate = get_param(metadata, "fs")
-    time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
-
-    # Build axes definition
-    # Order: time (if present) -> channel (if present) -> spatial (z, y, x)
-    axes = []
-
-    if ndim == 3:
-        # Shape is (T, Y, X)
-        axes = [
-            {"name": "t", "type": "time", "unit": "second"},
-            {"name": "y", "type": "space", "unit": "micrometer"},
-            {"name": "x", "type": "space", "unit": "micrometer"},
-        ]
-        scale_values = [time_scale, pixel_y, pixel_x]
-
-    elif ndim == 4:
-        # Shape is (T, Z, Y, X)
-        axes = [
-            {"name": "t", "type": "time", "unit": "second"},
-            {"name": "z", "type": "space", "unit": "micrometer"},
-            {"name": "y", "type": "space", "unit": "micrometer"},
-            {"name": "x", "type": "space", "unit": "micrometer"},
-        ]
-        scale_values = [time_scale, z_scale, pixel_y, pixel_x]
-
-    else:
-        # Fallback for unexpected dimensions
-        logger.warning(
-            f"Unexpected dimensionality {ndim} for OME-Zarr. "
-            f"OME-Zarr expects 3D (TYX) or 4D (TZYX) data."
-        )
-        axes = [{"name": f"dim_{i}", "type": "space"} for i in range(ndim)]
-        scale_values = [1.0] * ndim
-
-    # Build OME-NGFF v0.5 metadata
-    # coordinateTransformations in each dataset
-    coordinate_transforms = [{"type": "scale", "scale": scale_values}]
-    datasets = [{"path": "0", "coordinateTransformations": coordinate_transforms}]
-
-    multiscales = [
-        {
-            "version": "0.5",
-            "name": metadata.get("name", ""),
-            "axes": axes,
-            "datasets": datasets,
-        }
-    ]
-
-    # v0.5 uses "ome" namespace
-    ome_content = {
-        "version": "0.5",
-        "multiscales": multiscales,
-    }
-
-    # Add optional OMERO rendering metadata if present
-    omero_metadata = {}
-    if "channel_names" in metadata:
-        omero_metadata["channels"] = metadata["channel_names"]
-    if omero_metadata:
-        ome_content["omero"] = omero_metadata
-
-    result = {"ome": ome_content}
-
-    serializable_metadata = _make_json_serializable(metadata)
-    for k, v in serializable_metadata.items():
-        if k == "channel_names":
-            # Already encoded in OME omero section
-            continue
-        result[k] = v
-
-    return result
-
-
 def _write_zarr(
     path,
     data,
@@ -1759,6 +1667,7 @@ def _write_zarr(
             # Build and set OME metadata on the GROUP
             ome_metadata = _build_ome_metadata(
                 shape=(nframes, h, w),
+                dtype=data.dtype,
                 metadata=metadata or {},
             )
 

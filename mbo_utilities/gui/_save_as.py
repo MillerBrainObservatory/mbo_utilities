@@ -122,6 +122,12 @@ def draw_saveas_popup(parent: Any):
     if not hasattr(parent, "_saveas_tp_parsed"):
         parent._saveas_tp_parsed = None
 
+    # ensure phase correction defaults (fix_phase=True for save, use_fft=True)
+    if not hasattr(parent, "_saveas_fix_phase"):
+        parent._saveas_fix_phase = True
+    if not hasattr(parent, "_saveas_use_fft"):
+        parent._saveas_use_fft = True
+
     # set initial size (resizable by user)
     imgui.set_next_window_size(imgui.ImVec2(500, 550), imgui.Cond_.first_use_ever)
 
@@ -249,12 +255,19 @@ def draw_saveas_popup(parent: Any):
 
 def _draw_options_popup(parent: Any):
     """Draw the options popup for advanced save settings."""
+    # track when options popup is about to open (for resetting defaults)
     if parent._saveas_options_open:
         imgui.open_popup("Save Options")
         parent._saveas_options_open = False
+        # mark that we need to reset defaults on next frame when popup actually opens
+        parent._saveas_options_needs_reset = True
 
     imgui.set_next_window_size(imgui.ImVec2(350, 400), imgui.Cond_.first_use_ever)
     if imgui.begin_popup("Save Options"):
+        # reset defaults on first frame popup is actually visible
+        if getattr(parent, "_saveas_options_needs_reset", False):
+            parent._saveas_fix_phase = True
+            parent._saveas_options_needs_reset = False
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Options")
         imgui.dummy(imgui.ImVec2(0, 5))
 

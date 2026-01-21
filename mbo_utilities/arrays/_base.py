@@ -319,6 +319,11 @@ def _imwrite_base(
     # get metadata
     md = dict(arr.metadata) if arr.metadata else {}
 
+    if debug:
+        from mbo_utilities import log
+        _logger = log.get("writers")
+        _logger.info(f"_imwrite_base: apply_shift={md.get('apply_shift')}, s3d-job={md.get('s3d-job')}")
+
     # merge metadata overrides if present
     if "metadata_overrides" in kwargs:
         overrides = kwargs.pop("metadata_overrides", None)

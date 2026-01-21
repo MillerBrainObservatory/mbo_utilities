@@ -27,13 +27,12 @@ DIM_DESCRIPTIONS = {
     "B": "batch",
 }
 
-# default dimension mappings by ndim
-# these are the "slider dimensions" - dims that get sliders in viewers
+# default dimension mappings by ndim (ngff 0.5 compliant: T -> C -> Z -> Y -> X)
 DEFAULT_DIMS = {
     2: ("Y", "X"),
     3: ("T", "Y", "X"),
     4: ("T", "Z", "Y", "X"),
-    5: ("T", "Z", "C", "Y", "X"),
+    5: ("T", "C", "Z", "Y", "X"),  # ngff: time -> channel -> space
 }
 
 # alternative common dimension orderings
@@ -47,10 +46,10 @@ KNOWN_ORDERINGS = {
     "ZTYX": ("Z", "T", "Y", "X"),
     "TCYX": ("T", "C", "Y", "X"),
     "CZYX": ("C", "Z", "Y", "X"),
-    # 5D alternatives
+    # 5D alternatives (ngff compliant: T -> C -> Z -> Y -> X)
+    "TCZYX": ("T", "C", "Z", "Y", "X"),
     "TZCYX": ("T", "Z", "C", "Y", "X"),
-    "TCZVX": ("T", "C", "Z", "Y", "X"),
-    "sTZYX": ("S", "T", "Z", "Y", "X"),
+    "STZYX": ("S", "T", "Z", "Y", "X"),
     "VTZYX": ("V", "T", "Z", "Y", "X"),
 }
 
@@ -314,9 +313,12 @@ def infer_dims(ndim: int) -> tuple[str, ...]:
     return DEFAULT_DIMS[ndim]
 
 
-def get_dims(arr) -> tuple[str, ...]:
+def get_dims(arr, *, normalize: bool = True) -> tuple[str, ...]:
     """
-    Get dimension labels from an array.
+    Get dimension labels from an array in canonical form.
+
+    Always returns uppercase single-letter labels (T, Z, C, Y, X, etc.)
+    regardless of how the array's dims property is defined.
 
     Checks for:
     1. DimLabels feature (_dim_labels attribute)
@@ -327,24 +329,38 @@ def get_dims(arr) -> tuple[str, ...]:
     ----------
     arr : array-like
         array with shape and optionally dims
+    normalize : bool, default True
+        if True, normalize descriptive names to canonical single-letter form
 
     Returns
     -------
     tuple[str, ...]
-        dimension labels
+        dimension labels in canonical form (e.g., ("T", "Z", "Y", "X"))
+
+    Examples
+    --------
+    >>> arr.dims  # LBMArray
+    ('timepoints', 'z-planes', 'Y', 'X')
+    >>> get_dims(arr)
+    ('T', 'Z', 'Y', 'X')
     """
+    from mbo_utilities.arrays.features._dim_tags import normalize_dims
+
     # check for DimLabels feature
     if hasattr(arr, "_dim_labels") and arr._dim_labels is not None:
-        return arr._dim_labels.value
+        dims = arr._dim_labels.value
+        return normalize_dims(dims) if normalize else dims
 
     # check for dims property
     if hasattr(arr, "dims") and arr.dims is not None:
         dims = arr.dims
         if isinstance(dims, str):
-            return parse_dims(dims, arr.ndim)
-        return tuple(dims)
+            dims = parse_dims(dims, arr.ndim)
+        else:
+            dims = tuple(dims)
+        return normalize_dims(dims) if normalize else dims
 
-    # fallback to inference
+    # fallback to inference (already canonical)
     return infer_dims(arr.ndim)
 
 
