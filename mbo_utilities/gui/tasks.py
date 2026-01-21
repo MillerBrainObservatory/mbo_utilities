@@ -299,6 +299,8 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     num_timepoints = args.get("num_timepoints")
     ops = args.get("ops", {})
     s2p_settings = args.get("s2p_settings", {})
+    fix_phase = args.get("fix_phase", True)  # default True for s2p runs
+    use_fft = args.get("use_fft", True)  # default True for s2p runs
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -377,7 +379,9 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
                 planes=write_planes_arg, # 1-indexed or None if pre-sliced
                 num_frames=num_timepoints,
                 output_name="data_raw.bin",
-                metadata=current_md
+                metadata=current_md,
+                fix_phase=fix_phase,
+                use_fft=use_fft,
             )
 
             # Reload ops from disk to get Lx, Ly, and other metadata added by imwrite

@@ -37,6 +37,7 @@ def imwrite(
     ext: str = ".tiff",
     planes: list | tuple | int | None = None,
     frames: list | tuple | int | None = None,
+    channels: list | tuple | int | None = None,
     num_frames: int | None = None,
     register_z: bool = False,
     roi_mode: RoiMode | str = RoiMode.concat_y,
@@ -90,6 +91,13 @@ def imwrite(
         - int : Single frame, e.g. `frames=100` exports only frame 100
         - list/tuple : Specific frames, e.g. `frames=[1, 50, 100]`
         - range : Range of frames, e.g. `frames=list(range(1, 101))`
+
+    channels : list | tuple | int | None, optional
+        Color channels to export (1-based indexing). Only applies to arrays
+        with a C dimension (e.g., multi-color imaging). Options:
+        - None (default) : Export all channels
+        - int : Single channel, e.g. `channels=1`
+        - list/tuple : Specific channels, e.g. `channels=[1, 2]`
 
     roi_mode : RoiMode | str, default=RoiMode.concat_y
         Mode for handling multi-ROI data. Options:
@@ -376,6 +384,7 @@ def imwrite(
             progress_callback=progress_callback,
             planes=planes,
             frames=frames,
+            channels=channels,
             debug=debug,
             show_progress=show_progress,
             output_name=output_name,
@@ -431,6 +440,12 @@ def imwrite(
     if frames is not None:
         processing_extra["frames"] = (
             list(frames) if hasattr(frames, "__iter__") else frames
+        )
+
+    # Add channels info if specified
+    if channels is not None:
+        processing_extra["channels"] = (
+            list(channels) if hasattr(channels, "__iter__") else channels
         )
 
     # Collect output files

@@ -144,7 +144,27 @@ class FileDialog:
             return
 
         def _run_check():
-            self._install_status = check_installation()
+            # try to use fully cached install status first
+            try:
+                from mbo_utilities.env_cache import (
+                    get_cached_install_status,
+                    build_full_cache_with_install_status,
+                    save_cache,
+                )
+                cached_status = get_cached_install_status()
+                if cached_status:
+                    # cache is valid - use it directly, no need to recompute
+                    self._install_status = cached_status
+                    return
+
+                # cache invalid or missing - run full check and cache result
+                cache = build_full_cache_with_install_status()
+                save_cache(cache)
+                # get the status we just built
+                self._install_status = get_cached_install_status() or check_installation()
+            except Exception:
+                # fallback to regular check on any error
+                self._install_status = check_installation()
 
         self._check_thread = threading.Thread(target=_run_check, daemon=True)
         self._check_thread.start()
@@ -160,7 +180,9 @@ class FileDialog:
 
     def _draw_version_status(self):
         """Draw version with update status inline."""
-        version = self._install_status.mbo_version if self._install_status else "?"
+        # get version immediately from __version__ (don't wait for install check)
+        from mbo_utilities import __version__
+        version = __version__
 
         checking = self.upgrade_manager.check_status == CheckStatus.CHECKING
         done = self.upgrade_manager.check_status == CheckStatus.DONE

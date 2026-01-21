@@ -9,6 +9,7 @@ Provides ROI filtering and visualization:
 """
 
 import numpy as np
+import shutil
 import time
 from pathlib import Path
 from imgui_bundle import imgui, implot, portable_file_dialogs as pfd
@@ -85,6 +86,10 @@ class DiagnosticsWidget:
         self._save_cooldown = 0.5  # Seconds to wait after save before checking for changes
         self._save_status_msg = ""  # Status message to display
         self._save_status_time = 0  # When status was set
+
+        # training export settings
+        self._training_dir = None
+        self._exported_datasets = []  # list of paths to exported training data
 
     def load_results(self, plane_dir: Path):
         """Load suite2p results from a plane directory."""
@@ -474,6 +479,40 @@ class DiagnosticsWidget:
                 "Suite2p GUI doesn't auto-refresh from disk."
             )
 
+        # classifier training export
+        imgui.separator()
+        imgui.text("Classifier Training")
+
+        if imgui.button("Export Training"):
+            self._export_for_training()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("export current iscell + stat features for classifier training")
+
+        imgui.same_line()
+        if imgui.button("Mark Curated"):
+            self._mark_as_curated()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("copy iscell.npy and stat.npy to training folder")
+
+        # show training status
+        if self._training_dir:
+            imgui.text_colored(
+                imgui.ImVec4(0.5, 0.8, 0.5, 1.0),
+                f"Training: {self._training_dir.name}"
+            )
+
+        if len(self._exported_datasets) > 0:
+            imgui.text(f"Datasets: {len(self._exported_datasets)}")
+
+            if imgui.button("Build Classifier"):
+                self._build_classifier()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("build classifier from all exported datasets")
+
+            imgui.same_line()
+            if imgui.button("Clear"):
+                self._exported_datasets = []
+
     def _draw_right_panel(self):
         """Draw right panel with trace and histograms."""
         avail = imgui.get_content_region_avail()
@@ -668,6 +707,124 @@ class DiagnosticsWidget:
             self._save_status_msg = f"Save error: {e}"
             self._save_status_time = time.time()
 
+    def _export_for_training(self):
+        """Export current iscell + stat for classifier training."""
+        if self.stat is None or self.iscell is None:
+            self._save_status_msg = "No data loaded"
+            self._save_status_time = time.time()
+            return
+
+        save_path = getattr(self, "_save_path", self.loaded_path)
+        if save_path is None:
+            return
+
+        # create training subdirectory
+        training_dir = save_path / "classifier_training"
+        training_dir.mkdir(exist_ok=True)
+
+        # extract classifier features (suite2p default: npix_norm, compact, skew)
+        keys = ["npix_norm", "compact", "skew"]
+        n_rois = len(self.stat)
+
+        stats = np.zeros((n_rois, len(keys)), dtype=np.float32)
+        for i, s in enumerate(self.stat):
+            for j, k in enumerate(keys):
+                stats[i, j] = s.get(k, 0.0)
+
+        # get iscell labels
+        if self.iscell.ndim == 2:
+            iscell_labels = self.iscell[:, 0].astype(np.float32)
+        else:
+            iscell_labels = self.iscell.astype(np.float32)
+
+        # save in classifier format
+        training_data = {
+            "stats": stats,
+            "iscell": iscell_labels,
+            "keys": keys,
+            "source_path": str(save_path),
+        }
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        export_path = training_dir / f"training_{timestamp}.npy"
+        np.save(export_path, training_data)
+
+        self._training_dir = training_dir
+        self._exported_datasets.append(export_path)
+        self._save_status_msg = f"Exported: {export_path.name}"
+        self._save_status_time = time.time()
+        print(f"Training data exported to: {export_path}")
+
+    def _mark_as_curated(self):
+        """Mark current iscell.npy as manually curated (copy to training folder)."""
+        save_path = getattr(self, "_save_path", self.loaded_path)
+        if save_path is None:
+            return
+
+        training_dir = save_path / "classifier_training"
+        training_dir.mkdir(exist_ok=True)
+
+        # copy current files
+        for fname in ["iscell.npy", "stat.npy"]:
+            src = save_path / fname
+            if src.exists():
+                dst = training_dir / fname
+                shutil.copy(src, dst)
+
+        self._training_dir = training_dir
+        self._save_status_msg = "Marked as curated"
+        self._save_status_time = time.time()
+        print(f"Curated data saved to: {training_dir}")
+
+    def _build_classifier(self):
+        """Build classifier from exported training datasets."""
+        if len(self._exported_datasets) == 0:
+            self._save_status_msg = "No training data exported"
+            self._save_status_time = time.time()
+            return
+
+        # collect all training data
+        all_stats = []
+        all_iscell = []
+        keys = None
+
+        for path in self._exported_datasets:
+            if not path.exists():
+                continue
+            data = np.load(path, allow_pickle=True).item()
+            all_stats.append(data["stats"])
+            all_iscell.append(data["iscell"])
+            if keys is None:
+                keys = data["keys"]
+
+        if len(all_stats) == 0:
+            self._save_status_msg = "No valid training data found"
+            self._save_status_time = time.time()
+            return
+
+        combined_stats = np.vstack(all_stats)
+        combined_iscell = np.concatenate(all_iscell)
+
+        # save classifier
+        save_path = getattr(self, "_save_path", self.loaded_path)
+        if save_path is None:
+            return
+
+        classifier_path = save_path / "custom_classifier.npy"
+        model = {
+            "stats": combined_stats,
+            "iscell": combined_iscell,
+            "keys": keys,
+        }
+        np.save(classifier_path, model)
+
+        n_cells = int(combined_iscell.sum())
+        n_total = len(combined_iscell)
+        self._save_status_msg = f"Classifier: {n_cells}/{n_total} cells"
+        self._save_status_time = time.time()
+        print(f"Classifier saved to: {classifier_path}")
+        print(f"Training data: {n_cells} cells, {n_total - n_cells} non-cells")
+
     def _draw_stats_popup(self):
         """Draw ROI statistics popup."""
         if self._show_stats_popup:
@@ -734,6 +891,30 @@ class DiagnosticsWidget:
                                 dff = self._dff[roi_idx]
                                 imgui.text(f"dF/F range: [{np.min(dff):.3f}, {np.max(dff):.3f}]")
                                 imgui.text(f"dF/F std: {np.std(dff):.4f}")
+
+                        # classifier features (suite2p default: npix_norm, compact, skew)
+                        if imgui.collapsing_header("Classifier Features", imgui.TreeNodeFlags_.default_open):
+                            npix_norm = s.get("npix_norm", None)
+                            compact = s.get("compact", None)
+                            skew_val = s.get("skew", None)
+
+                            if npix_norm is not None:
+                                imgui.text(f"npix_norm: {npix_norm:.4f}")
+                            else:
+                                imgui.text_disabled("npix_norm: not computed")
+
+                            if compact is not None:
+                                imgui.text(f"compact: {compact:.4f}")
+                            else:
+                                imgui.text_disabled("compact: not computed")
+
+                            if skew_val is not None:
+                                imgui.text(f"skew: {skew_val:.4f}")
+                            else:
+                                imgui.text_disabled("skew: not computed")
+
+                            imgui.spacing()
+                            imgui.text_wrapped("these 3 features are used by suite2p's default classifier")
 
                         # Raw stat values
                         if imgui.collapsing_header("stat.npy values"):

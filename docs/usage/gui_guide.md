@@ -4,6 +4,11 @@
 
 Interactive data preview and processing tools for calcium imaging data.
 
+```{image} /_images/gui/readme/02_step_data_view.png
+:width: 100%
+:alt: MBO Utilities GUI
+```
+
 ## Quick Start
 
 ```bash
@@ -37,6 +42,11 @@ The full **Data Preview widget** is only available for raw ScanImage tiffs.
 ```
 
 ## Data Selection Dialog
+
+```{image} /_images/gui/readme/01_step_file_dialog.png
+:width: 80%
+:alt: File Selection Dialog
+```
 
 ### Open File vs Select Folder
 
@@ -102,6 +112,11 @@ Per z-plane statistics (computed on every 10th frame):
 
 Access via **File → Save As** or **Process** tab.
 
+```{image} /_images/gui/readme/04_save_as_dialog.png
+:width: 80%
+:alt: Save As Dialog
+```
+
 ### Output Formats
 
 | Format | Description |
@@ -115,7 +130,6 @@ Access via **File → Save As** or **Process** tab.
 
 | Option | Description |
 |--------|-------------|
-| Save mROI Separately | separate file per mROI |
 | Overwrite | replace existing files |
 | Register Z-Planes | suite3d axial registration |
 | Fix Scan Phase | apply phase correction |
@@ -125,6 +139,11 @@ Access via **File → Save As** or **Process** tab.
 ## Suite2p Processing
 
 Access via **Process** tab.
+
+```{image} /_images/gui/readme/06_suite2p_settings.png
+:width: 80%
+:alt: Suite2p Processing Settings
+```
 
 - run suite2p on selected z-plane
 - all parameters exposed with descriptions

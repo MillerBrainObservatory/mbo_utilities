@@ -88,6 +88,16 @@ def handle_keyboard_shortcuts(parent: Any):
         parent.logger.info("Shortcut: '/' (Keybinds)")
         parent._show_keybinds_popup = not getattr(parent, "_show_keybinds_popup", False)
 
+    # ?: show help popup (shift + / = ?)
+    if not io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.slash, False):
+        parent.logger.info("Shortcut: '?' (Help)")
+        parent._show_help_popup = True
+
+    # F1: show help popup
+    if imgui.is_key_pressed(imgui.Key.f1, False):
+        parent.logger.info("Shortcut: 'F1' (Help)")
+        parent._show_help_popup = True
+
     # arrow keys for slider dimensions (only when data is loaded)
     try:
         handle_arrow_keys(parent)
@@ -97,6 +107,12 @@ def handle_keyboard_shortcuts(parent: Any):
 
 def handle_arrow_keys(parent: Any):
     """Handle arrow key navigation for T and Z dimensions."""
+    io = imgui.get_io()
+
+    # skip arrow keys when typing in text fields
+    if io.want_text_input:
+        return
+
     if not parent.image_widget or not parent.image_widget.data:
         return
 
@@ -109,7 +125,6 @@ def handle_arrow_keys(parent: Any):
     if not isinstance(shape, tuple) or len(shape) < 3:
         return
 
-    io = imgui.get_io()
     current_indices = list(parent.image_widget.indices)
 
     # jump step: 10 when shift held, 1 otherwise

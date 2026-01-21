@@ -112,6 +112,14 @@ def cleanup_all_widgets(widgets: list[Widget]) -> None:
             pass
 
 
+from mbo_utilities.gui.widgets.shared_model import SharedDataModel
+from mbo_utilities.gui.widgets.suite2p_embedded import Suite2pEmbedded
+from mbo_utilities.gui.widgets.integrated_classifier import (
+    IntegratedClassifierWindow,
+    DiagnosticsPanel,
+    launch_classifier,
+)
+
 __all__ = [
     "Widget",
     "cleanup_all_widgets",
@@ -119,4 +127,10 @@ __all__ = [
     "draw_menu_bar",
     "draw_process_status_indicator",
     "get_supported_widgets",
+    # integrated classifier components
+    "SharedDataModel",
+    "Suite2pEmbedded",
+    "IntegratedClassifierWindow",
+    "DiagnosticsPanel",
+    "launch_classifier",
 ]

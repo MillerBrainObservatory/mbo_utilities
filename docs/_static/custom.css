@@ -1,5 +1,29 @@
 /* Custom CSS For MBO Documentation */
 
+/* force dark mode - override light theme completely */
+html, html[data-theme="light"], html[data-theme="dark"] {
+  --pst-color-background: #121212 !important;
+  --pst-color-on-background: #e0e0e0 !important;
+  --pst-color-surface: #1e1e1e !important;
+  --pst-color-on-surface: #e0e0e0 !important;
+  --pst-color-text-base: #e0e0e0 !important;
+  --pst-color-text-muted: #9e9e9e !important;
+  --pst-color-border: #333 !important;
+  --pst-color-shadow: rgba(0,0,0,0.4) !important;
+  --pst-color-link: #82aaff !important;
+  --pst-color-link-hover: #b0c4ff !important;
+  --pst-color-inline-code: #c9d1d9 !important;
+  --pst-color-inline-code-bg: #161b22 !important;
+  color-scheme: dark !important;
+}
+
+html, html[data-theme="light"], html[data-theme="dark"],
+body, .bd-main, .bd-content, .bd-article-container, .bd-sidebar-primary,
+.bd-sidebar-secondary, .bd-header, .bd-footer {
+  background-color: #121212 !important;
+  color: #e0e0e0 !important;
+}
+
 /* hide light/dark theme toggle - force dark only */
 button.theme-switch-button,
 .theme-switch-button,

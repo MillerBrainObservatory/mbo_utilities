@@ -56,6 +56,11 @@ from mbo_utilities.arrays.features._dim_tags import (
     SPATIAL_DIMS,
     TAG_REGISTRY,
     TagDefinition,
+    dim_to_ome_axis,
+    dims_to_ome_axes,
+    get_ome_axis_type,
+    get_ome_axis_unit,
+    normalize_dims,
 )
 from mbo_utilities.arrays.features._display_range import (
     DisplayRange,
@@ -136,6 +141,11 @@ __all__ = [
     "DimensionTag",
     "OutputFilename",
     "TagDefinition",
+    "dim_to_ome_axis",
+    "dims_to_ome_axes",
+    "get_ome_axis_type",
+    "get_ome_axis_unit",
+    "normalize_dims",
     # display range
     "DisplayRange",
     "DisplayRangeFeature",

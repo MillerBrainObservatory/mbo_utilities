@@ -192,6 +192,8 @@ exclude_lines = [
 [dependency-groups]
 dev = [
     "graphviz>=0.21",
+    "pillow>=12.1.0",
     "pyautogui>=0.9.54",
+    "pygetwindow>=0.0.9",
     "pytest>=8.4.2",
 ]

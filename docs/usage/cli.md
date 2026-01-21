@@ -10,6 +10,7 @@ The `mbo` command provides tools for viewing, converting, and analyzing imaging 
 | `mbo convert` | Convert between formats |
 | `mbo info` | Show array info |
 | `mbo scanphase` | Analyze scan-phase offset |
+| `mbo notebook` | Generate template notebooks |
 | `mbo download` | Download files from GitHub |
 | `mbo formats` | List supported formats |
 
@@ -132,6 +133,38 @@ Offset vs signal intensity. Red line suggests threshold below which measurements
 ::::
 
 **Tips:** Use `-n 2` or `-n 3` to run quickly on a subset of frames. Multi-ROI data: offsets are averaged across ROIs.
+
+## Notebook
+
+Generate template notebooks for common analysis pipelines.
+
+```bash
+mbo notebook lsp                          # LBM-Suite2p-Python pipeline
+mbo notebook basic                        # basic data exploration
+mbo notebook dff                          # delta F/F analysis
+mbo notebook lsp -d /path/to/data         # pre-fill data path
+mbo notebook lsp -o ./notebooks           # custom output directory
+mbo notebook lsp -n my_analysis           # custom name: yyyy-mm-dd_my_analysis.ipynb
+mbo notebook -l                           # list available templates
+```
+
+| Option | Description |
+|--------|-------------|
+| `-o, --output` | Output directory (default: current directory) |
+| `-n, --name` | Custom notebook name (date prefix auto-added) |
+| `-d, --data` | Data path to pre-fill in the notebook |
+| `-l, --list` | List available templates |
+| `--templates-dir` | Show custom templates directory path |
+
+**Available Templates:**
+
+| Template | Description |
+|----------|-------------|
+| `lsp` | LBM-Suite2p-Python full pipeline with imports, ops config, and visualization |
+| `basic` | Basic mbo_utilities data exploration with imread/imwrite |
+| `dff` | Delta F/F analysis with compute_dff and activity maps |
+
+Templates show full function signatures with all parameters, formatted for easy customization.
 
 ## Download
 

@@ -14,6 +14,7 @@ import h5py
 from . import log
 from ._parsing import _make_json_serializable, _convert_paths_to_strings
 from .util import load_npy
+from .metadata.io import _build_ome_metadata
 
 from tqdm.auto import tqdm
 
@@ -192,6 +193,7 @@ def _close_specific_npy_writer(filepath):
 
 
 def compute_pad_from_shifts(plane_shifts):
+    """compute padding needed to accommodate all plane shifts."""
     shifts = np.asarray(plane_shifts, dtype=int)
     dy_min, dx_min = shifts.min(axis=0)
     dy_max, dx_max = shifts.max(axis=0)
@@ -200,6 +202,94 @@ def compute_pad_from_shifts(plane_shifts):
     pad_left = max(0, -dx_min)
     pad_right = max(0, dx_max)
     return pad_top, pad_bottom, pad_left, pad_right
+
+
+def load_registration_shifts(metadata: dict | None, debug: bool = False):
+    """
+    load z-registration shifts from suite3d job directory.
+
+    parameters
+    ----------
+    metadata : dict or None
+        metadata dict containing 'apply_shift' flag and 's3d-job' path.
+    debug : bool
+        verbose logging.
+
+    returns
+    -------
+    tuple
+        (apply_shift, plane_shifts, padding) where:
+        - apply_shift: bool, whether shifts should be applied
+        - plane_shifts: ndarray or None, per-plane [dy, dx] shifts
+        - padding: tuple (pt, pb, pl, pr) or (0, 0, 0, 0)
+    """
+    apply_shift = metadata.get("apply_shift", False) if metadata else False
+    plane_shifts = None
+    padding = (0, 0, 0, 0)
+
+    if not apply_shift:
+        return False, None, padding
+
+    # load plane shifts from s3d-job
+    s3d_job_dir = metadata.get("s3d-job", "")
+    summary_path = Path(s3d_job_dir).joinpath("summary/summary.npy") if s3d_job_dir else None
+
+    if summary_path and summary_path.is_file():
+        try:
+            summary = load_npy(summary_path).item()
+            if isinstance(summary, dict) and "plane_shifts" in summary:
+                plane_shifts = np.asarray(summary["plane_shifts"])
+                padding = compute_pad_from_shifts(plane_shifts)
+                if debug:
+                    pt, pb, pl, pr = padding
+                    logger.info(f"Loaded z-registration shifts with padding: top={pt}, bottom={pb}, left={pl}, right={pr}")
+                return True, plane_shifts, padding
+        except Exception as e:
+            logger.warning(f"Failed to load plane shifts: {e}. Proceeding without registration.")
+
+    logger.warning(f"apply_shift=True but no valid s3d-job summary found. Proceeding without registration.")
+    return False, None, padding
+
+
+def apply_shifts_to_chunk(chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out):
+    """
+    apply z-registration shifts to a data chunk.
+
+    parameters
+    ----------
+    chunk_data : ndarray
+        input chunk with shape (T, Z, Y, X).
+    plane_shifts : ndarray
+        per-plane [dy, dx] shifts.
+    z_indices : list
+        z-plane indices (0-based) being written.
+    padding : tuple
+        (pt, pb, pl, pr) padding values.
+    Ly_out, Lx_out : int
+        output spatial dimensions including padding.
+
+    returns
+    -------
+    ndarray
+        shifted and padded chunk with shape (T, Z, Ly_out, Lx_out).
+    """
+    pt, pb, pl, pr = padding
+    n_t, n_z_chunk, h, w = chunk_data.shape
+
+    shifted_chunk = np.zeros((n_t, n_z_chunk, Ly_out, Lx_out), dtype=chunk_data.dtype)
+
+    for z_local in range(n_z_chunk):
+        z_global = z_indices[z_local]
+        if z_global < len(plane_shifts):
+            iy, ix = map(int, plane_shifts[z_global])
+            yy = slice(pt + iy, pt + iy + h)
+            xx = slice(pl + ix, pl + ix + w)
+            shifted_chunk[:, z_local, yy, xx] = chunk_data[:, z_local, :, :]
+        else:
+            # no shift for this plane, center it
+            shifted_chunk[:, z_local, pt:pt+h, pl:pl+w] = chunk_data[:, z_local, :, :]
+
+    return shifted_chunk
 
 
 def _write_plane(
@@ -947,30 +1037,13 @@ def _write_volumetric_tiff(
     n_planes = slicing.selections["Z"].count if "Z" in slicing.selections else 1
     Ly, Lx = slicing.spatial_shape
 
-    # check for z-registration shift application
-    apply_shift = metadata.get("apply_shift", False) if metadata else False
-    plane_shifts = None
-    pt, pb, pl, pr = 0, 0, 0, 0  # padding values
-
-    if apply_shift:
-        # load plane shifts from s3d-job
-        s3d_job_dir = metadata.get("s3d-job", "")
-        summary_path = Path(s3d_job_dir).joinpath("summary/summary.npy") if s3d_job_dir else None
-
-        if summary_path and summary_path.is_file():
-            try:
-                summary = load_npy(summary_path).item()
-                if isinstance(summary, dict) and "plane_shifts" in summary:
-                    plane_shifts = np.asarray(summary["plane_shifts"])
-                    pt, pb, pl, pr = compute_pad_from_shifts(plane_shifts)
-                    if debug:
-                        logger.info(f"Applying z-registration shifts with padding: top={pt}, bottom={pb}, left={pl}, right={pr}")
-            except Exception as e:
-                logger.warning(f"Failed to load plane shifts: {e}. Proceeding without registration.")
-                apply_shift = False
-        else:
-            logger.warning(f"apply_shift=True but no valid s3d-job summary found. Proceeding without registration.")
-            apply_shift = False
+    # check for z-registration shift application (shared logic)
+    if debug:
+        logger.info(f"  TIFF metadata: apply_shift={metadata.get('apply_shift')}, s3d-job={metadata.get('s3d-job')}")
+    apply_shift, plane_shifts, padding = load_registration_shifts(metadata, debug)
+    pt, pb, pl, pr = padding
+    if debug:
+        logger.info(f"  Registration result: apply_shift={apply_shift}, has_shifts={plane_shifts is not None}")
 
     # compute padded output dimensions if shifts are applied
     if apply_shift and plane_shifts is not None:
@@ -1046,26 +1119,11 @@ def _write_volumetric_tiff(
             # ensure contiguous
             chunk_data = np.ascontiguousarray(chunk_data)
 
-            # apply z-registration shifts if enabled
+            # apply z-registration shifts if enabled (shared logic)
             if apply_shift and plane_shifts is not None:
-                n_t, n_z_chunk, h, w = chunk_data.shape
-                # create padded output buffer
-                shifted_chunk = np.zeros((n_t, n_z_chunk, Ly_out, Lx_out), dtype=chunk_data.dtype)
-
-                for z_local in range(n_z_chunk):
-                    # get the actual z-plane index in the original data
-                    z_global = z_indices[z_local]
-                    if z_global < len(plane_shifts):
-                        iy, ix = map(int, plane_shifts[z_global])
-                        # compute destination slice for this plane
-                        yy = slice(pt + iy, pt + iy + h)
-                        xx = slice(pl + ix, pl + ix + w)
-                        shifted_chunk[:, z_local, yy, xx] = chunk_data[:, z_local, :, :]
-                    else:
-                        # no shift for this plane, center it
-                        shifted_chunk[:, z_local, pt:pt+h, pl:pl+w] = chunk_data[:, z_local, :, :]
-
-                chunk_data = shifted_chunk
+                chunk_data = apply_shifts_to_chunk(
+                    chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out
+                )
 
             # reshape to TZCYX for imagej (add C=1)
             chunk_5d = chunk_data[:, :, np.newaxis, :, :]
@@ -1165,6 +1223,7 @@ def _write_volumetric_zarr(
         OutputFilename,
         ArraySlicing,
         read_chunk,
+        get_dims,
     )
     from mbo_utilities.arrays.features._pyramid import (
         PyramidConfig,
@@ -1175,6 +1234,9 @@ def _write_volumetric_zarr(
 
     if metadata is None:
         metadata = {}
+
+    # get dimension labels from array (canonical form)
+    dims = get_dims(data)
 
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
@@ -1206,7 +1268,18 @@ def _write_volumetric_zarr(
     n_planes = slicing.selections["Z"].count if "Z" in slicing.selections else 1
     Ly, Lx = slicing.spatial_shape
 
-    target_shape = (n_frames, n_planes, Ly, Lx)
+    # check for z-registration shift application (shared logic)
+    apply_shift, plane_shifts, padding = load_registration_shifts(metadata, debug)
+    pt, pb, pl, pr = padding
+
+    # compute padded output dimensions if shifts are applied
+    if apply_shift and plane_shifts is not None:
+        Ly_out = Ly + pt + pb
+        Lx_out = Lx + pl + pr
+    else:
+        Ly_out, Lx_out = Ly, Lx
+
+    target_shape = (n_frames, n_planes, Ly_out, Lx_out)
 
     # update metadata using OutputMetadata for reactive values
     t_indices = slicing.selections["T"].indices if "T" in slicing.selections else None
@@ -1223,6 +1296,9 @@ def _write_volumetric_zarr(
     # get adjusted metadata dict
     md = out_meta.to_dict()
     md["shape"] = target_shape
+    if apply_shift and plane_shifts is not None:
+        md["padded_shape"] = (Ly_out, Lx_out)
+        md["original_shape"] = (Ly, Lx)
 
     if debug:
         logger.info(f"Writing volumetric zarr: {filename}")
@@ -1230,16 +1306,18 @@ def _write_volumetric_zarr(
         logger.info(f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}")
         if out_meta.z_step_factor > 1:
             logger.info(f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)")
+        if apply_shift:
+            logger.info(f"  Z-registration: padding=({pt}, {pb}, {pl}, {pr})")
 
     # determine chunking based on target_chunk_mb
     # for 4D TZYX, chunk along T dimension
-    bytes_per_frame = n_planes * Ly * Lx * np.dtype(data.dtype).itemsize
+    bytes_per_frame = n_planes * Ly_out * Lx_out * np.dtype(data.dtype).itemsize
     target_bytes = target_chunk_mb * 1024 * 1024
     frames_per_chunk = max(1, int(target_bytes / bytes_per_frame))
     frames_per_chunk = min(frames_per_chunk, n_frames)
 
     # inner chunk shape: 1 frame at a time for efficient random access
-    inner_chunk = (1, n_planes, Ly, Lx)
+    inner_chunk = (1, n_planes, Ly_out, Lx_out)
 
     # build codec chain
     if compression_level == 0:
@@ -1250,7 +1328,7 @@ def _write_volumetric_zarr(
     if sharded:
         # shard size: multiple frames per shard for efficient sequential reads
         shard_t = min(n_frames, frames_per_chunk)
-        shard_shape = (shard_t, n_planes, Ly, Lx)
+        shard_shape = (shard_t, n_planes, Ly_out, Lx_out)
 
         codec = ShardingCodec(
             chunk_shape=inner_chunk,
@@ -1293,9 +1371,14 @@ def _write_volumetric_zarr(
         overwrite=True,
     )
 
-    # build OME-NGFF metadata using OutputMetadata
-    ome_meta = out_meta.to_ome_ngff(dims=("T", "Z", "Y", "X"))
+    # build OME-NGFF metadata using OutputMetadata with array's dims
+    # for 4D output, use TZYX ordering
+    output_dims = ("T", "Z", "Y", "X")
+    ome_meta = out_meta.to_ome_ngff(dims=output_dims)
     base_scale = ome_meta["coordinateTransformations"][0]["scale"]
+
+    # store dims in metadata for readers
+    md["dims"] = output_dims
 
     # build full OME-NGFF v0.5 structure with pyramid datasets
     if pyramid_levels:
@@ -1352,6 +1435,8 @@ def _write_volumetric_zarr(
 
     # set napari-compatible scale on level 0 array
     z.attrs["scale"] = base_scale
+    # set dimension_names for NGFF 0.5 compliance (lowercase)
+    z.attrs["dimension_names"] = [d.lower() for d in output_dims]
 
     # write data in chunks
     pbar = None
@@ -1361,6 +1446,9 @@ def _write_volumetric_zarr(
 
     # track output offset (since ChunkInfo doesn't have offset)
     t_offset = 0
+
+    # get z-plane indices being written (0-based)
+    z_indices = slicing.selections["Z"].indices if "Z" in slicing.selections else list(range(n_planes))
 
     # iterate over chunks using unified slicing
     for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
@@ -1373,6 +1461,12 @@ def _write_volumetric_zarr(
 
         # ensure contiguous for efficient writes
         chunk_data = np.ascontiguousarray(chunk_data)
+
+        # apply z-registration shifts if enabled (shared logic)
+        if apply_shift and plane_shifts is not None:
+            chunk_data = apply_shifts_to_chunk(
+                chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out
+            )
 
         # get the output T range for this chunk
         t_start = t_offset
@@ -1464,114 +1558,6 @@ def _write_volumetric_zarr(
         logger.info(f"Wrote {filename} ({total_size / 1e9:.2f} GB)")
 
     return filename
-
-
-def _build_ome_metadata(shape: tuple, metadata: dict) -> dict:
-    """
-    Build OME-Zarr NGFF v0.5 compliant metadata.
-
-    Parameters
-    ----------
-    shape : tuple
-        Shape of the array (T, Y, X) or (T, Z, Y, X)
-    metadata : dict
-        Metadata dict containing optional keys:
-        - pixel_resolution : tuple (x, y) pixel size in micrometers
-        - frame_rate : float, sampling rate in Hz
-        - fs : float, alias for frame_rate
-        - dx, dy : float, pixel sizes in micrometers
-        - dz : float, z-step in micrometers (for 4D data)
-        - z_step : float, alias for dz
-        - voxel_size : tuple (dx, dy, dz) in micrometers
-
-    Returns
-    -------
-    dict
-        OME-Zarr NGFF v0.5 metadata dictionary ready for zarr.attrs.update()
-    """
-    from mbo_utilities.metadata import get_voxel_size, get_param
-
-    ndim = len(shape)
-
-    # extract spatial scales using standardized resolution getter
-    vs = get_voxel_size(metadata)
-    pixel_x = vs.dx
-    pixel_y = vs.dy
-    z_scale = vs.dz
-
-    # extract temporal scale using canonical parameter access
-    frame_rate = get_param(metadata, "fs")
-    time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
-
-    # Build axes definition
-    # Order: time (if present) -> channel (if present) -> spatial (z, y, x)
-    axes = []
-
-    if ndim == 3:
-        # Shape is (T, Y, X)
-        axes = [
-            {"name": "t", "type": "time", "unit": "second"},
-            {"name": "y", "type": "space", "unit": "micrometer"},
-            {"name": "x", "type": "space", "unit": "micrometer"},
-        ]
-        scale_values = [time_scale, pixel_y, pixel_x]
-
-    elif ndim == 4:
-        # Shape is (T, Z, Y, X)
-        axes = [
-            {"name": "t", "type": "time", "unit": "second"},
-            {"name": "z", "type": "space", "unit": "micrometer"},
-            {"name": "y", "type": "space", "unit": "micrometer"},
-            {"name": "x", "type": "space", "unit": "micrometer"},
-        ]
-        scale_values = [time_scale, z_scale, pixel_y, pixel_x]
-
-    else:
-        # Fallback for unexpected dimensions
-        logger.warning(
-            f"Unexpected dimensionality {ndim} for OME-Zarr. "
-            f"OME-Zarr expects 3D (TYX) or 4D (TZYX) data."
-        )
-        axes = [{"name": f"dim_{i}", "type": "space"} for i in range(ndim)]
-        scale_values = [1.0] * ndim
-
-    # Build OME-NGFF v0.5 metadata
-    # coordinateTransformations in each dataset
-    coordinate_transforms = [{"type": "scale", "scale": scale_values}]
-    datasets = [{"path": "0", "coordinateTransformations": coordinate_transforms}]
-
-    multiscales = [
-        {
-            "version": "0.5",
-            "name": metadata.get("name", ""),
-            "axes": axes,
-            "datasets": datasets,
-        }
-    ]
-
-    # v0.5 uses "ome" namespace
-    ome_content = {
-        "version": "0.5",
-        "multiscales": multiscales,
-    }
-
-    # Add optional OMERO rendering metadata if present
-    omero_metadata = {}
-    if "channel_names" in metadata:
-        omero_metadata["channels"] = metadata["channel_names"]
-    if omero_metadata:
-        ome_content["omero"] = omero_metadata
-
-    result = {"ome": ome_content}
-
-    serializable_metadata = _make_json_serializable(metadata)
-    for k, v in serializable_metadata.items():
-        if k == "channel_names":
-            # Already encoded in OME omero section
-            continue
-        result[k] = v
-
-    return result
 
 
 def _write_zarr(
@@ -1681,6 +1667,7 @@ def _write_zarr(
             # Build and set OME metadata on the GROUP
             ome_metadata = _build_ome_metadata(
                 shape=(nframes, h, w),
+                dtype=data.dtype,
                 metadata=metadata or {},
             )
 

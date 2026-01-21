@@ -961,6 +961,7 @@ def _build_ome_metadata(
     shape: tuple,
     dtype,
     metadata: dict,
+    dims: tuple[str, ...] | None = None,
 ) -> dict:
     """
     Build comprehensive OME-NGFF v0.5 metadata from ScanImage and other metadata.
@@ -971,39 +972,56 @@ def _build_ome_metadata(
     Parameters
     ----------
     shape : tuple
-        Shape of the array (T, Z, Y, X)
+        Shape of the array matching dims order
     dtype : np.dtype
         Data type of the array
     metadata : dict
         Metadata dictionary with optional keys
+    dims : tuple[str, ...] | None
+        Dimension labels like ("T", "Z", "Y", "X"). If None, defaults to TZYX for 4D.
 
     Returns
     -------
     dict
         Complete OME-NGFF v0.5 metadata attributes
     """
-    _T, _Z, _Y, _X = shape
+    from mbo_utilities.arrays.features._dim_tags import (
+        dims_to_ome_axes,
+        normalize_dims,
+    )
+    from mbo_utilities.arrays.features._dim_labels import infer_dims
 
-    pixel_resolution = metadata.get("pixel_resolution", [1.0, 1.0])
-    frame_rate = metadata.get("frame_rate", metadata.get("fs", 1.0))
-    dz = metadata.get("dz", metadata.get("z_step", 1.0))
-
-    if isinstance(pixel_resolution, (list, tuple)) and len(pixel_resolution) >= 2:
-        pixel_x, pixel_y = float(pixel_resolution[0]), float(pixel_resolution[1])
+    # determine dims
+    ndim = len(shape)
+    if dims is None:
+        dims = infer_dims(ndim)
     else:
-        pixel_x = pixel_y = 1.0
+        dims = normalize_dims(dims)
+
+    # use standard metadata extraction for consistent handling of aliases
+    from mbo_utilities.metadata.params import get_param, get_voxel_size
+
+    vs = get_voxel_size(metadata)
+    frame_rate = get_param(metadata, "fs", default=1.0)
 
     time_scale = 1.0 / float(frame_rate) if frame_rate else 1.0
 
-    # Build OME-NGFF v0.5 multiscales
-    axes = [
-        {"name": "t", "type": "time", "unit": "second"},
-        {"name": "z", "type": "space", "unit": "micrometer"},
-        {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "x", "type": "space", "unit": "micrometer"},
-    ]
+    # build OME-NGFF v0.5 axes from dims
+    axes = dims_to_ome_axes(dims)
 
-    scale_values = [time_scale, float(dz), pixel_y, pixel_x]
+    # build scale values matching dimension order
+    scale_values = []
+    for dim in dims:
+        if dim == "T":
+            scale_values.append(time_scale)
+        elif dim == "Z":
+            scale_values.append(float(vs.dz) if vs.dz else 1.0)
+        elif dim == "Y":
+            scale_values.append(float(vs.dy))
+        elif dim == "X":
+            scale_values.append(float(vs.dx))
+        else:
+            scale_values.append(1.0)  # C, V, B, etc.
 
     datasets = [
         {
@@ -1173,7 +1191,7 @@ def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
     Parameters
     ----------
     shape : tuple
-        Shape of the array (T, Z, Y, X)
+        Shape of the array (variable ndim, typically 3D TYX or 4D TZYX)
     dtype : np.dtype
         Data type of the array
     metadata : dict
@@ -1186,7 +1204,16 @@ def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
     """
     import numpy as np
 
-    _T, Z, _Y, _X = shape
+    # handle variable ndim - extract Z if present
+    ndim = len(shape)
+    if ndim == 4:
+        _T, Z, _Y, _X = shape
+    elif ndim == 3:
+        _T, _Y, _X = shape
+        Z = 1
+    else:
+        # 2D or other - no Z
+        Z = 1
 
     # Determine data range for window settings
     if np.issubdtype(dtype, np.integer):
