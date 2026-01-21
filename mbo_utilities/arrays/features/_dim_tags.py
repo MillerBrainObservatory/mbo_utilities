@@ -22,28 +22,53 @@ if TYPE_CHECKING:
 SPATIAL_DIMS = {"Y", "X"}
 
 # map dimension name aliases to canonical single-letter keys
-DIM_ALIASES = {
+DIM_ALIASES: dict[str, str] = {
     "timepoints": "T",
     "timepoint": "T",
     "time": "T",
     "frames": "T",
+    "frame": "T",
+    "t": "T",
     "z-planes": "Z",
     "z-plane": "Z",
+    "z-slices": "Z",
+    "z-slice": "Z",
     "zplane": "Z",
     "zplanes": "Z",
     "plane": "Z",
     "planes": "Z",
+    "slice": "Z",
+    "slices": "Z",
+    "depth": "Z",
+    "z": "Z",
     "channel": "C",
     "channels": "C",
+    "color": "C",
+    "colors": "C",
+    "c": "C",
     "view": "V",
     "views": "V",
+    "volume": "V",
+    "volumes": "V",
+    "v": "V",
     "roi": "R",
     "rois": "R",
     "region": "R",
+    "regions": "R",
+    "r": "R",
     "beamlet": "B",
     "beamlets": "B",
+    "b": "B",
     "camera": "A",
     "cameras": "A",
+    "a": "A",
+    "session": "S",
+    "sessions": "S",
+    "s": "S",
+    "y": "Y",
+    "x": "X",
+    "height": "Y",
+    "width": "X",
 }
 
 
@@ -284,3 +309,126 @@ class OutputFilename:
 
     def __repr__(self) -> str:
         return f"OutputFilename({self.build()!r})"
+
+
+def normalize_dims(dims: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    """convert descriptive dim names to canonical single-letter form.
+
+    parameters
+    ----------
+    dims : tuple[str, ...] | list[str]
+        dimension labels like ("timepoints", "z-planes", "Y", "X")
+
+    returns
+    -------
+    tuple[str, ...]
+        canonical form like ("T", "Z", "Y", "X")
+
+    examples
+    --------
+    >>> normalize_dims(("timepoints", "z-planes", "Y", "X"))
+    ('T', 'Z', 'Y', 'X')
+    >>> normalize_dims(("T", "C", "Z", "Y", "X"))
+    ('T', 'C', 'Z', 'Y', 'X')
+    """
+    result = []
+    for d in dims:
+        # check aliases first, then uppercase single letter
+        canonical = DIM_ALIASES.get(d.lower(), d.upper())
+        result.append(canonical)
+    return tuple(result)
+
+
+def get_ome_axis_type(dim: str) -> str:
+    """get ome-zarr ngff axis type for a dimension.
+
+    parameters
+    ----------
+    dim : str
+        canonical dimension label (T, C, Z, Y, X, etc.)
+
+    returns
+    -------
+    str
+        "time", "channel", or "space"
+    """
+    dim = dim.upper()
+    if dim == "T":
+        return "time"
+    elif dim == "C":
+        return "channel"
+    else:
+        return "space"  # Z, Y, X, V, R, B, S all spatial
+
+
+def get_ome_axis_unit(dim: str) -> str | None:
+    """get ome-zarr ngff axis unit for a dimension.
+
+    parameters
+    ----------
+    dim : str
+        canonical dimension label
+
+    returns
+    -------
+    str | None
+        unit string or None if no unit (e.g., channel)
+    """
+    dim = dim.upper()
+    if dim == "T":
+        return "second"
+    elif dim in ("Z", "Y", "X"):
+        return "micrometer"
+    return None  # C, V, R, B have no unit
+
+
+def dim_to_ome_axis(dim: str) -> dict:
+    """build ome-zarr ngff axis definition from canonical dimension label.
+
+    parameters
+    ----------
+    dim : str
+        canonical dimension label (T, C, Z, Y, X, etc.)
+
+    returns
+    -------
+    dict
+        ome-zarr axis definition with name, type, and optional unit
+    """
+    dim = dim.upper()
+    axis = {
+        "name": dim.lower(),
+        "type": get_ome_axis_type(dim),
+    }
+    unit = get_ome_axis_unit(dim)
+    if unit:
+        axis["unit"] = unit
+    return axis
+
+
+def dims_to_ome_axes(dims: tuple[str, ...] | list[str] | str) -> list[dict]:
+    """convert dimension labels to ome-zarr ngff axes list.
+
+    parameters
+    ----------
+    dims : tuple[str, ...] | list[str] | str
+        dimension labels like ("T", "C", "Z", "Y", "X") or "TCZYX"
+
+    returns
+    -------
+    list[dict]
+        list of ome-zarr axis definitions
+
+    examples
+    --------
+    >>> dims_to_ome_axes(("T", "Z", "Y", "X"))
+    [{'name': 't', 'type': 'time', 'unit': 'second'},
+     {'name': 'z', 'type': 'space', 'unit': 'micrometer'},
+     {'name': 'y', 'type': 'space', 'unit': 'micrometer'},
+     {'name': 'x', 'type': 'space', 'unit': 'micrometer'}]
+    """
+    if isinstance(dims, str):
+        dims = tuple(dims.upper())
+    # normalize first if needed
+    canonical = normalize_dims(dims)
+    return [dim_to_ome_axis(d) for d in canonical]

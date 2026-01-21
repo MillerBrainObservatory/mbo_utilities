@@ -154,8 +154,49 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, Suite2pRegistrationMixin, Segmen
         self._target_dtype = None
 
         # initialize dimension labels feature
-        # defer until shape is accessible (after self.zs is set)
-        self._init_dim_labels(dims)
+        # try to read dims from OME metadata first, then fall back to parameter
+        ome_dims = self._read_ome_dims()
+        if ome_dims is not None:
+            self._init_dim_labels(ome_dims)
+        elif dims is not None:
+            self._init_dim_labels(dims)
+        else:
+            self._init_dim_labels(None)  # will infer from ndim
+
+    def _read_ome_dims(self) -> tuple[str, ...] | None:
+        """extract dimension labels from ome-zarr metadata.
+
+        returns
+        -------
+        tuple[str, ...] | None
+            canonical dimension labels (e.g., ("T", "Z", "Y", "X")) or None
+            if not an OME-Zarr or axes not found
+        """
+        # check if we have an OME-Zarr group
+        if not self._groups or self._groups[0] is None:
+            return None
+
+        try:
+            attrs = dict(self._groups[0].attrs)
+            ome = attrs.get("ome", {})
+            multiscales = ome.get("multiscales", [])
+            if not multiscales:
+                return None
+
+            axes = multiscales[0].get("axes", [])
+            if not axes:
+                return None
+
+            # convert lowercase axis names to uppercase dim labels
+            dims = tuple(ax.get("name", "?").upper() for ax in axes)
+            return dims
+        except Exception:
+            return None
+
+    @property
+    def _is_ome(self) -> bool:
+        """check if this is an OME-Zarr store."""
+        return self._groups and self._groups[0] is not None
 
     @property
     def metadata(self) -> dict:

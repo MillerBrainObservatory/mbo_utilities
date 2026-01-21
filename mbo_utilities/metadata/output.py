@@ -282,32 +282,32 @@ class OutputMetadata:
         dict
             OME-NGFF v0.5 multiscales metadata
         """
+        from mbo_utilities.arrays.features._dim_tags import (
+            dims_to_ome_axes,
+            normalize_dims,
+        )
+
         vs = self.voxel_size
+        dims = normalize_dims(dims)
+        axes = dims_to_ome_axes(dims)
 
-        axes = []
+        # build scale values matching dimension order
         scales = []
-
         for dim in dims:
-            dim_upper = dim.upper()
-            if dim_upper == "T":
-                axes.append({"name": "t", "type": "time", "unit": "second"})
+            if dim == "T":
                 # time scale is finterval if contiguous, else 1.0
                 if self._is_contiguous and self.finterval is not None:
                     scales.append(self.finterval)
                 else:
                     scales.append(1.0)
-            elif dim_upper == "Z":
-                axes.append({"name": "z", "type": "space", "unit": "micrometer"})
+            elif dim == "Z":
                 scales.append(vs.dz if vs.dz is not None else 1.0)
-            elif dim_upper == "Y":
-                axes.append({"name": "y", "type": "space", "unit": "micrometer"})
+            elif dim == "Y":
                 scales.append(vs.dy)
-            elif dim_upper == "X":
-                axes.append({"name": "x", "type": "space", "unit": "micrometer"})
+            elif dim == "X":
                 scales.append(vs.dx)
-            elif dim_upper == "C":
-                axes.append({"name": "c", "type": "channel"})
-                scales.append(1.0)
+            else:
+                scales.append(1.0)  # C, V, B, etc.
 
         return {
             "axes": axes,
