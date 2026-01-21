@@ -148,12 +148,11 @@ class PreviewDataWidget(EdgeWindow):
         self.num_graphics = len(self.image_widget.graphics)
         self.shape = self.image_widget.data[0].shape
 
-        # Determine data type (ScanImage or ImageJ hyperstack)
-        from mbo_utilities.arrays import ImageJHyperstackArray
-        fpath_single = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
+        # Determine data type (ScanImage or volumetric TIFF)
+        from mbo_utilities.arrays import TiffArray
         self.is_mbo_scan = (
             isinstance(self.image_widget.data[0], ScanImageArray) or
-            (ImageJHyperstackArray.can_open(fpath_single) if fpath_single else False)
+            isinstance(self.image_widget.data[0], TiffArray)
         )
         self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
