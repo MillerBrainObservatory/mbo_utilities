@@ -16,76 +16,6 @@ kernelspec:
 
 `imread` and `imwrite` designed for 3D and 4D image data in `.tiff`, `.zarr`, `.h5` formats, but has been extended to include several other formats including suite2p `.bin`/`.ops` files, `.hdf5` and `.npy`.
 
-## Live Demo
-
-```{code-cell} python
-:tags: [remove-input]
-
-import tempfile
-import shutil
-from pathlib import Path
-import numpy as np
-import mbo_utilities as mbo
-import os
-os.environ["TQDM_DISABLE"] = "1"
-
-# demo paths
-_raw_dir = Path("D:/demo/raw")
-_demo_dir = Path(tempfile.mkdtemp(prefix="mbo_demo_"))
-```
-
-```{code-cell} python
-# read raw scanimage tiffs
-arr = mbo.imread(str(_raw_dir))
-print(f"Source: {type(arr).__name__}")
-print(f"  Shape: {arr.shape}")
-print(f"  Dtype: {arr.dtype}")
-print(f"  Dims:  {arr.dims}")
-print(f"  Planes: {arr.num_planes}")
-print(f"  ROIs: {arr.num_rois}")
-```
-
-```{code-cell} python
-# round-trip: save to zarr and reload
-mbo.imwrite(arr, _demo_dir / "demo.zarr", ext=".zarr", frames=range(100))
-zarr_arr = mbo.imread(str(_demo_dir / "demo.zarr"))
-print(f"Zarr: {type(zarr_arr).__name__}")
-print(f"  Shape: {zarr_arr.shape}")
-print(f"  Dims:  {zarr_arr.dims}")
-```
-
-```{code-cell} python
-# round-trip: save to tiff and reload
-mbo.imwrite(arr, _demo_dir / "demo.tiff", ext=".tiff", frames=range(100))
-tiff_arr = mbo.imread(str(_demo_dir / "demo.tiff"))
-print(f"TIFF: {type(tiff_arr).__name__}")
-print(f"  Shape: {tiff_arr.shape}")
-print(f"  Dims:  {tiff_arr.dims}")
-```
-
-```{code-cell} python
-# round-trip: save to hdf5 and reload
-mbo.imwrite(arr, _demo_dir / "demo.h5", ext=".h5", frames=range(100), planes=1)
-h5_arr = mbo.imread(str(_demo_dir / "demo.h5"))
-print(f"HDF5: {type(h5_arr).__name__}")
-print(f"  Shape: {h5_arr.shape}")
-```
-
-```{code-cell} python
-# round-trip: save to npy and reload
-mbo.imwrite(arr, _demo_dir / "demo.npy", ext=".npy", frames=range(50), planes=1)
-npy_arr = mbo.imread(str(_demo_dir / "demo.npy"))
-print(f"NPY: {type(npy_arr).__name__}")
-print(f"  Shape: {npy_arr.shape}")
-print(f"  Dims:  {npy_arr.dims}")
-```
-
-```{code-cell} python
-:tags: [remove-input]
-
-# cleanup temp directory
-shutil.rmtree(_demo_dir, ignore_errors=True)
-```
 
 ## Quick Reference
 
@@ -717,6 +647,77 @@ mbo.imwrite(arr, "output", ext=".zarr", sharded=False)
 
 # custom chunk size target
 mbo.imwrite(arr, "output", ext=".zarr", target_chunk_mb=50)
+```
+
+## Examples
+
+```{code-cell} python
+:tags: [remove-input]
+
+import tempfile
+import shutil
+from pathlib import Path
+import numpy as np
+import mbo_utilities as mbo
+import os
+os.environ["TQDM_DISABLE"] = "1"
+
+# demo paths
+_raw_dir = Path("D:/demo/raw")
+_demo_dir = Path(tempfile.mkdtemp(prefix="mbo_demo_"))
+```
+
+```{code-cell} python
+# read raw scanimage tiffs
+arr = mbo.imread(str(_raw_dir))
+print(f"Source: {type(arr).__name__}")
+print(f"  Shape: {arr.shape}")
+print(f"  Dtype: {arr.dtype}")
+print(f"  Dims:  {arr.dims}")
+print(f"  Planes: {arr.num_planes}")
+print(f"  ROIs: {arr.num_rois}")
+```
+
+```{code-cell} python
+# round-trip: save to zarr and reload
+mbo.imwrite(arr, _demo_dir / "demo.zarr", ext=".zarr", frames=range(100))
+zarr_arr = mbo.imread(str(_demo_dir / "demo.zarr"))
+print(f"Zarr: {type(zarr_arr).__name__}")
+print(f"  Shape: {zarr_arr.shape}")
+print(f"  Dims:  {zarr_arr.dims}")
+```
+
+```{code-cell} python
+# round-trip: save to tiff and reload
+mbo.imwrite(arr, _demo_dir / "demo.tiff", ext=".tiff", frames=range(100))
+tiff_arr = mbo.imread(str(_demo_dir / "demo.tiff"))
+print(f"TIFF: {type(tiff_arr).__name__}")
+print(f"  Shape: {tiff_arr.shape}")
+print(f"  Dims:  {tiff_arr.dims}")
+```
+
+```{code-cell} python
+# round-trip: save to hdf5 and reload
+mbo.imwrite(arr, _demo_dir / "demo.h5", ext=".h5", frames=range(100), planes=1)
+h5_arr = mbo.imread(str(_demo_dir / "demo.h5"))
+print(f"HDF5: {type(h5_arr).__name__}")
+print(f"  Shape: {h5_arr.shape}")
+```
+
+```{code-cell} python
+# round-trip: save to npy and reload
+mbo.imwrite(arr, _demo_dir / "demo.npy", ext=".npy", frames=range(50), planes=1)
+npy_arr = mbo.imread(str(_demo_dir / "demo.npy"))
+print(f"NPY: {type(npy_arr).__name__}")
+print(f"  Shape: {npy_arr.shape}")
+print(f"  Dims:  {npy_arr.dims}")
+```
+
+```{code-cell} python
+:tags: [remove-input]
+
+# cleanup temp directory
+shutil.rmtree(_demo_dir, ignore_errors=True)
 ```
 
 ## API Reference
