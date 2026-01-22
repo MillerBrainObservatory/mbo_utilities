@@ -85,6 +85,7 @@ The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/usa
 | `mbo info /path/to/data.tiff` | Show file info and metadata |
 | `mbo convert input.tiff output.zarr` | Convert between formats |
 | `mbo scanphase /path/to/data.tiff` | Run scan-phase analysis |
+| `mbo notebook lsp` | Generate template notebook |
 | `mbo formats` | List supported formats |
 | `mbo download path/to/notebook.ipynb` | Download a notebook to the current directory |
 | `mbo pollen` | Pollen calibration tool (WIP) |

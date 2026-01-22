@@ -14,643 +14,311 @@ kernelspec:
 (file_formats)=
 # File Formats
 
-`imread` and `imwrite` designed for 3D and 4D image data in `.tiff`, `.zarr`, `.h5` formats, but has been extended to include several other formats including suite2p `.bin`/`.ops` files, `.hdf5` and `.npy`.
+`imread` and `imwrite` handle 3D/4D imaging data across `.tiff`, `.zarr`, `.h5`, `.bin`, and `.npy` formats.
 
 ## Quick Reference
 
-| Input | Returns | Shape | Description | |
-|-------|---------|-------|-------------|:-:|
-| **`.tiff`** | | | TIFF image stacks | |
-| ↳ ScanImage | `ScanImageArray` | (T, Z, Y, X) | Multi-ROI volumetric with phase correction | [<i class="fa-solid fa-book"></i>](#scanimage-arrays) |
-| &emsp;↳ LBM | `LBMArray` | (T, Z, Y, X) | Z-planes as ScanImage channels | [<i class="fa-solid fa-book"></i>](#lbmarray) |
-| &emsp;↳ Piezo | `PiezoArray` | (T, Z, Y, X) | Piezo z-stacks, optional averaging | [<i class="fa-solid fa-book"></i>](#piezoarray) |
-| &emsp;↳ LBMPiezo | `LBMPiezoArray` | (T, Z, Y, X) | Combined LBM + piezo (calibration) | [<i class="fa-solid fa-book"></i>](#lbmpiezoarray) |
-| &emsp;↳ Single-plane | `SinglePlaneArray` | (T, 1, Y, X) | Single-plane time series | [<i class="fa-solid fa-book"></i>](#singleplanearray) |
-| ↳ Standard | `TiffArray` | (T, Z, Y, X) | Lazy page access, auto-detects volumetric | [<i class="fa-solid fa-book"></i>](#tiffarray) |
-| ↳ MBO metadata | `MBOTiffArray` | (T, Z, Y, X) | Dask-backed with MBO metadata | [<i class="fa-solid fa-book"></i>](#mbotiffarray) |
-| **`.bin`** | `BinArray` | (T, Y, X) | Direct binary file manipulation | [<i class="fa-solid fa-book"></i>](#binarray) |
-| **`.h5` / `.hdf5`** | `H5Array` | varies | HDF5 datasets | [<i class="fa-solid fa-book"></i>](#h5array) |
-| **`.zarr`** | `ZarrArray` | (T, Z, Y, X) | Zarr v3 / OME-Zarr stores | [<i class="fa-solid fa-book"></i>](#zarrarray) |
-| **`.npy` / `np.ndarray`** | `NumpyArray` | varies | Memory-mapped or in-memory arrays | [<i class="fa-solid fa-book"></i>](#numpyarray) |
-| **Directory** | | | | |
-| ↳ `ops.npy` | `Suite2pArray` | (T, Y, X) | Suite2p workflow integration | [<i class="fa-solid fa-book"></i>](#suite2parray) |
-| ↳ `planeXX/ops.npy` | `Suite2pArray` | (T, Z, Y, X) | Multi-plane Suite2p output | [<i class="fa-solid fa-book"></i>](#suite2parray) |
-| ↳ `planeXX.tiff` | `TiffArray` | (T, Z, Y, X) | Multi-plane TIFF volume | [<i class="fa-solid fa-book"></i>](#tiffarray) |
-| ↳ Isoview lightsheet | `IsoviewArray` | (T, Z, V, Y, X) | Multi-view lightsheet data | [<i class="fa-solid fa-book"></i>](#isoviewarray) |
+| Input | Returns | Shape | Description |
+|-------|---------|-------|-------------|
+| **`.tiff`** | | | |
+| ↳ ScanImage raw | `LBMArray` | (T, Z, Y, X) | LBM with z-planes as channels |
+| | `PiezoArray` | (T, Z, Y, X) | Piezo z-stacks, optional averaging |
+| | `LBMPiezoArray` | (Z, C, Y, X) | LBM + piezo (pollen calibration) |
+| | `SinglePlaneArray` | (T, C, Y, X) | Single-plane time series |
+| ↳ Standard/ImageJ | `TiffArray` | (T, Z, Y, X) | All TIFFs including ImageJ hyperstacks |
+| **`.bin`** | `BinArray` | (T, Y, X) | Suite2p binary (requires shape) |
+| **`.h5`** | `H5Array` | varies | HDF5 datasets |
+| **`.zarr`** | `ZarrArray` | (T, Z, Y, X) | Zarr v3 / OME-Zarr |
+| **`.npy`** | `NumpyArray` | varies | Memory-mapped numpy |
+| **`np.ndarray`** | `NumpyArray` | varies | In-memory wrapper |
+| **Directory** | | | |
+| ↳ `ops.npy` | `Suite2pArray` | (T, Y, X) | Suite2p single-plane |
+| ↳ `planeXX/ops.npy` | `Suite2pArray` | (T, Z, Y, X) | Suite2p volumetric |
+| ↳ `planeXX.tiff` | `TiffArray` | (T, Z, Y, X) | Multi-plane TIFF volume |
+| ↳ Isoview structure | `IsoviewArray` | (T, Z, V, Y, X) | Multi-view lightsheet |
 
-### Decision Tree
+### Detection Logic
 
 ```
 imread(path)
 │
-├── np.ndarray? ──────────────────────────────► NumpyArray
-│
-├── .npy ─────────────────────────────────────► NumpyArray (memory-mapped)
-├── .h5 / .hdf5 ──────────────────────────────► H5Array
-├── .zarr ────────────────────────────────────► ZarrArray
-├── .bin ─────────────────────────────────────► BinArray
+├── np.ndarray ───────────────────────────► NumpyArray
+├── .npy ─────────────────────────────────► NumpyArray (mmap)
+├── .h5 / .hdf5 ──────────────────────────► H5Array
+├── .zarr ────────────────────────────────► ZarrArray
+├── .bin (with ops.npy nearby) ───────────► Suite2pArray
+├── .bin (no ops.npy) ────────────────────► BinArray (shape required)
 │
 ├── .tif / .tiff
-│   ├── Has ScanImage ROI metadata?
-│   │   ├── LBM + Piezo? ─────────────────────► LBMPiezoArray
-│   │   ├── LBM acquisition? ─────────────────► LBMArray
-│   │   ├── Piezo enabled? ───────────────────► PiezoArray
-│   │   └── Single-plane? ────────────────────► SinglePlaneArray
-│   ├── Has MBO metadata? ────────────────────► MBOTiffArray
-│   └── Standard TIFF ────────────────────────► TiffArray
+│   ├── ScanImage metadata?
+│   │   ├── stack_type == "lbm" ──────────► LBMArray
+│   │   ├── stack_type == "piezo" ────────► PiezoArray
+│   │   ├── stack_type == "pollen" ───────► LBMPiezoArray
+│   │   └── stack_type == "single_plane" ─► SinglePlaneArray
+│   └── else ─────────────────────────────► TiffArray (handles ImageJ hyperstacks)
 │
-├── Directory
-│   ├── Contains planeXX.tiff? ───────────────► TiffArray (volumetric)
-│   ├── Contains planeXX/ with ops.npy? ──────► Suite2pArray (volumetric)
-│   ├── Contains ops.npy? ────────────────────► Suite2pArray
-│   └── Contains raw ScanImage TIFFs? ────────► ScanImageArray
-│
-└── List of paths
-    ├── All .tif? ────────────────────────────► TiffArray or MBOTiffArray
-    └── All .zarr? ───────────────────────────► ZarrArray (stacked along Z)
+└── Directory
+    ├── Isoview zarr structure ───────────► IsoviewArray
+    ├── *.zarr files ─────────────────────► ZarrArray
+    ├── ops.npy ──────────────────────────► Suite2pArray
+    ├── planeXX/ with ops.npy ────────────► Suite2pArray (volumetric)
+    ├── planeXX.tiff files ───────────────► TiffArray (volumetric)
+    └── ScanImage TIFFs ──────────────────► ScanImageArray subclass
 ```
 
-**Tip:** Use `open_scanimage()` for automatic ScanImage subclass detection:
-```python
-from mbo_utilities.arrays import open_scanimage
-arr = open_scanimage("/path/to/data.tif")  # Returns LBMArray, PiezoArray, or SinglePlaneArray
-```
-
-## Array Type Details
+## Array Types
 
 (scanimage-arrays)=
 ### ScanImage Arrays
 
-**Returned when:** Reading raw ScanImage TIFF files
-
-The ScanImage array hierarchy handles different acquisition types from ScanImage:
-
-```text
-ScanImageArray (base class)
-    ├── LBMArray         # Light Beads Microscopy (z-planes as channels)
-    ├── PiezoArray       # Piezo z-stacks with optional frame averaging
-    ├── LBMPiezoArray    # Combined LBM + piezo (e.g., pollen calibration)
-    └── SinglePlaneArray # Single-plane time series
-```
-
-Use `open_scanimage()` for automatic stack type detection, or instantiate the specific class directly.
-
-#### ScanImageArray (Base Class)
+Returned when reading raw ScanImage TIFF files. `imread()` auto-detects the stack type:
 
 ```python
 import mbo_utilities as mbo
-from mbo_utilities.arrays import open_scanimage, ScanImageArray
 
-# Auto-detect stack type
-scan = open_scanimage("/path/to/raw/*.tif")
-print(type(scan).__name__)  # 'LBMArray', 'PiezoArray', or 'SinglePlaneArray'
-print(scan.stack_type)      # 'lbm', 'piezo', or 'single_plane'
-
-# Or use imread (returns ScanImageArray base class)
-scan = mbo.imread("/path/to/raw/*.tif")
-
-print(scan.shape)      # (T, Z, Y, X) - e.g., (10000, 14, 456, 896)
-print(scan.num_rois)   # Number of ROIs
-print(scan.num_planes) # Alias for num_channels (Z planes)
-
-# ROI handling
-scan.roi = None      # Stitch all ROIs horizontally (default)
-scan.roi = 0         # Split into separate ROIs (returns tuple)
-scan.roi = 1         # Use only ROI 1 (1-indexed)
-scan.roi = [1, 2]    # Select specific ROIs
-
-# Phase correction settings
-scan.fix_phase = True           # Enable bidirectional scan-phase correction
-scan.use_fft = True             # Use FFT-based phase correction
-scan.phasecorr_method = "mean"  # "mean", "median", "max"
-scan.border = 3                 # Border pixels to exclude
-scan.upsample = 5               # Subpixel upsampling factor
-scan.max_offset = 4             # Maximum phase offset to search
+arr = mbo.imread("/path/to/raw/*.tif")
+print(type(arr).__name__)  # LBMArray, PiezoArray, SinglePlaneArray, or LBMPiezoArray
+print(arr.stack_type)      # 'lbm', 'piezo', 'single_plane', or 'pollen'
 ```
+
+All ScanImage arrays support:
+
+- **ROI handling**: `arr.roi = None` (stitch all), `arr.roi = 1` (specific ROI), `arr.roi = [1,2]` (multiple)
+- **Phase correction**: `arr.fix_phase = True/False`
+- **Metadata**: `arr.metadata["si"]` contains raw ScanImage headers
+- **Axial Registration**: `suite3d`-based z-plane registration
 
 (lbmarray)=
 #### LBMArray
 
-For Light Beads Microscopy stacks where z-planes are interleaved as ScanImage channels.
+Light Beads Microscopy with z-planes interleaved as ScanImage channels.
 
 ```python
-from mbo_utilities.arrays import LBMArray, open_scanimage
-
-# Auto-detect and get LBMArray
-arr = open_scanimage("/path/to/lbm_data.tif")
-# arr is LBMArray if detected as LBM
-
-# Key metadata context (shown in GUI tooltips):
-# - Ly: Total height including fly-to lines between mROIs
-# - dz: Must be user-supplied (not in ScanImage metadata for LBM)
-# - fs: Volume rate (frame rate / num_zplanes)
+arr = mbo.imread("/path/to/lbm_data.tif")
+print(arr.shape)      # (T, Z, Y, X)
+print(arr.num_planes) # number of z-planes
+# note: dz must be user-supplied (not in ScanImage metadata for LBM)
 ```
 
 (piezoarray)=
 #### PiezoArray
 
-For piezo z-stacks with optional frame averaging.
+Aquisitions using the ScanImage Piezo `hStackManager` produce z-stacks with optional frame averaging.
 
 ```python
-from mbo_utilities.arrays import PiezoArray, open_scanimage
+arr = mbo.imread("/path/to/piezo_data.tif")
+print(arr.shape)            # (T, Z, Y, X)
+print(arr.frames_per_slice) # frames per z-position
+print(arr.can_average)      # True if averaging possible
 
-# With frame averaging enabled
-arr = open_scanimage("/path/to/piezo_data.tif", average_frames=True)
-
-# Piezo-specific properties
-print(arr.frames_per_slice)    # Frames acquired per z-slice
-print(arr.log_average_factor)  # >1 if pre-averaged at acquisition
-print(arr.can_average)         # True if averaging is possible
-
-# Toggle averaging (changes shape)
-arr.average_frames = True
-print(arr.shape)  # Reduced T dimension when averaging
-
-# Key metadata context:
-# - frames_per_slice: Frames at each z-position before piezo moves
-# - log_average_factor: If >1, frames were pre-averaged during acquisition
-# - dz: Z-step size from hStackManager.stackZStepSize
+arr.average_frames = True   # toggle averaging based on `scanimage.logAverageFactor` 
 ```
 
 (lbmpiezoarray)=
 
 #### LBMPiezoArray
 
-For stacks that have both LBM characteristics (>2 channels/beamlets) and piezo characteristics (hStackManager enabled). Commonly used for pollen calibration data.
+Combined LBM + piezo, typically for pollen calibration.
 
 ```python
-from mbo_utilities.arrays import LBMPiezoArray, open_scanimage
-
-# Auto-detect combined LBM+piezo stack
-arr = open_scanimage("/path/to/pollen_calibration.tif")
-# arr is LBMPiezoArray if both LBM and piezo detected
-
+arr = mbo.imread("/path/to/pollen_calibration.tif")
 print(arr.stack_type)       # 'pollen'
-print(arr.num_planes)       # Z-planes from LBM channels
-print(arr.frames_per_slice) # Frames per piezo position
-
-# Key metadata context:
-# - Combines LBM's channel-as-z with piezo's z-stepping
-# - dz from hStackManager.stackZStepSize
-# - Used for pollen bead calibration workflows
+print(arr.shape)            # (Z, C, Y, X) - z-piezo positions × beamlets
 ```
 
 (singleplanearray)=
 #### SinglePlaneArray
 
-For single-plane time series without z-stack.
+Single-plane time series (no z-stack).
 
 ```python
-from mbo_utilities.arrays import SinglePlaneArray, open_scanimage
-
-arr = open_scanimage("/path/to/single_plane.tif")
-# arr is SinglePlaneArray if no z-stack detected
+arr = mbo.imread("/path/to/single_plane.tif")
+print(arr.shape)  # (T, C, Y, X) where C=1
 ```
-
-**Key Features (all ScanImage arrays):**
-
-- Automatic ROI stitching/splitting via `roi` property
-- Bidirectional scan-phase correction (configurable methods)
-- Stack type detection via `stack_type` property
-- ROI position extraction from ScanImage metadata
-- Contextual metadata descriptions via `get_param_description()`
-- Stores all ScanImage-metadata in `array.metadata["si"]`
-
-**Legacy alias:** `MboRawArray` is an alias for `ScanImageArray` for backwards compatibility.
-
----
 
 (tiffarray)=
 ### TiffArray
 
-**Returned when:** Reading processed TIFF file(s) without ScanImage metadata, or a directory with `planeXX.tiff` files
+Universal TIFF reader for non-ScanImage files. Automatically handles standard TIFF stacks,
+ImageJ hyperstacks (interleaved TZYX), and multi-plane volumes (planeXX.tiff directories).
 
 ```python
-# Single or multiple standard TIFF files
 arr = mbo.imread("/path/to/processed.tif")
-arr = mbo.imread(["/path/file1.tif", "/path/file2.tif"])
-# Returns: TiffArray
+print(arr.shape)  # (T, Z, Y, X) - Z=1 for single-file stacks
 
-print(type(arr))   # <class 'TiffArray'>
-print(arr.shape)   # (T, 1, Y, X) - 4D with Z=1 for single files
-print(arr.dtype)   # Data type from TIFF
+# ImageJ hyperstacks are auto-detected
+arr = mbo.imread("/path/to/imagej_stack.tif")
+print(arr.shape)         # (T, Z, Y, X) with Z > 1
+print(arr.is_volumetric) # True
 
-# Directory with planeXX.tiff files (auto-detected volumetric)
-vol = mbo.imread("/path/to/tiff_output/")
-# Detects plane01.tiff, plane02.tiff, etc.
-print(vol.shape)         # (T, Z, Y, X) - e.g., (10000, 14, 512, 512)
+# volumetric from directory
+vol = mbo.imread("/path/to/tiff_output/")  # detects planeXX.tiff pattern
+print(vol.shape)         # (T, Z, Y, X)
 print(vol.is_volumetric) # True
-print(vol.num_planes)    # 14
-
-# Lazy frame reading
-frame = arr[0]        # Read first frame
-subset = arr[10:20]   # Read frames 10-19 (only those pages are loaded)
-
-# Dtype conversion
-arr32 = arr.astype(np.float32)
 ```
-
-**Key Features:**
-
-- Uses `TiffFile` handles for lazy page access
-- Auto-detects volumetric structure from `planeXX.tiff` filename patterns
-- Multi-file support (concatenated along time axis)
-- Thread-safe page reading
-- Always outputs 4D format: (T, Z, Y, X) where Z=1 for single files
-
----
-
-(mbotiffarray)=
-### MBOTiffArray
-
-**Returned when:** Reading TIFFs with MBO-specific metadata (uses Dask backend)
-
-```python
-# MBO-processed TIFFs with metadata
-arr = mbo.imread("/path/to/processed/*.tif")
-# Returns: MBOTiffArray if MBO metadata detected
-
-print(type(arr))   # <class 'MBOTiffArray'>
-print(arr.shape)   # (T, Z, Y, X) - Dask infers shape
-print(arr.dask)    # Access underlying dask.Array
-
-# Lazy operations via Dask
-mean_proj = arr[:100].mean(axis=0).compute()
-```
-
-**Key Features:**
-
-- Dask-backed for truly lazy, chunked access
-- Uses `tifffile.imread(aszarr=True)` for memory-mapped access
-- Automatic dimension handling (2D → TZYX, 3D → TZYX, 4D passthrough)
-- Preserves file tags from filenames
-
----
-
-(binarray)=
-### BinArray
-
-**Returned when:** Explicitly reading a `.bin` file path
-
-```python
-# Reading a specific binary file
-arr = mbo.imread("path/to/data_raw.bin")
-# Returns: BinArray
-
-print(type(arr))   # <class 'BinArray'>
-print(arr.shape)   # (nframes, Ly, Lx)
-print(arr.nframes) # Number of frames
-print(arr.Ly, arr.Lx)  # Spatial dimensions
-
-# Access data like numpy array
-frame = arr[0]      # First frame
-subset = arr[0:100] # First 100 frames
-
-# Write access (if opened for writing)
-arr[0] = new_frame
-
-# Context manager support
-with BinArray("data.bin", shape=(100, 512, 512)) as arr:
-    arr[:] = data
-
-# Close when done
-arr.close()
-```
-
-**Key Features:**
-
-- Direct binary file access via `np.memmap`
-- Auto-infers shape from adjacent `ops.npy` if present
-- Can provide shape manually: `BinArray("file.bin", shape=(1000, 512, 512))`
-- Read/write access (supports `__setitem__`)
-- Useful for creating new binary files from scratch
-
-**When to use:**
-
-- Reading/writing specific binary files in a Suite2p workflow
-- Creating new binary files from scratch
-- When you want to work with the file directly, not through Suite2p's abstraction
-
----
 
 (suite2parray)=
 ### Suite2pArray
 
-**Returned when:** Reading a directory containing `ops.npy`, or `ops.npy` directly, or a directory with multiple `planeXX/` subdirectories
+Suite2p binary files with full ops.npy context.
 
 ```python
-# Reading a Suite2p single-plane directory
 arr = mbo.imread("/path/to/suite2p/plane0")
-arr = mbo.imread("/path/to/suite2p/plane0/ops.npy")
-# Returns: Suite2pArray
+print(arr.shape)       # (T, Y, X) single plane
+print(arr.raw_file)    # path to data_raw.bin
+print(arr.reg_file)    # path to data.bin
 
-print(type(arr))   # <class 'Suite2pArray'>
-print(arr.shape)   # (nframes, Ly, Lx) - 3D for single plane
-print(arr.metadata)  # Full ops.npy contents
+arr.switch_channel(use_raw=True)  # toggle raw/registered
 
-# Multi-plane Suite2p output (auto-detected volumetric)
-vol = mbo.imread("/path/to/suite2p_output/")
-# Detects plane01_stitched/, plane02_stitched/, etc.
-print(vol.shape)         # (T, Z, Y, X) - e.g., (10000, 14, 512, 512)
-print(vol.is_volumetric) # True
-print(vol.num_planes)    # 14
-
-# File paths (single plane)
-print(arr.raw_file)    # Path to data_raw.bin (unregistered)
-print(arr.reg_file)    # Path to data.bin (registered)
-print(arr.active_file) # Currently active file
-
-# Switch between raw and registered
-arr.switch_channel(use_raw=True)   # Use data_raw.bin
-arr.switch_channel(use_raw=False)  # Use data.bin (default)
-
-# Visualization with both channels
-iw = arr.imshow()  # Shows raw and registered side-by-side if both exist
+# volumetric
+vol = mbo.imread("/path/to/suite2p_output/")  # detects planeXX/ subdirs
+print(vol.shape)  # (T, Z, Y, X)
 ```
 
-**Key Features:**
+Note: frame count is computed from actual file size, not ops.npy (which may be stale).
 
-- Full Suite2p context (metadata from `ops.npy`)
-- Auto-detects volumetric structure from `planeXX/` subdirectory patterns
-- Access to both raw (`data_raw.bin`) and registered (`data.bin`) data
-- Memory-mapped via `np.memmap` for lazy loading
-- File size validation against ops metadata
-- For volumes: `switch_channel()` applies to all planes
+(binarray)=
+### BinArray
 
----
+Direct binary file access when no ops.npy context is available.
+
+```python
+from mbo_utilities.arrays import BinArray
+
+# requires explicit shape
+arr = BinArray("/path/to/data.bin", shape=(1000, 512, 512))
+print(arr.shape)  # (T, Y, X)
+
+# read/write via memmap
+arr[0] = new_frame
+arr.close()
+```
 
 (h5array)=
 ### H5Array
 
-**Returned when:** Reading HDF5 files (`.h5`, `.hdf5`)
+HDF5 datasets with auto-detection of common dataset names.
 
 ```python
-# HDF5 dataset
 arr = mbo.imread("/path/to/data.h5")
-# Returns: H5Array
+print(arr.dataset_name)  # 'mov', 'data', or first available
 
-print(type(arr))        # <class 'H5Array'>
-print(arr.shape)        # Dataset shape
-print(arr.dataset_name) # Auto-detected: 'mov', 'data', or first available
-
-# Optionally specify dataset name
+# specify dataset explicitly
 arr = mbo.imread("/path/to/data.h5", dataset="imaging_data")
-
-# Access data
-frame = arr[0]
-subset = arr[10:20, :, 100:200]
-
-# File-level metadata
-print(arr.metadata)  # HDF5 file attributes
-
-# Close file handle
-arr.close()
 ```
-
-**Key Features:**
-
-- Auto-detects common dataset names: `'mov'`, `'data'`, `'scan_corrections'`
-- Lazy loading via `h5py.Dataset`
-- Supports ellipsis indexing (`arr[..., 100:200]`)
-- File-level attributes exposed via `.metadata`
-
----
 
 (zarrarray)=
 ### ZarrArray
 
-**Returned when:** Reading Zarr stores (`.zarr` directories)
+Zarr v3 stores including OME-Zarr.
 
 ```python
-# Zarr store (standard or OME-Zarr)
 arr = mbo.imread("/path/to/data.zarr")
-# Returns: ZarrArray
+print(arr.shape)     # (T, Z, Y, X)
+print(arr.metadata)  # OME-NGFF attributes if present
 
-print(type(arr))   # <class 'ZarrArray'>
-print(arr.shape)   # (T, Z, Y, X) - always 4D
-
-# Read multiple zarr stores as z-planes
+# multiple zarr stores stacked as z-planes
 arr = mbo.imread(["/path/plane01.zarr", "/path/plane02.zarr"])
-
-# Access pre-computed statistics (if available in OME metadata)
-print(arr.zstats)  # {'mean': [...], 'std': [...], 'snr': [...]}
-
-# Access metadata (OME-NGFF attributes if present)
-print(arr.metadata)
 ```
-
-**Key Features:**
-
-- Supports both standard Zarr arrays and OME-Zarr groups
-- Auto-detects OME-Zarr structure (looks for `"0"` subarray in groups)
-- Multi-store support (stacked along Z axis)
-- Zarr v3 compatible
-- Exposes OME-NGFF metadata via `.metadata`
-
----
 
 (numpyarray)=
 ### NumpyArray
 
-**Returned when:** Reading `.npy` files OR passing an in-memory numpy array to `imread()`
-
-This is the most versatile array type - it wraps any numpy array and provides full `imwrite()` support.
-
-#### From .npy Files (Memory-Mapped)
+Wraps `.npy` files (memory-mapped) or in-memory numpy arrays.
 
 ```python
-# Read .npy file - memory-mapped for lazy loading
+# from file
 arr = mbo.imread("/path/to/data.npy")
-# Returns: NumpyArray
 
-print(type(arr))   # <class 'NumpyArray'>
-print(arr.shape)   # (T, Y, X) or (T, Z, Y, X)
-print(arr.dims)    # 'TYX' or 'TZYX' (auto-inferred)
-```
-
-#### From In-Memory Numpy Arrays
-
-```python
+# from in-memory array
 import numpy as np
-import mbo_utilities as mbo
-
-# Create or load a numpy array from anywhere
 data = np.random.randn(100, 512, 512).astype(np.float32)
-
-# Wrap with imread - returns NumpyArray
 arr = mbo.imread(data)
 
-print(arr)
-# NumpyArray(shape=(100, 512, 512), dtype=float32, dims='TYX' (in-memory))
+print(arr.dims)  # 'TYX' or 'TZYX' (auto-inferred from shape)
 
-# Now you have full imwrite support with all features
-mbo.imwrite(arr, "output", ext=".zarr")   # Zarr v3 with chunking/sharding
-mbo.imwrite(arr, "output", ext=".tiff")   # BigTIFF
-mbo.imwrite(arr, "output", ext=".bin")    # Suite2p binary + ops.npy
-mbo.imwrite(arr, "output", ext=".h5")     # HDF5
-mbo.imwrite(arr, "output", ext=".npy")    # NumPy format
+# enables imwrite to any format
+mbo.imwrite(arr, "output", ext=".zarr")
 ```
-
-#### 4D Volumetric Data
-
-```python
-# 4D arrays are automatically detected as (T, Z, Y, X)
-volume = np.random.randn(100, 15, 512, 512).astype(np.float32)
-arr = mbo.imread(volume)
-
-print(arr.dims)        # 'TZYX'
-print(arr.num_planes)  # 15
-
-# Write specific planes
-mbo.imwrite(arr, "output", ext=".zarr", planes=[1, 7, 14])
-```
-
-**Key Features:**
-
-- Automatic dimension inference (`TYX`, `TZYX`, `YX`, etc.)
-- Memory-mapped for `.npy` files (lazy loading)
-- Full `imwrite()` support with all output formats
-- Chunked reduction operations (`mean`, `std`, `max`, `min`)
-- Metadata auto-generation from array shape
-
----
 
 (isoviewarray)=
 ### IsoviewArray
 
-**Returned when:** Manually instantiated for isoview lightsheet microscopy data
+Isoview lightsheet microscopy data (multi-view, multi-timepoint).
 
 ```python
 from mbo_utilities.arrays import IsoviewArray
 
-# Isoview lightsheet data (multi-timepoint)
 arr = IsoviewArray("/path/to/output")
-# Shape: (T, Z, Views, Y, X) - 5D
-
-print(arr.shape)       # (10, 543, 4, 2048, 2048)
-print(arr.views)       # [(0, 0), (1, 0), (2, 1), (3, 1)] - (camera, channel) pairs
-print(arr.num_views)   # 4
-
-# Access specific view
-frame = arr[0, 100, 0]  # timepoint 0, z=100, view 0 (camera 0, channel 0)
-
-# Get view index for camera/channel
-idx = arr.view_index(camera=1, channel=0)
-
-# Access labels and projections (consolidated structure only)
-labels = arr.get_labels(timepoint=0, camera=0, label_type='segmentation')
-proj = arr.get_projection(timepoint=0, camera=0, proj_type='xy')
+print(arr.shape)     # (T, Z, V, Y, X) or (Z, V, Y, X) single timepoint
+print(arr.views)     # [(camera, channel), ...] pairs
+print(arr.num_views) # number of views
 ```
 
-**Key Features:**
+## Common Properties
 
-- Supports two data structures:
-  - **Consolidated**: `data_TM000000_SPM00.zarr/camera_0/0/`
-  - **Separate**: `SPM00_TM000000_CM00_CHN01.zarr`
-- Multi-view (camera/channel combinations)
-- 5D shape: `(T, Z, Views, Y, X)` or 4D `(Z, Views, Y, X)` for single timepoint
-- Access to segmentation labels and projections
-- Lazy loading via Zarr
+All array types provide:
 
----
-
-## Common Properties Across All Array Types
-
-All lazy array types provide these standard properties:
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `.shape` | `tuple[int, ...]` | Array dimensions |
-| `.dtype` | `np.dtype` | Data type |
-| `.ndim` | `int` | Number of dimensions |
-| `.metadata` | `dict` | Array/file metadata |
-| `.filenames` | `list[Path]` | Source file paths |
-| `._imwrite()` | method | Write to any output format |
+| Property    | Description                |
+|-------------|----------------------------|
+| `.shape`    | array dimensions           |
+| `.dtype`    | data type                  |
+| `.ndim`     | number of dimensions       |
+| `.metadata` | file/array metadata dict   |
 
 Most array types also provide:
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `.num_planes` | `int` | Number of Z-planes |
-| `.num_rois` | `int` | Number of ROIs (ScanImage arrays) |
-| `.stack_type` | `str` | Stack type: 'lbm', 'piezo', or 'single_plane' (ScanImage arrays) |
-| `.close()` | method | Release file handles |
+| Property      | Description                       |
+|---------------|-----------------------------------|
+| `.dims`       | dimension labels (e.g., 'TZYX')   |
+| `.num_planes` | number of z-planes                |
+| `.close()`    | release file handles              |
 
-PiezoArray-specific properties:
+ScanImage-specific:
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `.frames_per_slice` | `int` | Frames acquired per z-slice |
-| `.log_average_factor` | `int` | Averaging factor from acquisition |
-| `.can_average` | `bool` | True if frame averaging is possible |
-| `.average_frames` | `bool` | Toggle frame averaging on/off |
+| Property      | Description                                 |
+|---------------|---------------------------------------------|
+| `.stack_type` | 'lbm', 'piezo', 'single_plane', or 'pollen' |
+| `.num_rois`   | number of ROIs                              |
+| `.roi`        | ROI selection (None, int, or list)          |
+| `.fix_phase`  | enable/disable phase correction             |
 
-## Volumetric Output
+PiezoArray-specific:
 
-Both TIFF and Zarr formats support volumetric output with unified capabilities:
+| Property            | Description                |
+|---------------------|----------------------------|
+| `.frames_per_slice` | frames per z-position      |
+| `.can_average`      | True if averaging possible |
+| `.average_frames`   | toggle frame averaging     |
 
-### Features
+## Writing Data
 
-- **Plane/frame selection**: Write subsets of data with `planes=[0, 2, 4]` or `frames=range(100)`
-- **Reactive metadata**: Z-step (`dz`) automatically scales when selecting every Nth plane
-- **Consistent naming**: Output filenames include suffix tags (e.g., `data_planes-0-14-2.zarr`)
-- **Format-specific metadata**: ImageJ hyperstack for TIFF, OME-NGFF v0.5 for Zarr
-
-### Usage
+All array types support `imwrite()`:
 
 ```python
 import mbo_utilities as mbo
 
-arr = mbo.imread("/path/to/volume.tif")
+arr = mbo.imread("/path/to/data.tif")
 
-# write full volume to zarr (OME-NGFF v0.5 compliant)
-mbo.imwrite(arr, "output", ext=".zarr")
+# write to different formats
+mbo.imwrite(arr, "output", ext=".zarr")   # OME-Zarr v3
+mbo.imwrite(arr, "output", ext=".tiff")   # BigTIFF
+mbo.imwrite(arr, "output", ext=".h5")     # HDF5
+mbo.imwrite(arr, "output", ext=".npy")    # NumPy
+mbo.imwrite(arr, "output", ext=".bin")    # Suite2p binary
 
-# write every 2nd plane - dz automatically doubles
-mbo.imwrite(arr, "output", ext=".zarr", planes=[0, 2, 4, 6, 8])
+# subset selection
+mbo.imwrite(arr, "output", ext=".zarr", frames=range(100))
+mbo.imwrite(arr, "output", ext=".zarr", planes=[0, 2, 4])
 
-# write specific frame range to tiff
-mbo.imwrite(arr, "output", ext=".tiff", frames=range(0, 500))
-
-# non-contiguous frames - fs is invalidated in output metadata
-mbo.imwrite(arr, "output", ext=".tiff", frames=[0, 10, 50, 100])
-```
-
-### OutputMetadata
-
-The `OutputMetadata` class computes adjusted metadata for subsetted output:
-
-```python
-from mbo_utilities.metadata import OutputMetadata
-
-# source metadata with dz=5um and fs=30Hz
-meta = {"dz": 5.0, "fs": 30.0}
-
-# every 2nd plane -> dz doubles to 10um
-out = OutputMetadata(meta, plane_indices=[0, 2, 4, 6])
-print(out.dz)  # 10.0
-
-# non-contiguous frames -> fs invalidated
-out = OutputMetadata(meta, frame_indices=[0, 5, 10])
-print(out.fs)  # None (no valid frame rate for non-contiguous selection)
-```
-
-### Zarr Output Options
-
-```python
-# sharded zarr with compression (default)
+# zarr options
 mbo.imwrite(arr, "output", ext=".zarr", sharded=True, compression_level=1)
-
-# unsharded zarr (more compatible with older tools)
-mbo.imwrite(arr, "output", ext=".zarr", sharded=False)
-
-# custom chunk size target
-mbo.imwrite(arr, "output", ext=".zarr", target_chunk_mb=50)
 ```
+
+Metadata is automatically adjusted when subsetting (e.g., `dz` doubles when selecting every 2nd plane).
 
 ## API Reference
 
-- `mbo_utilities.imread()` - Smart file reader
-- `mbo_utilities.imwrite()` - Universal file writer
-- `mbo_utilities.arrays` - Direct access to array classes
-- `mbo_utilities.metadata.OutputMetadata` - Reactive metadata for subsetted output
+- `mbo_utilities.imread()` - unified file reader
+- `mbo_utilities.imwrite()` - unified file writer
+- `mbo_utilities.arrays` - direct access to array classes

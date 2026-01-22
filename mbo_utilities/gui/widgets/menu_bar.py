@@ -69,15 +69,20 @@ def draw_menu_bar(parent: Any):
                 imgui.end_menu()
             if imgui.begin_menu("Docs", True):
                 if imgui.menu_item(
-                    "Open Docs", "Ctrl+I", p_selected=False, enabled=True
+                    "Help", "F1", p_selected=False, enabled=True
                 )[0]:
-                    webbrowser.open(
-                        "https://millerbrainobservatory.github.io/mbo_utilities/"
-                    )
+                    parent._show_help_popup = True
                 if imgui.menu_item(
                     "Keybinds", "/", p_selected=False, enabled=True
                 )[0]:
                     parent._show_keybinds_popup = True
+                imgui.separator()
+                if imgui.menu_item(
+                    "Online Docs", "", p_selected=False, enabled=True
+                )[0]:
+                    webbrowser.open(
+                        "https://millerbrainobservatory.github.io/mbo_utilities/"
+                    )
                 imgui.end_menu()
             if imgui.begin_menu("Settings", True):
                 imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
@@ -236,7 +241,8 @@ def draw_keybinds_popup(parent: Any):
             ("[", "Toggle side panel"),
             ("v / Enter", "Reset vmin/vmax"),
             ("", ""),
-            ("Other", None),
+            ("Help", None),
+            ("F1 / ?", "Open help"),
             ("/", "Toggle keybinds popup"),
         ]
 

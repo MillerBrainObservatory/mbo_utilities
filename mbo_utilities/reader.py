@@ -18,7 +18,6 @@ from mbo_utilities.arrays import (
     BinArray,
     LBMPiezoArray,
     H5Array,
-    ImageJHyperstackArray,
     IsoviewArray,
     LBMArray,
     NumpyArray,
@@ -284,10 +283,8 @@ def imread(
             (SinglePlaneArray, "single-plane ScanImage"),
             # Generic ScanImage (raw acquisition data)
             (ScanImageArray, "raw ScanImage"),
-            # ImageJ hyperstacks (TZYX volumetric)
-            (ImageJHyperstackArray, "ImageJ hyperstack"),
-            # Fallback (any TIFF)
-            (TiffArray, "generic TIFF"),
+            # Fallback: TiffArray handles both standard TIFFs and ImageJ hyperstacks
+            (TiffArray, "TIFF"),
         ]
 
         for array_cls, description in TIFF_ARRAY_CLASSES:

@@ -160,20 +160,35 @@ def _get_version() -> str:
 
 
 def _check_for_upgrade() -> tuple[str, str | None]:
-    """Check PyPI for newer version of mbo_utilities.
+    """check pypi for newer version of mbo_utilities (cached for 1 hour).
 
-    Returns (current_version, latest_version) or (current_version, None) if check fails.
+    returns (current_version, latest_version) or (current_version, None) if check fails.
     """
     import urllib.request
     import json
 
     current = _get_version()
 
+    # check cache first (1 hour expiry)
+    try:
+        from mbo_utilities.env_cache import get_cached_pypi_version, update_pypi_cache
+        cached = get_cached_pypi_version(max_age_hours=1)
+        if cached:
+            return current, cached
+    except Exception:
+        pass
+
+    # fetch from pypi
     try:
         url = "https://pypi.org/pypi/mbo-utilities/json"
         with urllib.request.urlopen(url, timeout=5) as response:
             data = json.loads(response.read().decode())
             latest = data["info"]["version"]
+            # update cache
+            try:
+                update_pypi_cache(latest)
+            except Exception:
+                pass
             return current, latest
     except Exception:
         return current, None

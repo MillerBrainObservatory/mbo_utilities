@@ -68,7 +68,10 @@ source_suffix = {
 
 autodoc_mock_imports = ['scanreader']
 
-nb_execution_mode = "off"
+nb_execution_mode = "auto"
+nb_execution_timeout = 120  # 2 minutes per cell
+nb_execution_raise_on_error = True
+nb_execution_excludepatterns = ["user_guide.ipynb", "file_formats.md"]  # skip notebooks needing external data
 
 myst_admonition_enable = True
 myst_amsmath_enable = True
@@ -135,4 +138,9 @@ html_theme_options = {
             "type": "fontawesome",
         },
     ],
+}
+
+# force dark mode, hide light/dark toggle
+html_context = {
+    "default_mode": "dark",
 }

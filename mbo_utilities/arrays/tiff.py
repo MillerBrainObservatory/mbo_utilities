@@ -134,6 +134,60 @@ def find_tiff_plane_files(directory: Path) -> list[Path]:
     return sorted(plane_files, key=sort_key)
 
 
+class _InterleavedTiffReader:
+    """Internal reader for ImageJ-style interleaved TZYX hyperstacks."""
+
+    def __init__(self, path: Path, n_frames: int, n_planes: int):
+        self._path = path
+        self._tiff = TiffFile(path)
+        self._lock = threading.Lock()
+        self._n_frames = n_frames
+        self._n_planes = n_planes
+
+        page0 = self._tiff.pages.first
+        self._page_shape = page0.shape
+        self._dtype = page0.dtype
+
+    @property
+    def nframes(self) -> int:
+        return self._n_frames
+
+    @property
+    def n_planes(self) -> int:
+        return self._n_planes
+
+    @property
+    def Ly(self) -> int:
+        return self._page_shape[0]
+
+    @property
+    def Lx(self) -> int:
+        return self._page_shape[1]
+
+    @property
+    def dtype(self):
+        from mbo_utilities.util import get_dtype
+        return get_dtype(self._dtype)
+
+    def read_tzyx(self, t_indices: list[int], z_indices: list[int]) -> np.ndarray:
+        """Read frames for given T and Z indices, returning (T, Z, Y, X) array."""
+        buf = np.empty(
+            (len(t_indices), len(z_indices), self.Ly, self.Lx),
+            dtype=self._dtype
+        )
+
+        with self._lock:
+            for ti, t_idx in enumerate(t_indices):
+                for zi, z_idx in enumerate(z_indices):
+                    page_idx = t_idx * self._n_planes + z_idx
+                    buf[ti, zi] = self._tiff.pages[page_idx].asarray()
+
+        return buf
+
+    def close(self):
+        self._tiff.close()
+
+
 class _SingleTiffPlaneReader:
     """Internal reader for a single TIFF plane."""
 
@@ -436,8 +490,19 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         self.num_rois = 1
 
     def _init_single_plane(self, files: list[Path]):
-        """Initialize as single-plane array."""
+        """Initialize as single-plane array, or as interleaved hyperstack if detected."""
         self._is_volumetric = False
+        self._interleaved_reader = None
+
+        # check if single file is an ImageJ hyperstack with Z > 1
+        if len(files) == 1:
+            ij_info = self._check_imagej_hyperstack(files[0])
+            if ij_info is not None:
+                n_frames, n_planes = ij_info
+                self._init_interleaved_hyperstack(files[0], n_frames, n_planes)
+                return
+
+        # standard single-plane initialization
         reader = _SingleTiffPlaneReader(files)
         self._planes = [reader]
 
@@ -468,6 +533,75 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
             }
         )
         self.num_rois = 1
+
+    def _check_imagej_hyperstack(self, path: Path) -> tuple[int, int] | None:
+        """Check if file is an ImageJ hyperstack with Z > 1. Returns (n_frames, n_planes) or None."""
+        try:
+            with TiffFile(path) as tf:
+                if not tf.is_imagej:
+                    return None
+                ij_meta = tf.imagej_metadata
+                if not ij_meta:
+                    return None
+                n_planes = ij_meta.get("slices", 1)
+                if n_planes <= 1:
+                    return None
+
+                # try to get shape from our JSON metadata in Info field
+                n_frames = None
+                try:
+                    info_str = ij_meta.get("Info", "")
+                    if info_str:
+                        meta = json.loads(info_str)
+                        if "shape" in meta and len(meta["shape"]) >= 4:
+                            n_frames = meta["shape"][0]
+                            n_planes = meta["shape"][1]
+                except Exception:
+                    pass
+
+                if n_frames is None:
+                    n_frames = ij_meta.get("frames", 1)
+
+                return (n_frames, n_planes)
+        except Exception:
+            return None
+
+    def _init_interleaved_hyperstack(self, path: Path, n_frames: int, n_planes: int):
+        """Initialize as interleaved ImageJ hyperstack."""
+        self._is_volumetric = True
+        self._interleaved_reader = _InterleavedTiffReader(path, n_frames, n_planes)
+        self._planes = []  # not used for interleaved
+
+        self._nframes = n_frames
+        self._nz = n_planes
+        self._ly = self._interleaved_reader.Ly
+        self._lx = self._interleaved_reader.Lx
+        self._dtype = self._interleaved_reader.dtype
+        self.filenames = [path]
+
+        # try to read metadata from file
+        try:
+            from mbo_utilities.metadata import get_metadata_single
+            self._metadata = get_metadata_single(path)
+        except Exception:
+            self._metadata = {}
+
+        self._metadata.update(
+            {
+                "shape": self.shape,
+                "dtype": str(self._dtype),
+                "nframes": self._nframes,
+                "num_frames": self._nframes,
+                "num_planes": self._nz,
+                "file_path": str(path),
+            }
+        )
+        self.num_rois = 1
+
+        logger.info(
+            f"Loaded ImageJ hyperstack: {self._nframes} frames, {self._nz} planes, "
+            f"{self._ly}x{self._lx} px"
+        )
 
     def _init_volume(self, plane_files: list[Path]):
         """Initialize as volumetric array."""
@@ -571,10 +705,9 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         t_key = _convert_range_to_slice(t_key)
         z_key = _convert_range_to_slice(z_key)
 
-        # normalize t_key
+        # normalize t_key to list of indices
         if isinstance(t_key, slice):
-            start, stop, step = t_key.indices(self._nframes)
-            t_key = slice(start, stop, step)
+            t_indices = list(range(self._nframes)[t_key])
         elif isinstance(t_key, int):
             if t_key < 0:
                 t_key = self._nframes + t_key
@@ -582,41 +715,76 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
                 raise IndexError(
                     f"Time index {t_key} out of bounds for {self._nframes} frames"
                 )
+            t_indices = [t_key]
+        elif isinstance(t_key, (list, np.ndarray)):
+            t_indices = list(t_key)
+        else:
+            t_indices = list(range(self._nframes))
 
-        # handle z indexing
+        # normalize z_key to list of indices
         if isinstance(z_key, int):
             if z_key < 0:
                 z_key = self._nz + z_key
             if z_key < 0 or z_key >= self._nz:
                 raise IndexError(f"Z index {z_key} out of bounds for {self._nz} planes")
-            out = self._planes[z_key][t_key, y_key, x_key]
+            z_indices = [z_key]
+        elif isinstance(z_key, slice):
+            z_indices = list(range(self._nz)[z_key])
+        elif isinstance(z_key, (list, np.ndarray)):
+            z_indices = list(z_key)
         else:
-            if isinstance(z_key, slice):
-                z_indices = range(self._nz)[z_key]
-            elif isinstance(z_key, (list, np.ndarray)):
-                z_indices = z_key
-            else:
-                z_indices = range(self._nz)
+            z_indices = list(range(self._nz))
 
-            arrs = [self._planes[i][t_key, y_key, x_key] for i in z_indices]
+        # use interleaved reader if available
+        if self._interleaved_reader is not None:
+            out = self._interleaved_reader.read_tzyx(t_indices, z_indices)
+            # apply spatial slicing
+            if y_key != slice(None) or x_key != slice(None):
+                out = out[:, :, y_key, x_key]
+        else:
+            # use per-plane readers
+            arrs = []
+            for z_idx in z_indices:
+                plane_data = self._planes[z_idx][t_indices, y_key, x_key]
+                if plane_data.ndim == 2:
+                    plane_data = plane_data[np.newaxis, ...]
+                arrs.append(plane_data)
             out = np.stack(arrs, axis=1)
+
+        # squeeze singleton dimensions based on original key types
+        if isinstance(key[0], int):
+            out = out[0]
+        if isinstance(key[1], int) and out.ndim >= 3:
+            out = out[:, 0] if out.ndim == 4 else out[0]
 
         if self._target_dtype is not None:
             out = out.astype(self._target_dtype)
         return out
 
     def close(self):
+        if self._interleaved_reader is not None:
+            self._interleaved_reader.close()
         for plane in self._planes:
             plane.close()
 
 
-class ImageJHyperstackArray(TiffReaderMixin, ReductionMixin):
+class ImageJHyperstackArray(TiffArray):
     """
-    Lazy reader for ImageJ hyperstack TIFFs with TZYX format.
+    Deprecated: use TiffArray instead.
 
-    Reads shape from custom metadata tag 50839 or imagej_metadata.
-    Only reads first page for metadata - avoids parsing all IFDs.
+    TiffArray now automatically detects and handles ImageJ hyperstacks.
+    This class is kept for backwards compatibility only.
     """
+
+    def __init__(self, *args, **kwargs):
+        import warnings
+        warnings.warn(
+            "ImageJHyperstackArray is deprecated. Use TiffArray instead, "
+            "which automatically handles ImageJ hyperstacks.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        super().__init__(*args, **kwargs)
 
     @classmethod
     def can_open(cls, file: Path | str) -> bool:
@@ -637,128 +805,6 @@ class ImageJHyperstackArray(TiffReaderMixin, ReductionMixin):
                 return ij_meta.get("slices", 1) > 1
         except Exception:
             return False
-
-    def __init__(
-        self,
-        files: str | Path | list[str] | list[Path],
-        dims: str | Sequence[str] | None = None,
-    ):
-        if isinstance(files, (list, tuple)):
-            files = files[0]
-
-        self._path = Path(files)
-        self._tiff = TiffFile(self._path)
-        self._lock = threading.Lock()
-
-        # read first page only
-        page0 = self._tiff.pages.first
-        self._page_shape = page0.shape
-        self._dtype = page0.dtype
-        self._target_dtype = None
-
-        # get T and Z from imagej_metadata
-        ij_meta = self._tiff.imagej_metadata or {}
-
-        # try to parse our JSON from Info field
-        meta = {}
-        try:
-            info_str = ij_meta.get("Info", "")
-            if info_str:
-                meta = json.loads(info_str)
-        except Exception:
-            pass
-
-        if "shape" in meta and len(meta["shape"]) >= 4:
-            self._n_frames = meta["shape"][0]
-            self._n_planes = meta["shape"][1]
-        else:
-            self._n_frames = ij_meta.get("frames", 1)
-            self._n_planes = ij_meta.get("slices", 1)
-
-        self._ly, self._lx = self._page_shape[-2], self._page_shape[-1]
-        self.filenames = [self._path]
-        self.num_rois = 1
-
-        self._metadata = meta
-        self._metadata.update({
-            "shape": self.shape,
-            "dtype": str(self._dtype),
-            "nframes": self._n_frames,
-            "num_frames": self._n_frames,
-            "num_planes": self._n_planes,
-            "nplanes": self._n_planes,
-            "file_path": str(self._path),
-        })
-
-        self._dim_labels = DimLabels(dims or ("T", "Z", "Y", "X"), ndim=4)
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        return self._dim_labels.value
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        return (self._n_frames, self._n_planes, self._ly, self._lx)
-
-    @property
-    def dtype(self):
-        from mbo_utilities.util import get_dtype
-        return self._target_dtype if self._target_dtype else get_dtype(self._dtype)
-
-    @property
-    def ndim(self) -> int:
-        return 4
-
-    @property
-    def num_planes(self) -> int:
-        return self._n_planes
-
-    @property
-    def metadata(self) -> dict:
-        return self._metadata or {}
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        self._metadata = value
-
-    def __getitem__(self, key):
-        if not isinstance(key, tuple):
-            key = (key,)
-
-        while len(key) < 4:
-            key = key + (slice(None),)
-
-        t_key, z_key, y_key, x_key = key[:4]
-
-        t_indices = listify_index(t_key, self._n_frames)
-        z_indices = listify_index(z_key, self._n_planes)
-
-        with self._lock:
-            frames = []
-            for t_idx in t_indices:
-                z_frames = []
-                for z_idx in z_indices:
-                    page_idx = t_idx * self._n_planes + z_idx
-                    frame = self._tiff.pages[page_idx].asarray()
-                    z_frames.append(frame)
-                frames.append(np.stack(z_frames, axis=0))
-            out = np.stack(frames, axis=0)
-
-        if y_key != slice(None) or x_key != slice(None):
-            out = out[:, :, y_key, x_key]
-
-        if isinstance(t_key, int):
-            out = out[0]
-        if isinstance(z_key, int) and out.ndim >= 3:
-            out = out[:, 0] if out.ndim == 4 else out[0]
-
-        if self._target_dtype is not None:
-            out = out.astype(self._target_dtype)
-
-        return out
-
-    def close(self):
-        self._tiff.close()
 
 
 class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
@@ -923,7 +969,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
         border: int | tuple[int, int, int, int] = 3,
         upsample: int = 5,
         max_offset: int = 4,
-        use_fft: bool = False,
+        use_fft: bool = True,
         metadata: dict | None = None,
         dims: str | Sequence[str] | None = None,
     ):

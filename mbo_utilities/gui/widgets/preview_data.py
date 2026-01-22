@@ -60,6 +60,7 @@ from mbo_utilities.gui._save_as import draw_saveas_popup
 from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts
 from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
+from mbo_utilities.gui._help_viewer import draw_help_popup
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
@@ -147,12 +148,11 @@ class PreviewDataWidget(EdgeWindow):
         self.num_graphics = len(self.image_widget.graphics)
         self.shape = self.image_widget.data[0].shape
 
-        # Determine data type (ScanImage or ImageJ hyperstack)
-        from mbo_utilities.arrays import ImageJHyperstackArray
-        fpath_single = self.fpath[0] if isinstance(self.fpath, list) else self.fpath
+        # Determine data type (ScanImage or volumetric TIFF)
+        from mbo_utilities.arrays import TiffArray
         self.is_mbo_scan = (
             isinstance(self.image_widget.data[0], ScanImageArray) or
-            (ImageJHyperstackArray.can_open(fpath_single) if fpath_single else False)
+            isinstance(self.image_widget.data[0], TiffArray)
         )
         self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
@@ -360,6 +360,11 @@ class PreviewDataWidget(EdgeWindow):
 
         # Options
         self._saveas_background = True
+
+        # Scan-phase correction for save/export (separate from display settings)
+        # defaults to True for save operations
+        self._saveas_fix_phase = True
+        self._saveas_use_fft = True
 
     def _init_viewer(self):
         """Initialize the viewer based on data type."""
@@ -770,6 +775,7 @@ class PreviewDataWidget(EdgeWindow):
         draw_saveas_popup(self)
         draw_process_console_popup(self)
         draw_keybinds_popup(self)
+        draw_help_popup(self)
 
         super().draw_window()
 

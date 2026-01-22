@@ -48,7 +48,7 @@ def load_new_data(parent: Any, path: str):
 
     Uses iw.set_data() to swap data arrays, which handles shape changes.
     """
-    from mbo_utilities.arrays import ImageJHyperstackArray
+    from mbo_utilities.arrays import TiffArray
 
     path_obj = Path(path)
     if not path_obj.exists():
@@ -93,10 +93,10 @@ def load_new_data(parent: Any, path: str):
         parent.fpath = path
         parent.shape = new_data.shape
 
-        # Check if this is MBO data (ScanImage or ImageJ hyperstack)
+        # Check if this is MBO data (ScanImage or volumetric TIFF)
         parent.is_mbo_scan = (
             isinstance(new_data, ScanImageArray) or
-            ImageJHyperstackArray.can_open(path)
+            isinstance(new_data, TiffArray)
         )
 
         # Suggest s2p output directory if not set
