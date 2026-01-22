@@ -76,13 +76,6 @@ def handle_keyboard_shortcuts(parent: Any):
             with contextlib.suppress(Exception):
                 parent.image_widget.reset_vmin_vmax_frame()
 
-    # enter: reset vmin/vmax for current frame
-    if imgui.is_key_pressed(imgui.Key.enter, False) or imgui.is_key_pressed(imgui.Key.keypad_enter, False):
-        if parent.image_widget:
-            parent.logger.info("Shortcut: 'Enter' (Reset vmin/vmax)")
-            with contextlib.suppress(Exception):
-                parent.image_widget.reset_vmin_vmax_frame()
-
     # k: toggle keybinds popup (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.k, False):
         parent.logger.info("Shortcut: 'k' (Keybinds)")
@@ -91,11 +84,6 @@ def handle_keyboard_shortcuts(parent: Any):
     # h: show help popup (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.h, False):
         parent.logger.info("Shortcut: 'h' (Help)")
-        parent._show_help_popup = True
-
-    # F1: show help popup
-    if imgui.is_key_pressed(imgui.Key.f1, False):
-        parent.logger.info("Shortcut: 'F1' (Help)")
         parent._show_help_popup = True
 
     # arrow keys for slider dimensions (only when data is loaded)

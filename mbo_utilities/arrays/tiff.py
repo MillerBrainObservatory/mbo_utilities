@@ -770,43 +770,6 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
             plane.close()
 
 
-class ImageJHyperstackArray(TiffArray):
-    """
-    Deprecated: use TiffArray instead.
-
-    TiffArray now automatically detects and handles ImageJ hyperstacks.
-    This class is kept for backwards compatibility only.
-    """
-
-    def __init__(self, *args, **kwargs):
-        import warnings
-        warnings.warn(
-            "ImageJHyperstackArray is deprecated. Use TiffArray instead, "
-            "which automatically handles ImageJ hyperstacks.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        super().__init__(*args, **kwargs)
-
-    @classmethod
-    def can_open(cls, file: Path | str) -> bool:
-        """Check if file is an ImageJ hyperstack with Z > 1."""
-        if not file:
-            return False
-        path = Path(file)
-        if path.suffix.lower() not in (".tif", ".tiff"):
-            return False
-
-        try:
-            with TiffFile(path) as tf:
-                if not tf.is_imagej:
-                    return False
-                ij_meta = tf.imagej_metadata
-                if not ij_meta:
-                    return False
-                return ij_meta.get("slices", 1) > 1
-        except Exception:
-            return False
 
 
 class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
@@ -1080,6 +1043,13 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
         """Return metadata as dict. Always returns dict, never None."""
         if self._metadata is None:
             self._metadata = {}
+
+        # ensure fs is present using get_param to find it under any alias
+        fs = get_param(self._metadata, "fs")
+        if fs is not None:
+            self._metadata["fs"] = fs
+            self._metadata["frame_rate"] = fs
+
         self._metadata.update(
             {
                 "dtype": self.dtype,

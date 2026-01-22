@@ -8,12 +8,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from dask import array as da
 
 from mbo_utilities import log
 from mbo_utilities.arrays.features._dim_labels import get_dims, get_num_planes
 from mbo_utilities._writers import _write_plane, _write_volumetric_tiff, _write_volumetric_zarr
-from mbo_utilities.metadata import RoiMode
 from numpy.exceptions import AxisError
 
 if TYPE_CHECKING:
