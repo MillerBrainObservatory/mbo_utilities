@@ -204,16 +204,17 @@ def _draw_process_entry(pm: Any, proc: Any) -> None:
 
     # collapsible log output
     if proc.output_path and Path(proc.output_path).is_file():
-        if imgui.tree_node(f"Log Output##proc_{proc.pid}"):
-            lines = proc.tail_log(30)
-            line_height = imgui.get_text_line_height_with_spacing()
-            max_height = 180
-            content_h = min(len(lines) * line_height + 8, max_height) if lines else line_height + 8
+        tree_open = imgui.tree_node(f"Log Output##proc_{proc.pid}")
+        if tree_open:
+            try:
+                lines = proc.tail_log(30)
+                line_height = imgui.get_text_line_height_with_spacing()
+                max_height = 180
+                content_h = min(len(lines) * line_height + 8, max_height) if lines else line_height + 8
 
-            child_flags = imgui.ChildFlags_.borders
-            # begin_child always needs end_child, regardless of return value
-            visible = imgui.begin_child(f"##log_{proc.pid}", ImVec2(-1, content_h), child_flags)
-            if visible:
+                child_flags = imgui.ChildFlags_.borders
+                # begin_child always needs end_child, regardless of return value
+                imgui.begin_child(f"##log_{proc.pid}", ImVec2(-1, content_h), child_flags)
                 for line in lines:
                     line_stripped = line.strip()
                     # color code log lines
@@ -227,8 +228,9 @@ def _draw_process_entry(pm: Any, proc: Any) -> None:
                         imgui.text(line_stripped)
                 # auto-scroll to bottom
                 imgui.set_scroll_here_y(1.0)
-            imgui.end_child()
-            imgui.tree_pop()
+                imgui.end_child()
+            finally:
+                imgui.tree_pop()
 
     imgui.spacing()
     imgui.pop_id()
