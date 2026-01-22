@@ -51,13 +51,10 @@ def handle_keyboard_shortcuts(parent: Any):
                 start_dir = str(get_last_dir("open_folder") or Path.home())
             parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
 
-    # s: toggle save as popup (no modifiers)
+    # s: open save as popup (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.s, False):
         parent.logger.info("Shortcut: 's' (Save As)")
-        if getattr(parent, "_saveas_modal_open", False):
-            parent._saveas_modal_open = False
-        else:
-            parent._saveas_popup_open = True
+        parent._saveas_popup_open = True
 
     # m: toggle metadata viewer (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.m, False):

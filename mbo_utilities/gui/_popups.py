@@ -211,7 +211,9 @@ def _draw_process_entry(pm: Any, proc: Any) -> None:
             content_h = min(len(lines) * line_height + 8, max_height) if lines else line_height + 8
 
             child_flags = imgui.ChildFlags_.borders
-            if imgui.begin_child(f"##log_{proc.pid}", ImVec2(-1, content_h), child_flags):
+            # begin_child always needs end_child, regardless of return value
+            visible = imgui.begin_child(f"##log_{proc.pid}", ImVec2(-1, content_h), child_flags)
+            if visible:
                 for line in lines:
                     line_stripped = line.strip()
                     # color code log lines
@@ -225,7 +227,7 @@ def _draw_process_entry(pm: Any, proc: Any) -> None:
                         imgui.text(line_stripped)
                 # auto-scroll to bottom
                 imgui.set_scroll_here_y(1.0)
-                imgui.end_child()
+            imgui.end_child()
             imgui.tree_pop()
 
     imgui.spacing()
