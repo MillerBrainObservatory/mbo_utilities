@@ -21,9 +21,10 @@
 | Key | Action |
 |-----|--------|
 | m | Toggle metadata viewer |
-| Space | Toggle side panel |
+| p | Toggle side panel |
 | v | Reset vmin/vmax |
-| / | Show keybinds |
+| k | Show keybinds |
+| h | Show help |
 
 ## Mouse
 

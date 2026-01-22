@@ -238,12 +238,12 @@ def draw_keybinds_popup(parent: Any):
             ("", ""),
             ("View", None),
             ("m", "Toggle metadata viewer"),
-            ("[", "Toggle side panel"),
+            ("p", "Toggle side panel"),
             ("v / Enter", "Reset vmin/vmax"),
             ("", ""),
             ("Help", None),
-            ("F1 / ?", "Open help"),
-            ("/", "Toggle keybinds popup"),
+            ("h / F1", "Open help"),
+            ("k", "Toggle keybinds popup"),
         ]
 
         table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body

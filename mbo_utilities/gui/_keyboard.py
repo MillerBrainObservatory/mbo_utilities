@@ -64,9 +64,9 @@ def handle_keyboard_shortcuts(parent: Any):
         parent.logger.info("Shortcut: 'm' (Metadata Viewer)")
         parent.show_metadata_viewer = not parent.show_metadata_viewer
 
-    # [: toggle side panel collapse (no modifiers)
-    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.left_bracket, False):
-        parent.logger.info("Shortcut: '[' (Toggle Side Panel)")
+    # p: toggle side panel collapse (no modifiers)
+    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.p, False):
+        parent.logger.info("Shortcut: 'p' (Toggle Side Panel)")
         parent.collapsed = not parent.collapsed
 
     # v: reset vmin/vmax (no modifiers)
@@ -83,14 +83,14 @@ def handle_keyboard_shortcuts(parent: Any):
             with contextlib.suppress(Exception):
                 parent.image_widget.reset_vmin_vmax_frame()
 
-    # /: toggle keybinds popup (no modifiers)
-    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.slash, False):
-        parent.logger.info("Shortcut: '/' (Keybinds)")
+    # k: toggle keybinds popup (no modifiers)
+    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.k, False):
+        parent.logger.info("Shortcut: 'k' (Keybinds)")
         parent._show_keybinds_popup = not getattr(parent, "_show_keybinds_popup", False)
 
-    # ?: show help popup (shift + / = ?)
-    if not io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.slash, False):
-        parent.logger.info("Shortcut: '?' (Help)")
+    # h: show help popup (no modifiers)
+    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.h, False):
+        parent.logger.info("Shortcut: 'h' (Help)")
         parent._show_help_popup = True
 
     # F1: show help popup

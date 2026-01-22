@@ -1,12 +1,5 @@
 """
 Common helpers and base utilities for array types.
-
-This module contains shared functionality used across all array implementations:
-- ROI handling (supports_roi, normalize_roi, iter_rois)
-- Plane normalization (_normalize_planes)
-- Output path building (_build_output_path)
-- Common write implementation (_imwrite_base)
-- Axis/dimension utilities (_to_tzyx, _axes_or_guess)
 """
 
 from __future__ import annotations
@@ -489,42 +482,6 @@ def _imwrite_base(
         progress_callback(1.0, "Complete")
 
     return outpath
-
-
-def _to_tzyx(a: da.Array, axes: str) -> da.Array:
-    """Convert dask array to TZYX dimension order."""
-    order = [ax for ax in ["T", "Z", "C", "S", "Y", "X"] if ax in axes]
-    perm = [axes.index(ax) for ax in order]
-    a = da.transpose(a, axes=perm)
-    have_T = "T" in order
-    pos = {ax: i for i, ax in enumerate(order)}
-    tdim = a.shape[pos["T"]] if have_T else 1
-    merge_dims = [d for d, ax in enumerate(order) if ax in ("Z", "C", "S")]
-    if merge_dims:
-        front = []
-        if have_T:
-            front.append(pos["T"])
-        rest = [d for d in range(a.ndim) if d not in front]
-        a = da.transpose(a, axes=front + rest)
-        newshape = [
-            tdim if have_T else 1,
-            int(np.prod([a.shape[i] for i in rest[:-2]])),
-            a.shape[-2],
-            a.shape[-1],
-        ]
-        a = a.reshape(newshape)
-    else:
-        if have_T:
-            if a.ndim == 3:
-                a = da.expand_dims(a, 1)
-        else:
-            a = da.expand_dims(a, 0)
-            a = da.expand_dims(a, 1)
-        if order[-2:] != ["Y", "X"]:
-            yx_pos = [order.index("Y"), order.index("X")]
-            keep = [i for i in range(len(order)) if i not in yx_pos]
-            a = da.transpose(a, axes=keep + yx_pos)
-    return a
 
 
 def _axes_or_guess(arr_ndim: int) -> str:

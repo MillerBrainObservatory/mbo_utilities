@@ -153,6 +153,8 @@ class Suite2pPipelineWidget(PipelineWidget):
         self.parent._s2p_savepath_flash_start = self._savepath_flash_start
         self.parent._s2p_show_savepath_popup = self._show_savepath_popup
         self.parent._current_pipeline = "suite2p"
+        self.parent._s2p_fix_phase = self._s2p_fix_phase
+        self.parent._s2p_use_fft = self._s2p_use_fft
 
         draw_section_suite2p(self.parent)
 
@@ -173,6 +175,8 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._max_parallel_jobs = getattr(self.parent, "_max_parallel_jobs", 2)
         self._savepath_flash_start = getattr(self.parent, "_s2p_savepath_flash_start", None)
         self._show_savepath_popup = getattr(self.parent, "_s2p_show_savepath_popup", False)
+        self._s2p_fix_phase = getattr(self.parent, "_s2p_fix_phase", True)
+        self._s2p_use_fft = getattr(self.parent, "_s2p_use_fft", True)
 
         # Poll suite2p for selection changes
         self._poll_suite2p_selection()
