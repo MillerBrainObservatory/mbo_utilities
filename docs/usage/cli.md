@@ -63,6 +63,22 @@ mbo convert input.tiff output/ -n 1000            # first 1000 frames
 
 </details>
 
+**Example: Convert raw TIFFs to OME-Zarr**
+
+```bash
+mbo convert D:/demo/raw D:/demo/volume --ome -e .zarr
+```
+
+```
+Reading: D:/demo/raw
+Counting frames: 100%|████████████████████████████| 1/1 [00:00<00:00, 19152.07it/s]
+  Shape: (119, 14, 448, 448), dtype: int16
+Writing: D:/demo/volume (format: .zarr)
+Writing Zarr: 100%|███████████████████████████████| 119/119 [00:43<00:00, 2.71frames/s]
+
+Done! Output saved to: D:/demo/volume/tp00001-00119_zplane01-14_stack.zarr
+```
+
 ## Info
 
 Display array shape, dtype, chunk info, and metadata without loading data.

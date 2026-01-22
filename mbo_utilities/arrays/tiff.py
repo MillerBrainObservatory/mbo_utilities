@@ -577,7 +577,22 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
                 n_planes = ij_meta.get("slices", 1)
                 if n_planes <= 1:
                     return None
-                n_frames = ij_meta.get("frames", 1)
+
+                # try to get shape from our JSON metadata in Info field
+                n_frames = None
+                try:
+                    info_str = ij_meta.get("Info", "")
+                    if info_str:
+                        meta = json.loads(info_str)
+                        if "shape" in meta and len(meta["shape"]) >= 4:
+                            n_frames = meta["shape"][0]
+                            n_planes = meta["shape"][1]
+                except Exception:
+                    pass
+
+                if n_frames is None:
+                    n_frames = ij_meta.get("frames", 1)
+
                 return (n_frames, n_planes)
         except Exception:
             return None
