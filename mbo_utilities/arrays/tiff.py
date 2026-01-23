@@ -29,7 +29,9 @@ from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
 from mbo_utilities.arrays.features import (
     DimLabels,
+    DimensionSpecMixin,
     PhaseCorrectionFeature,
+    PhaseCorrectionMixin,
     RoiFeatureMixin,
 )
 from typing import TYPE_CHECKING
@@ -339,7 +341,7 @@ class _SingleTiffPlaneReader:
             tf.close()
 
 
-class TiffArray(TiffReaderMixin, ReductionMixin):
+class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
     """
     Lazy TIFF array reader with auto-detection of single file vs volume.
 
@@ -787,7 +789,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
 
 
 
-class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
+class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, DimensionSpecMixin, PhaseCorrectionMixin):
     """
     Base class for raw ScanImage TIFF readers with phase correction support.
 
@@ -978,7 +980,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
         if roi is not None:
             self.roi = roi  # validates via mixin setter
 
-        self._offset = 0.0
         self._mean_subtraction = False
         self.pbar = None
         self.show_pbar = False
@@ -1096,68 +1097,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
         return self.roi_slices
 
     @property
-    def offset(self):
-        return self.phase_correction.effective_shift or self._offset
-
-    @offset.setter
-    def offset(self, value: float | np.ndarray):
-        # If user manually sets offset, treat it as setting fixed shift
-        if isinstance(value, (int, float)):
-            self.phase_correction.shift = float(value)
-        self._offset = value
-
-    @property
-    def use_fft(self):
-        return self.phase_correction.use_fft
-
-    @use_fft.setter
-    def use_fft(self, value: bool):
-        self.phase_correction.use_fft = value
-
-    @property
-    def phasecorr_method(self):
-        return self.phase_correction.method.value
-
-    @phasecorr_method.setter
-    def phasecorr_method(self, value: str | None):
-        if value is None:
-            self.phase_correction.enabled = False
-        else:
-            self.phase_correction.method = value
-
-    @property
-    def fix_phase(self):
-        return self.phase_correction.enabled
-
-    @fix_phase.setter
-    def fix_phase(self, value: bool):
-        self.phase_correction.enabled = value
-
-    @property
-    def border(self):
-        return self.phase_correction.border
-
-    @border.setter
-    def border(self, value: int):
-        self.phase_correction.border = value
-
-    @property
-    def max_offset(self):
-        return self.phase_correction.max_offset
-
-    @max_offset.setter
-    def max_offset(self, value: int):
-        self.phase_correction.max_offset = value
-
-    @property
-    def upsample(self):
-        return self.phase_correction.upsample
-
-    @upsample.setter
-    def upsample(self, value: int):
-        self.phase_correction.upsample = value
-
-    @property
     def mean_subtraction(self):
         return self._mean_subtraction
 
@@ -1261,7 +1200,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
                     corrected = _apply_offset(chunk, shift, use_fft=self.use_fft)
                     offset = shift
                 else:
-                    # No fixed shift, compute on this chunk (Legacy behavior)
+                    # No fixed shift, compute on this chunk and cache it
                     corrected, offset = bidir_phasecorr(
                         chunk,
                         method=self.phasecorr_method,
@@ -1270,9 +1209,10 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
                         border=self.border,
                         use_fft=self.use_fft,
                     )
+                    # cache the computed shift so subsequent reads use same value
+                    self.phase_correction._computed_shift = offset
 
                 buf[idxs] = corrected
-                self._offset = offset
                 _t1 = _t.perf_counter()
                 logger.debug(
                     f"phase_corr: offset={offset:.2f}, method={self.phasecorr_method}, "
@@ -1280,7 +1220,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
                 )
             else:
                 buf[idxs] = chunk
-                self._offset = 0.0
             start = end
 
         logger.debug(
