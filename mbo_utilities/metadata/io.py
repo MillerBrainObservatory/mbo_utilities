@@ -77,7 +77,10 @@ def _metadata_from_ops(ops: dict) -> dict:
 
 def is_raw_scanimage(file: os.PathLike | str) -> bool:
     """
-    Check if a TIFF file is a raw ScanImage TIFF.
+    Check if a TIFF file is a raw ScanImage TIFF (unprocessed acquisition data).
+
+    A file is considered "raw" if it has ScanImage metadata AND has not been
+    processed by mbo_utilities (no custom tag 50839 with our JSON metadata).
 
     Parameters
     ----------
@@ -89,24 +92,32 @@ def is_raw_scanimage(file: os.PathLike | str) -> bool:
     bool
         True if the TIFF file is a raw ScanImage TIFF; False otherwise.
     """
-    if not file or not isinstance(file, (str, os.PathLike)) or Path(file).suffix not in [".tif", ".tiff"]:
+    if not file or not isinstance(file, (str, os.PathLike)):
+        return False
+    if Path(file).suffix.lower() not in (".tif", ".tiff"):
         return False
     try:
-        tiff_file = tifffile.TiffFile(file)
-        if (
-            # TiffFile.shaped_metadata is where we store metadata for processed tifs
-            # if this is not empty, we have a processed file
-            # otherwise, we have a raw scanimage tiff
-            hasattr(tiff_file, "shaped_metadata")
-            and tiff_file.shaped_metadata is not None
-            and isinstance(tiff_file.shaped_metadata, (list, tuple))
-        ):
-            logger.info(f"File {file} has shaped_metadata; not a raw ScanImage TIFF.")
-            return False
-        if tiff_file.scanimage_metadata is None:
-            logger.info(f"No ScanImage metadata found in {file}.")
-            return False
-        return True
+        with tifffile.TiffFile(file) as tf:
+            # must have scanimage metadata
+            if tf.scanimage_metadata is None:
+                return False
+
+            # check for our custom tag 50839 (mbo processed file marker)
+            # if present, this is a processed file, not raw
+            page0 = tf.pages.first
+            if page0 and 50839 in page0.tags:
+                return False
+
+            # check shaped_metadata - if it has content, likely processed
+            if (
+                hasattr(tf, "shaped_metadata")
+                and tf.shaped_metadata is not None
+                and isinstance(tf.shaped_metadata, (list, tuple))
+                and len(tf.shaped_metadata) > 0
+            ):
+                return False
+
+            return True
     except Exception:
         return False
 
@@ -116,8 +127,6 @@ def get_metadata(
     dx: float | None = None,
     dy: float | None = None,
     dz: float | None = None,
-    verbose: bool = False,
-    # Backward compatibility alias
     z_step: float | None = None,
 ):
     """
