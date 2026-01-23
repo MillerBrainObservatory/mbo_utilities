@@ -420,10 +420,12 @@ class PreviewDataWidget(EdgeWindow):
         for arr in self._get_data_arrays():
             if hasattr(arr, "offset"):
                 arr_offset = arr.offset
-                if isinstance(arr_offset, np.ndarray):
+                if arr_offset is None:
+                    offsets.append(0.0)
+                elif isinstance(arr_offset, np.ndarray):
                     offsets.append(float(arr_offset.mean()) if arr_offset.size > 0 else 0.0)
                 else:
-                    offsets.append(float(arr_offset) if arr_offset else 0.0)
+                    offsets.append(float(arr_offset))
             else:
                 offsets.append(0.0)
         return offsets
