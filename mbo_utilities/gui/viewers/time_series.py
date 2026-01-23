@@ -249,10 +249,10 @@ class TimeSeriesViewer(BaseViewer):
             if imgui.begin_tab_item("Preview")[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
-
-                self.parent.draw_preview_section()
-                imgui.pop_style_var()
-                imgui.pop_style_var()
+                try:
+                    self.parent.draw_preview_section()
+                finally:
+                    imgui.pop_style_var(2)
                 imgui.end_tab_item()
 
             # Signal Quality tab - disabled until zstats are computed
@@ -260,10 +260,11 @@ class TimeSeriesViewer(BaseViewer):
             if imgui.begin_tab_item("Signal Quality")[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
-                with imgui_ctx.begin_child("##StatsContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.none):
-                    self.parent.draw_stats_section()
-                imgui.pop_style_var()
-                imgui.pop_style_var()
+                try:
+                    with imgui_ctx.begin_child("##StatsContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.none):
+                        self.parent.draw_stats_section()
+                finally:
+                    imgui.pop_style_var(2)
                 imgui.end_tab_item()
             imgui.end_disabled()
 
@@ -271,10 +272,11 @@ class TimeSeriesViewer(BaseViewer):
             if imgui.begin_tab_item("Run")[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
-                from mbo_utilities.gui.widgets.pipelines import draw_run_tab
-                draw_run_tab(self.parent)
-                imgui.pop_style_var()
-                imgui.pop_style_var()
+                try:
+                    from mbo_utilities.gui.widgets.pipelines import draw_run_tab
+                    draw_run_tab(self.parent)
+                finally:
+                    imgui.pop_style_var(2)
                 imgui.end_tab_item()
             imgui.end_tab_bar()
 
@@ -381,7 +383,6 @@ class TimeSeriesViewer(BaseViewer):
     def _apply_phase_correction(self) -> None:
         """Apply phase correction settings to data arrays."""
         arrays = self._get_data_arrays()
-        self._current_offset = []
 
         for arr in arrays:
             if hasattr(arr, "fix_phase"):
@@ -393,10 +394,13 @@ class TimeSeriesViewer(BaseViewer):
             if hasattr(arr, "phase_upsample"):
                 arr.phase_upsample = self._phase_upsample
 
+        self._refresh_image_widget()
+
+        # read offsets after refresh so computed values are available
+        self._current_offset = []
+        for arr in arrays:
             if hasattr(arr, "offset"):
                 self._current_offset.append(arr.offset)
-
-        self._refresh_image_widget()
 
     def on_data_loaded(self) -> None:
         """Initialize time-series specific features when data loads."""

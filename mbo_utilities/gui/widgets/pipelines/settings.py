@@ -1453,17 +1453,19 @@ def _draw_section_suite2p_content(self):
             flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
-            if not visible:
-                _popup_states["reg_settings"] = False
-                imgui.close_current_popup()
-            else:
-                draw_registration_settings()
-                imgui.spacing()
-                imgui.separator()
-                if imgui.button("Close##reg", imgui.ImVec2(80, 0)):
+            try:
+                if not visible:
                     _popup_states["reg_settings"] = False
                     imgui.close_current_popup()
-            imgui.end_popup()
+                else:
+                    draw_registration_settings()
+                    imgui.spacing()
+                    imgui.separator()
+                    if imgui.button("Close##reg", imgui.ImVec2(80, 0)):
+                        _popup_states["reg_settings"] = False
+                        imgui.close_current_popup()
+            finally:
+                imgui.end_popup()
 
         # ROI Detection popup
         imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)
@@ -1473,17 +1475,19 @@ def _draw_section_suite2p_content(self):
             flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
-            if not visible:
-                _popup_states["roi_settings"] = False
-                imgui.close_current_popup()
-            else:
-                draw_roi_detection_settings()
-                imgui.spacing()
-                imgui.separator()
-                if imgui.button("Close##roi", imgui.ImVec2(80, 0)):
+            try:
+                if not visible:
                     _popup_states["roi_settings"] = False
                     imgui.close_current_popup()
-            imgui.end_popup()
+                else:
+                    draw_roi_detection_settings()
+                    imgui.spacing()
+                    imgui.separator()
+                    if imgui.button("Close##roi", imgui.ImVec2(80, 0)):
+                        _popup_states["roi_settings"] = False
+                        imgui.close_current_popup()
+            finally:
+                imgui.end_popup()
 
         # Spike Deconv popup
         imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
@@ -1493,17 +1497,19 @@ def _draw_section_suite2p_content(self):
             flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
-            if not visible:
-                _popup_states["spike_settings"] = False
-                imgui.close_current_popup()
-            else:
-                draw_spike_deconv_settings()
-                imgui.spacing()
-                imgui.separator()
-                if imgui.button("Close##spike", imgui.ImVec2(80, 0)):
+            try:
+                if not visible:
                     _popup_states["spike_settings"] = False
                     imgui.close_current_popup()
-            imgui.end_popup()
+                else:
+                    draw_spike_deconv_settings()
+                    imgui.spacing()
+                    imgui.separator()
+                    if imgui.button("Close##spike", imgui.ImVec2(80, 0)):
+                        _popup_states["spike_settings"] = False
+                        imgui.close_current_popup()
+            finally:
+                imgui.end_popup()
 
         # Output popup
         imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
@@ -1513,17 +1519,19 @@ def _draw_section_suite2p_content(self):
             flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
-            if not visible:
-                _popup_states["output_settings"] = False
-                imgui.close_current_popup()
-            else:
-                draw_output_settings()
-                imgui.spacing()
-                imgui.separator()
-                if imgui.button("Close##output", imgui.ImVec2(80, 0)):
+            try:
+                if not visible:
                     _popup_states["output_settings"] = False
                     imgui.close_current_popup()
-            imgui.end_popup()
+                else:
+                    draw_output_settings()
+                    imgui.spacing()
+                    imgui.separator()
+                    if imgui.button("Close##output", imgui.ImVec2(80, 0)):
+                        _popup_states["output_settings"] = False
+                        imgui.close_current_popup()
+            finally:
+                imgui.end_popup()
 
         # Data Options popup - shows data settings that affect Suite2p processing
         imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
@@ -1533,17 +1541,19 @@ def _draw_section_suite2p_content(self):
             flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
-            if not visible:
-                _popup_states["data_options"] = False
-                imgui.close_current_popup()
-            else:
-                _draw_data_options_content(self)
-                imgui.spacing()
-                imgui.separator()
-                if imgui.button("Close##data_opts", imgui.ImVec2(80, 0)):
+            try:
+                if not visible:
                     _popup_states["data_options"] = False
                     imgui.close_current_popup()
-            imgui.end_popup()
+                else:
+                    _draw_data_options_content(self)
+                    imgui.spacing()
+                    imgui.separator()
+                    if imgui.button("Close##data_opts", imgui.ImVec2(80, 0)):
+                        _popup_states["data_options"] = False
+                        imgui.close_current_popup()
+            finally:
+                imgui.end_popup()
 
         imgui.end_table()
     # if imgui.button("Load Suite2p Masks"):

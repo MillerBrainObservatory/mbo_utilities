@@ -62,6 +62,12 @@ from mbo_utilities.arrays.features._dim_tags import (
     get_ome_axis_unit,
     normalize_dims,
 )
+from mbo_utilities.arrays.features._dim_spec import (
+    DimRole,
+    DimensionSpec,
+    DimensionSpecs,
+    DimensionSpecMixin,
+)
 from mbo_utilities.arrays.features._display_range import (
     DisplayRange,
     DisplayRangeFeature,
@@ -146,6 +152,11 @@ __all__ = [
     "get_ome_axis_type",
     "get_ome_axis_unit",
     "normalize_dims",
+    # dim specs
+    "DimRole",
+    "DimensionSpec",
+    "DimensionSpecs",
+    "DimensionSpecMixin",
     # display range
     "DisplayRange",
     "DisplayRangeFeature",
