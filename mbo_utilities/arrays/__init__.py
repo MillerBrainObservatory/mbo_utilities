@@ -1,28 +1,6 @@
 """
 Array types for mbo_utilities.
 
-This package provides lazy array readers for various imaging data formats:
-- Suite2pArray: Suite2p binary files (.bin + ops.npy)
-- H5Array: HDF5 datasets
-- TiffArray: Generic TIFF files
-- ScanImageArray: Base class for raw ScanImage TIFFs with phase correction
-- LBMArray: LBM (Light Beads Microscopy) stacks
-- PiezoArray: Piezo z-stacks with optional frame averaging
-- LBMPiezoArray: Combined LBM + piezo stacks (e.g., pollen calibration)
-- SinglePlaneArray: Single-plane time series
-- open_scanimage: Factory function for auto-detecting ScanImage stack type
-- NumpyArray: NumPy arrays and .npy files
-- NWBArray: NWB (Neurodata Without Borders) files
-- ZarrArray: Zarr v3 stores (including OME-Zarr)
-- BinArray: Raw binary files without ops.npy
-- IsoviewArray: Isoview lightsheet microscopy data
-
-Also provides:
-- Registration utilities (validate_s3d_registration, register_zplanes_s3d)
-- RoiFeatureMixin: Mixin for multi-ROI support (use hasattr(arr, 'roi_mode') for detection)
-- Common helpers (normalize_roi, etc.)
-- Features (DimLabels, DimLabelsMixin for dimension labeling)
-
 Array classes are lazy-loaded on first access to improve startup time.
 """
 
@@ -40,7 +18,6 @@ from mbo_utilities.arrays._base import (
     _normalize_planes,
     _safe_get_metadata,
     _sanitize_suffix,
-    _to_tzyx,
     iter_rois,
     normalize_roi,
     supports_roi,
@@ -169,7 +146,6 @@ __all__ = [
     "_normalize_planes",
     "_safe_get_metadata",
     "_sanitize_suffix",
-    "_to_tzyx",
     # Features subpackage
     "features",
     # Suite2p helpers

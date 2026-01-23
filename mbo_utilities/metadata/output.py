@@ -389,13 +389,25 @@ class OutputMetadata:
             if source_fs is not None:
                 result["source_fs"] = source_fs
 
-        # update dimension counts
+        # update dimension counts with all aliases
         if self.num_frames is not None:
+            result["num_timepoints"] = self.num_frames
             result["nframes"] = self.num_frames
             result["num_frames"] = self.num_frames
+            result["n_frames"] = self.num_frames
+            result["timepoints"] = self.num_frames
+            result["T"] = self.num_frames
+            result["nt"] = self.num_frames
         if self.num_planes is not None:
+            result["num_zplanes"] = self.num_planes
             result["nplanes"] = self.num_planes
             result["num_planes"] = self.num_planes
+            result["n_planes"] = self.num_planes
+            result["zplanes"] = self.num_planes
+            result["Z"] = self.num_planes
+            result["nz"] = self.num_planes
+            result["slices"] = self.num_planes  # imagej alias
+            result["num_channels"] = self.num_planes  # lbm: z-planes stored as channels
 
         # record selection info
         if self._z_step_factor > 1:

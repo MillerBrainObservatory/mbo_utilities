@@ -51,22 +51,19 @@ def handle_keyboard_shortcuts(parent: Any):
                 start_dir = str(get_last_dir("open_folder") or Path.home())
             parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
 
-    # s: toggle save as popup (no modifiers)
+    # s: open save as popup (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.s, False):
         parent.logger.info("Shortcut: 's' (Save As)")
-        if getattr(parent, "_saveas_modal_open", False):
-            parent._saveas_modal_open = False
-        else:
-            parent._saveas_popup_open = True
+        parent._saveas_popup_open = True
 
     # m: toggle metadata viewer (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.m, False):
         parent.logger.info("Shortcut: 'm' (Metadata Viewer)")
         parent.show_metadata_viewer = not parent.show_metadata_viewer
 
-    # [: toggle side panel collapse (no modifiers)
-    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.left_bracket, False):
-        parent.logger.info("Shortcut: '[' (Toggle Side Panel)")
+    # p: toggle side panel collapse (no modifiers)
+    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.p, False):
+        parent.logger.info("Shortcut: 'p' (Toggle Side Panel)")
         parent.collapsed = not parent.collapsed
 
     # v: reset vmin/vmax (no modifiers)
@@ -76,26 +73,14 @@ def handle_keyboard_shortcuts(parent: Any):
             with contextlib.suppress(Exception):
                 parent.image_widget.reset_vmin_vmax_frame()
 
-    # enter: reset vmin/vmax for current frame
-    if imgui.is_key_pressed(imgui.Key.enter, False) or imgui.is_key_pressed(imgui.Key.keypad_enter, False):
-        if parent.image_widget:
-            parent.logger.info("Shortcut: 'Enter' (Reset vmin/vmax)")
-            with contextlib.suppress(Exception):
-                parent.image_widget.reset_vmin_vmax_frame()
-
-    # /: toggle keybinds popup (no modifiers)
-    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.slash, False):
-        parent.logger.info("Shortcut: '/' (Keybinds)")
+    # k: toggle keybinds popup (no modifiers)
+    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.k, False):
+        parent.logger.info("Shortcut: 'k' (Keybinds)")
         parent._show_keybinds_popup = not getattr(parent, "_show_keybinds_popup", False)
 
-    # ?: show help popup (shift + / = ?)
-    if not io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.slash, False):
-        parent.logger.info("Shortcut: '?' (Help)")
-        parent._show_help_popup = True
-
-    # F1: show help popup
-    if imgui.is_key_pressed(imgui.Key.f1, False):
-        parent.logger.info("Shortcut: 'F1' (Help)")
+    # h: show help popup (no modifiers)
+    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.h, False):
+        parent.logger.info("Shortcut: 'h' (Help)")
         parent._show_help_popup = True
 
     # arrow keys for slider dimensions (only when data is loaded)

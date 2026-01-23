@@ -1874,17 +1874,19 @@ def write_ops(metadata, raw_filename, **kwargs):
         nt = nt_metadata
         logger.debug(f"Using explicit nframes={nt} from metadata")
 
-    if "fs" not in metadata:
-        if "frame_rate" in metadata:
-            metadata["fs"] = metadata["frame_rate"]
-        elif "framerate" in metadata:
-            metadata["fs"] = metadata["framerate"]
+    # use get_param for consistent alias handling
+    from mbo_utilities.metadata import get_param, get_voxel_size
+
+    fs = get_param(metadata, "fs")
+    if fs is None:
+        # check finterval (ImageJ format) and convert to fs
+        finterval = get_param(metadata, "finterval")
+        if finterval is not None and finterval > 0:
+            fs = 1.0 / finterval
         else:
             logger.warning("No frame rate found; defaulting fs=10")
-            metadata["fs"] = 10
-
-    # Use get_voxel_size for consistent resolution handling across all aliases
-    from mbo_utilities.metadata import get_voxel_size
+            fs = 10
+    metadata["fs"] = fs
     voxel_size = get_voxel_size(metadata)
     dx, dy, dz = voxel_size.dx, voxel_size.dy, voxel_size.dz
 

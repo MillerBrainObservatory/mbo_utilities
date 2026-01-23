@@ -1,14 +1,5 @@
 """
 TIFF array readers.
-
-This module provides array readers for TIFF files:
-- TiffArray: Lazy TIFF reader, auto-detects single file vs volume directory
-- ScanImageArray: Base class for raw ScanImage TIFFs with phase correction
-- LBMArray: LBM (Light Beads Microscopy) stacks, z-planes as channels
-- PiezoArray: Piezo z-stacks with optional frame averaging
-- LBMPiezoArray: Combined LBM + piezo stacks (e.g., pollen calibration)
-- SinglePlaneArray: Single-plane time series
-- open_scanimage: Factory function that auto-detects stack type
 """
 
 from __future__ import annotations
@@ -98,6 +89,32 @@ def _extract_tiff_plane_number(name: str) -> int | None:
     if match:
         return int(match.group(1))
     return None
+
+
+def _read_tiff_metadata(path: Path) -> dict:
+    """
+    checks tiff metadata in order:
+    1. custom tag 50839 (JSON metadata from mbo save)
+    2. imagej_metadata Info field
+    3. shaped_metadata (tifffile format)
+    4. page description JSON
+
+    parameters
+    ----------
+    path : Path
+        path to tiff file
+
+    returns
+    -------
+    dict
+        metadata dict, empty if none found
+    """
+    from mbo_utilities.metadata.io import get_metadata_single
+
+    try:
+        return get_metadata_single(path)
+    except Exception:
+        return {}
 
 
 def find_tiff_plane_files(directory: Path) -> list[Path]:
@@ -392,51 +409,59 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         self,
         files: str | Path | list[str] | list[Path],
         dims: str | Sequence[str] | None = None,
+        metadata: dict | None = None,
     ):
         self._planes: list[_SingleTiffPlaneReader] = []
         self._is_volumetric = False
         self._target_dtype = None
+        self._interleaved_reader = None
 
-        # Normalize input
+        # normalize input to list of paths
         if isinstance(files, (str, Path)):
             path = Path(files)
             if path.is_dir():
+                # directory: look for plane files or any tiffs
                 plane_files = find_tiff_plane_files(path)
                 if plane_files:
-                    self._init_volume(plane_files)
+                    file_list = plane_files
                 else:
-                    tiff_files = list(path.glob("*.tif")) + list(path.glob("*.tiff"))
-                    if tiff_files:
-                        self._init_single_plane(tiff_files)
-                    else:
-                        raise ValueError(f"No TIFF files found in {path}")
+                    file_list = sorted(
+                        list(path.glob("*.tif")) + list(path.glob("*.tiff"))
+                    )
+                if not file_list:
+                    raise ValueError(f"No TIFF files found in {path}")
             else:
-                self._init_single_plane(expand_paths(files))
+                file_list = expand_paths(files)
         else:
-            paths = [Path(f) for f in files]
+            file_list = [Path(f) for f in files]
 
-            # Try to group by plane number
-            plane_groups = {}
-            for p in paths:
-                pnum = _extract_tiff_plane_number(p.name)
-                if pnum is not None:
-                    plane_groups.setdefault(pnum, []).append(p)
+        if not file_list:
+            raise ValueError("No TIFF files provided")
 
-            if len(plane_groups) > 1:
-                # Multiple planes detected in file list! Load as volume.
-                # Sort planes and ensure files within each plane are sorted
-                sorted_pnums = sorted(plane_groups.keys())
-                plane_files_list = []
-                for pnum in sorted_pnums:
-                    files_for_plane = sorted(plane_groups[pnum])
-                    plane_files_list.append(files_for_plane)
+        # STEP 1: read metadata FIRST (before deciding structure)
+        if metadata is not None:
+            self._metadata = metadata
+        else:
+            self._metadata = _read_tiff_metadata(file_list[0])
 
-                # Check if each plane has the same number of files (optional, but safer)
-                # For now, let's just use _init_volume logic but handle lists of files
-                self._init_volume_from_groups(plane_files_list)
+        # STEP 2: check metadata for shape to determine dimensionality
+        shape = self._metadata.get("shape")
+
+        if shape is not None and len(shape) == 4 and shape[1] > 1:
+            # metadata indicates 4D TZYX with Z > 1
+            n_frames, n_planes = shape[0], shape[1]
+            if len(file_list) == 1:
+                # single file with interleaved TZYX data
+                self._init_interleaved(file_list[0], n_frames, n_planes)
             else:
-                self._init_single_plane(paths)
+                # multiple files but metadata says 4D - trust metadata
+                # this handles chunked writes where each file is a time chunk
+                self._init_interleaved(file_list[0], n_frames, n_planes)
+        else:
+            # STEP 3: fall back to file structure heuristics
+            self._init_from_file_structure(file_list)
 
+        # STEP 4: set dimension labels
         self._dim_labels = DimLabels(dims, ndim=self.ndim)
 
     @property
@@ -444,7 +469,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         return self._dim_labels.value
 
     def _init_volume_from_groups(self, plane_groups: list[list[Path]]):
-        """Initialize as volumetric array from groups of files (one group per plane)."""
+        """initialize as volumetric array from groups of files (one group per plane)."""
         self._is_volumetric = True
         self._planes = []
 
@@ -469,14 +494,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         self._dtype = self._planes[0].dtype
         self.filenames = [f for group in plane_groups for f in group]
 
-        # Use metadata from first plane
-        try:
-            from mbo_utilities.metadata import get_metadata_single
-
-            self._metadata = get_metadata_single(plane_groups[0][0])
-        except Exception:
-            self._metadata = {}
-
+        # metadata already read in __init__, just update with computed values
         self._metadata.update(
             {
                 "shape": self.shape,
@@ -490,19 +508,9 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         self.num_rois = 1
 
     def _init_single_plane(self, files: list[Path]):
-        """Initialize as single-plane array, or as interleaved hyperstack if detected."""
+        """initialize as single-plane (TYX) array."""
         self._is_volumetric = False
-        self._interleaved_reader = None
 
-        # check if single file is an ImageJ hyperstack with Z > 1
-        if len(files) == 1:
-            ij_info = self._check_imagej_hyperstack(files[0])
-            if ij_info is not None:
-                n_frames, n_planes = ij_info
-                self._init_interleaved_hyperstack(files[0], n_frames, n_planes)
-                return
-
-        # standard single-plane initialization
         reader = _SingleTiffPlaneReader(files)
         self._planes = [reader]
 
@@ -513,15 +521,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         self._dtype = reader.dtype
         self.filenames = files
 
-        # try to read metadata from file first, fall back to basic info
-        try:
-            from mbo_utilities.metadata import get_metadata_single
-
-            self._metadata = get_metadata_single(files[0])
-        except Exception:
-            self._metadata = {}
-
-        # ensure basic shape info is present
+        # metadata already read in __init__, just update with computed values
         self._metadata.update(
             {
                 "shape": self.shape,
@@ -534,15 +534,46 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         )
         self.num_rois = 1
 
-    def _check_imagej_hyperstack(self, path: Path) -> tuple[int, int] | None:
-        """Check if file is an ImageJ hyperstack with Z > 1. Returns (n_frames, n_planes) or None."""
+    def _init_from_file_structure(self, files: list[Path]):
+        """fall back to determining structure from file organization.
+
+        used when metadata doesn't contain shape info. checks:
+        1. plane number patterns in filenames
+        2. imagej tags for frames/slices
+        3. defaults to single-plane timeseries
+        """
+        # check for plane number patterns in filenames
+        plane_groups = {}
+        for p in files:
+            pnum = _extract_tiff_plane_number(p.name)
+            if pnum is not None:
+                plane_groups.setdefault(pnum, []).append(p)
+
+        if len(plane_groups) > 1:
+            # multiple planes from filenames
+            sorted_pnums = sorted(plane_groups.keys())
+            plane_files_list = [sorted(plane_groups[pnum]) for pnum in sorted_pnums]
+            self._init_volume_from_groups(plane_files_list)
+        elif len(files) == 1:
+            # single file - check imagej tags as last resort
+            ij_info = self._check_imagej_tags(files[0])
+            if ij_info is not None:
+                n_frames, n_planes = ij_info
+                self._init_interleaved(files[0], n_frames, n_planes)
+            else:
+                # truly single plane timeseries
+                self._init_single_plane(files)
+        else:
+            # multiple files, no plane numbers - treat as time series
+            self._init_single_plane(files)
+
+    def _check_imagej_tags(self, path: Path) -> tuple[int, int] | None:
+        """check imagej tags for frames/slices. last resort fallback."""
         try:
             with TiffFile(path) as tf:
                 if not tf.is_imagej:
                     return None
-                ij_meta = tf.imagej_metadata
-                if not ij_meta:
-                    return None
+                ij_meta = tf.imagej_metadata or {}
                 n_planes = ij_meta.get("slices", 1)
                 if n_planes <= 1:
                     return None
@@ -566,8 +597,8 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         except Exception:
             return None
 
-    def _init_interleaved_hyperstack(self, path: Path, n_frames: int, n_planes: int):
-        """Initialize as interleaved ImageJ hyperstack."""
+    def _init_interleaved(self, path: Path, n_frames: int, n_planes: int):
+        """initialize as interleaved TZYX from single file."""
         self._is_volumetric = True
         self._interleaved_reader = _InterleavedTiffReader(path, n_frames, n_planes)
         self._planes = []  # not used for interleaved
@@ -579,13 +610,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         self._dtype = self._interleaved_reader.dtype
         self.filenames = [path]
 
-        # try to read metadata from file
-        try:
-            from mbo_utilities.metadata import get_metadata_single
-            self._metadata = get_metadata_single(path)
-        except Exception:
-            self._metadata = {}
-
+        # metadata already read in __init__, just update with computed values
         self._metadata.update(
             {
                 "shape": self.shape,
@@ -599,12 +624,12 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         self.num_rois = 1
 
         logger.info(
-            f"Loaded ImageJ hyperstack: {self._nframes} frames, {self._nz} planes, "
+            f"Loaded interleaved TZYX: {n_frames} frames, {n_planes} planes, "
             f"{self._ly}x{self._lx} px"
         )
 
     def _init_volume(self, plane_files: list[Path]):
-        """Initialize as volumetric array."""
+        """initialize as volumetric array from separate plane files."""
         self._is_volumetric = True
 
         for pfile in plane_files:
@@ -628,15 +653,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
         self._dtype = self._planes[0].dtype
         self.filenames = plane_files
 
-        # try to read metadata from first plane file, fall back to basic info
-        try:
-            from mbo_utilities.metadata import get_metadata_single
-
-            self._metadata = get_metadata_single(plane_files[0])
-        except Exception:
-            self._metadata = {}
-
-        # ensure basic shape info is present
+        # metadata already read in __init__, just update with computed values
         self._metadata.update(
             {
                 "shape": self.shape,
@@ -768,43 +785,6 @@ class TiffArray(TiffReaderMixin, ReductionMixin):
             plane.close()
 
 
-class ImageJHyperstackArray(TiffArray):
-    """
-    Deprecated: use TiffArray instead.
-
-    TiffArray now automatically detects and handles ImageJ hyperstacks.
-    This class is kept for backwards compatibility only.
-    """
-
-    def __init__(self, *args, **kwargs):
-        import warnings
-        warnings.warn(
-            "ImageJHyperstackArray is deprecated. Use TiffArray instead, "
-            "which automatically handles ImageJ hyperstacks.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        super().__init__(*args, **kwargs)
-
-    @classmethod
-    def can_open(cls, file: Path | str) -> bool:
-        """Check if file is an ImageJ hyperstack with Z > 1."""
-        if not file:
-            return False
-        path = Path(file)
-        if path.suffix.lower() not in (".tif", ".tiff"):
-            return False
-
-        try:
-            with TiffFile(path) as tf:
-                if not tf.is_imagej:
-                    return False
-                ij_meta = tf.imagej_metadata
-                if not ij_meta:
-                    return False
-                return ij_meta.get("slices", 1) > 1
-        except Exception:
-            return False
 
 
 class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
@@ -1078,6 +1058,13 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin):
         """Return metadata as dict. Always returns dict, never None."""
         if self._metadata is None:
             self._metadata = {}
+
+        # ensure fs is present using get_param to find it under any alias
+        fs = get_param(self._metadata, "fs")
+        if fs is not None:
+            self._metadata["fs"] = fs
+            self._metadata["frame_rate"] = fs
+
         self._metadata.update(
             {
                 "dtype": self.dtype,

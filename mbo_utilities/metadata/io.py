@@ -285,9 +285,25 @@ def get_metadata_single(file: Path):
             if page0 and 50839 in page0.tags:
                 import json
                 tag_value = page0.tags[50839].value
+                # handle different formats:
+                # 1. bytes: raw JSON bytes
+                # 2. str: JSON string
+                # 3. dict with 'Info' key: ImageJ mode wraps JSON in {'Info': '<json>'}
+                # 4. dict: already parsed metadata
                 if isinstance(tag_value, bytes):
                     tag_value = tag_value.rstrip(b"\x00").decode("utf-8")
-                meta = json.loads(tag_value)
+                    meta = json.loads(tag_value)
+                elif isinstance(tag_value, str):
+                    meta = json.loads(tag_value)
+                elif isinstance(tag_value, dict):
+                    # tifffile may auto-parse or wrap in 'Info' key
+                    if "Info" in tag_value and isinstance(tag_value["Info"], str):
+                        meta = json.loads(tag_value["Info"])
+                    else:
+                        # already a dict, use as-is
+                        meta = tag_value
+                else:
+                    meta = None
                 if isinstance(meta, dict):
                     return meta
         except (json.JSONDecodeError, TypeError, AttributeError, KeyError):

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from imgui_bundle import imgui, portable_file_dialogs as pfd, hello_imgui
+from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui
 
 from mbo_utilities.gui._imgui_helpers import set_tooltip, settings_row_with_popup, _popup_states
 from mbo_utilities.gui._selection_ui import draw_selection_table
@@ -784,6 +784,12 @@ def _draw_data_options_content(self):
 
     has_any_options = has_phase_support or has_z_reg or (nz > 1)
 
+    # ensure s2p phase attributes exist with defaults
+    if not hasattr(self, "_s2p_fix_phase"):
+        self._s2p_fix_phase = True
+    if not hasattr(self, "_s2p_use_fft"):
+        self._s2p_use_fft = True
+
     # scan-phase correction section
     if has_phase_support:
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Scan-Phase Correction")
@@ -865,9 +871,15 @@ def draw_section_suite2p(self):
     # consistent input width
     INPUT_WIDTH = 120
 
-    # set proper padding and spacing
-    imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4))
-    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 2))
+    # set proper padding and spacing using context manager for safety
+    with imgui_ctx.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4)):
+        with imgui_ctx.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 2)):
+            _draw_section_suite2p_content(self)
+
+
+def _draw_section_suite2p_content(self):
+    """inner content for suite2p section (called within style context)."""
+    INPUT_WIDTH = 120
 
     # initialize selection state (timepoints, z-planes)
     max_frames, num_planes = _init_s2p_selection_state(self)
@@ -1534,9 +1546,6 @@ def draw_section_suite2p(self):
             imgui.end_popup()
 
         imgui.end_table()
-
-    # Pop style variables
-    imgui.pop_style_var(2)  # Pop both style vars
     # if imgui.button("Load Suite2p Masks"):
     #     try:
     #         import numpy as np

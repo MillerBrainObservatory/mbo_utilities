@@ -1114,8 +1114,8 @@ def _draw_save_button(parent: Any):
                     pm = get_process_manager()
                     # handle fpath being a list (from directory) or single path
                     if isinstance(parent.fpath, (list, tuple)):
-                        input_path = str(parent.fpath[0]) if parent.fpath else ""
-                        # use parent directory for display name
+                        # pass parent directory so worker loads all files
+                        input_path = str(Path(parent.fpath[0]).parent) if parent.fpath else ""
                         fname = Path(parent.fpath[0]).parent.name if parent.fpath else "data"
                     else:
                         input_path = str(parent.fpath) if parent.fpath else ""
