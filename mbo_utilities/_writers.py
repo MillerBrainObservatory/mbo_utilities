@@ -1056,22 +1056,31 @@ def _write_volumetric_tiff(
 
     # update metadata for imagej using OutputMetadata for reactive values
     from mbo_utilities.metadata import OutputMetadata
+    from mbo_utilities.arrays.features import get_dims
 
-    # get 0-based indices for OutputMetadata
-    t_indices = slicing.selections["T"].indices if "T" in slicing.selections else None
-    z_indices_list = slicing.selections["Z"].indices if "Z" in slicing.selections else None
+    # get dims from array
+    source_dims = get_dims(data)
+
+    # build selections dict with 0-based indices
+    output_selections = {}
+    if "T" in slicing.selections:
+        output_selections["T"] = slicing.selections["T"].indices
+    if "Z" in slicing.selections:
+        output_selections["Z"] = slicing.selections["Z"].indices
 
     out_meta = OutputMetadata(
         source=metadata or {},
-        frame_indices=t_indices,
-        plane_indices=z_indices_list,
-        source_num_frames=data.shape[0] if len(data.shape) >= 3 else 1,
-        source_num_planes=data.shape[1] if len(data.shape) == 4 else 1,
+        source_shape=data.shape,
+        source_dims=source_dims,
+        selections=output_selections,
     )
 
-    # get adjusted metadata dict
+    # get adjusted metadata dict (now includes reactive Lx, Ly, shape)
     md = out_meta.to_dict()
+    # override shape with padded values if shifts applied
     md["shape"] = target_shape
+    md["Lx"] = Lx_out
+    md["Ly"] = Ly_out
     if apply_shift and plane_shifts is not None:
         md["padded_shape"] = (Ly_out, Lx_out)
         md["original_shape"] = (Ly, Lx)
@@ -1282,15 +1291,21 @@ def _write_volumetric_zarr(
     target_shape = (n_frames, n_planes, Ly_out, Lx_out)
 
     # update metadata using OutputMetadata for reactive values
-    t_indices = slicing.selections["T"].indices if "T" in slicing.selections else None
-    z_indices_list = slicing.selections["Z"].indices if "Z" in slicing.selections else None
+    # get dims from array
+    source_dims = get_dims(data)
+
+    # build selections dict from slicing
+    output_selections: dict[str, list[int]] = {}
+    if "T" in slicing.selections:
+        output_selections["T"] = list(slicing.selections["T"].indices)
+    if "Z" in slicing.selections:
+        output_selections["Z"] = list(slicing.selections["Z"].indices)
 
     out_meta = OutputMetadata(
         source=metadata or {},
-        frame_indices=t_indices,
-        plane_indices=z_indices_list,
-        source_num_frames=data.shape[0] if len(data.shape) >= 3 else 1,
-        source_num_planes=data.shape[1] if len(data.shape) == 4 else 1,
+        source_shape=data.shape,
+        source_dims=source_dims,
+        selections=output_selections,
     )
 
     # get adjusted metadata dict
