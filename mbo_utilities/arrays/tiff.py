@@ -1209,6 +1209,8 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                         border=self.border,
                         use_fft=self.use_fft,
                     )
+                    # cache the computed shift so subsequent reads use same value
+                    self.phase_correction._computed_shift = offset
 
                 buf[idxs] = corrected
                 self._last_offset = offset
