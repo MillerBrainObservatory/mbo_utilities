@@ -1200,7 +1200,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                     corrected = _apply_offset(chunk, shift, use_fft=self.use_fft)
                     offset = shift
                 else:
-                    # No fixed shift, compute on this chunk and cache it
+                    # compute offset on this chunk
                     corrected, offset = bidir_phasecorr(
                         chunk,
                         method=self.phasecorr_method,
@@ -1209,10 +1209,9 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                         border=self.border,
                         use_fft=self.use_fft,
                     )
-                    # cache the computed shift so subsequent reads use same value
-                    self.phase_correction._computed_shift = offset
 
                 buf[idxs] = corrected
+                self._last_offset = offset
                 _t1 = _t.perf_counter()
                 logger.debug(
                     f"phase_corr: offset={offset:.2f}, method={self.phasecorr_method}, "
@@ -1220,6 +1219,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                 )
             else:
                 buf[idxs] = chunk
+                self._last_offset = 0.0
             start = end
 
         logger.debug(
