@@ -1,0 +1,190 @@
+
+############################################################
+# ScanImage Workflow Demo
+############################################################
+
+Found 2 TIFF files in D:\demo\raw
+
+--- Reading with mbo.imread() ---
+
+============================================================
+Source Array (imread)
+============================================================
+  Path: D:\demo\raw
+  Type: LBMArray
+  Shape: (1574, 14, 550, 448)
+  Dtype: int16
+  Dims: ('timepoints', 'z-planes', 'Y', 'X')
+  Planes: 14
+  ROIs: 2
+  Stack Type: lbm
+  File: demo_mk355_7_27_2025_00001.tif
+  File: demo_mk355_7_27_2025_00002.tif
+
+  Key metadata:
+    fs: 14.0
+    dz: None
+    dx: 2.0
+    dy: 2.0
+    num_planes: 14
+    num_rois: 2
+
+--- Saving to Zarr ---
+  Saved to: D:\demo\output_test\demo_data.zarr
+
+============================================================
+Reloaded Zarr
+============================================================
+  Path: D:\demo\output_test\demo_data.zarr
+  Type: ZarrArray
+  Shape: (99, 14, 550, 448)
+  Dtype: int16
+  Dims: ('T', 'Z', 'Y', 'X')
+  File: tp00000-00099_zplane01-14_stack.zarr
+
+--- Saving to TIFF ---
+  Saved to: D:\demo\output_test\demo_data.tiff
+
+============================================================
+Reloaded TIFF
+============================================================
+  Path: D:\demo\output_test\demo_data.tiff
+  Type: ImageJHyperstackArray
+  Shape: (99, 14, 550, 448)
+  Dtype: int16
+  Dims: ('T', 'Z', 'Y', 'X')
+  Planes: 14
+  ROIs: 1
+  File: tp00000-00099_zplane01-14_stack.tif
+
+--- Saving to Binary (.bin) ---
+  Saved to: D:\demo\output_test\demo_bin\tp00000-00099_zplane01_stack.bin
+  Ops file: D:\demo\output_test\demo_bin\ops.npy
+
+============================================================
+Reloaded Binary (BinArray)
+============================================================
+  Path: D:\demo\output_test\demo_bin\tp00000-00099_zplane01_stack.bin
+  Type: BinArray
+  Shape: (100, 550, 448)
+  Dtype: int16
+  File: tp00000-00099_zplane01_stack.bin
+
+--- Saving to HDF5 ---
+  Saved to: D:\demo\output_test\demo_data.h5
+
+============================================================
+Reloaded HDF5
+============================================================
+  Path: D:\demo\output_test\demo_data.h5
+  Type: H5Array
+  Shape: (100, 550, 448)
+  Dtype: int16
+  Planes: 14
+  File: tp00000-00099_zplane01_stack.h5
+
+--- Saving to NPY ---
+  Saved to: D:\demo\output_test\demo_data.npy
+
+============================================================
+Reloaded NPY
+============================================================
+  Path: D:\demo\output_test\demo_data.npy
+  Type: NumpyArray
+  Shape: (50, 550, 448)
+  Dtype: int16
+  Dims: TYX
+  Planes: 1
+  File: tp00001-00050_zplane01_stack.npy
+
+============================================================
+Demo complete!
+============================================================
+
+############################################################
+# NumPy Array Workflow Demo
+############################################################
+
+--- Creating synthetic 4D volume ---
+  Raw numpy shape: (100, 8, 256, 256)
+  Raw numpy dtype: float32
+
+============================================================
+Wrapped NumpyArray
+============================================================
+  Type: NumpyArray
+  Shape: (100, 8, 256, 256)
+  Dtype: float32
+  Dims: TZYX
+  Planes: 8
+
+--- Round-trip test: .zarr ---
+  Saved to: D:\demo\output_numpy\synthetic.zarr
+
+============================================================
+Reloaded .zarr
+============================================================
+  Path: D:\demo\output_numpy\synthetic.zarr
+  Type: ZarrArray
+  Shape: (100, 8, 256, 256)
+  Dtype: float32
+  Dims: ('T', 'Z', 'Y', 'X')
+  File: tp00001-00100_zplane01-08_stack.zarr
+
+--- Round-trip test: .tiff ---
+  Saved to: D:\demo\output_numpy\synthetic.tiff
+
+============================================================
+Reloaded .tiff
+============================================================
+  Path: D:\demo\output_numpy\synthetic.tiff
+  Type: ImageJHyperstackArray
+  Shape: (100, 8, 256, 256)
+  Dtype: float32
+  Dims: ('T', 'Z', 'Y', 'X')
+  Planes: 8
+  ROIs: 1
+  File: tp00001-00100_zplane01-08_stack.tif
+
+--- Round-trip test: .bin ---
+  Saved to: D:\demo\output_numpy\synthetic_bin\tp00001-00100_zplane01_stack.bin
+
+============================================================
+Reloaded .bin
+============================================================
+  Path: D:\demo\output_numpy\synthetic_bin\tp00001-00100_zplane01_stack.bin
+  Type: BinArray
+  Shape: (100, 256, 256)
+  Dtype: int16
+  File: tp00001-00100_zplane01_stack.bin
+
+--- Round-trip test: .h5 ---
+  Saved to: D:\demo\output_numpy\synthetic.h5
+
+============================================================
+Reloaded .h5
+============================================================
+  Path: D:\demo\output_numpy\synthetic.h5
+  Type: H5Array
+  Shape: (100, 256, 256)
+  Dtype: float32
+  Planes: 8
+  File: tp00001-00100_zplane01_stack.h5
+
+--- Round-trip test: .npy ---
+  Saved to: D:\demo\output_numpy\synthetic.npy
+
+============================================================
+Reloaded .npy
+============================================================
+  Path: D:\demo\output_numpy\synthetic.npy
+  Type: NumpyArray
+  Shape: (100, 256, 256)
+  Dtype: float32
+  Dims: TYX
+  Planes: 1
+  File: tp00001-00100_zplane01_stack.npy
+
+============================================================
+NumPy workflow demo complete!
+============================================================
