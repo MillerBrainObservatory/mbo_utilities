@@ -313,9 +313,9 @@ def _write_plane(
     metadata = metadata or {}
 
     if plane_index is not None:
-        if not isinstance(plane_index, int):
+        if not isinstance(plane_index, (int, np.integer)):
             raise TypeError(f"plane_index must be an integer, got {type(plane_index)}")
-        metadata["plane"] = plane_index + 1
+        metadata["plane"] = int(plane_index) + 1
 
     # Get target frame count (nframes is primary, num_frames is alias)
     nframes_target = (
@@ -325,7 +325,7 @@ def _write_plane(
         or metadata.get("num_frames")
     )
 
-    if nframes_target is None or nframes_target == 0:
+    if nframes_target is None or nframes_target <= 0:
         nframes_target = data.shape[0]
 
     nframes_target = int(nframes_target)

@@ -16,11 +16,9 @@ import time
 import os
 import traceback
 from pathlib import Path
-from multiprocessing import Pool, cpu_count
 
 from mbo_utilities import imread
 from mbo_utilities.writer import imwrite
-from mbo_utilities.util import load_npy
 from mbo_utilities.arrays import register_zplanes_s3d, validate_s3d_registration
 from mbo_utilities.metadata import get_param
 
@@ -244,219 +242,79 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
         raise
 
 
-def _suite2p_worker(args):
+def task_suite2p(args: dict, logger: logging.Logger) -> None:
     """
-    Worker function for multiprocessing pool.
-    Runs suite2p on a single pre-extracted binary file.
-    """
-    from lbm_suite2p_python import run_plane
+    Suite2p pipeline task.
 
-    bin_file = args["bin_file"]
-    save_path = args["save_path"]
-    ops = args["ops"]
-    s2p_settings = args["s2p_settings"]
+    Delegates entirely to lbm_suite2p_python.pipeline which handles:
+    - input loading (paths, lists of paths, arrays)
+    - plane iteration for volumetric data
+    - binary extraction and suite2p processing
+    """
+    from lbm_suite2p_python import pipeline
+
+    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor.update(0.01, "Initializing Suite2p pipeline...")
+
+    input_path = args["input_path"]
+    output_dir = Path(args["output_dir"])
+    planes = args.get("planes")
+    num_timepoints = args.get("num_timepoints")
+    ops = args.get("ops", {})
+    s2p_settings = args.get("s2p_settings", {})
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # display name for logging
+    if isinstance(input_path, list):
+        if len(input_path) == 1:
+            input_path = input_path[0]  # unwrap single-item list
+            display_name = Path(input_path).name
+        else:
+            display_name = f"{len(input_path)} files ({Path(input_path[0]).name}...)"
+    else:
+        display_name = Path(input_path).name
+
+    monitor.update(0.05, f"Running pipeline: {display_name}...")
+    logger.info(f"Input: {input_path}")
+    logger.info(f"Output: {output_dir}")
+    logger.info(f"Planes: {planes}")
+
+    # handle num_timepoints limit
+    if num_timepoints is not None and num_timepoints > 0:
+        ops["nframes"] = num_timepoints
+
+    # build writer_kwargs for phase correction settings
+    writer_kwargs = {
+        "fix_phase": args.get("fix_phase", True),
+        "use_fft": args.get("use_fft", True),
+    }
 
     try:
-        run_plane(
-            bin_file,  # input_data: first positional argument
-            save_path=save_path,
+        monitor.update(0.1, "Running Suite2p...")
+
+        pipeline(
+            input_path,
+            save_path=str(output_dir),
             ops=ops,
+            planes=planes,
             keep_raw=s2p_settings.get("keep_raw", False),
             keep_reg=s2p_settings.get("keep_reg", True),
             force_reg=s2p_settings.get("force_reg", False),
             force_detect=s2p_settings.get("force_detect", False),
             dff_window_size=s2p_settings.get("dff_window_size", 300),
             dff_percentile=s2p_settings.get("dff_percentile", 20),
-            dff_smooth_window=s2p_settings.get("dff_smooth_window")
+            dff_smooth_window=s2p_settings.get("dff_smooth_window"),
+            writer_kwargs=writer_kwargs,
         )
-        return {"status": "success", "plane": ops.get("plane")}
+
+        monitor.finish("Suite2p pipeline completed.")
+        logger.info("Suite2p completed successfully")
+
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        return {"status": "error", "plane": ops.get("plane"), "error": str(e), "traceback": tb}
-
-
-def task_suite2p(args: dict, logger: logging.Logger) -> None:
-    """
-    Suite2p Pipeline Task.
-
-    Phase 1: Serial Safe Extraction
-    - Reads Master TIFF (single process)
-    - Writes data_raw.bin files for each plane
-
-    Phase 2: Parallel Processing
-    - Runs Suite2p on each .bin file using multiprocessing
-    """
-    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
-    monitor.update(0.01, "Initializing Suite2p pipeline...")
-
-    input_path = args["input_path"]
-    output_dir = Path(args["output_dir"])
-    planes = args.get("planes", []) # List of plane indices (1-indexed)
-    if not planes and "plane" in args:
-        planes = [args["plane"]]
-    roi = args.get("roi")
-    num_timepoints = args.get("num_timepoints")
-    ops = args.get("ops", {})
-    s2p_settings = args.get("s2p_settings", {})
-    fix_phase = args.get("fix_phase", True)  # default True for s2p runs
-    use_fft = args.get("use_fft", True)  # default True for s2p runs
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # --- Phase 1: Serial Extraction ---
-    if isinstance(input_path, list):
-        display_name = f"{len(input_path)} files ({Path(input_path[0]).name}...)"
-    else:
-        display_name = Path(input_path).name
-
-    monitor.update(0.05, f"Opening source file(s): {display_name}...")
-    logger.info(f"Opening {input_path}")
-
-    arr = imread(input_path)
-
-    # Sanity checks
-    if hasattr(arr, "fix_phase"):
-         monitor.update(0.05, "Applying phase correction settings...")
-         # Assuming these args might be passed in ops or kwargs,
-         # but usually encoded in the array defaults or metadata
-
-    extracted_items = [] # List of dicts describing each extracted plane
-
-    total_planes = len(planes)
-    for i, p_idx in enumerate(sorted(planes)):
-        monitor.update(0.1 + 0.4 * (i/total_planes), f"Extracting Plane {p_idx} ({i+1}/{total_planes})...")
-
-        # Determine output folder
-        if roi:
-            plane_dir = output_dir / f"plane{p_idx:02d}_roi{roi:02d}"
-        else:
-            plane_dir = output_dir / f"plane{p_idx:02d}_stitched"
-
-        plane_dir.mkdir(parents=True, exist_ok=True)
-        raw_file = plane_dir / "data_raw.bin"
-        ops_path = plane_dir / "ops.npy"
-
-        # Prepare metadata/ops
-        # We need to construct the specific ops for this plane
-        # This mirrors logic from pipeline_widgets.py but simplified
-
-        current_md = ops.copy()
-        current_md.update({
-            "plane": p_idx,
-            "save_path": str(plane_dir),
-            "raw_file": str(raw_file.resolve()),
-            "ops_path": str(ops_path)
-            # Add other necessary metadata if needed
-        })
-
-        # Extract and write
-        # We use imwrite with 'planes' kwarg to handle the slicing efficiently
-        logger.info(f"Extracting plane {p_idx} to {raw_file}")
-
-        try:
-             # Note: imwrite handles writing 'data_raw.bin' and 'ops.npy'
-            if roi:
-                arr.roi = roi
-
-            # Handle Array Slicing for Extraction
-            # We pass planes=p_idx to imwrite, which handles lazy chunked reading.
-            # Avoid manual slicing (arr[:, p_idx-1, ...]) as it triggers a full data load.
-            arr_to_write = arr
-            write_planes_arg = p_idx # 1-indexed for imwrite
-
-            # If array is 3D but we are asking for plane > 1, it implies interleaving
-            # or concatenation. imwrite generic handles interleaving if we pass planes=p_idx.
-            # But if it's concatenated files (ScanImageArray default), we rely on arr._imwrite
-            # or generic writer to handle it.
-
-            # Use imwrite to extract and write binary
-            imwrite(
-                arr_to_write,
-                plane_dir,
-                ext=".bin",
-                overwrite=True,
-                planes=write_planes_arg, # 1-indexed or None if pre-sliced
-                num_frames=num_timepoints,
-                output_name="data_raw.bin",
-                metadata=current_md,
-                fix_phase=fix_phase,
-                use_fft=use_fft,
-            )
-
-            # Reload ops from disk to get Lx, Ly, and other metadata added by imwrite
-            updated_ops = load_npy(ops_path).item() if ops_path.exists() else current_md
-
-            extracted_items.append({
-                "bin_file": str(raw_file),
-                "save_path": str(plane_dir),
-                "ops": updated_ops,
-                "s2p_settings": s2p_settings
-            })
-
-        except Exception as e:
-            logger.exception(f"Failed to extract plane {p_idx}: {e}")
-            logger.exception(traceback.format_exc())
-            monitor.fail(f"Extraction failed for plane {p_idx}: {e}", details={"traceback": traceback.format_exc()})
-            raise # Stop processing
-
-
-    # --- Phase 2: Parallel Processing ---
-    if not extracted_items:
-        logger.error("No planes were extracted. Check if the selected planes exist in the source file.")
-        monitor.fail("No planes were extracted. Check if the selected planes exist in the source file.")
-        return
-
-    monitor.update(0.5, "Starting parallel processing...")
-    logger.info(f"Starting parallel suite2p processing for {len(extracted_items)} plane(s)")
-
-    completed = 0
-    errors = 0
-
-    # Determine worker count
-    max_workers = args.get("max_workers", max(1, cpu_count() - 2))
-
-    with Pool(processes=max_workers) as pool:
-        # Submit all jobs
-        results = []
-        for item in extracted_items:
-            results.append(pool.apply_async(_suite2p_worker, (item,)))
-
-        # Wait for results and update monitor
-        while results:
-            # Check remaining
-            pending = [r for r in results if not r.ready()]
-            finished = len(results) - len(pending)
-
-            # Update progress
-            current_progress = 0.5 + 0.5 * (finished / len(extracted_items))
-            monitor.update(current_progress, f"Processing: {finished}/{len(extracted_items)} planes completed")
-
-            if not pending:
-                break
-
-            time.sleep(0.5)
-
-        # Collect final statuses
-        for r in results:
-            try:
-                res = r.get()
-                if res["status"] == "error":
-                    errors += 1
-                    logger.error(f"Error in plane {res['plane']}: {res['error']}")
-                    if "traceback" in res:
-                        logger.error(f"Traceback:\n{res['traceback']}")
-                else:
-                    completed += 1
-            except Exception as e:
-                errors += 1
-                logger.exception(f"Worker crashed: {e}")
-
-    if errors > 0:
-        msg = f"Completed with {errors} errors. ({completed} success)"
-        monitor.fail(msg)
-        raise RuntimeError(msg)
-    monitor.finish(f"All {completed} planes processed successfully.")
+        monitor.fail(str(e), details={"traceback": traceback.format_exc()})
+        logger.exception(f"Suite2p failed: {e}")
+        raise
 
 # Registry
 TASKS = {

@@ -112,7 +112,6 @@ class PhaseCorrectionFeature(ArrayFeature):
         self._upsample = upsample
         self._border = border
         self._max_offset = max_offset
-        self._computed_shift: float | None = None
 
     @property
     def value(self) -> dict:
@@ -156,8 +155,6 @@ class PhaseCorrectionFeature(ArrayFeature):
             self._method = PhaseCorrMethod.from_string(value)
         else:
             self._method = value
-        # reset computed shift when method changes
-        self._computed_shift = None
 
     @property
     def shift(self) -> float | None:
@@ -171,10 +168,8 @@ class PhaseCorrectionFeature(ArrayFeature):
 
     @property
     def effective_shift(self) -> float | None:
-        """Effective shift (fixed or computed)."""
-        if self._shift is not None:
-            return self._shift
-        return self._computed_shift
+        """Fixed shift value (None means compute on read)."""
+        return self._shift
 
     @property
     def use_fft(self) -> bool:
@@ -303,7 +298,6 @@ class PhaseCorrectionFeature(ArrayFeature):
             use_fft=self._use_fft,
         )
 
-        self._computed_shift = shift
         return shift
 
     def apply(self, frame):
@@ -336,7 +330,6 @@ class PhaseCorrectionFeature(ArrayFeature):
         self._enabled = False
         self._method = PhaseCorrMethod.mean
         self._shift = None
-        self._computed_shift = None
         self._use_fft = False
         self._upsample = 10
         self._border = 10
@@ -485,9 +478,10 @@ class PhaseCorrectionMixin:
     def offset(self) -> float | None:
         """Current effective phase shift value."""
         pc = getattr(self, "phase_correction", None)
-        if pc is not None:
+        if pc is not None and pc.effective_shift is not None:
             return pc.effective_shift
-        return None
+        # fallback to last computed offset from _read_pages
+        return getattr(self, "_last_offset", None)
 
     @offset.setter
     def offset(self, value: float):

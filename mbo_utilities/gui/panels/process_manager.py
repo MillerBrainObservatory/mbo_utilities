@@ -40,6 +40,7 @@ class ProcessInfo:
     progress: float = 0.0
     status_message: str = ""
     error_details: dict | str | None = None
+    completed_time: float | None = None  # when process finished
 
     def elapsed_seconds(self) -> float:
         """Seconds since process started."""
