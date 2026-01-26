@@ -325,7 +325,7 @@ def _write_plane(
         or metadata.get("num_frames")
     )
 
-    if nframes_target is None or nframes_target == 0:
+    if nframes_target is None or nframes_target <= 0:
         nframes_target = data.shape[0]
 
     nframes_target = int(nframes_target)

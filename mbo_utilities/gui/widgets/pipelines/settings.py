@@ -780,9 +780,16 @@ def _draw_data_options_content(self):
     INPUT_WIDTH = 100
     has_phase_support = getattr(self, "has_raster_scan_support", False)
     nz = getattr(self, "nz", 1)
-    has_z_reg = HAS_SUITE3D and nz > 1
 
-    has_any_options = has_phase_support or has_z_reg or (nz > 1)
+    # check if data already has z-registration applied
+    already_registered = False
+    arrays = self._get_data_arrays() if hasattr(self, "_get_data_arrays") else []
+    if arrays and hasattr(arrays[0], "metadata"):
+        already_registered = arrays[0].metadata.get("apply_shift", False)
+
+    has_z_reg = HAS_SUITE3D and nz > 1 and not already_registered
+
+    has_any_options = has_phase_support or has_z_reg
 
     # ensure s2p phase attributes exist with defaults
     if not hasattr(self, "_s2p_fix_phase"):
@@ -834,8 +841,8 @@ def _draw_data_options_content(self):
         for i, ofs in enumerate(self.current_offset):
             imgui.text(f"  Array {i + 1}: {ofs:.3f} px")
 
-    # z-registration section (suite3d)
-    if nz > 1:
+    # z-registration section (suite3d) - only show if not already registered
+    if nz > 1 and not already_registered:
         if has_phase_support:
             imgui.spacing()
             imgui.separator()
@@ -861,7 +868,7 @@ def _draw_data_options_content(self):
             imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Install suite3d to enable")
 
     if not has_any_options:
-        imgui.text_disabled("No data-specific options available.")
+        imgui.text_disabled("No available options for this data type.")
 
 
 def draw_section_suite2p(self):
@@ -1244,14 +1251,8 @@ def _draw_section_suite2p_content(self):
         _, self.s2p.nbinned = imgui.input_int("Max Binned Frames", self.s2p.nbinned)
         set_tooltip("Maximum number of binned frames for ROI detection.")
 
-        # Signal extraction settings (part of ROI detection workflow)
-        imgui.spacing()
-        imgui.separator()
-        imgui.text("Signal Extraction:")
-        _, self.s2p.neuropil_extract = imgui.checkbox(
-            "Extract Neuropil", self.s2p.neuropil_extract
-        )
-        set_tooltip("Extract neuropil signal for background correction.")
+    # --- Signal Extraction ---
+    def draw_signal_extraction_settings():
         _, self.s2p.allow_overlap = imgui.checkbox(
             "Allow Overlap", self.s2p.allow_overlap
         )
@@ -1272,21 +1273,34 @@ def _draw_section_suite2p_content(self):
         )
         set_tooltip("Percentile of Lambda used for neuropil exclusion.")
 
-        # Classification settings (part of ROI detection workflow)
-        imgui.spacing()
-        imgui.separator()
-        imgui.text("Classification:")
+    # --- Classification ---
+    def draw_classification_settings():
         _, self.s2p.soma_crop = imgui.checkbox("Soma Crop", self.s2p.soma_crop)
         set_tooltip("Crop dendrites for soma classification.")
-        _, self.s2p.use_builtin_classifier = imgui.checkbox(
-            "Use Built-in Classifier", self.s2p.use_builtin_classifier
-        )
-        set_tooltip("Use Suite2p's built-in ROI classifier.")
+
+        imgui.spacing()
         imgui.text("Classifier Path:")
-        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
-        imgui.text(self.s2p.classifier_path if self.s2p.classifier_path else "(none)")
+        path_display = self.s2p.classifier_path if self.s2p.classifier_path else "(none)"
+        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x - 80)
+        imgui.text(path_display)
         imgui.pop_text_wrap_pos()
-        set_tooltip("Path to external classifier if not using built-in.")
+        imgui.same_line()
+        if imgui.button("Browse##classifier"):
+            default_dir = str(Path(self.s2p.classifier_path).parent) if self.s2p.classifier_path else str(Path.home())
+            self._classifier_dialog = pfd.open_file(
+                "Select classifier file",
+                default_dir,
+                ["Classifier files", "*.npy *.pkl *.pickle", "All files", "*"],
+            )
+        set_tooltip("Select custom classifier file (e.g., .npy or .pkl)")
+
+        # handle file dialog result
+        if hasattr(self, "_classifier_dialog") and self._classifier_dialog is not None:
+            if self._classifier_dialog.ready():
+                result = self._classifier_dialog.result()
+                if result:
+                    self.s2p.classifier_path = result[0] if isinstance(result, list) else result
+                self._classifier_dialog = None
 
     # --- Spike Deconvolution ---
     def draw_spike_deconv_settings():
@@ -1410,14 +1424,40 @@ def _draw_section_suite2p_content(self):
         imgui.table_next_row()
         imgui.table_next_column()
         _, self.s2p.roidetect = imgui.checkbox("##roi_cb", self.s2p.roidetect)
-        set_tooltip("Enable/disable ROI detection and signal extraction")
+        set_tooltip("Enable/disable ROI detection")
         imgui.table_next_column()
         imgui.text("ROI Detection")
         imgui.table_next_column()
         if imgui.button("Settings##roi"):
             _popup_states["roi_settings"] = True
             imgui.open_popup("ROI Detection##roi_settings")
-        set_tooltip("Configure cell detection, extraction, and classification")
+        set_tooltip("Configure cell detection parameters")
+
+        # --- Signal Extraction row (with checkbox) ---
+        imgui.table_next_row()
+        imgui.table_next_column()
+        _, self.s2p.neuropil_extract = imgui.checkbox("##extract_cb", self.s2p.neuropil_extract)
+        set_tooltip("Enable/disable signal extraction")
+        imgui.table_next_column()
+        imgui.text("Signal Extraction")
+        imgui.table_next_column()
+        if imgui.button("Settings##extract"):
+            _popup_states["extract_settings"] = True
+            imgui.open_popup("Signal Extraction##extract_settings")
+        set_tooltip("Configure signal extraction parameters")
+
+        # --- Classification row ---
+        imgui.table_next_row()
+        imgui.table_next_column()
+        _, self.s2p.use_builtin_classifier = imgui.checkbox("##classify_cb", self.s2p.use_builtin_classifier)
+        set_tooltip("Enable/disable ROI classification")
+        imgui.table_next_column()
+        imgui.text("Classification")
+        imgui.table_next_column()
+        if imgui.button("Settings##classify"):
+            _popup_states["classify_settings"] = True
+            imgui.open_popup("Classification##classify_settings")
+        set_tooltip("Configure ROI classification settings")
 
         # --- Spike Deconvolution row (with checkbox) ---
         imgui.table_next_row()
@@ -1485,6 +1525,50 @@ def _draw_section_suite2p_content(self):
                     imgui.separator()
                     if imgui.button("Close##roi", imgui.ImVec2(80, 0)):
                         _popup_states["roi_settings"] = False
+                        imgui.close_current_popup()
+            finally:
+                imgui.end_popup()
+
+        # Signal Extraction popup
+        imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
+        opened, visible = imgui.begin_popup_modal(
+            "Signal Extraction##extract_settings",
+            p_open=True,
+            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+        )
+        if opened:
+            try:
+                if not visible:
+                    _popup_states["extract_settings"] = False
+                    imgui.close_current_popup()
+                else:
+                    draw_signal_extraction_settings()
+                    imgui.spacing()
+                    imgui.separator()
+                    if imgui.button("Close##extract", imgui.ImVec2(80, 0)):
+                        _popup_states["extract_settings"] = False
+                        imgui.close_current_popup()
+            finally:
+                imgui.end_popup()
+
+        # Classification popup
+        imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
+        opened, visible = imgui.begin_popup_modal(
+            "Classification##classify_settings",
+            p_open=True,
+            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+        )
+        if opened:
+            try:
+                if not visible:
+                    _popup_states["classify_settings"] = False
+                    imgui.close_current_popup()
+                else:
+                    draw_classification_settings()
+                    imgui.spacing()
+                    imgui.separator()
+                    if imgui.button("Close##classify", imgui.ImVec2(80, 0)):
+                        _popup_states["classify_settings"] = False
                         imgui.close_current_popup()
             finally:
                 imgui.end_popup()

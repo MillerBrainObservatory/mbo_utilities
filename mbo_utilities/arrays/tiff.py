@@ -63,7 +63,7 @@ register_pipeline(_TIFF_INFO)
 
 # register scanimage raw tiff reader
 _SCANIMAGE_INFO = PipelineInfo(
-    name="scanimage_raw",
+    name="ScanImage TIFF",
     description="Raw ScanImage TIFF files with multi-ROI support",
     input_patterns=[
         "**/*.tif",
