@@ -60,7 +60,7 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 # Suite2p alone will not include torch
 suite2p = [
     "numba>=0.60.0",
-    "lbm_suite2p_python>=2.5.2",
+    "lbm_suite2p_python>=2.5.3",
     "suite2p_mbo>=2.0.1",
 ]
 # Suite3D - requires CUPY
