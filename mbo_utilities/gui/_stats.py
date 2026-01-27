@@ -18,6 +18,65 @@ from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
 from mbo_utilities.reader import imread
 
 
+def _has_time_dim(arr: Any) -> bool:
+    """Check if array has a time dimension."""
+    dims = getattr(arr, "dims", None)
+    if dims is not None:
+        return "t" in dims
+    # fallback: assume time dim exists if ndim >= 3 and not a views array
+    return arr.ndim >= 3
+
+
+def _get_zslice(arr: Any, t_slice: slice, z: int) -> np.ndarray:
+    """Get a z-slice from an array, handling different dimension layouts.
+
+    Uses dims property to correctly index arrays with non-standard layouts
+    like IsoviewArray and ClusterPTArray which have a views/camera dimension.
+
+    Returns a stack of frames (T, Y, X) for computing temporal statistics,
+    or a single frame (Y, X) expanded to (1, Y, X) for single-timepoint data.
+
+    Supports:
+    - 3D: (T, Y, X) -> arr[t_slice]
+    - 4D standard: (T, Z, Y, X) -> arr[t_slice, z]
+    - 4D single-timepoint views: (Z, Views, Y, X) -> arr[z, 0] expanded to (1, Y, X)
+    - 5D with views: (T, Z, Views, Y, X) -> arr[t_slice, z, 0]
+    """
+    dims = getattr(arr, "dims", None)
+
+    # use dims property to determine correct indexing
+    if dims is not None:
+        # check if this is a views-type array (isoview, clusterpt)
+        if "cm" in dims:
+            if "t" in dims:
+                # multi-timepoint: (T, Z, Views, Y, X)
+                return arr[t_slice, z, 0]
+            else:
+                # single-timepoint: (Z, Views, Y, X) -> (Y, X)
+                # expand to (1, Y, X) for consistent stats computation
+                return arr[z, 0][np.newaxis, ...]
+        elif "z" in dims:
+            # has z but no views
+            if "t" in dims:
+                return arr[t_slice, z]
+            else:
+                # single z-slice, expand to (1, Y, X)
+                return arr[z][np.newaxis, ...]
+        else:
+            # no z dimension, just time
+            return arr[t_slice]
+
+    # fallback for arrays without dims property
+    if arr.ndim == 3:
+        return arr[t_slice]
+    elif arr.ndim == 4:
+        return arr[t_slice, z]
+    elif arr.ndim == 5:
+        return arr[t_slice, z, 0]
+    else:
+        return arr[t_slice]
+
+
 def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     """Compute z-stats for a single array."""
     # Check for pre-computed stats in zarr metadata (instant loading)
@@ -38,11 +97,7 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         n_z_planes = len(z_range)
         for i, z in enumerate(z_range):
             with tiff_lock:
-                stack = (
-                    arr[::10]
-                    if arr.ndim == 3
-                    else arr[::10, z]
-                )
+                stack = _get_zslice(arr, slice(None, None, 10), z)
                 mean_img = np.mean(stack, axis=0)
                 means.append(mean_img)
                 parent._zstats_progress[idx - 1] = (i + 1) / n_z_planes
@@ -64,11 +119,7 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
 
     for i, z in enumerate(z_range):
         with tiff_lock:
-            stack = (
-                arr[::10].astype(np.float32)
-                if arr.ndim == 3
-                else arr[::10, z].astype(np.float32)
-            )
+            stack = _get_zslice(arr, slice(None, None, 10), z).astype(np.float32)
 
             mean_img = np.mean(stack, axis=0)
             std_img = np.std(stack, axis=0)
@@ -145,8 +196,13 @@ def refresh_zstats(parent: Any):
     for i in range(n):
         reset_progress_state(f"zstats_{i}")
 
-    # Update nz based on current data shape
-    if len(parent.shape) >= 4:
+    # Update nz based on dims property if available, else fallback to shape
+    arr = parent.image_widget.data[0] if parent.image_widget.data else None
+    dims = getattr(arr, "dims", None) if arr is not None else None
+    if dims is not None and "z" in dims:
+        z_idx = dims.index("z")
+        parent.nz = parent.shape[z_idx]
+    elif len(parent.shape) >= 4:
         parent.nz = parent.shape[1]
     elif len(parent.shape) == 3:
         parent.nz = 1

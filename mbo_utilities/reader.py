@@ -16,6 +16,7 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays import (
     BinArray,
+    ClusterPTArray,
     LBMPiezoArray,
     H5Array,
     IsoviewArray,
@@ -38,9 +39,9 @@ if TYPE_CHECKING:
 logger = log.get("reader")
 
 # UI dropdown shows these formats (excludes .tif to avoid duplication)
-MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".npy"]
+MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".npy", ".klb"]
 # reading accepts .tif as alias for .tiff
-MBO_READABLE_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy"]
+MBO_READABLE_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy", ".klb"]
 
 # Re-export PIPELINE_TAGS for backward compatibility (canonical location is file_io.py)
 
@@ -153,20 +154,47 @@ def imread(
         elif p.is_dir():
             logger.debug(f"Input is a directory, searching for supported files in {p}")
 
-            # Check for Isoview structure: TM* subfolders with .zarr files
+            # Check for raw Isoview structure: .stack files with XML metadata
+            stack_files = list(p.glob("*.stack"))
+            if stack_files:
+                xml_files = list(p.glob("*.xml"))
+                if xml_files:
+                    logger.info(
+                        f"Detected raw Isoview structure with {len(stack_files)} .stack files."
+                    )
+                    return IsoviewArray(p)
+
+            # Check for clusterPT structure: TM* subfolders with .klb files
             tm_folders = [
                 d for d in p.iterdir() if d.is_dir() and d.name.startswith("TM")
             ]
             if tm_folders:
-                logger.info(
-                    f"Detected Isoview structure with {len(tm_folders)} TM folders."
-                )
-                return IsoviewArray(p)
+                # check first TM folder for file types
+                first_tm = tm_folders[0]
+                klb_files = list(first_tm.glob("*.klb"))
+                zarr_files = list(first_tm.glob("*.zarr"))
+
+                if klb_files:
+                    logger.info(
+                        f"Detected clusterPT structure with {len(tm_folders)} TM folders and KLB files."
+                    )
+                    return ClusterPTArray(p)
+                elif zarr_files:
+                    logger.info(
+                        f"Detected Isoview structure with {len(tm_folders)} TM folders."
+                    )
+                    return IsoviewArray(p)
 
             # Check if this IS a TM folder (single timepoint)
             if p.name.startswith("TM"):
+                klbs = list(p.glob("*.klb"))
                 zarrs = list(p.glob("*.zarr"))
-                if zarrs:
+                if klbs:
+                    logger.info(
+                        f"Detected single TM folder with {len(klbs)} KLB files."
+                    )
+                    return ClusterPTArray(p)
+                elif zarrs:
                     logger.info(
                         f"Detected single TM folder with {len(zarrs)} zarr files."
                     )
@@ -352,6 +380,18 @@ def imread(
 
         logger.debug(f"Loading .npy file as NumpyArray: {first}")
         return NumpyArray(first, **_filter_kwargs(NumpyArray, kwargs))
+
+    if first.suffix == ".klb":
+        # KLB files from clusterPT - determine parent structure
+        parent = first.parent
+        if parent.name.startswith("TM"):
+            # inside a TM folder - use parent of TM as base
+            logger.info(f"Detected KLB file in TM folder, loading as ClusterPTArray.")
+            return ClusterPTArray(parent.parent)
+        else:
+            # assume klb files are in TM folders under parent
+            logger.info(f"Detected KLB file, loading parent as ClusterPTArray.")
+            return ClusterPTArray(parent)
 
     raise TypeError(f"Unsupported file type: {first.suffix}")
 

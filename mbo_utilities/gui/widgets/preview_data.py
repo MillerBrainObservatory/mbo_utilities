@@ -253,8 +253,13 @@ class PreviewDataWidget(EdgeWindow):
             subplot.toolbar = False
         self.image_widget._sliders_ui._loop = True
 
-        # Determine nz
-        if len(self.shape) == 4:
+        # Determine nz using dims property if available
+        arr = self.image_widget.data[0]
+        dims = getattr(arr, "dims", None)
+        if dims is not None and "z" in dims:
+            z_idx = dims.index("z")
+            self.nz = self.shape[z_idx]
+        elif len(self.shape) >= 4:
             self.nz = self.shape[1]
         elif len(self.shape) == 3:
             self.nz = 1
@@ -267,6 +272,7 @@ class PreviewDataWidget(EdgeWindow):
         self._auto_update = False
         self._proj = "mean"
         self._mean_subtraction = False
+        self._auto_contrast_on_z = True  # auto-reset contrast when z changes
         self._last_z_idx = 0
 
         # Registration state
@@ -571,6 +577,15 @@ class PreviewDataWidget(EdgeWindow):
             self._update_mean_subtraction()
 
     @property
+    def auto_contrast_on_z(self) -> bool:
+        """Whether to auto-reset contrast when z-plane changes."""
+        return self._auto_contrast_on_z
+
+    @auto_contrast_on_z.setter
+    def auto_contrast_on_z(self, value: bool):
+        self._auto_contrast_on_z = value
+
+    @property
     def window_size(self) -> int:
         """Window size for temporal projection."""
         return self._window_size
@@ -805,7 +820,7 @@ class PreviewDataWidget(EdgeWindow):
             self._last_z_idx = z_idx
             if self._mean_subtraction:
                 self._update_mean_subtraction()
-            elif self.image_widget:
+            elif self._auto_contrast_on_z and self.image_widget:
                 self.image_widget.reset_vmin_vmax_frame()
 
     def draw_stats_section(self):

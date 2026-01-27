@@ -78,6 +78,10 @@ napari = [
     "napari-ome-zarr",
     "napari-animation",
 ]
+# Isoview lightsheet support (clusterPT KLB files)
+isoview = [
+    "pyklb",
+]
 # PyTorch for neural network operations
 torch = [
     "torch",
