@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from mbo_utilities.arrays.clusterpt import ClusterPTArray as ClusterPTArray
     from mbo_utilities.arrays.h5 import H5Array as H5Array
     from mbo_utilities.arrays.isoview import IsoviewArray as IsoviewArray
+    from mbo_utilities.arrays.isoview_output import IsoViewOutputArray as IsoViewOutputArray
     from mbo_utilities.arrays.numpy import NumpyArray as NumpyArray
     from mbo_utilities.arrays.nwb import NWBArray as NWBArray
     from mbo_utilities.arrays.suite2p import (
@@ -71,6 +72,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "ZarrArray": (".zarr", "ZarrArray"),
     "BinArray": (".bin", "BinArray"),
     "IsoviewArray": (".isoview", "IsoviewArray"),
+    "IsoViewOutputArray": (".isoview_output", "IsoViewOutputArray"),
     "ClusterPTArray": (".clusterpt", "ClusterPTArray"),
     "_extract_tiff_plane_number": (".tiff", "_extract_tiff_plane_number"),
     # registration
@@ -130,6 +132,7 @@ __all__ = [
     "H5Array",
     "ImageJHyperstackArray",
     "IsoviewArray",
+    "IsoViewOutputArray",
     "LBMArray",
     "NWBArray",
     "NumpyArray",

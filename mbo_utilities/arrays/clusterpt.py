@@ -427,8 +427,8 @@ class ClusterPTArray:
             ('t', 'z', 'cm', 'y', 'x') for multi-timepoint
         """
         if self._single_timepoint:
-            return ("z", "cm", "y", "x")
-        return ("t", "z", "cm", "y", "x")
+            return ("z", "cm", "Y", "X")
+        return ("t", "z", "cm", "Y", "X")
 
     @property
     def num_planes(self) -> int:
