@@ -400,6 +400,12 @@ def imread(
     if first.suffix == ".klb":
         import pyklb
 
+        # if only one KLB file specified, read it directly
+        if len(paths) == 1:
+            logger.info(f"Loading KLB file: {first}")
+            data = pyklb.readfull(str(first))
+            return NumpyArray(data)
+
         # check if this looks like a clusterPT structure
         parent = first.parent
         if parent.name.startswith("TM"):
