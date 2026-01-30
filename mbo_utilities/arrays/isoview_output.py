@@ -204,7 +204,11 @@ class IsoViewOutputArray:
             dims = header['imagesize_tczyx']
             spatial_dims = [d for d in dims if d > 1]
             if len(spatial_dims) >= 3:
-                shape = tuple(spatial_dims[-3:])
+                # klb header stores as (Z, Y, X) but Y/X are swapped relative to raw isoview
+                # raw .stack files: Y=1848 (long axis), X=768 (short axis)
+                # klb header reports: Y=768, X=1848 - need to swap back
+                z, y, x = spatial_dims[-3:]
+                shape = (z, x, y)  # swap Y and X to match raw convention
             else:
                 shape = (1,) * (3 - len(spatial_dims)) + tuple(spatial_dims)
             self._dtype = np.dtype(header['datatype'])
@@ -263,6 +267,9 @@ class IsoViewOutputArray:
         elif self._file_ext == ".klb":
             import pyklb
             data = pyklb.readfull(str(path))
+            # klb data has Y/X swapped relative to raw isoview - transpose to match
+            if data.ndim == 3:
+                data = data.transpose(0, 2, 1)  # (Z, Y, X) -> (Z, X, Y) -> becomes (Z, Y, X) after swap
         elif self._file_ext == ".zarr":
             import zarr
             z = zarr.open(path, mode="r")

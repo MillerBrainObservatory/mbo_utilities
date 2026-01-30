@@ -371,8 +371,8 @@ class IsoviewArray:
 
         Format: BSQ (band sequential), little-endian uint16
 
-        For XML dims [768, 1848, 38]:
-        - reshape directly to (Z, Y, X) = (38, 1848, 768)
+        For XML dims [768, 1848, 38] = [width, height, depth]:
+        - reshape to (Z, Y, X) = (38, 1848, 768)
         """
         depth, height, width = self._single_shape  # (Z=38, Y=1848, X=768)
         volume = np.fromfile(stack_path, dtype="<u2")  # little-endian uint16
