@@ -272,7 +272,7 @@ class PreviewDataWidget(EdgeWindow):
         self._auto_update = False
         self._proj = "mean"
         self._mean_subtraction = False
-        self._auto_contrast_on_z = True  # auto-reset contrast when z changes
+        self._auto_contrast_on_z = False  # auto-reset contrast when z changes (toggle with 'c')
         self._last_z_idx = 0
 
         # Registration state

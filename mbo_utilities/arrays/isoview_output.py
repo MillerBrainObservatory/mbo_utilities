@@ -123,21 +123,37 @@ class IsoViewOutputArray:
         """Parse filenames to find views and determine shape."""
         # patterns for extracting view info
         # SPM00_TM000000_CM00_CHN01.tif -> camera=0, channel=1
+        # SPM00_TM000000_CM00_CM01_CHN01.tif -> fused cameras 0+1, channel=1
         # SPM00_TM000000_CHN00.tif -> channel=0 (no camera)
         pattern_cm = re.compile(
             r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)" + re.escape(self._file_ext)
+        )
+        pattern_fused_cm = re.compile(
+            r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_CHN(\d+)" + re.escape(self._file_ext)
         )
         pattern_chn = re.compile(
             r"SPM(\d+)_TM(\d+)_CHN(\d+)" + re.escape(self._file_ext)
         )
 
         self._views = []
-        self._view_type = None  # 'cm' or 'ch'
+        self._view_type = None  # 'cm', 'fused', or 'ch'
         self._specimen = None
         self._file_map = {}  # view_idx -> filename pattern parts
 
         for f in sorted(self._data_files):
-            # try CM pattern first
+            # try fused camera pattern first (CM##_CM##)
+            match = pattern_fused_cm.match(f.name)
+            if match:
+                specimen, timepoint, cam0, cam1, channel = map(int, match.groups())
+                self._specimen = specimen
+                self._view_type = "fused"
+                view_key = (cam0, cam1)
+                if view_key not in self._views:
+                    self._views.append(view_key)
+                    self._file_map[view_key] = {"cam0": cam0, "cam1": cam1, "channel": channel}
+                continue
+
+            # try single CM pattern
             match = pattern_cm.match(f.name)
             if match:
                 specimen, timepoint, camera, channel = map(int, match.groups())
@@ -220,7 +236,10 @@ class IsoViewOutputArray:
         sp = self._specimen if self._specimen is not None else 0
         view = self._views[view_idx]
 
-        if self._view_type == "cm":
+        if self._view_type == "fused":
+            info = self._file_map[view]
+            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['cam0']:02d}_CM{info['cam1']:02d}_CHN{info['channel']:02d}{self._file_ext}"
+        elif self._view_type == "cm":
             info = self._file_map[view]
             filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}_CHN{info['channel']:02d}{self._file_ext}"
         else:  # ch

@@ -127,7 +127,8 @@ def get_slider_dims(arr_or_dims) -> tuple[str, ...] | None:
         dims = arr_or_dims
     else:
         # assume it's an array, try to get dims
-        dims = get_dims(arr_or_dims)
+        # use normalize=False to preserve descriptive names for slider labels
+        dims = get_dims(arr_or_dims, normalize=False)
 
     if dims is None:
         return None

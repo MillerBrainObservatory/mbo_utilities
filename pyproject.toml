@@ -40,6 +40,7 @@ dependencies = [
 	"imgui-bundle>=1.92.5",
 	"pyqt6>=6.7",
 	"pyqt6-sip",
+	"pyqtgraph",
 	"qtpy",
 	"wgpu>=0.28.1,<0.29",
 ]
