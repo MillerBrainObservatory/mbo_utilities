@@ -97,6 +97,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
 
     # Optional params
     planes = args.get("planes")
+    channels = args.get("channels")  # list of 1-based channel indices or None
     rois = args.get("rois")
     frames = args.get("frames")  # list of 1-based frame indices or None
     metadata = args.get("metadata", {})
@@ -212,6 +213,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
                 outpath=output_path,
                 ext=ext,
                 planes=planes,
+                channels=channels,
                 frames=frames,
                 roi=rois,
                 overwrite=True,
@@ -226,6 +228,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
                 output_path,
                 ext=ext,
                 planes=planes,
+                channels=channels,
                 frames=frames,
                 roi=rois,
                 overwrite=True,

@@ -964,6 +964,7 @@ def _write_volumetric_tiff(
     metadata: dict | None = None,
     planes: list | None = None,
     frames: list | None = None,
+    channels: list | None = None,
     overwrite: bool = True,
     target_chunk_mb: int = 50,
     progress_callback=None,
@@ -972,12 +973,12 @@ def _write_volumetric_tiff(
     output_suffix: str | None = None,
 ):
     """
-    Write volumetric TZYX data as single ImageJ hyperstack tiff.
+    Write volumetric TZYX or TCYX data as single ImageJ hyperstack tiff.
 
     parameters
     ----------
     data : array-like
-        data with shape (T, Z, Y, X), (T, Y, X), or (Z, Y, X)
+        data with shape (T, Z, Y, X), (T, C, Y, X), (T, Y, X), or (Z, Y, X)
     path : Path
         output directory (filename auto-generated from dims)
     metadata : dict
@@ -986,6 +987,8 @@ def _write_volumetric_tiff(
         z-plane selection (1-based indices). None = all planes.
     frames : list | None
         timepoint selection (1-based indices). None = all frames.
+    channels : list | None
+        channel selection (1-based indices). None = all channels.
     overwrite : bool
         overwrite existing files
     target_chunk_mb : int
@@ -1015,13 +1018,15 @@ def _write_volumetric_tiff(
         selections["T"] = [frames] if isinstance(frames, int) else frames
     if planes is not None:
         selections["Z"] = [planes] if isinstance(planes, int) else planes
+    if channels is not None:
+        selections["C"] = [channels] if isinstance(channels, int) else channels
 
     # create slicing state (handles dim normalization, 1-based conversion)
     slicing = ArraySlicing.from_array(data, selections=selections, one_based=True)
 
     # build output filename from dims
     suffix = output_suffix if output_suffix else "stack"
-    output_fn = OutputFilename.from_array(data, planes=planes, frames=frames, suffix=suffix)
+    output_fn = OutputFilename.from_array(data, planes=planes, frames=frames, channels=channels, suffix=suffix)
     filename = path / output_fn.build(".tif")
 
     if filename.exists() and not overwrite:
@@ -1034,7 +1039,13 @@ def _write_volumetric_tiff(
     # get target shape after selection
     output_shape = slicing.output_shape
     n_frames = slicing.selections["T"].count if "T" in slicing.selections else 1
-    n_planes = slicing.selections["Z"].count if "Z" in slicing.selections else 1
+    # handle both Z (z-planes) and C (channels) as the second dimension
+    if "Z" in slicing.selections:
+        n_planes = slicing.selections["Z"].count
+    elif "C" in slicing.selections:
+        n_planes = slicing.selections["C"].count
+    else:
+        n_planes = 1
     Ly, Lx = slicing.spatial_shape
 
     # check for z-registration shift application (shared logic)

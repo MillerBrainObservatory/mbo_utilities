@@ -1,5 +1,5 @@
 """
-shared ui components for timepoint and z-plane selection.
+shared ui components for timepoint, z-plane, and channel selection.
 
 used by both save-as dialog and suite2p run tab.
 """
@@ -9,33 +9,33 @@ from imgui_bundle import imgui, hello_imgui
 from mbo_utilities.arrays.features._slicing import parse_timepoint_selection
 
 
-def _parse_z_selection(text: str, num_planes: int) -> tuple[int, int, int, str]:
+def _parse_range_selection(text: str, max_val: int) -> tuple[int, int, int, str]:
     """
-    Parse z-plane selection string like "1:14" or "1:14:2".
+    Parse a range selection string like "1:14" or "1:14:2".
 
     Returns (start, stop, step, error_msg). error_msg is empty on success.
     """
     text = text.strip()
     if not text:
-        return 1, num_planes, 1, ""
+        return 1, max_val, 1, ""
 
     parts = text.split(":")
     try:
         if len(parts) == 1:
             # single value
             val = int(parts[0])
-            if val < 1 or val > num_planes:
-                return 1, num_planes, 1, f"plane {val} out of range 1-{num_planes}"
+            if val < 1 or val > max_val:
+                return 1, max_val, 1, f"value {val} out of range 1-{max_val}"
             return val, val, 1, ""
         elif len(parts) == 2:
             start = int(parts[0])
             stop = int(parts[1])
             if start < 1:
                 start = 1
-            if stop > num_planes:
-                stop = num_planes
+            if stop > max_val:
+                stop = max_val
             if start > stop:
-                return 1, num_planes, 1, "start > stop"
+                return 1, max_val, 1, "start > stop"
             return start, stop, 1, ""
         elif len(parts) == 3:
             start = int(parts[0])
@@ -43,17 +43,27 @@ def _parse_z_selection(text: str, num_planes: int) -> tuple[int, int, int, str]:
             step = int(parts[2])
             if start < 1:
                 start = 1
-            if stop > num_planes:
-                stop = num_planes
+            if stop > max_val:
+                stop = max_val
             if step < 1:
                 step = 1
             if start > stop:
-                return 1, num_planes, 1, "start > stop"
+                return 1, max_val, 1, "start > stop"
             return start, stop, step, ""
         else:
-            return 1, num_planes, 1, "format: start:stop or start:stop:step"
+            return 1, max_val, 1, "format: start:stop or start:stop:step"
     except ValueError:
-        return 1, num_planes, 1, "invalid number"
+        return 1, max_val, 1, "invalid number"
+
+
+def _parse_z_selection(text: str, num_planes: int) -> tuple[int, int, int, str]:
+    """Parse z-plane selection string. Wrapper for _parse_range_selection."""
+    return _parse_range_selection(text, num_planes)
+
+
+def _parse_channel_selection(text: str, num_channels: int) -> tuple[int, int, int, str]:
+    """Parse channel selection string. Wrapper for _parse_range_selection."""
+    return _parse_range_selection(text, num_channels)
 
 
 def draw_selection_table(
@@ -64,9 +74,11 @@ def draw_selection_table(
     z_attr: str = "_saveas_z",
     id_suffix: str = "",
     suffix_attr: str | None = None,
+    num_channels: int = 1,
+    c_attr: str = "_saveas_c",
 ):
     """
-    Draw a selection table for timepoints and z-planes.
+    Draw a selection table for timepoints, z-planes, and channels.
 
     Parameters
     ----------
@@ -84,6 +96,10 @@ def draw_selection_table(
         Suffix for imgui IDs to avoid conflicts.
     suffix_attr : str | None
         If provided, adds a Suffix row with this attribute name for output suffix.
+    num_channels : int
+        Number of color channels in data (default 1).
+    c_attr : str
+        Attribute prefix for channel state (e.g., "_saveas_c").
     """
     # get/set attributes dynamically
     tp_selection = getattr(parent, f"{tp_attr}_selection", f"1:{max_frames}")
@@ -110,6 +126,26 @@ def draw_selection_table(
 
     # parse current z selection
     z_start, z_stop, z_step, _ = _parse_z_selection(z_selection, num_planes)
+
+    # channel selection as text (similar to z-plane)
+    c_selection_attr = f"{c_attr}_selection"
+    c_error_attr = f"{c_attr}_error"
+    if not hasattr(parent, c_selection_attr):
+        c_start = getattr(parent, f"{c_attr}_start", 1)
+        c_stop = getattr(parent, f"{c_attr}_stop", num_channels)
+        c_step = getattr(parent, f"{c_attr}_step", 1)
+        if c_step == 1:
+            c_selection = f"{c_start}:{c_stop}"
+        else:
+            c_selection = f"{c_start}:{c_stop}:{c_step}"
+        setattr(parent, c_selection_attr, c_selection)
+        setattr(parent, c_error_attr, "")
+
+    c_selection = getattr(parent, c_selection_attr)
+    c_error = getattr(parent, c_error_attr, "")
+
+    # parse current channel selection
+    c_start, c_stop, c_step, _ = _parse_channel_selection(c_selection, num_channels)
 
     INPUT_WIDTH = hello_imgui.em_size(13)
 
@@ -228,6 +264,55 @@ def draw_selection_table(
             else:
                 imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_planes_selected}/{num_planes}")
 
+        # channels row (only if multi-channel)
+        if num_channels > 1:
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text("Channels")
+
+            imgui.table_next_column()
+            imgui.set_next_item_width(INPUT_WIDTH)
+
+            # red border if error
+            had_c_error = bool(c_error)
+            if had_c_error:
+                imgui.push_style_color(imgui.Col_.frame_bg, imgui.ImVec4(0.3, 0.1, 0.1, 1.0))
+
+            changed, new_val = imgui.input_text(f"##c{id_suffix}", c_selection)
+            if changed:
+                setattr(parent, c_selection_attr, new_val)
+                c_start, c_stop, c_step, err = _parse_channel_selection(new_val, num_channels)
+                setattr(parent, c_error_attr, err)
+                c_error = err
+                # update old-style attrs for compatibility
+                setattr(parent, f"{c_attr}_start", c_start)
+                setattr(parent, f"{c_attr}_stop", c_stop)
+                setattr(parent, f"{c_attr}_step", c_step)
+
+            if had_c_error:
+                imgui.pop_style_color()
+
+            if c_error and imgui.is_item_hovered():
+                imgui.set_tooltip(c_error)
+
+            imgui.table_next_column()
+            if imgui.small_button(f"All##c{id_suffix}"):
+                setattr(parent, c_selection_attr, f"1:{num_channels}")
+                setattr(parent, c_error_attr, "")
+                setattr(parent, f"{c_attr}_start", 1)
+                setattr(parent, f"{c_attr}_stop", num_channels)
+                setattr(parent, f"{c_attr}_step", 1)
+                c_start, c_stop, c_step = 1, num_channels, 1
+                c_error = ""
+
+            imgui.table_next_column()
+            selected_channels = list(range(c_start, c_stop + 1, c_step))
+            n_channels_selected = len(selected_channels)
+            if c_error:
+                imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "invalid")
+            else:
+                imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_channels_selected}/{num_channels}")
+
         # suffix row (optional)
         if suffix_attr:
             imgui.table_next_row()
@@ -259,4 +344,4 @@ def draw_selection_table(
         imgui.end_table()
 
     # return parsed selection info for caller
-    return tp_parsed, z_start, z_stop, z_step
+    return tp_parsed, z_start, z_stop, z_step, c_start, c_stop, c_step

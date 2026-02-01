@@ -258,6 +258,7 @@ def _imwrite_base(
     outpath: Path | str,
     planes: int | list | tuple | None = None,
     frames: int | list | tuple | None = None,
+    channels: int | list | tuple | None = None,
     ext: str = ".tiff",
     overwrite: bool = False,
     target_chunk_mb: int = 50,
@@ -282,6 +283,8 @@ def _imwrite_base(
         Planes to write (1-based indexing). None means all planes.
     frames : int | list | tuple | None
         Frames to write (1-based indexing). None means all frames.
+    channels : int | list | tuple | None
+        Channels to write (1-based indexing). None means all channels.
     ext : str
         Output format extension (e.g., '.tiff', '.bin', '.zarr').
     overwrite : bool
@@ -343,6 +346,16 @@ def _imwrite_base(
     else:
         frames_list = None  # all frames
 
+    # normalize channel selection to 1-based list
+    num_channels = getattr(arr, "num_color_channels", 1)
+    if channels is not None:
+        if isinstance(channels, int):
+            channels_list = [channels]
+        else:
+            channels_list = list(channels)
+    else:
+        channels_list = None  # all channels
+
     # tiff: use volumetric writer
     if ext_clean in ("tiff", "tif"):
         # extract output_suffix from kwargs if present
@@ -353,6 +366,7 @@ def _imwrite_base(
             metadata=md,
             planes=planes_list,
             frames=frames_list,
+            channels=channels_list,
             overwrite=overwrite,
             target_chunk_mb=target_chunk_mb,
             progress_callback=progress_callback,
