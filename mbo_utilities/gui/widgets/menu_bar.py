@@ -240,6 +240,7 @@ def draw_keybinds_popup(parent: Any):
             ("m", "Toggle metadata viewer"),
             ("p", "Toggle side panel"),
             ("v / Enter", "Reset vmin/vmax"),
+            ("c", "Toggle auto-contrast on Z"),
             ("", ""),
             ("Help", None),
             ("h / F1", "Open help"),

@@ -73,6 +73,12 @@ def handle_keyboard_shortcuts(parent: Any):
             with contextlib.suppress(Exception):
                 parent.image_widget.reset_vmin_vmax_frame()
 
+    # c: toggle auto-contrast on z-change (no modifiers)
+    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.c, False):
+        parent.auto_contrast_on_z = not parent.auto_contrast_on_z
+        state = "ON" if parent.auto_contrast_on_z else "OFF"
+        parent.logger.info(f"Shortcut: 'c' (Auto-contrast on Z: {state})")
+
     # k: toggle keybinds popup (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.k, False):
         parent.logger.info("Shortcut: 'k' (Keybinds)")

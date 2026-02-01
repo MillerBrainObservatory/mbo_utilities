@@ -935,6 +935,10 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7c/96/5a2220abcbd027eebcf8bedd28207a2de168899e51be13ba01ebdd4147a1/glfw-2.10.0-py2.py27.py3.py30.py31.py32.py33.py34.py35.py36.py37.py38.p39.p310.p311.p312.p313-none-macosx_11_0_arm64.whl", hash = "sha256:5328db1a92d07abd988730517ec02aa8390d3e6ef7ce98c8b57ecba2f43a39ba", size = 102179, upload-time = "2025-09-12T08:54:29.163Z" },
     { url = "https://files.pythonhosted.org/packages/84/06/cb588ca65561defe0fc48d1df4c2ac12569b81231ae4f2b52ab37007d0bd/glfw-2.10.0-py2.py27.py3.py30.py31.py32.py33.py34.py35.py36.py37.py38.p39.p310.p311.p312.p313-none-win32.whl", hash = "sha256:6c9549da71b93e367b4d71438798daae1da2592039fd14204a80a1a2348ae127", size = 552685, upload-time = "2025-09-12T08:54:35.723Z" },
     { url = "https://files.pythonhosted.org/packages/86/27/00c9c96af18ac0a5eac2ff61cbe306551a2d770d7173f396d0792ee1a59e/glfw-2.10.0-py2.py27.py3.py30.py31.py32.py33.py34.py35.py36.py37.py38.p39.p310.p311.p312.p313-none-win_amd64.whl", hash = "sha256:6292d5d6634d668cd23d337e6089491d3945a9aa4ac6e1667b0003520d7caa51", size = 559466, upload-time = "2025-09-12T08:54:37.661Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/87/de0b33f6f00687499ca1371f22aa73396341b85bf88f1a284f9da8842493/glfw-2.10.0-py2.py27.py3.py30.py31.py32.py33.py34.py35.py36.py37.py38.py39.py310.py311.py312.py313.py314-none-macosx_10_6_intel.whl", hash = "sha256:2aab89d2d9535635ba011fc7303390685169a1aa6731ad580d08d043524b8899", size = 105326, upload-time = "2026-01-28T05:57:56.083Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/a6/6ea2f73ad4474896d9e38b3ffbe6ffd5a802c738392269e99e8c6621a461/glfw-2.10.0-py2.py27.py3.py30.py31.py32.py33.py34.py35.py36.py37.py38.py39.py310.py311.py312.py313.py314-none-macosx_11_0_arm64.whl", hash = "sha256:23936202a107039b5372f0b88ae1d11080746aa1c78910a45d4a0c4cf408cfaa", size = 102180, upload-time = "2026-01-28T05:57:57.787Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/b9/b04c3aa0aad2870cfe799f32f8b59789c98e1816bbce9e83f4823c5b840b/glfw-2.10.0-py2.py27.py3.py30.py31.py32.py33.py34.py35.py36.py37.py38.py39.py310.py311.py312.py313.py314-none-win32.whl", hash = "sha256:fca724a21a372731edb290841edd28a9fb1ee490f833392752844ac807c0086a", size = 552682, upload-time = "2026-01-28T05:58:05.649Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/e1/6d6816b296a529ac9b897ad228b1e084eb1f92319e96371880eebdc874a6/glfw-2.10.0-py2.py27.py3.py30.py31.py32.py33.py34.py35.py36.py37.py38.py39.py310.py311.py312.py313.py314-none-win_amd64.whl", hash = "sha256:823c0bd7770977d4b10e0ed0aef2f3682276b7c88b8b65cfc540afce5951392f", size = 559464, upload-time = "2026-01-28T05:58:07.261Z" },
 ]
 
 [[package]]
@@ -1883,6 +1887,7 @@ dependencies = [
     { name = "pygfx" },
     { name = "pyqt6" },
     { name = "pyqt6-sip" },
+    { name = "pyqtgraph" },
     { name = "qtpy" },
     { name = "rendercanvas" },
     { name = "scikit-image" },
@@ -1944,6 +1949,9 @@ docs = [
     { name = "sphinxcontrib-bibtex" },
     { name = "sphinxcontrib-images" },
     { name = "sphinxcontrib-video" },
+]
+isoview = [
+    { name = "pyklb" },
 ]
 napari = [
     { name = "napari" },
@@ -2027,8 +2035,10 @@ requires-dist = [
     { name = "pandas" },
     { name = "pygfx", specifier = ">=0.15.2" },
     { name = "pygfx", marker = "extra == 'docs'", specifier = ">=0.14.0" },
+    { name = "pyklb", marker = "extra == 'isoview'" },
     { name = "pyqt6", specifier = ">=6.7" },
     { name = "pyqt6-sip" },
+    { name = "pyqtgraph" },
     { name = "qtpy" },
     { name = "rastermap", marker = "extra == 'rastermap'" },
     { name = "rendercanvas", specifier = ">=2.4.2,<2.5" },
@@ -2056,7 +2066,7 @@ requires-dist = [
     { name = "wgpu", specifier = ">=0.28.1,<0.29" },
     { name = "zarr", specifier = ">=3.1.3" },
 ]
-provides-extras = ["suite2p", "suite3d", "rastermap", "napari", "torch", "processing", "docs", "all"]
+provides-extras = ["suite2p", "suite3d", "rastermap", "napari", "isoview", "torch", "processing", "docs", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3191,6 +3201,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b0/77/a5b8c569bf593b0140bde72ea885a803b82086995367bf2037de0159d924/pygments-2.19.2.tar.gz", hash = "sha256:636cb2477cec7f8952536970bc533bc43743542f70392ae026374600add5b887", size = 4968631, upload-time = "2025-06-21T13:39:12.283Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/21/705964c7812476f378728bdf590ca4b771ec72385c533964653c68e86bdc/pygments-2.19.2-py3-none-any.whl", hash = "sha256:86540386c03d588bb81d44bc3928634ff26449851e99741617ecb9037ee5ec0b", size = 1225217, upload-time = "2025-06-21T13:39:07.939Z" },
+]
+
+[[package]]
+name = "pyklb"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/17/07/db052e6af602f26ba5029817cc781db79ecad414f586c6f3bfd32ce876bf/pyklb-0.3.0.tar.gz", hash = "sha256:7a2cc6fd80a24b45aa7f6559018e05ddda18e11f8505b7f8a232d9b5044c0131", size = 6158706, upload-time = "2025-10-31T20:03:18.712Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f5/aa/131f6928246741159d2ea8b407d9045e5d2be8ab89e67714b9f83edc6249/pyklb-0.3.0-cp312-cp312-win_amd64.whl", hash = "sha256:1418fbbb786016efc6e580307543f830c7cdf7a3990d1cd69a227da11e36cc5f", size = 133584, upload-time = "2025-10-31T20:02:59.615Z" },
 ]
 
 [[package]]

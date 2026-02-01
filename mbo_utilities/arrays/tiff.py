@@ -965,7 +965,20 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         else:
             self._metadata = get_metadata(self.filenames)
 
-        self.num_channels = get_param(self._metadata, "nplanes", default=1)
+        # num_channels = size of 2nd dimension (interleaved pages per frame)
+        # for LBM: beamlets (which are z-planes)
+        # for single-plane with 2 PMTs: color channels
+        # this is used for shape calculation and data indexing
+        self.num_channels = self._metadata.get("nchannels") or get_param(self._metadata, "nplanes", default=1)
+        # actual z-planes (1 for single-plane, beamlet count for LBM, slice count for piezo)
+        # check both num_planes and num_zplanes keys
+        self._num_zplanes = (
+            self._metadata.get("num_planes")
+            or self._metadata.get("num_zplanes")
+            or self.num_channels
+        )
+        # actual color channels (PMT/detector channels, typically 1 or 2)
+        self._num_color_channels = self._metadata.get("num_color_channels", 1)
         self.num_frames = get_param(self._metadata, "nframes")
         self._source_dtype = get_param(self._metadata, "dtype", default="int16")
         self._target_dtype = None
@@ -1301,7 +1314,13 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
 
     @property
     def num_planes(self):
-        return self.num_channels
+        """Number of z-planes (actual spatial planes, not color channels)."""
+        return self._num_zplanes
+
+    @property
+    def num_color_channels(self):
+        """Number of color/detector channels (PMT channels)."""
+        return self._num_color_channels
 
     @property
     def shape(self):

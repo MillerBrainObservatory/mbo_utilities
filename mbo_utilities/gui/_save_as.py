@@ -737,17 +737,22 @@ def _draw_selection_section(parent: Any):
     data = None
     max_frames = 1000
     num_planes = 1
+    num_channels = 1
     try:
         data = parent.image_widget.data[0]
         max_frames = data.shape[0]
+        # get actual z-planes
         if hasattr(data, "num_planes"):
             num_planes = data.num_planes
-        elif hasattr(data, "num_channels"):
-            num_planes = data.num_channels
-        elif len(data.shape) == 4:
-            num_planes = data.shape[1]
         else:
             num_planes = 1
+        # get color channels (PMT/detector channels)
+        if hasattr(data, "num_color_channels"):
+            num_channels = data.num_color_channels
+        elif hasattr(data, "_num_color_channels"):
+            num_channels = data._num_color_channels
+        else:
+            num_channels = 1
     except Exception as e:
         hello_imgui.log(hello_imgui.LogLevel.error, f"Could not read data dimensions: {e}")
 
@@ -771,6 +776,10 @@ def _draw_selection_section(parent: Any):
         parent._saveas_z_stop = num_planes
         parent._saveas_z_step = 1
         parent._saveas_last_num_planes = num_planes
+        parent._saveas_c_start = 1
+        parent._saveas_c_stop = num_channels
+        parent._saveas_c_step = 1
+        parent._saveas_last_num_channels = num_channels
 
     # initialize timepoint selection state (new single text input)
     if not hasattr(parent, "_saveas_tp_selection"):
@@ -803,8 +812,23 @@ def _draw_selection_section(parent: Any):
         parent._saveas_z_stop = num_planes
         parent._saveas_z_step = 1
 
+    # initialize channel selection state
+    if not hasattr(parent, "_saveas_c_start"):
+        parent._saveas_c_start = 1
+    if not hasattr(parent, "_saveas_c_stop"):
+        parent._saveas_c_stop = num_channels
+    if not hasattr(parent, "_saveas_c_step"):
+        parent._saveas_c_step = 1
+    if not hasattr(parent, "_saveas_last_num_channels"):
+        parent._saveas_last_num_channels = num_channels
+    elif parent._saveas_last_num_channels != num_channels:
+        parent._saveas_last_num_channels = num_channels
+        parent._saveas_c_start = 1
+        parent._saveas_c_stop = num_channels
+        parent._saveas_c_step = 1
+
     # draw selection table using shared component (includes suffix row)
-    tp_parsed, z_start, z_stop, z_step = draw_selection_table(
+    tp_parsed, z_start, z_stop, z_step, c_start, c_stop, c_step = draw_selection_table(
         parent,
         max_frames,
         num_planes,
@@ -812,6 +836,8 @@ def _draw_selection_section(parent: Any):
         z_attr="_saveas_z",
         id_suffix="_saveas",
         suffix_attr="_saveas_output_suffix",
+        num_channels=num_channels,
+        c_attr="_saveas_c",
     )
 
     # update legacy _selected_planes for compatibility
@@ -820,6 +846,13 @@ def _draw_selection_section(parent: Any):
         parent._selected_planes = set(p - 1 for p in selected_planes)
     else:
         parent._selected_planes = {0}
+
+    # track selected channels
+    if num_channels > 1:
+        selected_channels = list(range(c_start, c_stop + 1, c_step))
+        parent._selected_channels = set(c - 1 for c in selected_channels)
+    else:
+        parent._selected_channels = {0}
 
     # parse selection if not already done (initial load)
     if parent._saveas_tp_parsed is None and not parent._saveas_tp_error:
@@ -893,6 +926,7 @@ def _draw_selection_section(parent: Any):
 
     # calculate output info
     n_planes_out = len(range(z_start, z_stop + 1, z_step)) if num_planes > 1 else 1
+    n_channels_out = len(range(c_start, c_stop + 1, c_step)) if num_channels > 1 else 1
 
     # get image dimensions and dtype for size estimate
     Ly, Lx = 512, 512
@@ -913,7 +947,11 @@ def _draw_selection_section(parent: Any):
             pass  # keep defaults
 
     # estimate file size (raw data size, compression varies)
-    raw_bytes = n_frames * n_planes_out * Ly * Lx * dtype_size
+    # for multi-channel data, n_channels_out replaces n_planes_out in size calc
+    if num_channels > 1:
+        raw_bytes = n_frames * n_channels_out * Ly * Lx * dtype_size
+    else:
+        raw_bytes = n_frames * n_planes_out * Ly * Lx * dtype_size
     if raw_bytes >= 1e9:
         size_str = f"~{raw_bytes / 1e9:.1f} GB"
     elif raw_bytes >= 1e6:
@@ -925,6 +963,9 @@ def _draw_selection_section(parent: Any):
     if num_planes > 1:
         shape_str = f"({n_frames}, {n_planes_out}, {Ly}, {Lx})"
         dims_str = "TZYX"
+    elif num_channels > 1:
+        shape_str = f"({n_frames}, {n_channels_out}, {Ly}, {Lx})"
+        dims_str = "TCYX"
     else:
         shape_str = f"({n_frames}, {Ly}, {Lx})"
         dims_str = "TYX"
@@ -974,6 +1015,9 @@ def _draw_save_button(parent: Any):
     no_planes = parent._selected_planes is not None and len(parent._selected_planes) == 0
     no_valid_tp = parent._saveas_tp_error or parent._saveas_tp_parsed is None
 
+    # get num_channels from parent state (set in _draw_selection_section)
+    num_channels = getattr(parent, "_saveas_last_num_channels", 1)
+
     if no_planes:
         imgui.begin_disabled()
         imgui.button("Save", imgui.ImVec2(100, 0))
@@ -998,6 +1042,7 @@ def _draw_save_button(parent: Any):
             parent._saveas_outdir = str(last_dir)
         try:
             save_planes = [p + 1 for p in parent._selected_planes]
+            save_channels = [c + 1 for c in getattr(parent, "_selected_channels", {0})]
 
             # Validate that at least one plane is selected
             if not save_planes:
@@ -1063,6 +1108,7 @@ def _draw_save_button(parent: Any):
                     "path": parent.fpath,
                     "outpath": parent._saveas_outdir,
                     "planes": save_planes,
+                    "channels": save_channels if len(save_channels) < num_channels else None,
                     "frames": frames,
                     "roi": rois,
                     "roi_mode": roi_mode,
@@ -1103,7 +1149,8 @@ def _draw_save_button(parent: Any):
                 else:
                     frames_msg = "all frames"
                 roi_msg = f"ROIs {rois}" if rois else roi_mode.description
-                parent.logger.info(f"Saving planes {save_planes} ({frames_msg}), {roi_msg}")
+                channels_msg = f", channels {save_channels}" if len(save_channels) < num_channels else ""
+                parent.logger.info(f"Saving planes {save_planes}{channels_msg} ({frames_msg}), {roi_msg}")
                 parent.logger.info(
                     f"Saving to {parent._saveas_outdir} as {parent._ext}"
                 )
@@ -1125,6 +1172,7 @@ def _draw_save_button(parent: Any):
                         "output_path": str(parent._saveas_outdir),
                         "ext": parent._ext,
                         "planes": save_planes,
+                        "channels": save_channels if len(save_channels) < num_channels else None,
                         "frames": frames,
                         "rois": rois,
                         "fix_phase": parent._saveas_fix_phase,

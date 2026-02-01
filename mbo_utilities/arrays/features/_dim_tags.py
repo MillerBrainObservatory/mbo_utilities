@@ -45,6 +45,7 @@ DIM_ALIASES: dict[str, str] = {
     "channels": "C",
     "color": "C",
     "colors": "C",
+    "ch": "C",
     "c": "C",
     "view": "V",
     "views": "V",
@@ -61,6 +62,7 @@ DIM_ALIASES: dict[str, str] = {
     "b": "B",
     "camera": "A",
     "cameras": "A",
+    "cm": "A",
     "a": "A",
     "session": "S",
     "sessions": "S",
@@ -256,6 +258,7 @@ class OutputFilename:
         arr,
         planes: int | list | Sequence[int] | None = None,
         frames: int | list | Sequence[int] | None = None,
+        channels: int | list | Sequence[int] | None = None,
         suffix: str = "stack",
     ) -> "OutputFilename":
         """create from array and optional selections.
@@ -268,6 +271,8 @@ class OutputFilename:
             z-plane selection (1-based indices)
         frames : int | list | None
             timepoint selection (1-based indices)
+        channels : int | list | None
+            channel selection (1-based indices)
         suffix : str
             filename suffix (default "stack")
 
@@ -301,6 +306,8 @@ class OutputFilename:
                 selection = [planes] if isinstance(planes, int) else planes
             elif dim_key == "T" and frames is not None:
                 selection = [frames] if isinstance(frames, int) else frames
+            elif dim_key == "C" and channels is not None:
+                selection = [channels] if isinstance(channels, int) else channels
 
             tag = DimensionTag.from_dim_size(definition, dim_size, selection)
             tags.append(tag)

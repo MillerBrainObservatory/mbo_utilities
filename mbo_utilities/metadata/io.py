@@ -371,12 +371,14 @@ def get_metadata_single(file: Path):
         else:
             num_rois = len(roi_group)
 
-        # Handle single channel case where channelSave is int instead of list
+        # nchannels = interleaved channels in TIFF (len(channelSave)) - used for shape/indexing
+        # num_planes and num_color_channels are computed by clean_scanimage_metadata after
+        # it transforms the flat si keys to nested structure
         channel_save = si.get("SI.hChannels.channelSave")
         if channel_save is None or isinstance(channel_save, (int, float)):
-            num_planes = 1
+            nchannels = 1
         else:
-            num_planes = len(channel_save)
+            nchannels = len(channel_save)
 
         zoom_factor = si.get("SI.hRoiManager.scanZoomFactor")
         uniform_sampling = si.get("SI.hScan2D.uniformSampling", "NA")
@@ -419,7 +421,7 @@ def get_metadata_single(file: Path):
         roi_width, roi_height = num_pixel_xy[0], num_pixel_xy[1]
 
         metadata = {
-            "num_planes": num_planes,
+            "nchannels": nchannels,  # interleaved channels in TIFF (for shape calculation)
             "num_rois": num_rois,
             "roi": (roi_width, roi_height),
             "fov": (num_rois * roi_width, roi_height),
@@ -487,11 +489,13 @@ def get_metadata_batch(file_paths: list | tuple):
 
     # Get metadata from first file only
     metadata = get_metadata_single(file_paths[0])
-    n_planes = metadata.get("num_planes", 1)
+    # nchannels = interleaved pages per frame (for LBM: beamlets, for single-plane: PMT channels)
+    # this is what we divide by to get frame count, not num_planes (spatial z-planes)
+    nchannels = metadata.get("nchannels", 1)
 
     # Count frames for all files
     frames_per_file = [
-        query_tiff_pages(fp) // n_planes
+        query_tiff_pages(fp) // nchannels
         for fp in tqdm(file_paths, desc="Counting frames")
     ]
 
@@ -725,9 +729,11 @@ def clean_scanimage_metadata(meta: dict) -> dict:
         result["piezo_stack"] = stack_type == "piezo"
         result["num_color_channels"] = get_num_color_channels(result)
 
-        # set num_zplanes from stack detection if not already present
+        # set num_planes from stack detection if not already present
         if "num_zplanes" not in result and "num_planes" not in result:
-            result["num_zplanes"] = get_num_zplanes(result)
+            num_z = get_num_zplanes(result)
+            result["num_zplanes"] = num_z
+            result["num_planes"] = num_z  # alias for ScanImageArray
 
         # add dz if available from ScanImage (but NOT for LBM - user must supply)
         if stack_type != "lbm":

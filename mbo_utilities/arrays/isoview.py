@@ -20,14 +20,68 @@ _ISOVIEW_INFO = PipelineInfo(
         "**/data_TM??????_SPM??.zarr",
         "**/SPM??_TM??????_CM??_CHN??.zarr",
         "**/TM??????/",
+        "**/SPC??_TM?????_ANG???_CM?_CHN??_PH?.stack",
     ],
     output_patterns=[],
-    input_extensions=["zarr"],
+    input_extensions=["zarr", "stack"],
     output_extensions=[],
-    marker_files=[],
+    marker_files=["ch00_spec00.xml", "ch0.xml"],
     category="reader",
 )
 register_pipeline(_ISOVIEW_INFO)
+
+
+def _parse_isoview_xml(xml_path: Path) -> dict:
+    """Parse isoview XML metadata file for dimensions and camera info."""
+    import xml.etree.ElementTree as ET
+
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+
+    metadata = {}
+
+    # find info elements
+    for info in root.iter("info"):
+        attribs = info.attrib
+
+        if "dimensions" in attribs:
+            # format: "1848x768x38" or "1848x768x38, 1848x768x38" for multi-camera
+            dims_str = attribs["dimensions"]
+            camera_dims = []
+            for cam_dims in dims_str.split(","):
+                parts = [int(x) for x in cam_dims.strip().split("x")]
+                if len(parts) == 3:
+                    # xml is (height, width, depth) -> we want (height, width, depth)
+                    camera_dims.append(tuple(parts))
+            metadata["dimensions"] = camera_dims
+
+        if "z_step" in attribs:
+            metadata["z_step"] = float(attribs["z_step"])
+
+        if "exposure_time" in attribs:
+            metadata["exposure_time"] = float(attribs["exposure_time"])
+
+        if "detection_objective" in attribs:
+            metadata["detection_objective"] = attribs["detection_objective"]
+
+        if "specimen_name" in attribs:
+            metadata["specimen_name"] = attribs["specimen_name"]
+
+        if "timestamp" in attribs:
+            metadata["timestamp"] = attribs["timestamp"]
+
+    return metadata
+
+
+def _find_isoview_xml(base_path: Path) -> Path | None:
+    """Find XML metadata file in isoview raw data directory."""
+    # try common patterns
+    patterns = ["ch00_spec00.xml", "ch0.xml", "ch*.xml", "*.xml"]
+    for pattern in patterns:
+        matches = list(base_path.glob(pattern))
+        if matches:
+            return matches[0]
+    return None
 
 
 class IsoviewArray:
@@ -37,7 +91,8 @@ class IsoviewArray:
     Conforms to LazyArrayProtocol for compatibility with mbo_utilities imread/imwrite
     and downstream processing pipelines.
 
-    Supports both structures:
+    Supports three structures:
+    - Raw (input): SPC00_TM00000_ANG000_CM0_CHN01_PH0.stack (binary uint16)
     - Consolidated (new): data_TM000000_SPM00.zarr/camera_0/0/
     - Separate (old): SPM00_TM000000_CM00_CHN01.zarr
 
@@ -50,29 +105,40 @@ class IsoviewArray:
     Parameters
     ----------
     path : str or Path
-        Path to output directory containing TM* folders or single TM folder.
+        Path to directory containing .stack files or TM* folders with .zarr files.
 
     Examples
     --------
-    >>> arr = IsoviewArray("path/to/output")
+    >>> arr = IsoviewArray("path/to/raw_data")  # with .stack files
     >>> arr.shape
-    (10, 543, 4, 2048, 2048)  # (T, Z, Views, Y, X)
+    (61, 38, 4, 1848, 768)  # (t, z, cm, y, x)
+    >>> arr.dims
+    ('t', 'z', 'cm', 'y', 'x')
     >>> arr.views
-    [(0, 0), (1, 0), (2, 1), (3, 1)]
-    >>> frame = arr[0, 100, 0]  # timepoint 0, z=100, view 0
+    [(0, 1), (1, 1), (2, 0), (3, 0)]  # (camera, channel) per view
+    >>> frame = arr[0, 10, 0]  # t=0, z=10, cm=0
     """
 
     def __init__(self, path: str | Path):
-        try:
-            import zarr
-        except ImportError:
-            raise ImportError("zarr>=3.0 required: pip install zarr")
-
         self.base_path = Path(path)
         if not self.base_path.exists():
             raise FileNotFoundError(f"Path does not exist: {self.base_path}")
 
-        # Detect if single TM or multi-TM
+        # check for raw .stack files first
+        stack_files = list(self.base_path.glob("*.stack"))
+        if stack_files:
+            self._structure = "raw"
+            self._discover_raw(self.base_path)
+            self._zarr_cache = {}
+            return
+
+        # otherwise check for zarr-based structures
+        try:
+            import zarr
+        except ImportError:
+            raise ImportError("zarr>=3.0 required for zarr files: pip install zarr")
+
+        # detect if single TM or multi-TM
         if self.base_path.name.startswith("TM"):
             zarr_files_in_path = list(self.base_path.glob("*.zarr"))
             if zarr_files_in_path:
@@ -89,14 +155,95 @@ class IsoviewArray:
             self._single_timepoint = False
 
             if not self.tm_folders:
-                raise ValueError(f"No TM* folders found in {self.base_path}")
+                raise ValueError(f"No TM* folders or .stack files found in {self.base_path}")
 
-        # Detect structure type and discover views
+        # detect structure type and discover views
         first_tm = self.tm_folders[0]
         self._detect_structure(first_tm)
 
-        # Cache for opened zarr arrays: (t_idx, view_idx) -> zarr array
+        # cache for opened zarr arrays: (t_idx, view_idx) -> zarr array
         self._zarr_cache = {}
+
+    def _discover_raw(self, base_path: Path):
+        """Discover raw .stack files and parse metadata from XML.
+
+        Filename pattern: SPC{specimen}_TM{time}_ANG{angle}_CM{camera}_CHN{channel}_PH{phase}.stack
+        """
+        import re
+
+        # find xml for dimensions
+        xml_path = _find_isoview_xml(base_path)
+        if xml_path is None:
+            raise ValueError(f"No XML metadata file found in {base_path}")
+
+        xml_meta = _parse_isoview_xml(xml_path)
+        self._zarr_attrs = xml_meta
+
+        if "dimensions" not in xml_meta or not xml_meta["dimensions"]:
+            raise ValueError(f"No dimensions found in XML: {xml_path}")
+
+        # dimensions from xml: [width, height, depth] = [768, 1848, 38]
+        # width = X = 768, height = Y = 1848
+        xml_width, xml_height, _ = xml_meta["dimensions"][0]
+        self._xml_width = xml_width  # X = 768
+        self._xml_height = xml_height  # Y = 1848
+
+        # parse all .stack files
+        stack_files = sorted(base_path.glob("*.stack"))
+        if not stack_files:
+            raise ValueError(f"No .stack files in {base_path}")
+
+        # pattern: SPC00_TM00000_ANG000_CM0_CHN01_PH0.stack
+        pattern = re.compile(
+            r"SPC(\d+)_TM(\d+)_ANG(\d+)_CM(\d+)_CHN(\d+)_PH(\d+)\.stack"
+        )
+
+        # organize by timepoint and (camera, channel)
+        self._stack_files = {}  # {timepoint: {(camera, channel): Path}}
+        timepoints = set()
+        views = set()
+
+        for sf in stack_files:
+            match = pattern.match(sf.name)
+            if not match:
+                logger.warning(f"Skipping unrecognized file: {sf.name}")
+                continue
+
+            specimen, timepoint, angle, camera, channel, phase = map(int, match.groups())
+            timepoints.add(timepoint)
+            views.add((camera, channel))
+
+            if timepoint not in self._stack_files:
+                self._stack_files[timepoint] = {}
+            self._stack_files[timepoint][(camera, channel)] = sf
+
+        # sort timepoints and views
+        self._timepoints = sorted(timepoints)
+        self._views = sorted(views)
+
+        if not self._views:
+            raise ValueError(f"No valid camera/channel combinations in {base_path}")
+
+        # calculate depth from file size
+        first_file = next(iter(self._stack_files[self._timepoints[0]].values()))
+        file_size = first_file.stat().st_size
+        total_pixels = file_size // 2  # uint16 = 2 bytes
+        depth = total_pixels // (xml_width * xml_height)
+
+        # store shape as (Z, Y, X) where Y=height=1848, X=width=768
+        self._single_shape = (depth, xml_height, xml_width)  # (Z=38, Y=1848, X=768)
+        self._dtype = np.dtype("uint16")
+        self._single_timepoint = len(self._timepoints) == 1
+        self._consolidated_path = None
+
+        # create tm_folders-like list for compatibility
+        self.tm_folders = [base_path] * len(self._timepoints)
+
+        logger.info(
+            f"IsoviewArray: structure=raw, "
+            f"timepoints={len(self._timepoints)}, views={len(self._views)}, "
+            f"shape={self._single_shape}"
+        )
 
     def _detect_structure(self, tm_folder: Path):
         """Detect consolidated vs separate structure and discover views."""
@@ -219,19 +366,52 @@ class IsoviewArray:
         # Store root attrs as metadata
         self._zarr_attrs = dict(z.attrs)
 
-    def _get_zarr(self, t_idx: int, view_idx: int):
-        """Get or open a zarr array for timepoint and view index."""
-        import zarr
+    def _read_stack_file(self, stack_path: Path) -> np.ndarray:
+        """Read raw binary .stack file as numpy array.
 
+        Format: BSQ (band sequential), little-endian uint16
+
+        For XML dims [768, 1848, 38] = [width, height, depth]:
+        - reshape to (Z, Y, X) = (38, 1848, 768)
+        """
+        depth, height, width = self._single_shape  # (Z=38, Y=1848, X=768)
+        volume = np.fromfile(stack_path, dtype="<u2")  # little-endian uint16
+        volume = volume.reshape((depth, height, width))  # (Z, Y, X) = (38, 1848, 768)
+        return volume
+
+    def _get_zarr(self, t_idx: int, view_idx: int):
+        """Get or open array data for timepoint and view index.
+
+        For raw structure: reads .stack file into memory
+        For zarr structures: returns lazy zarr array
+        """
         cache_key = (t_idx, view_idx)
         if cache_key in self._zarr_cache:
             return self._zarr_cache[cache_key]
 
         camera, channel = self._views[view_idx]
+
+        if self._structure == "raw":
+            # get timepoint from sorted list
+            timepoint = self._timepoints[t_idx]
+            if timepoint not in self._stack_files:
+                raise FileNotFoundError(f"No data for timepoint {timepoint}")
+            if (camera, channel) not in self._stack_files[timepoint]:
+                raise FileNotFoundError(
+                    f"No data for camera={camera}, channel={channel} at timepoint {timepoint}"
+                )
+
+            stack_path = self._stack_files[timepoint][(camera, channel)]
+            arr = self._read_stack_file(stack_path)
+            self._zarr_cache[cache_key] = arr
+            return arr
+
+        # zarr-based structures
+        import zarr
         tm_folder = self.tm_folders[t_idx]
 
         if self._structure == "consolidated":
-            # Find consolidated zarr in this TM folder
+            # find consolidated zarr in this TM folder
             zarr_files = []
             for zf in tm_folder.glob("*.zarr"):
                 try:
@@ -280,7 +460,9 @@ class IsoviewArray:
         z, y, x = self._single_shape
         if self._single_timepoint:
             return (z, len(self._views), y, x)
-        return (len(self.tm_folders), z, len(self._views), y, x)
+        # for raw structure, use _timepoints length
+        num_t = len(self._timepoints) if self._structure == "raw" else len(self.tm_folders)
+        return (num_t, z, len(self._views), y, x)
 
     @property
     def dtype(self):
@@ -367,9 +549,10 @@ class IsoviewArray:
             meta["fs"] = float(fps)
 
         # LazyArrayProtocol required fields
-        meta["num_timepoints"] = len(self.tm_folders)
-        meta["nframes"] = len(self.tm_folders)  # suite2p alias
-        meta["num_frames"] = len(self.tm_folders)  # legacy alias
+        num_t = self.num_timepoints
+        meta["num_timepoints"] = num_t
+        meta["nframes"] = num_t  # suite2p alias
+        meta["num_frames"] = num_t  # legacy alias
         meta["Ly"] = self._single_shape[1]
         meta["Lx"] = self._single_shape[2]
 
@@ -439,6 +622,8 @@ class IsoviewArray:
     @property
     def num_timepoints(self) -> int:
         """Number of timepoints."""
+        if self._structure == "raw":
+            return len(self._timepoints)
         return len(self.tm_folders)
 
     def __len__(self) -> int:
@@ -648,8 +833,16 @@ class IsoviewArray:
         Returns
         -------
         list[Path]
-            List of TM folder paths.
+            For raw: list of .stack file paths
+            For zarr: list of TM folder paths
         """
+        if self._structure == "raw":
+            # return all stack files
+            files = []
+            for t in self._timepoints:
+                for (cam, chn), path in self._stack_files[t].items():
+                    files.append(path)
+            return files
         return list(self.tm_folders)
 
     @property
@@ -660,13 +853,12 @@ class IsoviewArray:
         Returns
         -------
         tuple[str, ...]
-            ('Z', 'V', 'Y', 'X') for single timepoint
-            ('T', 'Z', 'V', 'Y', 'X') for multi-timepoint
-            V = Views (camera/channel combinations)
+            ('z', 'cm', 'y', 'x') for single timepoint
+            ('t', 'z', 'cm', 'y', 'x') for multi-timepoint
         """
         if self._single_timepoint:
-            return ("Z", "V", "Y", "X")
-        return ("T", "Z", "V", "Y", "X")
+            return ("z", "cm", "Y", "X")
+        return ("t", "z", "cm", "Y", "X")
 
     @property
     def num_planes(self) -> int:

@@ -385,6 +385,8 @@ class ArraySlicing:
         n_planes = 1
         if "Z" in self.selections:
             n_planes = self.selections["Z"].count
+        elif "C" in self.selections:
+            n_planes = self.selections["C"].count
         return n_planes * Ly * Lx * self.dtype.itemsize
 
     def calculate_chunk_size(self, target_mb: float = 50.0) -> int:
@@ -494,7 +496,7 @@ def read_chunk(
     read a chunk from a lazy array.
 
     reads frame-by-frame to avoid np.ix_ which lazy arrays don't support.
-    handles TZYX, TYX, ZYX dimension orderings.
+    handles TZYX, TCYX, TYX, ZYX, and 5D arrays with views (TZVYX) dimension orderings.
 
     parameters
     ----------
@@ -515,9 +517,37 @@ def read_chunk(
 
     ndim = len(dims)
 
-    # handle ZYX (no T dimension)
+    # detect views dimension (CM, V, C when not channel, etc.)
+    # views are non-spatial dims that aren't T or Z
+    views_dim_idx = None
+    views_key = None
+    for i, d in enumerate(dims):
+        if d not in ("T", "Z", "Y", "X"):
+            views_dim_idx = i
+            views_key = d
+            break
+
+    # get view selection (default to first view if not specified)
+    v_indices = chunk_info.selections.get(views_key) if views_key else None
+    if v_indices is None and views_key:
+        v_indices = [0]  # default to first view
+
+    # handle ZYX or ZVYX (no T dimension)
     if "T" not in dims:
-        if z_indices is not None:
+        if ndim == 4 and views_dim_idx is not None:
+            # ZVYX - select first view, then handle Z
+            v_idx = v_indices[0] if v_indices else 0
+            if z_indices is not None:
+                frames = []
+                for z_idx in z_indices:
+                    frame = arr[z_idx, v_idx, :, :]
+                    frames.append(np.asarray(frame))
+                result = np.stack(frames, axis=0)
+                return result[np.newaxis, :, :, :]
+            else:
+                result = np.asarray(arr[:, v_idx, :, :])
+                return result[np.newaxis, :, :, :]
+        elif z_indices is not None:
             # ZYX with z selection
             if ndim == 3 and dims[0] == "Z":
                 frames = []
@@ -536,24 +566,42 @@ def read_chunk(
             result = np.asarray(arr[:, :, :])
             return result[np.newaxis, :, :, :]
 
-    # handle TYX and TZYX
+    # handle TYX, TZYX, TCYX, and TZVYX
     if t_indices is None:
         t_indices = [0]
 
     frames = []
     for t_idx in t_indices:
-        if ndim == 4:
-            # TZYX
+        if ndim == 5 and views_dim_idx is not None:
+            # TZVYX - 5D with views dimension
+            v_idx = v_indices[0] if v_indices else 0
             if z_indices is not None:
-                # select specific z planes
+                z_frames = []
+                for z_idx in z_indices:
+                    z_frame = arr[t_idx, z_idx, v_idx, :, :]
+                    z_frames.append(np.asarray(z_frame))
+                frame = np.stack(z_frames, axis=0)  # (Z_sel, Y, X)
+            else:
+                frame = np.asarray(arr[t_idx, :, v_idx, :, :])  # (Z, Y, X)
+        elif ndim == 4:
+            # TZYX or TCYX (4D with Z or channel dimension)
+            if z_indices is not None:
+                # select specific z planes (TZYX)
                 z_frames = []
                 for z_idx in z_indices:
                     z_frame = arr[t_idx, z_idx, :, :]
                     z_frames.append(np.asarray(z_frame))
                 frame = np.stack(z_frames, axis=0)  # (Z_sel, Y, X)
+            elif views_key is not None and v_indices is not None:
+                # TCYX - select specific channels (views_key is 'C')
+                c_frames = []
+                for c_idx in v_indices:
+                    c_frame = arr[t_idx, c_idx, :, :]
+                    c_frames.append(np.asarray(c_frame))
+                frame = np.stack(c_frames, axis=0)  # (C_sel, Y, X)
             else:
-                # all z planes
-                frame = np.asarray(arr[t_idx, :, :, :])  # (Z, Y, X)
+                # all z planes or channels
+                frame = np.asarray(arr[t_idx, :, :, :])  # (Z, Y, X) or (C, Y, X)
         elif ndim == 3:
             if dims[0] == "T":
                 # TYX
