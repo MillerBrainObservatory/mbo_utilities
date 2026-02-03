@@ -562,6 +562,7 @@ class PreviewDataWidget(EdgeWindow):
     @proj.setter
     def proj(self, value: str):
         if value != self._proj:
+            self.logger.info(f"Projection changed: {self._proj} -> {value}")
             self._proj = value
             self._update_window_funcs()
 
@@ -592,11 +593,13 @@ class PreviewDataWidget(EdgeWindow):
 
     @window_size.setter
     def window_size(self, value: int):
+        if value == self._window_size:
+            return
         self._window_size = value
         self.logger.info(f"Window size set to {value}.")
         if not self.processors:
             return
-        n_slider_dims = self.processors[0].n_slider_dims if self.processors else 1
+        n_slider_dims = self.processors[0].n_slider_dims
         per_processor_sizes = (self._window_size,) + (None,) * (n_slider_dims - 1)
         self._set_processor_attr("window_sizes", per_processor_sizes)
         if self.image_widget:
@@ -632,9 +635,9 @@ class PreviewDataWidget(EdgeWindow):
         if not self.processors:
             return
 
-        original_states = []
+        # save histogram state and disable recomputation during update
+        saved = [(p._compute_histogram, p._histogram) for p in self.processors]
         for proc in self.processors:
-            original_states.append(proc._compute_histogram)
             proc._compute_histogram = False
 
         try:
@@ -655,11 +658,14 @@ class PreviewDataWidget(EdgeWindow):
         except Exception as e:
             self.logger.exception(f"Error setting {attr}: {e}")
         finally:
-            for proc, orig in zip(self.processors, original_states, strict=False):
-                proc._compute_histogram = orig
-
-        with contextlib.suppress(Exception):
-            self.image_widget.reset_vmin_vmax_frame()
+            # restore histogram state
+            for proc, (orig_compute, orig_hist) in zip(self.processors, saved):
+                proc._compute_histogram = orig_compute
+                proc._histogram = orig_hist
+            # fix dock visibility (fastplotlib sets to 0 when histogram is None)
+            for subplot in self.image_widget.figure:
+                if subplot.docks["right"].size < 1:
+                    subplot.docks["right"].size = 80
 
     def _refresh_widgets(self):
         """Refresh widgets based on current data capabilities."""
@@ -690,7 +696,7 @@ class PreviewDataWidget(EdgeWindow):
         if not any_mean_sub and sigma is None:
             def identity(frame):
                 return frame
-            self.image_widget.spatial_func = identity
+            self._set_processor_attr("spatial_func", identity)
             return
 
         spatial_funcs = []
@@ -701,16 +707,23 @@ class PreviewDataWidget(EdgeWindow):
 
             spatial_funcs.append(self._make_spatial_func(mean_img, sigma))
 
-        self.image_widget.spatial_func = spatial_funcs
+        self._set_processor_attr("spatial_func", spatial_funcs)
 
     def _make_spatial_func(self, mean_img: np.ndarray | None, sigma: float | None):
         """Create a spatial function that applies mean subtraction and/or gaussian blur."""
+        # precompute kernel size for opencv (6*sigma, rounded to odd)
+        ksize = (int(sigma * 6) | 1) if sigma else 0
+
         def spatial_func(frame):
             result = frame
             if mean_img is not None:
                 result = result.astype(np.float32) - mean_img
             if sigma is not None and sigma > 0:
-                result = gaussian_filter(result, sigma=sigma)
+                try:
+                    import cv2
+                    result = cv2.GaussianBlur(result, (ksize, ksize), sigma)
+                except ImportError:
+                    result = gaussian_filter(result, sigma=sigma)
             return result
         return spatial_func
 
@@ -731,7 +744,7 @@ class PreviewDataWidget(EdgeWindow):
         proj_funcs = {"mean": mean_wrapper, "max": max_wrapper, "std": std_wrapper}
         proj_func = proj_funcs.get(self._proj, mean_wrapper)
 
-        n_slider_dims = self.processors[0].n_slider_dims if self.processors else 1
+        n_slider_dims = self.processors[0].n_slider_dims
 
         if n_slider_dims == 1:
             window_funcs = (proj_func,)
