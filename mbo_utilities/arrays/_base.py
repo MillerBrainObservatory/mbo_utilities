@@ -318,13 +318,11 @@ def _imwrite_base(
         _logger = log.get("writers")
         _logger.info(f"_imwrite_base: apply_shift={md.get('apply_shift')}, s3d-job={md.get('s3d-job')}")
 
-    # merge metadata overrides if present
     if "metadata_overrides" in kwargs:
         overrides = kwargs.pop("metadata_overrides", None)
         if overrides and isinstance(overrides, dict):
             md.update(overrides)
 
-    # sanitize metadata for serialization
     md = _sanitize_metadata(md)
 
     # normalize plane selection to 1-based list

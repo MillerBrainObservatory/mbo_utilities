@@ -10,8 +10,6 @@ if TYPE_CHECKING:
 
 ARRAY_LIKE_ATTRS = ["shape", "ndim", "__getitem__"]
 
-# re-export from features module for backwards compatibility
-
 
 @runtime_checkable
 class ArrayProtocol(Protocol):

@@ -1,8 +1,4 @@
-"""
-NWB (Neurodata Without Borders) array reader.
-
-This module provides NWBArray for reading two-photon imaging data from NWB files.
-"""
+"""nwb array reader."""
 
 from __future__ import annotations
 
@@ -14,10 +10,9 @@ from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
 logger = log.get("arrays.nwb")
 
-# register nwb pipeline info
 _NWB_INFO = PipelineInfo(
     name="nwb",
-    description="NWB (Neurodata Without Borders) files",
+    description="nwb files",
     input_patterns=[
         "**/*.nwb",
     ],
@@ -33,32 +28,7 @@ register_pipeline(_NWB_INFO)
 
 
 class NWBArray:
-    """
-    Lazy array reader for NWB (Neurodata Without Borders) files.
-
-    Reads TwoPhotonSeries acquisition data from NWB files.
-
-    Parameters
-    ----------
-    path : Path or str
-        Path to NWB file.
-
-    Attributes
-    ----------
-    shape : tuple[int, ...]
-        Array shape.
-    dtype : np.dtype
-        Data type.
-    ndim : int
-        Number of dimensions.
-
-    Examples
-    --------
-    >>> arr = NWBArray("experiment.nwb")
-    >>> arr.shape
-    (10000, 512, 512)
-    >>> frame = arr[0]  # Get first frame
-    """
+    """lazy array reader for nwb files."""
 
     def __init__(self, path: Path | str):
         try:
@@ -69,7 +39,7 @@ class NWBArray:
             )
         self.path = Path(path)
         if not self.path.exists():
-            raise FileNotFoundError(f"No NWB file found at {self.path}")
+            raise FileNotFoundError(f"file not found: {self.path}")
 
         self.filenames = [self.path]
 
@@ -116,7 +86,7 @@ class NWBArray:
         planes=None,
         **kwargs,
     ):
-        """Write NWBArray to disk in various formats."""
+        """write array to disk."""
         return _imwrite_base(
             self,
             outpath,

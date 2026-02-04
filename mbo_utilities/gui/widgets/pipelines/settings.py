@@ -267,7 +267,7 @@ class Suite2pSettings:
 
     # output settings
     preclassify: float = 0.0  # apply classifier before extraction (0.0 = keep all)
-    save_nwb: bool = False  # Save output as NWB file
+    save_nwb: bool = False
     save_mat: bool = False  # Save results in Fall.mat
     combined: bool = True  # Combine results across planes
     aspect: float = 1.0  # Ratio of um/pixels X to Y (for GUI only)
@@ -1355,7 +1355,6 @@ def _draw_section_suite2p_content(self):
         )
         set_tooltip("Probability threshold to apply classifier before extraction.")
         _, self.s2p.save_nwb = imgui.checkbox("Save NWB", self.s2p.save_nwb)
-        set_tooltip("Export processed data to NWB format.")
         _, self.s2p.save_mat = imgui.checkbox("Save MATLAB File", self.s2p.save_mat)
         set_tooltip("Export results to Fall.mat for MATLAB analysis.")
         _, self.s2p.combined = imgui.checkbox(
