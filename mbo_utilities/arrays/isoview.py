@@ -151,17 +151,6 @@ class IsoviewArray:
     Conforms to LazyArrayProtocol for compatibility with mbo_utilities imread/imwrite
     and downstream processing pipelines.
 
-    Supports three structures:
-    - Raw (input): SPC00_TM00000_ANG000_CM0_CHN01_PH0.stack (binary uint16)
-    - Consolidated (new): data_TM000000_SPM00.zarr/camera_0/0/
-    - Separate (old): SPM00_TM000000_CM00_CHN01.zarr
-
-    Shape:
-    - Multi-timepoint: (T, Z, Views, Y, X) - 5D
-    - Single timepoint: (Z, Views, Y, X) - 4D
-
-    Views are (camera, channel) combinations that exist in the data.
-
     Parameters
     ----------
     path : str or Path
@@ -295,12 +284,13 @@ class IsoviewArray:
         self._dtype = np.dtype("uint16")
         self._single_timepoint = len(self._timepoints) == 1
         self._consolidated_path = None
+        self._pipeline_stage = "isoview-raw"
 
         # create tm_folders-like list for compatibility
         self.tm_folders = [base_path] * len(self._timepoints)
 
         logger.info(
-            f"IsoviewArray: structure=raw, "
+            f"IsoviewArray: structure=raw, pipeline_stage={self._pipeline_stage}, "
             f"timepoints={len(self._timepoints)}, views={len(self._views)}, "
             f"shape={self._single_shape}"
         )
@@ -333,44 +323,94 @@ class IsoviewArray:
         )
 
     def _discover_separate(self, tm_folder: Path):
-        """Parse SPM00_TM000000_CM00_CHN01.zarr filenames."""
+        """Parse SPM00_TM000000_CM00_CHN01.zarr filenames.
+
+        Detects pipeline stage from filename patterns:
+        - isoview-pt: SPM00_TM000000_CM00_CHN01.zarr (single camera per file)
+        - isoview-mf: SPM00_TM000000_CM00_CM01_CHN01.zarr (fused cameras)
+        - isoview-mfc: SPM00_TM000000_CHN00.zarr or CHN00_CHN01 (channel-only or fused channels)
+        """
+        import re
         import zarr
 
         zarr_files = sorted(tm_folder.glob("*.zarr"))
         if not zarr_files:
             raise ValueError(f"No .zarr files in {tm_folder}")
 
-        self._views = []  # [(camera, channel), ...]
+        self._views = []  # [(camera, channel), ...] or [(channel,), ...] for mfc
+        self._pipeline_stage = "isoview-pt"  # default
+
+        # patterns for different stages
+        # mf: CM##_CM## (fused cameras)
+        pattern_mf = re.compile(r"CM(\d+)_CM(\d+)_CHN(\d+)")
+        # pt: single CM##_CHN##
+        pattern_pt = re.compile(r"_CM(\d+)_CHN(\d+)(?:\.zarr)?$")
+        # mfc: CHN##_CHN## (fused channels) or just CHN## (no cameras)
+        pattern_mfc_fused = re.compile(r"CHN(\d+)_CHN(\d+)")
+        pattern_mfc_single = re.compile(r"_CHN(\d+)(?:\.zarr)?$")
+
+        has_fused_cameras = False
+        has_fused_channels = False
+        has_single_cameras = False
 
         for zf in zarr_files:
             name = zf.stem
 
-            # Skip mask files
+            # skip mask files
             if any(x in name for x in ["Mask", "mask", "coords"]):
                 continue
 
-            parts = name.split("_")
-            cm_idx = chn_idx = None
+            # check for fused cameras (mf stage)
+            match_mf = pattern_mf.search(name)
+            if match_mf:
+                has_fused_cameras = True
+                cam0, cam1, chn = int(match_mf.group(1)), int(match_mf.group(2)), int(match_mf.group(3))
+                view = ((cam0, cam1), chn)
+                if view not in self._views:
+                    self._views.append(view)
+                continue
 
-            for part in parts:
-                if part.startswith("CM"):
-                    # Extract only digits after CM
-                    cm_str = part[2:]
-                    if cm_str.isdigit():
-                        cm_idx = int(cm_str)
-                elif part.startswith("CHN"):
-                    # Extract only digits after CHN
-                    chn_str = part[3:]
-                    if chn_str.isdigit():
-                        chn_idx = int(chn_str)
+            # check for fused channels (mfc stage)
+            match_mfc = pattern_mfc_fused.search(name)
+            if match_mfc:
+                has_fused_channels = True
+                chn0, chn1 = int(match_mfc.group(1)), int(match_mfc.group(2))
+                view = (chn0, chn1)
+                if view not in self._views:
+                    self._views.append(view)
+                continue
 
-            if cm_idx is not None and chn_idx is not None:
-                self._views.append((cm_idx, chn_idx))
+            # check for single camera (pt stage)
+            match_pt = pattern_pt.search(name)
+            if match_pt:
+                has_single_cameras = True
+                cm_idx, chn_idx = int(match_pt.group(1)), int(match_pt.group(2))
+                view = (cm_idx, chn_idx)
+                if view not in self._views:
+                    self._views.append(view)
+                continue
+
+            # check for channel-only (mfc stage, single channel output)
+            match_chn = pattern_mfc_single.search(name)
+            if match_chn and "CM" not in name:
+                has_fused_channels = True
+                chn = int(match_chn.group(1))
+                view = (chn,)
+                if view not in self._views:
+                    self._views.append(view)
+
+        # determine pipeline stage
+        if has_fused_channels:
+            self._pipeline_stage = "isoview-mfc"
+        elif has_fused_cameras:
+            self._pipeline_stage = "isoview-mf"
+        elif has_single_cameras:
+            self._pipeline_stage = "isoview-pt"
 
         if not self._views:
             raise ValueError(f"No valid camera/channel combinations in {tm_folder}")
 
-        # Open first valid (non-mask) file to get shape/dtype/metadata
+        # open first valid (non-mask) file to get shape/dtype/metadata
         first_valid = None
         for zf in zarr_files:
             if not any(x in zf.stem for x in ["Mask", "mask", "coords"]):
@@ -387,6 +427,8 @@ class IsoviewArray:
             else:
                 raise ValueError(f"OME-Zarr group missing '0' array: {zarr_files[0]}")
             self._zarr_attrs = dict(first_z.attrs)
+            # extract pixel spacing from OME-Zarr multiscales
+            self._extract_pixel_spacing_from_zarr(first_z)
         else:
             first_arr = first_z
             self._zarr_attrs = dict(first_arr.attrs) if hasattr(first_arr, "attrs") else {}
@@ -395,14 +437,42 @@ class IsoviewArray:
         self._dtype = first_arr.dtype
         self._consolidated_path = None
 
+    def _extract_pixel_spacing_from_zarr(self, zarr_group):
+        """Extract dx, dy, dz from OME-Zarr multiscales metadata."""
+        multiscales = zarr_group.attrs.get("multiscales", [])
+        if not multiscales:
+            return
+
+        # get first multiscale entry
+        ms = multiscales[0] if isinstance(multiscales, list) else multiscales
+        datasets = ms.get("datasets", [])
+        if not datasets:
+            return
+
+        # get coordinate transformations from first dataset
+        transforms = datasets[0].get("coordinateTransformations", [])
+        for t in transforms:
+            if t.get("type") == "scale":
+                scale = t.get("scale", [])
+                # scale is [z, y, x] for 3D data
+                if len(scale) >= 3:
+                    self._zarr_attrs["dz"] = float(scale[0])
+                    self._zarr_attrs["dy"] = float(scale[1])
+                    self._zarr_attrs["dx"] = float(scale[2])
+                    # also store z_step for compatibility
+                    self._zarr_attrs["z_step"] = float(scale[0])
+                    self._zarr_attrs["pixel_resolution_um"] = float(scale[1])
+                break
+
     def _discover_consolidated(self, tm_folder: Path, consolidated_zarr: Path):
         """Parse camera_N subgroups from consolidated zarr."""
         import zarr
 
         self._consolidated_path = consolidated_zarr
+        self._pipeline_stage = "isoview-pt"  # consolidated is from process_timepoint
         z = zarr.open(consolidated_zarr, mode="r")
 
-        # Find all camera_N groups
+        # find all camera_N groups
         camera_groups = sorted(
             [k for k in z.group_keys() if k.startswith("camera_")],
             key=lambda x: int(x.split("_")[1])
@@ -411,32 +481,41 @@ class IsoviewArray:
         if not camera_groups:
             raise ValueError(f"No camera_N groups in {consolidated_zarr}")
 
-        # For now, assume each camera has one channel (channel 0)
-        # TODO: detect multiple channels per camera from metadata
+        # for now, assume each camera has one channel (channel 0)
         self._views = []
         for cam_group in camera_groups:
             cam_idx = int(cam_group.split("_")[1])
             self._views.append((cam_idx, 0))
 
-        # Get shape/dtype from first camera
-        first_arr = z[f"{camera_groups[0]}/0"]
+        # get shape/dtype from first camera
+        first_cam_group = z[camera_groups[0]]
+        first_arr = first_cam_group["0"]
         self._single_shape = first_arr.shape  # (Z, Y, X)
         self._dtype = first_arr.dtype
 
-        # Store root attrs as metadata
+        # store root attrs as metadata
         self._zarr_attrs = dict(z.attrs)
 
-    def _read_stack_file(self, stack_path: Path) -> np.ndarray:
-        """Read raw binary .stack file as numpy array.
+        # extract pixel spacing from camera group's multiscales
+        self._extract_pixel_spacing_from_zarr(first_cam_group)
+
+    def _read_stack_file(self, stack_path: Path) -> np.memmap:
+        """Memory-map raw binary .stack file for lazy access.
 
         Format: BSQ (band sequential), little-endian uint16
 
         For XML dims [768, 1848, 38] = [width, height, depth]:
         - reshape to (Z, Y, X) = (38, 1848, 768)
+
+        Uses memory mapping for efficient slice access without loading entire file.
         """
         depth, height, width = self._single_shape  # (Z=38, Y=1848, X=768)
-        volume = np.fromfile(stack_path, dtype="<u2")  # little-endian uint16
-        volume = volume.reshape((depth, height, width))  # (Z, Y, X) = (38, 1848, 768)
+        volume = np.memmap(
+            stack_path,
+            dtype="<u2",  # little-endian uint16
+            mode="r",
+            shape=(depth, height, width),  # (Z, Y, X) = (38, 1848, 768)
+        )
         return volume
 
     def _get_zarr(self, t_idx: int, view_idx: int):
@@ -642,15 +721,16 @@ class IsoviewArray:
         # camera_roi, wavelength, illumination_arms, illumination_filter,
         # detection_filter, specimen_name, data_header, timestamp, vps
 
-        # stack type for isoview is always volumetric
-        if "stack_type" not in meta:
-            meta["stack_type"] = "isoview"
+        # stack type based on pipeline stage:
+        # isoview-raw, isoview-pt, isoview-mf, isoview-mfc
+        meta["stack_type"] = getattr(self, "_pipeline_stage", "isoview")
 
         # number of views (cameras x channels)
         meta["num_views"] = len(self._views)
 
         # === ISOVIEW-SPECIFIC FIELDS ===
         meta["views"] = self._views
+        meta["pipeline_stage"] = getattr(self, "_pipeline_stage", "unknown")
         meta["shape"] = self.shape
         meta["structure"] = self._structure
         meta["single_timepoint"] = self._single_timepoint
@@ -931,7 +1011,7 @@ class IsoviewArray:
             # return all stack files
             files = []
             for t in self._timepoints:
-                for (cam, chn), path in self._stack_files[t].items():
+                for path in self._stack_files[t].values():
                     files.append(path)
             return files
         return list(self.tm_folders)
@@ -1045,15 +1125,15 @@ class IsoViewOutputArray:
         if not self.base_path.exists():
             raise FileNotFoundError(f"Path does not exist: {self.base_path}")
 
+        # initialize metadata before discovery (extraction happens during _read_shape)
+        self._metadata = {}
+        self._cache = {}
+
         # discover structure
         self._discover_structure()
 
         # auto-detect or use provided view dimension name
         self._view_dim = view_dim or self._detect_view_dim()
-
-        # cache for loaded volumes
-        self._cache = {}
-        self._metadata = {}
 
     def _discover_structure(self):
         """Find TM folders, file type, and views."""
@@ -1108,7 +1188,13 @@ class IsoViewOutputArray:
         logger.info(f"IsoViewOutputArray: detected {self._file_ext} files")
 
     def _discover_views(self, tm_folder: Path):
-        """Parse filenames to find views and determine shape."""
+        """Parse filenames to find views and determine shape.
+
+        Detects pipeline stage from filename patterns:
+        - isoview-pt: SPM00_TM000000_CM00_CHN01 (single camera per file)
+        - isoview-mf: SPM00_TM000000_CM00_CM01_CHN01 (fused cameras)
+        - isoview-mfc: SPM00_TM000000_CHN00 (channel-only, fully fused)
+        """
         import re
 
         # patterns for extracting view info
@@ -1129,6 +1215,7 @@ class IsoViewOutputArray:
         self._view_type = None  # 'cm', 'fused', or 'ch'
         self._specimen = None
         self._file_map = {}  # view_idx -> filename pattern parts
+        self._pipeline_stage = "isoview-pt"  # default
 
         for f in sorted(self._data_files):
             # try fused camera pattern first (CM##_CM##)
@@ -1137,6 +1224,7 @@ class IsoViewOutputArray:
                 specimen, timepoint, cam0, cam1, channel = map(int, match.groups())
                 self._specimen = specimen
                 self._view_type = "fused"
+                self._pipeline_stage = "isoview-mf"
                 view_key = (cam0, cam1)
                 if view_key not in self._views:
                     self._views.append(view_key)
@@ -1149,17 +1237,19 @@ class IsoViewOutputArray:
                 specimen, timepoint, camera, channel = map(int, match.groups())
                 self._specimen = specimen
                 self._view_type = "cm"
+                self._pipeline_stage = "isoview-pt"
                 if camera not in self._views:
                     self._views.append(camera)
                     self._file_map[camera] = {"camera": camera, "channel": channel}
                 continue
 
-            # try CHN-only pattern
+            # try CHN-only pattern (fully fused or channel-fused)
             match = pattern_chn.match(f.name)
             if match:
                 specimen, timepoint, channel = map(int, match.groups())
                 self._specimen = specimen
                 self._view_type = "ch"
+                self._pipeline_stage = "isoview-mfc"
                 if channel not in self._views:
                     self._views.append(channel)
                     self._file_map[channel] = {"channel": channel}
@@ -1177,17 +1267,19 @@ class IsoViewOutputArray:
 
         logger.info(
             f"IsoViewOutputArray: views={self._views}, shape={self._single_shape}, "
-            f"view_type={self._view_type}"
+            f"view_type={self._view_type}, pipeline_stage={self._pipeline_stage}"
         )
 
     def _read_shape(self, file_path: Path):
-        """Read shape and dtype from first file."""
+        """Read shape, dtype, and pixel spacing from first file."""
         if self._file_ext == ".tif":
             import tifffile
             with tifffile.TiffFile(str(file_path)) as tif:
                 # get shape from first series
                 shape = tif.series[0].shape
                 self._dtype = tif.series[0].dtype
+                # try to extract pixel spacing from ImageJ metadata
+                self._extract_tiff_metadata(tif)
         elif self._file_ext == ".klb":
             import pyklb
             header = pyklb.readheader(str(file_path))
@@ -1202,11 +1294,20 @@ class IsoViewOutputArray:
             else:
                 shape = (1,) * (3 - len(spatial_dims)) + tuple(spatial_dims)
             self._dtype = np.dtype(header['datatype'])
+            # extract pixel spacing from klb header
+            spacing = header.get('pixelspacing_tczyx', [1.0, 1.0, 1.0, 1.0, 1.0])
+            if len(spacing) >= 5:
+                # klb spacing is [t, c, z, y, x]
+                self._metadata["dz"] = float(spacing[2])
+                self._metadata["dy"] = float(spacing[3])
+                self._metadata["dx"] = float(spacing[4])
         elif self._file_ext == ".zarr":
             import zarr
             z = zarr.open(file_path, mode="r")
             if isinstance(z, zarr.Group):
                 arr = z["0"] if "0" in z else list(z.values())[0]
+                # extract pixel spacing from OME-Zarr multiscales
+                self._extract_zarr_metadata(z)
             else:
                 arr = z
             shape = arr.shape
@@ -1222,6 +1323,85 @@ class IsoViewOutputArray:
         else:
             # take last 3 dims
             self._single_shape = shape[-3:]
+
+    def _extract_tiff_metadata(self, tif):
+        """Extract pixel spacing and timing from TIFF ImageJ metadata.
+
+        For isoview TIFFs:
+        - dz comes from ImageJ 'spacing' metadata (in µm)
+        - dx, dy come from XResolution/YResolution tags
+        - fs comes from ImageJ 'finterval' (1/finterval) or 'fps' if present
+        - Resolution is stored as pixels per unit with ResolutionUnit tag
+        """
+        try:
+            ij_meta = getattr(tif, "imagej_metadata", None) or {}
+
+            # extract dz from ImageJ spacing
+            if "spacing" in ij_meta:
+                self._metadata["dz"] = float(ij_meta["spacing"])
+
+            # extract frame rate from ImageJ metadata
+            if "finterval" in ij_meta and ij_meta["finterval"] > 0:
+                self._metadata["fs"] = 1.0 / float(ij_meta["finterval"])
+            elif "fps" in ij_meta:
+                self._metadata["fs"] = float(ij_meta["fps"])
+
+            # extract dx, dy from resolution tags
+            # isoview writes resolution as pixels/µm, so we invert to get µm/pixel
+            for page in tif.pages[:1]:
+                x_res_tag = page.tags.get("XResolution")
+                y_res_tag = page.tags.get("YResolution")
+
+                if x_res_tag:
+                    x_res = x_res_tag.value
+                    if x_res and x_res[0] > 0:
+                        # x_res = (numerator, denominator) = pixels per unit
+                        # µm/pixel = 1 / (pixels/µm) = denominator / numerator
+                        px_per_um = float(x_res[0]) / float(x_res[1])
+                        self._metadata["dx"] = 1.0 / px_per_um
+
+                if y_res_tag:
+                    y_res = y_res_tag.value
+                    if y_res and y_res[0] > 0:
+                        px_per_um = float(y_res[0]) / float(y_res[1])
+                        self._metadata["dy"] = 1.0 / px_per_um
+
+        except Exception:
+            pass
+
+    def _extract_zarr_metadata(self, zarr_group):
+        """Extract pixel spacing and timing from OME-Zarr multiscales metadata."""
+        # check for isoview-specific attrs (fps, exposure_time, etc)
+        attrs = zarr_group.attrs
+        if "fps" in attrs:
+            self._metadata["fs"] = float(attrs["fps"])
+        if "vps" in attrs:
+            self._metadata["vps"] = float(attrs["vps"])
+        if "exposure_time" in attrs and "fs" not in self._metadata:
+            # exposure_time in ms, convert to Hz
+            self._metadata["fs"] = 1000.0 / float(attrs["exposure_time"])
+
+        multiscales = attrs.get("multiscales", [])
+        if not multiscales:
+            return
+
+        # get first multiscale entry
+        ms = multiscales[0] if isinstance(multiscales, list) else multiscales
+        datasets = ms.get("datasets", [])
+        if not datasets:
+            return
+
+        # get coordinate transformations from first dataset
+        transforms = datasets[0].get("coordinateTransformations", [])
+        for t in transforms:
+            if t.get("type") == "scale":
+                scale = t.get("scale", [])
+                # scale is [z, y, x] for 3D data
+                if len(scale) >= 3:
+                    self._metadata["dz"] = float(scale[0])
+                    self._metadata["dy"] = float(scale[1])
+                    self._metadata["dx"] = float(scale[2])
+                break
 
     def _get_file_path(self, t_idx: int, view_idx: int) -> Path:
         """Get file path for timepoint and view index."""
@@ -1347,14 +1527,15 @@ class IsoViewOutputArray:
 
         Imaging parameters (displayed in green in metadata viewer):
         - fs: frame rate in Hz (if available from source metadata)
-        - dx, dy: pixel size in micrometers (if available)
-        - dz: z step in micrometers (if available)
+        - dx, dy: pixel size in micrometers (from file metadata)
+        - dz: z step in micrometers (from file metadata)
         - Lx, Ly: image dimensions in pixels
         - num_zplanes: number of z-planes per volume
         - num_timepoints: number of timepoints
         - dtype: data type
 
         Acquisition parameters (displayed in orange):
+        - stack_type: pipeline stage (isoview-pt, isoview-mf, isoview-mfc)
         - file_type: output file format (.tif, .klb, .zarr)
         - view_type: 'cm' (camera), 'ch' (channel), or 'fused'
         - specimen: specimen number
@@ -1362,10 +1543,13 @@ class IsoViewOutputArray:
         Plus isoview output-specific fields:
         - views: list of view indices
         - view_dim: dimension name for views ('cm', 'ch', or 'view')
+        - pipeline_stage: same as stack_type
         """
         meta = dict(self._metadata)
 
         # === IMAGING PARAMETERS ===
+        # dx, dy, dz are already in _metadata if extracted from file
+
         # image dimensions from shape
         meta["Ly"] = self._single_shape[1]
         meta["Lx"] = self._single_shape[2]
@@ -1384,7 +1568,9 @@ class IsoViewOutputArray:
         meta["dtype"] = str(self._dtype)
 
         # === ACQUISITION PARAMETERS ===
-        meta["stack_type"] = "isoview_output"
+        # stack_type based on pipeline stage
+        meta["stack_type"] = getattr(self, "_pipeline_stage", "isoview-pt")
+        meta["pipeline_stage"] = getattr(self, "_pipeline_stage", "isoview-pt")
         meta["file_type"] = self._file_ext
         meta["view_type"] = self._view_type
         meta["num_views"] = len(self._views)
@@ -1623,6 +1809,10 @@ class ClusterPTArray:
         # check for pyklb
         _check_pyklb()
 
+        # initialize metadata before discovery (extraction happens during _discover_views)
+        self._metadata = {}
+        self._cache = {}
+
         # detect if single TM or multi-TM
         if self.base_path.name.startswith("TM"):
             klb_files = list(self.base_path.glob("*.klb"))
@@ -1644,10 +1834,6 @@ class ClusterPTArray:
 
         # discover views from first timepoint
         self._discover_views(self.tm_folders[0])
-
-        # cache for klb data: (t_idx, view_idx) -> ndarray
-        self._cache = {}
-        self._metadata = {}
 
     def _discover_views(self, tm_folder: Path):
         """Parse KLB files to find camera/channel combinations and shape."""
@@ -1685,7 +1871,7 @@ class ClusterPTArray:
         # sort views by (camera, channel)
         self._views = sorted(self._views)
 
-        # read first file to get shape/dtype
+        # read first file to get shape/dtype and pixel spacing
         first_view = self._views[0]
         first_file = self._get_klb_path(tm_folder, first_view)
         header = pyklb.readheader(str(first_file))
@@ -1703,6 +1889,14 @@ class ClusterPTArray:
             self._single_shape = (1,) * (3 - len(spatial_dims)) + tuple(spatial_dims)
 
         self._dtype = np.dtype(header['datatype'])
+
+        # extract pixel spacing from klb header
+        # pixelspacing_tczyx is [t, c, z, y, x]
+        spacing = header.get('pixelspacing_tczyx', [1.0, 1.0, 1.0, 1.0, 1.0])
+        if len(spacing) >= 5:
+            self._metadata["dz"] = float(spacing[2])
+            self._metadata["dy"] = float(spacing[3])
+            self._metadata["dx"] = float(spacing[4])
 
         logger.info(
             f"ClusterPTArray: timepoints={len(self.tm_folders)}, views={len(self._views)}, "
@@ -1818,7 +2012,9 @@ class ClusterPTArray:
         meta["dtype"] = str(self._dtype)
 
         # === ACQUISITION PARAMETERS ===
-        meta["stack_type"] = "clusterpt"
+        # clusterpt is from the old IsoView-Processing MATLAB pipeline
+        meta["stack_type"] = "isoview-pt"
+        meta["pipeline_stage"] = "isoview-pt"
         meta["structure"] = "clusterpt"
         meta["file_type"] = ".klb"
         meta["num_views"] = len(self._views)
