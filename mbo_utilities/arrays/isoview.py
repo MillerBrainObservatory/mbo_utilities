@@ -12,6 +12,46 @@ from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
 logger = logging.getLogger(__name__)
 
+# regex pattern for TM folders - matches TM###### anywhere in name
+import re
+_TM_PATTERN = re.compile(r"TM(\d{5,6})")
+
+
+def _find_tm_folders(base_path: Path) -> list[Path]:
+    """Find folders containing TM###### pattern in their name.
+
+    Supports both:
+    - TM000000 (standard naming)
+    - Dme_E1.TM000000_multiFused_blending (embedded)
+
+    Returns folders sorted by timepoint number.
+    """
+    tm_folders = []
+    for d in base_path.iterdir():
+        if not d.is_dir():
+            continue
+        match = _TM_PATTERN.search(d.name)
+        if match:
+            tm_folders.append((int(match.group(1)), d))
+
+    # sort by timepoint number and return just the paths
+    tm_folders.sort(key=lambda x: x[0])
+    return [p for _, p in tm_folders]
+
+
+def _extract_timepoint(folder_name: str) -> int:
+    """Extract timepoint number from folder name containing TM######."""
+    match = _TM_PATTERN.search(folder_name)
+    if match:
+        return int(match.group(1))
+    raise ValueError(f"No TM pattern found in folder name: {folder_name}")
+
+
+def _has_tm_pattern(name: str) -> bool:
+    """Check if name contains TM###### pattern."""
+    return _TM_PATTERN.search(name) is not None
+
+
 # register isoview pipeline info
 _ISOVIEW_INFO = PipelineInfo(
     name="isoview",
@@ -188,7 +228,8 @@ class IsoviewArray:
             raise ImportError("zarr>=3.0 required for zarr files: pip install zarr")
 
         # detect if single TM or multi-TM
-        if self.base_path.name.startswith("TM"):
+        # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
+        if _has_tm_pattern(self.base_path.name):
             zarr_files_in_path = list(self.base_path.glob("*.zarr"))
             if zarr_files_in_path:
                 self._single_timepoint = True
@@ -196,11 +237,7 @@ class IsoviewArray:
             else:
                 raise ValueError(f"TM folder {self.base_path} contains no .zarr files")
         else:
-            self.tm_folders = sorted(
-                [d for d in self.base_path.iterdir()
-                 if d.is_dir() and d.name.startswith("TM")],
-                key=lambda x: int(x.name[2:])
-            )
+            self.tm_folders = _find_tm_folders(self.base_path)
             self._single_timepoint = False
 
             if not self.tm_folders:
@@ -1080,12 +1117,24 @@ class IsoviewArray:
         )
 
 
-# patterns to exclude (masks, auxiliary files)
+# patterns to exclude (masks, projections, auxiliary files)
 EXCLUDE_PATTERNS = [
     "Mask",
     "mask",
     "minIntensity",
     "coords",
+    "Projection",
+    "configuration",
+    "transformation",
+    "intensityCorrection",
+    "referenceMinIntensity",
+    "scores",
+    "jobCompleted",
+]
+
+# patterns that identify data files (for fusedStack naming)
+DATA_PATTERNS = [
+    ".fusedStack.",  # multifuse output: CM00_CM01_CHN01.fusedStack.klb
 ]
 
 
@@ -1137,18 +1186,13 @@ class IsoViewOutputArray:
 
     def _discover_structure(self):
         """Find TM folders, file type, and views."""
-        import re
-
         # detect if single TM or multi-TM
-        if self.base_path.name.startswith("TM"):
+        # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
+        if _has_tm_pattern(self.base_path.name):
             self._single_timepoint = True
             self.tm_folders = [self.base_path]
         else:
-            self.tm_folders = sorted(
-                [d for d in self.base_path.iterdir()
-                 if d.is_dir() and d.name.startswith("TM")],
-                key=lambda x: int(x.name[2:])
-            )
+            self.tm_folders = _find_tm_folders(self.base_path)
             self._single_timepoint = len(self.tm_folders) == 1
 
             if not self.tm_folders:
@@ -1162,7 +1206,10 @@ class IsoViewOutputArray:
         self._discover_views(first_tm)
 
     def _detect_file_type(self, tm_folder: Path):
-        """Detect file type (.tif, .klb, or .zarr) in TM folder."""
+        """Detect file type (.tif, .klb, or .zarr) in TM folder.
+
+        Also detects fusedStack naming convention (e.g., .fusedStack.klb).
+        """
         # check for each type, excluding mask files
         tif_files = [f for f in tm_folder.glob("*.tif")
                      if not any(x in f.name for x in EXCLUDE_PATTERNS)]
@@ -1171,12 +1218,21 @@ class IsoViewOutputArray:
         zarr_files = [f for f in tm_folder.glob("*.zarr")
                       if not any(x in f.name for x in EXCLUDE_PATTERNS)]
 
+        # detect fusedStack naming (multifuse output)
+        self._fused_stack_naming = False
+
         if tif_files:
             self._file_ext = ".tif"
             self._data_files = tif_files
         elif klb_files:
             self._file_ext = ".klb"
-            self._data_files = klb_files
+            # check for fusedStack naming
+            fused_files = [f for f in klb_files if ".fusedStack." in f.name]
+            if fused_files:
+                self._fused_stack_naming = True
+                self._data_files = fused_files
+            else:
+                self._data_files = klb_files
         elif zarr_files:
             self._file_ext = ".zarr"
             self._data_files = zarr_files
@@ -1185,7 +1241,7 @@ class IsoViewOutputArray:
                 f"No supported data files (.tif, .klb, .zarr) in {tm_folder}"
             )
 
-        logger.info(f"IsoViewOutputArray: detected {self._file_ext} files")
+        logger.info(f"IsoViewOutputArray: detected {self._file_ext} files, fusedStack={self._fused_stack_naming}")
 
     def _discover_views(self, tm_folder: Path):
         """Parse filenames to find views and determine shape.
@@ -1194,21 +1250,24 @@ class IsoViewOutputArray:
         - isoview-pt: SPM00_TM000000_CM00_CHN01 (single camera per file)
         - isoview-mf: SPM00_TM000000_CM00_CM01_CHN01 (fused cameras)
         - isoview-mfc: SPM00_TM000000_CHN00 (channel-only, fully fused)
+
+        Handles both standard naming (.klb) and fusedStack naming (.fusedStack.klb).
         """
         import re
 
-        # patterns for extracting view info
+        # patterns for extracting view info - use looser matching for file suffix
+        # allows .klb, .fusedStack.klb, .tif, .zarr, etc.
         # SPM00_TM000000_CM00_CHN01.tif -> camera=0, channel=1
-        # SPM00_TM000000_CM00_CM01_CHN01.tif -> fused cameras 0+1, channel=1
+        # SPM00_TM000000_CM00_CM01_CHN01.fusedStack.klb -> fused cameras 0+1, channel=1
         # SPM00_TM000000_CHN00.tif -> channel=0 (no camera)
         pattern_cm = re.compile(
-            r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)" + re.escape(self._file_ext)
+            r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)(?:\.[a-zA-Z]+)+" + "$"
         )
         pattern_fused_cm = re.compile(
-            r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_CHN(\d+)" + re.escape(self._file_ext)
+            r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_CHN(\d+)(?:\.[a-zA-Z]+)+" + "$"
         )
         pattern_chn = re.compile(
-            r"SPM(\d+)_TM(\d+)_CHN(\d+)" + re.escape(self._file_ext)
+            r"SPM(\d+)_TM(\d+)_CHN(\d+)(?:\.[a-zA-Z]+)+" + "$"
         )
 
         self._views = []
@@ -1406,18 +1465,21 @@ class IsoViewOutputArray:
     def _get_file_path(self, t_idx: int, view_idx: int) -> Path:
         """Get file path for timepoint and view index."""
         tm_folder = self.tm_folders[t_idx]
-        tp = int(tm_folder.name[2:])  # extract timepoint from folder name
+        tp = _extract_timepoint(tm_folder.name)
         sp = self._specimen if self._specimen is not None else 0
         view = self._views[view_idx]
 
+        # handle fusedStack naming (e.g., .fusedStack.klb for multifuse output)
+        ext = ".fusedStack" + self._file_ext if self._fused_stack_naming else self._file_ext
+
         if self._view_type == "fused":
             info = self._file_map[view]
-            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['cam0']:02d}_CM{info['cam1']:02d}_CHN{info['channel']:02d}{self._file_ext}"
+            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['cam0']:02d}_CM{info['cam1']:02d}_CHN{info['channel']:02d}{ext}"
         elif self._view_type == "cm":
             info = self._file_map[view]
-            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}_CHN{info['channel']:02d}{self._file_ext}"
+            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}_CHN{info['channel']:02d}{ext}"
         else:  # ch
-            filename = f"SPM{sp:02d}_TM{tp:06d}_CHN{view:02d}{self._file_ext}"
+            filename = f"SPM{sp:02d}_TM{tp:06d}_CHN{view:02d}{ext}"
 
         return tm_folder / filename
 
@@ -1814,7 +1876,8 @@ class ClusterPTArray:
         self._cache = {}
 
         # detect if single TM or multi-TM
-        if self.base_path.name.startswith("TM"):
+        # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
+        if _has_tm_pattern(self.base_path.name):
             klb_files = list(self.base_path.glob("*.klb"))
             if klb_files:
                 self._single_timepoint = True
@@ -1822,11 +1885,7 @@ class ClusterPTArray:
             else:
                 raise ValueError(f"TM folder {self.base_path} contains no .klb files")
         else:
-            self.tm_folders = sorted(
-                [d for d in self.base_path.iterdir()
-                 if d.is_dir() and d.name.startswith("TM")],
-                key=lambda x: int(x.name[2:])
-            )
+            self.tm_folders = _find_tm_folders(self.base_path)
             self._single_timepoint = len(self.tm_folders) == 1
 
             if not self.tm_folders:
@@ -1906,8 +1965,7 @@ class ClusterPTArray:
     def _get_klb_path(self, tm_folder: Path, view: tuple[int, int]) -> Path:
         """Get path to KLB file for a timepoint folder and view."""
         camera, channel = view
-        # extract timepoint from folder name
-        tp = int(tm_folder.name[2:])
+        tp = _extract_timepoint(tm_folder.name)
         sp = self._specimen if self._specimen is not None else 0
 
         filename = f"SPM{sp:02d}_TM{tp:06d}_CM{camera:02d}_CHN{channel:02d}.klb"
