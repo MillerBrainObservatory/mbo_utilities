@@ -158,90 +158,163 @@ IMWRITE_SIGNATURE = '''mbo.imwrite(
     output_suffix=None,  # str | None - custom suffix for output filenames
 )'''
 
-RUN_LSP_SIGNATURE = '''run_lsp(
-    raw_data,
-    output_dir,
-    ops=ops,
-    planes=None,  # list | None - specific planes to process, or None for all
-)'''
-
-
-# ============================================================================
-# built-in templates
-# ============================================================================
-
 @register_template("lsp", "LBM-Suite2p-Python full pipeline")
 def _template_lsp(data_path: str = "/path/to/data", **kwargs) -> list[dict]:
     """generate lbm-suite2p-python pipeline notebook."""
     cells = [
+        # imports
         _make_cell(
             "from pathlib import Path\n"
             "import numpy as np\n"
-            "import matplotlib.pyplot as plt\n"
-            "\n"
             "import mbo_utilities as mbo\n"
-            "from lbm_suite2p_python import run_lsp\n"
-            "from lbm_suite2p_python.utils import get_default_ops"
+            "import lbm_suite2p_python as lsp"
         ),
+        # run pipeline header
+        _make_cell("## Run Pipeline", cell_type="markdown"),
+        # paths
         _make_cell(
-            f'raw_data = Path(r"{data_path}")\n'
-            'output_dir = raw_data.parent / f"{raw_data.stem}_suite2p"'
+            f'input_data = r"{data_path}"\n'
+            'save_path = r"D:/demo/segmentation"'
         ),
-        _make_cell(IMREAD_SIGNATURE),
+        # help info
         _make_cell(
-            "print(f\"Shape: {arr.shape}\")\n"
-            "print(f\"Type:  {type(arr).__name__}\")\n"
-            "print(f\"Dtype: {arr.dtype}\")\n"
-            "if hasattr(arr, 'metadata'):\n"
-            "    md = arr.metadata\n"
-            "    print(f\"Num planes: {md.get('num_planes', 'N/A')}\")\n"
-            "    print(f\"Frame rate: {md.get('frame_rate', 'N/A')} Hz\")"
+            "To get help on any function or module:\n\n"
+            "```python\n"
+            "help(lsp)\n"
+            "help(lsp.pipeline)\n"
+            "```",
+            cell_type="markdown"
         ),
+        # pipeline call
         _make_cell(
-            "ops = get_default_ops()\n"
-            "ops['tau'] = 1.3  # gcamp indicator decay time\n"
-            "ops['fs'] = arr.metadata.get('frame_rate', 10.0)\n"
-            "ops['nplanes'] = arr.metadata.get('num_planes', 1)\n"
-            "ops['do_registration'] = True\n"
-            "ops['nonrigid'] = True\n"
-            "ops['sparse_mode'] = True\n"
-            "ops['diameter'] = 12  # approximate neuron diameter in pixels"
+            "ops = {\n"
+            '    "diameter": 3,\n'
+            '    "anatomical_only": 4,      # max projection\n'
+            '    "accept_all_cells": True,  # skip acc/rej cells by s2p\n'
+            '    "spatial_hp_cp": 3,\n'
+            '    "denoise": 1,\n'
+            '    "two_step_registration": 1,\n'
+            "}\n"
+            "\n"
+            "results = lsp.pipeline(\n"
+            "    input_data=input_data,      # path to .zarr, .tiff, or .bin file\n"
+            "    save_path=save_path,        # default: save next to input file\n"
+            "    ops=ops,                    # default: use MBO-optimized parameters\n"
+            "    planes=np.arange(1, 4),     # None for all planes, or list of zplanes (1-based)\n"
+            "    num_timepoints=500,         # None for all timepoints, or int\n"
+            "    roi=None,                   # default: stitch multi-ROI data\n"
+            "    keep_reg=True,              # default: keep data.bin (registered binary)\n"
+            "    keep_raw=False,             # default: delete data_raw.bin after processing\n"
+            "    force_reg=False,            # default: skip if already registered\n"
+            "    force_detect=False,         # default: skip if stat.npy exists\n"
+            "    dff_window_size=None,       # default: auto-calculate from tau and framerate\n"
+            "    dff_percentile=20,          # default: 20th percentile for baseline\n"
+            "    dff_smooth_window=None,     # default: auto-calculate from tau and framerate\n"
+            "    accept_all_cells=False,     # default: use suite2p classification\n"
+            "    cell_filters=[],            # default: set to [] to disable\n"
+            "    reader_kwargs={},           # default: args passed to mbo.imread(input_path)\n"
+            "    writer_kwargs={},           # default: args passed to mbo.imwrite(lazy_array, save_path)\n"
+            ")"
         ),
+        # load results header
+        _make_cell("## Load Results", cell_type="markdown"),
+        # load results
         _make_cell(
-            "# " + RUN_LSP_SIGNATURE.replace("\n", "\n# ")
+            "# get output folders\n"
+            "folders = sorted(Path(save_path).glob(\"zplane*\"))\n"
+            "print(f\"Found {len(folders)} plane folders\")\n"
+            "\n"
+            "# load results from first plane\n"
+            "results = lsp.load_planar_results(folders[0])\n"
+            "F = results[\"F\"]\n"
+            "stat = results[\"stat\"]\n"
+            "Fneu = results[\"Fneu\"]\n"
+            "iscell = results[\"iscell\"]\n"
+            "\n"
+            "print(f\"Loaded {F.shape[0]} ROIs, {F.shape[1]} frames\")"
         ),
+        # quality scoring
         _make_cell(
-            "plane_dir = output_dir / \"plane00\"\n"
-            "if plane_dir.exists():\n"
-            "    from mbo_utilities.arrays import Suite2pArray\n"
-            "    s2p = Suite2pArray(plane_dir)\n"
-            "    print(f\"Loaded {s2p.shape[0]} frames, {len(s2p.stat)} ROIs\")"
+            "# plot top N neurons by quality score\n"
+            "top_n = 20\n"
+            "trace_quality = lsp.postprocessing.compute_trace_quality_score(F,)\n"
+            "sort_idx = trace_quality[\"sort_idx\"]"
         ),
+        # plot
         _make_cell(
-            "if 's2p' in dir():\n"
-            "    fig, ax = plt.subplots(1, 1, figsize=(10, 10))\n"
-            "    ax.imshow(s2p.mean_img, cmap='gray')\n"
-            "    ax.set_title(f'Mean image with {len(s2p.stat)} ROIs')\n"
-            "    for i, roi in enumerate(s2p.stat[:50]):\n"
-            "        ypix, xpix = roi['ypix'], roi['xpix']\n"
-            "        ax.scatter(xpix, ypix, s=1, alpha=0.5)\n"
-            "    plt.tight_layout()\n"
-            "    plt.show()"
+            "top_indices = sort_idx[:top_n]\n"
+            "\n"
+            "# create boolean mask for plot_masks\n"
+            "mask_idx = np.zeros(len(stat), dtype=bool)\n"
+            "mask_idx[top_indices] = True\n"
+            "\n"
+            "# load ops to get the background image\n"
+            "ops = lsp.load_ops(folders[0] / \"ops.npy\")\n"
+            "img = ops.get(\"meanImgE\", ops.get(\"meanImg\"))\n"
+            "\n"
+            "# plot masks for top neurons\n"
+            "lsp.plot_regional_zoom(\n"
+            "    plane_dir=folders[0],\n"
+            ")\n"
+            "\n"
+            "# plot traces for top neurons\n"
+            "lsp.plot_traces(\n"
+            "    f=F[top_indices],\n"
+            "    fps=ops.get(\"fs\", 30.0),\n"
+            "    num_neurons=top_n,\n"
+            "    title=f\"Top {top_n} Neuron Traces\"\n"
+            ")"
         ),
+        # planar outputs table
         _make_cell(
-            "if 's2p' in dir():\n"
-            "    F = s2p.F  # raw fluorescence\n"
-            "    Fneu = s2p.Fneu  # neuropil\n"
-            "    spks = s2p.spks  # deconvolved spikes\n"
-            "    print(f\"Traces shape: {F.shape}\")\n"
-            "    fig, axes = plt.subplots(3, 1, figsize=(12, 6), sharex=True)\n"
-            "    t = np.arange(F.shape[1]) / ops['fs']\n"
-            "    for i, ax in enumerate(axes):\n"
-            "        ax.plot(t, F[i] - 0.7 * Fneu[i], 'k', lw=0.5)\n"
-            "        ax.set_ylabel(f'ROI {i}')\n"
-            "    axes[-1].set_xlabel('Time (s)')\n"
-            "    plt.tight_layout()\n"
-            "    plt.show()"
+            "### Planar Outputs\n\n"
+            "Each z-plane directory contains:\n\n"
+            "#### Data Files\n\n"
+            "| File | Shape | Description |\n"
+            "|------|-------|-------------|\n"
+            "| `ops.npy` | dict | Processing parameters and metadata |\n"
+            "| `stat.npy` | (n_rois,) | ROI definitions (pixel coordinates, weights, shape stats) |\n"
+            "| `F.npy` | (n_rois, n_frames) | Raw fluorescence traces |\n"
+            "| `Fneu.npy` | (n_rois, n_frames) | Neuropil fluorescence traces |\n"
+            "| `spks.npy` | (n_rois, n_frames) | Deconvolved spike estimates |\n"
+            "| `iscell.npy` | (n_rois, 2) | Cell classification: `[:, 0]` = is_cell (0/1), `[:, 1]` = probability |\n"
+            "| `data.bin` | (n_frames, Ly, Lx) | Registered movie (if `keep_reg=True`) |",
+            cell_type="markdown"
+        ),
+        # dff header
+        _make_cell("### Calculate dF/F", cell_type="markdown"),
+        # dff calculation
+        _make_cell(
+            "# calculate dF/F with rolling percentile baseline\n"
+            "dff = lsp.dff_rolling_percentile(\n"
+            "    results['F'],\n"
+            "    window_size=300,    # frames (~10x tau x fs)\n"
+            "    percentile=20       # baseline percentile\n"
+            ")\n"
+            "\n"
+            "# filter for accepted cells only\n"
+            "iscell_mask = results['iscell'][:, 0].astype(bool)\n"
+            "dff_cells = dff[iscell_mask]\n"
+            "print(f\"dF/F shape (accepted cells): {dff_cells.shape}\")"
+        ),
+        # gui header
+        _make_cell(
+            "## Open Suite2p GUI\n\n"
+            "The Suite2p GUI provides interactive visualization and manual curation:\n\n"
+            "- **View registered movie**: Suite2p -> Registration -> View Registration Binary\n"
+            "- **Compare raw vs registered**: Check \"View raw binary\" (requires `keep_raw=True`)\n"
+            "- **Registration quality**: Suite2p -> Registration -> View Registration Metrics (>1500 frames)",
+            cell_type="markdown"
+        ),
+        # gui cell
+        _make_cell(
+            "# open GUI for manual curation\n"
+            "run_gui = False\n"
+            "if folders and run_gui:\n"
+            "    stat_file = folders[0] / \"stat.npy\"\n"
+            "    if stat_file.exists():\n"
+            "        from suite2p import gui\n"
+            "        gui.run(statfile=str(stat_file))"
         ),
     ]
     return cells

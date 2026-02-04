@@ -771,9 +771,9 @@ def default_ops():
         "bruker_bidirectional": False,  # bidirectional multiplane in bruker: 0, 1, 2, 2, 1, 0 (True) vs 0, 1, 2, 0, 1, 2 (False)
         "h5py": [],  # take h5py as input (deactivates data_path)
         "h5py_key": "data",  # key in h5py where data array is stored
-        "nwb_file": "",  # take nwb file as input (deactivates data_path)
-        "nwb_driver": "",  # driver for nwb file (nothing if file is local)
-        "nwb_series": "",  # TwoPhotonSeries name, defaults to first TwoPhotonSeries in nwb file
+        "nwb_file": "",
+        "nwb_driver": "",
+        "nwb_series": "",
         "save_path0": "",  # pathname where you'd like to store results, defaults to first item in data_path
         "save_folder": [],  # directory you"d like suite2p results to be saved to
         "subfolders": [],  # subfolders you"d like to search through when look_one_level_down is set to True
@@ -791,7 +791,7 @@ def default_ops():
         # output settings
         "preclassify": 0.0,  # apply classifier before signal extraction with probability 0.3
         "save_mat": False,  # whether to save output as matlab files
-        "save_NWB": False,  # whether to save output as NWB file
+        "save_NWB": False,
         "combined": True,  # combine multiple planes into a single result /single canvas for GUI
         "aspect": 1.0,  # um/pixels in X / um/pixels in Y (for correct aspect ratio in GUI)
         # bidirectional phase offset

@@ -48,7 +48,7 @@ class WindowFunctionsWidget(Widget):
             ' "std" (variance)'
         )
 
-        if proj_changed:
+        if proj_changed and options[selected_display_idx] != parent.proj:
             parent.proj = options[selected_display_idx]
 
         # window size
@@ -60,7 +60,7 @@ class WindowFunctionsWidget(Widget):
             "Size of the temporal window (in frames) used for projection."
             " E.g. a value of 3 averages over 3 consecutive frames."
         )
-        if winsize_changed and new_winsize > 0:
+        if winsize_changed and new_winsize > 0 and new_winsize != parent.window_size:
             parent.window_size = new_winsize
 
 
