@@ -32,7 +32,16 @@ register_pipeline(_ISOVIEW_INFO)
 
 
 def _parse_isoview_xml(xml_path: Path) -> dict:
-    """Parse isoview XML metadata file for dimensions and camera info."""
+    """Parse isoview XML metadata file for dimensions and camera info.
+
+    extracts:
+    - dimensions, z_step, exposure_time, detection_objective
+    - specimen_name, timestamp, data_header
+    - camera info: camera_type, camera_roi, wavelength
+    - illumination: illumination_arms, illumination_filter, detection_filter
+    - computed: objective_mag, pixel_resolution_um, fps, vps, zplanes
+    """
+    import re
     import xml.etree.ElementTree as ET
 
     tree = ET.parse(xml_path)
@@ -40,35 +49,86 @@ def _parse_isoview_xml(xml_path: Path) -> dict:
 
     metadata = {}
 
+    # default camera pixel size (C11440-22C camera = 6.5 um)
+    CAMERA_PIXEL_SIZE = 6.5
+
     # find info elements
     for info in root.iter("info"):
         attribs = info.attrib
 
+        # dimensions: "1848x768x38" or "1848x768x38, 1848x768x38" for multi-camera
         if "dimensions" in attribs:
-            # format: "1848x768x38" or "1848x768x38, 1848x768x38" for multi-camera
             dims_str = attribs["dimensions"]
             camera_dims = []
             for cam_dims in dims_str.split(","):
                 parts = [int(x) for x in cam_dims.strip().split("x")]
                 if len(parts) == 3:
-                    # xml is (height, width, depth) -> we want (height, width, depth)
                     camera_dims.append(tuple(parts))
             metadata["dimensions"] = camera_dims
 
+        # z spacing
         if "z_step" in attribs:
             metadata["z_step"] = float(attribs["z_step"])
 
+        # exposure time (ms)
         if "exposure_time" in attribs:
             metadata["exposure_time"] = float(attribs["exposure_time"])
 
+        # detection objective - extract magnification
         if "detection_objective" in attribs:
             metadata["detection_objective"] = attribs["detection_objective"]
+            obj_str = attribs["detection_objective"].split(",")[0]
+            mag_match = re.search(r'(\d+(?:\.\d+)?)x', obj_str, re.IGNORECASE)
+            if mag_match:
+                metadata["objective_mag"] = float(mag_match.group(1))
 
+        # specimen info
         if "specimen_name" in attribs:
             metadata["specimen_name"] = attribs["specimen_name"]
-
+        if "data_header" in attribs:
+            metadata["data_header"] = attribs["data_header"]
         if "timestamp" in attribs:
             metadata["timestamp"] = attribs["timestamp"]
+        if "time_point" in attribs:
+            metadata["time_point"] = int(attribs["time_point"])
+        if "specimen_XYZT" in attribs:
+            metadata["specimen_XYZT"] = attribs["specimen_XYZT"]
+        if "angle" in attribs:
+            metadata["angle"] = float(attribs["angle"])
+
+        # camera info
+        if "camera_index" in attribs:
+            metadata["camera_index"] = attribs["camera_index"]
+        if "camera_type" in attribs:
+            metadata["camera_type"] = attribs["camera_type"]
+        if "camera_roi" in attribs:
+            metadata["camera_roi"] = attribs["camera_roi"]
+
+        # illumination/detection
+        if "wavelength" in attribs:
+            metadata["wavelength"] = attribs["wavelength"]
+        if "illumination_arms" in attribs:
+            metadata["illumination_arms"] = attribs["illumination_arms"]
+        if "illumination_filter" in attribs:
+            metadata["illumination_filter"] = attribs["illumination_filter"]
+        if "detection_filter" in attribs:
+            metadata["detection_filter"] = attribs["detection_filter"]
+
+    # computed fields
+    if "dimensions" in metadata and metadata["dimensions"]:
+        dims = metadata["dimensions"][0]
+        metadata["zplanes"] = dims[-1]
+
+    # fps = 1000 / exposure_time_ms
+    if "exposure_time" in metadata:
+        metadata["fps"] = 1000.0 / metadata["exposure_time"]
+        if "zplanes" in metadata:
+            metadata["vps"] = metadata["fps"] / metadata["zplanes"]
+
+    # pixel resolution = camera pixel size / magnification
+    metadata["camera_pixel_size_um"] = CAMERA_PIXEL_SIZE
+    if "objective_mag" in metadata:
+        metadata["pixel_resolution_um"] = CAMERA_PIXEL_SIZE / metadata["objective_mag"]
 
     return metadata
 
@@ -516,22 +576,32 @@ class IsoviewArray:
         """
         Return metadata as dict. Always returns dict, never None.
 
-        Contains standard keys for Suite2p compatibility:
-        - nframes: number of frames (timepoints)
-        - num_frames: alias for nframes
-        - Ly: height in pixels
-        - Lx: width in pixels
-        - nplanes: number of z-planes
-        - dx, dy, dz: voxel size in micrometers
-        - fs: frame rate in Hz
+        Imaging parameters (displayed in green in metadata viewer):
+        - fs: frame rate in Hz (computed from exposure_time)
+        - dx, dy: pixel size in micrometers (camera_pixel_size / objective_mag)
+        - dz: z step in micrometers
+        - Lx, Ly: image dimensions in pixels
+        - num_zplanes: number of z-planes per volume
+        - num_timepoints: number of timepoints
+        - dtype: data type
+
+        Acquisition parameters (displayed in orange):
+        - exposure_time: camera exposure in ms
+        - detection_objective: objective lens description
+        - objective_mag: objective magnification (e.g., 16.0)
+        - camera_type, camera_roi: camera hardware info
+        - wavelength, illumination_arms, illumination_filter, detection_filter
+        - specimen_name, data_header, timestamp
+        - vps: volumes per second (fps / zplanes)
 
         Plus isoview-specific fields:
-        - num_timepoints, views, shape, structure
-        - cameras: per-camera metadata dict
+        - views: list of (camera, channel) tuples
+        - structure: 'raw', 'consolidated', or 'separate'
+        - cameras: per-camera metadata dict (for consolidated structure)
         """
         meta = dict(self._zarr_attrs) if self._zarr_attrs else {}
 
-        # map isoview keys to canonical metadata keys
+        # === IMAGING PARAMETERS ===
         # pixel resolution: pixel_resolution_um -> dx, dy
         px_res = meta.get("pixel_resolution_um")
         if px_res is not None:
@@ -543,35 +613,56 @@ class IsoviewArray:
         if z_step is not None:
             meta["dz"] = float(z_step)
 
-        # frame rate: fps -> fs
+        # frame rate: fps -> fs (volume rate for lightsheet)
         fps = meta.get("fps")
         if fps is not None:
             meta["fs"] = float(fps)
 
-        # LazyArrayProtocol required fields
-        num_t = self.num_timepoints
-        meta["num_timepoints"] = num_t
-        meta["nframes"] = num_t  # suite2p alias
-        meta["num_frames"] = num_t  # legacy alias
+        # image dimensions from shape
         meta["Ly"] = self._single_shape[1]
         meta["Lx"] = self._single_shape[2]
 
         # z-planes from shape (not timepoints!)
+        meta["num_zplanes"] = self._single_shape[0]
         meta["nplanes"] = self._single_shape[0]
         meta["num_planes"] = self._single_shape[0]
 
-        # isoview-specific fields
+        # timepoints
+        num_t = self.num_timepoints
+        meta["num_timepoints"] = num_t
+        meta["nframes"] = num_t  # suite2p alias
+        meta["num_frames"] = num_t  # legacy alias
+
+        # dtype
+        meta["dtype"] = str(self._dtype)
+
+        # === ACQUISITION PARAMETERS ===
+        # these are already in meta from _zarr_attrs if available:
+        # exposure_time, detection_objective, objective_mag, camera_type,
+        # camera_roi, wavelength, illumination_arms, illumination_filter,
+        # detection_filter, specimen_name, data_header, timestamp, vps
+
+        # stack type for isoview is always volumetric
+        if "stack_type" not in meta:
+            meta["stack_type"] = "isoview"
+
+        # number of views (cameras x channels)
+        meta["num_views"] = len(self._views)
+
+        # === ISOVIEW-SPECIFIC FIELDS ===
         meta["views"] = self._views
         meta["shape"] = self.shape
         meta["structure"] = self._structure
         meta["single_timepoint"] = self._single_timepoint
 
-        # add per-camera metadata
+        # add per-camera metadata (consolidated structure only)
         cam_meta = self.camera_metadata
         if cam_meta:
             meta["cameras"] = cam_meta
             # aggregate per-camera values for display
-            for key in ["zplanes", "min_intensity", "illumination_arms", "vps"]:
+            agg_keys = ["zplanes", "min_intensity", "illumination_arms", "vps",
+                        "wavelength", "detection_filter"]
+            for key in agg_keys:
                 values = [cm.get(key) for cm in cam_meta.values() if cm.get(key) is not None]
                 if values:
                     # if all same, use single value, otherwise use list
@@ -1251,22 +1342,59 @@ class IsoViewOutputArray:
 
     @property
     def metadata(self) -> dict:
-        """Return metadata as dict."""
+        """
+        Return metadata as dict. Always returns dict, never None.
+
+        Imaging parameters (displayed in green in metadata viewer):
+        - fs: frame rate in Hz (if available from source metadata)
+        - dx, dy: pixel size in micrometers (if available)
+        - dz: z step in micrometers (if available)
+        - Lx, Ly: image dimensions in pixels
+        - num_zplanes: number of z-planes per volume
+        - num_timepoints: number of timepoints
+        - dtype: data type
+
+        Acquisition parameters (displayed in orange):
+        - file_type: output file format (.tif, .klb, .zarr)
+        - view_type: 'cm' (camera), 'ch' (channel), or 'fused'
+        - specimen: specimen number
+
+        Plus isoview output-specific fields:
+        - views: list of view indices
+        - view_dim: dimension name for views ('cm', 'ch', or 'view')
+        """
         meta = dict(self._metadata)
 
+        # === IMAGING PARAMETERS ===
+        # image dimensions from shape
+        meta["Ly"] = self._single_shape[1]
+        meta["Lx"] = self._single_shape[2]
+
+        # z-planes from shape
+        meta["num_zplanes"] = self._single_shape[0]
+        meta["nplanes"] = self._single_shape[0]
+        meta["num_planes"] = self._single_shape[0]
+
+        # timepoints
         meta["num_timepoints"] = self.num_timepoints
         meta["nframes"] = self.num_timepoints
         meta["num_frames"] = self.num_timepoints
-        meta["Ly"] = self._single_shape[1]
-        meta["Lx"] = self._single_shape[2]
-        meta["nplanes"] = self._single_shape[0]
-        meta["num_planes"] = self._single_shape[0]
+
+        # dtype
+        meta["dtype"] = str(self._dtype)
+
+        # === ACQUISITION PARAMETERS ===
+        meta["stack_type"] = "isoview_output"
+        meta["file_type"] = self._file_ext
+        meta["view_type"] = self._view_type
+        meta["num_views"] = len(self._views)
+        meta["specimen"] = self._specimen
+
+        # === ISOVIEW OUTPUT-SPECIFIC FIELDS ===
         meta["views"] = self._views
         meta["view_dim"] = self._view_dim
         meta["shape"] = self.shape
-        meta["file_type"] = self._file_ext
         meta["single_timepoint"] = self._single_timepoint
-        meta["specimen"] = self._specimen
 
         return meta
 
@@ -1648,23 +1776,58 @@ class ClusterPTArray:
 
     @property
     def metadata(self) -> dict:
-        """Return metadata as dict."""
+        """
+        Return metadata as dict. Always returns dict, never None.
+
+        Imaging parameters (displayed in green in metadata viewer):
+        - fs: frame rate in Hz (if available from source metadata)
+        - dx, dy: pixel size in micrometers (if available)
+        - dz: z step in micrometers (if available)
+        - Lx, Ly: image dimensions in pixels
+        - num_zplanes: number of z-planes per volume
+        - num_timepoints: number of timepoints
+        - dtype: data type
+
+        Acquisition parameters (displayed in orange):
+        - structure: 'clusterpt' (IsoView-Processing corrected data)
+        - file_type: .klb
+        - specimen: specimen number
+
+        Plus clusterpt-specific fields:
+        - views: list of (camera, channel) tuples
+        """
         meta = dict(self._metadata)
 
-        # standard keys
+        # === IMAGING PARAMETERS ===
+        # image dimensions from shape
+        meta["Ly"] = self._single_shape[1]
+        meta["Lx"] = self._single_shape[2]
+
+        # z-planes from shape
+        meta["num_zplanes"] = self._single_shape[0]
+        meta["nplanes"] = self._single_shape[0]
+        meta["num_planes"] = self._single_shape[0]
+
+        # timepoints
         num_t = self.num_timepoints
         meta["num_timepoints"] = num_t
         meta["nframes"] = num_t
         meta["num_frames"] = num_t
-        meta["Ly"] = self._single_shape[1]
-        meta["Lx"] = self._single_shape[2]
-        meta["nplanes"] = self._single_shape[0]
-        meta["num_planes"] = self._single_shape[0]
+
+        # dtype
+        meta["dtype"] = str(self._dtype)
+
+        # === ACQUISITION PARAMETERS ===
+        meta["stack_type"] = "clusterpt"
+        meta["structure"] = "clusterpt"
+        meta["file_type"] = ".klb"
+        meta["num_views"] = len(self._views)
+        meta["specimen"] = self._specimen
+
+        # === CLUSTERPT-SPECIFIC FIELDS ===
         meta["views"] = self._views
         meta["shape"] = self.shape
-        meta["structure"] = "clusterpt"
         meta["single_timepoint"] = self._single_timepoint
-        meta["specimen"] = self._specimen
 
         return meta
 
