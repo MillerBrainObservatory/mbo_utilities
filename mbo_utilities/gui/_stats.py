@@ -394,16 +394,18 @@ def _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, arra
 
         if is_dual_zplane:
             metrics = [
-                ("Mean Fluorescence", mean_vals[0], mean_vals[1], "a.u.", False),
-                ("Std. Deviation", std_vals[0], std_vals[1], "a.u.", False),
-                ("Signal-to-Noise", snr_vals[0], snr_vals[1], "ratio", True),
+                ("Mean Fluorescence", mean_vals[0], mean_vals[1], "a.u."),
+                ("Std. Deviation", std_vals[0], std_vals[1], "a.u."),
+                ("Signal-to-Noise (?)", snr_vals[0], snr_vals[1], "ratio"),
             ]
-            for metric_name, val1, val2, unit, is_snr in metrics:
+            for metric_name, val1, val2, unit in metrics:
                 imgui.table_next_row()
                 imgui.table_next_column()
                 imgui.text(metric_name)
-                if is_snr:
-                    set_tooltip(SNR_TOOLTIP, show_mark=True)
+                if "(?)" in metric_name and imgui.is_item_hovered():
+                    imgui.begin_tooltip()
+                    imgui.text(SNR_TOOLTIP)
+                    imgui.end_tooltip()
                 imgui.table_next_column()
                 imgui.text(f"{val1:.2f}")
                 imgui.table_next_column()
@@ -412,16 +414,18 @@ def _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, arra
                 imgui.text(unit)
         else:
             metrics = [
-                ("Mean Fluorescence", mean_vals[0], "a.u.", False),
-                ("Std. Deviation", std_vals[0], "a.u.", False),
-                ("Signal-to-Noise", snr_vals[0], "ratio", True),
+                ("Mean Fluorescence", mean_vals[0], "a.u."),
+                ("Std. Deviation", std_vals[0], "a.u."),
+                ("Signal-to-Noise (?)", snr_vals[0], "ratio"),
             ]
-            for metric_name, value, unit, is_snr in metrics:
+            for metric_name, value, unit in metrics:
                 imgui.table_next_row()
                 imgui.table_next_column()
                 imgui.text(metric_name)
-                if is_snr:
-                    set_tooltip(SNR_TOOLTIP, show_mark=True)
+                if "(?)" in metric_name and imgui.is_item_hovered():
+                    imgui.begin_tooltip()
+                    imgui.text(SNR_TOOLTIP)
+                    imgui.end_tooltip()
                 imgui.table_next_column()
                 imgui.text(f"{value:.2f}")
                 imgui.table_next_column()
@@ -438,16 +442,14 @@ def _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals, array_idx=No
         4,
         imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
     ):
-        for col in ["Z", "Mean", "Std", "SNR"]:
+        for col in ["Z", "Mean", "Std", "SNR (?)"]:
             imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
-        # custom header row to add tooltip on SNR
-        imgui.table_next_row(imgui.TableRowFlags_.headers)
-        for col in ["Z", "Mean", "Std"]:
-            imgui.table_next_column()
-            imgui.table_header(col)
-        imgui.table_next_column()
-        imgui.table_header("SNR")
-        set_tooltip(SNR_TOOLTIP, show_mark=True)
+        imgui.table_headers_row()
+        # tooltip for SNR header - hover anywhere on header row
+        if imgui.is_item_hovered():
+            imgui.begin_tooltip()
+            imgui.text(SNR_TOOLTIP)
+            imgui.end_tooltip()
         for i in range(len(z_vals)):
             imgui.table_next_row()
             for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):
