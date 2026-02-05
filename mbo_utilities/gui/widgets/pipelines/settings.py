@@ -541,7 +541,7 @@ def _draw_s2p_selection_popup(self):
         imgui.dummy(imgui.ImVec2(0, 3))
 
         # draw selection table using shared component
-        tp_parsed, z_start, z_stop, z_step = draw_selection_table(
+        tp_parsed, z_start, z_stop, z_step, *_ = draw_selection_table(
             self,
             max_frames,
             num_planes,

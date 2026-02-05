@@ -253,18 +253,44 @@ class PreviewDataWidget(EdgeWindow):
             subplot.toolbar = False
         self.image_widget._sliders_ui._loop = True
 
-        # Determine nz using dims property if available
+        # Determine nz and nc (z-planes and channels) using dims property
         arr = self.image_widget.data[0]
         dims = getattr(arr, "dims", None)
-        if dims is not None and "z" in dims:
-            z_idx = dims.index("z")
+        dims_lower = tuple(d.lower() for d in dims) if dims else None
+
+        # detect z-planes
+        if dims_lower is not None and "z" in dims_lower:
+            z_idx = dims_lower.index("z")
             self.nz = self.shape[z_idx]
-        elif len(self.shape) >= 4:
+        elif dims_lower is not None and any(d in dims_lower for d in ("z-planes", "z-slices", "volumes")):
+            # handle verbose dim names from piezo/lbm arrays
+            for d in ("z-planes", "z-slices", "volumes"):
+                if d in dims_lower:
+                    z_idx = dims_lower.index(d)
+                    self.nz = self.shape[z_idx]
+                    break
+        elif len(self.shape) >= 4 and (dims_lower is None or "channel" not in dims_lower):
+            # only use shape[1] as z if not a channel dimension
             self.nz = self.shape[1]
-        elif len(self.shape) == 3:
-            self.nz = 1
         else:
             self.nz = 1
+
+        # detect channels (separate from z-planes)
+        if dims_lower is not None and "channel" in dims_lower:
+            c_idx = dims_lower.index("channel")
+            self.nc = self.shape[c_idx]
+        elif dims_lower is not None and "channels" in dims_lower:
+            c_idx = dims_lower.index("channels")
+            self.nc = self.shape[c_idx]
+        elif dims_lower is not None and "c" in dims_lower:
+            c_idx = dims_lower.index("c")
+            self.nc = self.shape[c_idx]
+        elif hasattr(arr, "num_color_channels"):
+            self.nc = arr.num_color_channels
+        else:
+            self.nc = 1
+
+        self.logger.info(f"Detected nz={self.nz}, nc={self.nc} from dims={dims}")
 
         # Window/projection state
         self._window_size = 1
@@ -380,6 +406,8 @@ class PreviewDataWidget(EdgeWindow):
         self.logger.info(f"Viewer: {self._viewer.name}")
         self._main_widget = self._viewer._main_widget
         self.set_context_info()
+        # ensure window functions are set so slider dims are properly reduced
+        self._update_window_funcs()
 
     def set_context_info(self):
         """Update app title with dataset name."""
@@ -716,9 +744,11 @@ class PreviewDataWidget(EdgeWindow):
 
         def spatial_func(frame):
             result = frame
-            if mean_img is not None:
+            if mean_img is not None and result.ndim == 2:
+                # only subtract when frame is 2D (Y, X); skip if 3D since
+                # mean_img is z-specific and can't be applied to a full stack
                 result = result.astype(np.float32) - mean_img
-            if sigma is not None and sigma > 0:
+            if sigma is not None and sigma > 0 and result.ndim == 2:
                 try:
                     import cv2
                     result = cv2.GaussianBlur(result, (ksize, ksize), sigma)

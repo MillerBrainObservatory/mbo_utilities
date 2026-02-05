@@ -91,7 +91,7 @@ The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/usa
 | `mbo pollen` | Pollen calibration tool (WIP) |
 | `mbo pollen path/to/data` | Pollen calibration - Skip data collection |
 
-→ [CLI Guide](https://millerbrainobservatory.github.io/mbo_utilities/cli.html)
+→ [CLI Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/cli.html)
 
 ### GUI
 
