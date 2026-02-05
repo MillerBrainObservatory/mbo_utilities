@@ -260,13 +260,22 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "frameRate",
             "scanFrameRate",
             "fps",
-            "vps",
         ),
         dtype=float,
         unit="Hz",
         default=None,
         description="Frame rate / sampling frequency (Hz)",
         label="Frame Rate",
+    ),
+    # volumes per second (for volumetric imaging like IsoView)
+    "vps": MetadataParameter(
+        canonical="vps",
+        aliases=("volumes_per_second",),
+        dtype=float,
+        unit="Hz",
+        default=None,
+        description="Volumetric acquisition rate (volumes per second)",
+        label="Volume Rate",
     ),
     # ImageJ frame interval (seconds between frames, inverse of fs)
     "finterval": MetadataParameter(

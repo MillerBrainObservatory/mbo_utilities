@@ -32,6 +32,10 @@ from mbo_utilities.arrays import (
     _extract_tiff_plane_number,
     open_scanimage,
 )
+from mbo_utilities.arrays.isoview import (
+    _find_tm_folders,
+    _has_tm_pattern,
+)
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -166,9 +170,8 @@ def imread(
                     return IsoviewArray(p)
 
             # Check for IsoView output structure: TM* subfolders with data files
-            tm_folders = [
-                d for d in p.iterdir() if d.is_dir() and d.name.startswith("TM")
-            ]
+            # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
+            tm_folders = _find_tm_folders(p)
             if tm_folders:
                 # check first TM folder for file types
                 first_tm = tm_folders[0]
@@ -195,7 +198,8 @@ def imread(
                     return IsoviewArray(p)
 
             # Check if this IS a TM folder (single timepoint)
-            if p.name.startswith("TM"):
+            # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
+            if _has_tm_pattern(p.name):
                 klbs = list(p.glob("*.klb"))
                 zarrs = list(p.glob("*.zarr"))
                 tifs = [f for f in p.glob("*.tif")
