@@ -28,10 +28,11 @@ def _has_time_dim(arr: Any) -> bool:
 
 
 def _get_zslice(arr: Any, t_slice: slice, z: int) -> np.ndarray:
-    """Get a z-slice from an array, handling different dimension layouts.
+    """Get a z-slice or channel-slice from an array for stats computation.
 
     Uses dims property to correctly index arrays with non-standard layouts
-    like IsoviewArray and ClusterPTArray which have a views/camera dimension.
+    like IsoviewArray and ClusterPTArray which have a views/camera dimension,
+    and SinglePlaneArray which has channels instead of z-planes.
 
     Returns a stack of frames (T, Y, X) for computing temporal statistics,
     or a single frame (Y, X) expanded to (1, Y, X) for single-timepoint data.
@@ -39,31 +40,40 @@ def _get_zslice(arr: Any, t_slice: slice, z: int) -> np.ndarray:
     Supports:
     - 3D: (T, Y, X) -> arr[t_slice]
     - 4D standard: (T, Z, Y, X) -> arr[t_slice, z]
+    - 4D channels: (T, C, Y, X) -> arr[t_slice, z] (z indexes channel)
     - 4D single-timepoint views: (Z, Views, Y, X) -> arr[z, 0] expanded to (1, Y, X)
     - 5D with views: (T, Z, Views, Y, X) -> arr[t_slice, z, 0]
     """
     dims = getattr(arr, "dims", None)
 
     # use dims property to determine correct indexing
+    # normalize to lowercase for comparison (dims may be uppercase or mixed)
     if dims is not None:
+        dims_lower = tuple(d.lower() for d in dims)
         # check if this is a views-type array (isoview, clusterpt)
-        if "cm" in dims:
-            if "t" in dims:
+        if "cm" in dims_lower:
+            if "t" in dims_lower or "timepoints" in dims_lower:
                 # multi-timepoint: (T, Z, Views, Y, X)
                 return arr[t_slice, z, 0]
             else:
                 # single-timepoint: (Z, Views, Y, X) -> (Y, X)
                 # expand to (1, Y, X) for consistent stats computation
                 return arr[z, 0][np.newaxis, ...]
-        elif "z" in dims:
+        elif "z" in dims_lower or any(d in dims_lower for d in ("z-planes", "z-slices", "volumes")):
             # has z but no views
-            if "t" in dims:
+            if "t" in dims_lower or "timepoints" in dims_lower:
                 return arr[t_slice, z]
             else:
                 # single z-slice, expand to (1, Y, X)
                 return arr[z][np.newaxis, ...]
+        elif "channels" in dims_lower or "channel" in dims_lower or "c" in dims_lower:
+            # multi-channel single-plane: (T, C, Y, X) - z indexes channel
+            if "t" in dims_lower or "timepoints" in dims_lower:
+                return arr[t_slice, z]
+            else:
+                return arr[z][np.newaxis, ...]
         else:
-            # no z dimension, just time
+            # no z or channel dimension, just time (3D TYX)
             return arr[t_slice]
 
     # fallback for arrays without dims property
@@ -77,8 +87,31 @@ def _get_zslice(arr: Any, t_slice: slice, z: int) -> np.ndarray:
         return arr[t_slice]
 
 
+def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
+    """Determine the range of slices to compute stats over.
+
+    Returns (slice_indices, slice_label) where slice_label is 'z' or 'c'.
+    For 3D data (TYX), returns ([0], 'z').
+    For 4D data with z-planes, iterates over z.
+    For 4D data with channels (no z), iterates over channels.
+    """
+    if arr.ndim == 3:
+        return [0], "z"
+
+    # check if this is channel data (nz=1 but nc>1)
+    nz = getattr(parent, "nz", 1)
+    nc = getattr(parent, "nc", 1)
+
+    if nz > 1:
+        return list(range(nz)), "z"
+    elif nc > 1:
+        return list(range(nc)), "c"
+    else:
+        return [0], "z"
+
+
 def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
-    """Compute z-stats for a single array."""
+    """Compute slice-stats (z-plane or channel) for a single array."""
     # Check for pre-computed stats in zarr metadata (instant loading)
     # supports both 'stats' (new) and 'zstats' (legacy) properties
     pre_stats = None
@@ -92,46 +125,48 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         # Still need to compute mean images for visualization
         means = []
         tiff_lock = threading.Lock()
-        # determine actual z-planes for this array
-        z_range = [0] if arr.ndim == 3 else list(range(parent.nz))
-        n_z_planes = len(z_range)
-        for i, z in enumerate(z_range):
+        # determine slice range (z-planes or channels)
+        slice_range, slice_label = _get_slice_range(parent, arr)
+        n_slices = len(slice_range)
+        for i, s in enumerate(slice_range):
             with tiff_lock:
-                stack = _get_zslice(arr, slice(None, None, 10), z)
+                stack = _get_zslice(arr, slice(None, None, 10), s)
                 mean_img = np.mean(stack, axis=0)
                 means.append(mean_img)
-                parent._zstats_progress[idx - 1] = (i + 1) / n_z_planes
-                parent._zstats_current_z[idx - 1] = z
+                parent._zstats_progress[idx - 1] = (i + 1) / n_slices
+                parent._zstats_current_z[idx - 1] = s
         means_stack = np.stack(means)
         parent._zstats_means[idx - 1] = means_stack
         parent._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
         parent._zstats_done[idx - 1] = True
         parent._zstats_running[idx - 1] = False
-        parent.logger.info(f"Loaded pre-computed z-stats from zarr metadata for array {idx}")
+        parent.logger.info(f"Loaded pre-computed {slice_label}-stats from zarr metadata for array {idx}")
         return
 
     stats, means = {"mean": [], "std": [], "snr": []}, []
     tiff_lock = threading.Lock()
 
-    # determine actual z-planes for this array
-    z_range = [0] if arr.ndim == 3 else list(range(parent.nz))
-    n_z_planes = len(z_range)
+    # determine slice range (z-planes or channels)
+    slice_range, slice_label = _get_slice_range(parent, arr)
+    n_slices = len(slice_range)
+    stats["slice_label"] = slice_label  # track what we're iterating over
 
-    for i, z in enumerate(z_range):
+    for i, s in enumerate(slice_range):
         with tiff_lock:
-            stack = _get_zslice(arr, slice(None, None, 10), z).astype(np.float32)
+            stack = _get_zslice(arr, slice(None, None, 10), s).astype(np.float32)
 
             mean_img = np.mean(stack, axis=0)
             std_img = np.std(stack, axis=0)
-            snr_img = np.divide(mean_img, std_img + 1e-5, where=(std_img > 1e-5))
+            snr_img = np.zeros_like(mean_img)
+            np.divide(mean_img, std_img + 1e-5, out=snr_img, where=(std_img > 1e-5))
 
             stats["mean"].append(float(np.mean(mean_img)))
             stats["std"].append(float(np.mean(std_img)))
             stats["snr"].append(float(np.mean(snr_img)))
 
             means.append(mean_img)
-            parent._zstats_progress[idx - 1] = (i + 1) / n_z_planes
-            parent._zstats_current_z[idx - 1] = z
+            parent._zstats_progress[idx - 1] = (i + 1) / n_slices
+            parent._zstats_current_z[idx - 1] = s
 
     parent._zstats[idx - 1] = stats
     means_stack = np.stack(means)
@@ -336,6 +371,9 @@ def _draw_array_stats(
             _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, array_idx)
 
 
+SNR_TOOLTIP = "SNR = mean(mean_img / std_img), computed per-pixel then spatially averaged"
+
+
 def _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, array_idx=None):
     """Draw simplified stats table for single/dual z-plane."""
     n_cols = 4 if is_dual_zplane else 3
@@ -356,14 +394,16 @@ def _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, arra
 
         if is_dual_zplane:
             metrics = [
-                ("Mean Fluorescence", mean_vals[0], mean_vals[1], "a.u."),
-                ("Std. Deviation", std_vals[0], std_vals[1], "a.u."),
-                ("Signal-to-Noise", snr_vals[0], snr_vals[1], "ratio"),
+                ("Mean Fluorescence", mean_vals[0], mean_vals[1], "a.u.", False),
+                ("Std. Deviation", std_vals[0], std_vals[1], "a.u.", False),
+                ("Signal-to-Noise", snr_vals[0], snr_vals[1], "ratio", True),
             ]
-            for metric_name, val1, val2, unit in metrics:
+            for metric_name, val1, val2, unit, is_snr in metrics:
                 imgui.table_next_row()
                 imgui.table_next_column()
                 imgui.text(metric_name)
+                if is_snr:
+                    set_tooltip(SNR_TOOLTIP, show_mark=True)
                 imgui.table_next_column()
                 imgui.text(f"{val1:.2f}")
                 imgui.table_next_column()
@@ -372,14 +412,16 @@ def _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, arra
                 imgui.text(unit)
         else:
             metrics = [
-                ("Mean Fluorescence", mean_vals[0], "a.u."),
-                ("Std. Deviation", std_vals[0], "a.u."),
-                ("Signal-to-Noise", snr_vals[0], "ratio"),
+                ("Mean Fluorescence", mean_vals[0], "a.u.", False),
+                ("Std. Deviation", std_vals[0], "a.u.", False),
+                ("Signal-to-Noise", snr_vals[0], "ratio", True),
             ]
-            for metric_name, value, unit in metrics:
+            for metric_name, value, unit, is_snr in metrics:
                 imgui.table_next_row()
                 imgui.table_next_column()
                 imgui.text(metric_name)
+                if is_snr:
+                    set_tooltip(SNR_TOOLTIP, show_mark=True)
                 imgui.table_next_column()
                 imgui.text(f"{value:.2f}")
                 imgui.table_next_column()
@@ -398,7 +440,14 @@ def _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals, array_idx=No
     ):
         for col in ["Z", "Mean", "Std", "SNR"]:
             imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
-        imgui.table_headers_row()
+        # custom header row to add tooltip on SNR
+        imgui.table_next_row(imgui.TableRowFlags_.headers)
+        for col in ["Z", "Mean", "Std"]:
+            imgui.table_next_column()
+            imgui.table_header(col)
+        imgui.table_next_column()
+        imgui.table_header("SNR")
+        set_tooltip(SNR_TOOLTIP, show_mark=True)
         for i in range(len(z_vals)):
             imgui.table_next_row()
             for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):

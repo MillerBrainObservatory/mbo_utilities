@@ -385,6 +385,7 @@ def _imwrite_base(
             metadata=md,
             planes=planes_list,
             frames=frames_list,
+            channels=channels_list,
             overwrite=overwrite,
             target_chunk_mb=target_chunk_mb,
             progress_callback=progress_callback,

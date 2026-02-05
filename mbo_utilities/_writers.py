@@ -1183,6 +1183,7 @@ def _write_volumetric_zarr(
     metadata: dict | None = None,
     planes: list | None = None,
     frames: list | None = None,
+    channels: list | None = None,
     overwrite: bool = True,
     target_chunk_mb: int = 50,
     progress_callback=None,
@@ -1201,7 +1202,7 @@ def _write_volumetric_zarr(
     parameters
     ----------
     data : array-like
-        data with shape (T, Z, Y, X), (T, Y, X), or (Z, Y, X)
+        data with shape (T, Z, Y, X), (T, C, Y, X), (T, Y, X), or (Z, Y, X)
     path : Path
         output directory (filename auto-generated from dims)
     metadata : dict
@@ -1210,6 +1211,8 @@ def _write_volumetric_zarr(
         z-plane selection (1-based indices). None = all planes.
     frames : list | None
         timepoint selection (1-based indices). None = all frames.
+    channels : list | None
+        channel selection (1-based indices). None = all channels.
     overwrite : bool
         overwrite existing files
     target_chunk_mb : int
@@ -1267,13 +1270,15 @@ def _write_volumetric_zarr(
         selections["T"] = [frames] if isinstance(frames, int) else frames
     if planes is not None:
         selections["Z"] = [planes] if isinstance(planes, int) else planes
+    if channels is not None:
+        selections["C"] = [channels] if isinstance(channels, int) else channels
 
     # create slicing state (handles dim normalization, 1-based conversion)
     slicing = ArraySlicing.from_array(data, selections=selections, one_based=True)
 
     # build output filename from dims
     suffix = output_suffix if output_suffix else "stack"
-    output_fn = OutputFilename.from_array(data, planes=planes, frames=frames, suffix=suffix)
+    output_fn = OutputFilename.from_array(data, planes=planes, frames=frames, channels=channels, suffix=suffix)
     filename = path / output_fn.build(".zarr")
 
     if filename.exists() and not overwrite:
@@ -1311,6 +1316,8 @@ def _write_volumetric_zarr(
         output_selections["T"] = list(slicing.selections["T"].indices)
     if "Z" in slicing.selections:
         output_selections["Z"] = list(slicing.selections["Z"].indices)
+    if "C" in slicing.selections:
+        output_selections["C"] = list(slicing.selections["C"].indices)
 
     out_meta = OutputMetadata(
         source=metadata or {},
