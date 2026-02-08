@@ -708,12 +708,6 @@ class PreviewDataWidget(EdgeWindow):
 
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function."""
-        names = self.image_widget._slider_dim_names or ()
-        try:
-            z_idx = self.image_widget.indices["z"] if "z" in names else 0
-        except (IndexError, KeyError):
-            z_idx = 0
-
         sigma = self.gaussian_sigma if self.gaussian_sigma > 0 else None
 
         any_mean_sub = self._mean_subtraction and any(
@@ -729,25 +723,32 @@ class PreviewDataWidget(EdgeWindow):
 
         spatial_funcs = []
         for i in range(self.num_graphics):
-            mean_img = None
+            means_stack = None
             if self._mean_subtraction and self._zstats_done[i] and self._zstats_means[i] is not None:
-                mean_img = self._zstats_means[i][z_idx].astype(np.float32)
+                means_stack = self._zstats_means[i].astype(np.float32)
 
-            spatial_funcs.append(self._make_spatial_func(mean_img, sigma))
+            spatial_funcs.append(self._make_spatial_func(means_stack, sigma))
 
         self._set_processor_attr("spatial_func", spatial_funcs)
 
-    def _make_spatial_func(self, mean_img: np.ndarray | None, sigma: float | None):
+    def _make_spatial_func(self, means_stack: np.ndarray | None, sigma: float | None):
         """Create a spatial function that applies mean subtraction and/or gaussian blur."""
         # precompute kernel size for opencv (6*sigma, rounded to odd)
         ksize = (int(sigma * 6) | 1) if sigma else 0
+        iw = self.image_widget
 
         def spatial_func(frame):
             result = frame
-            if mean_img is not None and result.ndim == 2:
-                # only subtract when frame is 2D (Y, X); skip if 3D since
-                # mean_img is z-specific and can't be applied to a full stack
-                result = result.astype(np.float32) - mean_img
+            if means_stack is not None and result.ndim == 2:
+                # dynamically look up current z-plane so the correct mean
+                # is subtracted even when z changes between rebuilds
+                names = iw._slider_dim_names or ()
+                try:
+                    z_idx = iw.indices["z"] if "z" in names else 0
+                except (IndexError, KeyError):
+                    z_idx = 0
+                z_idx = min(z_idx, len(means_stack) - 1)
+                result = result.astype(np.float32) - means_stack[z_idx]
             if sigma is not None and sigma > 0 and result.ndim == 2:
                 try:
                     import cv2
@@ -861,9 +862,7 @@ class PreviewDataWidget(EdgeWindow):
 
         if z_idx != self._last_z_idx:
             self._last_z_idx = z_idx
-            if self._mean_subtraction:
-                self._update_mean_subtraction()
-            elif self._auto_contrast_on_z and self.image_widget:
+            if (self._mean_subtraction or self._auto_contrast_on_z) and self.image_widget:
                 self.image_widget.reset_vmin_vmax_frame()
 
     def draw_stats_section(self):

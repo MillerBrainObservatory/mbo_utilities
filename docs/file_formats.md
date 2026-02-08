@@ -14,7 +14,12 @@ kernelspec:
 (file_formats)=
 # File Formats
 
-`imread` and `imwrite` handle 3D/4D imaging data across `.tiff`, `.zarr`, `.h5`, `.bin`, and `.npy` formats.
+`imread()` and the GUI file dialogs are primarily designed to read [ScanImage](https://docs.scanimage.org/) TIFFs
+and future raw filetypes supported at the [Miller Brain Observatory](https://millerbrainobservatory.github.io/).
+
+The raw metadata is made [OME](https://www.openmicroscopy.org/ome-xml/) and ImageJ/Fiji compatible when writing to disk, ensuring downstream tools can interpret volumetric and multi-channel data correctly.
+
+Additional formats are made as-needed for specific tasks, e.g. Suite2p `.bin` and `.h5` for microscope calibrations.
 
 ## Quick Reference
 
@@ -42,7 +47,7 @@ kernelspec:
 ```
 imread(path)
 │
-├── np.ndarray ───────────────────────────► NumpyArray
+├── np.ndarray ───────────────────────────► NumpyArray (in-memory)
 ├── .npy ─────────────────────────────────► NumpyArray (mmap)
 ├── .h5 / .hdf5 ──────────────────────────► H5Array
 ├── .zarr ────────────────────────────────► ZarrArray
@@ -55,7 +60,7 @@ imread(path)
 │   │   ├── stack_type == "piezo" ────────► PiezoArray
 │   │   ├── stack_type == "pollen" ───────► LBMPiezoArray
 │   │   └── stack_type == "single_plane" ─► SinglePlaneArray
-│   └── else ─────────────────────────────► TiffArray (handles ImageJ hyperstacks)
+│   └── else ─────────────────────────────► TiffArray 
 │
 └── Directory
     ├── Isoview zarr structure ───────────► IsoviewArray
@@ -72,6 +77,8 @@ imread(path)
 ### ScanImage Arrays
 
 Returned when reading raw ScanImage TIFF files. `imread()` auto-detects the stack type:
+
+This folder containing all `tiffs` for a single session can be passed to `imread`, as well as a single files or a list of files.
 
 ```python
 import mbo_utilities as mbo

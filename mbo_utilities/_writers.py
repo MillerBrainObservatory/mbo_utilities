@@ -304,6 +304,7 @@ def _write_plane(
     show_progress=True,
     dshape=None,
     plane_index=None,
+    channel_index=None,
     shift_vector=None,
     **kwargs,
 ):
@@ -475,15 +476,17 @@ def _write_plane(
     for i in range(nchunks):
         end = start + base + (1 if i < extra else 0)
 
-        # Extract chunk - handle plane_index for z-plane selection
+        # Extract chunk - handle plane_index and channel_index for z/channel selection
         # NOTE: Use len(data.shape) instead of data.ndim for ScanImageArray compatibility
         # (ScanImageArray.ndim returns metadata ndim, not actual dimensions)
-        if plane_index is not None and len(data.shape) >= 4:
-            # For 4D data with plane_index, extract the specific z-plane
-            # Index both time and z dimensions in one operation
+        if channel_index is not None and plane_index is not None and len(data.shape) >= 5:
+            # 5D TCZYX: extract specific channel and z-plane
+            chunk = data[start:end, channel_index, plane_index, :, :]
+        elif plane_index is not None and len(data.shape) >= 4:
+            # 4D TZYX: extract specific z-plane
             chunk = data[start:end, plane_index, :, :]
         elif plane_index is not None:
-            # For 3D or 2D data, plane_index is just metadata
+            # 3D or 2D data, plane_index is just metadata
             chunk = data[start:end]
         else:
             # No plane_index: standard slicing

@@ -104,13 +104,17 @@ def load_new_data(parent: Any, path: str):
             path_obj = Path(path[0] if isinstance(path, (list, tuple)) else path)
             parent._s2p_outdir = str(path_obj.parent / "suite2p")
 
-        # Update nz for z-plane count
-        if len(parent.shape) == 4:
+        # Update nz/nc for z-plane and channel counts
+        if len(parent.shape) == 5:
+            # TCZYX: shape[1]=C, shape[2]=Z
+            parent.nc = parent.shape[1]
+            parent.nz = parent.shape[2]
+        elif len(parent.shape) == 4:
             parent.nz = parent.shape[1]
-        elif len(parent.shape) == 3:
-            parent.nz = 1
+            parent.nc = 1
         else:
             parent.nz = 1
+            parent.nc = 1
 
         # Reset save dialog state for new data
         parent._saveas_selected_roi = set()

@@ -99,6 +99,10 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
 
 def main():
     """Main entry point for worker subprocess."""
+    # force line buffering so print() output appears in logs immediately
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+
     # disable tqdm dynamic display for file output (no terminal = no \r updates)
     os.environ["TQDM_DISABLE"] = "1"
 
