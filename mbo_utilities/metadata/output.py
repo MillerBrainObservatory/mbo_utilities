@@ -226,6 +226,17 @@ class OutputMetadata:
         except ValueError:
             return 1
 
+    @property
+    def num_color_channels(self) -> int:
+        """number of color channels in output."""
+        if not self.source_dims:
+            return get_param(self.source, "num_color_channels", default=1) or 1
+        try:
+            idx = list(self.source_dims).index("C")
+            return self._output_shape[idx] if idx < len(self._output_shape) else 1
+        except ValueError:
+            return get_param(self.source, "num_color_channels", default=1) or 1
+
     # legacy compatibility properties
 
     @property
@@ -386,7 +397,17 @@ class OutputMetadata:
         }
 
         ndim = len(shape)
-        if ndim == 4:
+        if ndim == 5:
+            # TZCYX order
+            n_frames = shape[0]
+            n_slices = shape[1]
+            n_channels = shape[2]
+            ij_meta["images"] = n_frames * n_slices * n_channels
+            ij_meta["frames"] = n_frames
+            ij_meta["slices"] = n_slices
+            ij_meta["channels"] = n_channels
+            ij_meta["hyperstack"] = True
+        elif ndim == 4:
             n_frames = shape[0]
             n_slices = shape[1]
             ij_meta["images"] = n_frames * n_slices
@@ -547,6 +568,7 @@ class OutputMetadata:
         result["nz"] = self.num_zplanes
         result["slices"] = self.num_zplanes
         result["num_channels"] = self.num_zplanes  # lbm: z-planes as channels
+        result["num_color_channels"] = self.num_color_channels
 
         # record selection info
         if self._z_step_factor > 1:
