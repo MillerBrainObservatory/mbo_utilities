@@ -977,12 +977,7 @@ def _draw_section_suite2p_content(self):
 
     # handle run button click
     if button_clicked and has_save_path:
-        self.logger.info(f"Running Suite2p pipeline on {len(self._selected_planes)} planes...")
         run_process(self)
-        if getattr(self, "_s2p_background", True):
-            self.logger.info("Suite2p processing started in background.")
-        else:
-            self.logger.info("Suite2p processing submitted.")
 
     if self._install_error:
         if self._show_red_text:
@@ -1752,7 +1747,7 @@ def run_process(self):
             self.logger.error(f"Unknown pipeline selected: {self._current_pipeline}")
         return
 
-    self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
+    self.logger.debug(f"suite2p settings: {self.s2p}")
     if not _check_lsp_available():
         self.logger.warning(
             "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline."
@@ -1853,9 +1848,7 @@ def run_process(self):
                     output_path=output_dir,
                 )
 
-                if pid:
-                    self.logger.info(f"Started background process {pid} for {description}")
-                else:
+                if not pid:
                     self.logger.error(
                         f"Failed to start background process for {description}"
                     )

@@ -154,7 +154,7 @@ class PreviewDataWidget(EdgeWindow):
             isinstance(self.image_widget.data[0], ScanImageArray) or
             isinstance(self.image_widget.data[0], TiffArray)
         )
-        self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
+        self.logger.debug(f"data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
         # Initialize state
         self._init_state()
@@ -170,7 +170,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # Start z-stats computation
         if threading_enabled:
-            self.logger.info("Starting zstats computation...")
+            self.logger.debug("starting zstats computation")
             for i in range(self.num_graphics):
                 self._zstats_running[i] = True
             threading.Thread(target=lambda: compute_zstats(self), daemon=True).start()
@@ -195,7 +195,7 @@ class PreviewDataWidget(EdgeWindow):
 
         log.attach(console_handler)
         self.logger = log.get("gui")
-        self.logger.info("Logger initialized.")
+        self.logger.debug("Logger initialized.")
         start_output_capture()
 
     def _init_suite2p(self):
@@ -427,7 +427,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @s2p_dir.setter
     def s2p_dir(self, value):
-        self.logger.info(f"Setting Suite2p directory to {value}")
+        self.logger.debug(f"suite2p_dir={value}")
         self._s2p_dir = value
 
     @property
@@ -495,7 +495,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @fix_phase.setter
     def fix_phase(self, value: bool):
-        self.logger.info(f"Setting fix_phase to {value}.")
+        self.logger.debug(f"fix_phase={value}")
         for arr in self._get_data_arrays():
             if hasattr(arr, "phase_correction") and isinstance(arr.phase_correction, PhaseCorrectionFeature):
                 arr.phase_correction.enabled = value
@@ -516,7 +516,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @use_fft.setter
     def use_fft(self, value: bool):
-        self.logger.info(f"Setting use_fft to {value}.")
+        self.logger.debug(f"use_fft={value}")
         for arr in self._get_data_arrays():
             if hasattr(arr, "phase_correction") and isinstance(arr.phase_correction, PhaseCorrectionFeature):
                 arr.phase_correction.use_fft = value
@@ -537,7 +537,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @border.setter
     def border(self, value: int):
-        self.logger.info(f"Setting border to {value}.")
+        self.logger.debug(f"border={value}")
         for arr in self._get_data_arrays():
             if hasattr(arr, "phase_correction") and isinstance(arr.phase_correction, PhaseCorrectionFeature):
                 arr.phase_correction.border = value
@@ -553,7 +553,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @max_offset.setter
     def max_offset(self, value: int):
-        self.logger.info(f"Setting max_offset to {value}.")
+        self.logger.debug(f"max_offset={value}")
         for arr in self._get_data_arrays():
             if hasattr(arr, "max_offset"):
                 arr.max_offset = value
@@ -590,7 +590,7 @@ class PreviewDataWidget(EdgeWindow):
     @proj.setter
     def proj(self, value: str):
         if value != self._proj:
-            self.logger.info(f"Projection changed: {self._proj} -> {value}")
+            self.logger.debug(f"projection: {self._proj} -> {value}")
             self._proj = value
             self._update_window_funcs()
 
@@ -624,7 +624,7 @@ class PreviewDataWidget(EdgeWindow):
         if value == self._window_size:
             return
         self._window_size = value
-        self.logger.info(f"Window size set to {value}.")
+        self.logger.debug(f"window_size={value}")
         if not self.processors:
             return
         n_slider_dims = self.processors[0].n_slider_dims
@@ -645,7 +645,7 @@ class PreviewDataWidget(EdgeWindow):
     def phase_upsample(self, value: int):
         if not self.has_raster_scan_support:
             return
-        self.logger.info(f"Setting phase_upsample to {value}.")
+        self.logger.debug(f"phase_upsample={value}")
         for arr in self._get_data_arrays():
             if hasattr(arr, "upsample"):
                 arr.upsample = value
@@ -797,7 +797,7 @@ class PreviewDataWidget(EdgeWindow):
             if frac >= 1.0:
                 self._saveas_running = False
                 self._saveas_complete_time = time.time()
-                self.logger.info("Save complete")
+                self.logger.debug("save complete")
         elif isinstance(meta, str):
             self._register_z_progress = frac
             self._register_z_current_msg = meta
@@ -851,7 +851,7 @@ class PreviewDataWidget(EdgeWindow):
         menu_ms = (t1 - t0) * 1000
         draw_ms = (t2 - t1) * 1000
         if menu_ms > 50 or draw_ms > 50:
-            print(f"SLOW FRAME: menu={menu_ms:.1f}ms, draw={draw_ms:.1f}ms")
+            self.logger.debug(f"slow frame: menu={menu_ms:.1f}ms, draw={draw_ms:.1f}ms")
 
         # Update mean subtraction when z-plane changes
         names = self.image_widget._slider_dim_names or ()
@@ -915,4 +915,4 @@ class PreviewDataWidget(EdgeWindow):
         if hasattr(self, "_s2p_folder_dialog"):
             self._s2p_folder_dialog = None
 
-        self.logger.info("GUI cleanup complete")
+        self.logger.debug("gui cleanup complete")

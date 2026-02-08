@@ -13,7 +13,6 @@ from mbo_utilities.preferences import (
     set_last_dir,
     add_recent_file,
 )
-from mbo_utilities.gui.widgets.upgrade_manager import UpgradeManager, CheckStatus, UpgradeStatus
 from mbo_utilities.install import check_installation, Status
 
 # re-export for backwards compatibility
@@ -36,6 +35,57 @@ COL_OK = imgui.ImVec4(0.4, 1.0, 0.4, 1.0)
 COL_WARN = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
 COL_ERR = imgui.ImVec4(1.0, 0.4, 0.4, 1.0)
 COL_NA = imgui.ImVec4(0.5, 0.5, 0.5, 1.0)
+
+
+def _get_install_source() -> str:
+    """get install source label: 'PyPI', git branch name, or 'editable'."""
+    try:
+        import importlib.metadata
+        import json
+
+        dist = importlib.metadata.distribution("mbo-utilities")
+
+        # check direct_url.json (pip install from git url or editable)
+        direct_url_text = dist.read_text("direct_url.json")
+        if direct_url_text:
+            info = json.loads(direct_url_text)
+            vcs_info = info.get("vcs_info", {})
+            if vcs_info:
+                branch = vcs_info.get("requested_revision")
+                if branch:
+                    return branch
+                commit = vcs_info.get("commit_id", "")
+                return commit[:8] if commit else "git"
+            if info.get("dir_info"):
+                return _git_branch() or "editable"
+            return "local"
+
+        # editable egg-info installs (uv run, pip install -e .)
+        if hasattr(dist, "_path") and ".egg-info" in str(dist._path):
+            return _git_branch() or "editable"
+
+        return "PyPI"
+    except Exception:
+        return ""
+
+
+def _git_branch() -> str:
+    """get current git branch of the package source, or empty string."""
+    try:
+        import subprocess
+        from pathlib import Path
+        import mbo_utilities
+
+        pkg_dir = Path(mbo_utilities.__file__).parent.parent
+        if not (pkg_dir / ".git").exists():
+            return ""
+        r = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, cwd=str(pkg_dir), timeout=5,
+        )
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception:
+        return ""
 
 
 def push_button_style(primary=True):
@@ -112,9 +162,7 @@ class FileDialog:
         self.metadata_only = False
         self.split_rois = False
         self._default_dir = str(get_default_open_dir())
-        # upgrade manager - auto-check on startup
-        self.upgrade_manager = UpgradeManager(enabled=True)
-        self.upgrade_manager.check_for_upgrade()
+        self._install_source = _get_install_source()
         # cached install status (computed in background)
         self._install_status = None
         self._check_thread = None
@@ -179,61 +227,14 @@ class FileDialog:
         return None
 
     def _draw_version_status(self):
-        """Draw version with update status inline."""
-        # get version immediately from __version__ (don't wait for install check)
+        """Draw version with install source inline."""
         from mbo_utilities import __version__
-        version = __version__
 
-        checking = self.upgrade_manager.check_status == CheckStatus.CHECKING
-        done = self.upgrade_manager.check_status == CheckStatus.DONE
-        has_update = done and self.upgrade_manager.upgrade_available
-        is_dev = done and self.upgrade_manager.is_dev_build
-        up_to_date = done and not has_update and not is_dev
-
-        # version text - green if up to date, normal otherwise
-        if up_to_date:
-            imgui.text_colored(COL_OK, f"v{version}")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("up to date")
-        elif is_dev:
-            imgui.text_colored(COL_TEXT_DIM, f"v{version}")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("development build")
-        elif checking:
-            imgui.text_colored(COL_TEXT_DIM, f"v{version}")
-            imgui.same_line()
-            imgui.text_colored(COL_TEXT_DIM, "...")
-        else:
-            imgui.text_colored(COL_TEXT_DIM, f"v{version}")
-
-        # update button if available
-        if has_update:
-            imgui.same_line()
-            upgrading = self.upgrade_manager.upgrade_status == UpgradeStatus.RUNNING
-            if upgrading:
-                imgui.begin_disabled()
-
-            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.5, 0.2, 1.0))
-            imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.25, 0.6, 0.25, 1.0))
-            imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.15, 0.4, 0.15, 1.0))
-            text_h = imgui.get_text_line_height()
-            if imgui.button("update", imgui.ImVec2(0, text_h)):
-                self.upgrade_manager.start_upgrade()
-            imgui.pop_style_color(3)
-
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(f"v{self.upgrade_manager.latest_version} available")
-
-            if upgrading:
-                imgui.end_disabled()
-
-            # show restart message after upgrade
-            if self.upgrade_manager.upgrade_status == UpgradeStatus.SUCCESS:
-                imgui.same_line()
-                imgui.text_colored(COL_OK, "restart")
-            elif self.upgrade_manager.upgrade_status == UpgradeStatus.ERROR:
-                imgui.same_line()
-                imgui.text_colored(COL_ERR, "failed")
+        source = self._install_source
+        label = f"v{__version__}"
+        if source:
+            label += f" ({source})"
+        imgui.text_colored(COL_TEXT_DIM, label)
 
     def _draw_dependency_group(self, name: str, pipeline_feature: str, requires: list[tuple[str, str]]):
         """Draw a single dependency group inline: Name - Requirement vX.X (GPU/CPU)."""
