@@ -1246,23 +1246,53 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         t0 = time.perf_counter()
         if not isinstance(key, tuple):
             key = (key,)
-        t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (
-            slice(None),
-        ) * (4 - len(key))
-        frames = listify_index(t_key, self.num_frames)
-        chans = listify_index(z_key, self.num_channels)
-        if not frames or not chans:
-            return np.empty(0)
+
+        ndim = len(self.shape)
+        key = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (ndim - len(key))
+
+        # 5D: (T, C, Z, Y, X) — dual-channel LBM
+        if ndim == 5:
+            t_key, c_key, z_key, y_key, x_key = key
+            frames = listify_index(t_key, self.num_frames)
+            colors = listify_index(c_key, self._num_color_channels)
+            zplanes = listify_index(z_key, self._num_zplanes)
+            if not frames or not colors or not zplanes:
+                return np.empty(0)
+            # map (c, z) -> virtual channel index for page formula
+            chans = [c * self._num_zplanes + z for c in colors for z in zplanes]
+        else:
+            t_key, z_key = key[0], key[1]
+            frames = listify_index(t_key, self.num_frames)
+            chans = listify_index(z_key, self.num_channels)
+            if not frames or not chans:
+                return np.empty(0)
 
         out = self.process_rois(frames, chans)
         t1 = time.perf_counter()
         self.logger.debug(f"__getitem__ took {(t1 - t0) * 1000:.1f}ms")
 
+        # reshape (T, C*Z, Y, X) -> (T, C, Z, Y, X) for 5D
+        if ndim == 5:
+            if isinstance(out, tuple):
+                out = tuple(
+                    x.reshape(len(frames), len(colors), len(zplanes), x.shape[-2], x.shape[-1])
+                    for x in out
+                )
+            else:
+                out = out.reshape(len(frames), len(colors), len(zplanes), out.shape[-2], out.shape[-1])
+
+        # squeeze integer-indexed dimensions
         squeeze = []
-        if isinstance(t_key, int):
+        if isinstance(key[0], int):
             squeeze.append(0)
-        if isinstance(z_key, int):
-            squeeze.append(1)
+        if ndim == 5:
+            if isinstance(key[1], int):
+                squeeze.append(1)
+            if isinstance(key[2], int):
+                squeeze.append(2)
+        else:
+            if isinstance(key[1], int):
+                squeeze.append(1)
         if squeeze:
             if isinstance(out, tuple):
                 out = tuple(np.squeeze(x, axis=tuple(squeeze)) for x in out)
@@ -1327,20 +1357,15 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         if self.roi is not None and not isinstance(self.roi, (list, tuple)):
             if self.roi > 0:
                 roi = self._rois[self.roi - 1]
-                return (
-                    self.num_frames,
-                    self.num_channels,
-                    roi["height"],
-                    roi["width"],
-                )
+                h, w = roi["height"], roi["width"]
+                if self._num_color_channels > 1:
+                    return (self.num_frames, self._num_color_channels, self._num_zplanes, h, w)
+                return (self.num_frames, self.num_channels, h, w)
         total_width = sum(roi["width"] for roi in self._rois)
         max_height = max(roi["height"] for roi in self._rois)
-        return (
-            self.num_frames,
-            self.num_channels,
-            max_height,
-            total_width,
-        )
+        if self._num_color_channels > 1:
+            return (self.num_frames, self._num_color_channels, self._num_zplanes, max_height, total_width)
+        return (self.num_frames, self.num_channels, max_height, total_width)
 
     def size(self):
         total_width = sum(roi["width"] for roi in self._rois)
@@ -1466,7 +1491,8 @@ class LBMArray(ScanImageArray):
 
     @property
     def dims(self) -> tuple[str, ...]:
-        """Dimension labels for LBM arrays: (timepoints, z-planes, Y, X)."""
+        if self._num_color_channels > 1:
+            return ("timepoints", "channels", "z-planes", "Y", "X")
         return ("timepoints", "z-planes", "Y", "X")
 
 

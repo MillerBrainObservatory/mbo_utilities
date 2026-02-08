@@ -421,10 +421,7 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                 ("stack_type", "Acquisition stack type: lbm, piezo, or single_plane"),
                 ("lbm_stack", "Light Beads Microscopy acquisition mode"),
                 ("piezo_stack", "Piezo-driven z-stack acquisition mode"),
-                ("num_color_channels", "Number of color channels (1 or 2)"),
             ]
-            if is_lbm:
-                acq_fields.append(("num_mrois", "Number of multi-ROI scan regions (LBM only)"))
 
             si_data = metadata.get("si", {}) if isinstance(metadata.get("si"), dict) else {}
             si_version_major = (
@@ -445,8 +442,6 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                 "stack_type": ("stackType",),
                 "lbm_stack": ("is_lbm", "lbmStack"),
                 "piezo_stack": ("is_piezo", "piezoStack"),
-                "num_mrois": ("num_rois", "scanimage_multirois", "numROIs", "nrois", "n_rois"),
-                "num_color_channels": ("color_channels", "ncolors", "num_colors"),
                 "nchannels": ("num_channels", "n_channels", "channels", "C", "nc", "numChannels"),
             }
             for key, _ in acq_fields:
@@ -541,7 +536,7 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                 imgui.text_colored(_TREE_NODE_COLOR, "Other")
                 imgui.separator()
                 imaging_keys = set(IMAGING_METADATA_KEYS)
-                acquisition_keys = {"stack_type", "lbm_stack", "piezo_stack", "num_mrois", "num_color_channels", "nchannels"}
+                acquisition_keys = {"stack_type", "lbm_stack", "piezo_stack", "nchannels"}
                 for k, v in sorted(remaining.items()):
                     key_color = _get_key_color(k, imaging_keys, acquisition_keys, ALIAS_MAP)
                     _render_item(k, v, filter_text=_metadata_search_filter, name_color=key_color)

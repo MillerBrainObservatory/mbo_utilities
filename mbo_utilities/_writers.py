@@ -1039,13 +1039,8 @@ def _write_volumetric_tiff(
     # get target shape after selection
     output_shape = slicing.output_shape
     n_frames = slicing.selections["T"].count if "T" in slicing.selections else 1
-    # handle both Z (z-planes) and C (channels) as the second dimension
-    if "Z" in slicing.selections:
-        n_planes = slicing.selections["Z"].count
-    elif "C" in slicing.selections:
-        n_planes = slicing.selections["C"].count
-    else:
-        n_planes = 1
+    n_planes = slicing.selections["Z"].count if "Z" in slicing.selections else 1
+    n_channels = slicing.selections["C"].count if "C" in slicing.selections else 1
     Ly, Lx = slicing.spatial_shape
 
     # check for z-registration shift application (shared logic)
@@ -1063,7 +1058,10 @@ def _write_volumetric_tiff(
     else:
         Ly_out, Lx_out = Ly, Lx
 
-    target_shape = (n_frames, n_planes, Ly_out, Lx_out)
+    if n_channels > 1:
+        target_shape = (n_frames, n_planes, n_channels, Ly_out, Lx_out)
+    else:
+        target_shape = (n_frames, n_planes, Ly_out, Lx_out)
 
     # update metadata for imagej using OutputMetadata for reactive values
     from mbo_utilities.metadata import OutputMetadata
@@ -1078,6 +1076,8 @@ def _write_volumetric_tiff(
         output_selections["T"] = slicing.selections["T"].indices
     if "Z" in slicing.selections:
         output_selections["Z"] = slicing.selections["Z"].indices
+    if "C" in slicing.selections:
+        output_selections["C"] = slicing.selections["C"].indices
 
     out_meta = OutputMetadata(
         source=metadata or {},
@@ -1110,8 +1110,9 @@ def _write_volumetric_tiff(
 
     if debug:
         logger.info(f"Writing volumetric tiff: {filename}")
-        logger.info(f"  Shape: {target_shape} (TZYX)")
-        logger.info(f"  ImageJ meta: frames={ij_meta.get('frames')}, slices={ij_meta.get('slices')}")
+        shape_label = "TZCYX" if n_channels > 1 else "TZYX"
+        logger.info(f"  Shape: {target_shape} ({shape_label})")
+        logger.info(f"  ImageJ meta: frames={ij_meta.get('frames')}, slices={ij_meta.get('slices')}, channels={ij_meta.get('channels')}")
         logger.info(f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}")
         if out_meta.z_step_factor > 1:
             logger.info(f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)")
@@ -1132,21 +1133,27 @@ def _write_volumetric_tiff(
             # read chunk using unified reader
             chunk_data = read_chunk(data, chunk_info, slicing.dims)
 
-            # ensure 4D (T, Z, Y, X)
-            if chunk_data.ndim == 3:
-                chunk_data = chunk_data[:, np.newaxis, :, :]
-
-            # ensure contiguous
-            chunk_data = np.ascontiguousarray(chunk_data)
-
-            # apply z-registration shifts if enabled (shared logic)
-            if apply_shift and plane_shifts is not None:
-                chunk_data = apply_shifts_to_chunk(
-                    chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out
-                )
-
-            # reshape to TZCYX for imagej (add C=1)
-            chunk_5d = chunk_data[:, :, np.newaxis, :, :]
+            if chunk_data.ndim == 5:
+                # TCZYX -> TZCYX for ImageJ
+                chunk_data = chunk_data.transpose(0, 2, 1, 3, 4)
+                chunk_data = np.ascontiguousarray(chunk_data)
+                # apply z-registration per channel (apply_shifts_to_chunk expects 4D)
+                if apply_shift and plane_shifts is not None:
+                    for c in range(chunk_data.shape[2]):
+                        chunk_data[:, :, c, :, :] = apply_shifts_to_chunk(
+                            chunk_data[:, :, c, :, :], plane_shifts, z_indices, padding, Ly_out, Lx_out
+                        )
+                chunk_5d = chunk_data  # already (T, Z, C, Y, X)
+            else:
+                # existing 4D path
+                if chunk_data.ndim == 3:
+                    chunk_data = chunk_data[:, np.newaxis, :, :]
+                chunk_data = np.ascontiguousarray(chunk_data)
+                if apply_shift and plane_shifts is not None:
+                    chunk_data = apply_shifts_to_chunk(
+                        chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out
+                    )
+                chunk_5d = chunk_data[:, :, np.newaxis, :, :]
 
             # write each frame (T) with all its Z slices
             for t in range(chunk_5d.shape[0]):

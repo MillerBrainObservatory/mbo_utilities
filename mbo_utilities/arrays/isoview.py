@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 import re
 _TM_PATTERN = re.compile(r"TM(\d{5,6})")
 
+# regex pattern for TL folders (Tiled structure)
+_TL_PATTERN = re.compile(r"TL(\d+)")
+
 
 def _find_tm_folders(base_path: Path) -> list[Path]:
     """Find folders containing TM###### pattern in their name.
@@ -61,11 +64,13 @@ _ISOVIEW_INFO = PipelineInfo(
         "**/SPM??_TM??????_CM??_CHN??.zarr",
         "**/TM??????/",
         "**/SPC??_TM?????_ANG???_CM?_CHN??_PH?.stack",
+        "**/TL?/TL?_CM?.stack",  # timelapse structure
+        "**/TL??/TL??_CM?.stack",  # timelapse with 2-digit TL number
     ],
     output_patterns=[],
     input_extensions=["zarr", "stack"],
     output_extensions=[],
-    marker_files=["ch00_spec00.xml", "ch0.xml"],
+    marker_files=["ch00_spec00.xml", "ch0.xml", "TL*_ch*.xml"],
     category="reader",
 )
 register_pipeline(_ISOVIEW_INFO)
@@ -173,10 +178,25 @@ def _parse_isoview_xml(xml_path: Path) -> dict:
     return metadata
 
 
-def _find_isoview_xml(base_path: Path) -> Path | None:
-    """Find XML metadata file in isoview raw data directory."""
-    # try common patterns
-    patterns = ["ch00_spec00.xml", "ch0.xml", "ch*.xml", "*.xml"]
+def _find_isoview_xml(base_path: Path, timelapse: bool = False) -> Path | None:
+    """Find XML metadata file in isoview raw data directory.
+
+    Args:
+        base_path: directory containing XML files
+        timelapse: if True, search for TL#_ch##.xml pattern first
+    """
+    if timelapse:
+        # timelapse structure: TL1/TL1_ch00.xml or TL1/TL1_ch01.xml
+        folder_name = base_path.name
+        patterns = [
+            f"{folder_name}_ch*.xml",  # TL1_ch00.xml, TL1_ch01.xml
+            "ch*.xml",
+            "*.xml",
+        ]
+    else:
+        # standard structure
+        patterns = ["ch00_spec00.xml", "ch0.xml", "ch*.xml", "*.xml"]
+
     for pattern in patterns:
         matches = list(base_path.glob(pattern))
         if matches:
@@ -253,12 +273,24 @@ class IsoviewArray:
     def _discover_raw(self, base_path: Path):
         """Discover raw .stack files and parse metadata from XML.
 
-        Filename pattern: SPC{specimen}_TM{time}_ANG{angle}_CM{camera}_CHN{channel}_PH{phase}.stack
+        Supports two filename patterns:
+        1. Standard: SPC{specimen}_TM{time}_ANG{angle}_CM{camera}_CHN{channel}_PH{phase}.stack
+        2. Timelapse: TL{timepoint}_CM{camera}.stack (channel inferred from camera)
         """
         import re
 
+        # check for timelapse structure (TL#_CM#.stack)
+        timelapse_pattern = re.compile(r"TL(\d+)_CM(\d+)\.stack")
+        stack_files = sorted(base_path.glob("*.stack"))
+
+        if not stack_files:
+            raise ValueError(f"No .stack files in {base_path}")
+
+        # detect if timelapse by checking first file
+        is_timelapse = any(timelapse_pattern.match(sf.name) for sf in stack_files)
+
         # find xml for dimensions
-        xml_path = _find_isoview_xml(base_path)
+        xml_path = _find_isoview_xml(base_path, timelapse=is_timelapse)
         if xml_path is None:
             raise ValueError(f"No XML metadata file found in {base_path}")
 
@@ -274,34 +306,49 @@ class IsoviewArray:
         self._xml_width = xml_width  # X = 768
         self._xml_height = xml_height  # Y = 1848
 
-        # parse all .stack files
-        stack_files = sorted(base_path.glob("*.stack"))
-        if not stack_files:
-            raise ValueError(f"No .stack files in {base_path}")
-
-        # pattern: SPC00_TM00000_ANG000_CM0_CHN01_PH0.stack
-        pattern = re.compile(
-            r"SPC(\d+)_TM(\d+)_ANG(\d+)_CM(\d+)_CHN(\d+)_PH(\d+)\.stack"
-        )
-
         # organize by timepoint and (camera, channel)
         self._stack_files = {}  # {timepoint: {(camera, channel): Path}}
         timepoints = set()
         views = set()
 
-        for sf in stack_files:
-            match = pattern.match(sf.name)
-            if not match:
-                logger.warning(f"Skipping unrecognized file: {sf.name}")
-                continue
+        if is_timelapse:
+            # timelapse: TL#_CM#.stack pattern
+            # channel is inferred from camera: CM0,1 -> CHN01; CM2,3 -> CHN00
+            for sf in stack_files:
+                match = timelapse_pattern.match(sf.name)
+                if not match:
+                    logger.warning(f"Skipping unrecognized file: {sf.name}")
+                    continue
 
-            specimen, timepoint, angle, camera, channel, phase = map(int, match.groups())
-            timepoints.add(timepoint)
-            views.add((camera, channel))
+                timepoint, camera = map(int, match.groups())
+                # infer channel from camera
+                channel = 1 if camera in (0, 1) else 0
 
-            if timepoint not in self._stack_files:
-                self._stack_files[timepoint] = {}
-            self._stack_files[timepoint][(camera, channel)] = sf
+                timepoints.add(timepoint)
+                views.add((camera, channel))
+
+                if timepoint not in self._stack_files:
+                    self._stack_files[timepoint] = {}
+                self._stack_files[timepoint][(camera, channel)] = sf
+        else:
+            # standard: SPC00_TM00000_ANG000_CM0_CHN01_PH0.stack
+            pattern = re.compile(
+                r"SPC(\d+)_TM(\d+)_ANG(\d+)_CM(\d+)_CHN(\d+)_PH(\d+)\.stack"
+            )
+
+            for sf in stack_files:
+                match = pattern.match(sf.name)
+                if not match:
+                    logger.warning(f"Skipping unrecognized file: {sf.name}")
+                    continue
+
+                specimen, timepoint, angle, camera, channel, phase = map(int, match.groups())
+                timepoints.add(timepoint)
+                views.add((camera, channel))
+
+                if timepoint not in self._stack_files:
+                    self._stack_files[timepoint] = {}
+                self._stack_files[timepoint][(camera, channel)] = sf
 
         # sort timepoints and views
         self._timepoints = sorted(timepoints)
@@ -322,12 +369,14 @@ class IsoviewArray:
         self._single_timepoint = len(self._timepoints) == 1
         self._consolidated_path = None
         self._pipeline_stage = "isoview-raw"
+        self._is_timelapse = is_timelapse
 
         # create tm_folders-like list for compatibility
         self.tm_folders = [base_path] * len(self._timepoints)
 
         logger.info(
-            f"IsoviewArray: structure=raw, pipeline_stage={self._pipeline_stage}, "
+            f"IsoviewArray: structure=raw, timelapse={is_timelapse}, "
+            f"pipeline_stage={self._pipeline_stage}, "
             f"timepoints={len(self._timepoints)}, views={len(self._views)}, "
             f"shape={self._single_shape}"
         )

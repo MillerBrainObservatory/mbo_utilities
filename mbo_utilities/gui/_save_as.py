@@ -896,6 +896,19 @@ def _draw_selection_section(parent: Any):
         # fallback if no valid selection
         n_frames = 0
 
+    # channel tag - include if multi-channel
+    if num_channels > 1:
+        if c_start == c_stop:
+            c_tag = DimensionTag(TAG_REGISTRY["C"], start=c_start, stop=None, step=1)
+        else:
+            c_tag = DimensionTag(
+                TAG_REGISTRY["C"],
+                start=c_start,
+                stop=c_stop,
+                step=c_step if c_step != 1 else 1,
+            )
+        tags.append(c_tag)
+
     # z-plane tag - always include if multi-plane
     z_start = getattr(parent, "_saveas_z_start", 1)
     z_stop = getattr(parent, "_saveas_z_stop", 1)
@@ -1093,6 +1106,11 @@ def _draw_save_button(parent: Any):
                 if tp_parsed:
                     tp_meta = tp_parsed.to_metadata()
                     metadata_overrides["timepoint_selection"] = tp_meta
+
+                # add channel selection metadata
+                if len(save_channels) < num_channels:
+                    metadata_overrides["num_color_channels"] = len(save_channels)
+                    metadata_overrides["channel_selection"] = save_channels
 
                 # Determine output_suffix: only use custom suffix for multi-ROI stitched data
                 output_suffix = None

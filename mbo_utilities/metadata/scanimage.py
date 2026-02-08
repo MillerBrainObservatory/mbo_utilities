@@ -172,11 +172,12 @@ def get_num_zplanes(metadata: dict) -> int:
     si = metadata.get("si", {})
 
     if stack_type in ("lbm", "pollen"):
-        # For both LBM and pollen, beamlets (channels) represent z-planes
+        # beamlets = z-planes; for dual-channel, divide by color channels
         hch = si.get("hChannels", {})
         channel_save = hch.get("channelSave", [])
         if isinstance(channel_save, list):
-            return len(channel_save)
+            num_color = get_num_color_channels(metadata)
+            return len(channel_save) // max(num_color, 1)
         return 1
 
     if stack_type == "piezo":
