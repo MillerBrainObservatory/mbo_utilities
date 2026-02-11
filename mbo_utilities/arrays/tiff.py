@@ -878,8 +878,6 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
             plane.close()
 
 
-
-
 class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, DimensionSpecMixin, PhaseCorrectionMixin):
     """
     Base class for raw ScanImage TIFF readers with phase correction support.
