@@ -154,7 +154,7 @@ class PreviewDataWidget(EdgeWindow):
             isinstance(self.image_widget.data[0], ScanImageArray) or
             isinstance(self.image_widget.data[0], TiffArray)
         )
-        self.logger.debug(f"data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
+        self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
         # Initialize state
         self._init_state()
@@ -170,7 +170,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # Start z-stats computation
         if threading_enabled:
-            self.logger.debug("starting zstats computation")
+            self.logger.info("Starting zstats computation...")
             for i in range(self.num_graphics):
                 self._zstats_running[i] = True
             threading.Thread(target=lambda: compute_zstats(self), daemon=True).start()
@@ -195,7 +195,7 @@ class PreviewDataWidget(EdgeWindow):
 
         log.attach(console_handler)
         self.logger = log.get("gui")
-        self.logger.debug("Logger initialized.")
+        self.logger.info("Logger initialized.")
         start_output_capture()
 
     def _init_suite2p(self):
@@ -290,7 +290,13 @@ class PreviewDataWidget(EdgeWindow):
         else:
             self.nc = 1
 
-        self.logger.info(f"Detected nz={self.nz}, nc={self.nc} from dims={dims}")
+        # detect camera views (isoview cm dimension)
+        self.n_views = 1
+        if dims_lower is not None and "cm" in dims_lower:
+            cm_idx = dims_lower.index("cm")
+            self.n_views = self.shape[cm_idx]
+
+        self.logger.info(f"Detected nz={self.nz}, nc={self.nc}, n_views={self.n_views} from dims={dims}")
 
         # Window/projection state
         self._window_size = 1
@@ -427,7 +433,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @s2p_dir.setter
     def s2p_dir(self, value):
-        self.logger.debug(f"suite2p_dir={value}")
+        self.logger.info(f"Setting Suite2p directory to {value}")
         self._s2p_dir = value
 
     @property
@@ -495,7 +501,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @fix_phase.setter
     def fix_phase(self, value: bool):
-        self.logger.debug(f"fix_phase={value}")
+        self.logger.info(f"Setting fix_phase to {value}.")
         for arr in self._get_data_arrays():
             if hasattr(arr, "phase_correction") and isinstance(arr.phase_correction, PhaseCorrectionFeature):
                 arr.phase_correction.enabled = value
@@ -516,7 +522,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @use_fft.setter
     def use_fft(self, value: bool):
-        self.logger.debug(f"use_fft={value}")
+        self.logger.info(f"Setting use_fft to {value}.")
         for arr in self._get_data_arrays():
             if hasattr(arr, "phase_correction") and isinstance(arr.phase_correction, PhaseCorrectionFeature):
                 arr.phase_correction.use_fft = value
@@ -537,7 +543,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @border.setter
     def border(self, value: int):
-        self.logger.debug(f"border={value}")
+        self.logger.info(f"Setting border to {value}.")
         for arr in self._get_data_arrays():
             if hasattr(arr, "phase_correction") and isinstance(arr.phase_correction, PhaseCorrectionFeature):
                 arr.phase_correction.border = value
@@ -553,7 +559,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @max_offset.setter
     def max_offset(self, value: int):
-        self.logger.debug(f"max_offset={value}")
+        self.logger.info(f"Setting max_offset to {value}.")
         for arr in self._get_data_arrays():
             if hasattr(arr, "max_offset"):
                 arr.max_offset = value
@@ -590,7 +596,7 @@ class PreviewDataWidget(EdgeWindow):
     @proj.setter
     def proj(self, value: str):
         if value != self._proj:
-            self.logger.debug(f"projection: {self._proj} -> {value}")
+            self.logger.info(f"Projection changed: {self._proj} -> {value}")
             self._proj = value
             self._update_window_funcs()
 
@@ -621,13 +627,18 @@ class PreviewDataWidget(EdgeWindow):
 
     @window_size.setter
     def window_size(self, value: int):
+        # clamp to available timepoints
+        nt = self.shape[0] if len(self.shape) > 0 else 1
+        value = max(1, min(value, nt))
         if value == self._window_size:
             return
         self._window_size = value
-        self.logger.debug(f"window_size={value}")
+        self.logger.info(f"Window size set to {value}.")
         if not self.processors:
             return
         n_slider_dims = self.processors[0].n_slider_dims
+        if n_slider_dims == 0:
+            return
         per_processor_sizes = (self._window_size,) + (None,) * (n_slider_dims - 1)
         self._set_processor_attr("window_sizes", per_processor_sizes)
         if self.image_widget:
@@ -645,7 +656,7 @@ class PreviewDataWidget(EdgeWindow):
     def phase_upsample(self, value: int):
         if not self.has_raster_scan_support:
             return
-        self.logger.debug(f"phase_upsample={value}")
+        self.logger.info(f"Setting phase_upsample to {value}.")
         for arr in self._get_data_arrays():
             if hasattr(arr, "upsample"):
                 arr.upsample = value
@@ -708,6 +719,12 @@ class PreviewDataWidget(EdgeWindow):
 
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function."""
+        names = self.image_widget._slider_dim_names or ()
+        try:
+            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+        except (IndexError, KeyError):
+            z_idx = 0
+
         sigma = self.gaussian_sigma if self.gaussian_sigma > 0 else None
 
         any_mean_sub = self._mean_subtraction and any(
@@ -723,32 +740,25 @@ class PreviewDataWidget(EdgeWindow):
 
         spatial_funcs = []
         for i in range(self.num_graphics):
-            means_stack = None
+            mean_img = None
             if self._mean_subtraction and self._zstats_done[i] and self._zstats_means[i] is not None:
-                means_stack = self._zstats_means[i].astype(np.float32)
+                mean_img = self._zstats_means[i][z_idx].astype(np.float32)
 
-            spatial_funcs.append(self._make_spatial_func(means_stack, sigma))
+            spatial_funcs.append(self._make_spatial_func(mean_img, sigma))
 
         self._set_processor_attr("spatial_func", spatial_funcs)
 
-    def _make_spatial_func(self, means_stack: np.ndarray | None, sigma: float | None):
+    def _make_spatial_func(self, mean_img: np.ndarray | None, sigma: float | None):
         """Create a spatial function that applies mean subtraction and/or gaussian blur."""
         # precompute kernel size for opencv (6*sigma, rounded to odd)
         ksize = (int(sigma * 6) | 1) if sigma else 0
-        iw = self.image_widget
 
         def spatial_func(frame):
             result = frame
-            if means_stack is not None and result.ndim == 2:
-                # dynamically look up current z-plane so the correct mean
-                # is subtracted even when z changes between rebuilds
-                names = iw._slider_dim_names or ()
-                try:
-                    z_idx = iw.indices["z"] if "z" in names else 0
-                except (IndexError, KeyError):
-                    z_idx = 0
-                z_idx = min(z_idx, len(means_stack) - 1)
-                result = result.astype(np.float32) - means_stack[z_idx]
+            if mean_img is not None and result.ndim == 2:
+                # only subtract when frame is 2D (Y, X); skip if 3D since
+                # mean_img is z-specific and can't be applied to a full stack
+                result = result.astype(np.float32) - mean_img
             if sigma is not None and sigma > 0 and result.ndim == 2:
                 try:
                     import cv2
@@ -777,7 +787,9 @@ class PreviewDataWidget(EdgeWindow):
 
         n_slider_dims = self.processors[0].n_slider_dims
 
-        if n_slider_dims == 1:
+        if n_slider_dims == 0:
+            return
+        elif n_slider_dims == 1:
             window_funcs = (proj_func,)
         elif n_slider_dims == 2:
             window_funcs = (proj_func, None)
@@ -797,7 +809,7 @@ class PreviewDataWidget(EdgeWindow):
             if frac >= 1.0:
                 self._saveas_running = False
                 self._saveas_complete_time = time.time()
-                self.logger.debug("save complete")
+                self.logger.info("Save complete")
         elif isinstance(meta, str):
             self._register_z_progress = frac
             self._register_z_current_msg = meta
@@ -851,7 +863,7 @@ class PreviewDataWidget(EdgeWindow):
         menu_ms = (t1 - t0) * 1000
         draw_ms = (t2 - t1) * 1000
         if menu_ms > 50 or draw_ms > 50:
-            self.logger.debug(f"slow frame: menu={menu_ms:.1f}ms, draw={draw_ms:.1f}ms")
+            print(f"SLOW FRAME: menu={menu_ms:.1f}ms, draw={draw_ms:.1f}ms")
 
         # Update mean subtraction when z-plane changes
         names = self.image_widget._slider_dim_names or ()
@@ -862,7 +874,9 @@ class PreviewDataWidget(EdgeWindow):
 
         if z_idx != self._last_z_idx:
             self._last_z_idx = z_idx
-            if (self._mean_subtraction or self._auto_contrast_on_z) and self.image_widget:
+            if self._mean_subtraction:
+                self._update_mean_subtraction()
+            elif self._auto_contrast_on_z and self.image_widget:
                 self.image_widget.reset_vmin_vmax_frame()
 
     def draw_stats_section(self):
@@ -915,4 +929,4 @@ class PreviewDataWidget(EdgeWindow):
         if hasattr(self, "_s2p_folder_dialog"):
             self._s2p_folder_dialog = None
 
-        self.logger.debug("gui cleanup complete")
+        self.logger.info("GUI cleanup complete")

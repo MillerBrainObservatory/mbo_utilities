@@ -13,11 +13,15 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
 
 from mbo_utilities.gui.tasks import TASKS
+
+# max minutes with no progress change before worker self-terminates
+MAX_STALL_MINUTES = 120
 
 
 def setup_logging(log_file: str | None = None) -> logging.Logger:
@@ -97,6 +101,48 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
         print(f"Failed to update status sidecar: {e}", file=sys.stderr)
 
 
+def _start_watchdog(uuid: str | None, logger: logging.Logger):
+    """daemon thread that kills this process if progress stalls."""
+    def _watchdog():
+        log_dir = Path.home() / "mbo" / "logs"
+        last_progress = 0.0
+        last_change = time.time()
+        stall_seconds = MAX_STALL_MINUTES * 60
+
+        while True:
+            time.sleep(60)
+            try:
+                if uuid:
+                    sidecar = log_dir / f"progress_{uuid}.json"
+                else:
+                    sidecar = log_dir / f"progress_{os.getpid()}.json"
+
+                if sidecar.exists():
+                    with open(sidecar) as f:
+                        data = json.load(f)
+                    progress = data.get("progress", 0.0)
+                    status = data.get("status", "running")
+
+                    # done, no need to watch
+                    if status in ("completed", "error"):
+                        return
+
+                    if progress != last_progress:
+                        last_progress = progress
+                        last_change = time.time()
+            except Exception:
+                pass
+
+            if time.time() - last_change > stall_seconds:
+                msg = f"watchdog: no progress for {MAX_STALL_MINUTES} min, terminating"
+                logger.error(msg)
+                _update_status(os.getpid(), "error", message=msg, uuid=uuid)
+                os._exit(1)
+
+    t = threading.Thread(target=_watchdog, daemon=True)
+    t.start()
+
+
 def main():
     """Main entry point for worker subprocess."""
     # force line buffering so print() output appears in logs immediately
@@ -128,6 +174,9 @@ def main():
     logger = setup_logging(log_file)
 
     logger.info(f"Worker started: task={task_type}, pid={os.getpid()}")
+
+    # watchdog kills this process if it stalls for too long
+    _start_watchdog(uuid, logger)
 
     # get task function
     if task_type not in TASKS:

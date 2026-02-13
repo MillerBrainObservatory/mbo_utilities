@@ -1181,6 +1181,9 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                 "num_frames": self.num_frames,
                 "use_fft": self.use_fft,
                 "mean_subtraction": self.mean_subtraction,
+                # stitched image dimensions (accounts for multi-ROI layout)
+                "Ly": self.shape[-2],
+                "Lx": self.shape[-1],
             }
         )
         return self._metadata

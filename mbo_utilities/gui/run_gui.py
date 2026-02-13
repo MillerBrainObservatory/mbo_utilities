@@ -5,15 +5,11 @@ This module is designed for fast startup - heavy imports are deferred until need
 Operations like --download-notebook and --check-install should be near-instant.
 """
 import sys
-import warnings
 from pathlib import Path
 from typing import Any
 
 import click
 import contextlib
-
-# suppress cmap alias warnings (e.g. 'coolwarm' is also 'paraview:coolwarm')
-warnings.filterwarnings("ignore", message=".*is an alias for.*", category=UserWarning)
 
 # Set AppUserModelID immediately for Windows
 try:
