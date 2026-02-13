@@ -383,11 +383,12 @@ class ArraySlicing:
         """bytes for one frame (all spatial dims, one index per non-spatial dim)."""
         Ly, Lx = self.spatial_shape
         n_planes = 1
+        n_channels = 1
         if "Z" in self.selections:
             n_planes = self.selections["Z"].count
-        elif "C" in self.selections:
-            n_planes = self.selections["C"].count
-        return n_planes * Ly * Lx * self.dtype.itemsize
+        if "C" in self.selections:
+            n_channels = self.selections["C"].count
+        return n_planes * n_channels * Ly * Lx * self.dtype.itemsize
 
     def calculate_chunk_size(self, target_mb: float = 50.0) -> int:
         """
@@ -572,7 +573,18 @@ def read_chunk(
 
     frames = []
     for t_idx in t_indices:
-        if ndim == 5 and views_dim_idx is not None:
+        if ndim == 5 and "C" in dims and "Z" in dims:
+            # TCZYX - preserve both C and Z dimensions
+            c_indices = chunk_info.selections.get("C", list(range(arr.shape[dims.index("C")])))
+            z_sel = z_indices if z_indices is not None else list(range(arr.shape[dims.index("Z")]))
+            c_frames = []
+            for c_idx in c_indices:
+                z_frames = []
+                for z_idx in z_sel:
+                    z_frames.append(np.asarray(arr[t_idx, c_idx, z_idx, :, :]))
+                c_frames.append(np.stack(z_frames, axis=0))  # (Z_sel, Y, X)
+            frame = np.stack(c_frames, axis=0)  # (C_sel, Z_sel, Y, X)
+        elif ndim == 5 and views_dim_idx is not None:
             # TZVYX - 5D with views dimension
             v_idx = v_indices[0] if v_indices else 0
             if z_indices is not None:

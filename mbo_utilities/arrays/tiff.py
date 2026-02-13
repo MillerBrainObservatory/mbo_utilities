@@ -154,14 +154,15 @@ def find_tiff_plane_files(directory: Path) -> list[Path]:
 
 
 class _InterleavedTiffReader:
-    """Internal reader for ImageJ-style interleaved TZYX hyperstacks."""
+    """Internal reader for ImageJ-style interleaved TZCYX hyperstacks."""
 
-    def __init__(self, path: Path, n_frames: int, n_planes: int):
+    def __init__(self, path: Path, n_frames: int, n_planes: int, n_channels: int = 1):
         self._path = path
         self._tiff = TiffFile(path)
         self._lock = threading.Lock()
         self._n_frames = n_frames
         self._n_planes = n_planes
+        self._n_channels = n_channels
 
         page0 = self._tiff.pages.first
         self._page_shape = page0.shape
@@ -176,6 +177,10 @@ class _InterleavedTiffReader:
         return self._n_planes
 
     @property
+    def n_channels(self) -> int:
+        return self._n_channels
+
+    @property
     def Ly(self) -> int:
         return self._page_shape[0]
 
@@ -188,20 +193,38 @@ class _InterleavedTiffReader:
         from mbo_utilities.util import get_dtype
         return get_dtype(self._dtype)
 
-    def read_tzyx(self, t_indices: list[int], z_indices: list[int]) -> np.ndarray:
-        """Read frames for given T and Z indices, returning (T, Z, Y, X) array."""
-        buf = np.empty(
-            (len(t_indices), len(z_indices), self.Ly, self.Lx),
-            dtype=self._dtype
-        )
+    def read_tzyx(self, t_indices: list[int], z_indices: list[int], c_indices: list[int] | None = None) -> np.ndarray:
+        """Read frames for given T, Z, and optional C indices.
 
-        with self._lock:
-            for ti, t_idx in enumerate(t_indices):
-                for zi, z_idx in enumerate(z_indices):
-                    page_idx = t_idx * self._n_planes + z_idx
-                    buf[ti, zi] = self._tiff.pages[page_idx].asarray()
-
-        return buf
+        Pages are stored in TZCYX order: page = t*(Z*C) + z*C + c.
+        When c_indices is provided (multi-channel), returns (T, C, Z, Y, X).
+        Otherwise returns (T, Z, Y, X) for backward compatibility.
+        """
+        if c_indices is not None and self._n_channels > 1:
+            # 5D: return TCZYX
+            buf = np.empty(
+                (len(t_indices), len(c_indices), len(z_indices), self.Ly, self.Lx),
+                dtype=self._dtype
+            )
+            with self._lock:
+                for ti, t_idx in enumerate(t_indices):
+                    for ci, c_idx in enumerate(c_indices):
+                        for zi, z_idx in enumerate(z_indices):
+                            page_idx = t_idx * (self._n_planes * self._n_channels) + z_idx * self._n_channels + c_idx
+                            buf[ti, ci, zi] = self._tiff.pages[page_idx].asarray()
+            return buf
+        else:
+            # 4D: return TZYX (backward compatible)
+            buf = np.empty(
+                (len(t_indices), len(z_indices), self.Ly, self.Lx),
+                dtype=self._dtype
+            )
+            with self._lock:
+                for ti, t_idx in enumerate(t_indices):
+                    for zi, z_idx in enumerate(z_indices):
+                        page_idx = t_idx * self._n_planes + z_idx
+                        buf[ti, zi] = self._tiff.pages[page_idx].asarray()
+            return buf
 
     def close(self):
         self._tiff.close()
@@ -417,6 +440,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
         self._is_volumetric = False
         self._target_dtype = None
         self._interleaved_reader = None
+        self._nc = 1
 
         # normalize input to list of paths
         if isinstance(files, (str, Path)):
@@ -449,7 +473,14 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
         # STEP 2: check metadata for shape to determine dimensionality
         shape = self._metadata.get("shape")
 
-        if shape is not None and len(shape) == 4 and shape[1] > 1:
+        if shape is not None and len(shape) == 5 and shape[1] > 1 and shape[2] > 1:
+            # metadata indicates 5D TZCYX with Z > 1 and C > 1
+            n_frames, n_planes, n_channels = shape[0], shape[1], shape[2]
+            if len(file_list) == 1:
+                self._init_interleaved(file_list[0], n_frames, n_planes, n_channels)
+            else:
+                self._init_interleaved(file_list[0], n_frames, n_planes, n_channels)
+        elif shape is not None and len(shape) == 4 and shape[1] > 1:
             # metadata indicates 4D TZYX with Z > 1
             n_frames, n_planes = shape[0], shape[1]
             if len(file_list) == 1:
@@ -560,8 +591,8 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
             # single file - check imagej tags as last resort
             ij_info = self._check_imagej_tags(files[0])
             if ij_info is not None:
-                n_frames, n_planes = ij_info
-                self._init_interleaved(files[0], n_frames, n_planes)
+                n_frames, n_planes, n_channels = ij_info
+                self._init_interleaved(files[0], n_frames, n_planes, n_channels)
             else:
                 # truly single plane timeseries
                 self._init_single_plane(files)
@@ -569,14 +600,15 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
             # multiple files, no plane numbers - treat as time series
             self._init_single_plane(files)
 
-    def _check_imagej_tags(self, path: Path) -> tuple[int, int] | None:
-        """check imagej tags for frames/slices. last resort fallback."""
+    def _check_imagej_tags(self, path: Path) -> tuple[int, int, int] | None:
+        """check imagej tags for frames/slices/channels. last resort fallback."""
         try:
             with TiffFile(path) as tf:
                 if not tf.is_imagej:
                     return None
                 ij_meta = tf.imagej_metadata or {}
                 n_planes = ij_meta.get("slices", 1)
+                n_channels = ij_meta.get("channels", 1)
                 if n_planes <= 1:
                     return None
 
@@ -586,7 +618,11 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
                     info_str = ij_meta.get("Info", "")
                     if info_str:
                         meta = json.loads(info_str)
-                        if "shape" in meta and len(meta["shape"]) >= 4:
+                        if "shape" in meta and len(meta["shape"]) == 5:
+                            n_frames = meta["shape"][0]
+                            n_planes = meta["shape"][1]
+                            n_channels = meta["shape"][2]
+                        elif "shape" in meta and len(meta["shape"]) == 4:
                             n_frames = meta["shape"][0]
                             n_planes = meta["shape"][1]
                 except Exception:
@@ -595,18 +631,19 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
                 if n_frames is None:
                     n_frames = ij_meta.get("frames", 1)
 
-                return (n_frames, n_planes)
+                return (n_frames, n_planes, n_channels)
         except Exception:
             return None
 
-    def _init_interleaved(self, path: Path, n_frames: int, n_planes: int):
-        """initialize as interleaved TZYX from single file."""
+    def _init_interleaved(self, path: Path, n_frames: int, n_planes: int, n_channels: int = 1):
+        """initialize as interleaved TZCYX from single file."""
         self._is_volumetric = True
-        self._interleaved_reader = _InterleavedTiffReader(path, n_frames, n_planes)
+        self._interleaved_reader = _InterleavedTiffReader(path, n_frames, n_planes, n_channels)
         self._planes = []  # not used for interleaved
 
         self._nframes = n_frames
         self._nz = n_planes
+        self._nc = n_channels
         self._ly = self._interleaved_reader.Ly
         self._lx = self._interleaved_reader.Lx
         self._dtype = self._interleaved_reader.dtype
@@ -620,15 +657,22 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
                 "nframes": self._nframes,
                 "num_frames": self._nframes,
                 "num_planes": self._nz,
+                "num_color_channels": self._nc,
                 "file_path": str(path),
             }
         )
         self.num_rois = 1
 
-        logger.info(
-            f"Loaded interleaved TZYX: {n_frames} frames, {n_planes} planes, "
-            f"{self._ly}x{self._lx} px"
-        )
+        if n_channels > 1:
+            logger.info(
+                f"Loaded interleaved TCZYX: {n_frames} frames, {n_channels} channels, "
+                f"{n_planes} planes, {self._ly}x{self._lx} px"
+            )
+        else:
+            logger.info(
+                f"Loaded interleaved TZYX: {n_frames} frames, {n_planes} planes, "
+                f"{self._ly}x{self._lx} px"
+            )
 
     def _init_volume(self, plane_files: list[Path]):
         """initialize as volumetric array from separate plane files."""
@@ -685,6 +729,8 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
 
     @property
     def shape(self) -> tuple[int, ...]:
+        if self._nc > 1:
+            return (self._nframes, self._nc, self._nz, self._ly, self._lx)
         return (self._nframes, self._nz, self._ly, self._lx)
 
     @property
@@ -699,7 +745,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
 
     @property
     def ndim(self) -> int:
-        return 4
+        return 5 if self._nc > 1 else 4
 
     @property
     def metadata(self) -> dict:
@@ -718,11 +764,22 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
-        key = key + (slice(None),) * (4 - len(key))
-        t_key, z_key, y_key, x_key = key
+
+        ndim = self.ndim
+        key = key + (slice(None),) * (ndim - len(key))
+
+        if ndim == 5:
+            # TCZYX indexing
+            t_key, c_key, z_key, y_key, x_key = key
+        else:
+            # TZYX indexing
+            t_key, z_key, y_key, x_key = key
+            c_key = slice(None)
 
         t_key = _convert_range_to_slice(t_key)
         z_key = _convert_range_to_slice(z_key)
+        if ndim == 5:
+            c_key = _convert_range_to_slice(c_key)
 
         # normalize t_key to list of indices
         if isinstance(t_key, slice):
@@ -740,6 +797,22 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
         else:
             t_indices = list(range(self._nframes))
 
+        # normalize c_key to list of indices (for 5D)
+        c_indices = None
+        if self._nc > 1:
+            if isinstance(c_key, int):
+                if c_key < 0:
+                    c_key = self._nc + c_key
+                if c_key < 0 or c_key >= self._nc:
+                    raise IndexError(f"Channel index {c_key} out of bounds for {self._nc} channels")
+                c_indices = [c_key]
+            elif isinstance(c_key, slice):
+                c_indices = list(range(self._nc)[c_key])
+            elif isinstance(c_key, (list, np.ndarray)):
+                c_indices = list(c_key)
+            else:
+                c_indices = list(range(self._nc))
+
         # normalize z_key to list of indices
         if isinstance(z_key, int):
             if z_key < 0:
@@ -756,10 +829,16 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
 
         # use interleaved reader if available
         if self._interleaved_reader is not None:
-            out = self._interleaved_reader.read_tzyx(t_indices, z_indices)
+            out = self._interleaved_reader.read_tzyx(t_indices, z_indices, c_indices)
             # apply spatial slicing
-            if y_key != slice(None) or x_key != slice(None):
-                out = out[:, :, y_key, x_key]
+            if self._nc > 1:
+                # out is (T, C, Z, Y, X)
+                if y_key != slice(None) or x_key != slice(None):
+                    out = out[:, :, :, y_key, x_key]
+            else:
+                # out is (T, Z, Y, X)
+                if y_key != slice(None) or x_key != slice(None):
+                    out = out[:, :, y_key, x_key]
         else:
             # use per-plane readers
             arrs = []
@@ -771,10 +850,22 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
             out = np.stack(arrs, axis=1)
 
         # squeeze singleton dimensions based on original key types
-        if isinstance(key[0], int):
-            out = out[0]
-        if isinstance(key[1], int) and out.ndim >= 3:
-            out = out[:, 0] if out.ndim == 4 else out[0]
+        if ndim == 5:
+            # TCZYX: squeeze T(0), C(1), Z(2) as needed
+            squeeze_axes = []
+            if isinstance(key[0], int):
+                squeeze_axes.append(0)
+            if isinstance(key[1], int):
+                squeeze_axes.append(1)
+            if isinstance(key[2], int):
+                squeeze_axes.append(2)
+            for ax in sorted(squeeze_axes, reverse=True):
+                out = np.squeeze(out, axis=ax)
+        else:
+            if isinstance(key[0], int):
+                out = out[0]
+            if isinstance(key[1], int) and out.ndim >= 3:
+                out = out[:, 0] if out.ndim == 4 else out[0]
 
         if self._target_dtype is not None:
             out = out.astype(self._target_dtype)
@@ -785,8 +876,6 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
             self._interleaved_reader.close()
         for plane in self._planes:
             plane.close()
-
-
 
 
 class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, DimensionSpecMixin, PhaseCorrectionMixin):
@@ -1092,6 +1181,9 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                 "num_frames": self.num_frames,
                 "use_fft": self.use_fft,
                 "mean_subtraction": self.mean_subtraction,
+                # stitched image dimensions (accounts for multi-ROI layout)
+                "Ly": self.shape[-2],
+                "Lx": self.shape[-1],
             }
         )
         return self._metadata
@@ -1246,23 +1338,53 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         t0 = time.perf_counter()
         if not isinstance(key, tuple):
             key = (key,)
-        t_key, z_key, _, _ = tuple(_convert_range_to_slice(k) for k in key) + (
-            slice(None),
-        ) * (4 - len(key))
-        frames = listify_index(t_key, self.num_frames)
-        chans = listify_index(z_key, self.num_channels)
-        if not frames or not chans:
-            return np.empty(0)
+
+        ndim = len(self.shape)
+        key = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (ndim - len(key))
+
+        # 5D: (T, C, Z, Y, X) — dual-channel LBM
+        if ndim == 5:
+            t_key, c_key, z_key, y_key, x_key = key
+            frames = listify_index(t_key, self.num_frames)
+            colors = listify_index(c_key, self._num_color_channels)
+            zplanes = listify_index(z_key, self._num_zplanes)
+            if not frames or not colors or not zplanes:
+                return np.empty(0)
+            # map (c, z) -> virtual channel index for page formula
+            chans = [c * self._num_zplanes + z for c in colors for z in zplanes]
+        else:
+            t_key, z_key = key[0], key[1]
+            frames = listify_index(t_key, self.num_frames)
+            chans = listify_index(z_key, self.num_channels)
+            if not frames or not chans:
+                return np.empty(0)
 
         out = self.process_rois(frames, chans)
         t1 = time.perf_counter()
         self.logger.debug(f"__getitem__ took {(t1 - t0) * 1000:.1f}ms")
 
+        # reshape (T, C*Z, Y, X) -> (T, C, Z, Y, X) for 5D
+        if ndim == 5:
+            if isinstance(out, tuple):
+                out = tuple(
+                    x.reshape(len(frames), len(colors), len(zplanes), x.shape[-2], x.shape[-1])
+                    for x in out
+                )
+            else:
+                out = out.reshape(len(frames), len(colors), len(zplanes), out.shape[-2], out.shape[-1])
+
+        # squeeze integer-indexed dimensions
         squeeze = []
-        if isinstance(t_key, int):
+        if isinstance(key[0], int):
             squeeze.append(0)
-        if isinstance(z_key, int):
-            squeeze.append(1)
+        if ndim == 5:
+            if isinstance(key[1], int):
+                squeeze.append(1)
+            if isinstance(key[2], int):
+                squeeze.append(2)
+        else:
+            if isinstance(key[1], int):
+                squeeze.append(1)
         if squeeze:
             if isinstance(out, tuple):
                 out = tuple(np.squeeze(x, axis=tuple(squeeze)) for x in out)
@@ -1327,20 +1449,15 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         if self.roi is not None and not isinstance(self.roi, (list, tuple)):
             if self.roi > 0:
                 roi = self._rois[self.roi - 1]
-                return (
-                    self.num_frames,
-                    self.num_channels,
-                    roi["height"],
-                    roi["width"],
-                )
+                h, w = roi["height"], roi["width"]
+                if self._num_color_channels > 1:
+                    return (self.num_frames, self._num_color_channels, self._num_zplanes, h, w)
+                return (self.num_frames, self.num_channels, h, w)
         total_width = sum(roi["width"] for roi in self._rois)
         max_height = max(roi["height"] for roi in self._rois)
-        return (
-            self.num_frames,
-            self.num_channels,
-            max_height,
-            total_width,
-        )
+        if self._num_color_channels > 1:
+            return (self.num_frames, self._num_color_channels, self._num_zplanes, max_height, total_width)
+        return (self.num_frames, self.num_channels, max_height, total_width)
 
     def size(self):
         total_width = sum(roi["width"] for roi in self._rois)
@@ -1466,7 +1583,8 @@ class LBMArray(ScanImageArray):
 
     @property
     def dims(self) -> tuple[str, ...]:
-        """Dimension labels for LBM arrays: (timepoints, z-planes, Y, X)."""
+        if self._num_color_channels > 1:
+            return ("timepoints", "channels", "z-planes", "Y", "X")
         return ("timepoints", "z-planes", "Y", "X")
 
 

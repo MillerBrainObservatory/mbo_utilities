@@ -15,6 +15,14 @@ logger = logging.getLogger(__name__)
 # regex pattern for TM folders - matches TM###### anywhere in name
 import re
 _TM_PATTERN = re.compile(r"TM(\d{5,6})")
+_TL_PATTERN = re.compile(r"TL(\d+)")
+_TILED_RAW_PATTERN = re.compile(r"(.+)_CM(\d+)\.stack")
+_TILED_CORRECTED_PATTERN = re.compile(
+    r"SPM(\d+)_TL(\d+)_CM(\d+)_CHN(\d+)\.(ome\.)?tif$"
+)
+_TILED_FUSED_PATTERN = re.compile(
+    r"SPM(\d+)_TL(\d+)_CM(\d+)_CM(\d+)_CHN(\d+)\.fusedStack\.(ome\.)?tif$"
+)
 
 
 def _find_tm_folders(base_path: Path) -> list[Path]:
@@ -176,12 +184,85 @@ def _parse_isoview_xml(xml_path: Path) -> dict:
 def _find_isoview_xml(base_path: Path) -> Path | None:
     """Find XML metadata file in isoview raw data directory."""
     # try common patterns
-    patterns = ["ch00_spec00.xml", "ch0.xml", "ch*.xml", "*.xml"]
+    patterns = [
+        "ch00_spec00.xml", "ch0.xml", "ch*.xml",
+        "TL*_ch*.xml", "SPM*_TL*_CHN*.xml",
+        "*.xml",
+    ]
     for pattern in patterns:
         matches = list(base_path.glob(pattern))
         if matches:
             return matches[0]
     return None
+
+
+class _PagedTiffReader:
+    """lazy page-based reader for large tif volumes.
+
+    reads individual z-planes on demand via tifffile.TiffFile.pages[z].asarray()
+    instead of loading the entire file into memory. supports [z, y, x] indexing
+    matching the interface used by memmap/zarr in IsoviewArray.__getitem__.
+    """
+
+    def __init__(self, path: Path):
+        import tifffile
+        self._tif = tifffile.TiffFile(str(path))
+        page0 = self._tif.pages[0]
+        self._n_pages = len(self._tif.pages)
+        self._page_shape = (page0.shape[-2], page0.shape[-1])
+        self._dtype = page0.dtype
+
+    @property
+    def shape(self):
+        return (self._n_pages, *self._page_shape)
+
+    @property
+    def dtype(self):
+        return self._dtype
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key, slice(None), slice(None))
+        while len(key) < 3:
+            key = (*key, slice(None))
+
+        z_key, y_key, x_key = key
+
+        # resolve z indices
+        if isinstance(z_key, int):
+            z_indices = [z_key if z_key >= 0 else self._n_pages + z_key]
+            squeeze_z = True
+        elif isinstance(z_key, slice):
+            z_indices = list(range(*z_key.indices(self._n_pages)))
+            squeeze_z = False
+        elif isinstance(z_key, (list, np.ndarray)):
+            z_indices = list(z_key)
+            squeeze_z = False
+        else:
+            z_indices = list(range(self._n_pages))
+            squeeze_z = False
+
+        # read requested pages
+        pages = []
+        for zi in z_indices:
+            page_data = self._tif.pages[zi].asarray()
+            pages.append(page_data[y_key, x_key])
+
+        result = np.stack(pages, axis=0)
+
+        if squeeze_z:
+            result = result[0]
+
+        return result
+
+    def close(self):
+        self._tif.close()
+
+    def __del__(self):
+        try:
+            self._tif.close()
+        except Exception:
+            pass
 
 
 class IsoviewArray:
@@ -216,8 +297,17 @@ class IsoviewArray:
         # check for raw .stack files first
         stack_files = list(self.base_path.glob("*.stack"))
         if stack_files:
-            self._structure = "raw"
-            self._discover_raw(self.base_path)
+            self._zarr_cache = {}
+            if self._is_tiled_raw(stack_files):
+                self._structure = "tiled-raw"
+                self._discover_tiled_raw()
+            else:
+                self._structure = "raw"
+                self._discover_raw(self.base_path)
+            return
+
+        # check for tiled corrected/fused TIF files (no TM folders)
+        if self._find_tiled_tifs():
             self._zarr_cache = {}
             return
 
@@ -330,6 +420,212 @@ class IsoviewArray:
             f"IsoviewArray: structure=raw, pipeline_stage={self._pipeline_stage}, "
             f"timepoints={len(self._timepoints)}, views={len(self._views)}, "
             f"shape={self._single_shape}"
+        )
+
+    def _is_tiled_raw(self, stack_files: list[Path]) -> bool:
+        """check if .stack files are tiled (TL) rather than timelapse (TM)."""
+        for sf in stack_files:
+            if _TILED_RAW_PATTERN.match(sf.name):
+                return True
+        return False
+
+    def _find_tiled_tifs(self) -> bool:
+        """detect tiled corrected/fused TIF files in current directory."""
+        tif_files = [
+            f for f in self.base_path.glob("*.tif")
+            if not any(x in f.name for x in EXCLUDE_PATTERNS)
+        ]
+        if not tif_files:
+            return False
+
+        # check fused pattern first (more specific)
+        fused = [f for f in tif_files if _TILED_FUSED_PATTERN.match(f.name)]
+        if fused:
+            self._structure = "tiled-fused"
+            self._discover_tiled_fused(fused)
+            return True
+
+        corrected = [f for f in tif_files if _TILED_CORRECTED_PATTERN.match(f.name)]
+        if corrected:
+            self._structure = "tiled-corrected"
+            self._discover_tiled_corrected(corrected)
+            return True
+
+        return False
+
+    def _discover_tiled_raw(self):
+        """discover tiled raw .stack files: {folder}_CM#.stack pattern."""
+        stack_files = sorted(self.base_path.glob("*.stack"))
+
+        self._views = []
+        self._tiled_files = {}
+
+        for sf in stack_files:
+            match = _TILED_RAW_PATTERN.match(sf.name)
+            if not match:
+                continue
+            cam_idx = int(match.group(2))
+            if cam_idx not in self._views:
+                self._views.append(cam_idx)
+            self._tiled_files[cam_idx] = sf
+
+        self._views = sorted(self._views)
+        if not self._views:
+            raise ValueError(f"No valid tiled raw .stack files in {self.base_path}")
+
+        # parse xml for dimensions
+        xml_path = _find_isoview_xml(self.base_path)
+        if xml_path is None:
+            # try parent directory
+            xml_path = _find_isoview_xml(self.base_path.parent)
+
+        if xml_path is not None:
+            xml_meta = _parse_isoview_xml(xml_path)
+            self._zarr_attrs = xml_meta
+            if "dimensions" in xml_meta and xml_meta["dimensions"]:
+                xml_width, xml_height, _ = xml_meta["dimensions"][0]
+                self._xml_width = xml_width
+                self._xml_height = xml_height
+            else:
+                self._zarr_attrs = {}
+                self._xml_width = None
+                self._xml_height = None
+        else:
+            self._zarr_attrs = {}
+            self._xml_width = None
+            self._xml_height = None
+
+        # calculate shape from first file
+        first_file = self._tiled_files[self._views[0]]
+        file_size = first_file.stat().st_size
+
+        if self._xml_width is not None:
+            total_pixels = file_size // 2  # uint16
+            depth = total_pixels // (self._xml_width * self._xml_height)
+            self._single_shape = (depth, self._xml_height, self._xml_width)
+        else:
+            # no xml: try to infer from file, assume square pages
+            total_pixels = file_size // 2
+            # rough guess: common isoview sizes
+            import math
+            side = int(math.sqrt(total_pixels / 100))  # assume ~100 z-planes
+            self._single_shape = (100, side, side)
+            logger.warning("No XML metadata found, shape is approximate")
+
+        self._dtype = np.dtype("uint16")
+        self._single_timepoint = True
+        self._consolidated_path = None
+        self._pipeline_stage = "isoview-tiled-raw"
+
+        # extract tile id from folder name
+        tl_match = _TL_PATTERN.search(self.base_path.name)
+        self._tile_id = int(tl_match.group(1)) if tl_match else None
+
+        logger.info(
+            f"IsoviewArray: structure=tiled-raw, views={len(self._views)}, "
+            f"shape={self._single_shape}, tile={self._tile_id}"
+        )
+
+    def _discover_tiled_corrected(self, tif_files: list[Path]):
+        """discover tiled corrected TIF files: SPM##_TL#_CM##_CHN##.ome.tif."""
+        self._views = []
+        self._tiled_files = {}
+
+        for tf in sorted(tif_files):
+            match = _TILED_CORRECTED_PATTERN.match(tf.name)
+            if not match:
+                continue
+            specimen = int(match.group(1))
+            tile = int(match.group(2))
+            camera = int(match.group(3))
+            channel = int(match.group(4))
+            view = (camera, channel)
+            if view not in self._views:
+                self._views.append(view)
+            self._tiled_files[view] = tf
+
+        self._views = sorted(self._views)
+        if not self._views:
+            raise ValueError(f"No valid tiled corrected TIF files in {self.base_path}")
+
+        # read shape from first file
+        first_path = self._tiled_files[self._views[0]]
+        reader = _PagedTiffReader(first_path)
+        self._single_shape = reader.shape
+        self._dtype = reader.dtype
+        reader.close()
+
+        self._single_timepoint = True
+        self._consolidated_path = None
+        self._pipeline_stage = "isoview-tiled-corrected"
+
+        # try to parse xml metadata
+        xml_path = _find_isoview_xml(self.base_path)
+        if xml_path is None:
+            xml_path = _find_isoview_xml(self.base_path.parent)
+        self._zarr_attrs = _parse_isoview_xml(xml_path) if xml_path else {}
+
+        # extract tile id
+        tl_match = _TL_PATTERN.search(self.base_path.name)
+        if tl_match is None:
+            # try parent folder
+            tl_match = _TL_PATTERN.search(self.base_path.parent.name)
+        self._tile_id = int(tl_match.group(1)) if tl_match else None
+
+        logger.info(
+            f"IsoviewArray: structure=tiled-corrected, views={len(self._views)}, "
+            f"shape={self._single_shape}, tile={self._tile_id}"
+        )
+
+    def _discover_tiled_fused(self, tif_files: list[Path]):
+        """discover tiled fused TIF files: SPM##_TL#_CM##_CM##_CHN##.fusedStack.ome.tif."""
+        self._views = []
+        self._tiled_files = {}
+
+        for tf in sorted(tif_files):
+            match = _TILED_FUSED_PATTERN.match(tf.name)
+            if not match:
+                continue
+            specimen = int(match.group(1))
+            tile = int(match.group(2))
+            cam0 = int(match.group(3))
+            cam1 = int(match.group(4))
+            channel = int(match.group(5))
+            view = ((cam0, cam1), channel)
+            if view not in self._views:
+                self._views.append(view)
+            self._tiled_files[view] = tf
+
+        self._views = sorted(self._views)
+        if not self._views:
+            raise ValueError(f"No valid tiled fused TIF files in {self.base_path}")
+
+        # read shape from first file
+        first_path = self._tiled_files[self._views[0]]
+        reader = _PagedTiffReader(first_path)
+        self._single_shape = reader.shape
+        self._dtype = reader.dtype
+        reader.close()
+
+        self._single_timepoint = True
+        self._consolidated_path = None
+        self._pipeline_stage = "isoview-tiled-fused"
+
+        # try to parse xml metadata
+        xml_path = _find_isoview_xml(self.base_path)
+        if xml_path is None:
+            xml_path = _find_isoview_xml(self.base_path.parent)
+        self._zarr_attrs = _parse_isoview_xml(xml_path) if xml_path else {}
+
+        # extract tile id
+        tl_match = _TL_PATTERN.search(self.base_path.name)
+        if tl_match is None:
+            tl_match = _TL_PATTERN.search(self.base_path.parent.name)
+        self._tile_id = int(tl_match.group(1)) if tl_match else None
+
+        logger.info(
+            f"IsoviewArray: structure=tiled-fused, views={len(self._views)}, "
+            f"shape={self._single_shape}, tile={self._tile_id}"
         )
 
     def _detect_structure(self, tm_folder: Path):
@@ -565,6 +861,21 @@ class IsoviewArray:
         if cache_key in self._zarr_cache:
             return self._zarr_cache[cache_key]
 
+        # tiled structures use _tiled_files keyed by view value
+        if self._structure == "tiled-raw":
+            view = self._views[view_idx]
+            stack_path = self._tiled_files[view]
+            arr = self._read_stack_file(stack_path)
+            self._zarr_cache[cache_key] = arr
+            return arr
+
+        if self._structure in ("tiled-corrected", "tiled-fused"):
+            view = self._views[view_idx]
+            tif_path = self._tiled_files[view]
+            reader = _PagedTiffReader(tif_path)
+            self._zarr_cache[cache_key] = reader
+            return reader
+
         camera, channel = self._views[view_idx]
 
         if self._structure == "raw":
@@ -772,6 +1083,15 @@ class IsoviewArray:
         meta["structure"] = self._structure
         meta["single_timepoint"] = self._single_timepoint
 
+        # tiled acquisition info
+        if self._structure.startswith("tiled"):
+            meta["acquisition_type"] = "tiled"
+            tile_id = getattr(self, "_tile_id", None)
+            if tile_id is not None:
+                meta["tile_id"] = tile_id
+        else:
+            meta["acquisition_type"] = "timelapse"
+
         # add per-camera metadata (consolidated structure only)
         cam_meta = self.camera_metadata
         if cam_meta:
@@ -832,6 +1152,8 @@ class IsoviewArray:
         """Number of timepoints."""
         if self._structure == "raw":
             return len(self._timepoints)
+        if self._structure.startswith("tiled"):
+            return 1
         return len(self.tm_folders)
 
     def __len__(self) -> int:
@@ -1045,12 +1367,13 @@ class IsoviewArray:
             For zarr: list of TM folder paths
         """
         if self._structure == "raw":
-            # return all stack files
             files = []
             for t in self._timepoints:
                 for path in self._stack_files[t].values():
                     files.append(path)
             return files
+        if self._structure.startswith("tiled"):
+            return list(self._tiled_files.values())
         return list(self.tm_folders)
 
     @property
@@ -1081,7 +1404,10 @@ class IsoviewArray:
         return self._single_shape[0]
 
     def close(self) -> None:
-        """Release resources (clear zarr cache)."""
+        """Release resources (close readers and clear cache)."""
+        for v in self._zarr_cache.values():
+            if isinstance(v, _PagedTiffReader):
+                v.close()
         self._zarr_cache.clear()
 
     def _imwrite(
@@ -1130,6 +1456,17 @@ EXCLUDE_PATTERNS = [
     "referenceMinIntensity",
     "scores",
     "jobCompleted",
+    "segmentationMask",
+    "xyMask",
+    "xzMask",
+    "fusionMask",
+    "xyProjection",
+    "xzProjection",
+    "yzProjection",
+    "Background_",
+    "transformedMask",
+    "mask2D",
+    "mask.tif",
 ]
 
 # patterns that identify data files (for fusedStack naming)

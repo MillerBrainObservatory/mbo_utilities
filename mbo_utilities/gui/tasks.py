@@ -25,6 +25,77 @@ from mbo_utilities.metadata import get_param
 logger = logging.getLogger("mbo.worker.tasks")
 
 
+class _ChannelView:
+    """4D TZYX view of a single channel from 5D TCZYX data.
+
+    Wraps a lazy array and presents it as 4D by fixing the channel index.
+    Used to feed single-channel data to pipelines that expect TZYX input.
+    """
+
+    def __init__(self, arr, channel_0idx: int):
+        self._arr = arr
+        self._ch = channel_0idx
+        self._metadata_override = None
+
+    @property
+    def shape(self):
+        s = self._arr.shape
+        return (s[0], s[2], s[3], s[4])
+
+    @property
+    def ndim(self):
+        return 4
+
+    @property
+    def dtype(self):
+        return self._arr.dtype
+
+    @property
+    def metadata(self):
+        if self._metadata_override is not None:
+            return self._metadata_override
+        md = dict(getattr(self._arr, "metadata", {}))
+        md["num_color_channels"] = 1
+        return md
+
+    @metadata.setter
+    def metadata(self, value):
+        self._metadata_override = value
+
+    @property
+    def filenames(self):
+        return getattr(self._arr, "filenames", [])
+
+    @property
+    def num_planes(self):
+        return self._arr.shape[2]
+
+    @property
+    def num_color_channels(self):
+        return 1
+
+    @property
+    def num_channels(self):
+        return self._arr.shape[2]
+
+    @property
+    def dims(self):
+        return ("T", "Z", "Y", "X")
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+        key = key + (slice(None),) * (4 - len(key))
+        return self._arr[(key[0], self._ch, key[1], key[2], key[3])]
+
+    def _imwrite(self, outpath, planes=None, ext=".tiff", **kwargs):
+        from mbo_utilities.arrays._base import _imwrite_base
+
+        return _imwrite_base(
+            self, outpath, planes=planes, ext=ext, **kwargs
+        )
+
+
 class TaskMonitor:
     """
     Helper to report task progress to a JSON sidecar file.
@@ -287,6 +358,24 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     if num_timepoints is not None and num_timepoints > 0:
         ops["nframes"] = num_timepoints
 
+    # per-channel extraction: wrap data as 4D TZYX so pipeline sees single channel
+    channel = args.get("channel")
+    pipeline_input = input_path
+    if channel is not None:
+        ops["functional_chan"] = 1
+        ops["align_by_chan"] = 1
+        logger.info(f"Single-channel extraction: channel {channel}")
+
+        # register _ChannelView as recognized lazy array type
+        import lbm_suite2p_python.utils as _lsp_utils
+        if "_ChannelView" not in _lsp_utils._LAZY_ARRAY_TYPES:
+            _lsp_utils._LAZY_ARRAY_TYPES = _lsp_utils._LAZY_ARRAY_TYPES + ("_ChannelView",)
+
+        # load data and wrap with channel view (presents 5D as 4D TZYX)
+        arr = imread(input_path)
+        pipeline_input = _ChannelView(arr, channel - 1)
+        logger.info(f"Wrapped as 4D view: shape={pipeline_input.shape}")
+
     # build writer_kwargs for phase correction settings
     writer_kwargs = {
         "fix_phase": args.get("fix_phase", True),
@@ -296,11 +385,26 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     try:
         monitor.update(0.1, "Running Suite2p...")
 
+        # progress callback maps plane/step to 0.1-0.95 range
+        def _progress(plane=0, total_planes=1, step="", message="", **kw):
+            base = 0.1 + 0.85 * (plane / max(total_planes, 1))
+            offsets = {
+                "plane_start": 0.0,
+                "writing_binary": 0.01,
+                "suite2p": 0.05,
+                "postprocessing": 0.70,
+                "plane_done": 0.85 / max(total_planes, 1),
+                "done": 0.85 / max(total_planes, 1),
+            }
+            frac = base + offsets.get(step, 0)
+            monitor.update(min(frac, 0.95), message)
+
         pipeline(
-            input_path,
+            pipeline_input,
             save_path=str(output_dir),
             ops=ops,
             planes=planes,
+            num_timepoints=num_timepoints,
             keep_raw=s2p_settings.get("keep_raw", False),
             keep_reg=s2p_settings.get("keep_reg", True),
             force_reg=s2p_settings.get("force_reg", False),
@@ -309,6 +413,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             dff_percentile=s2p_settings.get("dff_percentile", 20),
             dff_smooth_window=s2p_settings.get("dff_smooth_window"),
             writer_kwargs=writer_kwargs,
+            progress_callback=_progress,
         )
 
         monitor.finish("Suite2p pipeline completed.")

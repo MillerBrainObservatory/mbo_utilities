@@ -453,19 +453,19 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
     ),
     "fov": MetadataParameter(
         canonical="fov",
-        aliases=("fov_px", "fov_pixels"),
+        aliases=("fov_px",),
         dtype=tuple,
         unit="px",
         default=None,
-        description="Field of view as (x, y) in pixels",
+        description="Field of view as (x, y) in pixels (tiled)",
     ),
     "fov_um": MetadataParameter(
         canonical="fov_um",
-        aliases=("fov_micrometers",),
+        aliases=(),
         dtype=tuple,
         unit="µm",
         default=None,
-        description="Field of view as (x, y) in µm",
+        description="Field of view as (x, y) in µm (tiled)",
     ),
 }
 
@@ -510,6 +510,8 @@ IMAGING_METADATA_KEYS: tuple[str, ...] = (
     "Lx",
     "Ly",
     "num_zplanes",
+    "num_color_channels",
+    "num_mrois",
     "num_timepoints",
     "dtype",
 )

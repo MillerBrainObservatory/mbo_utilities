@@ -290,7 +290,13 @@ class PreviewDataWidget(EdgeWindow):
         else:
             self.nc = 1
 
-        self.logger.info(f"Detected nz={self.nz}, nc={self.nc} from dims={dims}")
+        # detect camera views (isoview cm dimension)
+        self.n_views = 1
+        if dims_lower is not None and "cm" in dims_lower:
+            cm_idx = dims_lower.index("cm")
+            self.n_views = self.shape[cm_idx]
+
+        self.logger.info(f"Detected nz={self.nz}, nc={self.nc}, n_views={self.n_views} from dims={dims}")
 
         # Window/projection state
         self._window_size = 1
@@ -621,6 +627,9 @@ class PreviewDataWidget(EdgeWindow):
 
     @window_size.setter
     def window_size(self, value: int):
+        # clamp to available timepoints
+        nt = self.shape[0] if len(self.shape) > 0 else 1
+        value = max(1, min(value, nt))
         if value == self._window_size:
             return
         self._window_size = value
@@ -628,6 +637,8 @@ class PreviewDataWidget(EdgeWindow):
         if not self.processors:
             return
         n_slider_dims = self.processors[0].n_slider_dims
+        if n_slider_dims == 0:
+            return
         per_processor_sizes = (self._window_size,) + (None,) * (n_slider_dims - 1)
         self._set_processor_attr("window_sizes", per_processor_sizes)
         if self.image_widget:
@@ -776,7 +787,9 @@ class PreviewDataWidget(EdgeWindow):
 
         n_slider_dims = self.processors[0].n_slider_dims
 
-        if n_slider_dims == 1:
+        if n_slider_dims == 0:
+            return
+        elif n_slider_dims == 1:
             window_funcs = (proj_func,)
         elif n_slider_dims == 2:
             window_funcs = (proj_func, None)

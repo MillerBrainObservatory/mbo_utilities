@@ -21,8 +21,8 @@ class WindowFunctionsWidget(Widget):
 
     @classmethod
     def is_supported(cls, parent: Any) -> bool:
-        """Always supported for any array with temporal dimension."""
-        return True
+        """Supported when data has more than 1 timepoint."""
+        return getattr(parent, "shape", (0,))[0] > 1
 
     def draw(self) -> None:
         """Draw window functions controls."""

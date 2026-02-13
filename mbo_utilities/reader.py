@@ -35,6 +35,9 @@ from mbo_utilities.arrays import (
 from mbo_utilities.arrays.isoview import (
     _find_tm_folders,
     _has_tm_pattern,
+    _TILED_CORRECTED_PATTERN,
+    _TILED_FUSED_PATTERN,
+    EXCLUDE_PATTERNS as ISOVIEW_EXCLUDE_PATTERNS,
 )
 from typing import TYPE_CHECKING
 
@@ -167,6 +170,19 @@ def imread(
                     logger.info(
                         f"Detected raw Isoview structure with {len(stack_files)} .stack files."
                     )
+                    return IsoviewArray(p)
+
+            # Check for tiled corrected/fused isoview TIF files (no TM folders)
+            tiled_tifs = [
+                f for f in p.glob("*.tif")
+                if not any(x in f.name for x in ISOVIEW_EXCLUDE_PATTERNS)
+            ]
+            if tiled_tifs:
+                if any(_TILED_FUSED_PATTERN.match(f.name) for f in tiled_tifs):
+                    logger.info("Detected tiled fused isoview data")
+                    return IsoviewArray(p)
+                if any(_TILED_CORRECTED_PATTERN.match(f.name) for f in tiled_tifs):
+                    logger.info("Detected tiled corrected isoview data")
                     return IsoviewArray(p)
 
             # Check for IsoView output structure: TM* subfolders with data files

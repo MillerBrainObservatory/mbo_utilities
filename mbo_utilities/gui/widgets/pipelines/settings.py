@@ -394,12 +394,19 @@ def _init_s2p_selection_state(self):
     # get data dimensions
     max_frames = 1000
     num_planes = 1
+    num_channels = 1
     try:
         if hasattr(self, "image_widget") and self.image_widget.data:
             data = self.image_widget.data[0]
             max_frames = data.shape[0]
-            if data.ndim == 4:
+            if hasattr(data, "num_planes"):
+                num_planes = data.num_planes
+            elif data.ndim == 4:
                 num_planes = data.shape[1]
+            if hasattr(data, "num_color_channels"):
+                num_channels = data.num_color_channels
+            elif hasattr(data, "_num_color_channels"):
+                num_channels = data._num_color_channels
     except Exception:
         pass
 
@@ -423,6 +430,10 @@ def _init_s2p_selection_state(self):
         self._s2p_z_stop = num_planes
         self._s2p_z_step = 1
         self._s2p_last_num_planes = num_planes
+        self._s2p_c_start = 1
+        self._s2p_c_stop = num_channels
+        self._s2p_c_step = 1
+        self._s2p_last_num_channels = num_channels
 
     # check if max changed
     if not hasattr(self, "_s2p_last_max_tp"):
@@ -448,6 +459,21 @@ def _init_s2p_selection_state(self):
         self._s2p_z_stop = num_planes
         self._s2p_z_step = 1
 
+    # channel state
+    if not hasattr(self, "_s2p_c_start"):
+        self._s2p_c_start = 1
+    if not hasattr(self, "_s2p_c_stop"):
+        self._s2p_c_stop = num_channels
+    if not hasattr(self, "_s2p_c_step"):
+        self._s2p_c_step = 1
+    if not hasattr(self, "_s2p_last_num_channels"):
+        self._s2p_last_num_channels = num_channels
+    elif self._s2p_last_num_channels != num_channels:
+        self._s2p_last_num_channels = num_channels
+        self._s2p_c_start = 1
+        self._s2p_c_stop = num_channels
+        self._s2p_c_step = 1
+
     # ensure _selected_planes is initialized (used by run_process)
     if not hasattr(self, "_selected_planes"):
         self._selected_planes = set(range(1, num_planes + 1))
@@ -459,11 +485,11 @@ def _init_s2p_selection_state(self):
         except ValueError as e:
             self._s2p_tp_error = str(e)
 
-    return max_frames, num_planes
+    return max_frames, num_planes, num_channels
 
 
-def _draw_s2p_selection_preview(self, max_frames, num_planes):
-    """Draw compact selection preview with frame/plane counts."""
+def _draw_s2p_selection_preview(self, max_frames, num_planes, num_channels=1):
+    """Draw compact selection preview with frame/plane/channel counts."""
     # calculate counts
     if self._s2p_tp_parsed:
         n_frames = self._s2p_tp_parsed.count
@@ -471,12 +497,15 @@ def _draw_s2p_selection_preview(self, max_frames, num_planes):
         n_frames = max_frames
 
     n_planes = len(range(self._s2p_z_start, self._s2p_z_stop + 1, self._s2p_z_step))
+    n_channels = len(range(self._s2p_c_start, self._s2p_c_stop + 1, self._s2p_c_step))
 
     # compact preview line
+    parts = [f"{n_frames} frames"]
+    if num_channels > 1:
+        parts.append(f"{n_channels} channels")
     if num_planes > 1:
-        imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames} frames, {n_planes} planes")
-    else:
-        imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), f"{n_frames} frames")
+        parts.append(f"{n_planes} planes")
+    imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), ", ".join(parts))
 
 
 def _draw_s2p_selection_popup(self):
@@ -491,6 +520,7 @@ def _draw_s2p_selection_popup(self):
     if imgui.begin_popup("Selection##s2p"):
         max_frames = getattr(self, "_s2p_last_max_tp", 1000)
         num_planes = getattr(self, "_s2p_last_num_planes", 1)
+        num_channels = getattr(self, "_s2p_last_num_channels", 1)
 
         # === OUTPUT PATH ===
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Output")
@@ -541,13 +571,15 @@ def _draw_s2p_selection_popup(self):
         imgui.dummy(imgui.ImVec2(0, 3))
 
         # draw selection table using shared component
-        tp_parsed, z_start, z_stop, z_step, *_ = draw_selection_table(
+        tp_parsed, z_start, z_stop, z_step, c_start, c_stop, c_step = draw_selection_table(
             self,
             max_frames,
             num_planes,
             tp_attr="_s2p_tp",
             z_attr="_s2p_z",
             id_suffix="_s2p",
+            num_channels=num_channels,
+            c_attr="_s2p_c",
         )
 
         # update _selected_planes for run_process
@@ -888,8 +920,8 @@ def _draw_section_suite2p_content(self):
     """inner content for suite2p section (called within style context)."""
     INPUT_WIDTH = 120
 
-    # initialize selection state (timepoints, z-planes)
-    max_frames, num_planes = _init_s2p_selection_state(self)
+    # initialize selection state (timepoints, z-planes, channels)
+    max_frames, num_planes, num_channels = _init_s2p_selection_state(self)
 
     # get output path
     s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
@@ -906,7 +938,7 @@ def _draw_section_suite2p_content(self):
 
     # selection preview info underneath
     imgui.indent(8)
-    _draw_s2p_selection_preview(self, max_frames, num_planes)
+    _draw_s2p_selection_preview(self, max_frames, num_planes, num_channels)
     # show output path
     if s2p_path:
         # truncate long paths
@@ -945,12 +977,7 @@ def _draw_section_suite2p_content(self):
 
     # handle run button click
     if button_clicked and has_save_path:
-        self.logger.info(f"Running Suite2p pipeline on {len(self._selected_planes)} planes...")
         run_process(self)
-        if getattr(self, "_s2p_background", True):
-            self.logger.info("Suite2p processing started in background.")
-        else:
-            self.logger.info("Suite2p processing submitted.")
 
     if self._install_error:
         if self._show_red_text:
@@ -1690,6 +1717,27 @@ def _draw_section_suite2p_content(self):
     #         self.image_widget.graphics[1].data = combined
 
 
+def _build_channel_dirname(self, channel: int) -> str:
+    """build dimension-tagged dirname for a single channel run."""
+    from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY
+
+    tags = []
+    # timepoints
+    tp = self._s2p_tp_parsed
+    if tp and tp.final_indices:
+        tp_start = tp.final_indices[0] + 1
+        tp_stop = tp.final_indices[-1] + 1
+        tags.append(DimensionTag(TAG_REGISTRY["T"], start=tp_start, stop=tp_stop, step=1))
+    # channel (single)
+    tags.append(DimensionTag(TAG_REGISTRY["C"], start=channel, stop=None, step=1))
+    # z-planes
+    z_start = getattr(self, "_s2p_z_start", 1)
+    z_stop = getattr(self, "_s2p_z_stop", 1)
+    z_step = getattr(self, "_s2p_z_step", 1)
+    tags.append(DimensionTag(TAG_REGISTRY["Z"], start=z_start, stop=z_stop, step=z_step))
+    return "_".join(tag.to_string() for tag in tags)
+
+
 def run_process(self):
     """Runs the selected processing pipeline."""
     if self._current_pipeline != "suite2p":
@@ -1699,7 +1747,7 @@ def run_process(self):
             self.logger.error(f"Unknown pipeline selected: {self._current_pipeline}")
         return
 
-    self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
+    self.logger.debug(f"suite2p settings: {self.s2p}")
     if not _check_lsp_available():
         self.logger.warning(
             "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline."
@@ -1752,51 +1800,81 @@ def run_process(self):
             )
             roi = 1 if num_rois > 1 else None
 
-            # Spawn a SINGLE subprocess for ALL selected planes (more efficient extraction)
-            worker_args = {
-                "input_path": input_path,
-                "output_dir": s2p_path,
-                "planes": sorted(selected_planes),  # Pass list of planes
-                "roi": roi,
-                "num_timepoints": self.s2p.target_timepoints,
-                "ops": self.s2p.to_dict(),
-                "fix_phase": self._s2p_fix_phase,
-                "use_fft": self._s2p_use_fft,
-                "s2p_settings": {
-                    "keep_raw": self.s2p.keep_raw,
-                    "keep_reg": self.s2p.keep_reg,
-                    "force_reg": self.s2p.force_reg,
-                    "force_detect": self.s2p.force_detect,
-                    "dff_window_size": self.s2p.dff_window_size,
-                    "dff_percentile": self.s2p.dff_percentile,
-                    "dff_smooth_window": self.s2p.dff_smooth_window,
-                },
-            }
+            # determine selected channels
+            c_start = getattr(self, "_s2p_c_start", 1)
+            c_stop = getattr(self, "_s2p_c_stop", 1)
+            c_step = getattr(self, "_s2p_c_step", 1)
+            selected_channels = list(range(c_start, c_stop + 1, c_step))
+            multi_channel = len(selected_channels) > 1
 
-            description = f"Suite2p: {len(selected_planes)} plane(s)"
-            if roi:
-                description += f" ROI {roi}"
+            for channel in selected_channels:
+                # per-channel output subdir when multiple channels selected
+                if multi_channel:
+                    output_dir = str(Path(s2p_path) / _build_channel_dirname(self, channel))
+                else:
+                    output_dir = s2p_path
 
-            pid = pm.spawn(
-                task_type="suite2p",
-                args=worker_args,
-                description=description,
-                output_path=s2p_path,
-            )
+                worker_args = {
+                    "input_path": input_path,
+                    "output_dir": output_dir,
+                    "planes": sorted(selected_planes),
+                    "roi": roi,
+                    "num_timepoints": self.s2p.target_timepoints,
+                    "ops": self.s2p.to_dict(),
+                    "fix_phase": self._s2p_fix_phase,
+                    "use_fft": self._s2p_use_fft,
+                    "channel": channel if multi_channel else None,
+                    "s2p_settings": {
+                        "keep_raw": self.s2p.keep_raw,
+                        "keep_reg": self.s2p.keep_reg,
+                        "force_reg": self.s2p.force_reg,
+                        "force_detect": self.s2p.force_detect,
+                        "dff_window_size": self.s2p.dff_window_size,
+                        "dff_percentile": self.s2p.dff_percentile,
+                        "dff_smooth_window": self.s2p.dff_smooth_window,
+                    },
+                }
 
-            if pid:
-                self.logger.info(f"Started background process {pid} for {description}")
-            else:
-                self.logger.error(
-                    f"Failed to start background process for {description}"
+                description = f"Suite2p: {len(selected_planes)} plane(s)"
+                if multi_channel:
+                    description += f" ch{channel}"
+                if roi:
+                    description += f" ROI {roi}"
+
+                pid = pm.spawn(
+                    task_type="suite2p",
+                    args=worker_args,
+                    description=description,
+                    output_path=output_dir,
                 )
+
+                if not pid:
+                    self.logger.error(
+                        f"Failed to start background process for {description}"
+                    )
         else:
             # Use daemon threads (original behavior)
-            # Build list of all (arr_idx, z_plane) pairs to process
+            # determine selected channels
+            c_start = getattr(self, "_s2p_c_start", 1)
+            c_stop = getattr(self, "_s2p_c_stop", 1)
+            c_step = getattr(self, "_s2p_c_step", 1)
+            selected_channels = list(range(c_start, c_stop + 1, c_step))
+            multi_channel = len(selected_channels) > 1
+
+            s2p_path = getattr(self, "_s2p_outdir", "") or getattr(
+                self, "_saveas_outdir", ""
+            )
+
+            # build list of (arr_idx, z_plane, channel, base_out) jobs
             jobs = []
             for i, _arr in enumerate(self.image_widget.data):
-                for plane in sorted(selected_planes):
-                    jobs.append((i, plane - 1))  # Convert to 0-indexed
+                for channel in selected_channels:
+                    if multi_channel:
+                        base_out = str(Path(s2p_path) / _build_channel_dirname(self, channel))
+                    else:
+                        base_out = None  # use default path logic
+                    for plane in sorted(selected_planes):
+                        jobs.append((i, plane - 1, channel if multi_channel else None, base_out))
 
             # Check if parallel processing is enabled
             use_parallel = getattr(self, "_parallel_processing", False)
@@ -1812,18 +1890,22 @@ def run_process(self):
                     )
                     with ThreadPoolExecutor(max_workers=max_jobs) as executor:
                         futures = {}
-                        for job_idx, (arr_idx, z_plane) in enumerate(jobs):
+                        for job_idx, (arr_idx, z_plane, channel, base_out) in enumerate(jobs):
                             future = executor.submit(
-                                run_plane_from_data, self, arr_idx, z_plane
+                                run_plane_from_data, self, arr_idx, z_plane,
+                                channel=channel, base_out_override=base_out,
                             )
-                            futures[future] = (z_plane, job_idx)
+                            futures[future] = (z_plane, channel, job_idx)
 
                         for future in futures:
-                            z_plane, job_idx = futures[future]
+                            z_plane, channel, job_idx = futures[future]
                             try:
                                 future.result()
+                                desc = f"Plane {z_plane + 1}"
+                                if channel is not None:
+                                    desc += f" ch{channel}"
                                 self.logger.info(
-                                    f"Plane {z_plane + 1} completed ({job_idx + 1}/{len(jobs)})"
+                                    f"{desc} completed ({job_idx + 1}/{len(jobs)})"
                                 )
                             except Exception as e:
                                 self.logger.exception(
@@ -1835,22 +1917,28 @@ def run_process(self):
             else:
                 # Sequential processing in a single background thread
                 def run_all_planes_sequential():
-                    for job_idx, (arr_idx, z_plane) in enumerate(jobs):
+                    for job_idx, (arr_idx, z_plane, channel, base_out) in enumerate(jobs):
+                        desc = f"plane {z_plane + 1}"
+                        if channel is not None:
+                            desc += f" ch{channel}"
                         self.logger.info(
-                            f"Processing plane {z_plane + 1} ({job_idx + 1}/{len(jobs)})..."
+                            f"Processing {desc} ({job_idx + 1}/{len(jobs)})..."
                         )
                         try:
-                            run_plane_from_data(self, arr_idx, z_plane)
+                            run_plane_from_data(
+                                self, arr_idx, z_plane,
+                                channel=channel, base_out_override=base_out,
+                            )
                         except Exception as e:
                             self.logger.exception(
-                                f"Error processing plane {z_plane + 1}: {e}"
+                                f"Error processing {desc}: {e}"
                             )
                     self.logger.info("Suite2p processing complete.")
 
                 threading.Thread(target=run_all_planes_sequential, daemon=True).start()
 
 
-def run_plane_from_data(self, arr_idx, z_plane=None):
+def run_plane_from_data(self, arr_idx, z_plane=None, channel=None, base_out_override=None):
     if not _check_lsp_available():
         self.logger.error("lbm_suite2p_python is not installed.")
         self._install_error = True
@@ -1867,9 +1955,12 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
         except (IndexError, KeyError):
             current_z = 0
 
-    # Use _s2p_outdir for suite2p, fallback to _saveas_outdir
-    s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
-    base_out = Path(s2p_path) if s2p_path else None
+    # Use base_out_override (per-channel subdir), or fall back to _s2p_outdir
+    if base_out_override:
+        base_out = Path(base_out_override)
+    else:
+        s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
+        base_out = Path(s2p_path) if s2p_path else None
     if not base_out:
         from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
 
@@ -1942,6 +2033,11 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
     defaults["num_frames"] = self.s2p.target_timepoints  # legacy alias
     defaults["nframes"] = self.s2p.target_timepoints  # suite2p alias
 
+    # single-channel extraction: suite2p only sees 1 channel
+    if channel is not None:
+        defaults["functional_chan"] = 1
+        defaults["align_by_chan"] = 1
+
     # also clean lazy_mdata to prevent shape contamination from arr.metadata
     # TODO: Do we need this?
     lazy_mdata.pop("shape", None)
@@ -1976,6 +2072,7 @@ def run_plane_from_data(self, arr_idx, z_plane=None):
         overwrite=True,
         register_z=False,
         planes=plane,
+        channels=[channel] if channel is not None else None,
         output_name="data_raw.bin",
         roi=roi,
         metadata=defaults,

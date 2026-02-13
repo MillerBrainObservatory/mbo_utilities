@@ -401,8 +401,13 @@ def _imwrite_base(
     # (bin, h5, npy)
     dims = get_dims(arr)
 
+    # resolve channel_index for 5D TCZYX data with channel selection
+    channel_index = None
+    if len(arr.shape) == 5 and channels_list is not None and len(channels_list) == 1:
+        channel_index = channels_list[0] - 1  # 0-based
+
     # extract shape info
-    if len(arr.shape) == 4:
+    if len(arr.shape) >= 4:
         nframes = arr.shape[0]
     elif len(arr.shape) == 3 and dims[0] in {"T", "timepoints"}:
         nframes = arr.shape[0]
@@ -411,7 +416,12 @@ def _imwrite_base(
     Ly, Lx = arr.shape[-2], arr.shape[-1]
 
     # validate num_planes against actual shape
-    if len(arr.shape) == 4:
+    if len(arr.shape) == 5:
+        # 5D TCZYX: z-planes at index 2
+        actual_z_size = arr.shape[2]
+        if num_planes > actual_z_size:
+            num_planes = actual_z_size
+    elif len(arr.shape) == 4:
         actual_z_size = arr.shape[1]
         if num_planes > actual_z_size:
             num_planes = actual_z_size
@@ -485,6 +495,7 @@ def _imwrite_base(
             show_progress=show_progress,
             dshape=(nframes, Ly, Lx),
             plane_index=plane_idx,
+            channel_index=channel_index,
             **kwargs,
         )
 

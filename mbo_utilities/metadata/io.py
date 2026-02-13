@@ -411,13 +411,12 @@ def get_metadata_single(file: Path):
         size_xy = sizes[0]
         num_pixel_xy = num_pixel_xys[0]
 
-        fov_x_um = round(objective_resolution * size_xy[0])
-        fov_y_um = round(objective_resolution * size_xy[1])
-        pixel_resolution = (fov_x_um / num_pixel_xy[0], fov_y_um / num_pixel_xy[1])
+        roi_fov_x_um = round(objective_resolution * size_xy[0])
+        roi_fov_y_um = round(objective_resolution * size_xy[1])
+        pixel_resolution = (roi_fov_x_um / num_pixel_xy[0], roi_fov_y_um / num_pixel_xy[1])
 
         # roi is per-strip dimensions (width, height)
-        # fov is total field of view in pixels (num_rois * width, height)
-        # fov_um is total field of view in micrometers
+        # fov/fov_um are total tiled field of view (num_rois * per-roi)
         roi_width, roi_height = num_pixel_xy[0], num_pixel_xy[1]
 
         metadata = {
@@ -425,7 +424,7 @@ def get_metadata_single(file: Path):
             "num_rois": num_rois,
             "roi": (roi_width, roi_height),
             "fov": (num_rois * roi_width, roi_height),
-            "fov_um": (fov_x_um, fov_y_um),
+            "fov_um": (num_rois * roi_fov_x_um, roi_fov_y_um),
             "frame_rate": frame_rate,
             "pixel_resolution": np.round(pixel_resolution, 2),
             "ndim": len(shape),
@@ -496,7 +495,7 @@ def get_metadata_batch(file_paths: list | tuple):
     # Count frames for all files
     frames_per_file = [
         query_tiff_pages(fp) // nchannels
-        for fp in tqdm(file_paths, desc="Counting frames")
+        for fp in tqdm(file_paths, desc="Counting frames", disable=len(file_paths) < 2)
     ]
 
     total_frames = sum(frames_per_file)
