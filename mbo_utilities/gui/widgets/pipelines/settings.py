@@ -407,6 +407,12 @@ def _init_s2p_selection_state(self):
                 num_channels = data.num_color_channels
             elif hasattr(data, "_num_color_channels"):
                 num_channels = data._num_color_channels
+            # fallback: detect channels from dims/shape for 5D data
+            if num_channels <= 1 and data.ndim == 5:
+                from mbo_utilities.arrays.features import get_dims
+                dims = get_dims(data)
+                if dims is not None and len(dims) >= 5 and dims[1] == "C":
+                    num_channels = data.shape[1]
     except Exception:
         pass
 
@@ -1722,19 +1728,19 @@ def _build_channel_dirname(self, channel: int) -> str:
     from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY
 
     tags = []
-    # timepoints
-    tp = self._s2p_tp_parsed
-    if tp and tp.final_indices:
-        tp_start = tp.final_indices[0] + 1
-        tp_stop = tp.final_indices[-1] + 1
-        tags.append(DimensionTag(TAG_REGISTRY["T"], start=tp_start, stop=tp_stop, step=1))
-    # channel (single)
+    # channel first (varies across sibling dirs)
     tags.append(DimensionTag(TAG_REGISTRY["C"], start=channel, stop=None, step=1))
     # z-planes
     z_start = getattr(self, "_s2p_z_start", 1)
     z_stop = getattr(self, "_s2p_z_stop", 1)
     z_step = getattr(self, "_s2p_z_step", 1)
     tags.append(DimensionTag(TAG_REGISTRY["Z"], start=z_start, stop=z_stop, step=z_step))
+    # timepoints last (same across sibling dirs)
+    tp = self._s2p_tp_parsed
+    if tp and tp.final_indices:
+        tp_start = tp.final_indices[0] + 1
+        tp_stop = tp.final_indices[-1] + 1
+        tags.append(DimensionTag(TAG_REGISTRY["T"], start=tp_start, stop=tp_stop, step=1))
     return "_".join(tag.to_string() for tag in tags)
 
 
@@ -1806,6 +1812,8 @@ def run_process(self):
             c_step = getattr(self, "_s2p_c_step", 1)
             selected_channels = list(range(c_start, c_stop + 1, c_step))
             multi_channel = len(selected_channels) > 1
+            # always pass channel for multi-channel source data (5D needs _ChannelView)
+            has_channels = getattr(self, "_s2p_last_num_channels", 1) > 1
 
             for channel in selected_channels:
                 # per-channel output subdir when multiple channels selected
@@ -1823,7 +1831,7 @@ def run_process(self):
                     "ops": self.s2p.to_dict(),
                     "fix_phase": self._s2p_fix_phase,
                     "use_fft": self._s2p_use_fft,
-                    "channel": channel if multi_channel else None,
+                    "channel": channel if (multi_channel or has_channels) else None,
                     "s2p_settings": {
                         "keep_raw": self.s2p.keep_raw,
                         "keep_reg": self.s2p.keep_reg,
@@ -1836,7 +1844,7 @@ def run_process(self):
                 }
 
                 description = f"Suite2p: {len(selected_planes)} plane(s)"
-                if multi_channel:
+                if multi_channel or has_channels:
                     description += f" ch{channel}"
                 if roi:
                     description += f" ROI {roi}"
@@ -1860,6 +1868,7 @@ def run_process(self):
             c_step = getattr(self, "_s2p_c_step", 1)
             selected_channels = list(range(c_start, c_stop + 1, c_step))
             multi_channel = len(selected_channels) > 1
+            has_channels = getattr(self, "_s2p_last_num_channels", 1) > 1
 
             s2p_path = getattr(self, "_s2p_outdir", "") or getattr(
                 self, "_saveas_outdir", ""
@@ -1874,7 +1883,7 @@ def run_process(self):
                     else:
                         base_out = None  # use default path logic
                     for plane in sorted(selected_planes):
-                        jobs.append((i, plane - 1, channel if multi_channel else None, base_out))
+                        jobs.append((i, plane - 1, channel if (multi_channel or has_channels) else None, base_out))
 
             # Check if parallel processing is enabled
             use_parallel = getattr(self, "_parallel_processing", False)
