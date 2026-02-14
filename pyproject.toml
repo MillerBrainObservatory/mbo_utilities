@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.5.4"
+version = "2.6.0"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
