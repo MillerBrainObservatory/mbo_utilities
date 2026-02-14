@@ -108,6 +108,7 @@ class DebugPanel(BasePanel):
 
         # UI state
         self.auto_scroll = True
+        self._last_msg_count = 0  # tracks message count for scroll-on-new-message
         self.search_text = ""
         self.show_loggers = False  # collapsed by default
         self.show_controls = True
@@ -283,8 +284,23 @@ class DebugPanel(BasePanel):
             imgui.same_line()
             imgui.text_colored(col, msg)
 
-        if self.auto_scroll:
+        # auto-scroll: only jump to bottom when new messages arrive.
+        # if user scrolls away from bottom, disable auto-scroll until
+        # they scroll back down or re-enable the checkbox.
+        has_new = len(self.messages) != self._last_msg_count
+        self._last_msg_count = len(self.messages)
+
+        if self.auto_scroll and has_new:
             imgui.set_scroll_here_y(1.0)
+
+        # disable auto-scroll when user scrolls up, re-enable at bottom
+        max_scroll = imgui.get_scroll_max_y()
+        if max_scroll > 0:
+            at_bottom = imgui.get_scroll_y() >= max_scroll - imgui.get_text_line_height()
+            if not at_bottom and not has_new:
+                self.auto_scroll = False
+            elif at_bottom:
+                self.auto_scroll = True
 
         imgui.end_child()
 
