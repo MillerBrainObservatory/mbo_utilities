@@ -35,7 +35,7 @@ def _get_cached_flag(key: str, fallback_check: callable) -> bool:
 
 # HAS_* flags - use cache when available, fallback to direct check
 HAS_SUITE2P: bool = _get_cached_flag(
-    "suite2p", lambda: _check_import("lbm_suite2p_python")
+    "suite2p", lambda: _check_import("lbm_suite2p_python") and _check_import("suite2p")
 )
 HAS_SUITE3D: bool = _get_cached_flag(
     "suite3d", lambda: _check_import("suite3d") and _check_import("cupy")

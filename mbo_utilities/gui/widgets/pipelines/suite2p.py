@@ -22,11 +22,14 @@ _HAS_LSP: bool | None = None
 
 
 def _check_lsp_available() -> bool:
-    """check if lbm_suite2p_python is available (lazy, cached, no actual import)."""
+    """check if lbm_suite2p_python and suite2p are both available."""
     global _HAS_LSP
     if _HAS_LSP is None:
         import importlib.util
-        _HAS_LSP = importlib.util.find_spec("lbm_suite2p_python") is not None
+        _HAS_LSP = (
+            importlib.util.find_spec("lbm_suite2p_python") is not None
+            and importlib.util.find_spec("suite2p") is not None
+        )
     return _HAS_LSP
 
 

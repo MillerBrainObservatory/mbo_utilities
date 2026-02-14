@@ -102,6 +102,7 @@ class TimeSeriesViewer(BaseViewer):
 
         # Capability cache
         self._has_raster_scan_support = None
+        self._has_pipeline = None
 
         # Only initialize panels when not using legacy delegation
         if parent is None:
@@ -221,8 +222,6 @@ class TimeSeriesViewer(BaseViewer):
             self._has_raster_scan_support = any(supports_raster_scan(arr) for arr in arrays)
         return self._has_raster_scan_support
 
-    # === Rendering ===
-
     def draw(self) -> None:
         """
         Main render callback.
@@ -269,6 +268,11 @@ class TimeSeriesViewer(BaseViewer):
             imgui.end_disabled()
 
             # Run tab for processing pipelines
+            if self._has_pipeline is None:
+                from mbo_utilities.gui.widgets.pipelines import any_pipeline_available
+                self._has_pipeline = any_pipeline_available()
+            if not self._has_pipeline:
+                imgui.begin_disabled()
             if imgui.begin_tab_item("Run")[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
@@ -278,6 +282,13 @@ class TimeSeriesViewer(BaseViewer):
                 finally:
                     imgui.pop_style_var(2)
                 imgui.end_tab_item()
+            if not self._has_pipeline:
+                imgui.end_disabled()
+                if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                    imgui.set_tooltip(
+                        "Suite2p not installed.\n"
+                        'Install with: uv pip install "mbo_utilities[suite2p]"'
+                    )
             imgui.end_tab_bar()
 
     def _draw_new(self) -> None:
@@ -325,6 +336,11 @@ class TimeSeriesViewer(BaseViewer):
             imgui.end_disabled()
 
             # Run tab - processing pipelines
+            if self._has_pipeline is None:
+                from mbo_utilities.gui.widgets.pipelines import any_pipeline_available
+                self._has_pipeline = any_pipeline_available()
+            if not self._has_pipeline:
+                imgui.begin_disabled()
             if imgui.begin_tab_item("Run")[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
@@ -335,6 +351,13 @@ class TimeSeriesViewer(BaseViewer):
 
                 imgui.pop_style_var(2)
                 imgui.end_tab_item()
+            if not self._has_pipeline:
+                imgui.end_disabled()
+                if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                    imgui.set_tooltip(
+                        "Suite2p not installed.\n"
+                        'Install with: uv pip install "mbo_utilities[suite2p]"'
+                    )
 
             imgui.end_tab_bar()
 
