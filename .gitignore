@@ -186,3 +186,6 @@ _backup_images/
 
 # numpy data files
 *.npz
+
+# local uv source overrides
+uv.toml
