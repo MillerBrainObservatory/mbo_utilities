@@ -350,9 +350,10 @@ class _SingleTiffPlaneReader:
             if chunk.ndim == 2:
                 chunk = chunk[np.newaxis, ...]
 
-            for local_idx, global_frame in zip(local_indices, file_frames, strict=False):
+            for chunk_idx, (local_idx, global_frame) in enumerate(
+                zip(local_indices, file_frames, strict=False)
+            ):
                 buf_idx = frame_to_buf_idx[global_frame]
-                chunk_idx = local_indices.index(local_idx)
                 buf[buf_idx] = chunk[chunk_idx]
 
             start = end
@@ -476,20 +477,13 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
         if shape is not None and len(shape) == 5 and shape[1] > 1 and shape[2] > 1:
             # metadata indicates 5D TZCYX with Z > 1 and C > 1
             n_frames, n_planes, n_channels = shape[0], shape[1], shape[2]
-            if len(file_list) == 1:
-                self._init_interleaved(file_list[0], n_frames, n_planes, n_channels)
-            else:
-                self._init_interleaved(file_list[0], n_frames, n_planes, n_channels)
+            # TODO: multi-file interleaved not yet supported, uses first file only
+            self._init_interleaved(file_list[0], n_frames, n_planes, n_channels)
         elif shape is not None and len(shape) == 4 and shape[1] > 1:
             # metadata indicates 4D TZYX with Z > 1
             n_frames, n_planes = shape[0], shape[1]
-            if len(file_list) == 1:
-                # single file with interleaved TZYX data
-                self._init_interleaved(file_list[0], n_frames, n_planes)
-            else:
-                # multiple files but metadata says 4D - trust metadata
-                # this handles chunked writes where each file is a time chunk
-                self._init_interleaved(file_list[0], n_frames, n_planes)
+            # TODO: multi-file interleaved not yet supported, uses first file only
+            self._init_interleaved(file_list[0], n_frames, n_planes)
         else:
             # STEP 3: fall back to file structure heuristics
             self._init_from_file_structure(file_list)
@@ -787,7 +781,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
         elif isinstance(t_key, int):
             if t_key < 0:
                 t_key = self._nframes + t_key
-            if t_key >= self._nframes:
+            if t_key < 0 or t_key >= self._nframes:
                 raise IndexError(
                     f"Time index {t_key} out of bounds for {self._nframes} frames"
                 )
@@ -1115,6 +1109,11 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
     def _on_feature_change(self, event):
         # Optional: handle feature changes (log, etc)
         pass
+
+    def close(self):
+        """Close all open TIFF file handles."""
+        for tf in self.tiff_files:
+            tf.close()
 
     def _extract_roi_info(self):
         """Extract ROI slice information using centralized metadata function."""
@@ -1459,10 +1458,13 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
             return (self.num_frames, self._num_color_channels, self._num_zplanes, max_height, total_width)
         return (self.num_frames, self.num_channels, max_height, total_width)
 
+    @property
     def size(self):
-        total_width = sum(roi["width"] for roi in self._rois)
-        max_height = max(roi["height"] for roi in self._rois)
-        return self.num_frames * self.num_channels * max_height * total_width
+        s = self.shape
+        result = 1
+        for dim in s:
+            result *= dim
+        return result
 
     @property
     def _page_height(self):
@@ -1786,7 +1788,7 @@ class PiezoArray(ScanImageArray):
         - When not averaging: num_slices * frames_per_slice (all raw frames)
         """
         base_shape = super().shape
-        h, w = base_shape[2], base_shape[3]
+        h, w = base_shape[-2], base_shape[-1]
 
         if self._average_frames or self._log_average_factor > 1:
             # averaging enabled or pre-averaged: one frame per slice

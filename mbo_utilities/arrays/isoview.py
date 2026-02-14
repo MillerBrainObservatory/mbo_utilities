@@ -18,10 +18,10 @@ _TM_PATTERN = re.compile(r"TM(\d{5,6})")
 _TL_PATTERN = re.compile(r"TL(\d+)")
 _TILED_RAW_PATTERN = re.compile(r"(.+)_CM(\d+)\.stack")
 _TILED_CORRECTED_PATTERN = re.compile(
-    r"SPM(\d+)_TL(\d+)_CM(\d+)_CHN(\d+)\.(ome\.)?tif$"
+    r"SPM(\d+)_TL(\d+)_CM(\d+)_VW(\d+)\.(ome\.)?tif$"
 )
 _TILED_FUSED_PATTERN = re.compile(
-    r"SPM(\d+)_TL(\d+)_CM(\d+)_CM(\d+)_CHN(\d+)\.fusedStack\.(ome\.)?tif$"
+    r"SPM(\d+)_TL(\d+)_CM(\d+)_CM(\d+)_VW(\d+)\.fusedStack\.(ome\.)?tif$"
 )
 
 
@@ -66,6 +66,7 @@ _ISOVIEW_INFO = PipelineInfo(
     description="Isoview lightsheet microscopy data",
     input_patterns=[
         "**/data_TM??????_SPM??.zarr",
+        "**/SPM??_TM??????_CM??_VW??.zarr",
         "**/SPM??_TM??????_CM??_CHN??.zarr",
         "**/TM??????/",
         "**/SPC??_TM?????_ANG???_CM?_CHN??_PH?.stack",
@@ -186,7 +187,7 @@ def _find_isoview_xml(base_path: Path) -> Path | None:
     # try common patterns
     patterns = [
         "ch00_spec00.xml", "ch0.xml", "ch*.xml",
-        "TL*_ch*.xml", "SPM*_TL*_CHN*.xml",
+        "TL*_ch*.xml", "SPM*_TL*_VW*.xml", "SPM*_TM*_VW*.xml",
         "*.xml",
     ]
     for pattern in patterns:
@@ -281,12 +282,12 @@ class IsoviewArray:
     --------
     >>> arr = IsoviewArray("path/to/raw_data")  # with .stack files
     >>> arr.shape
-    (61, 38, 4, 1848, 768)  # (t, z, cm, y, x)
+    (61, 38, 4, 1848, 768)  # (t, z, vw, y, x)
     >>> arr.dims
-    ('t', 'z', 'cm', 'y', 'x')
+    ('t', 'z', 'vw', 'y', 'x')
     >>> arr.views
-    [(0, 1), (1, 1), (2, 0), (3, 0)]  # (camera, channel) per view
-    >>> frame = arr[0, 10, 0]  # t=0, z=10, cm=0
+    [(0, 0), (1, 0), (2, 1), (3, 1)]  # (camera, view) per entry
+    >>> frame = arr[0, 10, 0]  # t=0, z=10, vw=0
     """
 
     def __init__(self, path: str | Path):
@@ -374,7 +375,7 @@ class IsoviewArray:
             r"SPC(\d+)_TM(\d+)_ANG(\d+)_CM(\d+)_CHN(\d+)_PH(\d+)\.stack"
         )
 
-        # organize by timepoint and (camera, channel)
+        # organize by timepoint and (camera, channel) — raw files use CHN naming
         self._stack_files = {}  # {timepoint: {(camera, channel): Path}}
         timepoints = set()
         views = set()
@@ -398,7 +399,7 @@ class IsoviewArray:
         self._views = sorted(views)
 
         if not self._views:
-            raise ValueError(f"No valid camera/channel combinations in {base_path}")
+            raise ValueError(f"No valid camera/view combinations in {base_path}")
 
         # calculate depth from file size
         first_file = next(iter(self._stack_files[self._timepoints[0]].values()))
@@ -421,6 +422,51 @@ class IsoviewArray:
             f"timepoints={len(self._timepoints)}, views={len(self._views)}, "
             f"shape={self._single_shape}"
         )
+
+    def _extract_ome_metadata_isoview(self, tif):
+        """Extract stage position and crop info from OME-XML into _ome_meta."""
+        try:
+            import xml.etree.ElementTree as ET
+
+            ome_xml = tif.ome_metadata
+            if not ome_xml:
+                return
+
+            root = ET.fromstring(ome_xml)
+
+            # stage position from Plane elements
+            for plane in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Plane"):
+                pos_x = plane.get("PositionX")
+                pos_y = plane.get("PositionY")
+                pos_z = plane.get("PositionZ")
+                if pos_x is not None:
+                    self._ome_meta["stage_x"] = float(pos_x)
+                if pos_y is not None:
+                    self._ome_meta["stage_y"] = float(pos_y)
+                if pos_z is not None:
+                    self._ome_meta["stage_z"] = float(pos_z)
+                break
+
+            # wavelength from Channel
+            for channel in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Channel"):
+                em_wl = channel.get("EmissionWavelength")
+                if em_wl:
+                    self._ome_meta["wavelength"] = float(em_wl)
+                break
+
+            # crop provenance from Description
+            for img in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Image"):
+                desc = img.get("Description", "")
+                if not desc:
+                    desc_el = img.find("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Description")
+                    if desc_el is not None and desc_el.text:
+                        desc = desc_el.text
+                if "raw_shape" in desc:
+                    self._ome_meta["crop_provenance"] = desc
+                break
+
+        except Exception:
+            pass
 
     def _is_tiled_raw(self, stack_files: list[Path]) -> bool:
         """check if .stack files are tiled (TL) rather than timelapse (TM)."""
@@ -527,7 +573,7 @@ class IsoviewArray:
         )
 
     def _discover_tiled_corrected(self, tif_files: list[Path]):
-        """discover tiled corrected TIF files: SPM##_TL#_CM##_CHN##.ome.tif."""
+        """discover tiled corrected TIF files: SPM##_TL#_CM##_VW##.ome.tif."""
         self._views = []
         self._tiled_files = {}
 
@@ -538,8 +584,8 @@ class IsoviewArray:
             specimen = int(match.group(1))
             tile = int(match.group(2))
             camera = int(match.group(3))
-            channel = int(match.group(4))
-            view = (camera, channel)
+            view_idx = int(match.group(4))
+            view = (camera, view_idx)
             if view not in self._views:
                 self._views.append(view)
             self._tiled_files[view] = tf
@@ -565,6 +611,17 @@ class IsoviewArray:
             xml_path = _find_isoview_xml(self.base_path.parent)
         self._zarr_attrs = _parse_isoview_xml(xml_path) if xml_path else {}
 
+        # extract OME-TIFF metadata (stage position, crop provenance)
+        try:
+            import tifffile
+            with tifffile.TiffFile(str(first_path)) as tif:
+                self._ome_meta = {}
+                self._extract_ome_metadata_isoview(tif)
+                if self._ome_meta:
+                    self._zarr_attrs.update(self._ome_meta)
+        except Exception:
+            pass
+
         # extract tile id
         tl_match = _TL_PATTERN.search(self.base_path.name)
         if tl_match is None:
@@ -578,7 +635,7 @@ class IsoviewArray:
         )
 
     def _discover_tiled_fused(self, tif_files: list[Path]):
-        """discover tiled fused TIF files: SPM##_TL#_CM##_CM##_CHN##.fusedStack.ome.tif."""
+        """discover tiled fused TIF files: SPM##_TL#_CM##_CM##_VW##.fusedStack.ome.tif."""
         self._views = []
         self._tiled_files = {}
 
@@ -590,8 +647,8 @@ class IsoviewArray:
             tile = int(match.group(2))
             cam0 = int(match.group(3))
             cam1 = int(match.group(4))
-            channel = int(match.group(5))
-            view = ((cam0, cam1), channel)
+            view_idx = int(match.group(5))
+            view = ((cam0, cam1), view_idx)
             if view not in self._views:
                 self._views.append(view)
             self._tiled_files[view] = tf
@@ -656,12 +713,14 @@ class IsoviewArray:
         )
 
     def _discover_separate(self, tm_folder: Path):
-        """Parse SPM00_TM000000_CM00_CHN01.zarr filenames.
+        """Parse SPM00_TM000000_CM00_VW01.zarr filenames.
 
         Detects pipeline stage from filename patterns:
-        - isoview-pt: SPM00_TM000000_CM00_CHN01.zarr (single camera per file)
-        - isoview-mf: SPM00_TM000000_CM00_CM01_CHN01.zarr (fused cameras)
-        - isoview-mfc: SPM00_TM000000_CHN00.zarr or CHN00_CHN01 (channel-only or fused channels)
+        - isoview-pt: SPM00_TM000000_CM00_VW01.zarr (single camera per file)
+        - isoview-mf: SPM00_TM000000_CM00_CM01_VW01.zarr (fused cameras)
+        - isoview-mfc: SPM00_TM000000_VW00.zarr or VW00_VW01 (view-only or fused views)
+
+        Also supports legacy CHN naming for backward compatibility.
         """
         import re
         import zarr
@@ -670,20 +729,20 @@ class IsoviewArray:
         if not zarr_files:
             raise ValueError(f"No .zarr files in {tm_folder}")
 
-        self._views = []  # [(camera, channel), ...] or [(channel,), ...] for mfc
+        self._views = []  # [(camera, view), ...] or [(view,), ...] for mfc
         self._pipeline_stage = "isoview-pt"  # default
 
-        # patterns for different stages
-        # mf: CM##_CM## (fused cameras)
-        pattern_mf = re.compile(r"CM(\d+)_CM(\d+)_CHN(\d+)")
-        # pt: single CM##_CHN##
-        pattern_pt = re.compile(r"_CM(\d+)_CHN(\d+)(?:\.zarr)?$")
-        # mfc: CHN##_CHN## (fused channels) or just CHN## (no cameras)
-        pattern_mfc_fused = re.compile(r"CHN(\d+)_CHN(\d+)")
-        pattern_mfc_single = re.compile(r"_CHN(\d+)(?:\.zarr)?$")
+        # patterns for different stages (support both VW and legacy CHN)
+        # mf: CM##_CM## with VW## or CHN##
+        pattern_mf = re.compile(r"CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)")
+        # pt: single CM## with VW## or CHN##
+        pattern_pt = re.compile(r"_CM(\d+)_(?:VW|CHN)(\d+)(?:\.zarr)?$")
+        # mfc: VW##_VW## or CHN##_CHN## (fused views) or just VW## / CHN## (no cameras)
+        pattern_mfc_fused = re.compile(r"(?:VW|CHN)(\d+)_(?:VW|CHN)(\d+)")
+        pattern_mfc_single = re.compile(r"_(?:VW|CHN)(\d+)(?:\.zarr)?$")
 
         has_fused_cameras = False
-        has_fused_channels = False
+        has_fused_views = False
         has_single_cameras = False
 
         for zf in zarr_files:
@@ -697,18 +756,18 @@ class IsoviewArray:
             match_mf = pattern_mf.search(name)
             if match_mf:
                 has_fused_cameras = True
-                cam0, cam1, chn = int(match_mf.group(1)), int(match_mf.group(2)), int(match_mf.group(3))
-                view = ((cam0, cam1), chn)
+                cam0, cam1, vw = int(match_mf.group(1)), int(match_mf.group(2)), int(match_mf.group(3))
+                view = ((cam0, cam1), vw)
                 if view not in self._views:
                     self._views.append(view)
                 continue
 
-            # check for fused channels (mfc stage)
+            # check for fused views (mfc stage)
             match_mfc = pattern_mfc_fused.search(name)
             if match_mfc:
-                has_fused_channels = True
-                chn0, chn1 = int(match_mfc.group(1)), int(match_mfc.group(2))
-                view = (chn0, chn1)
+                has_fused_views = True
+                vw0, vw1 = int(match_mfc.group(1)), int(match_mfc.group(2))
+                view = (vw0, vw1)
                 if view not in self._views:
                     self._views.append(view)
                 continue
@@ -717,23 +776,23 @@ class IsoviewArray:
             match_pt = pattern_pt.search(name)
             if match_pt:
                 has_single_cameras = True
-                cm_idx, chn_idx = int(match_pt.group(1)), int(match_pt.group(2))
-                view = (cm_idx, chn_idx)
+                cm_idx, vw_idx = int(match_pt.group(1)), int(match_pt.group(2))
+                view = (cm_idx, vw_idx)
                 if view not in self._views:
                     self._views.append(view)
                 continue
 
-            # check for channel-only (mfc stage, single channel output)
-            match_chn = pattern_mfc_single.search(name)
-            if match_chn and "CM" not in name:
-                has_fused_channels = True
-                chn = int(match_chn.group(1))
-                view = (chn,)
+            # check for view-only (mfc stage, single view output)
+            match_vw = pattern_mfc_single.search(name)
+            if match_vw and "CM" not in name:
+                has_fused_views = True
+                vw = int(match_vw.group(1))
+                view = (vw,)
                 if view not in self._views:
                     self._views.append(view)
 
         # determine pipeline stage
-        if has_fused_channels:
+        if has_fused_views:
             self._pipeline_stage = "isoview-mfc"
         elif has_fused_cameras:
             self._pipeline_stage = "isoview-mf"
@@ -741,7 +800,7 @@ class IsoviewArray:
             self._pipeline_stage = "isoview-pt"
 
         if not self._views:
-            raise ValueError(f"No valid camera/channel combinations in {tm_folder}")
+            raise ValueError(f"No valid camera/view combinations in {tm_folder}")
 
         # open first valid (non-mask) file to get shape/dtype/metadata
         first_valid = None
@@ -916,11 +975,15 @@ class IsoviewArray:
             arr = z[f"camera_{camera}/0"]
 
         else:  # separate
-            pattern = f"*_CM{camera:02d}_CHN{channel:02d}.zarr"
+            # try VW naming first, fall back to legacy CHN
+            pattern = f"*_CM{camera:02d}_VW{channel:02d}.zarr"
             matches = list(tm_folder.glob(pattern))
+            if not matches:
+                pattern = f"*_CM{camera:02d}_CHN{channel:02d}.zarr"
+                matches = list(tm_folder.glob(pattern))
 
             if not matches:
-                raise FileNotFoundError(f"No {pattern} in {tm_folder}")
+                raise FileNotFoundError(f"No *_CM{camera:02d}_VW{channel:02d}.zarr in {tm_folder}")
 
             z = zarr.open(matches[0], mode="r")
             if isinstance(z, zarr.Group):
@@ -1022,7 +1085,7 @@ class IsoviewArray:
         - vps: volumes per second (fps / zplanes)
 
         Plus isoview-specific fields:
-        - views: list of (camera, channel) tuples
+        - views: list of (camera, view) tuples
         - structure: 'raw', 'consolidated', or 'separate'
         - cameras: per-camera metadata dict (for consolidated structure)
         """
@@ -1073,7 +1136,7 @@ class IsoviewArray:
         # isoview-raw, isoview-pt, isoview-mf, isoview-mfc
         meta["stack_type"] = getattr(self, "_pipeline_stage", "isoview")
 
-        # number of views (cameras x channels)
+        # number of views (cameras x views)
         meta["num_views"] = len(self._views)
 
         # === ISOVIEW-SPECIFIC FIELDS ===
@@ -1139,12 +1202,12 @@ class IsoviewArray:
 
     @property
     def views(self) -> list[tuple[int, int]]:
-        """List of (camera, channel) tuples for each view index."""
+        """List of (camera, view) tuples for each view index."""
         return self._views
 
     @property
     def num_views(self) -> int:
-        """Number of camera/channel views."""
+        """Number of camera/view combinations."""
         return len(self._views)
 
     @property
@@ -1160,13 +1223,13 @@ class IsoviewArray:
         """Length is first dimension (T or Z depending on structure)."""
         return self.shape[0]
 
-    def view_index(self, camera: int, channel: int) -> int:
-        """Get view index for a specific camera/channel combination."""
+    def view_index(self, camera: int, view: int) -> int:
+        """Get view index for a specific camera/view combination."""
         try:
-            return self._views.index((camera, channel))
+            return self._views.index((camera, view))
         except ValueError:
             raise ValueError(
-                f"No view for camera={camera}, channel={channel}. "
+                f"No view for camera={camera}, view={view}. "
                 f"Available views: {self._views}"
             )
 
@@ -1384,12 +1447,12 @@ class IsoviewArray:
         Returns
         -------
         tuple[str, ...]
-            ('z', 'cm', 'y', 'x') for single timepoint
-            ('t', 'z', 'cm', 'y', 'x') for multi-timepoint
+            ('z', 'vw', 'y', 'x') for single timepoint
+            ('t', 'z', 'vw', 'y', 'x') for multi-timepoint
         """
         if self._single_timepoint:
-            return ("z", "cm", "Y", "X")
-        return ("t", "z", "cm", "Y", "X")
+            return ("z", "vw", "Y", "X")
+        return ("t", "z", "vw", "Y", "X")
 
     @property
     def num_planes(self) -> int:
@@ -1471,7 +1534,7 @@ EXCLUDE_PATTERNS = [
 
 # patterns that identify data files (for fusedStack naming)
 DATA_PATTERNS = [
-    ".fusedStack.",  # multifuse output: CM00_CM01_CHN01.fusedStack.klb
+    ".fusedStack.",  # multifuse output: CM00_CM01_VW01.fusedStack.klb
 ]
 
 
@@ -1490,8 +1553,8 @@ class IsoViewOutputArray:
         Path to directory containing TM* folders or a single TM folder
     view_dim : str, optional
         Name for view dimension in dims tuple. Default auto-detects:
-        - 'cm' if CM## pattern found in filenames
-        - 'ch' if only CHN## pattern (no CM) found
+        - 'vw' if CM##_VW## pattern found in filenames
+        - 'cm' if legacy CM##_CHN## pattern found
         - 'view' otherwise
 
     Examples
@@ -1500,9 +1563,9 @@ class IsoViewOutputArray:
     >>> arr.shape
     (4, 38, 4, 1848, 768)  # (t, z, views, y, x)
     >>> arr.dims
-    ('t', 'z', 'cm', 'y', 'x')
+    ('t', 'z', 'vw', 'y', 'x')
     >>> arr.views
-    [0, 1, 2, 3]  # camera indices
+    [0, 1, 2, 3]  # view indices
     >>> frame = arr[0, 10, 0]  # t=0, z=10, view=0
     """
 
@@ -1584,31 +1647,31 @@ class IsoViewOutputArray:
         """Parse filenames to find views and determine shape.
 
         Detects pipeline stage from filename patterns:
-        - isoview-pt: SPM00_TM000000_CM00_CHN01 (single camera per file)
-        - isoview-mf: SPM00_TM000000_CM00_CM01_CHN01 (fused cameras)
-        - isoview-mfc: SPM00_TM000000_CHN00 (channel-only, fully fused)
+        - isoview-pt: SPM00_TM000000_CM00_VW01 (single camera per file)
+        - isoview-mf: SPM00_TM000000_CM00_CM01_VW01 (fused cameras)
+        - isoview-mfc: SPM00_TM000000_VW00 (view-only, fully fused)
 
+        Supports both VW and legacy CHN naming.
         Handles both standard naming (.klb) and fusedStack naming (.fusedStack.klb).
         """
         import re
 
-        # patterns for extracting view info - use looser matching for file suffix
-        # allows .klb, .fusedStack.klb, .tif, .zarr, etc.
-        # SPM00_TM000000_CM00_CHN01.tif -> camera=0, channel=1
-        # SPM00_TM000000_CM00_CM01_CHN01.fusedStack.klb -> fused cameras 0+1, channel=1
-        # SPM00_TM000000_CHN00.tif -> channel=0 (no camera)
+        # patterns for extracting view info (support both VW and legacy CHN)
+        # SPM00_TM000000_CM00_VW01.tif -> camera=0, view=1
+        # SPM00_TM000000_CM00_CM01_VW01.fusedStack.klb -> fused cameras 0+1, view=1
+        # SPM00_TM000000_VW00.tif -> view=0 (no camera)
         pattern_cm = re.compile(
-            r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)(?:\.[a-zA-Z]+)+" + "$"
+            r"SPM(\d+)_TM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:\.[a-zA-Z]+)+" + "$"
         )
         pattern_fused_cm = re.compile(
-            r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_CHN(\d+)(?:\.[a-zA-Z]+)+" + "$"
+            r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:\.[a-zA-Z]+)+" + "$"
         )
-        pattern_chn = re.compile(
-            r"SPM(\d+)_TM(\d+)_CHN(\d+)(?:\.[a-zA-Z]+)+" + "$"
+        pattern_vw = re.compile(
+            r"SPM(\d+)_TM(\d+)_(?:VW|CHN)(\d+)(?:\.[a-zA-Z]+)+" + "$"
         )
 
         self._views = []
-        self._view_type = None  # 'cm', 'fused', or 'ch'
+        self._view_type = None  # 'vw', 'fused', or 'view'
         self._specimen = None
         self._file_map = {}  # view_idx -> filename pattern parts
         self._pipeline_stage = "isoview-pt"  # default
@@ -1617,38 +1680,38 @@ class IsoViewOutputArray:
             # try fused camera pattern first (CM##_CM##)
             match = pattern_fused_cm.match(f.name)
             if match:
-                specimen, timepoint, cam0, cam1, channel = map(int, match.groups())
+                specimen, timepoint, cam0, cam1, view_idx = map(int, match.groups())
                 self._specimen = specimen
                 self._view_type = "fused"
                 self._pipeline_stage = "isoview-mf"
                 view_key = (cam0, cam1)
                 if view_key not in self._views:
                     self._views.append(view_key)
-                    self._file_map[view_key] = {"cam0": cam0, "cam1": cam1, "channel": channel}
+                    self._file_map[view_key] = {"cam0": cam0, "cam1": cam1, "view": view_idx}
                 continue
 
             # try single CM pattern
             match = pattern_cm.match(f.name)
             if match:
-                specimen, timepoint, camera, channel = map(int, match.groups())
+                specimen, timepoint, camera, view_idx = map(int, match.groups())
                 self._specimen = specimen
-                self._view_type = "cm"
+                self._view_type = "vw"
                 self._pipeline_stage = "isoview-pt"
                 if camera not in self._views:
                     self._views.append(camera)
-                    self._file_map[camera] = {"camera": camera, "channel": channel}
+                    self._file_map[camera] = {"camera": camera, "view": view_idx}
                 continue
 
-            # try CHN-only pattern (fully fused or channel-fused)
-            match = pattern_chn.match(f.name)
+            # try VW-only pattern (fully fused)
+            match = pattern_vw.match(f.name)
             if match:
-                specimen, timepoint, channel = map(int, match.groups())
+                specimen, timepoint, view_idx = map(int, match.groups())
                 self._specimen = specimen
-                self._view_type = "ch"
+                self._view_type = "view"
                 self._pipeline_stage = "isoview-mfc"
-                if channel not in self._views:
-                    self._views.append(channel)
-                    self._file_map[channel] = {"channel": channel}
+                if view_idx not in self._views:
+                    self._views.append(view_idx)
+                    self._file_map[view_idx] = {"view": view_idx}
                 continue
 
         if not self._views:
@@ -1721,13 +1784,15 @@ class IsoViewOutputArray:
             self._single_shape = shape[-3:]
 
     def _extract_tiff_metadata(self, tif):
-        """Extract pixel spacing and timing from TIFF ImageJ metadata.
+        """Extract pixel spacing, timing, and OME metadata from TIFF.
 
         For isoview TIFFs:
-        - dz comes from ImageJ 'spacing' metadata (in µm)
+        - dz comes from ImageJ 'spacing' metadata (in um)
         - dx, dy come from XResolution/YResolution tags
         - fs comes from ImageJ 'finterval' (1/finterval) or 'fps' if present
-        - Resolution is stored as pixels per unit with ResolutionUnit tag
+        - OME-XML: stage_x/y/z from Plane PositionX/Y/Z
+        - OME-XML: wavelength and exposure_time from Channel
+        - OME-XML: crop provenance from Description (raw_shape, crop params)
         """
         try:
             ij_meta = getattr(tif, "imagej_metadata", None) or {}
@@ -1743,7 +1808,6 @@ class IsoViewOutputArray:
                 self._metadata["fs"] = float(ij_meta["fps"])
 
             # extract dx, dy from resolution tags
-            # isoview writes resolution as pixels/µm, so we invert to get µm/pixel
             for page in tif.pages[:1]:
                 x_res_tag = page.tags.get("XResolution")
                 y_res_tag = page.tags.get("YResolution")
@@ -1751,8 +1815,6 @@ class IsoViewOutputArray:
                 if x_res_tag:
                     x_res = x_res_tag.value
                     if x_res and x_res[0] > 0:
-                        # x_res = (numerator, denominator) = pixels per unit
-                        # µm/pixel = 1 / (pixels/µm) = denominator / numerator
                         px_per_um = float(x_res[0]) / float(x_res[1])
                         self._metadata["dx"] = 1.0 / px_per_um
 
@@ -1761,6 +1823,58 @@ class IsoViewOutputArray:
                     if y_res and y_res[0] > 0:
                         px_per_um = float(y_res[0]) / float(y_res[1])
                         self._metadata["dy"] = 1.0 / px_per_um
+
+            # extract OME-XML metadata (stage position, crop provenance)
+            self._extract_ome_metadata(tif)
+
+        except Exception:
+            pass
+
+    def _extract_ome_metadata(self, tif):
+        """Extract stage position, wavelength, and crop info from OME-XML."""
+        try:
+            import xml.etree.ElementTree as ET
+
+            ome_xml = tif.ome_metadata
+            if not ome_xml:
+                return
+
+            root = ET.fromstring(ome_xml)
+            ns = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
+
+            # stage position from Plane elements
+            for plane in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Plane"):
+                pos_x = plane.get("PositionX")
+                pos_y = plane.get("PositionY")
+                pos_z = plane.get("PositionZ")
+                if pos_x is not None:
+                    self._metadata["stage_x"] = float(pos_x)
+                if pos_y is not None:
+                    self._metadata["stage_y"] = float(pos_y)
+                if pos_z is not None:
+                    self._metadata["stage_z"] = float(pos_z)
+                break  # only need first plane
+
+            # wavelength and exposure from Channel
+            for channel in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Channel"):
+                name = channel.get("Name")
+                if name:
+                    self._metadata["channel_name"] = name
+                em_wl = channel.get("EmissionWavelength")
+                if em_wl:
+                    self._metadata["wavelength"] = float(em_wl)
+                break
+
+            # crop provenance from Description
+            for img in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Image"):
+                desc = img.get("Description", "")
+                if not desc:
+                    desc_el = img.find("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Description")
+                    if desc_el is not None and desc_el.text:
+                        desc = desc_el.text
+                if "raw_shape" in desc:
+                    self._metadata["crop_provenance"] = desc
+                break
 
         except Exception:
             pass
@@ -1811,12 +1925,19 @@ class IsoViewOutputArray:
 
         if self._view_type == "fused":
             info = self._file_map[view]
-            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['cam0']:02d}_CM{info['cam1']:02d}_CHN{info['channel']:02d}{ext}"
-        elif self._view_type == "cm":
+            # try VW naming first, fall back to CHN
+            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['cam0']:02d}_CM{info['cam1']:02d}_VW{info['view']:02d}{ext}"
+            if not (tm_folder / filename).exists():
+                filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['cam0']:02d}_CM{info['cam1']:02d}_CHN{info['view']:02d}{ext}"
+        elif self._view_type == "vw":
             info = self._file_map[view]
-            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}_CHN{info['channel']:02d}{ext}"
-        else:  # ch
-            filename = f"SPM{sp:02d}_TM{tp:06d}_CHN{view:02d}{ext}"
+            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}_VW{info['view']:02d}{ext}"
+            if not (tm_folder / filename).exists():
+                filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}_CHN{info['view']:02d}{ext}"
+        else:  # view
+            filename = f"SPM{sp:02d}_TM{tp:06d}_VW{view:02d}{ext}"
+            if not (tm_folder / filename).exists():
+                filename = f"SPM{sp:02d}_TM{tp:06d}_CHN{view:02d}{ext}"
 
         return tm_folder / filename
 
@@ -1859,11 +1980,13 @@ class IsoViewOutputArray:
 
     def _detect_view_dim(self) -> str:
         """Auto-detect view dimension name from file pattern."""
-        if self._view_type == "cm":
-            return "cm"
-        elif self._view_type == "ch":
-            return "ch"
-        return "view"
+        if self._view_type == "vw":
+            return "vw"
+        elif self._view_type == "view":
+            return "vw"
+        elif self._view_type == "fused":
+            return "vw"
+        return "vw"
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -1893,7 +2016,7 @@ class IsoViewOutputArray:
         """Dimension labels for sliders.
 
         Spatial dims (Y, X) are uppercase per mbo_utilities convention.
-        Slider dims (t, z, cm/ch) are lowercase for fastplotlib.
+        Slider dims (t, z, vw) are lowercase for fastplotlib.
         """
         if self._single_timepoint:
             return ("z", self._view_dim, "Y", "X")
@@ -1936,12 +2059,12 @@ class IsoViewOutputArray:
         Acquisition parameters (displayed in orange):
         - stack_type: pipeline stage (isoview-pt, isoview-mf, isoview-mfc)
         - file_type: output file format (.tif, .klb, .zarr)
-        - view_type: 'cm' (camera), 'ch' (channel), or 'fused'
+        - view_type: 'vw' (camera+view), 'fused', or 'view'
         - specimen: specimen number
 
         Plus isoview output-specific fields:
         - views: list of view indices
-        - view_dim: dimension name for views ('cm', 'ch', or 'view')
+        - view_dim: dimension name for views ('vw')
         - pipeline_stage: same as stack_type
         """
         meta = dict(self._metadata)
@@ -2140,6 +2263,7 @@ _CLUSTERPT_INFO = PipelineInfo(
     name="clusterpt",
     description="IsoView-Processing clusterPT corrected data (KLB)",
     input_patterns=[
+        "**/TM??????/SPM??_TM??????_CM??_VW??.klb",
         "**/TM??????/SPM??_TM??????_CM??_CHN??.klb",
         "**/SPM??/*.corrected/*/TM??????/",
     ],
@@ -2383,7 +2507,7 @@ class ClusterPTArray:
         - specimen: specimen number
 
         Plus clusterpt-specific fields:
-        - views: list of (camera, channel) tuples
+        - views: list of (camera, channel) tuples (legacy CHN naming)
         """
         meta = dict(self._metadata)
 
@@ -2584,12 +2708,12 @@ class ClusterPTArray:
         Returns
         -------
         tuple[str, ...]
-            ('z', 'cm', 'y', 'x') for single timepoint
-            ('t', 'z', 'cm', 'y', 'x') for multi-timepoint
+            ('z', 'vw', 'y', 'x') for single timepoint
+            ('t', 'z', 'vw', 'y', 'x') for multi-timepoint
         """
         if self._single_timepoint:
-            return ("z", "cm", "Y", "X")
-        return ("t", "z", "cm", "Y", "X")
+            return ("z", "vw", "Y", "X")
+        return ("t", "z", "vw", "Y", "X")
 
     @property
     def num_planes(self) -> int:
