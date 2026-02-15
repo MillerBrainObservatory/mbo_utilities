@@ -1,0 +1,882 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mbo_utilities.writer &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=26413419" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../../_static/togglebutton.js?v=1ae7504c"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/mbo_utilities/writer';</script>
+    <link rel="icon" href="../../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="../../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="../../_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../usage/gui_guide.html">Graphical User Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2F_modules/mbo_utilities/writer.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button"
+   title="Open an issue"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+
+</a>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for mbo_utilities.writer</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">imwrite - Write lazy imaging arrays to disk.</span>
+
+<span class="sd">This module provides the imwrite() function for writing imaging data to</span>
+<span class="sd">various file formats with support for ROI selection, z-plane registration,</span>
+<span class="sd">chunked streaming, and format conversion.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities</span><span class="w"> </span><span class="kn">import</span> <span class="n">log</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities._writers</span><span class="w"> </span><span class="kn">import</span> <span class="n">_try_generic_writers</span><span class="p">,</span> <span class="n">add_processing_step</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">register_zplanes_s3d</span><span class="p">,</span>
+    <span class="n">validate_s3d_registration</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.metadata</span><span class="w"> </span><span class="kn">import</span> <span class="n">RoiMode</span><span class="p">,</span> <span class="n">get_param</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_npy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">TYPE_CHECKING</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">contextlib</span>
+
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Sequence</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">log</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;writer&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="imwrite">
+<a class="viewcode-back" href="../../api/io.html#mbo_utilities.imwrite">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">imwrite</span><span class="p">(</span>
+    <span class="n">lazy_array</span><span class="p">,</span>
+    <span class="n">outpath</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span><span class="p">,</span>
+    <span class="n">ext</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;.tiff&quot;</span><span class="p">,</span>
+    <span class="n">planes</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="nb">tuple</span> <span class="o">|</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">frames</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="nb">tuple</span> <span class="o">|</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">channels</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="nb">tuple</span> <span class="o">|</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">num_frames</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">register_z</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">roi_mode</span><span class="p">:</span> <span class="n">RoiMode</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">RoiMode</span><span class="o">.</span><span class="n">concat_y</span><span class="p">,</span>
+    <span class="n">roi</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">overwrite</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">order</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="nb">tuple</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">target_chunk_mb</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">100</span><span class="p">,</span>
+    <span class="n">progress_callback</span><span class="p">:</span> <span class="n">Callable</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">debug</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">show_progress</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">shift_vectors</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_suffix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Write a supported lazy imaging array to disk.</span>
+
+<span class="sd">    This function handles writing multi-dimensional imaging data to various formats,</span>
+<span class="sd">    with support for ROI selection, z-plane registration, chunked streaming, and</span>
+<span class="sd">    format conversion. Use with `imread()` to load and convert imaging data.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    lazy_array : object</span>
+<span class="sd">        A lazy array from `imread()` or a numpy array. Any object with `.shape`,</span>
+<span class="sd">        `.dtype`, and `_imwrite()` method is supported. Use `mbo formats` CLI</span>
+<span class="sd">        command to list all supported input formats.</span>
+
+<span class="sd">    outpath : str or Path</span>
+<span class="sd">        Target directory to write output files. Will be created if it doesn&#39;t exist.</span>
+<span class="sd">        Files are named automatically based on plane/ROI (e.g., `plane01_roi1.tiff`).</span>
+
+<span class="sd">    ext : str, default=&quot;.tiff&quot;</span>
+<span class="sd">        Output format extension. Supported formats:</span>
+<span class="sd">        - `.tiff`, `.tif` : Multi-page TIFF (BigTIFF for &gt;4GB)</span>
+<span class="sd">        - `.bin` : Suite2p-compatible binary format with ops.npy metadata</span>
+<span class="sd">        - `.zarr` : Zarr v3 array store</span>
+<span class="sd">        - `.h5`, `.hdf5` : HDF5 format</span>
+
+<span class="sd">    planes : list | tuple | int | None, optional</span>
+<span class="sd">        Z-planes to export (1-based indexing). Options:</span>
+<span class="sd">        - None (default) : Export all planes</span>
+<span class="sd">        - int : Single plane, e.g. `planes=7` exports only plane 7</span>
+<span class="sd">        - list/tuple : Specific planes, e.g. `planes=[1, 7, 14]`</span>
+
+<span class="sd">    frames : list | tuple | int | None, optional</span>
+<span class="sd">        Timepoints to export (1-based indexing). Options:</span>
+<span class="sd">        - None (default) : Export all frames</span>
+<span class="sd">        - int : Single frame, e.g. `frames=100` exports only frame 100</span>
+<span class="sd">        - list/tuple : Specific frames, e.g. `frames=[1, 50, 100]`</span>
+<span class="sd">        - range : Range of frames, e.g. `frames=list(range(1, 101))`</span>
+
+<span class="sd">    channels : list | tuple | int | None, optional</span>
+<span class="sd">        Color channels to export (1-based indexing). Only applies to arrays</span>
+<span class="sd">        with a C dimension (e.g., multi-color imaging). Options:</span>
+<span class="sd">        - None (default) : Export all channels</span>
+<span class="sd">        - int : Single channel, e.g. `channels=1`</span>
+<span class="sd">        - list/tuple : Specific channels, e.g. `channels=[1, 2]`</span>
+
+<span class="sd">    roi_mode : RoiMode | str, default=RoiMode.concat_y</span>
+<span class="sd">        Mode for handling multi-ROI data. Options:</span>
+<span class="sd">        - RoiMode.concat_y : Horizontally concatenate ROIs into single FOV (default)</span>
+<span class="sd">        - RoiMode.separate : Write each ROI to separate files</span>
+<span class="sd">        String values are accepted (case-insensitive): &quot;concat_y&quot;, &quot;separate&quot;.</span>
+
+<span class="sd">    roi : int | Sequence[int] | None, optional</span>
+<span class="sd">        Specific ROI(s) to export when roi_mode=RoiMode.separate. Options:</span>
+<span class="sd">        - None (default) : Export all ROIs</span>
+<span class="sd">        - int &gt; 0 : Export specific ROI, e.g. `roi=1` exports only ROI 1</span>
+<span class="sd">        - list/tuple : Export specific ROIs, e.g. `roi=[1, 3]`</span>
+<span class="sd">        Note: When roi_mode=RoiMode.concat_y, this parameter is ignored.</span>
+
+<span class="sd">    num_frames : int, optional</span>
+<span class="sd">        Number of frames to export. If None (default), exports all frames.</span>
+
+<span class="sd">    register_z : bool, default=False</span>
+<span class="sd">        Perform z-plane registration using Suite3D before writing.</span>
+
+<span class="sd">    shift_vectors : np.ndarray, optional</span>
+<span class="sd">        Pre-computed z-shift vectors with shape (n_planes, 2) for [dy, dx] shifts.</span>
+
+<span class="sd">    metadata : dict, optional</span>
+<span class="sd">        Additional metadata to merge into output file headers/attributes.</span>
+
+<span class="sd">    overwrite : bool, default=False</span>
+<span class="sd">        Whether to overwrite existing output files.</span>
+
+<span class="sd">    order : list | tuple, optional</span>
+<span class="sd">        Reorder planes before writing. Must have same length as `planes`.</span>
+
+<span class="sd">    target_chunk_mb : int, optional</span>
+<span class="sd">        Target chunk size in MB for streaming writes. Default is 100 MB.</span>
+
+<span class="sd">    progress_callback : Callable, optional</span>
+<span class="sd">        Callback function for progress updates: `callback(progress, current_plane)`.</span>
+
+<span class="sd">    debug : bool, default=False</span>
+<span class="sd">        Enable verbose logging for troubleshooting.</span>
+
+<span class="sd">    show_progress : bool, default=True</span>
+<span class="sd">        Show tqdm progress bar during writing. Set to False in notebooks</span>
+<span class="sd">        when you don&#39;t want progress output cluttering the display.</span>
+
+<span class="sd">    output_name : str, optional</span>
+<span class="sd">        Filename for binary output when ext=&quot;.bin&quot;.</span>
+
+<span class="sd">    output_suffix : str, optional</span>
+<span class="sd">        Custom suffix to append to output filenames. If None (default), files are</span>
+<span class="sd">        named with &quot;_stitched&quot; for multi-ROI data when roi is None, or &quot;_roiN&quot;</span>
+<span class="sd">        for specific ROIs. Examples: &quot;_stitched&quot;, &quot;_processed&quot;, &quot;_session1&quot;.</span>
+<span class="sd">        The suffix is automatically sanitized (illegal characters removed, double</span>
+<span class="sd">        extensions prevented, underscore prefix added if missing).</span>
+
+<span class="sd">    **kwargs</span>
+<span class="sd">        Additional format-specific options passed to writer backends.</span>
+
+<span class="sd">        Zarr-specific options (ext=&quot;.zarr&quot;):</span>
+<span class="sd">        - sharded : bool, default True</span>
+<span class="sd">            Use Zarr v3 sharding codec for efficient large file access.</span>
+<span class="sd">        - level : int, default 1</span>
+<span class="sd">            Gzip compression level (0=none, 1-9).</span>
+<span class="sd">        - ome : bool, default True</span>
+<span class="sd">            Write OME-NGFF v0.5 metadata for napari/OMERO compatibility.</span>
+<span class="sd">        - pyramid : bool, default False</span>
+<span class="sd">            Generate multi-resolution pyramid for faster navigation.</span>
+<span class="sd">            Enables napari multiscale viewing.</span>
+<span class="sd">        - pyramid_max_layers : int, default 4</span>
+<span class="sd">            Maximum additional resolution levels (0-4 = 5 total levels).</span>
+<span class="sd">            Only spatial dims (Y, X) are downsampled by 2x per level.</span>
+<span class="sd">        - pyramid_method : str, default &quot;mean&quot;</span>
+<span class="sd">            Downsampling method: &quot;mean&quot; (default), &quot;nearest&quot;, &quot;gaussian&quot;.</span>
+<span class="sd">            Use &quot;nearest&quot; for label/mask data to preserve integer values.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    Path</span>
+<span class="sd">        Path to the output directory containing written files.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; from mbo_utilities import imread, imwrite</span>
+<span class="sd">    &gt;&gt;&gt; data = imread(&quot;path/to/raw/*.tiff&quot;)</span>
+<span class="sd">    &gt;&gt;&gt; imwrite(data, &quot;output/session1&quot;, roi=None)  # Stitch all ROIs</span>
+
+<span class="sd">    &gt;&gt;&gt; # Save specific planes</span>
+<span class="sd">    &gt;&gt;&gt; imwrite(data, &quot;output/session1&quot;, planes=[1, 7, 14])</span>
+
+<span class="sd">    &gt;&gt;&gt; # Split ROIs</span>
+<span class="sd">    &gt;&gt;&gt; imwrite(data, &quot;output/session1&quot;, roi=0)</span>
+
+<span class="sd">    &gt;&gt;&gt; # Z-plane registration</span>
+<span class="sd">    &gt;&gt;&gt; imwrite(data, &quot;output/registered&quot;, register_z=True)</span>
+
+<span class="sd">    &gt;&gt;&gt; # Convert to Suite2p binary</span>
+<span class="sd">    &gt;&gt;&gt; imwrite(data, &quot;output/suite2p&quot;, ext=&quot;.bin&quot;, roi=0)</span>
+
+<span class="sd">    &gt;&gt;&gt; # Save to Zarr</span>
+<span class="sd">    &gt;&gt;&gt; imwrite(data, &quot;output/zarr_store&quot;, ext=&quot;.zarr&quot;)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">debug</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Debug mode enabled; setting log level to INFO.&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">propagate</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">WARNING</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">propagate</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="c1"># normalize roi_mode to enum</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">roi_mode</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">roi_mode</span> <span class="o">=</span> <span class="n">RoiMode</span><span class="o">.</span><span class="n">from_string</span><span class="p">(</span><span class="n">roi_mode</span><span class="p">)</span>
+
+    <span class="c1"># save path</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">outpath</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">)):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;`outpath` must be a string or Path, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">outpath</span><span class="p">)</span><span class="si">}</span><span class="s2"> instead.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="n">outpath</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">outpath</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">outpath</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">outpath</span><span class="si">}</span><span class="s2"> is not inside a valid directory.&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot; Please create the directory first.&quot;</span>
+        <span class="p">)</span>
+    <span class="n">outpath</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="c1"># handle roi based on roi_mode</span>
+    <span class="c1"># ROI support detected via duck typing: hasattr(arr, &#39;roi_mode&#39;)</span>
+    <span class="k">if</span> <span class="n">roi_mode</span> <span class="o">==</span> <span class="n">RoiMode</span><span class="o">.</span><span class="n">separate</span><span class="p">:</span>
+        <span class="c1"># separate mode: set roi on array if specified</span>
+        <span class="k">if</span> <span class="n">roi</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;roi_mode&quot;</span><span class="p">):</span>
+            <span class="n">lazy_array</span><span class="o">.</span><span class="n">roi</span> <span class="o">=</span> <span class="n">roi</span>
+    <span class="k">elif</span> <span class="n">roi_mode</span> <span class="o">==</span> <span class="n">RoiMode</span><span class="o">.</span><span class="n">concat_y</span><span class="p">:</span>
+        <span class="c1"># concat mode: roi parameter is ignored, use None (stitch all)</span>
+        <span class="k">if</span> <span class="n">roi</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;roi=</span><span class="si">{</span><span class="n">roi</span><span class="si">}</span><span class="s2"> ignored when roi_mode=concat_y. &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;All ROIs will be concatenated.&quot;</span>
+            <span class="p">)</span>
+        <span class="n">roi</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">if</span> <span class="n">order</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">order</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">planes</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The length of the `order` (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">order</span><span class="p">)</span><span class="si">}</span><span class="s2">) does not match &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;the number of planes (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">planes</span><span class="p">)</span><span class="si">}</span><span class="s2">).&quot;</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">i</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">i</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="n">planes</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">order</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;order indices must be in range [0, </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">planes</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">], got </span><span class="si">{</span><span class="n">order</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+        <span class="n">planes</span> <span class="o">=</span> <span class="p">[</span><span class="n">planes</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">order</span><span class="p">]</span>
+
+    <span class="n">existing_meta</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;metadata&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">file_metadata</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">existing_meta</span> <span class="ow">or</span> <span class="p">{})</span>
+
+    <span class="k">if</span> <span class="n">metadata</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">metadata</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;metadata must be a dict, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">file_metadata</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span>
+
+    <span class="c1"># store roi_mode in metadata as string</span>
+    <span class="n">file_metadata</span><span class="p">[</span><span class="s2">&quot;roi_mode&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">roi_mode</span><span class="o">.</span><span class="n">value</span>
+
+    <span class="k">if</span> <span class="n">num_frames</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">file_metadata</span><span class="p">[</span><span class="s2">&quot;num_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">num_frames</span><span class="p">)</span>
+        <span class="n">file_metadata</span><span class="p">[</span><span class="s2">&quot;nframes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">num_frames</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;metadata&quot;</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">contextlib</span><span class="o">.</span><span class="n">suppress</span><span class="p">(</span><span class="ne">AttributeError</span><span class="p">):</span>
+            <span class="n">lazy_array</span><span class="o">.</span><span class="n">metadata</span> <span class="o">=</span> <span class="n">file_metadata</span>
+
+    <span class="n">s3d_job_dir</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">register_z</span><span class="p">:</span>
+        <span class="n">file_metadata</span><span class="p">[</span><span class="s2">&quot;apply_shift&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">num_planes</span> <span class="o">=</span> <span class="n">get_param</span><span class="p">(</span><span class="n">file_metadata</span><span class="p">,</span> <span class="s2">&quot;nplanes&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">shift_vectors</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">file_metadata</span><span class="p">[</span><span class="s2">&quot;shift_vectors&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">shift_vectors</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Using provided shift_vectors for registration.&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">existing_s3d_dir</span> <span class="o">=</span> <span class="kc">None</span>
+
+            <span class="k">if</span> <span class="s2">&quot;s3d-job&quot;</span> <span class="ow">in</span> <span class="n">file_metadata</span><span class="p">:</span>
+                <span class="n">candidate</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">file_metadata</span><span class="p">[</span><span class="s2">&quot;s3d-job&quot;</span><span class="p">])</span>
+                <span class="k">if</span> <span class="n">validate_s3d_registration</span><span class="p">(</span><span class="n">candidate</span><span class="p">,</span> <span class="n">num_planes</span><span class="p">):</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found valid s3d-job in metadata: </span><span class="si">{</span><span class="n">candidate</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="n">existing_s3d_dir</span> <span class="o">=</span> <span class="n">candidate</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                        <span class="s2">&quot;s3d-job in metadata exists but registration is invalid&quot;</span>
+                    <span class="p">)</span>
+
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">existing_s3d_dir</span><span class="p">:</span>
+                <span class="n">job_id</span> <span class="o">=</span> <span class="n">file_metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;job_id&quot;</span><span class="p">,</span> <span class="s2">&quot;s3d-preprocessed&quot;</span><span class="p">)</span>
+                <span class="n">candidate</span> <span class="o">=</span> <span class="n">outpath</span> <span class="o">/</span> <span class="n">job_id</span>
+                <span class="k">if</span> <span class="n">validate_s3d_registration</span><span class="p">(</span><span class="n">candidate</span><span class="p">,</span> <span class="n">num_planes</span><span class="p">):</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found valid existing s3d-job: </span><span class="si">{</span><span class="n">candidate</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="n">existing_s3d_dir</span> <span class="o">=</span> <span class="n">candidate</span>
+
+            <span class="k">if</span> <span class="n">existing_s3d_dir</span><span class="p">:</span>
+                <span class="n">s3d_job_dir</span> <span class="o">=</span> <span class="n">existing_s3d_dir</span>
+                <span class="c1"># notify callback that we&#39;re using cached registration</span>
+                <span class="k">if</span> <span class="n">progress_callback</span><span class="p">:</span>
+                    <span class="n">progress_callback</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="s2">&quot;Using cached registration&quot;</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">s3d_job_dir</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;dirs.npy&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+                    <span class="n">dirs</span> <span class="o">=</span> <span class="n">load_npy</span><span class="p">(</span><span class="n">s3d_job_dir</span> <span class="o">/</span> <span class="s2">&quot;dirs.npy&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+                    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">dirs</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                        <span class="k">if</span> <span class="n">Path</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+                            <span class="n">file_metadata</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;No valid s3d-job found, running Suite3D registration.&quot;</span><span class="p">)</span>
+                <span class="n">s3d_job_dir</span> <span class="o">=</span> <span class="n">register_zplanes_s3d</span><span class="p">(</span>
+                    <span class="n">filenames</span><span class="o">=</span><span class="n">lazy_array</span><span class="o">.</span><span class="n">filenames</span><span class="p">,</span>
+                    <span class="n">metadata</span><span class="o">=</span><span class="n">file_metadata</span><span class="p">,</span>
+                    <span class="n">outpath</span><span class="o">=</span><span class="n">outpath</span><span class="p">,</span>
+                    <span class="n">progress_callback</span><span class="o">=</span><span class="n">progress_callback</span><span class="p">,</span>
+                <span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">s3d_job_dir</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">validate_s3d_registration</span><span class="p">(</span><span class="n">s3d_job_dir</span><span class="p">,</span> <span class="n">num_planes</span><span class="p">):</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Z-plane registration succeeded: </span><span class="si">{</span><span class="n">s3d_job_dir</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+                            <span class="s2">&quot;Suite3D job completed but validation failed. &quot;</span>
+                            <span class="s2">&quot;Proceeding without registration.&quot;</span>
+                        <span class="p">)</span>
+                        <span class="n">s3d_job_dir</span> <span class="o">=</span> <span class="kc">None</span>
+                        <span class="n">file_metadata</span><span class="p">[</span><span class="s2">&quot;apply_shift&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                        <span class="s2">&quot;Z-plane registration failed. Proceeding without registration.&quot;</span>
+                    <span class="p">)</span>
+                    <span class="n">file_metadata</span><span class="p">[</span><span class="s2">&quot;apply_shift&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="k">if</span> <span class="n">s3d_job_dir</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Storing s3d-job path </span><span class="si">{</span><span class="n">s3d_job_dir</span><span class="si">}</span><span class="s2"> in metadata.&quot;</span><span class="p">)</span>
+            <span class="n">file_metadata</span><span class="p">[</span><span class="s2">&quot;s3d-job&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">s3d_job_dir</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;metadata&quot;</span><span class="p">):</span>
+            <span class="k">with</span> <span class="n">contextlib</span><span class="o">.</span><span class="n">suppress</span><span class="p">(</span><span class="ne">AttributeError</span><span class="p">):</span>
+                <span class="n">lazy_array</span><span class="o">.</span><span class="n">metadata</span> <span class="o">=</span> <span class="n">file_metadata</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">file_metadata</span><span class="p">[</span><span class="s2">&quot;apply_shift&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;metadata&quot;</span><span class="p">):</span>
+            <span class="k">with</span> <span class="n">contextlib</span><span class="o">.</span><span class="n">suppress</span><span class="p">(</span><span class="ne">AttributeError</span><span class="p">):</span>
+                <span class="n">lazy_array</span><span class="o">.</span><span class="n">metadata</span> <span class="o">=</span> <span class="n">file_metadata</span>
+
+    <span class="c1"># Collect input files for processing history</span>
+    <span class="n">input_files</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;filenames&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">input_files</span><span class="p">:</span>
+        <span class="c1"># handle single path or list of paths</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">input_files</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">)):</span>
+            <span class="n">input_files</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">input_files</span><span class="p">)]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">input_files</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">input_files</span><span class="p">]</span>
+
+    <span class="c1"># Extract scan-phase correction parameters if available (ScanImageArray)</span>
+    <span class="n">scan_phase_params</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;fix_phase&quot;</span><span class="p">):</span>
+        <span class="n">scan_phase_params</span><span class="p">[</span><span class="s2">&quot;fix_phase&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;fix_phase&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;use_fft&quot;</span><span class="p">):</span>
+        <span class="n">scan_phase_params</span><span class="p">[</span><span class="s2">&quot;use_fft&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;use_fft&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;phasecorr_method&quot;</span><span class="p">):</span>
+        <span class="n">scan_phase_params</span><span class="p">[</span><span class="s2">&quot;phasecorr_method&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span>
+            <span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;phasecorr_method&quot;</span><span class="p">,</span> <span class="kc">None</span>
+        <span class="p">)</span>
+
+    <span class="c1"># Start timing for processing history</span>
+    <span class="n">write_start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;_imwrite&quot;</span><span class="p">):</span>
+        <span class="n">write_kwargs</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">num_frames</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">write_kwargs</span><span class="p">[</span><span class="s2">&quot;num_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">num_frames</span>
+
+        <span class="n">result</span> <span class="o">=</span> <span class="n">lazy_array</span><span class="o">.</span><span class="n">_imwrite</span><span class="p">(</span>
+            <span class="n">outpath</span><span class="p">,</span>
+            <span class="n">overwrite</span><span class="o">=</span><span class="n">overwrite</span><span class="p">,</span>
+            <span class="n">target_chunk_mb</span><span class="o">=</span><span class="n">target_chunk_mb</span><span class="p">,</span>
+            <span class="n">ext</span><span class="o">=</span><span class="n">ext</span><span class="p">,</span>
+            <span class="n">progress_callback</span><span class="o">=</span><span class="n">progress_callback</span><span class="p">,</span>
+            <span class="n">planes</span><span class="o">=</span><span class="n">planes</span><span class="p">,</span>
+            <span class="n">frames</span><span class="o">=</span><span class="n">frames</span><span class="p">,</span>
+            <span class="n">channels</span><span class="o">=</span><span class="n">channels</span><span class="p">,</span>
+            <span class="n">debug</span><span class="o">=</span><span class="n">debug</span><span class="p">,</span>
+            <span class="n">show_progress</span><span class="o">=</span><span class="n">show_progress</span><span class="p">,</span>
+            <span class="n">output_name</span><span class="o">=</span><span class="n">output_name</span><span class="p">,</span>
+            <span class="n">output_suffix</span><span class="o">=</span><span class="n">output_suffix</span><span class="p">,</span>
+            <span class="n">roi_mode</span><span class="o">=</span><span class="n">roi_mode</span><span class="p">,</span>
+            <span class="o">**</span><span class="n">write_kwargs</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Falling back to generic writers for </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">)</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+        <span class="n">_try_generic_writers</span><span class="p">(</span>
+            <span class="n">lazy_array</span><span class="p">,</span>
+            <span class="n">outpath</span><span class="p">,</span>
+            <span class="n">overwrite</span><span class="o">=</span><span class="n">overwrite</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">outpath</span>
+
+    <span class="c1"># Record processing step in metadata</span>
+    <span class="n">write_duration</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">write_start_time</span>
+
+    <span class="c1"># Build extra info for processing history</span>
+    <span class="n">processing_extra</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;input_format&quot;</span><span class="p">:</span> <span class="nb">type</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span>
+        <span class="s2">&quot;output_format&quot;</span><span class="p">:</span> <span class="n">ext</span><span class="p">,</span>
+        <span class="s2">&quot;num_frames&quot;</span><span class="p">:</span> <span class="n">file_metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;num_frames&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">file_metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;nframes&quot;</span><span class="p">),</span>
+        <span class="s2">&quot;shape&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">lazy_array</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;shape&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Add scan-phase correction info if present</span>
+    <span class="k">if</span> <span class="n">scan_phase_params</span><span class="p">:</span>
+        <span class="n">processing_extra</span><span class="p">[</span><span class="s2">&quot;scan_phase_correction&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">scan_phase_params</span>
+
+    <span class="c1"># Add z-registration info if used</span>
+    <span class="k">if</span> <span class="n">register_z</span><span class="p">:</span>
+        <span class="n">processing_extra</span><span class="p">[</span><span class="s2">&quot;z_registration&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;enabled&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;s3d_job_dir&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">s3d_job_dir</span><span class="p">)</span> <span class="k">if</span> <span class="n">s3d_job_dir</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="s2">&quot;apply_shift&quot;</span><span class="p">:</span> <span class="n">file_metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;apply_shift&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="n">shift_vectors</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">processing_extra</span><span class="p">[</span><span class="s2">&quot;z_registration&quot;</span><span class="p">][</span><span class="s2">&quot;shift_vectors_provided&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1"># Add ROI info if specified</span>
+    <span class="k">if</span> <span class="n">roi</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">processing_extra</span><span class="p">[</span><span class="s2">&quot;roi&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">roi</span>
+
+    <span class="c1"># Add planes info if specified</span>
+    <span class="k">if</span> <span class="n">planes</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">processing_extra</span><span class="p">[</span><span class="s2">&quot;planes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="nb">list</span><span class="p">(</span><span class="n">planes</span><span class="p">)</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">planes</span><span class="p">,</span> <span class="s2">&quot;__iter__&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="n">planes</span>
+        <span class="p">)</span>
+
+    <span class="c1"># Add frames info if specified</span>
+    <span class="k">if</span> <span class="n">frames</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">processing_extra</span><span class="p">[</span><span class="s2">&quot;frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="nb">list</span><span class="p">(</span><span class="n">frames</span><span class="p">)</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">frames</span><span class="p">,</span> <span class="s2">&quot;__iter__&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="n">frames</span>
+        <span class="p">)</span>
+
+    <span class="c1"># Add channels info if specified</span>
+    <span class="k">if</span> <span class="n">channels</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">processing_extra</span><span class="p">[</span><span class="s2">&quot;channels&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="nb">list</span><span class="p">(</span><span class="n">channels</span><span class="p">)</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">channels</span><span class="p">,</span> <span class="s2">&quot;__iter__&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="n">channels</span>
+        <span class="p">)</span>
+
+    <span class="c1"># Collect output files</span>
+    <span class="n">output_files</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">result</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">Path</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+            <span class="c1"># List files in output directory</span>
+            <span class="n">out_files</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;*</span><span class="si">{</span><span class="n">ext</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">out_files</span><span class="p">:</span>
+                <span class="n">output_files</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">out_files</span><span class="p">[:</span><span class="mi">20</span><span class="p">]]</span>  <span class="c1"># Limit to first 20</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">output_files</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">result</span><span class="p">)]</span>
+
+    <span class="n">add_processing_step</span><span class="p">(</span>
+        <span class="n">file_metadata</span><span class="p">,</span>
+        <span class="n">step_name</span><span class="o">=</span><span class="s2">&quot;imwrite&quot;</span><span class="p">,</span>
+        <span class="n">input_files</span><span class="o">=</span><span class="n">input_files</span><span class="p">,</span>
+        <span class="n">output_files</span><span class="o">=</span><span class="n">output_files</span><span class="p">,</span>
+        <span class="n">duration_seconds</span><span class="o">=</span><span class="n">write_duration</span><span class="p">,</span>
+        <span class="n">extra</span><span class="o">=</span><span class="n">processing_extra</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Update lazy_array metadata with processing history if possible</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lazy_array</span><span class="p">,</span> <span class="s2">&quot;metadata&quot;</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">contextlib</span><span class="o">.</span><span class="n">suppress</span><span class="p">(</span><span class="ne">AttributeError</span><span class="p">):</span>
+            <span class="n">lazy_array</span><span class="o">.</span><span class="n">metadata</span> <span class="o">=</span> <span class="n">file_metadata</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing step recorded: imwrite to </span><span class="si">{</span><span class="n">ext</span><span class="si">}</span><span class="s2"> in </span><span class="si">{</span><span class="n">write_duration</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">s&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">result</span></div>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

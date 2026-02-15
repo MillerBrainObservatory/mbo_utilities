@@ -1,0 +1,1713 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mbo_utilities.metadata.io &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=26413419" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../../../_static/togglebutton.js?v=1ae7504c"></script>
+    <script src="../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/mbo_utilities/metadata/io';</script>
+    <link rel="icon" href="../../../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="../../../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="../../../_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../../../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../usage/gui_guide.html">Graphical User Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2F_modules/mbo_utilities/metadata/io.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button"
+   title="Open an issue"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+
+</a>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for mbo_utilities.metadata.io</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">metadata file I/O - reading/writing metadata from TIFF files.</span>
+
+<span class="sd">functions for extracting metadata from ScanImage TIFFs and other file formats.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">tqdm.auto</span><span class="w"> </span><span class="kn">import</span> <span class="n">tqdm</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tifffile</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities</span><span class="w"> </span><span class="kn">import</span> <span class="n">log</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.file_io</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_files</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities._parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">_make_json_serializable</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_npy</span>
+
+<span class="c1"># import from sibling modules</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.params</span><span class="w"> </span><span class="kn">import</span> <span class="n">normalize_resolution</span><span class="p">,</span> <span class="n">get_param</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;_build_ome_metadata&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;clean_scanimage_metadata&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;default_ops&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;get_metadata&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;get_metadata_batch&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;get_metadata_single&quot;</span><span class="p">,</span>
+    <span class="c1"># file I/O functions</span>
+    <span class="s2">&quot;is_raw_scanimage&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;query_tiff_pages&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">log</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;metadata&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_metadata_from_ops</span><span class="p">(</span><span class="n">ops</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Build metadata dict from ops.npy using the metadata API for consistent extraction.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    ops : dict</span>
+<span class="sd">        The ops dictionary loaded from ops.npy.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        Metadata dictionary with standard keys.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Use get_param for consistent value extraction across aliases</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;num_planes&quot;</span><span class="p">:</span> <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;nplanes&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+        <span class="s2">&quot;Lx&quot;</span><span class="p">:</span> <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;Lx&quot;</span><span class="p">),</span>
+        <span class="s2">&quot;Ly&quot;</span><span class="p">:</span> <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;Ly&quot;</span><span class="p">),</span>
+        <span class="s2">&quot;fov&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;Lx&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span>
+            <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;Ly&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;frame_rate&quot;</span><span class="p">:</span> <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;fs&quot;</span><span class="p">),</span>
+        <span class="s2">&quot;fs&quot;</span><span class="p">:</span> <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;fs&quot;</span><span class="p">),</span>
+        <span class="s2">&quot;zoom_factor&quot;</span><span class="p">:</span> <span class="n">ops</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;zoom&quot;</span><span class="p">),</span>
+        <span class="s2">&quot;dx&quot;</span><span class="p">:</span> <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;dx&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1.0</span><span class="p">),</span>
+        <span class="s2">&quot;dy&quot;</span><span class="p">:</span> <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;dy&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1.0</span><span class="p">),</span>
+        <span class="s2">&quot;pixel_resolution&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;dx&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1.0</span><span class="p">),</span>
+            <span class="n">get_param</span><span class="p">(</span><span class="n">ops</span><span class="p">,</span> <span class="s2">&quot;dy&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1.0</span><span class="p">),</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="s2">&quot;int16&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;ops_fallback&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="c1"># Filter out None values</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">is_raw_scanimage</span><span class="p">(</span><span class="n">file</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">PathLike</span> <span class="o">|</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Check if a TIFF file is a raw ScanImage TIFF (unprocessed acquisition data).</span>
+
+<span class="sd">    A file is considered &quot;raw&quot; if it has ScanImage metadata AND has not been</span>
+<span class="sd">    processed by mbo_utilities (no custom tag 50839 with our JSON metadata).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    file: os.PathLike</span>
+<span class="sd">        Path to the TIFF file.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    bool</span>
+<span class="sd">        True if the TIFF file is a raw ScanImage TIFF; False otherwise.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">file</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">PathLike</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">Path</span><span class="p">(</span><span class="n">file</span><span class="p">)</span><span class="o">.</span><span class="n">suffix</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;.tif&quot;</span><span class="p">,</span> <span class="s2">&quot;.tiff&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">tifffile</span><span class="o">.</span><span class="n">TiffFile</span><span class="p">(</span><span class="n">file</span><span class="p">)</span> <span class="k">as</span> <span class="n">tf</span><span class="p">:</span>
+            <span class="c1"># must have scanimage metadata</span>
+            <span class="k">if</span> <span class="n">tf</span><span class="o">.</span><span class="n">scanimage_metadata</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">False</span>
+
+            <span class="c1"># check for our custom tag 50839 (mbo processed file marker)</span>
+            <span class="c1"># if present, this is a processed file, not raw</span>
+            <span class="n">page0</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">pages</span><span class="o">.</span><span class="n">first</span>
+            <span class="k">if</span> <span class="n">page0</span> <span class="ow">and</span> <span class="mi">50839</span> <span class="ow">in</span> <span class="n">page0</span><span class="o">.</span><span class="n">tags</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">False</span>
+
+            <span class="c1"># check shaped_metadata - if it has content, likely processed</span>
+            <span class="k">if</span> <span class="p">(</span>
+                <span class="nb">hasattr</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;shaped_metadata&quot;</span><span class="p">)</span>
+                <span class="ow">and</span> <span class="n">tf</span><span class="o">.</span><span class="n">shaped_metadata</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tf</span><span class="o">.</span><span class="n">shaped_metadata</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">))</span>
+                <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">tf</span><span class="o">.</span><span class="n">shaped_metadata</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span>
+            <span class="p">):</span>
+                <span class="k">return</span> <span class="kc">False</span>
+
+            <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+
+<div class="viewcode-block" id="get_metadata">
+<a class="viewcode-back" href="../../../api/io.html#mbo_utilities.get_metadata">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_metadata</span><span class="p">(</span>
+    <span class="n">file</span><span class="p">,</span>
+    <span class="n">dx</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">dy</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">dz</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">z_step</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Extract metadata from a TIFF file or directory of TIFF files produced by ScanImage.</span>
+
+<span class="sd">    This function handles single files, lists of files, or directories containing TIFF files.</span>
+<span class="sd">    When given a directory, it automatically finds and processes all TIFF files in natural</span>
+<span class="sd">    sort order. For multiple files, it calculates frames per file accounting for z-planes.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    file : os.PathLike, str, or list</span>
+<span class="sd">        - Single file path: processes that file</span>
+<span class="sd">        - Directory path: processes all TIFF files in the directory</span>
+<span class="sd">        - List of file paths: processes all files in the list</span>
+<span class="sd">    dx : float, optional</span>
+<span class="sd">        X pixel resolution in micrometers. Overrides extracted value.</span>
+<span class="sd">    dy : float, optional</span>
+<span class="sd">        Y pixel resolution in micrometers. Overrides extracted value.</span>
+<span class="sd">    dz : float, optional</span>
+<span class="sd">        Z step size in micrometers. Overrides extracted value.</span>
+<span class="sd">        Also available as ``z_step`` for backward compatibility.</span>
+<span class="sd">    verbose : bool, optional</span>
+<span class="sd">        If True, returns extended metadata including all ScanImage attributes. Default is False.</span>
+<span class="sd">    z_step : float, optional</span>
+<span class="sd">        Alias for ``dz`` (backward compatibility).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        A dictionary containing extracted metadata with normalized resolution aliases:</span>
+<span class="sd">        - dx, dy, dz: canonical resolution values in micrometers</span>
+<span class="sd">        - pixel_resolution: (dx, dy) tuple</span>
+<span class="sd">        - voxel_size: (dx, dy, dz) tuple</span>
+<span class="sd">        - umPerPixX, umPerPixY, umPerPixZ: legacy format</span>
+<span class="sd">        - PhysicalSizeX, PhysicalSizeY, PhysicalSizeZ: OME format</span>
+
+<span class="sd">        For multiple files, also includes:</span>
+<span class="sd">        - &#39;frames_per_file&#39;: list of frame counts per file (accounting for z-planes)</span>
+<span class="sd">        - &#39;total_frames&#39;: total frames across all files</span>
+<span class="sd">        - &#39;file_paths&#39;: list of processed file paths</span>
+<span class="sd">        - &#39;tiff_pages_per_file&#39;: raw TIFF page counts per file</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If no recognizable metadata is found or no TIFF files found in directory.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; # Single file with z-resolution</span>
+<span class="sd">    &gt;&gt;&gt; meta = get_metadata(&quot;path/to/rawscan_00001.tif&quot;, dz=5.0)</span>
+<span class="sd">    &gt;&gt;&gt; print(f&quot;Voxel size: {meta[&#39;voxel_size&#39;]}&quot;)</span>
+
+<span class="sd">    &gt;&gt;&gt; # Directory of files</span>
+<span class="sd">    &gt;&gt;&gt; meta = get_metadata(&quot;path/to/scan_directory/&quot;)</span>
+<span class="sd">    &gt;&gt;&gt; print(f&quot;Files processed: {len(meta[&#39;file_paths&#39;])}&quot;)</span>
+<span class="sd">    &gt;&gt;&gt; print(f&quot;Frames per file: {meta[&#39;frames_per_file&#39;]}&quot;)</span>
+
+<span class="sd">    &gt;&gt;&gt; # List of specific files</span>
+<span class="sd">    &gt;&gt;&gt; files = [&quot;scan_00001.tif&quot;, &quot;scan_00002.tif&quot;, &quot;scan_00003.tif&quot;]</span>
+<span class="sd">    &gt;&gt;&gt; meta = get_metadata(files, dz=5.0)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Handle z_step alias for backward compatibility</span>
+    <span class="k">if</span> <span class="n">dz</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">z_step</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">dz</span> <span class="o">=</span> <span class="n">z_step</span>
+
+    <span class="c1"># Convert input to Path object and handle different input types</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="s2">&quot;metadata&quot;</span><span class="p">):</span>
+        <span class="n">metadata</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">metadata</span><span class="p">)</span> <span class="k">if</span> <span class="n">file</span><span class="o">.</span><span class="n">metadata</span> <span class="k">else</span> <span class="p">{}</span>
+        <span class="k">return</span> <span class="n">normalize_resolution</span><span class="p">(</span><span class="n">metadata</span><span class="p">,</span> <span class="n">dx</span><span class="o">=</span><span class="n">dx</span><span class="p">,</span> <span class="n">dy</span><span class="o">=</span><span class="n">dy</span><span class="p">,</span> <span class="n">dz</span><span class="o">=</span><span class="n">dz</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+        <span class="c1"># make sure all values in the list are strings or paths</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">all</span><span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">PathLike</span><span class="p">))</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">file</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;All items in the list must be of type str or os.PathLike.&quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Got: </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2"> of type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">file</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+        <span class="n">file_paths</span> <span class="o">=</span> <span class="p">[</span><span class="n">Path</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">file</span><span class="p">]</span>
+        <span class="n">metadata</span> <span class="o">=</span> <span class="n">get_metadata_batch</span><span class="p">(</span><span class="n">file_paths</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">normalize_resolution</span><span class="p">(</span><span class="n">metadata</span><span class="p">,</span> <span class="n">dx</span><span class="o">=</span><span class="n">dx</span><span class="p">,</span> <span class="n">dy</span><span class="o">=</span><span class="n">dy</span><span class="p">,</span> <span class="n">dz</span><span class="o">=</span><span class="n">dz</span><span class="p">)</span>
+
+    <span class="n">file_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">file_path</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+        <span class="c1"># check for .zarr , get_files doesn&#39;t work on nested zarr files</span>
+        <span class="k">if</span> <span class="n">file_path</span><span class="o">.</span><span class="n">suffix</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;.zarr&quot;</span><span class="p">]:</span>
+            <span class="n">metadata</span> <span class="o">=</span> <span class="n">get_metadata_single</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">normalize_resolution</span><span class="p">(</span><span class="n">metadata</span><span class="p">,</span> <span class="n">dx</span><span class="o">=</span><span class="n">dx</span><span class="p">,</span> <span class="n">dy</span><span class="o">=</span><span class="n">dy</span><span class="p">,</span> <span class="n">dz</span><span class="o">=</span><span class="n">dz</span><span class="p">)</span>
+        <span class="n">tiff_files</span> <span class="o">=</span> <span class="n">get_files</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="s2">&quot;tif&quot;</span><span class="p">,</span> <span class="n">sort_ascending</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">tiff_files</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No TIFF files found in directory: </span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">metadata</span> <span class="o">=</span> <span class="n">get_metadata_batch</span><span class="p">(</span><span class="n">tiff_files</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">normalize_resolution</span><span class="p">(</span><span class="n">metadata</span><span class="p">,</span> <span class="n">dx</span><span class="o">=</span><span class="n">dx</span><span class="p">,</span> <span class="n">dy</span><span class="o">=</span><span class="n">dy</span><span class="p">,</span> <span class="n">dz</span><span class="o">=</span><span class="n">dz</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">file_path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="n">metadata</span> <span class="o">=</span> <span class="n">get_metadata_single</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">normalize_resolution</span><span class="p">(</span><span class="n">metadata</span><span class="p">,</span> <span class="n">dx</span><span class="o">=</span><span class="n">dx</span><span class="p">,</span> <span class="n">dy</span><span class="o">=</span><span class="n">dy</span><span class="p">,</span> <span class="n">dz</span><span class="o">=</span><span class="n">dz</span><span class="p">)</span>
+
+    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Path does not exist or is not accessible: </span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_metadata_single</span><span class="p">(</span><span class="n">file</span><span class="p">:</span> <span class="n">Path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Extract metadata from a single TIFF file produced by ScanImage or processed via the save_as function.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    file : Path</span>
+<span class="sd">        The full path to the TIFF file from which metadata is to be extracted.</span>
+<span class="sd">    verbose : bool, optional</span>
+<span class="sd">        If True, returns an extended metadata dictionary that includes all available ScanImage attributes.</span>
+<span class="sd">        Default is False.</span>
+<span class="sd">    z_step : float, optional</span>
+<span class="sd">        The z-step size in microns. If provided, it will be included in the returned metadata.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        A dictionary containing the extracted metadata (e.g., number of planes, frame rate, field-of-view,</span>
+<span class="sd">        pixel resolution).</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If no recognizable metadata is found in the TIFF file (e.g., the file is not a valid ScanImage TIFF).</span>
+
+<span class="sd">    Notes</span>
+<span class="sd">    -----</span>
+<span class="sd">    - num_timepoints represents the T dimension (sequential timepoints)</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; mdata = get_metadata(&quot;path/to/rawscan_00001.tif&quot;)</span>
+<span class="sd">    &gt;&gt;&gt; print(mdata[&quot;num_timepoints&quot;])</span>
+<span class="sd">    5345</span>
+<span class="sd">    &gt;&gt;&gt; mdata = get_metadata(&quot;path/to/assembled_data.tif&quot;)</span>
+<span class="sd">    &gt;&gt;&gt; print(mdata[&quot;shape&quot;])</span>
+<span class="sd">    (14, 5345, 477, 477)</span>
+<span class="sd">    &gt;&gt;&gt; meta_verbose = get_metadata(&quot;path/to/scanimage_file.tif&quot;, verbose=True)</span>
+<span class="sd">    &gt;&gt;&gt; print(meta_verbose[&quot;all&quot;])</span>
+<span class="sd">    {... Includes all ScanImage FrameData ...}</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">file</span><span class="o">.</span><span class="n">suffix</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;.zarr&quot;</span><span class="p">,</span> <span class="s2">&quot;.h5&quot;</span><span class="p">]:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities</span><span class="w"> </span><span class="kn">import</span> <span class="n">imread</span>
+
+        <span class="n">file</span> <span class="o">=</span> <span class="n">imread</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">file</span><span class="o">.</span><span class="n">metadata</span>
+
+    <span class="n">tiff_file</span> <span class="o">=</span> <span class="n">tifffile</span><span class="o">.</span><span class="n">TiffFile</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">is_raw_scanimage</span><span class="p">(</span><span class="n">file</span><span class="p">):</span>
+        <span class="c1"># try shaped_metadata first (tifffile shaped format)</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="nb">hasattr</span><span class="p">(</span><span class="n">tiff_file</span><span class="p">,</span> <span class="s2">&quot;shaped_metadata&quot;</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="n">tiff_file</span><span class="o">.</span><span class="n">shaped_metadata</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">tiff_file</span><span class="o">.</span><span class="n">shaped_metadata</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span>
+        <span class="p">):</span>
+            <span class="k">return</span> <span class="n">tiff_file</span><span class="o">.</span><span class="n">shaped_metadata</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="c1"># try reading JSON from custom TIFF tag 50839</span>
+        <span class="c1"># (this is where _write_tiff stores full metadata in ImageJ mode)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">page0</span> <span class="o">=</span> <span class="n">tiff_file</span><span class="o">.</span><span class="n">pages</span><span class="o">.</span><span class="n">first</span>
+            <span class="k">if</span> <span class="n">page0</span> <span class="ow">and</span> <span class="mi">50839</span> <span class="ow">in</span> <span class="n">page0</span><span class="o">.</span><span class="n">tags</span><span class="p">:</span>
+                <span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+                <span class="n">tag_value</span> <span class="o">=</span> <span class="n">page0</span><span class="o">.</span><span class="n">tags</span><span class="p">[</span><span class="mi">50839</span><span class="p">]</span><span class="o">.</span><span class="n">value</span>
+                <span class="c1"># handle different formats:</span>
+                <span class="c1"># 1. bytes: raw JSON bytes</span>
+                <span class="c1"># 2. str: JSON string</span>
+                <span class="c1"># 3. dict with &#39;Info&#39; key: ImageJ mode wraps JSON in {&#39;Info&#39;: &#39;&lt;json&gt;&#39;}</span>
+                <span class="c1"># 4. dict: already parsed metadata</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tag_value</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">):</span>
+                    <span class="n">tag_value</span> <span class="o">=</span> <span class="n">tag_value</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="sa">b</span><span class="s2">&quot;</span><span class="se">\x00</span><span class="s2">&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+                    <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">tag_value</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tag_value</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+                    <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">tag_value</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tag_value</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                    <span class="c1"># tifffile may auto-parse or wrap in &#39;Info&#39; key</span>
+                    <span class="k">if</span> <span class="s2">&quot;Info&quot;</span> <span class="ow">in</span> <span class="n">tag_value</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tag_value</span><span class="p">[</span><span class="s2">&quot;Info&quot;</span><span class="p">],</span> <span class="nb">str</span><span class="p">):</span>
+                        <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">tag_value</span><span class="p">[</span><span class="s2">&quot;Info&quot;</span><span class="p">])</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="c1"># already a dict, use as-is</span>
+                        <span class="n">meta</span> <span class="o">=</span> <span class="n">tag_value</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">meta</span> <span class="o">=</span> <span class="kc">None</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                    <span class="k">return</span> <span class="n">meta</span>
+        <span class="k">except</span> <span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">KeyError</span><span class="p">):</span>
+            <span class="k">pass</span>
+
+        <span class="c1"># fallback: try reading JSON from first page description</span>
+        <span class="c1"># (this is how _write_tiff stores metadata in non-ImageJ mode)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">page0</span> <span class="o">=</span> <span class="n">tiff_file</span><span class="o">.</span><span class="n">pages</span><span class="o">.</span><span class="n">first</span>
+            <span class="k">if</span> <span class="n">page0</span> <span class="ow">and</span> <span class="n">page0</span><span class="o">.</span><span class="n">description</span><span class="p">:</span>
+                <span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+                <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">page0</span><span class="o">.</span><span class="n">description</span><span class="p">)</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                    <span class="k">return</span> <span class="n">meta</span>
+        <span class="k">except</span> <span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+            <span class="k">pass</span>
+
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No metadata found in </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">tiff_file</span><span class="p">,</span> <span class="s2">&quot;scanimage_metadata&quot;</span><span class="p">):</span>
+        <span class="n">meta</span> <span class="o">=</span> <span class="n">tiff_file</span><span class="o">.</span><span class="n">scanimage_metadata</span>
+        <span class="c1"># if no ScanImage metadata at all → fallback immediately</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">meta</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2"> has no scanimage_metadata, trying ops.npy fallback.&quot;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">parent</span> <span class="ow">in</span> <span class="n">Path</span><span class="p">(</span><span class="n">file</span><span class="p">)</span><span class="o">.</span><span class="n">parents</span><span class="p">:</span>
+                <span class="n">ops_path</span> <span class="o">=</span> <span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;ops.npy&quot;</span>
+                <span class="k">if</span> <span class="n">ops_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">ops</span> <span class="o">=</span> <span class="n">load_npy</span><span class="p">(</span><span class="n">ops_path</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+                        <span class="k">return</span> <span class="n">_metadata_from_ops</span><span class="p">(</span><span class="n">ops</span><span class="p">)</span>
+                    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed ops.npy fallback for </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;no_metadata&quot;</span><span class="p">}</span>
+
+        <span class="n">si</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;FrameData&quot;</span><span class="p">,</span> <span class="p">{})</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">si</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No FrameData found in </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;scanimage_no_framedata&quot;</span><span class="p">}</span>
+
+        <span class="n">pages</span> <span class="o">=</span> <span class="n">tiff_file</span><span class="o">.</span><span class="n">pages</span>
+        <span class="n">first_page</span> <span class="o">=</span> <span class="n">pages</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">shape</span> <span class="o">=</span> <span class="n">first_page</span><span class="o">.</span><span class="n">shape</span>
+
+        <span class="c1"># Extract ROI and imaging metadata with defensive access</span>
+        <span class="n">roi_groups_container</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;RoiGroups&quot;</span><span class="p">,</span> <span class="p">{})</span>
+        <span class="n">imaging_roi_group</span> <span class="o">=</span> <span class="n">roi_groups_container</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;imagingRoiGroup&quot;</span><span class="p">,</span> <span class="p">{})</span>
+        <span class="n">roi_group</span> <span class="o">=</span> <span class="n">imaging_roi_group</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rois&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">roi_group</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No ROI information found in </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;scanimage_no_rois&quot;</span><span class="p">}</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">roi_group</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="n">num_rois</span> <span class="o">=</span> <span class="mi">1</span>
+            <span class="n">roi_group</span> <span class="o">=</span> <span class="p">[</span><span class="n">roi_group</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">num_rois</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">roi_group</span><span class="p">)</span>
+
+        <span class="c1"># nchannels = interleaved channels in TIFF (len(channelSave)) - used for shape/indexing</span>
+        <span class="c1"># num_planes and num_color_channels are computed by clean_scanimage_metadata after</span>
+        <span class="c1"># it transforms the flat si keys to nested structure</span>
+        <span class="n">channel_save</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;SI.hChannels.channelSave&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">channel_save</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">channel_save</span><span class="p">,</span> <span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="nb">float</span><span class="p">)):</span>
+            <span class="n">nchannels</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">nchannels</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">channel_save</span><span class="p">)</span>
+
+        <span class="n">zoom_factor</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;SI.hRoiManager.scanZoomFactor&quot;</span><span class="p">)</span>
+        <span class="n">uniform_sampling</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;SI.hScan2D.uniformSampling&quot;</span><span class="p">,</span> <span class="s2">&quot;NA&quot;</span><span class="p">)</span>
+        <span class="n">objective_resolution</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;SI.objectiveResolution&quot;</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+        <span class="n">frame_rate</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;SI.hRoiManager.scanFrameRate&quot;</span><span class="p">)</span>
+
+        <span class="n">fly_to_time</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;SI.hScan2D.flytoTimePerScanfield&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+        <span class="n">line_period</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;SI.hRoiManager.linePeriod&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="n">num_fly_to_lines</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">fly_to_time</span> <span class="o">/</span> <span class="n">line_period</span><span class="p">)</span> <span class="k">if</span> <span class="n">line_period</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+
+        <span class="n">sizes</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">num_pixel_xys</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">roi</span> <span class="ow">in</span> <span class="n">roi_group</span><span class="p">:</span>
+            <span class="n">scanfields</span> <span class="o">=</span> <span class="n">roi</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;scanfields&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">scanfields</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">scanfields</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+                <span class="n">scanfields</span> <span class="o">=</span> <span class="n">scanfields</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">scanfields</span> <span class="k">else</span> <span class="p">{}</span>
+            <span class="n">size_xy</span> <span class="o">=</span> <span class="n">scanfields</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sizeXY&quot;</span><span class="p">)</span>
+            <span class="n">pixel_res</span> <span class="o">=</span> <span class="n">scanfields</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pixelResolutionXY&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">size_xy</span><span class="p">:</span>
+                <span class="n">sizes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">size_xy</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">pixel_res</span><span class="p">:</span>
+                <span class="n">num_pixel_xys</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pixel_res</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">sizes</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">num_pixel_xys</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not extract ROI size/resolution from </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;scanimage_no_roi_sizes&quot;</span><span class="p">}</span>
+
+        <span class="n">size_xy</span> <span class="o">=</span> <span class="n">sizes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">num_pixel_xy</span> <span class="o">=</span> <span class="n">num_pixel_xys</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="n">roi_fov_x_um</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">objective_resolution</span> <span class="o">*</span> <span class="n">size_xy</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">roi_fov_y_um</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">objective_resolution</span> <span class="o">*</span> <span class="n">size_xy</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+        <span class="n">pixel_resolution</span> <span class="o">=</span> <span class="p">(</span><span class="n">roi_fov_x_um</span> <span class="o">/</span> <span class="n">num_pixel_xy</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">roi_fov_y_um</span> <span class="o">/</span> <span class="n">num_pixel_xy</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+        <span class="c1"># roi is per-strip dimensions (width, height)</span>
+        <span class="c1"># fov/fov_um are total tiled field of view (num_rois * per-roi)</span>
+        <span class="n">roi_width</span><span class="p">,</span> <span class="n">roi_height</span> <span class="o">=</span> <span class="n">num_pixel_xy</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">num_pixel_xy</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="n">metadata</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;nchannels&quot;</span><span class="p">:</span> <span class="n">nchannels</span><span class="p">,</span>  <span class="c1"># interleaved channels in TIFF (for shape calculation)</span>
+            <span class="s2">&quot;num_rois&quot;</span><span class="p">:</span> <span class="n">num_rois</span><span class="p">,</span>
+            <span class="s2">&quot;roi&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">roi_width</span><span class="p">,</span> <span class="n">roi_height</span><span class="p">),</span>
+            <span class="s2">&quot;fov&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">num_rois</span> <span class="o">*</span> <span class="n">roi_width</span><span class="p">,</span> <span class="n">roi_height</span><span class="p">),</span>
+            <span class="s2">&quot;fov_um&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">num_rois</span> <span class="o">*</span> <span class="n">roi_fov_x_um</span><span class="p">,</span> <span class="n">roi_fov_y_um</span><span class="p">),</span>
+            <span class="s2">&quot;frame_rate&quot;</span><span class="p">:</span> <span class="n">frame_rate</span><span class="p">,</span>
+            <span class="s2">&quot;pixel_resolution&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">pixel_resolution</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span>
+            <span class="s2">&quot;ndim&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">shape</span><span class="p">),</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="s2">&quot;int16&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;size&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">shape</span><span class="p">),</span>
+            <span class="s2">&quot;page_height&quot;</span><span class="p">:</span> <span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+            <span class="s2">&quot;page_width&quot;</span><span class="p">:</span> <span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+            <span class="s2">&quot;objective_resolution&quot;</span><span class="p">:</span> <span class="n">objective_resolution</span><span class="p">,</span>
+            <span class="s2">&quot;zoom_factor&quot;</span><span class="p">:</span> <span class="n">zoom_factor</span><span class="p">,</span>
+            <span class="s2">&quot;uniform_sampling&quot;</span><span class="p">:</span> <span class="n">uniform_sampling</span><span class="p">,</span>
+            <span class="s2">&quot;num_fly_to_lines&quot;</span><span class="p">:</span> <span class="n">num_fly_to_lines</span><span class="p">,</span>
+            <span class="s2">&quot;roi_heights&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">px</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">px</span> <span class="ow">in</span> <span class="n">num_pixel_xys</span><span class="p">],</span>
+            <span class="s2">&quot;roi_groups&quot;</span><span class="p">:</span> <span class="n">_make_json_serializable</span><span class="p">(</span><span class="n">roi_group</span><span class="p">),</span>
+            <span class="s2">&quot;si&quot;</span><span class="p">:</span> <span class="n">_make_json_serializable</span><span class="p">(</span><span class="n">si</span><span class="p">),</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="n">clean_scanimage_metadata</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No ScanImage metadata found in </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">, trying ops.npy fallback.&quot;</span><span class="p">)</span>
+    <span class="c1"># fallback: no ScanImage metadata, try nearby ops.npy</span>
+    <span class="n">ops_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">file</span><span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="s2">&quot;ops.npy&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">ops_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="c1"># climb until you find suite2p or root</span>
+        <span class="k">for</span> <span class="n">parent</span> <span class="ow">in</span> <span class="n">Path</span><span class="p">(</span><span class="n">file</span><span class="p">)</span><span class="o">.</span><span class="n">parents</span><span class="p">:</span>
+            <span class="n">ops_path</span> <span class="o">=</span> <span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;ops.npy&quot;</span>
+            <span class="k">if</span> <span class="n">ops_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">ops</span> <span class="o">=</span> <span class="n">load_npy</span><span class="p">(</span><span class="n">ops_path</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+                    <span class="n">result</span> <span class="o">=</span> <span class="n">_metadata_from_ops</span><span class="p">(</span><span class="n">ops</span><span class="p">)</span>
+                    <span class="c1"># single-plane suite2p folder → force to 1</span>
+                    <span class="k">if</span> <span class="s2">&quot;plane0&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">ops_path</span><span class="o">.</span><span class="n">parent</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+                        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;num_planes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+                    <span class="k">return</span> <span class="n">result</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed ops.npy fallback for </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">ops_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found ops.npy at </span><span class="si">{</span><span class="n">ops_path</span><span class="si">}</span><span class="s2">, attempting to load.&quot;</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">ops</span> <span class="o">=</span> <span class="n">load_npy</span><span class="p">(</span><span class="n">ops_path</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">_metadata_from_ops</span><span class="p">(</span><span class="n">ops</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed ops.npy fallback for </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;no_metadata&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_metadata_batch</span><span class="p">(</span><span class="n">file_paths</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Extract and aggregate metadata from a list of TIFF files.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    file_paths : list of Path</span>
+<span class="sd">        List of TIFF file paths.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        Aggregated metadata with per-file frame information.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">file_paths</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;No files provided&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Get metadata from first file only</span>
+    <span class="n">metadata</span> <span class="o">=</span> <span class="n">get_metadata_single</span><span class="p">(</span><span class="n">file_paths</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="c1"># nchannels = interleaved pages per frame (for LBM: beamlets, for single-plane: PMT channels)</span>
+    <span class="c1"># this is what we divide by to get frame count, not num_planes (spatial z-planes)</span>
+    <span class="n">nchannels</span> <span class="o">=</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;nchannels&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="c1"># Count frames for all files</span>
+    <span class="n">frames_per_file</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">query_tiff_pages</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span> <span class="o">//</span> <span class="n">nchannels</span>
+        <span class="k">for</span> <span class="n">fp</span> <span class="ow">in</span> <span class="n">tqdm</span><span class="p">(</span><span class="n">file_paths</span><span class="p">,</span> <span class="n">desc</span><span class="o">=</span><span class="s2">&quot;Counting frames&quot;</span><span class="p">,</span> <span class="n">disable</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">file_paths</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="p">]</span>
+
+    <span class="n">total_frames</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">frames_per_file</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">metadata</span> <span class="o">|</span> <span class="p">{</span>
+        <span class="s2">&quot;num_timepoints&quot;</span><span class="p">:</span> <span class="n">total_frames</span><span class="p">,</span>
+        <span class="s2">&quot;nframes&quot;</span><span class="p">:</span> <span class="n">total_frames</span><span class="p">,</span>  <span class="c1"># suite2p alias</span>
+        <span class="s2">&quot;num_frames&quot;</span><span class="p">:</span> <span class="n">total_frames</span><span class="p">,</span>  <span class="c1"># legacy alias</span>
+        <span class="s2">&quot;frames_per_file&quot;</span><span class="p">:</span> <span class="n">frames_per_file</span><span class="p">,</span>
+        <span class="s2">&quot;file_paths&quot;</span><span class="p">:</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span> <span class="k">for</span> <span class="n">fp</span> <span class="ow">in</span> <span class="n">file_paths</span><span class="p">],</span>
+        <span class="s2">&quot;num_files&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">file_paths</span><span class="p">),</span>
+    <span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">query_tiff_pages</span><span class="p">(</span><span class="n">file_path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get page count for TIFF files for both 64-bit (BigTiff) and 32-bit TIFFS.</span>
+
+<span class="sd">    Frames per tiff must be uniform.</span>
+
+<span class="sd">    1. Reading first TWO IFD offsets only</span>
+<span class="sd">    2. Calculating page_size = second_offset - first_offset</span>
+<span class="sd">    3. Estimating: total_pages = file_size / page_size</span>
+
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    file_path : str</span>
+<span class="sd">        Path to ScanImage TIFF file</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    int</span>
+<span class="sd">        Number of pages</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">file_size</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getsize</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="c1"># Read header (8 bytes)</span>
+        <span class="n">header</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span>
+
+        <span class="c1"># Detect byte order</span>
+        <span class="k">if</span> <span class="n">header</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span> <span class="o">==</span> <span class="sa">b</span><span class="s2">&quot;II&quot;</span><span class="p">:</span>
+            <span class="n">bo</span> <span class="o">=</span> <span class="s2">&quot;&lt;&quot;</span>  <span class="c1"># Little-endian</span>
+        <span class="k">elif</span> <span class="n">header</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span> <span class="o">==</span> <span class="sa">b</span><span class="s2">&quot;MM&quot;</span><span class="p">:</span>
+            <span class="n">bo</span> <span class="o">=</span> <span class="s2">&quot;&gt;&quot;</span>  <span class="c1"># Big-endian</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Not a TIFF file&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Detect TIFF version</span>
+        <span class="n">version</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bo</span><span class="si">}</span><span class="s2">H&quot;</span><span class="p">,</span> <span class="n">header</span><span class="p">[</span><span class="mi">2</span><span class="p">:</span><span class="mi">4</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">version</span> <span class="o">==</span> <span class="mi">42</span><span class="p">:</span>
+            <span class="c1"># Classic TIFF (32-bit offsets)</span>
+            <span class="n">offset_fmt</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bo</span><span class="si">}</span><span class="s2">I&quot;</span>
+            <span class="n">offset_size</span> <span class="o">=</span> <span class="mi">4</span>
+            <span class="n">tag_count_fmt</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bo</span><span class="si">}</span><span class="s2">H&quot;</span>
+            <span class="n">tag_count_size</span> <span class="o">=</span> <span class="mi">2</span>
+            <span class="n">tag_size</span> <span class="o">=</span> <span class="mi">12</span>
+            <span class="n">first_ifd_offset</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">offset_fmt</span><span class="p">,</span> <span class="n">header</span><span class="p">[</span><span class="mi">4</span><span class="p">:</span><span class="mi">8</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">header_size</span> <span class="o">=</span> <span class="mi">8</span>
+
+        <span class="k">elif</span> <span class="n">version</span> <span class="o">==</span> <span class="mi">43</span><span class="p">:</span>
+            <span class="c1"># BigTIFF (64-bit offsets)</span>
+            <span class="n">offset_fmt</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bo</span><span class="si">}</span><span class="s2">Q&quot;</span>
+            <span class="n">offset_size</span> <span class="o">=</span> <span class="mi">8</span>
+            <span class="n">tag_count_fmt</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bo</span><span class="si">}</span><span class="s2">Q&quot;</span>
+            <span class="n">tag_count_size</span> <span class="o">=</span> <span class="mi">8</span>
+            <span class="n">tag_size</span> <span class="o">=</span> <span class="mi">20</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span>
+            <span class="n">first_ifd_offset</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">offset_fmt</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">offset_size</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">header_size</span> <span class="o">=</span> <span class="mi">16</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown TIFF version: </span><span class="si">{</span><span class="n">version</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Go to first IFD</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="n">first_ifd_offset</span><span class="p">)</span>
+
+        <span class="c1"># Read tag count</span>
+        <span class="n">tag_count</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">tag_count_fmt</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">tag_count_size</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="c1"># Skip all tags to get to next IFD offset</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="n">first_ifd_offset</span> <span class="o">+</span> <span class="n">tag_count_size</span> <span class="o">+</span> <span class="p">(</span><span class="n">tag_count</span> <span class="o">*</span> <span class="n">tag_size</span><span class="p">))</span>
+
+        <span class="c1"># Read second IFD offset</span>
+        <span class="n">second_ifd_offset</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">offset_fmt</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">offset_size</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">second_ifd_offset</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">1</span>  <span class="c1"># Only one page</span>
+
+        <span class="c1"># Calculate page size (IFD + image data for one page)</span>
+        <span class="n">page_size</span> <span class="o">=</span> <span class="n">second_ifd_offset</span> <span class="o">-</span> <span class="n">first_ifd_offset</span>
+
+        <span class="c1"># Calculate total pages</span>
+        <span class="n">data_size</span> <span class="o">=</span> <span class="n">file_size</span> <span class="o">-</span> <span class="n">header_size</span>
+        <span class="n">num_pages</span> <span class="o">=</span> <span class="n">data_size</span> <span class="o">//</span> <span class="n">page_size</span>
+
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">num_pages</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">clean_scanimage_metadata</span><span class="p">(</span><span class="n">meta</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Build a JSON-serializable, nicely nested dict from ScanImage metadata.</span>
+
+<span class="sd">    - All non-&#39;si&#39; top-level keys are kept after cleaning</span>
+<span class="sd">    - All &#39;SI.*&#39; keys (from anywhere) are nested under &#39;si&#39; with &#39;SI.&#39; prefix stripped</span>
+<span class="sd">    - So SI.hChannels.channelSave -&gt; metadata[&#39;si&#39;][&#39;hChannels&#39;][&#39;channelSave&#39;]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_clean</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">x</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">generic</span><span class="p">,)):</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">x</span><span class="o">.</span><span class="n">size</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">None</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="nb">float</span><span class="p">):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+                <span class="k">return</span> <span class="kc">None</span>
+            <span class="k">return</span> <span class="n">x</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="nb">bool</span><span class="p">)):</span>
+            <span class="k">return</span> <span class="n">x</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">s</span> <span class="k">if</span> <span class="n">s</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+            <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">x</span><span class="p">:</span>
+                <span class="n">cv</span> <span class="o">=</span> <span class="n">_clean</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">cv</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cv</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">out</span> <span class="k">if</span> <span class="n">out</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">x</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">cv</span> <span class="o">=</span> <span class="n">_clean</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">cv</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">out</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">k</span><span class="p">)]</span> <span class="o">=</span> <span class="n">cv</span>
+            <span class="k">return</span> <span class="n">out</span> <span class="k">if</span> <span class="n">out</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">x</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_prune</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">d</span>
+        <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
+            <span class="n">v</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                <span class="n">pv</span> <span class="o">=</span> <span class="n">_prune</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">pv</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">pv</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">d</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">pv</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">d</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="n">v</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="p">[],</span> <span class="s2">&quot;&quot;</span><span class="p">):</span>
+                <span class="n">d</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">d</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_collect_SI_keys</span><span class="p">(</span><span class="n">node</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Collect all &#39;SI.*&#39; keys anywhere in the tree.&quot;&quot;&quot;</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">node</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;SI.&quot;</span><span class="p">):</span>
+                    <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">))</span>
+                <span class="c1"># Recurse into nested dicts/lists</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">_collect_SI_keys</span><span class="p">(</span><span class="n">v</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+            <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">node</span><span class="p">:</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">_collect_SI_keys</span><span class="p">(</span><span class="n">v</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">out</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_nest_into_si</span><span class="p">(</span><span class="n">root_dict</span><span class="p">,</span> <span class="n">dotted_key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Nest &#39;SI.hChannels.channelSave&#39; into root_dict as [&#39;hChannels&#39;][&#39;channelSave&#39;].&quot;&quot;&quot;</span>
+        <span class="c1"># Strip &#39;SI.&#39; prefix</span>
+        <span class="n">dotted_key</span> <span class="o">=</span> <span class="n">dotted_key</span><span class="o">.</span><span class="n">removeprefix</span><span class="p">(</span><span class="s2">&quot;SI.&quot;</span><span class="p">)</span>
+
+        <span class="n">parts</span> <span class="o">=</span> <span class="n">dotted_key</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+        <span class="n">cur</span> <span class="o">=</span> <span class="n">root_dict</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">parts</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]:</span>
+            <span class="n">cur</span> <span class="o">=</span> <span class="n">cur</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="p">{})</span>
+        <span class="n">leaf</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">cur</span><span class="p">[</span><span class="n">leaf</span><span class="p">]</span> <span class="o">=</span> <span class="n">_clean</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+
+    <span class="c1"># 1) Copy all top-level keys EXCEPT &#39;si&#39;</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">meta</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">k</span> <span class="o">==</span> <span class="s2">&quot;si&quot;</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">cv</span> <span class="o">=</span> <span class="n">_clean</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cv</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">result</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">cv</span>
+
+    <span class="c1"># 2) Initialize &#39;si&#39; dict</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;si&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="c1"># 3) Add non-SI.* keys from meta[&#39;si&#39;] (like RoiGroups, etc.)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;si&quot;</span><span class="p">),</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">meta</span><span class="p">[</span><span class="s2">&quot;si&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;SI.&quot;</span><span class="p">)):</span>
+                <span class="n">cv</span> <span class="o">=</span> <span class="n">_clean</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">cv</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;si&quot;</span><span class="p">][</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">cv</span>
+
+    <span class="c1"># 4) Collect ALL &#39;SI.*&#39; keys from entire meta tree and nest under result[&#39;si&#39;]</span>
+    <span class="n">si_pairs</span> <span class="o">=</span> <span class="n">_collect_SI_keys</span><span class="p">(</span><span class="n">meta</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">dotted_key</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">si_pairs</span><span class="p">:</span>
+        <span class="n">_nest_into_si</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;si&quot;</span><span class="p">],</span> <span class="n">dotted_key</span><span class="p">,</span> <span class="n">val</span><span class="p">)</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="n">_prune</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+
+    <span class="c1"># 5) Add derived ScanImage stack detection fields</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.scanimage</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+        <span class="n">detect_stack_type</span><span class="p">,</span>
+        <span class="n">get_num_color_channels</span><span class="p">,</span>
+        <span class="n">get_num_zplanes</span><span class="p">,</span>
+        <span class="n">get_z_step_size</span><span class="p">,</span>
+        <span class="n">get_frame_rate</span><span class="p">,</span>
+        <span class="n">get_roi_info</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;si&quot;</span><span class="p">):</span>
+        <span class="n">stack_type</span> <span class="o">=</span> <span class="n">detect_stack_type</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;stack_type&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">stack_type</span>
+        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;lbm_stack&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">stack_type</span> <span class="o">==</span> <span class="s2">&quot;lbm&quot;</span>
+        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;piezo_stack&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">stack_type</span> <span class="o">==</span> <span class="s2">&quot;piezo&quot;</span>
+        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;num_color_channels&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">get_num_color_channels</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+
+        <span class="c1"># set num_planes from stack detection if not already present</span>
+        <span class="k">if</span> <span class="s2">&quot;num_zplanes&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">result</span> <span class="ow">and</span> <span class="s2">&quot;num_planes&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">result</span><span class="p">:</span>
+            <span class="n">num_z</span> <span class="o">=</span> <span class="n">get_num_zplanes</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+            <span class="n">result</span><span class="p">[</span><span class="s2">&quot;num_zplanes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">num_z</span>
+            <span class="n">result</span><span class="p">[</span><span class="s2">&quot;num_planes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">num_z</span>  <span class="c1"># alias for ScanImageArray</span>
+
+        <span class="c1"># add dz if available from ScanImage (but NOT for LBM - user must supply)</span>
+        <span class="k">if</span> <span class="n">stack_type</span> <span class="o">!=</span> <span class="s2">&quot;lbm&quot;</span><span class="p">:</span>
+            <span class="n">dz</span> <span class="o">=</span> <span class="n">get_z_step_size</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">dz</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">result</span><span class="p">[</span><span class="s2">&quot;dz&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">dz</span>
+
+        <span class="c1"># add frame rate if available</span>
+        <span class="n">fs</span> <span class="o">=</span> <span class="n">get_frame_rate</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">fs</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">result</span><span class="p">[</span><span class="s2">&quot;fs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">fs</span>
+
+        <span class="c1"># add ROI/FOV info (don&#39;t overwrite existing values)</span>
+        <span class="n">roi_info</span> <span class="o">=</span> <span class="n">get_roi_info</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">roi_info</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">result</span><span class="p">:</span>
+                <span class="n">result</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+
+    <span class="c1"># add all standard aliases for backward compatibility</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.params</span><span class="w"> </span><span class="kn">import</span> <span class="n">normalize_metadata</span>
+    <span class="n">normalize_metadata</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">result</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">default_ops</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Default options to run pipeline.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="c1"># file input/output settings</span>
+        <span class="s2">&quot;look_one_level_down&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether to look in all subfolders when searching for tiffs</span>
+        <span class="s2">&quot;fast_disk&quot;</span><span class="p">:</span> <span class="p">[],</span>  <span class="c1"># used to store temporary binary file, defaults to save_path0</span>
+        <span class="s2">&quot;delete_bin&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether to delete binary file after processing</span>
+        <span class="s2">&quot;mesoscan&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># for reading in scanimage mesoscope files</span>
+        <span class="s2">&quot;bruker&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether or not single page BRUKER tiffs!</span>
+        <span class="s2">&quot;bruker_bidirectional&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># bidirectional multiplane in bruker: 0, 1, 2, 2, 1, 0 (True) vs 0, 1, 2, 0, 1, 2 (False)</span>
+        <span class="s2">&quot;h5py&quot;</span><span class="p">:</span> <span class="p">[],</span>  <span class="c1"># take h5py as input (deactivates data_path)</span>
+        <span class="s2">&quot;h5py_key&quot;</span><span class="p">:</span> <span class="s2">&quot;data&quot;</span><span class="p">,</span>  <span class="c1"># key in h5py where data array is stored</span>
+        <span class="s2">&quot;nwb_file&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;nwb_driver&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;nwb_series&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;save_path0&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>  <span class="c1"># pathname where you&#39;d like to store results, defaults to first item in data_path</span>
+        <span class="s2">&quot;save_folder&quot;</span><span class="p">:</span> <span class="p">[],</span>  <span class="c1"># directory you&quot;d like suite2p results to be saved to</span>
+        <span class="s2">&quot;subfolders&quot;</span><span class="p">:</span> <span class="p">[],</span>  <span class="c1"># subfolders you&quot;d like to search through when look_one_level_down is set to True</span>
+        <span class="s2">&quot;move_bin&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># if 1, and fast_disk is different than save_disk, binary file is moved to save_disk</span>
+        <span class="c1"># main settings</span>
+        <span class="s2">&quot;nplanes&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>  <span class="c1"># each tiff has these many planes in sequence</span>
+        <span class="s2">&quot;nchannels&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>  <span class="c1"># each tiff has these many channels per plane</span>
+        <span class="s2">&quot;functional_chan&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>  <span class="c1"># this channel is used to extract functional ROIs (1-based)</span>
+        <span class="s2">&quot;tau&quot;</span><span class="p">:</span> <span class="mf">1.3</span><span class="p">,</span>  <span class="c1"># this is the main parameter for deconvolution</span>
+        <span class="s2">&quot;fs&quot;</span><span class="p">:</span> <span class="mf">10.0</span><span class="p">,</span>  <span class="c1"># sampling rate (PER PLANE e.g. for 12 plane recordings it will be around 2.5)</span>
+        <span class="s2">&quot;force_sktiff&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether or not to use scikit-image for tiff reading</span>
+        <span class="s2">&quot;frames_include&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span>
+        <span class="s2">&quot;multiplane_parallel&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether or not to run on server</span>
+        <span class="s2">&quot;ignore_flyback&quot;</span><span class="p">:</span> <span class="p">[],</span>
+        <span class="c1"># output settings</span>
+        <span class="s2">&quot;preclassify&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>  <span class="c1"># apply classifier before signal extraction with probability 0.3</span>
+        <span class="s2">&quot;save_mat&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether to save output as matlab files</span>
+        <span class="s2">&quot;save_NWB&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="s2">&quot;combined&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># combine multiple planes into a single result /single canvas for GUI</span>
+        <span class="s2">&quot;aspect&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>  <span class="c1"># um/pixels in X / um/pixels in Y (for correct aspect ratio in GUI)</span>
+        <span class="c1"># bidirectional phase offset</span>
+        <span class="s2">&quot;do_bidiphase&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether or not to compute bidirectional phase offset (applies to 2P recordings only)</span>
+        <span class="s2">&quot;bidiphase&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># Bidirectional Phase offset from line scanning (set by user). Applied to all frames in recording.</span>
+        <span class="s2">&quot;bidi_corrected&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># Whether to do bidirectional correction during registration</span>
+        <span class="c1"># registration settings</span>
+        <span class="s2">&quot;do_registration&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># whether to register data (2 forces re-registration)</span>
+        <span class="s2">&quot;two_step_registration&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether or not to run registration twice (useful for low SNR data). Set keep_movie_raw to True if setting this parameter to True.</span>
+        <span class="s2">&quot;keep_movie_raw&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether to keep binary file of non-registered frames.</span>
+        <span class="s2">&quot;nimg_init&quot;</span><span class="p">:</span> <span class="mi">300</span><span class="p">,</span>  <span class="c1"># subsampled frames for finding reference image</span>
+        <span class="s2">&quot;batch_size&quot;</span><span class="p">:</span> <span class="mi">500</span><span class="p">,</span>  <span class="c1"># number of frames per batch</span>
+        <span class="s2">&quot;maxregshift&quot;</span><span class="p">:</span> <span class="mf">0.1</span><span class="p">,</span>  <span class="c1"># max allowed registration shift, as a fraction of frame max(width and height)</span>
+        <span class="s2">&quot;align_by_chan&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>  <span class="c1"># when multi-channel, you can align by non-functional channel (1-based)</span>
+        <span class="s2">&quot;reg_tif&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether to save registered tiffs</span>
+        <span class="s2">&quot;reg_tif_chan2&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether to save channel 2 registered tiffs</span>
+        <span class="s2">&quot;subpixel&quot;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>  <span class="c1"># precision of subpixel registration (1/subpixel steps)</span>
+        <span class="s2">&quot;smooth_sigma_time&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># gaussian smoothing in time</span>
+        <span class="s2">&quot;smooth_sigma&quot;</span><span class="p">:</span> <span class="mf">1.15</span><span class="p">,</span>  <span class="c1"># ~1 good for 2P recordings, recommend 3-5 for 1P recordings</span>
+        <span class="s2">&quot;th_badframes&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>  <span class="c1"># this parameter determines which frames to exclude when determining cropping - set it smaller to exclude more frames</span>
+        <span class="s2">&quot;norm_frames&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># normalize frames when detecting shifts</span>
+        <span class="s2">&quot;force_refImg&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># if True, use refImg stored in ops if available</span>
+        <span class="s2">&quot;pad_fft&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># if True, pads image during FFT part of registration</span>
+        <span class="c1"># non rigid registration settings</span>
+        <span class="s2">&quot;nonrigid&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># whether to use nonrigid registration</span>
+        <span class="s2">&quot;block_size&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="mi">128</span><span class="p">,</span>
+            <span class="mi">128</span><span class="p">,</span>
+        <span class="p">],</span>  <span class="c1"># block size to register (** keep this a multiple of 2 **)</span>
+        <span class="s2">&quot;snr_thresh&quot;</span><span class="p">:</span> <span class="mf">1.2</span><span class="p">,</span>  <span class="c1"># if any nonrigid block is below this threshold, it gets smoothed until above this threshold. 1.0 results in no smoothing</span>
+        <span class="s2">&quot;maxregshiftNR&quot;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>  <span class="c1"># maximum pixel shift allowed for nonrigid, relative to rigid</span>
+        <span class="c1"># 1P settings</span>
+        <span class="s2">&quot;1Preg&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether to perform high-pass filtering and tapering</span>
+        <span class="s2">&quot;spatial_hp_reg&quot;</span><span class="p">:</span> <span class="mi">42</span><span class="p">,</span>  <span class="c1"># window for spatial high-pass filtering before registration</span>
+        <span class="s2">&quot;pre_smooth&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># whether to smooth before high-pass filtering before registration</span>
+        <span class="s2">&quot;spatial_taper&quot;</span><span class="p">:</span> <span class="mi">40</span><span class="p">,</span>  <span class="c1"># how much to ignore on edges (important for vignetted windows, for FFT padding do not set BELOW 3*ops[&quot;smooth_sigma&quot;])</span>
+        <span class="c1"># cell detection settings with suite2p</span>
+        <span class="s2">&quot;roidetect&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># whether or not to run ROI extraction</span>
+        <span class="s2">&quot;spikedetect&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># whether or not to run spike deconvolution</span>
+        <span class="s2">&quot;sparse_mode&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># whether or not to run sparse_mode</span>
+        <span class="s2">&quot;spatial_scale&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># 0: multi-scale; 1: 6 pixels, 2: 12 pixels, 3: 24 pixels, 4: 48 pixels</span>
+        <span class="s2">&quot;connected&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># whether or not to keep ROIs fully connected (set to 0 for dendrites)</span>
+        <span class="s2">&quot;nbinned&quot;</span><span class="p">:</span> <span class="mi">5000</span><span class="p">,</span>  <span class="c1"># max number of binned frames for cell detection</span>
+        <span class="s2">&quot;max_iterations&quot;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span>  <span class="c1"># maximum number of iterations to do cell detection</span>
+        <span class="s2">&quot;threshold_scaling&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>  <span class="c1"># adjust the automatically determined threshold by this scalar multiplier</span>
+        <span class="s2">&quot;max_overlap&quot;</span><span class="p">:</span> <span class="mf">0.75</span><span class="p">,</span>  <span class="c1"># cells with more overlap than this get removed during triage, before refinement</span>
+        <span class="s2">&quot;high_pass&quot;</span><span class="p">:</span> <span class="mi">100</span><span class="p">,</span>  <span class="c1"># running mean subtraction across bins with a window of size &quot;high_pass&quot; (use low values for 1P)</span>
+        <span class="s2">&quot;spatial_hp_detect&quot;</span><span class="p">:</span> <span class="mi">25</span><span class="p">,</span>  <span class="c1"># window for spatial high-pass filtering for neuropil subtraction before detection</span>
+        <span class="s2">&quot;denoise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># denoise binned movie for cell detection in sparse_mode</span>
+        <span class="c1"># cell detection settings with cellpose (used if anatomical_only &gt; 0)</span>
+        <span class="s2">&quot;anatomical_only&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># run cellpose to get masks on 1: max_proj / mean_img; 2: mean_img; 3: mean_img enhanced, 4: max_proj</span>
+        <span class="s2">&quot;diameter&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># use diameter for cellpose, if 0 estimate diameter</span>
+        <span class="s2">&quot;cellprob_threshold&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>  <span class="c1"># cellprob_threshold for cellpose</span>
+        <span class="s2">&quot;flow_threshold&quot;</span><span class="p">:</span> <span class="mf">1.5</span><span class="p">,</span>  <span class="c1"># flow_threshold for cellpose</span>
+        <span class="s2">&quot;spatial_hp_cp&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>  <span class="c1"># high-pass image spatially by a multiple of the diameter</span>
+        <span class="s2">&quot;pretrained_model&quot;</span><span class="p">:</span> <span class="s2">&quot;cyto&quot;</span><span class="p">,</span>  <span class="c1"># path to pretrained model or model type string in Cellpose (can be user model)</span>
+        <span class="c1"># classification parameters</span>
+        <span class="s2">&quot;soma_crop&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># crop dendrites for cell classification stats like compactness</span>
+        <span class="c1"># ROI extraction parameters</span>
+        <span class="s2">&quot;neuropil_extract&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># whether or not to extract neuropil; if False, Fneu is set to zero</span>
+        <span class="s2">&quot;inner_neuropil_radius&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>  <span class="c1"># number of pixels to keep between ROI and neuropil donut</span>
+        <span class="s2">&quot;min_neuropil_pixels&quot;</span><span class="p">:</span> <span class="mi">350</span><span class="p">,</span>  <span class="c1"># minimum number of pixels in the neuropil</span>
+        <span class="s2">&quot;lam_percentile&quot;</span><span class="p">:</span> <span class="mf">50.0</span><span class="p">,</span>  <span class="c1"># percentile of lambda within area to ignore when excluding cell pixels for neuropil extraction</span>
+        <span class="s2">&quot;allow_overlap&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># pixels that are overlapping are thrown out (False) or added to both ROIs (True)</span>
+        <span class="s2">&quot;use_builtin_classifier&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># whether or not to use built-in classifier for cell detection (overrides</span>
+        <span class="c1"># classifier specified in classifier_path if set to True)</span>
+        <span class="s2">&quot;classifier_path&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>  <span class="c1"># path to classifier</span>
+        <span class="c1"># channel 2 detection settings (stat[n][&quot;chan2&quot;], stat[n][&quot;not_chan2&quot;])</span>
+        <span class="s2">&quot;chan2_thres&quot;</span><span class="p">:</span> <span class="mf">0.65</span><span class="p">,</span>  <span class="c1"># minimum for detection of brightness on channel 2</span>
+        <span class="c1"># deconvolution settings</span>
+        <span class="s2">&quot;baseline&quot;</span><span class="p">:</span> <span class="s2">&quot;maximin&quot;</span><span class="p">,</span>  <span class="c1"># baselining mode (can also choose &quot;prctile&quot;)</span>
+        <span class="s2">&quot;win_baseline&quot;</span><span class="p">:</span> <span class="mf">60.0</span><span class="p">,</span>  <span class="c1"># window for maximin</span>
+        <span class="s2">&quot;sig_baseline&quot;</span><span class="p">:</span> <span class="mf">10.0</span><span class="p">,</span>  <span class="c1"># smoothing constant for gaussian filter</span>
+        <span class="s2">&quot;prctile_baseline&quot;</span><span class="p">:</span> <span class="mf">8.0</span><span class="p">,</span>  <span class="c1"># optional (whether to use a percentile baseline)</span>
+        <span class="s2">&quot;neucoeff&quot;</span><span class="p">:</span> <span class="mf">0.7</span><span class="p">,</span>  <span class="c1"># neuropil coefficient</span>
+    <span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_params_from_metadata_caiman</span><span class="p">(</span><span class="n">metadata</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Generate parameters for CNMF from metadata.</span>
+
+<span class="sd">    Based on the pixel resolution and frame rate, the parameters are set to reasonable values.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    metadata : dict</span>
+<span class="sd">        Metadata dictionary resulting from `lcp.get_metadata()`.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        Dictionary of parameters for lbm_mc.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="n">_default_params_caiman</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">metadata</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;No metadata found. Using default parameters.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">params</span>
+
+    <span class="n">params</span><span class="p">[</span><span class="s2">&quot;main&quot;</span><span class="p">][</span><span class="s2">&quot;fr&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;frame_rate&quot;</span><span class="p">]</span>
+    <span class="n">params</span><span class="p">[</span><span class="s2">&quot;main&quot;</span><span class="p">][</span><span class="s2">&quot;dxy&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;pixel_resolution&quot;</span><span class="p">]</span>
+
+    <span class="c1"># typical neuron ~16 microns</span>
+    <span class="n">gSig</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="mi">16</span> <span class="o">/</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;pixel_resolution&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span> <span class="o">/</span> <span class="mi">2</span>
+    <span class="n">params</span><span class="p">[</span><span class="s2">&quot;main&quot;</span><span class="p">][</span><span class="s2">&quot;gSig&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">gSig</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">gSig</span><span class="p">))</span>
+
+    <span class="n">gSiz</span> <span class="o">=</span> <span class="p">(</span><span class="mi">4</span> <span class="o">*</span> <span class="n">gSig</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">gSig</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">params</span><span class="p">[</span><span class="s2">&quot;main&quot;</span><span class="p">][</span><span class="s2">&quot;gSiz&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">gSiz</span>
+
+    <span class="n">max_shifts</span> <span class="o">=</span> <span class="p">[</span><span class="nb">round</span><span class="p">(</span><span class="mi">10</span> <span class="o">/</span> <span class="n">px</span><span class="p">)</span> <span class="k">for</span> <span class="n">px</span> <span class="ow">in</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;pixel_resolution&quot;</span><span class="p">]]</span>
+    <span class="n">params</span><span class="p">[</span><span class="s2">&quot;main&quot;</span><span class="p">][</span><span class="s2">&quot;max_shifts&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">max_shifts</span>
+
+    <span class="n">strides</span> <span class="o">=</span> <span class="p">[</span><span class="nb">round</span><span class="p">(</span><span class="mi">64</span> <span class="o">/</span> <span class="n">px</span><span class="p">)</span> <span class="k">for</span> <span class="n">px</span> <span class="ow">in</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;pixel_resolution&quot;</span><span class="p">]]</span>
+    <span class="n">params</span><span class="p">[</span><span class="s2">&quot;main&quot;</span><span class="p">][</span><span class="s2">&quot;strides&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">strides</span>
+
+    <span class="c1"># overlap should be ~neuron diameter</span>
+    <span class="n">overlaps</span> <span class="o">=</span> <span class="p">[</span><span class="nb">round</span><span class="p">(</span><span class="n">gSig</span> <span class="o">/</span> <span class="n">px</span><span class="p">)</span> <span class="k">for</span> <span class="n">px</span> <span class="ow">in</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;pixel_resolution&quot;</span><span class="p">]]</span>
+    <span class="k">if</span> <span class="n">overlaps</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">gSig</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Overlaps too small. Increasing to neuron diameter.&quot;</span><span class="p">)</span>
+        <span class="n">overlaps</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">gSig</span><span class="p">)]</span> <span class="o">*</span> <span class="mi">2</span>
+    <span class="n">params</span><span class="p">[</span><span class="s2">&quot;main&quot;</span><span class="p">][</span><span class="s2">&quot;overlaps&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">overlaps</span>
+
+    <span class="n">rf_0</span> <span class="o">=</span> <span class="p">(</span><span class="n">strides</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">overlaps</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">//</span> <span class="mi">2</span>
+    <span class="n">rf_1</span> <span class="o">=</span> <span class="p">(</span><span class="n">strides</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">overlaps</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">//</span> <span class="mi">2</span>
+    <span class="n">rf</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">([</span><span class="n">rf_0</span><span class="p">,</span> <span class="n">rf_1</span><span class="p">]))</span>
+
+    <span class="n">stride</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">([</span><span class="n">overlaps</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">overlaps</span><span class="p">[</span><span class="mi">1</span><span class="p">]]))</span>
+
+    <span class="n">params</span><span class="p">[</span><span class="s2">&quot;main&quot;</span><span class="p">][</span><span class="s2">&quot;rf&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">rf</span>
+    <span class="n">params</span><span class="p">[</span><span class="s2">&quot;main&quot;</span><span class="p">][</span><span class="s2">&quot;stride&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">stride</span>
+
+    <span class="k">return</span> <span class="n">params</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_default_params_caiman</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Default parameters for both registration and CNMF.</span>
+<span class="sd">    The exception is gSiz being set relative to gSig.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        Dictionary of default parameter values for registration and segmentation.</span>
+
+<span class="sd">    Notes</span>
+<span class="sd">    -----</span>
+<span class="sd">    This will likely change as CaImAn is updated.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">gSig</span> <span class="o">=</span> <span class="mi">6</span>
+    <span class="n">gSiz</span> <span class="o">=</span> <span class="p">(</span><span class="mi">4</span> <span class="o">*</span> <span class="n">gSig</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">gSig</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;main&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="c1"># Motion correction parameters</span>
+            <span class="s2">&quot;pw_rigid&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;max_shifts&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">6</span><span class="p">,</span> <span class="mi">6</span><span class="p">],</span>
+            <span class="s2">&quot;strides&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">64</span><span class="p">,</span> <span class="mi">64</span><span class="p">],</span>
+            <span class="s2">&quot;overlaps&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
+            <span class="s2">&quot;min_mov&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="s2">&quot;gSig_filt&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span>
+            <span class="s2">&quot;max_deviation_rigid&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
+            <span class="s2">&quot;border_nan&quot;</span><span class="p">:</span> <span class="s2">&quot;copy&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;splits_els&quot;</span><span class="p">:</span> <span class="mi">14</span><span class="p">,</span>
+            <span class="s2">&quot;upsample_factor_grid&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+            <span class="s2">&quot;use_cuda&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;num_frames_split&quot;</span><span class="p">:</span> <span class="mi">50</span><span class="p">,</span>
+            <span class="s2">&quot;niter_rig&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+            <span class="s2">&quot;is3D&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;splits_rig&quot;</span><span class="p">:</span> <span class="mi">14</span><span class="p">,</span>
+            <span class="s2">&quot;num_splits_to_process_rig&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="c1"># CNMF parameters</span>
+            <span class="s2">&quot;fr&quot;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
+            <span class="s2">&quot;dxy&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span>
+            <span class="s2">&quot;decay_time&quot;</span><span class="p">:</span> <span class="mf">0.4</span><span class="p">,</span>
+            <span class="s2">&quot;p&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+            <span class="s2">&quot;nb&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
+            <span class="s2">&quot;K&quot;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span>
+            <span class="s2">&quot;rf&quot;</span><span class="p">:</span> <span class="mi">64</span><span class="p">,</span>
+            <span class="s2">&quot;stride&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
+            <span class="s2">&quot;gSig&quot;</span><span class="p">:</span> <span class="n">gSig</span><span class="p">,</span>
+            <span class="s2">&quot;gSiz&quot;</span><span class="p">:</span> <span class="n">gSiz</span><span class="p">,</span>
+            <span class="s2">&quot;method_init&quot;</span><span class="p">:</span> <span class="s2">&quot;greedy_roi&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;rolling_sum&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;use_cnn&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;ssub&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+            <span class="s2">&quot;tsub&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+            <span class="s2">&quot;merge_thr&quot;</span><span class="p">:</span> <span class="mf">0.7</span><span class="p">,</span>
+            <span class="s2">&quot;bas_nonneg&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;min_SNR&quot;</span><span class="p">:</span> <span class="mf">1.4</span><span class="p">,</span>
+            <span class="s2">&quot;rval_thr&quot;</span><span class="p">:</span> <span class="mf">0.8</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;refit&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_build_ome_metadata</span><span class="p">(</span>
+    <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">,</span>
+    <span class="n">dtype</span><span class="p">,</span>
+    <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+    <span class="n">dims</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Build comprehensive OME-NGFF v0.5 metadata from ScanImage and other metadata.</span>
+
+<span class="sd">    Creates OMERO rendering settings, custom metadata fields, and proper</span>
+<span class="sd">    coordinate transformations based on available metadata.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    shape : tuple</span>
+<span class="sd">        Shape of the array matching dims order</span>
+<span class="sd">    dtype : np.dtype</span>
+<span class="sd">        Data type of the array</span>
+<span class="sd">    metadata : dict</span>
+<span class="sd">        Metadata dictionary with optional keys</span>
+<span class="sd">    dims : tuple[str, ...] | None</span>
+<span class="sd">        Dimension labels like (&quot;T&quot;, &quot;Z&quot;, &quot;Y&quot;, &quot;X&quot;). If None, defaults to TZYX for 4D.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        Complete OME-NGFF v0.5 metadata attributes</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.features._dim_tags</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+        <span class="n">dims_to_ome_axes</span><span class="p">,</span>
+        <span class="n">normalize_dims</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.features._dim_labels</span><span class="w"> </span><span class="kn">import</span> <span class="n">infer_dims</span>
+
+    <span class="c1"># determine dims</span>
+    <span class="n">ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">dims</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">dims</span> <span class="o">=</span> <span class="n">infer_dims</span><span class="p">(</span><span class="n">ndim</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">dims</span> <span class="o">=</span> <span class="n">normalize_dims</span><span class="p">(</span><span class="n">dims</span><span class="p">)</span>
+
+    <span class="c1"># use standard metadata extraction for consistent handling of aliases</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.metadata.params</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_param</span><span class="p">,</span> <span class="n">get_voxel_size</span>
+
+    <span class="n">vs</span> <span class="o">=</span> <span class="n">get_voxel_size</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span>
+    <span class="n">frame_rate</span> <span class="o">=</span> <span class="n">get_param</span><span class="p">(</span><span class="n">metadata</span><span class="p">,</span> <span class="s2">&quot;fs&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+
+    <span class="n">time_scale</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="nb">float</span><span class="p">(</span><span class="n">frame_rate</span><span class="p">)</span> <span class="k">if</span> <span class="n">frame_rate</span> <span class="k">else</span> <span class="mf">1.0</span>
+
+    <span class="c1"># build OME-NGFF v0.5 axes from dims</span>
+    <span class="n">axes</span> <span class="o">=</span> <span class="n">dims_to_ome_axes</span><span class="p">(</span><span class="n">dims</span><span class="p">)</span>
+
+    <span class="c1"># build scale values matching dimension order</span>
+    <span class="n">scale_values</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">dims</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">dim</span> <span class="o">==</span> <span class="s2">&quot;T&quot;</span><span class="p">:</span>
+            <span class="n">scale_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">time_scale</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">dim</span> <span class="o">==</span> <span class="s2">&quot;Z&quot;</span><span class="p">:</span>
+            <span class="n">scale_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">vs</span><span class="o">.</span><span class="n">dz</span><span class="p">)</span> <span class="k">if</span> <span class="n">vs</span><span class="o">.</span><span class="n">dz</span> <span class="k">else</span> <span class="mf">1.0</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">dim</span> <span class="o">==</span> <span class="s2">&quot;Y&quot;</span><span class="p">:</span>
+            <span class="n">scale_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">vs</span><span class="o">.</span><span class="n">dy</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="n">dim</span> <span class="o">==</span> <span class="s2">&quot;X&quot;</span><span class="p">:</span>
+            <span class="n">scale_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">vs</span><span class="o">.</span><span class="n">dx</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">scale_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span>  <span class="c1"># C, V, B, etc.</span>
+
+    <span class="n">datasets</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;path&quot;</span><span class="p">:</span> <span class="s2">&quot;0&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;coordinateTransformations&quot;</span><span class="p">:</span> <span class="p">[{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;scale&quot;</span><span class="p">,</span> <span class="s2">&quot;scale&quot;</span><span class="p">:</span> <span class="n">scale_values</span><span class="p">}],</span>
+        <span class="p">}</span>
+    <span class="p">]</span>
+
+    <span class="n">multiscales</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;version&quot;</span><span class="p">:</span> <span class="s2">&quot;0.5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;volume&quot;</span><span class="p">),</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="n">axes</span><span class="p">,</span>
+            <span class="s2">&quot;datasets&quot;</span><span class="p">:</span> <span class="n">datasets</span><span class="p">,</span>
+        <span class="p">}</span>
+    <span class="p">]</span>
+
+    <span class="c1"># Build OME content</span>
+    <span class="n">ome_content</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;version&quot;</span><span class="p">:</span> <span class="s2">&quot;0.5&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;multiscales&quot;</span><span class="p">:</span> <span class="n">multiscales</span><span class="p">,</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Add OMERO rendering metadata</span>
+    <span class="n">omero_metadata</span> <span class="o">=</span> <span class="n">_build_omero_metadata</span><span class="p">(</span>
+        <span class="n">shape</span><span class="o">=</span><span class="n">shape</span><span class="p">,</span>
+        <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span>
+        <span class="n">metadata</span><span class="o">=</span><span class="n">metadata</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">omero_metadata</span><span class="p">:</span>
+        <span class="n">ome_content</span><span class="p">[</span><span class="s2">&quot;omero&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">omero_metadata</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;ome&quot;</span><span class="p">:</span> <span class="n">ome_content</span><span class="p">}</span>
+
+    <span class="c1"># Add custom metadata fields (ScanImage, acquisition info, etc.)</span>
+    <span class="n">custom_meta</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="c1"># Add ScanImage metadata</span>
+    <span class="k">if</span> <span class="s2">&quot;si&quot;</span> <span class="ow">in</span> <span class="n">metadata</span><span class="p">:</span>
+        <span class="n">si</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;si&quot;</span><span class="p">]</span>
+        <span class="n">custom_meta</span><span class="p">[</span><span class="s2">&quot;scanimage&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;version&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;VERSION_MAJOR&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;unknown&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;VERSION_MINOR&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;imaging_system&quot;</span><span class="p">:</span> <span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;imagingSystem&quot;</span><span class="p">,</span> <span class="s2">&quot;unknown&quot;</span><span class="p">),</span>
+            <span class="s2">&quot;objective_resolution&quot;</span><span class="p">:</span> <span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                <span class="s2">&quot;objectiveResolution&quot;</span><span class="p">,</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;objective_resolution&quot;</span><span class="p">)</span>
+            <span class="p">),</span>
+            <span class="s2">&quot;scan_mode&quot;</span><span class="p">:</span> <span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;hScan2D&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;scanMode&quot;</span><span class="p">,</span> <span class="s2">&quot;unknown&quot;</span><span class="p">),</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Add beam/laser info</span>
+        <span class="k">if</span> <span class="s2">&quot;hBeams&quot;</span> <span class="ow">in</span> <span class="n">si</span><span class="p">:</span>
+            <span class="n">custom_meta</span><span class="p">[</span><span class="s2">&quot;scanimage&quot;</span><span class="p">][</span><span class="s2">&quot;laser_power&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">si</span><span class="p">[</span><span class="s2">&quot;hBeams&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;powers&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="n">custom_meta</span><span class="p">[</span><span class="s2">&quot;scanimage&quot;</span><span class="p">][</span><span class="s2">&quot;power_fraction&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">si</span><span class="p">[</span><span class="s2">&quot;hBeams&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                <span class="s2">&quot;powerFractions&quot;</span><span class="p">,</span> <span class="mi">0</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Add ROI info</span>
+        <span class="k">if</span> <span class="s2">&quot;hRoiManager&quot;</span> <span class="ow">in</span> <span class="n">si</span><span class="p">:</span>
+            <span class="n">roi_mgr</span> <span class="o">=</span> <span class="n">si</span><span class="p">[</span><span class="s2">&quot;hRoiManager&quot;</span><span class="p">]</span>
+            <span class="n">custom_meta</span><span class="p">[</span><span class="s2">&quot;scanimage&quot;</span><span class="p">][</span><span class="s2">&quot;roi&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s2">&quot;scan_zoom&quot;</span><span class="p">:</span> <span class="n">roi_mgr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;scanZoomFactor&quot;</span><span class="p">,</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;zoom_factor&quot;</span><span class="p">)),</span>
+                <span class="s2">&quot;lines_per_frame&quot;</span><span class="p">:</span> <span class="n">roi_mgr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;linesPerFrame&quot;</span><span class="p">),</span>
+                <span class="s2">&quot;pixels_per_line&quot;</span><span class="p">:</span> <span class="n">roi_mgr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pixelsPerLine&quot;</span><span class="p">),</span>
+                <span class="s2">&quot;line_period&quot;</span><span class="p">:</span> <span class="n">roi_mgr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;linePeriod&quot;</span><span class="p">),</span>
+                <span class="s2">&quot;bidirectional&quot;</span><span class="p">:</span> <span class="n">si</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;hScan2D&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;bidirectional&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">),</span>
+            <span class="p">}</span>
+
+    <span class="c1"># Add ROI groups information</span>
+    <span class="k">if</span> <span class="s2">&quot;roi_groups&quot;</span> <span class="ow">in</span> <span class="n">metadata</span><span class="p">:</span>
+        <span class="n">custom_meta</span><span class="p">[</span><span class="s2">&quot;roi_groups&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;roi_groups&quot;</span><span class="p">]</span>
+
+    <span class="c1"># Add acquisition metadata</span>
+    <span class="n">acq_meta</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;acquisition_date&quot;</span><span class="p">,</span> <span class="s2">&quot;experimenter&quot;</span><span class="p">,</span> <span class="s2">&quot;description&quot;</span><span class="p">,</span> <span class="s2">&quot;specimen&quot;</span><span class="p">]:</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">metadata</span><span class="p">:</span>
+            <span class="n">acq_meta</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">acq_meta</span><span class="p">:</span>
+        <span class="n">custom_meta</span><span class="p">[</span><span class="s2">&quot;acquisition&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">acq_meta</span>
+
+    <span class="c1"># Add microscope metadata</span>
+    <span class="n">microscope_meta</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="p">[</span>
+        <span class="s2">&quot;objective&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;emission_wavelength&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;excitation_wavelength&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;numerical_aperture&quot;</span><span class="p">,</span>
+    <span class="p">]:</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">metadata</span><span class="p">:</span>
+            <span class="n">microscope_meta</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">microscope_meta</span><span class="p">:</span>
+        <span class="n">custom_meta</span><span class="p">[</span><span class="s2">&quot;microscope&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">microscope_meta</span>
+
+    <span class="c1"># Add processing metadata</span>
+    <span class="n">processing_meta</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;fix_phase&quot;</span><span class="p">,</span> <span class="s2">&quot;phasecorr_method&quot;</span><span class="p">,</span> <span class="s2">&quot;use_fft&quot;</span><span class="p">,</span> <span class="s2">&quot;register_z&quot;</span><span class="p">]:</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">metadata</span><span class="p">:</span>
+            <span class="n">processing_meta</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">processing_meta</span><span class="p">:</span>
+        <span class="n">custom_meta</span><span class="p">[</span><span class="s2">&quot;processing&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">processing_meta</span>
+
+    <span class="c1"># Add file info</span>
+    <span class="k">if</span> <span class="s2">&quot;file_paths&quot;</span> <span class="ow">in</span> <span class="n">metadata</span> <span class="ow">or</span> <span class="s2">&quot;num_files&quot;</span> <span class="ow">in</span> <span class="n">metadata</span><span class="p">:</span>
+        <span class="n">custom_meta</span><span class="p">[</span><span class="s2">&quot;source_files&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;num_files&quot;</span><span class="p">:</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;num_files&quot;</span><span class="p">),</span>
+            <span class="s2">&quot;num_timepoints&quot;</span><span class="p">:</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;num_timepoints&quot;</span><span class="p">,</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;num_frames&quot;</span><span class="p">)),</span>
+            <span class="s2">&quot;frames_per_file&quot;</span><span class="p">:</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;frames_per_file&quot;</span><span class="p">),</span>
+        <span class="p">}</span>
+
+    <span class="c1"># Add all serializable custom metadata</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">custom_meta</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+            <span class="n">result</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Skipping non-serializable metadata key: </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Add any other simple metadata fields</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">metadata</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="n">key</span>
+            <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span>
+                <span class="s2">&quot;pixel_resolution&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;frame_rate&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;fs&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;dz&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;z_step&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;name&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;si&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;roi_groups&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;acquisition_date&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;experimenter&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;description&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;specimen&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;objective&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;emission_wavelength&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;excitation_wavelength&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;numerical_aperture&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;fix_phase&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;phasecorr_method&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;use_fft&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;register_z&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;file_paths&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;num_files&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;num_timepoints&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;num_frames&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;nframes&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;frames_per_file&quot;</span><span class="p">,</span>
+            <span class="p">]</span>
+            <span class="ow">and</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">result</span>
+        <span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+                <span class="n">result</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+                <span class="k">pass</span>
+
+    <span class="k">return</span> <span class="n">result</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_build_omero_metadata</span><span class="p">(</span><span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">,</span> <span class="n">dtype</span><span class="p">,</span> <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Build OMERO rendering metadata for OME-NGFF.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    shape : tuple</span>
+<span class="sd">        Shape of the array (variable ndim, typically 3D TYX or 4D TZYX)</span>
+<span class="sd">    dtype : np.dtype</span>
+<span class="sd">        Data type of the array</span>
+<span class="sd">    metadata : dict</span>
+<span class="sd">        Metadata dictionary</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        OMERO metadata or empty dict if not enough info</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+    <span class="c1"># handle variable ndim - extract Z if present</span>
+    <span class="n">ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">ndim</span> <span class="o">==</span> <span class="mi">4</span><span class="p">:</span>
+        <span class="n">_T</span><span class="p">,</span> <span class="n">Z</span><span class="p">,</span> <span class="n">_Y</span><span class="p">,</span> <span class="n">_X</span> <span class="o">=</span> <span class="n">shape</span>
+    <span class="k">elif</span> <span class="n">ndim</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+        <span class="n">_T</span><span class="p">,</span> <span class="n">_Y</span><span class="p">,</span> <span class="n">_X</span> <span class="o">=</span> <span class="n">shape</span>
+        <span class="n">Z</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># 2D or other - no Z</span>
+        <span class="n">Z</span> <span class="o">=</span> <span class="mi">1</span>
+
+    <span class="c1"># Determine data range for window settings</span>
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">issubdtype</span><span class="p">(</span><span class="n">dtype</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">integer</span><span class="p">):</span>
+        <span class="n">info</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">iinfo</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">data_min</span><span class="p">,</span> <span class="n">data_max</span> <span class="o">=</span> <span class="n">info</span><span class="o">.</span><span class="n">min</span><span class="p">,</span> <span class="n">info</span><span class="o">.</span><span class="n">max</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">data_min</span><span class="p">,</span> <span class="n">data_max</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span>
+
+    <span class="c1"># Build channel metadata</span>
+    <span class="n">channels</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="c1"># Get channel names from metadata</span>
+    <span class="n">channel_names</span> <span class="o">=</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;channel_names&quot;</span><span class="p">)</span>
+    <span class="n">num_channels</span> <span class="o">=</span> <span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;num_planes&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">channel_names</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># Generate default channel names</span>
+        <span class="k">if</span> <span class="n">num_channels</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">channel_names</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;Channel 1&quot;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">channel_names</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;Z-plane </span><span class="si">{</span><span class="n">i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_channels</span><span class="p">)]</span>
+
+    <span class="c1"># Default colors (cycle through common microscopy colors)</span>
+    <span class="n">default_colors</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;00FF00&quot;</span><span class="p">,</span>  <span class="c1"># Green</span>
+        <span class="s2">&quot;FF0000&quot;</span><span class="p">,</span>  <span class="c1"># Red</span>
+        <span class="s2">&quot;0000FF&quot;</span><span class="p">,</span>  <span class="c1"># Blue</span>
+        <span class="s2">&quot;FFFF00&quot;</span><span class="p">,</span>  <span class="c1"># Yellow</span>
+        <span class="s2">&quot;FF00FF&quot;</span><span class="p">,</span>  <span class="c1"># Magenta</span>
+        <span class="s2">&quot;00FFFF&quot;</span><span class="p">,</span>  <span class="c1"># Cyan</span>
+        <span class="s2">&quot;FFFFFF&quot;</span><span class="p">,</span>  <span class="c1"># White</span>
+    <span class="p">]</span>
+
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">channel_names</span><span class="p">[:</span><span class="n">num_channels</span><span class="p">]):</span>
+        <span class="n">channel</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;active&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;coefficient&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+            <span class="s2">&quot;color&quot;</span><span class="p">:</span> <span class="n">default_colors</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="n">default_colors</span><span class="p">)],</span>
+            <span class="s2">&quot;family&quot;</span><span class="p">:</span> <span class="s2">&quot;linear&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;inverted&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span>
+            <span class="s2">&quot;window&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">data_max</span><span class="p">),</span>
+                <span class="s2">&quot;max&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">data_max</span><span class="p">),</span>
+                <span class="s2">&quot;min&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">data_min</span><span class="p">),</span>
+                <span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">data_min</span><span class="p">),</span>
+            <span class="p">},</span>
+        <span class="p">}</span>
+        <span class="n">channels</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">channel</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">channels</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{}</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;channels&quot;</span><span class="p">:</span> <span class="n">channels</span><span class="p">,</span>
+        <span class="s2">&quot;rdefs&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;defaultT&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="s2">&quot;defaultZ&quot;</span><span class="p">:</span> <span class="n">Z</span> <span class="o">//</span> <span class="mi">2</span><span class="p">,</span>  <span class="c1"># Middle z-plane</span>
+            <span class="s2">&quot;model&quot;</span><span class="p">:</span> <span class="s2">&quot;greyscale&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;version&quot;</span><span class="p">:</span> <span class="s2">&quot;0.5&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

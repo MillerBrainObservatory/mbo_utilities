@@ -1,0 +1,896 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Metadata Handling Deep Dive &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=26413419" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="_static/togglebutton.js?v=1ae7504c"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="_static/tippy/metadata_deep_dive.c28146f4-0cad-464e-b709-32c356e1ae4d.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'metadata_deep_dive';</script>
+    <link rel="icon" href="_static/utilities.png"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/gui_guide.html">Graphical User Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/metadata_deep_dive.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/metadata_deep_dive.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Fmetadata_deep_dive.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/metadata_deep_dive.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Metadata Handling Deep Dive</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#core-concepts-variables">1. Core Concepts &amp; Variables</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#the-ops-variable">The <code class="docutils literal notranslate"><span class="pre">ops</span></code> Variable</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#important-variables">Important Variables</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#planar-vs-volumetric-handling">2. Planar vs. Volumetric Handling</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#a-detection-logic">A. Detection Logic</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#b-internal-handling-the-plane-ops">B. Internal Handling (The “Plane Ops”)</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#metadata-extraction-options-get-metadata">3. Metadata Extraction Options (<code class="docutils literal notranslate"><span class="pre">get_metadata</span></code>)</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#in-depth-reference-table">4. In-Depth Reference Table</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#summary-of-plane-ops">Summary of <code class="docutils literal notranslate"><span class="pre">plane_ops</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#output-metadata-outputmetadata">5. Output Metadata (<code class="docutils literal notranslate"><span class="pre">OutputMetadata</span></code>)</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#a-reactive-metadata-adjustments">A. Reactive Metadata Adjustments</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#b-usage-example">B. Usage Example</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c-format-specific-output">C. Format-Specific Output</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#d-key-properties">D. Key Properties</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="metadata-handling-deep-dive">
+<h1>Metadata Handling Deep Dive<a class="headerlink" href="#metadata-handling-deep-dive" title="Link to this heading">#</a></h1>
+<p>This document provides an in-depth breakdown of how metadata, options, and planar/volumetric data are handled in <code class="docutils literal notranslate"><span class="pre">mbo_utilities</span></code>.</p>
+<p>The metadata system is centralized in <code class="docutils literal notranslate"><span class="pre">mbo_utilities.metadata</span></code> but heavily integrated into the Array classes (<code class="docutils literal notranslate"><span class="pre">Suite2pArray</span></code>, <code class="docutils literal notranslate"><span class="pre">TiffArray</span></code>, <code class="docutils literal notranslate"><span class="pre">ScanImageArray</span></code>). The system is designed to normalize disparate inputs (ScanImage headers, Suite2p <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code>, ImageJ tags) into a minimal standard set of “canonical” keys.</p>
+<section id="core-concepts-variables">
+<h2>1. Core Concepts &amp; Variables<a class="headerlink" href="#core-concepts-variables" title="Link to this heading">#</a></h2>
+<section id="the-ops-variable">
+<h3>The <code class="docutils literal notranslate"><span class="pre">ops</span></code> Variable<a class="headerlink" href="#the-ops-variable" title="Link to this heading">#</a></h3>
+<p>While <code class="docutils literal notranslate"><span class="pre">plane_ops</span></code> is often referenced in user scripts, in the codebase this conceptually maps to the <strong><code class="docutils literal notranslate"><span class="pre">ops</span></code> dictionary</strong> loaded from <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code>.</p>
+<ul class="simple">
+<li><p><strong>In Suite2p</strong>: Use <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code>.</p></li>
+<li><p><strong>In ScanImage</strong>: Use <code class="docutils literal notranslate"><span class="pre">SI</span></code> header tags -&gt; converted to a dictionary structure similar to <code class="docutils literal notranslate"><span class="pre">ops</span></code>.</p></li>
+</ul>
+</section>
+<section id="important-variables">
+<h3>Important Variables<a class="headerlink" href="#important-variables" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Variable (Canonical)</p></th>
+<th class="head text-left"><p>Source Names (Aliases)</p></th>
+<th class="head text-left"><p>Description</p></th>
+<th class="head text-left"><p>Important for…</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><strong><code class="docutils literal notranslate"><span class="pre">num_zplanes</span></code></strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">nplanes</span></code>, <code class="docutils literal notranslate"><span class="pre">num_slices</span></code>, <code class="docutils literal notranslate"><span class="pre">Z</span></code></p></td>
+<td class="text-left"><p>Number of Z-planes in the volume. <strong>Critical volume flag.</strong></p></td>
+<td class="text-left"><p>Distinguishing Planar vs Volumetric.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong><code class="docutils literal notranslate"><span class="pre">num_timepoints</span></code></strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">nframes</span></code>, <code class="docutils literal notranslate"><span class="pre">T</span></code>, <code class="docutils literal notranslate"><span class="pre">num_frames</span></code></p></td>
+<td class="text-left"><p>Total timepoints (volumes or frames).</p></td>
+<td class="text-left"><p>Array shaping <code class="docutils literal notranslate"><span class="pre">(T,</span> <span class="pre">...)</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><strong><code class="docutils literal notranslate"><span class="pre">stack_type</span></code></strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">stackType</span></code> (derived)</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">single_plane</span></code>, <code class="docutils literal notranslate"><span class="pre">lbm</span></code>, <code class="docutils literal notranslate"><span class="pre">piezo</span></code>, <code class="docutils literal notranslate"><span class="pre">pollen</span></code>.</p></td>
+<td class="text-left"><p>Determining how Z is parsed from TIFFs.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong><code class="docutils literal notranslate"><span class="pre">fs</span></code></strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">frame_rate</span></code>, <code class="docutils literal notranslate"><span class="pre">scanFrameRate</span></code></p></td>
+<td class="text-left"><p>Sampling frequency (Hz) <strong>per plane</strong>.</p></td>
+<td class="text-left"><p>Timing &amp; Analysis.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><strong><code class="docutils literal notranslate"><span class="pre">dx</span></code>, <code class="docutils literal notranslate"><span class="pre">dy</span></code>, <code class="docutils literal notranslate"><span class="pre">dz</span></code></strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">micronsPerPixel</span></code>, <code class="docutils literal notranslate"><span class="pre">z_step</span></code></p></td>
+<td class="text-left"><p>Spatial resolution in µm.</p></td>
+<td class="text-left"><p>Scale bars &amp; physical measurements.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong><code class="docutils literal notranslate"><span class="pre">roi</span></code> / <code class="docutils literal notranslate"><span class="pre">fov</span></code></strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">linesPerFrame</span></code>, <code class="docutils literal notranslate"><span class="pre">pixelsPerLine</span></code></p></td>
+<td class="text-left"><p>Dimensions of the acquired window.</p></td>
+<td class="text-left"><p>Reshaping raw data streams.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+<section id="planar-vs-volumetric-handling">
+<h2>2. Planar vs. Volumetric Handling<a class="headerlink" href="#planar-vs-volumetric-handling" title="Link to this heading">#</a></h2>
+<p>The system automatically detects whether data is 2D (Planar) or 3D+T (Volumetric) based on file structure and metadata tags.</p>
+<section id="a-detection-logic">
+<h3>A. Detection Logic<a class="headerlink" href="#a-detection-logic" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Context</p></th>
+<th class="head text-left"><p><strong>Planar (Single Plane)</strong></p></th>
+<th class="head text-left"><p><strong>Volumetric (Multi-plane)</strong></p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><strong>Suite2p</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">ops.npy</span></code> exists in the target folder OR only <code class="docutils literal notranslate"><span class="pre">plane0/</span></code> exists.</p></td>
+<td class="text-left"><p>Multiple <code class="docutils literal notranslate"><span class="pre">planeX/</span></code> subdirectories found containing <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong>ScanImage</strong></p></td>
+<td class="text-left"><p>Metadata <code class="docutils literal notranslate"><span class="pre">num_zplanes</span></code> == 1.</p></td>
+<td class="text-left"><p>Metadata <code class="docutils literal notranslate"><span class="pre">num_zplanes</span></code> &gt; 1 OR <code class="docutils literal notranslate"><span class="pre">stack_type</span></code> is <code class="docutils literal notranslate"><span class="pre">lbm</span></code>/<code class="docutils literal notranslate"><span class="pre">piezo</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><strong>TIFF Files</strong></p></td>
+<td class="text-left"><p>Single file with no special hierarchy.</p></td>
+<td class="text-left"><p>Directory of files matching <code class="docutils literal notranslate"><span class="pre">plane\d+.*</span></code> naming pattern.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="b-internal-handling-the-plane-ops">
+<h3>B. Internal Handling (The “Plane Ops”)<a class="headerlink" href="#b-internal-handling-the-plane-ops" title="Link to this heading">#</a></h3>
+<p>In <code class="docutils literal notranslate"><span class="pre">Suite2pArray</span></code>, the distinction is explicit in the initialization:</p>
+<ol class="arabic simple">
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">_init_volume</span></code></strong>:</p>
+<ul class="simple">
+<li><p>Iterates through sorted <code class="docutils literal notranslate"><span class="pre">plane_dirs</span></code>.</p></li>
+<li><p>Creates a <code class="docutils literal notranslate"><span class="pre">_SinglePlaneReader</span></code> for <strong>each plane</strong>.</p></li>
+<li><p><strong>“Plane Ops”</strong>: Each <code class="docutils literal notranslate"><span class="pre">_SinglePlaneReader</span></code> loads its own <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code> into <code class="docutils literal notranslate"><span class="pre">self.metadata</span></code>.</p></li>
+<li><p><strong>Aggregation</strong>: The main array’s <code class="docutils literal notranslate"><span class="pre">metadata</span></code> is a copy of the <em>first plane’s</em> ops, but with <code class="docutils literal notranslate"><span class="pre">nplanes</span></code> updated to match the number of directories.</p></li>
+</ul>
+</li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">_init_single_plane</span></code></strong>:</p>
+<ul class="simple">
+<li><p>Creates only one <code class="docutils literal notranslate"><span class="pre">_SinglePlaneReader</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_is_volumetric</span></code> is set to <code class="docutils literal notranslate"><span class="pre">False</span></code>.</p></li>
+</ul>
+</li>
+</ol>
+<p><strong>Key Implication</strong>: <code class="docutils literal notranslate"><span class="pre">Suite2pArray</span></code> acts as a facade. If volumetric, <code class="docutils literal notranslate"><span class="pre">array[t,</span> <span class="pre">z,</span> <span class="pre">y,</span> <span class="pre">x]</span></code> routes the request to the specific <code class="docutils literal notranslate"><span class="pre">_SinglePlaneReader</span></code> for appropriate <code class="docutils literal notranslate"><span class="pre">z</span></code>.</p>
+</section>
+</section>
+<section id="metadata-extraction-options-get-metadata">
+<h2>3. Metadata Extraction Options (<code class="docutils literal notranslate"><span class="pre">get_metadata</span></code>)<a class="headerlink" href="#metadata-extraction-options-get-metadata" title="Link to this heading">#</a></h2>
+<p>When you call <code class="docutils literal notranslate"><span class="pre">get_metadata(file)</span></code>, the following decision tree is executed:</p>
+<ol class="arabic simple">
+<li><p><strong>Is it a Raw ScanImage TIFF?</strong> (<code class="docutils literal notranslate"><span class="pre">is_raw_scanimage</span></code>)</p>
+<ul class="simple">
+<li><p><strong>Yes</strong>: Parse <code class="docutils literal notranslate"><span class="pre">scanimage_metadata</span></code> attribute.</p>
+<ul>
+<li><p>Run <code class="docutils literal notranslate"><span class="pre">clean_scanimage_metadata</span></code>: Nests <code class="docutils literal notranslate"><span class="pre">SI.hChannels</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">si['hChannels']</span></code>.</p></li>
+<li><p>Run <code class="docutils literal notranslate"><span class="pre">detect_stack_type</span></code>: Checks for LBM (channels=z) or Piezo usage.</p></li>
+<li><p>Compute <code class="docutils literal notranslate"><span class="pre">num_timepoints</span></code>: Adjusts for averaging and slices.</p></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><p><strong>Is it a Processed TIFF?</strong></p>
+<ul class="simple">
+<li><p><strong>Yes</strong> (has <code class="docutils literal notranslate"><span class="pre">shaped_metadata</span></code>): Read directly from ImageJ/MBO tags.</p></li>
+</ul>
+</li>
+<li><p><strong>Fallback</strong>:</p>
+<ul class="simple">
+<li><p>Look for a sibling <code class="docutils literal notranslate"><span class="pre">ops.npy</span></code>.</p></li>
+<li><p>Load it and map Suite2p keys (<code class="docutils literal notranslate"><span class="pre">nplanes</span></code>, <code class="docutils literal notranslate"><span class="pre">Lx</span></code>) to canonical keys.</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="in-depth-reference-table">
+<h2>4. In-Depth Reference Table<a class="headerlink" href="#in-depth-reference-table" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Variable / Option</p></th>
+<th class="head text-left"><p>Canonical Key</p></th>
+<th class="head text-left"><p>Expected Value</p></th>
+<th class="head text-left"><p>Logic / Notes</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><strong>Plane Operations</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">ops</span></code> (internal)</p></td>
+<td class="text-left"><p>Dictionary</p></td>
+<td class="text-left"><p>In <code class="docutils literal notranslate"><span class="pre">Suite2pArray</span></code>, each Z-slice manages its own <code class="docutils literal notranslate"><span class="pre">ops</span></code> dict. High-level metadata matches Plane 0.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong>Z-Plane Count</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">num_zplanes</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">int</span></code> (e.g., 1 or 30)</p></td>
+<td class="text-left"><p><strong>LBM</strong>: Count of <code class="docutils literal notranslate"><span class="pre">SI.hChannels.channelSave</span></code>. <br> <strong>Piezo</strong>: <code class="docutils literal notranslate"><span class="pre">SI.hStackManager.numSlices</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><strong>Stack Mode</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">stack_type</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">String</span></code></p></td>
+<td class="text-left"><p><strong><code class="docutils literal notranslate"><span class="pre">lbm</span></code></strong>: Multi-channel acquisition where channels map to depths. <br> <strong><code class="docutils literal notranslate"><span class="pre">piezo</span></code></strong>: Slow Z-stage stepping. <br> <strong><code class="docutils literal notranslate"><span class="pre">pollen</span></code></strong>: LBM + Piezo calibration.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong>Frame Rate</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">fs</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code> (Hz)</p></td>
+<td class="text-left"><p>Extracted from <code class="docutils literal notranslate"><span class="pre">SI.hRoiManager.scanFrameRate</span></code>. Valid for the <em>plane</em>, not the volume (usually).</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><strong>Timepoints</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">num_timepoints</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td class="text-left"><p><strong>Single</strong>: Total frames in file. <br> <strong>Volume</strong>: <code class="docutils literal notranslate"><span class="pre">Total</span> <span class="pre">Frames</span> <span class="pre">//</span> <span class="pre">(Slices</span> <span class="pre">*</span> <span class="pre">AvgFactor)</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong>ROI / Grid</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">num_mrois</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td class="text-left"><p>Number of distinct scan fields (multi-ROI) stitched into the image.</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><strong>Pixel Size</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">dx</span></code>, <code class="docutils literal notranslate"><span class="pre">dy</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code> (µm)</p></td>
+<td class="text-left"><p>Pixel resolution. Crucial for scale bars. Note: <code class="docutils literal notranslate"><span class="pre">dz</span></code> (Z-step) is manually passed for LBM often.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="summary-of-plane-ops">
+<h3>Summary of <code class="docutils literal notranslate"><span class="pre">plane_ops</span></code><a class="headerlink" href="#summary-of-plane-ops" title="Link to this heading">#</a></h3>
+<p>If you are looking for a variable strictly named <code class="docutils literal notranslate"><span class="pre">plane_ops</span></code>, it does not exist as a global class. It likely refers to:</p>
+<ol class="arabic simple">
+<li><p>The <code class="docutils literal notranslate"><span class="pre">ops</span></code> dictionary loaded inside <code class="docutils literal notranslate"><span class="pre">_SinglePlaneReader</span></code> in <code class="docutils literal notranslate"><span class="pre">arrays/suite2p.py</span></code>.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">ops</span></code> variable commonly used in users’ analysis scripts when iterating over planes.</p></li>
+</ol>
+</section>
+</section>
+<section id="output-metadata-outputmetadata">
+<h2>5. Output Metadata (<code class="docutils literal notranslate"><span class="pre">OutputMetadata</span></code>)<a class="headerlink" href="#output-metadata-outputmetadata" title="Link to this heading">#</a></h2>
+<p>When writing subsets of data (e.g., every Nth z-plane, specific frame ranges), metadata needs to be adjusted accordingly. The <code class="docutils literal notranslate"><span class="pre">OutputMetadata</span></code> class handles this transformation automatically.</p>
+<section id="a-reactive-metadata-adjustments">
+<h3>A. Reactive Metadata Adjustments<a class="headerlink" href="#a-reactive-metadata-adjustments" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Selection Type</p></th>
+<th class="head text-left"><p>Metadata Adjustment</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><strong>Every Nth z-plane</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">dz</span></code> multiplied by step factor</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong>Contiguous frames</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">fs</span></code> adjusted for frame step</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><strong>Non-contiguous frames</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">fs</span></code> invalidated (set to <code class="docutils literal notranslate"><span class="pre">None</span></code>)</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong>Frame subsampling</strong></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">fs</span></code> divided by frame step</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="b-usage-example">
+<h3>B. Usage Example<a class="headerlink" href="#b-usage-example" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.metadata</span><span class="w"> </span><span class="kn">import</span> <span class="n">OutputMetadata</span>
+
+<span class="c1"># source metadata</span>
+<span class="n">source</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;dz&quot;</span><span class="p">:</span> <span class="mf">5.0</span><span class="p">,</span> <span class="s2">&quot;fs&quot;</span><span class="p">:</span> <span class="mf">30.0</span><span class="p">,</span> <span class="s2">&quot;dx&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s2">&quot;dy&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">}</span>
+
+<span class="c1"># write every 2nd z-plane</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">OutputMetadata</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">plane_indices</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">10</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">dz</span><span class="p">)</span>           <span class="c1"># 10.0 (doubled)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">z_step_factor</span><span class="p">)</span> <span class="c1"># 2</span>
+
+<span class="c1"># write non-contiguous frames (fs becomes invalid)</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">OutputMetadata</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">frame_indices</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="mi">500</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">fs</span><span class="p">)</span>           <span class="c1"># None</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">is_contiguous</span><span class="p">)</span> <span class="c1"># False</span>
+
+<span class="c1"># write every 3rd frame (contiguous with step)</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">OutputMetadata</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">frame_indices</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">12</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">fs</span><span class="p">)</span>           <span class="c1"># 10.0 (30/3)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">is_contiguous</span><span class="p">)</span> <span class="c1"># True</span>
+</pre></div>
+</div>
+</section>
+<section id="c-format-specific-output">
+<h3>C. Format-Specific Output<a class="headerlink" href="#c-format-specific-output" title="Link to this heading">#</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">OutputMetadata</span></code> provides builders for different output formats:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Method</p></th>
+<th class="head text-left"><p>Output Format</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">to_imagej(shape)</span></code></p></td>
+<td class="text-left"><p>ImageJ TIFF</p></td>
+<td class="text-left"><p>Returns <code class="docutils literal notranslate"><span class="pre">(ij_metadata,</span> <span class="pre">resolution)</span></code> tuple</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">to_ome_ngff(dims)</span></code></p></td>
+<td class="text-left"><p>OME-NGFF v0.5</p></td>
+<td class="text-left"><p>Returns multiscales metadata dict</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">to_napari_scale(dims)</span></code></p></td>
+<td class="text-left"><p>napari</p></td>
+<td class="text-left"><p>Returns scale tuple for visualization</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">to_dict()</span></code></p></td>
+<td class="text-left"><p>Generic</p></td>
+<td class="text-left"><p>Returns flat metadata dict with all aliases</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="d-key-properties">
+<h3>D. Key Properties<a class="headerlink" href="#d-key-properties" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Property</p></th>
+<th class="head text-left"><p>Type</p></th>
+<th class="head text-left"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">dz</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span> <span class="pre">|</span> <span class="pre">None</span></code></p></td>
+<td class="text-left"><p>Adjusted z-step (source × z_step_factor)</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">dx</span></code>, <code class="docutils literal notranslate"><span class="pre">dy</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></td>
+<td class="text-left"><p>Unchanged pixel sizes</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">fs</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span> <span class="pre">|</span> <span class="pre">None</span></code></p></td>
+<td class="text-left"><p>Adjusted frame rate (None if non-contiguous)</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">finterval</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">float</span> <span class="pre">|</span> <span class="pre">None</span></code></p></td>
+<td class="text-left"><p>Frame interval in seconds (1/fs)</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">is_contiguous</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></td>
+<td class="text-left"><p>Whether frame selection is contiguous</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">z_step_factor</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td class="text-left"><p>Multiplication factor for z-step</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">frame_step</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></td>
+<td class="text-left"><p>Step between selected frames</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">voxel_size</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">VoxelSize</span></code></p></td>
+<td class="text-left"><p>Adjusted voxel size dataclass</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#core-concepts-variables">1. Core Concepts &amp; Variables</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#the-ops-variable">The <code class="docutils literal notranslate"><span class="pre">ops</span></code> Variable</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#important-variables">Important Variables</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#planar-vs-volumetric-handling">2. Planar vs. Volumetric Handling</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#a-detection-logic">A. Detection Logic</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#b-internal-handling-the-plane-ops">B. Internal Handling (The “Plane Ops”)</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#metadata-extraction-options-get-metadata">3. Metadata Extraction Options (<code class="docutils literal notranslate"><span class="pre">get_metadata</span></code>)</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#in-depth-reference-table">4. In-Depth Reference Table</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#summary-of-plane-ops">Summary of <code class="docutils literal notranslate"><span class="pre">plane_ops</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#output-metadata-outputmetadata">5. Output Metadata (<code class="docutils literal notranslate"><span class="pre">OutputMetadata</span></code>)</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#a-reactive-metadata-adjustments">A. Reactive Metadata Adjustments</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#b-usage-example">B. Usage Example</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c-format-specific-output">C. Format-Specific Output</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#d-key-properties">D. Key Properties</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

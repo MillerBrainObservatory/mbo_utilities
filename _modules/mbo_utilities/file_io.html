@@ -1,0 +1,858 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mbo_utilities.file_io &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=26413419" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../../_static/togglebutton.js?v=1ae7504c"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/mbo_utilities/file_io';</script>
+    <link rel="icon" href="../../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="../../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="../../_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../usage/gui_guide.html">Graphical User Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2F_modules/mbo_utilities/file_io.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button"
+   title="Open an issue"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+
+</a>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for mbo_utilities.file_io</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Sequence</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">dask.array</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">da</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">tifffile</span><span class="w"> </span><span class="kn">import</span> <span class="n">tifffile</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">log</span>
+
+<span class="c1"># Tags used to identify plane/roi outputs in filenames</span>
+<span class="n">PIPELINE_TAGS</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;plane&quot;</span><span class="p">,</span> <span class="s2">&quot;roi&quot;</span><span class="p">,</span> <span class="s2">&quot;z&quot;</span><span class="p">,</span> <span class="s2">&quot;plane_&quot;</span><span class="p">,</span> <span class="s2">&quot;roi_&quot;</span><span class="p">,</span> <span class="s2">&quot;z_&quot;</span><span class="p">)</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">zarr</span><span class="w"> </span><span class="kn">import</span> <span class="nb">open</span> <span class="k">as</span> <span class="n">zarr_open</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">zarr.storage</span><span class="w"> </span><span class="kn">import</span> <span class="n">FsspecStore</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">fsspec.implementations.reference</span><span class="w"> </span><span class="kn">import</span> <span class="n">ReferenceFileSystem</span>
+
+    <span class="n">HAS_ZARR</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="n">HAS_ZARR</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">zarr_open</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">ReferenceFileSystem</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">FsspecStore</span> <span class="o">=</span> <span class="kc">None</span>
+
+<span class="n">CHUNKS</span> <span class="o">=</span> <span class="p">{</span><span class="mi">0</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">:</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">}</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">log</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;file_io&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="files_to_dask">
+<a class="viewcode-back" href="../../api/io.html#mbo_utilities.files_to_dask">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">files_to_dask</span><span class="p">(</span><span class="n">files</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span><span class="p">],</span> <span class="n">astype</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">chunk_t</span><span class="o">=</span><span class="mi">250</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Lazily build a Dask array or list of arrays depending on filename tags.</span>
+
+<span class="sd">    - &quot;plane&quot;, &quot;z&quot;, or &quot;chan&quot; → stacked along Z (TZYX)</span>
+<span class="sd">    - &quot;roi&quot; → list of 3D (T,Y,X) arrays, one per ROI</span>
+<span class="sd">    - otherwise → concatenate all files in time (T)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">Path</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">files</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;No input files provided.&quot;</span><span class="p">)</span>
+
+    <span class="n">has_plane</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(plane|z|chan)[_-]?\d+&quot;</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">)</span>
+    <span class="n">has_roi</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;roi[_-]?\d+&quot;</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">)</span>
+
+    <span class="c1"># lazy-load utility inline</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">load_lazy</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">suffix</span> <span class="o">==</span> <span class="s2">&quot;.npy&quot;</span><span class="p">:</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">mmap_mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">f</span><span class="o">.</span><span class="n">suffix</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;.tif&quot;</span><span class="p">,</span> <span class="s2">&quot;.tiff&quot;</span><span class="p">):</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">tifffile</span><span class="o">.</span><span class="n">memmap</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported file type: </span><span class="si">{</span><span class="n">f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">chunks</span> <span class="o">=</span> <span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">chunk_t</span><span class="p">,</span> <span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="o">*</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+        <span class="k">return</span> <span class="n">da</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="n">chunks</span><span class="o">=</span><span class="n">chunks</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">has_roi</span><span class="p">:</span>
+        <span class="n">roi_groups</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;roi[_-]?(\d+)&quot;</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+            <span class="n">roi_idx</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span> <span class="k">if</span> <span class="n">m</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="n">roi_groups</span><span class="p">[</span><span class="n">roi_idx</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="n">roi_arrays</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">roi_idx</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">roi_groups</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+            <span class="n">arrays</span> <span class="o">=</span> <span class="p">[</span><span class="n">load_lazy</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">group</span><span class="p">)]</span>
+            <span class="n">darr</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">arrays</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># concat in time</span>
+            <span class="k">if</span> <span class="n">astype</span><span class="p">:</span>
+                <span class="n">darr</span> <span class="o">=</span> <span class="n">darr</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">astype</span><span class="p">)</span>
+            <span class="n">roi_arrays</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">darr</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">roi_arrays</span>
+
+    <span class="c1"># Plane or Z grouping case</span>
+    <span class="k">if</span> <span class="n">has_plane</span><span class="p">:</span>
+        <span class="n">plane_groups</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(plane|z|chan)[_-]?(\d+)&quot;</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+            <span class="n">plane_idx</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span> <span class="k">if</span> <span class="n">m</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="n">plane_groups</span><span class="p">[</span><span class="n">plane_idx</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="n">plane_stacks</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">_z</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">plane_groups</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+            <span class="n">arrays</span> <span class="o">=</span> <span class="p">[</span><span class="n">load_lazy</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">group</span><span class="p">)]</span>
+            <span class="n">plane</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">arrays</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">plane_stacks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">plane</span><span class="p">)</span>
+
+        <span class="n">full</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">plane_stacks</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (T,Z,Y,X)</span>
+        <span class="k">return</span> <span class="n">full</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">astype</span><span class="p">)</span> <span class="k">if</span> <span class="n">astype</span> <span class="k">else</span> <span class="n">full</span>
+
+    <span class="c1"># Default: concatenate along time</span>
+    <span class="n">arrays</span> <span class="o">=</span> <span class="p">[</span><span class="n">load_lazy</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">files</span><span class="p">)]</span>
+    <span class="n">full</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">arrays</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># (T,Y,X)</span>
+    <span class="k">return</span> <span class="n">full</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">astype</span><span class="p">)</span> <span class="k">if</span> <span class="n">astype</span> <span class="k">else</span> <span class="n">full</span></div>
+
+
+
+<div class="viewcode-block" id="expand_paths">
+<a class="viewcode-back" href="../../api/io.html#mbo_utilities.expand_paths">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">expand_paths</span><span class="p">(</span><span class="n">paths</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span> <span class="o">|</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">]:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Expand a path, list of paths, or wildcard pattern into a sorted list of actual files.</span>
+
+<span class="sd">    This is a handy wrapper for loading images or data files when you’ve got a folder,</span>
+<span class="sd">    some wildcards, or a mix of both.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    paths : str, Path, or list of (str or Path)</span>
+<span class="sd">        Can be a single path, a wildcard pattern like &quot;\\*.tif&quot;, a folder, or a list of those.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    list of Path</span>
+<span class="sd">        Sorted list of full paths to matching files.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; expand_paths(&quot;data/\\*.tif&quot;)</span>
+<span class="sd">    [Path(&quot;data/img_000.tif&quot;), Path(&quot;data/img_001.tif&quot;), ...]</span>
+
+<span class="sd">    &gt;&gt;&gt; expand_paths(Path(&quot;data&quot;))</span>
+<span class="sd">    [Path(&quot;data/img_000.tif&quot;), Path(&quot;data/img_001.tif&quot;), ...]</span>
+
+<span class="sd">    &gt;&gt;&gt; expand_paths([&quot;data/\\*.tif&quot;, Path(&quot;more_data&quot;)])</span>
+<span class="sd">    [Path(&quot;data/img_000.tif&quot;), Path(&quot;more_data/img_050.tif&quot;), ...]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">paths</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">)):</span>
+        <span class="n">paths</span> <span class="o">=</span> <span class="p">[</span><span class="n">paths</span><span class="p">]</span>
+    <span class="k">elif</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">paths</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Expected str, Path, or sequence of them, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">paths</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">paths</span><span class="p">:</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s2">&quot;*&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">p</span><span class="p">):</span>
+            <span class="n">result</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">name</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="n">p</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+            <span class="n">result</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*&quot;</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="n">p</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="n">p</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+            <span class="n">result</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">result</span> <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">is_file</span><span class="p">())</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sort_by_si_filename</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Sort ScanImage files by the last number in the filename (e.g., _00001, _00002, etc.).&quot;&quot;&quot;</span>
+    <span class="n">numbers</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\d+&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">filename</span><span class="p">))</span>
+    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">numbers</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span> <span class="k">if</span> <span class="n">numbers</span> <span class="k">else</span> <span class="mi">0</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_is_leaf_zarr</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Check if a .zarr directory is a leaf (no nested .zarr subdirs).</span>
+
+<span class="sd">    A leaf zarr store contains chunk data (numbered directories like 0/, 1/)</span>
+<span class="sd">    and metadata files, but no nested .zarr directories.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">is_dir</span><span class="p">()</span> <span class="ow">or</span> <span class="n">path</span><span class="o">.</span><span class="n">suffix</span> <span class="o">!=</span> <span class="s2">&quot;.zarr&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="c1"># Check if any immediate subdirectory is also a .zarr</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">path</span><span class="o">.</span><span class="n">iterdir</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">child</span><span class="o">.</span><span class="n">is_dir</span><span class="p">()</span> <span class="ow">and</span> <span class="n">child</span><span class="o">.</span><span class="n">suffix</span> <span class="o">==</span> <span class="s2">&quot;.zarr&quot;</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">False</span>  <span class="c1"># Has nested zarr, not a leaf</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">PermissionError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">):</span>
+        <span class="k">pass</span>
+    <span class="k">return</span> <span class="kc">True</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_walk_with_zarr_filter</span><span class="p">(</span><span class="n">base_path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">max_depth</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">exclude_dirs</span><span class="p">:</span> <span class="nb">list</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Walk directory tree, stopping at leaf .zarr directories.</span>
+
+<span class="sd">    Yields files found during traversal. Does not recurse into:</span>
+<span class="sd">    - Leaf .zarr directories (those without nested .zarr subdirs)</span>
+<span class="sd">    - Excluded directories</span>
+<span class="sd">    - Directories beyond max_depth</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="nb">len</span><span class="p">(</span><span class="n">base_path</span><span class="o">.</span><span class="n">parts</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_walk</span><span class="p">(</span><span class="n">current</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">depth</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">depth</span> <span class="o">&gt;</span> <span class="n">max_depth</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">entries</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">current</span><span class="o">.</span><span class="n">iterdir</span><span class="p">())</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">PermissionError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">):</span>
+            <span class="k">return</span>
+
+        <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">entries</span><span class="p">:</span>
+            <span class="c1"># Skip excluded directories</span>
+            <span class="k">if</span> <span class="n">entry</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="n">exclude_dirs</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="k">if</span> <span class="n">entry</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+                <span class="k">yield</span> <span class="n">entry</span>
+            <span class="k">elif</span> <span class="n">entry</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+                <span class="c1"># If this is a leaf .zarr store, yield it as a &quot;file&quot; (the store itself)</span>
+                <span class="c1"># and don&#39;t recurse into its chunk directories</span>
+                <span class="k">if</span> <span class="n">_is_leaf_zarr</span><span class="p">(</span><span class="n">entry</span><span class="p">):</span>
+                    <span class="c1"># Yield the zarr directory itself as if it were a file</span>
+                    <span class="c1"># (zarr stores are treated as single units)</span>
+                    <span class="k">yield</span> <span class="n">entry</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="c1"># Recurse into non-leaf directories</span>
+                    <span class="k">yield from</span> <span class="n">_walk</span><span class="p">(</span><span class="n">entry</span><span class="p">,</span> <span class="n">depth</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">yield from</span> <span class="n">_walk</span><span class="p">(</span><span class="n">base_path</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="get_files">
+<a class="viewcode-back" href="../../api/io.html#mbo_utilities.get_files">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_files</span><span class="p">(</span>
+    <span class="n">base_dir</span><span class="p">,</span> <span class="n">str_contains</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">max_depth</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">sort_ascending</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exclude_dirs</span><span class="o">=</span><span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span> <span class="o">|</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Recursively search for files in a specified directory whose names contain a given substring,</span>
+<span class="sd">    limiting the search to a maximum subdirectory depth. Optionally, the resulting list of file paths</span>
+<span class="sd">    is sorted in ascending order using numeric parts of the filenames when available.</span>
+
+<span class="sd">    This function intelligently handles zarr stores: it stops recursing into leaf .zarr</span>
+<span class="sd">    directories (those that don&#39;t contain nested .zarr subdirs) to avoid traversing</span>
+<span class="sd">    thousands of internal chunk directories.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    base_dir : str or Path</span>
+<span class="sd">        The base directory where the search begins. This path is expanded (e.g., &#39;~&#39; is resolved)</span>
+<span class="sd">        and converted to an absolute path.</span>
+<span class="sd">    str_contains : str, optional</span>
+<span class="sd">        A substring that must be present in a file&#39;s name for it to be included in the result.</span>
+<span class="sd">        If empty, all files are matched.</span>
+<span class="sd">    max_depth : int, optional</span>
+<span class="sd">        The maximum number of subdirectory levels (relative to the base directory) to search.</span>
+<span class="sd">        Defaults to 1. If set to 0, it is automatically reset to 1.</span>
+<span class="sd">    sort_ascending : bool, optional</span>
+<span class="sd">        If True (default), the matched file paths are sorted in ascending alphanumeric order.</span>
+<span class="sd">        The sort key extracts numeric parts from filenames so that, for example, &quot;file2&quot; comes</span>
+<span class="sd">        before &quot;file10&quot;.</span>
+<span class="sd">    exclude_dirs : iterable of str or Path, optional</span>
+<span class="sd">        An iterable of directories to exclude from the resulting list of file paths. By default</span>
+<span class="sd">        will exclude &quot;.venv/&quot;, &quot;__pycache__/&quot;, &quot;.git&quot; and &quot;.github&quot;].</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    list of str</span>
+<span class="sd">        A list of full file paths (as strings) for files within the base directory (and its</span>
+<span class="sd">        subdirectories up to the specified depth) that contain the provided substring.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    FileNotFoundError</span>
+<span class="sd">        If the base directory does not exist.</span>
+<span class="sd">    NotADirectoryError</span>
+<span class="sd">        If the specified base_dir is not a directory.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; import mbo_utilities as mbo</span>
+<span class="sd">    &gt;&gt;&gt; # Get all files that contain &quot;ops.npy&quot; in their names by searching up to 3 levels deep:</span>
+<span class="sd">    &gt;&gt;&gt; ops_files = mbo.get_files(&quot;path/to/files&quot;, &quot;ops.npy&quot;, max_depth=3)</span>
+<span class="sd">    &gt;&gt;&gt; # Get only files containing &quot;tif&quot; in the current directory (max_depth=1):</span>
+<span class="sd">    &gt;&gt;&gt; tif_files = mbo.get_files(&quot;path/to/files&quot;, &quot;tif&quot;)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Handle UNC paths carefully - resolve() can break them on Windows</span>
+    <span class="n">base_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">base_dir</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span>
+    <span class="c1"># Only resolve non-UNC paths (UNC paths start with \\)</span>
+    <span class="n">path_str</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">base_path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">path_str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\\\\</span><span class="s2">&quot;</span><span class="p">):</span>
+        <span class="n">base_path</span> <span class="o">=</span> <span class="n">base_path</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">base_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Directory &#39;</span><span class="si">{</span><span class="n">base_path</span><span class="si">}</span><span class="s2">&#39; does not exist.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">base_path</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">NotADirectoryError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&#39;</span><span class="si">{</span><span class="n">base_path</span><span class="si">}</span><span class="s2">&#39; is not a directory.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">max_depth</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">max_depth</span> <span class="o">=</span> <span class="mi">1</span>
+
+    <span class="k">if</span> <span class="n">exclude_dirs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">exclude_dirs</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;.venv&quot;</span><span class="p">,</span> <span class="s2">&quot;.git&quot;</span><span class="p">,</span> <span class="s2">&quot;__pycache__&quot;</span><span class="p">]</span>
+
+    <span class="c1"># Use custom walk that handles zarr stores properly</span>
+    <span class="n">files</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">_walk_with_zarr_filter</span><span class="p">(</span><span class="n">base_path</span><span class="p">,</span> <span class="n">max_depth</span><span class="p">,</span> <span class="n">exclude_dirs</span><span class="p">):</span>
+        <span class="c1"># Filter by str_contains if specified</span>
+        <span class="k">if</span> <span class="n">str_contains</span> <span class="ow">and</span> <span class="n">str_contains</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">entry</span><span class="o">.</span><span class="n">name</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">files</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">sort_ascending</span><span class="p">:</span>
+        <span class="n">files</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="n">sort_by_si_filename</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">files</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">derive_tag_from_filename</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Derive a folder tag from a filename based on “planeN”, “roiN”, or &quot;tagN&quot; patterns.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    path : str or pathlib.Path</span>
+<span class="sd">        File path or name whose stem will be parsed.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    str</span>
+<span class="sd">        If the stem starts with “plane”, “roi”, or “res” followed by an integer,</span>
+<span class="sd">        returns that tag plus the integer (e.g. “plane3”, “roi7”, “res2”).</span>
+<span class="sd">        Otherwise returns the original stem unchanged.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; derive_tag_from_filename(&quot;plane_01.tif&quot;)</span>
+<span class="sd">    &#39;plane1&#39;</span>
+<span class="sd">    &gt;&gt;&gt; derive_tag_from_filename(&quot;plane2.bin&quot;)</span>
+<span class="sd">    &#39;plane2&#39;</span>
+<span class="sd">    &gt;&gt;&gt; derive_tag_from_filename(&quot;roi5.raw&quot;)</span>
+<span class="sd">    &#39;roi5&#39;</span>
+<span class="sd">    &gt;&gt;&gt; derive_tag_from_filename(&quot;ROI_10.dat&quot;)</span>
+<span class="sd">    &#39;roi10&#39;</span>
+<span class="sd">    &gt;&gt;&gt; derive_tag_from_filename(&quot;res-3.h5&quot;)</span>
+<span class="sd">    &#39;res3&#39;</span>
+<span class="sd">    &gt;&gt;&gt; derive_tag_from_filename(&quot;assembled_data_1.tiff&quot;)</span>
+<span class="sd">    &#39;assembled_data_1&#39;</span>
+<span class="sd">    &gt;&gt;&gt; derive_tag_from_filename(&quot;file_12.tif&quot;)</span>
+<span class="sd">    &#39;file_12&#39;</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">stem</span>
+    <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">PIPELINE_TAGS</span><span class="p">:</span>
+        <span class="n">low</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">low</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">tag</span><span class="p">):</span>
+            <span class="n">suffix</span> <span class="o">=</span> <span class="n">name</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span> <span class="p">:]</span>
+            <span class="k">if</span> <span class="n">suffix</span> <span class="ow">and</span> <span class="p">(</span><span class="n">suffix</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)):</span>
+                <span class="n">suffix</span> <span class="o">=</span> <span class="n">suffix</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+            <span class="k">if</span> <span class="n">suffix</span><span class="o">.</span><span class="n">isdigit</span><span class="p">():</span>
+                <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">tag</span><span class="si">}{</span><span class="nb">int</span><span class="p">(</span><span class="n">suffix</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="n">name</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_mbo_project_root</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the root path of the mbo_utilities package (where assets folder lives).&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_package_assets_path</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return path to the bundled assets folder in the installed package.</span>
+
+<span class="sd">    uses importlib.resources for robust installed package support.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">importlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">resources</span>
+        <span class="c1"># for python 3.9+, use files() API</span>
+        <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">resources</span><span class="o">.</span><span class="n">files</span><span class="p">(</span><span class="s2">&quot;mbo_utilities&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;assets&quot;</span><span class="p">)))</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">):</span>
+        <span class="c1"># fallback for older python or edge cases</span>
+        <span class="k">return</span> <span class="n">_get_mbo_project_root</span><span class="p">()</span> <span class="o">/</span> <span class="s2">&quot;assets&quot;</span>
+
+
+<div class="viewcode-block" id="get_mbo_dirs">
+<a class="viewcode-back" href="../../api/io.html#mbo_utilities.get_mbo_dirs">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_mbo_dirs</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Ensure ~/mbo and its subdirectories exist.</span>
+
+<span class="sd">    Returns a dict with paths to the root, settings, and cache directories.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">base</span> <span class="o">=</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;mbo&quot;</span><span class="p">)</span>
+    <span class="n">imgui</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;imgui&quot;</span><span class="p">)</span>
+    <span class="n">cache</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;cache&quot;</span><span class="p">)</span>
+    <span class="n">logs</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;logs&quot;</span><span class="p">)</span>
+    <span class="n">tests</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;tests&quot;</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;data&quot;</span><span class="p">)</span>
+
+    <span class="n">assets</span> <span class="o">=</span> <span class="n">imgui</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;assets&quot;</span><span class="p">)</span>
+    <span class="n">settings</span> <span class="o">=</span> <span class="n">assets</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;app_settings&quot;</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">imgui</span><span class="p">,</span> <span class="n">cache</span><span class="p">,</span> <span class="n">logs</span><span class="p">,</span> <span class="n">assets</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">tests</span><span class="p">):</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;base&quot;</span><span class="p">:</span> <span class="n">base</span><span class="p">,</span>
+        <span class="s2">&quot;imgui&quot;</span><span class="p">:</span> <span class="n">imgui</span><span class="p">,</span>
+        <span class="s2">&quot;cache&quot;</span><span class="p">:</span> <span class="n">cache</span><span class="p">,</span>
+        <span class="s2">&quot;logs&quot;</span><span class="p">:</span> <span class="n">logs</span><span class="p">,</span>
+        <span class="s2">&quot;assets&quot;</span><span class="p">:</span> <span class="n">assets</span><span class="p">,</span>
+        <span class="s2">&quot;settings&quot;</span><span class="p">:</span> <span class="n">settings</span><span class="p">,</span>
+        <span class="s2">&quot;data&quot;</span><span class="p">:</span> <span class="n">data</span><span class="p">,</span>
+        <span class="s2">&quot;tests&quot;</span><span class="p">:</span> <span class="n">tests</span><span class="p">,</span>
+    <span class="p">}</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_last_savedir_path</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return path to settings file tracking last saved folder.</span>
+
+<span class="sd">    .. deprecated::</span>
+<span class="sd">        Use :func:`mbo_utilities.preferences.get_last_save_dir` instead.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+        <span class="s2">&quot;get_last_savedir_path() is deprecated. Use mbo_utilities.preferences.get_last_save_dir() instead.&quot;</span><span class="p">,</span>
+        <span class="ne">DeprecationWarning</span><span class="p">,</span>
+        <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;mbo&quot;</span><span class="p">,</span> <span class="s2">&quot;settings&quot;</span><span class="p">,</span> <span class="s2">&quot;last_savedir.json&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_last_savedir</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load last saved directory path if it exists.</span>
+
+<span class="sd">    .. deprecated::</span>
+<span class="sd">        Use :func:`mbo_utilities.preferences.get_last_save_dir` instead.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+        <span class="s2">&quot;load_last_savedir() is deprecated. Use mbo_utilities.preferences.get_last_save_dir() instead.&quot;</span><span class="p">,</span>
+        <span class="ne">DeprecationWarning</span><span class="p">,</span>
+        <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.preferences</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_last_save_dir</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">get_last_save_dir</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">result</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">result</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">default</span> <span class="ow">or</span> <span class="n">Path</span><span class="p">()</span><span class="o">.</span><span class="n">cwd</span><span class="p">())</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">save_last_savedir</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Persist the most recent save directory path.</span>
+
+<span class="sd">    .. deprecated::</span>
+<span class="sd">        Use :func:`mbo_utilities.preferences.set_last_save_dir` instead.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+        <span class="s2">&quot;save_last_savedir() is deprecated. Use mbo_utilities.preferences.set_last_save_dir() instead.&quot;</span><span class="p">,</span>
+        <span class="ne">DeprecationWarning</span><span class="p">,</span>
+        <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.preferences</span><span class="w"> </span><span class="kn">import</span> <span class="n">set_last_save_dir</span>
+    <span class="n">set_last_save_dir</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">print_tree</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">max_depth</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">):</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+        <span class="k">return</span>
+
+    <span class="n">entries</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">([</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">path</span><span class="o">.</span><span class="n">iterdir</span><span class="p">()</span> <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">is_dir</span><span class="p">()])</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">entry</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">entries</span><span class="p">):</span>
+        <span class="s2">&quot;└── &quot;</span> <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;├── &quot;</span>
+
+        <span class="k">if</span> <span class="n">max_depth</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">extension</span> <span class="o">=</span> <span class="s2">&quot;    &quot;</span> <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;│   &quot;</span>
+            <span class="n">print_tree</span><span class="p">(</span><span class="n">entry</span><span class="p">,</span> <span class="n">max_depth</span><span class="o">=</span><span class="n">max_depth</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="n">prefix</span> <span class="o">+</span> <span class="n">extension</span><span class="p">)</span>
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

@@ -1,0 +1,890 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Command Line Interface &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=26413419" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../_static/togglebutton.js?v=1ae7504c"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="../_static/tippy/usage/cli.16595aca-c593-4f57-8d48-08d2854c60ff.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'usage/cli';</script>
+    <link rel="icon" href="../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="GUI User Guide" href="gui_guide.html" />
+    <link rel="prev" title="mbo_utilities: User Guide" href="../user_guide.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="../_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../user_guide.html">User Guide</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gui_guide.html">Graphical User Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/usage/cli.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/usage/cli.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Fusage/cli.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/usage/cli.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Command Line Interface</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#gui-mode">GUI Mode</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#convert">Convert</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#info">Info</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#scan-phase-analysis">Scan-Phase Analysis</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#notebook">Notebook</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#download">Download</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#utilities">Utilities</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#formats">Formats</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#upgrade">Upgrade</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="command-line-interface">
+<span id="cli-usage"></span><h1>Command Line Interface<a class="headerlink" href="#command-line-interface" title="Link to this heading">#</a></h1>
+<p>The <code class="docutils literal notranslate"><span class="pre">mbo</span></code> command provides tools for viewing, converting, and analyzing imaging data.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Command</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span></code></p></td>
+<td><p>Launch GUI with file dialog</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">convert</span></code></p></td>
+<td><p>Convert between formats</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">info</span></code></p></td>
+<td><p>Show array info</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">scanphase</span></code></p></td>
+<td><p>Analyze scan-phase offset</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">notebook</span></code></p></td>
+<td><p>Generate template notebooks</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">download</span></code></p></td>
+<td><p>Download files from GitHub</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">formats</span></code></p></td>
+<td><p>List supported formats</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="gui-mode">
+<h2>GUI Mode<a class="headerlink" href="#gui-mode" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w">                          </span><span class="c1"># file dialog</span>
+mbo<span class="w"> </span>/path/to/data<span class="w">            </span><span class="c1"># open specific file</span>
+mbo<span class="w"> </span>/path/to/data<span class="w"> </span>--metadata<span class="w"> </span><span class="c1"># show only metadata</span>
+</pre></div>
+</div>
+<p align="center">
+  <img src="/_images/gui/readme/01_step_file_dialog.png" height="360" alt="File Selection" />
+  <img src="/_images/gui/readme/02_step_data_view.png" height="360" alt="Data Viewer" />
+</p>
+</section>
+<section id="convert">
+<h2>Convert<a class="headerlink" href="#convert" title="Link to this heading">#</a></h2>
+<p>Convert between formats with optional processing.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>convert<span class="w"> </span>input.tiff<span class="w"> </span>output/<span class="w"> </span>-e<span class="w"> </span>.zarr<span class="w">           </span><span class="c1"># tiff to zarr</span>
+mbo<span class="w"> </span>convert<span class="w"> </span>input.tiff<span class="w"> </span>output/<span class="w"> </span>-e<span class="w"> </span>.bin<span class="w">            </span><span class="c1"># tiff to suite2p binary</span>
+mbo<span class="w"> </span>convert<span class="w"> </span>input.zarr<span class="w"> </span>output/<span class="w"> </span>-e<span class="w"> </span>.tiff<span class="w">           </span><span class="c1"># zarr to tiff</span>
+mbo<span class="w"> </span>convert<span class="w"> </span>input.tiff<span class="w"> </span>output/<span class="w"> </span>-e<span class="w"> </span>.zarr<span class="w"> </span>-p<span class="w"> </span><span class="m">1</span><span class="w"> </span>-p<span class="w"> </span><span class="m">7</span><span class="w"> </span><span class="c1"># specific planes</span>
+mbo<span class="w"> </span>convert<span class="w"> </span>input.tiff<span class="w"> </span>output/<span class="w"> </span>--fix-phase<span class="w">        </span><span class="c1"># with phase correction</span>
+mbo<span class="w"> </span>convert<span class="w"> </span>input.tiff<span class="w"> </span>output/<span class="w"> </span>-n<span class="w"> </span><span class="m">1000</span><span class="w">            </span><span class="c1"># first 1000 frames</span>
+</pre></div>
+</div>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">-e,</span> <span class="pre">--ext</span></code></p></td>
+<td><p>Output format: <code class="docutils literal notranslate"><span class="pre">.tiff</span></code>, <code class="docutils literal notranslate"><span class="pre">.zarr</span></code>, <code class="docutils literal notranslate"><span class="pre">.bin</span></code>, <code class="docutils literal notranslate"><span class="pre">.h5</span></code>, <code class="docutils literal notranslate"><span class="pre">.npy</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">-p,</span> <span class="pre">--planes</span></code></p></td>
+<td><p>Z-planes to export (1-based), repeatable</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">-n,</span> <span class="pre">--num-frames</span></code></p></td>
+<td><p>Limit number of frames</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--roi</span></code></p></td>
+<td><p>ROI selection: <code class="docutils literal notranslate"><span class="pre">None</span></code>, <code class="docutils literal notranslate"><span class="pre">0</span></code>, <code class="docutils literal notranslate"><span class="pre">N</span></code>, or <code class="docutils literal notranslate"><span class="pre">&quot;1,3&quot;</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--fix-phase</span></code></p></td>
+<td><p>Bidirectional phase correction</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--overwrite</span></code></p></td>
+<td><p>Replace existing files</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<details>
+<summary><b>All Convert Options</b></summary>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--output-suffix</span></code></p></td>
+<td><p>Custom filename suffix (default: <code class="docutils literal notranslate"><span class="pre">_stitched</span></code> for multi-roi)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--phasecorr-method</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">mean</span></code>, <code class="docutils literal notranslate"><span class="pre">median</span></code>, or <code class="docutils literal notranslate"><span class="pre">max</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--register-z</span></code></p></td>
+<td><p>Z-plane registration via suite3d</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--ome/--no-ome</span></code></p></td>
+<td><p>OME-zarr metadata (zarr only)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--chunk-mb</span></code></p></td>
+<td><p>Streaming chunk size (default: 100)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--debug</span></code></p></td>
+<td><p>Verbose logging</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</details>
+<p><strong>Example: Convert raw TIFFs to OME-Zarr</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>convert<span class="w"> </span>D:/demo/raw<span class="w"> </span>D:/demo/volume<span class="w"> </span>--ome<span class="w"> </span>-e<span class="w"> </span>.zarr
+</pre></div>
+</div>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Reading: D:/demo/raw
+Counting frames: 100%|████████████████████████████| 1/1 [00:00&lt;00:00, 19152.07it/s]
+  Shape: (119, 14, 448, 448), dtype: int16
+Writing: D:/demo/volume (format: .zarr)
+Writing Zarr: 100%|███████████████████████████████| 119/119 [00:43&lt;00:00, 2.71frames/s]
+
+Done! Output saved to: D:/demo/volume/tp00001-00119_zplane01-14_stack.zarr
+</pre></div>
+</div>
+</section>
+<section id="info">
+<h2>Info<a class="headerlink" href="#info" title="Link to this heading">#</a></h2>
+<p>Display array shape, dtype, chunk info, and metadata without loading data.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>info<span class="w"> </span>/data/raw.tiff
+mbo<span class="w"> </span>info<span class="w"> </span>/data/volume.zarr
+mbo<span class="w"> </span>info<span class="w"> </span>/data/suite2p/plane0
+</pre></div>
+</div>
+</section>
+<section id="scan-phase-analysis">
+<h2>Scan-Phase Analysis<a class="headerlink" href="#scan-phase-analysis" title="Link to this heading">#</a></h2>
+<p>Bidirectional resonant scanning causes alternating rows to be shifted horizontally. This tool measures that shift to help configure correction parameters.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>scanphase<span class="w">                        </span><span class="c1"># file dialog</span>
+mbo<span class="w"> </span>scanphase<span class="w"> </span>/path/to/data.tiff<span class="w">     </span><span class="c1"># analyze file</span>
+mbo<span class="w"> </span>scanphase<span class="w"> </span>./folder/<span class="w"> </span>-n<span class="w"> </span><span class="m">5</span><span class="w">         </span><span class="c1"># first 5 tiffs</span>
+mbo<span class="w"> </span>scanphase<span class="w"> </span>data.tiff<span class="w"> </span>-o<span class="w"> </span>./results<span class="w"> </span><span class="c1"># custom output</span>
+mbo<span class="w"> </span>scanphase<span class="w"> </span>data.tiff<span class="w"> </span>--show<span class="w">       </span><span class="c1"># show plots</span>
+mbo<span class="w"> </span>scanphase<span class="w"> </span>data.tiff<span class="w"> </span>--format<span class="w"> </span>pdf<span class="w"> </span><span class="c1"># output as pdf</span>
+</pre></div>
+</div>
+<p><strong>Output Files:</strong></p>
+<div class="sd-sphinx-override sd-cards-carousel sd-card-cols-2 docutils">
+<div class="sd-card sd-sphinx-override sd-mb-3 sd-shadow-sm docutils">
+<div class="sd-card-body docutils">
+<div class="sd-card-title sd-font-weight-bold docutils">
+temporal.png</div>
+<p class="sd-card-text">Offset time series + histogram. Should be flat; large jumps indicate motion/hardware issues. Typical offset: 0.5-2.0 px.</p>
+<a class="reference internal image-reference" href="../_images/temporal.png"><img alt="../_images/temporal.png" src="../_images/temporal.png" style="width: 100%;" />
+</a>
+</div>
+</div>
+<div class="sd-card sd-sphinx-override sd-mb-3 sd-shadow-sm docutils">
+<div class="sd-card-body docutils">
+<div class="sd-card-title sd-font-weight-bold docutils">
+windows.png</div>
+<p class="sd-card-text">Offset vs window size. Shows how estimate stabilizes with more frames. Red line marks where std drops below 0.1 px.</p>
+<a class="reference internal image-reference" href="../_images/windows.png"><img alt="../_images/windows.png" src="../_images/windows.png" style="width: 100%;" />
+</a>
+</div>
+</div>
+<div class="sd-card sd-sphinx-override sd-mb-3 sd-shadow-sm docutils">
+<div class="sd-card-body docutils">
+<div class="sd-card-title sd-font-weight-bold docutils">
+spatial.png</div>
+<p class="sd-card-text">Spatial heatmaps (32x32 and 64x64 patches). Edges different from center is normal. Gray = low signal.</p>
+<a class="reference internal image-reference" href="../_images/spatial.png"><img alt="../_images/spatial.png" src="../_images/spatial.png" style="width: 100%;" />
+</a>
+</div>
+</div>
+<div class="sd-card sd-sphinx-override sd-mb-3 sd-shadow-sm docutils">
+<div class="sd-card-body docutils">
+<div class="sd-card-title sd-font-weight-bold docutils">
+zplanes.png</div>
+<p class="sd-card-text">Offset vs depth (if multi-plane). Assess if offset varies with z due to resonant scanner angle.</p>
+<a class="reference internal image-reference" href="../_images/zplanes.png"><img alt="../_images/zplanes.png" src="../_images/zplanes.png" style="width: 100%;" />
+</a>
+</div>
+</div>
+<div class="sd-card sd-sphinx-override sd-mb-3 sd-shadow-sm docutils">
+<div class="sd-card-body docutils">
+<div class="sd-card-title sd-font-weight-bold docutils">
+parameters.png</div>
+<p class="sd-card-text">Offset vs signal intensity. Red line suggests threshold below which measurements are noisy.</p>
+<a class="reference internal image-reference" href="../_images/parameters.png"><img alt="../_images/parameters.png" src="../_images/parameters.png" style="width: 100%;" />
+</a>
+</div>
+</div>
+</div>
+<p><strong>Tips:</strong> Use <code class="docutils literal notranslate"><span class="pre">-n</span> <span class="pre">2</span></code> or <code class="docutils literal notranslate"><span class="pre">-n</span> <span class="pre">3</span></code> to run quickly on a subset of frames. Multi-ROI data: offsets are averaged across ROIs.</p>
+</section>
+<section id="notebook">
+<h2>Notebook<a class="headerlink" href="#notebook" title="Link to this heading">#</a></h2>
+<p>Generate template notebooks for common analysis pipelines.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>notebook<span class="w"> </span>lsp<span class="w">                          </span><span class="c1"># LBM-Suite2p-Python pipeline</span>
+mbo<span class="w"> </span>notebook<span class="w"> </span>basic<span class="w">                        </span><span class="c1"># basic data exploration</span>
+mbo<span class="w"> </span>notebook<span class="w"> </span>dff<span class="w">                          </span><span class="c1"># delta F/F analysis</span>
+mbo<span class="w"> </span>notebook<span class="w"> </span>lsp<span class="w"> </span>-d<span class="w"> </span>/path/to/data<span class="w">         </span><span class="c1"># pre-fill data path</span>
+mbo<span class="w"> </span>notebook<span class="w"> </span>lsp<span class="w"> </span>-o<span class="w"> </span>./notebooks<span class="w">           </span><span class="c1"># custom output directory</span>
+mbo<span class="w"> </span>notebook<span class="w"> </span>lsp<span class="w"> </span>-n<span class="w"> </span>my_analysis<span class="w">           </span><span class="c1"># custom name: yyyy-mm-dd_my_analysis.ipynb</span>
+mbo<span class="w"> </span>notebook<span class="w"> </span>-l<span class="w">                           </span><span class="c1"># list available templates</span>
+</pre></div>
+</div>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">-o,</span> <span class="pre">--output</span></code></p></td>
+<td><p>Output directory (default: current directory)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">-n,</span> <span class="pre">--name</span></code></p></td>
+<td><p>Custom notebook name (date prefix auto-added)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">-d,</span> <span class="pre">--data</span></code></p></td>
+<td><p>Data path to pre-fill in the notebook</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">-l,</span> <span class="pre">--list</span></code></p></td>
+<td><p>List available templates</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--templates-dir</span></code></p></td>
+<td><p>Show custom templates directory path</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Available Templates:</strong></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Template</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">lsp</span></code></p></td>
+<td><p>LBM-Suite2p-Python full pipeline with imports, ops config, and visualization</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">basic</span></code></p></td>
+<td><p>Basic mbo_utilities data exploration with imread/imwrite</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">dff</span></code></p></td>
+<td><p>Delta F/F analysis with compute_dff and activity maps</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Templates show full function signatures with all parameters, formatted for easy customization.</p>
+</section>
+<section id="download">
+<h2>Download<a class="headerlink" href="#download" title="Link to this heading">#</a></h2>
+<p>Download files from GitHub (auto-converts blob to raw URLs).</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>download<span class="w"> </span>https://github.com/user/repo/blob/main/notebook.ipynb
+mbo<span class="w"> </span>download<span class="w"> </span>https://github.com/user/repo/blob/main/data.npy<span class="w"> </span>-o<span class="w"> </span>./data/
+</pre></div>
+</div>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Downloading</span> <span class="n">from</span><span class="p">:</span>
+  <span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">raw</span><span class="o">.</span><span class="n">githubusercontent</span><span class="o">.</span><span class="n">com</span><span class="o">/.../</span><span class="n">quickstart</span><span class="o">.</span><span class="n">ipynb</span>
+<span class="n">Saving</span> <span class="n">to</span><span class="p">:</span>
+  <span class="n">C</span><span class="p">:</span>\<span class="n">Users</span>\<span class="o">...</span>\<span class="n">quickstart</span><span class="o">.</span><span class="n">ipynb</span>
+
+<span class="n">Successfully</span> <span class="n">downloaded</span><span class="p">:</span> <span class="n">quickstart</span><span class="o">.</span><span class="n">ipynb</span>
+</pre></div>
+</div>
+<a class="reference internal image-reference" href="../_images/jupyter_lab.png"><img alt="../_images/jupyter_lab.png" class="align-center" src="../_images/jupyter_lab.png" style="width: 80%;" />
+</a>
+</section>
+<section id="utilities">
+<h2>Utilities<a class="headerlink" href="#utilities" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>--check-install<span class="w">      </span><span class="c1"># verify installation and GPU config</span>
+mbo<span class="w"> </span>--download-notebook<span class="w">  </span><span class="c1"># download user guide notebook</span>
+mbo<span class="w"> </span>--download-file<span class="w"> </span>URL<span class="w">  </span><span class="c1"># download any file</span>
+</pre></div>
+</div>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>mbo_utilities v2.4.3 | Python 3.12.12
+==================================================
+
+CUDA Environment:
+  Driver CUDA:         12.6
+
+Features:
+  [Γ£ô] PyTorch
+  [Γ£ô] CuPy
+  [ ] Suite2p (not installed)
+  [ ] Suite3D (not installed)
+  [ ] Rastermap (not installed)
+</pre></div>
+</div>
+</section>
+<section id="formats">
+<h2>Formats<a class="headerlink" href="#formats" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>formats
+</pre></div>
+</div>
+<p><strong>Input:</strong> <code class="docutils literal notranslate"><span class="pre">.tif</span></code>, <code class="docutils literal notranslate"><span class="pre">.tiff</span></code>, <code class="docutils literal notranslate"><span class="pre">.zarr</span></code>, <code class="docutils literal notranslate"><span class="pre">.bin</span></code>, <code class="docutils literal notranslate"><span class="pre">.h5</span></code>, <code class="docutils literal notranslate"><span class="pre">.hdf5</span></code>, <code class="docutils literal notranslate"><span class="pre">.npy</span></code>, <code class="docutils literal notranslate"><span class="pre">.json</span></code>
+<strong>Output:</strong> <code class="docutils literal notranslate"><span class="pre">.tiff</span></code>, <code class="docutils literal notranslate"><span class="pre">.zarr</span></code>, <code class="docutils literal notranslate"><span class="pre">.bin</span></code>, <code class="docutils literal notranslate"><span class="pre">.h5</span></code>, <code class="docutils literal notranslate"><span class="pre">.npy</span></code></p>
+</section>
+<section id="upgrade">
+<h2>Upgrade<a class="headerlink" href="#upgrade" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Method</p></th>
+<th class="head"><p>Command</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Install script</p></td>
+<td><p>Re-run install script</p></td>
+</tr>
+<tr class="row-odd"><td><p>CLI only</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">tool</span> <span class="pre">upgrade</span> <span class="pre">mbo_utilities</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Virtual env</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">pip</span> <span class="pre">install</span> <span class="pre">-U</span> <span class="pre">mbo_utilities</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="../user_guide.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">mbo_utilities: User Guide</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="gui_guide.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">GUI User Guide</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#gui-mode">GUI Mode</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#convert">Convert</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#info">Info</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#scan-phase-analysis">Scan-Phase Analysis</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#notebook">Notebook</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#download">Download</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#utilities">Utilities</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#formats">Formats</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#upgrade">Upgrade</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

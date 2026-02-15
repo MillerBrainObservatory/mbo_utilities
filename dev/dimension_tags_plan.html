@@ -1,0 +1,853 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Dimension Tags System Refactor Plan &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=26413419" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../_static/togglebutton.js?v=1ae7504c"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="../_static/tippy/dev/dimension_tags_plan.9d39b41a-d775-4d54-a4dc-36bcc1a39f4a.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'dev/dimension_tags_plan';</script>
+    <link rel="icon" href="../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="../_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../usage/gui_guide.html">Graphical User Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/dev/dimension_tags_plan.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/dev/dimension_tags_plan.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Fdev/dimension_tags_plan.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/dev/dimension_tags_plan.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Dimension Tags System Refactor Plan</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#filename-convention">Filename Convention</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#architecture">Architecture</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dimensiontag-class">1. DimensionTag Class</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dimensiontagregistry">2. DimensionTagRegistry</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#outputfilename-builder">3. OutputFilename Builder</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#integration-with-imwrite">4. Integration with imwrite</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#array-imwrite-method-updates">5. Array _imwrite() Method Updates</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#implementation-steps">Implementation Steps</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#phase-1-core-tag-system">Phase 1: Core Tag System</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#phase-2-tiff-hyperstack-support">Phase 2: TIFF Hyperstack Support</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#phase-3-array-integration">Phase 3: Array Integration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#phase-4-api-and-documentation">Phase 4: API and Documentation</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#file-changes-summary">File Changes Summary</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#backward-compatibility">Backward Compatibility</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example-usage">Example Usage</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#open-questions">Open Questions</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="dimension-tags-system-refactor-plan">
+<h1>Dimension Tags System Refactor Plan<a class="headerlink" href="#dimension-tags-system-refactor-plan" title="Link to this heading">#</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">#</a></h2>
+<p>Create an extensible dimension tag system for filename generation that supports:</p>
+<ul class="simple">
+<li><p>Volumetric (TZYX) vs planar (TYX) output modes</p></li>
+<li><p>ImageJ-compatible hyperstack TIFFs</p></li>
+<li><p>Descriptive filenames with dimension ranges</p></li>
+<li><p>Future extensibility for Camera, Beamlet, View, etc.</p></li>
+</ul>
+</section>
+<section id="filename-convention">
+<h2>Filename Convention<a class="headerlink" href="#filename-convention" title="Link to this heading">#</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="n">tag1</span><span class="p">}</span><span class="n">_</span><span class="p">{</span><span class="n">tag2</span><span class="p">}</span><span class="n">_</span><span class="p">{</span><span class="o">...</span><span class="p">}</span><span class="n">_stack</span><span class="o">.</span><span class="n">tif</span>
+</pre></div>
+</div>
+<p><strong>Tag format:</strong> <code class="docutils literal notranslate"><span class="pre">{label}{start}[-{stop}[-{step}]]</span></code></p>
+<p><strong>Examples:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">zplane01-14_tp00001-10000_stack.tif</span></code> → TZYX (14 planes, 10000 timepoints)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">zplane01-14_tp00001_stack.tif</span></code> → ZYX (14 planes, single timepoint)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">zplane01_tp00001-10000_stack.tif</span></code> → TYX (single plane, 10000 timepoints)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">zplane01-14-2_tp00001-10000_stack.tif</span></code> → TZYX with step=2 (planes 1,3,5,7,9,11,13)</p></li>
+</ul>
+<p><strong>Future examples:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">cam0_zplane01-14_tp00001-10000_stack.tif</span></code> → Camera 0, volumetric</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">beamlet01-04_zplane01_tp00001-10000_stack.tif</span></code> → Pollen calibration</p></li>
+</ul>
+</section>
+<section id="architecture">
+<h2>Architecture<a class="headerlink" href="#architecture" title="Link to this heading">#</a></h2>
+<section id="dimensiontag-class">
+<h3>1. DimensionTag Class<a class="headerlink" href="#dimensiontag-class" title="Link to this heading">#</a></h3>
+<p>Location: <code class="docutils literal notranslate"><span class="pre">mbo_utilities/arrays/features/_dim_tags.py</span></code></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">DimensionTag</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;single dimension tag for filename generation.&quot;&quot;&quot;</span>
+    <span class="n">label</span><span class="p">:</span> <span class="nb">str</span>           <span class="c1"># e.g., &quot;zplane&quot;, &quot;tp&quot;, &quot;cam&quot;, &quot;beamlet&quot;</span>
+    <span class="n">dim_char</span><span class="p">:</span> <span class="nb">str</span>        <span class="c1"># single char: Z, T, C, V, B, etc.</span>
+    <span class="n">start</span><span class="p">:</span> <span class="nb">int</span>           <span class="c1"># 1-based start index</span>
+    <span class="n">stop</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span>     <span class="c1"># 1-based stop index (None = single value)</span>
+    <span class="n">step</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span>        <span class="c1"># step size (default 1)</span>
+    <span class="n">zero_pad</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>    <span class="c1"># zero-padding width for indices</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">to_string</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;format as filename component.&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">to_slice</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">slice</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;convert to array slice (0-based).&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">from_string</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;DimensionTag&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;parse from filename component.&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+</section>
+<section id="dimensiontagregistry">
+<h3>2. DimensionTagRegistry<a class="headerlink" href="#dimensiontagregistry" title="Link to this heading">#</a></h3>
+<p>Location: <code class="docutils literal notranslate"><span class="pre">mbo_utilities/arrays/features/_dim_tags.py</span></code></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">DimensionTagRegistry</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;registry of known dimension tag types.&quot;&quot;&quot;</span>
+
+    <span class="c1"># built-in tags</span>
+    <span class="n">TAGS</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;T&quot;</span><span class="p">:</span> <span class="n">TagDefinition</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;tp&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;timepoint&quot;</span><span class="p">,</span> <span class="n">zero_pad</span><span class="o">=</span><span class="mi">5</span><span class="p">),</span>
+        <span class="s2">&quot;Z&quot;</span><span class="p">:</span> <span class="n">TagDefinition</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;zplane&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;z-plane&quot;</span><span class="p">,</span> <span class="n">zero_pad</span><span class="o">=</span><span class="mi">2</span><span class="p">),</span>
+        <span class="s2">&quot;C&quot;</span><span class="p">:</span> <span class="n">TagDefinition</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;ch&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;channel&quot;</span><span class="p">,</span> <span class="n">zero_pad</span><span class="o">=</span><span class="mi">2</span><span class="p">),</span>
+        <span class="s2">&quot;V&quot;</span><span class="p">:</span> <span class="n">TagDefinition</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;view&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;view&quot;</span><span class="p">,</span> <span class="n">zero_pad</span><span class="o">=</span><span class="mi">2</span><span class="p">),</span>
+        <span class="s2">&quot;R&quot;</span><span class="p">:</span> <span class="n">TagDefinition</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;roi&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;region of interest&quot;</span><span class="p">,</span> <span class="n">zero_pad</span><span class="o">=</span><span class="mi">2</span><span class="p">),</span>
+        <span class="c1"># future</span>
+        <span class="s2">&quot;B&quot;</span><span class="p">:</span> <span class="n">TagDefinition</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;beamlet&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;beamlet&quot;</span><span class="p">,</span> <span class="n">zero_pad</span><span class="o">=</span><span class="mi">2</span><span class="p">),</span>
+        <span class="s2">&quot;A&quot;</span><span class="p">:</span> <span class="n">TagDefinition</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;cam&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;camera&quot;</span><span class="p">,</span> <span class="n">zero_pad</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+    <span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">register</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dim_char</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">definition</span><span class="p">:</span> <span class="n">TagDefinition</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;register custom tag type.&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_label</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dim_char</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;get filename label for dimension.&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+</section>
+<section id="outputfilename-builder">
+<h3>3. OutputFilename Builder<a class="headerlink" href="#outputfilename-builder" title="Link to this heading">#</a></h3>
+<p>Location: <code class="docutils literal notranslate"><span class="pre">mbo_utilities/arrays/features/_dim_tags.py</span></code></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">OutputFilename</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;builds output filename from dimension tags.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tags</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">DimensionTag</span><span class="p">],</span> <span class="n">suffix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;stack&quot;</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tags</span> <span class="o">=</span> <span class="n">tags</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">suffix</span> <span class="o">=</span> <span class="n">suffix</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ext</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;.tif&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;build filename string.&quot;&quot;&quot;</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="n">tag</span><span class="o">.</span><span class="n">to_string</span><span class="p">()</span> <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">tags</span><span class="p">]</span>
+        <span class="k">return</span> <span class="s2">&quot;_&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span> <span class="o">+</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">suffix</span><span class="p">])</span> <span class="o">+</span> <span class="n">ext</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">from_array</span><span class="p">(</span>
+        <span class="bp">cls</span><span class="p">,</span>
+        <span class="n">arr</span><span class="p">,</span>
+        <span class="n">planes</span><span class="p">:</span> <span class="nb">slice</span> <span class="o">|</span> <span class="nb">list</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">frames</span><span class="p">:</span> <span class="nb">slice</span> <span class="o">|</span> <span class="nb">list</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">suffix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;stack&quot;</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;OutputFilename&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;create from array and selection.&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+</section>
+<section id="integration-with-imwrite">
+<h3>4. Integration with imwrite<a class="headerlink" href="#integration-with-imwrite" title="Link to this heading">#</a></h3>
+<p>Location: <code class="docutils literal notranslate"><span class="pre">mbo_utilities/_writers.py</span></code></p>
+<p>Modify <code class="docutils literal notranslate"><span class="pre">_write_tiff()</span></code> to:</p>
+<ol class="arabic simple">
+<li><p>Accept <code class="docutils literal notranslate"><span class="pre">volumetric:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></code> parameter</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">volumetric=True</span></code>:</p>
+<ul class="simple">
+<li><p>Write all Z planes to single file as hyperstack</p></li>
+<li><p>Use proper ImageJ TZCYX ordering</p></li>
+<li><p>Generate filename with dimension tags</p></li>
+</ul>
+</li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">volumetric=False</span></code> (default, current behavior):</p>
+<ul class="simple">
+<li><p>Write separate file per plane (backward compatible)</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="array-imwrite-method-updates">
+<h3>5. Array _imwrite() Method Updates<a class="headerlink" href="#array-imwrite-method-updates" title="Link to this heading">#</a></h3>
+<p>Each array class’s <code class="docutils literal notranslate"><span class="pre">_imwrite()</span></code> method gains:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">volumetric:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></code> - write as single hyperstack</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">filename_template:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></code> - override auto-generated name</p></li>
+</ul>
+</section>
+</section>
+<section id="implementation-steps">
+<h2>Implementation Steps<a class="headerlink" href="#implementation-steps" title="Link to this heading">#</a></h2>
+<section id="phase-1-core-tag-system">
+<h3>Phase 1: Core Tag System<a class="headerlink" href="#phase-1-core-tag-system" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>Create <code class="docutils literal notranslate"><span class="pre">_dim_tags.py</span></code> with:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">TagDefinition</span></code> dataclass</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DimensionTag</span></code> dataclass</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DimensionTagRegistry</span></code> singleton</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">OutputFilename</span></code> builder</p></li>
+</ul>
+</li>
+<li><p>Add unit tests for tag parsing and generation</p></li>
+</ol>
+</section>
+<section id="phase-2-tiff-hyperstack-support">
+<h3>Phase 2: TIFF Hyperstack Support<a class="headerlink" href="#phase-2-tiff-hyperstack-support" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>Update <code class="docutils literal notranslate"><span class="pre">_write_tiff()</span></code> in <code class="docutils literal notranslate"><span class="pre">_writers.py</span></code>:</p>
+<ul class="simple">
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">volumetric</span></code> parameter</p></li>
+<li><p>Implement TZCYX hyperstack writing</p></li>
+<li><p>Proper ImageJ metadata for hyperstacks</p></li>
+</ul>
+</li>
+<li><p>Update <code class="docutils literal notranslate"><span class="pre">_build_imagej_metadata()</span></code>:</p>
+<ul class="simple">
+<li><p>Handle multi-plane hyperstacks</p></li>
+<li><p>Set correct frames/slices/channels</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="phase-3-array-integration">
+<h3>Phase 3: Array Integration<a class="headerlink" href="#phase-3-array-integration" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>Update <code class="docutils literal notranslate"><span class="pre">_imwrite_base()</span></code> in <code class="docutils literal notranslate"><span class="pre">arrays/_base.py</span></code>:</p>
+<ul class="simple">
+<li><p>Accept <code class="docutils literal notranslate"><span class="pre">volumetric</span></code> parameter</p></li>
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">OutputFilename</span></code> for path generation</p></li>
+<li><p>Route to appropriate writer mode</p></li>
+</ul>
+</li>
+<li><p>Update individual array <code class="docutils literal notranslate"><span class="pre">_imwrite()</span></code> methods:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">TiffArray</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ScanImageArray</span></code> and subclasses</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ZarrArray</span></code>, <code class="docutils literal notranslate"><span class="pre">H5Array</span></code>, etc.</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="phase-4-api-and-documentation">
+<h3>Phase 4: API and Documentation<a class="headerlink" href="#phase-4-api-and-documentation" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>Update <code class="docutils literal notranslate"><span class="pre">imwrite()</span></code> in <code class="docutils literal notranslate"><span class="pre">writer.py</span></code>:</p>
+<ul class="simple">
+<li><p>Expose <code class="docutils literal notranslate"><span class="pre">volumetric</span></code> parameter</p></li>
+<li><p>Document new filename conventions</p></li>
+</ul>
+</li>
+<li><p>Update documentation:</p>
+<ul class="simple">
+<li><p>New filename format examples</p></li>
+<li><p>Hyperstack usage guide</p></li>
+</ul>
+</li>
+</ol>
+</section>
+</section>
+<section id="file-changes-summary">
+<h2>File Changes Summary<a class="headerlink" href="#file-changes-summary" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Changes</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">arrays/features/_dim_tags.py</span></code></p></td>
+<td><p><strong>NEW</strong> - Tag system implementation</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">arrays/features/__init__.py</span></code></p></td>
+<td><p>Export new classes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">_writers.py</span></code></p></td>
+<td><p>Add volumetric tiff writing</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">arrays/_base.py</span></code></p></td>
+<td><p>Update <code class="docutils literal notranslate"><span class="pre">_build_output_path()</span></code>, <code class="docutils literal notranslate"><span class="pre">_imwrite_base()</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">writer.py</span></code></p></td>
+<td><p>Add volumetric parameter to <code class="docutils literal notranslate"><span class="pre">imwrite()</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="backward-compatibility">
+<h2>Backward Compatibility<a class="headerlink" href="#backward-compatibility" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p>Default behavior unchanged (<code class="docutils literal notranslate"><span class="pre">volumetric=False</span></code>)</p></li>
+<li><p>Existing per-plane output still works</p></li>
+<li><p>New filenames only when explicitly requested</p></li>
+<li><p>Existing filename patterns still parsed correctly</p></li>
+</ul>
+</section>
+<section id="example-usage">
+<h2>Example Usage<a class="headerlink" href="#example-usage" title="Link to this heading">#</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">mbo_utilities</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mbo</span>
+
+<span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;data.tif&quot;</span><span class="p">)</span>  <span class="c1"># shape: (10000, 14, 512, 512) TZYX</span>
+
+<span class="c1"># current behavior (per-plane files)</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="s2">&quot;output/&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.tiff&quot;</span><span class="p">)</span>
+<span class="c1"># creates: output/plane01.tiff, output/plane02.tiff, ...</span>
+
+<span class="c1"># new volumetric mode</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="s2">&quot;output/&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="n">volumetric</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="c1"># creates: output/zplane01-14_tp00001-10000_stack.tif</span>
+
+<span class="c1"># with plane selection</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="s2">&quot;output/&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="n">volumetric</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">planes</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">])</span>
+<span class="c1"># creates: output/zplane01-02-04_tp00001-10000_stack.tif</span>
+
+<span class="c1"># single timepoint</span>
+<span class="n">mbo</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="n">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">1</span><span class="p">],</span> <span class="s2">&quot;output/&quot;</span><span class="p">,</span> <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="n">volumetric</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="c1"># creates: output/zplane01-14_tp00001_stack.tif</span>
+</pre></div>
+</div>
+</section>
+<section id="open-questions">
+<h2>Open Questions<a class="headerlink" href="#open-questions" title="Link to this heading">#</a></h2>
+<ol class="arabic simple">
+<li><p>Should <code class="docutils literal notranslate"><span class="pre">_stack</span></code> suffix be configurable or always present for volumetric?</p></li>
+<li><p>How to handle ROI dimension in filename? <code class="docutils literal notranslate"><span class="pre">roi01-04_zplane01-14_stack.tif</span></code>?</p></li>
+<li><p>Should non-tiff formats (zarr, h5) also use this naming convention?</p></li>
+</ol>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#filename-convention">Filename Convention</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#architecture">Architecture</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dimensiontag-class">1. DimensionTag Class</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dimensiontagregistry">2. DimensionTagRegistry</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#outputfilename-builder">3. OutputFilename Builder</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#integration-with-imwrite">4. Integration with imwrite</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#array-imwrite-method-updates">5. Array _imwrite() Method Updates</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#implementation-steps">Implementation Steps</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#phase-1-core-tag-system">Phase 1: Core Tag System</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#phase-2-tiff-hyperstack-support">Phase 2: TIFF Hyperstack Support</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#phase-3-array-integration">Phase 3: Array Integration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#phase-4-api-and-documentation">Phase 4: API and Documentation</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#file-changes-summary">File Changes Summary</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#backward-compatibility">Backward Compatibility</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example-usage">Example Usage</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#open-questions">Open Questions</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

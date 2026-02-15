@@ -1,0 +1,896 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Quantifying Cell Activity &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=26413419" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="_static/togglebutton.js?v=1ae7504c"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="_static/tippy/dff.c4b1fd4f-49e6-41a0-8d88-de47e586993f.js"></script>
+    <script>window.MathJax = {"options": {"processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'dff';</script>
+    <link rel="icon" href="_static/utilities.png"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="API" href="api/index.html" />
+    <link rel="prev" title="File Formats" href="file_formats.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/gui_guide.html">Graphical User Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/dff.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/dff.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Fdff.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/dff.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Quantifying Cell Activity</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#baseline-f0-strategies">Baseline F₀ Strategies</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#standardized-noise-levels">Standardized Noise Levels</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pipelines">Pipelines</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#caiman">CaImAn</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#suite2p">Suite2p</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#extract">EXTRACT</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#calculating-f-f">Calculating ΔF/F</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#indicator-dynamics">Indicator Dynamics</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#references">References</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="quantifying-cell-activity">
+<h1>Quantifying Cell Activity<a class="headerlink" href="#quantifying-cell-activity" title="Link to this heading">#</a></h1>
+<p>The gold-standard formula for measuring cellular activity is “Delta F over F₀”, or the change in fluorescence intensity normalized by the baseline activity:</p>
+<div class="center large math notranslate nohighlight">
+\[\Delta F/F_0 = \frac{F - F_0}{F_0}\]</div>
+<p>Here, F₀ a user-defined baseline that may be static (e.g., median over all frames)
+or dynamically estimated using a rolling window.</p>
+<p>This guide assumes you’ve read <a class="reference external" href="https://www.scientifica.uk.com/learning-zone/how-to-compute-%CE%B4f-f-from-calcium-imaging-data">this scientifica article</a> by Dr Peter Rupprecht at the University of Zurich.</p>
+<div class="sd-container-fluid sd-sphinx-override sd-mb-4 docutils">
+<div class="sd-row docutils">
+<div class="sd-col sd-d-flex-row sd-col-12 sd-col-xs-12 sd-col-sm-12 sd-col-md-12 sd-col-lg-12 docutils">
+<div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm docutils">
+<div class="sd-card-body docutils">
+<div class="sd-card-title sd-font-weight-bold docutils">
+Blog-Post Takeaways</div>
+<ul class="simple">
+<li><p class="sd-card-text"><span class="math notranslate nohighlight">\(\Delta F/F\)</span> reflects intracellular calcium levels, but often in a nonlinear way</p></li>
+<li><p class="sd-card-text"><span class="math notranslate nohighlight">\(\Delta F/F\)</span> was initially introduced for organic dye calcium indicators in the 1930s</p></li>
+<li><p class="sd-card-text">GCaMP behaves differently due to its low baseline brightness and its nonlinearity</p></li>
+<li><p class="sd-card-text">There is no single recipe on how to compute <span class="math notranslate nohighlight">\(\Delta F/F\)</span></p></li>
+<li><p class="sd-card-text">Computation of <span class="math notranslate nohighlight">\(\Delta F/F\)</span> must be adapted to cell types, activity patterns, and noise</p></li>
+<li><p class="sd-card-text">Interpretation of <span class="math notranslate nohighlight">\(\Delta F/F\)</span> requires knowledge about indicators, cell types, and confounds</p></li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+</div>
+<figure class="full-width align-default" id="fig-dff-activity">
+<img alt="Cell Activity (DF/F)" src="_images/cell_activity.png" />
+<figcaption>
+<p><span class="caption-text">ΔF/F traces for 30 cells, sorted by similarity using the <a class="reference external" href="https://github.com/MouseLand/rastermap">Rastermap</a> algorithm.</span><a class="headerlink" href="#fig-dff-activity" title="Link to this image">#</a></p>
+</figcaption>
+</figure>
+<section id="baseline-f0-strategies">
+<h2>Baseline F₀ Strategies<a class="headerlink" href="#baseline-f0-strategies" title="Link to this heading">#</a></h2>
+<p>Choosing the correct baseline strategy depends on many factors:</p>
+<ul class="simple">
+<li><p>Cell type</p></li>
+<li><p>Brain location</p></li>
+<li><p>Frame-rate</p></li>
+<li><p>Virus Kinetics</p></li>
+<li><p>Scientific question</p></li>
+</ul>
+<p>This table summarizes Calcium Activity detection strategies used in embryoinic development reviewed by <span id="id1">Huang <em>et al.</em> [<a class="reference internal" href="#id16" title="Lawrence Huang, Peter Ledochowitsch, Ulf Knoblich, Jérôme Lecoq, Gabe J Murphy, R Clay Reid, Saskia E J de Vries, Christof Koch, Hongkui Zeng, Michael A Buice, Jack Waters, and Lu Li. Relationship between simultaneously recorded spiking activity and fluorescence signal in gcamp6 transgenic mice. eLife, 10:e51675, 2021. URL: https://elifesciences.org/articles/51675, doi:10.7554/eLife.51675.">3</a>]</span>.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p><strong>Method</strong></p></th>
+<th class="head"><p><strong>How It’s Performed</strong></p></th>
+<th class="head"><p><strong>Pros</strong></p></th>
+<th class="head"><p><strong>Cons</strong></p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>Percentile Baseline Subtraction</strong></p></td>
+<td><p>Use a moving window to define F₀ as low percentile (e.g., 10–20th) of the trace.</p></td>
+<td><p>Adaptive baseline; handles long-term drift.</p></td>
+<td><p>Choice of window size/percentile affects sensitivity.</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Z-Score Thresholding</strong></p></td>
+<td><p>Normalize trace by mean/SD, define events above N standard deviations.</p></td>
+<td><p>Removes baseline drift; good for noisy data.</p></td>
+<td><p>Sensitive to noise if SD is low; assumes Gaussian distribution.</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>dF/F Thresholding</strong></p></td>
+<td><p>Compute (F − F₀)/F₀ and define a fixed or adaptive threshold for events.</p></td>
+<td><p>Widely used; compatible with GCaMP, Fluo dyes.</p></td>
+<td><p>Sensitive to F₀ definition; arbitrary thresholds can bias results.</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Standard Deviation (SD) Masking</strong></p></td>
+<td><p>Define active frames/regions where ΔF exceeds N×SD of baseline.</p></td>
+<td><p>Objective thresholding for event detection.</p></td>
+<td><p>Threshold choice heavily affects results.</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Image Subtraction (Frame-to-Frame)</strong></p></td>
+<td><p>Compute ΔF = Fₙ − Fₙ₋₁ or F − background to detect sudden changes.</p></td>
+<td><p>Simple, fast; used for wave detection.</p></td>
+<td><p>Sensitive to noise; misses gradual changes.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<figure class="full-width align-default" id="fig-dff-strategies">
+<img alt="Comparison of dF/F baseline strategies" src="_images/dff_baseline_strategies2.png" />
+<figcaption>
+<p><span class="caption-text">Comparison of different ΔF/F₀ baseline correction methods across selected cells.</span><a class="headerlink" href="#fig-dff-strategies" title="Link to this image">#</a></p>
+</figcaption>
+</figure>
+<figure class="full-width align-default" id="fig-dff-dff">
+<img alt="Resulting DFF values from baseline strategies" src="_images/dff_baseline_strategies_dff.png" />
+<figcaption>
+<p><span class="caption-text">The resulting ΔF/F₀ traces can look different depending on the chosen baseline strategy.</span><a class="headerlink" href="#fig-dff-dff" title="Link to this image">#</a></p>
+</figcaption>
+</figure>
+<figure class="full-width align-default" id="fig-dff-dff-ev">
+<img alt="Resulting DFF values from baseline strategies with Events" src="_images/dff_baseline_strategies_events.png" />
+<figcaption>
+<p><span class="caption-text">The resulting ΔF/F₀ traces can look different depending on the chosen baseline strategy.</span><a class="headerlink" href="#fig-dff-dff-ev" title="Link to this image">#</a></p>
+</figcaption>
+</figure>
+</section>
+<section id="standardized-noise-levels">
+<h2>Standardized Noise Levels<a class="headerlink" href="#standardized-noise-levels" title="Link to this heading">#</a></h2>
+<div class="center large math notranslate nohighlight">
+\[\nu = \frac{\mathrm{median}_t\left( \left| \frac{\Delta F_t}{F_0} - \frac{\Delta F_{t+1}}{F_0} \right| \right)}{\sqrt{f_r}}\]</div>
+<ul class="simple">
+<li><p>Compare shot-noise levels across datasets, recordings, experiments</p></li>
+<li><p>Takes advantage of the slow calcium signal, which is typically similar between adjacent frames</p></li>
+<li><p>Median to exclude outlies stemming from fast onset</p></li>
+<li><p>Norm by sqrt(framerate) makes metric comparable across datasets with different framerates</p></li>
+<li><p>Shot-noise decreases with #samples with a square root dependency</p></li>
+</ul>
+<p>The resulting units, <code class="docutils literal notranslate"><span class="pre">%</span> <span class="pre">for</span> <span class="pre">dF/F,</span> <span class="pre">divided</span> <span class="pre">by</span> <span class="pre">the</span> <span class="pre">square</span> <span class="pre">root</span> <span class="pre">of</span> <span class="pre">seconds</span></code>, is strange.</p>
+<p>This metric should be used relative to other datasets.</p>
+<figure class="full-width align-default" id="fig-noise-high-low">
+<img alt="High vs Low Noise Levels" src="_images/noise_comp.png" />
+<figcaption>
+<p><span class="caption-text">Top N neurons with highest and lowest standardized noise levels.</span><a class="headerlink" href="#fig-noise-high-low" title="Link to this image">#</a></p>
+</figcaption>
+</figure>
+</section>
+<section id="pipelines">
+<h2>Pipelines<a class="headerlink" href="#pipelines" title="Link to this heading">#</a></h2>
+<p>There are several pipelines for users to choose from when deciding how to process calcium imaging datasets.
+Often times, the outputs of these pipelines are in units that are not well documented.
+Even worse, the <em>inputs</em> to downstream pipelines pipelines require data to have particular units.</p>
+<div class="dropdown admonition" id="bg-sub-example">
+<p class="admonition-title">Example</p>
+<p><a class="reference external" href="https://gcamp6f.com/2021/10/04/large-scale-calcium-imaging-noise-levels/">This discussion</a>, which details how to calculate noise for a variety of datasets, used traces that had <a class="reference external" href="https://github.com/cajal/microns_phase3_nda/issues/21">the background signal subtracted</a>.</p>
+<p>This happens because CaImAn subtracts the background signal from each neuron under the hood.
+The resulting units are no longer raw signal, they are background-subtracted raw-signal.
+This process reduces the baseline F₀ to nearly zero and heavily skew ΔF/F₀ calculations.</p>
+</div>
+<section id="caiman">
+<h3><a class="reference external" href="https://github.com/flatironinstitute/CaImAn">CaImAn</a><a class="headerlink" href="#caiman" title="Link to this heading">#</a></h3>
+<p>See: <a class="reference external" href="https://caiman.readthedocs.io/en/latest/core_functions.html#caiman.source_extraction.cnmf.utilities.detrend_df_f" title="(in CaImAn v1.13.1)"><code class="xref py py-func docutils literal notranslate"><span class="pre">detrend_df_f</span></code></a></p>
+<p>CaImAn computes ΔF/F₀ using a <strong>running low-percentile baseline</strong>.</p>
+<p>By default, it uses the <strong>8th percentile</strong> over a <strong>500 frame</strong> window.
+The idea is to track the lower envelope of the signal to get F₀ without being biased by transients.</p>
+<p><strong>Neuropil/background:</strong> CaImAn handles this as part of its CNMF model <span id="id2">[<a class="reference internal" href="#id17" title="Haifeng Liu, Zhaohui Wu, Xuelong Li, Deng Cai, and Thomas S. Huang. Constrained nonnegative matrix factorization for image representation. IEEE Transactions on Pattern Analysis and Machine Intelligence, 34(7):1299–1311, 2012. doi:10.1109/TPAMI.2011.217.">5</a>]</span>.</p>
+<p>Background and neuropil are explicitly separated into distinct spatial/temporal components, so the output traces are background subtracted during this matrix-factorization (as was the issue in the above <a class="reference internal" href="#bg-sub-example"><span class="std std-ref">example</span></a>).</p>
+<p>There is a strong argument to be made that a matrix factorization <code class="docutils literal notranslate"><span class="pre">CNMF</span></code> is not complex enough to model the true background and neuropil.</p>
+<figure class="full-width align-default" id="fig-dff-caiman">
+<img alt="CaImAn default DF/F strategy" src="_images/dff_baseline_strategies_caiman.png" />
+<figcaption>
+<p><span class="caption-text"><a class="reference external" href="https://github.com/flatironinstitute/CaImAn">CaImAn</a> uses a default baseline of the <code class="docutils literal notranslate"><span class="pre">lower</span> <span class="pre">8th</span> <span class="pre">percentile</span></code> and a moving window of <code class="docutils literal notranslate"><span class="pre">200</span> <span class="pre">frames</span></code>.</span><a class="headerlink" href="#fig-dff-caiman" title="Link to this image">#</a></p>
+</figcaption>
+</figure>
+<p><span id="id3">Giovannucci <em>et al.</em> [<a class="reference internal" href="#id18" title="Andrea Giovannucci, Johannes Friedrich, Pat Gunn, Jérémie Kalfon, Brandon L Brown, Sue Ann Koay, Jiannis Taxidis, Farzaneh Najafi, Jeffrey L Gauthier, Pengcheng Zhou, Baljit S Khakh, David W Tank, Dmitri B Chklovskii, and Eftychios A Pnevmatikakis. Caiman an open source tool for scalable calcium imaging data analysis. eLife, 8:e38173, 2019. URL: https://elifesciences.org/articles/38173, doi:10.7554/eLife.38173.">2</a>]</span></p>
+</section>
+<section id="suite2p">
+<h3><a class="reference external" href="https://github.com/MouseLand/suite2p/tree/main">Suite2p</a><a class="headerlink" href="#suite2p" title="Link to this heading">#</a></h3>
+<p>Suite2p does <strong>not</strong> output traces in ΔF/F₀ format directly.</p>
+<p>Instead, it gives you the raw trace and the neuropil, along with spike estimates if you ran <a class="reference external" href="https://suite2p.readthedocs.io/en/latest/deconvolution.html">deconvolution</a>.
+The neuropil represents fluorescence from the surrounding non-somatic tissue.
+As an optional step, many experimentors apply a fixed subtraction:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># F is an [n_neurons x time] array of raw signal</span>
+<span class="c1"># Fneu is an [n_neurons x time] array of neuropil</span>
+<span class="n">F_corrected</span> <span class="o">=</span> <span class="n">F</span> <span class="o">-</span> <span class="mf">0.7</span> <span class="o">*</span> <span class="n">Fneu</span>
+</pre></div>
+</div>
+<p>The 0.7 is an empirically chosen scalar to account for the partial contamination.
+Essentially you subtract 70% of the signal contained in the surrounding neuropil.</p>
+<p>To compute ΔF/F₀, you divide trace, be that neuropil-corrected or not, by an F₀ you calculate yourself.</p>
+<p>Internally, when running spike deconvolution, suite2p will convert your data into DF/F0 internally.
+For this, the default F₀ estimate comes from a <strong>“maximin”</strong> filter: smooth the trace with a Gaussian (default ~10 s), take a rolling <strong>min</strong>, then a <strong>max</strong> over a 60 s window.</p>
+<figure class="align-default" id="id23">
+<img alt="_images/dff_oasis.png" src="_images/dff_oasis.png" />
+<figcaption>
+<p><span class="caption-text">Raw, neuropil, ΔF/F₀ and resulting deconvolved spikes as output by <a class="reference external" href="https://github.com/MouseLand/suite2p">Suite2p</a></span><a class="headerlink" href="#id23" title="Link to this image">#</a></p>
+</figcaption>
+</figure>
+<p><span id="id4">Pachitariu <em>et al.</em> [<a class="reference internal" href="#id19" title="Marius Pachitariu, Carsen Stringer, Mario Dipoppa, Sylvia Schröder, L. Federico Rossi, Henry Dalgleish, Matteo Carandini, and Kenneth D. Harris. Suite2p: beyond 10,000 neurons with standard two-photon microscopy. bioRxiv, 2017. URL: https://www.biorxiv.org/content/10.1101/061507, doi:10.1101/061507.">6</a>]</span></p>
+</section>
+<section id="extract">
+<h3><a class="reference external" href="https://github.com/schnitzer-lab/EXTRACT-public?tab=readme-ov-file">EXTRACT</a><a class="headerlink" href="#extract" title="Link to this heading">#</a></h3>
+<p>EXTRACT outputs raw fluorescence signals without built-in ΔF/F₀ calculation. You compute it yourself using something like a low-percentile (e.g. 10%) as F₀. Most people use a global or sliding percentile window.</p>
+<p><strong>Neuropil:</strong> Handled implicitly. The algorithm uses robust factorization to ignore background and neuropil. There’s no explicit subtraction or coefficient to tune. It isolates only what fits a consistent spatial footprint and suppresses outliers by design.</p>
+<p><span id="id5">Inan <em>et al.</em> [<a class="reference internal" href="#id21" title="Hakan Inan, Murat A Erdogdu, and Mark Schnitzer. Robust estimation of neural signals in calcium imaging. In Advances in Neural Information Processing Systems, volume 30. Curran Associates, Inc., 2017. URL: https://proceedings.neurips.cc/paper/2017/hash/e449b9317dad920c0dd5ad0a2a2d5e49-Abstract.html.">4</a>]</span>, <span id="id6">Dinç <em>et al.</em> [<a class="reference internal" href="#id20" title="Fatih Dinç, Hakan Inan, Oscar Hernandez, Claudia Schmuckermair, Omer Hazon, Tugce Tasci, Biafra O. Ahanonu, Yanping Zhang, Jérôme Lecoq, Simon Haziza, Mark J. Wagner, Murat A. Erdogdu, and Mark J. Schnitzer. Fast, scalable, and statistically robust cell extraction from large-scale neural calcium imaging datasets. bioRxiv, 2024. URL: https://www.biorxiv.org/content/10.1101/2021.03.24.436279, doi:10.1101/2021.03.24.436279.">1</a>]</span></p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p><strong>Pipeline</strong></p></th>
+<th class="head"><p><strong>F₀ Method</strong></p></th>
+<th class="head"><p><strong>ΔF/F₀</strong></p></th>
+<th class="head"><p><strong>Neuropil</strong></p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>CaImAn</strong></p></td>
+<td><p>8th percentile, 500-frame window</p></td>
+<td><p>Yes, in pipeline</p></td>
+<td><p>Modeled via CNMF, no manual subtraction</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Suite2p</strong></p></td>
+<td><p>Maximin (default) or 8th percentile</p></td>
+<td><p>No, user divides post hoc</p></td>
+<td><p>0.7 × F<sub>neu</sub> subtracted before baseline</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>EXTRACT</strong></p></td>
+<td><p>User-defined (e.g. 10th percentile)</p></td>
+<td><p>No, user computes</p></td>
+<td><p>Implicitly handled via robust model</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+<section id="calculating-f-f">
+<h2>Calculating ΔF/F<a class="headerlink" href="#calculating-f-f" title="Link to this heading">#</a></h2>
+<p>The most important consideration you must consider is how you calculate your baseline activity, which depends on your experimental question.</p>
+<figure class="align-default" id="fig-dff-example">
+<a class="reference internal image-reference" href="_images/dff_1.png"><img alt="Example ΔF/F trace baseline comparisons" src="_images/dff_1.png" style="width: 600px;" />
+</a>
+<figcaption>
+<p><span class="caption-text">Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1.</span><a class="headerlink" href="#fig-dff-example" title="Link to this image">#</a></p>
+</figcaption>
+</figure>
+<ol class="arabic simple">
+<li><p>Spike inference from mouse spinal cord calcium imaging data (<span id="id7">Rupprecht <em>et al.</em> [<a class="reference internal" href="#id15" title="Peter Rupprecht, Wei Fan, Steve J. Sullivan, Fritjof Helmchen, and Andrei D. Sdrulla. Spike inference from mouse spinal cord calcium imaging data. bioRxiv, 2024. URL: https://www.biorxiv.org/content/10.1101/2024.07.17.603957, doi:10.1101/2024.07.17.603957.">7</a>]</span>)</p></li>
+</ol>
+<ul class="simple">
+<li><p>DF/F = Lower 10th percentile</p></li>
+<li><p>GCaMP6s</p></li>
+</ul>
+<ol class="arabic simple" start="2">
+<li><p>Spike inference on GCaMP8 indicators <span id="id8">Rupprecht <em>et al.</em> [<a class="reference internal" href="#id14" title="Peter Rupprecht, Márton Rózsa, Xusheng Fang, Karel Svoboda, and Fritjof Helmchen. Spike inference from calcium imaging data acquired with gcamp8 indicators. bioRxiv, 2025. URL: https://www.biorxiv.org/content/10.1101/2025.03.03.641129, doi:10.1101/2025.03.03.641129.">8</a>]</span></p></li>
+</ol>
+<ul class="simple">
+<li><p>GCaMP8, GCaMP7f</p></li>
+</ul>
+<ol class="arabic simple" start="3">
+<li><p>GCaMP6 calibration study <span id="id9">Huang <em>et al.</em> [<a class="reference internal" href="#id16" title="Lawrence Huang, Peter Ledochowitsch, Ulf Knoblich, Jérôme Lecoq, Gabe J Murphy, R Clay Reid, Saskia E J de Vries, Christof Koch, Hongkui Zeng, Michael A Buice, Jack Waters, and Lu Li. Relationship between simultaneously recorded spiking activity and fluorescence signal in gcamp6 transgenic mice. eLife, 10:e51675, 2021. URL: https://elifesciences.org/articles/51675, doi:10.7554/eLife.51675.">3</a>]</span></p></li>
+</ol>
+<ul class="simple">
+<li><p>ΔF/F = (F − F₀,local)/F₀,global, where F₀,local is the mean fluorescence over 100 ms before the first AP, and F₀,global is the minimum F₀,local across trials</p></li>
+<li><p>GCaMP6f</p></li>
+</ul>
+</section>
+<section id="indicator-dynamics">
+<span id="dynamics"></span><h2>Indicator Dynamics<a class="headerlink" href="#indicator-dynamics" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p><strong>GCaMP Variant</strong></p></th>
+<th class="head"><p><strong>Optimal Tau (s)</strong></p></th>
+<th class="head"><p><strong>Notes / Sources</strong></p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>GCaMP6f (fast)</strong></p></td>
+<td><p>~0.5–0.7 s</p></td>
+<td><p>Suite2p: ~0.7 s (<a class="reference external" href="https://suite2p.readthedocs.io">docs</a>). OASIS/CNMF: ~0.5–0.7 s (<a class="reference external" href="https://www.ncbi.nlm.nih.gov/pmc/">PMC</a>). CaImAn: ~0.4 s (<a class="reference external" href="https://caiman.readthedocs.io">docs</a>).</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>GCaMP6m (medium)</strong></p></td>
+<td><p>~1.0–1.25 s</p></td>
+<td><p>Suite2p: ~1.0 s. OASIS: ~1.25 s (<a class="reference external" href="https://www.ncbi.nlm.nih.gov/pmc/">PMC</a>). CaImAn: ~1.0 s (<a class="reference external" href="https://caiman.readthedocs.io">docs</a>).</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>GCaMP6s (slow)</strong></p></td>
+<td><p>~1.5–2.0 s</p></td>
+<td><p>Suite2p: 1.25–1.5 s. OASIS/Suite2p: ~2.0 s (<a class="reference external" href="https://www.ncbi.nlm.nih.gov/pmc/">PMC</a>). CaImAn: ~1.5–2.0 s.</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>GCaMP7f (fast)</strong></p></td>
+<td><p>~0.5 s</p></td>
+<td><p>Spike inference tuning (<a class="reference external" href="https://www.biorxiv.org">bioRxiv</a>). Similar to GCaMP6f.</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>GCaMP7m (medium)</strong></p></td>
+<td><p>~1.0 s (est.)</p></td>
+<td><p>Estimated by analogy to GCaMP6m. No default in tools.</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>GCaMP7s (slow)</strong></p></td>
+<td><p>~1.0–1.5 s</p></td>
+<td><p>In vivo half-decay ~0.7 s (<a class="reference external" href="https://elifesciences.org">eLife</a>). Tau ≈ 1.0 s.</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>GCaMP8f (fast)</strong></p></td>
+<td><p>~0.3 s</p></td>
+<td><p>OASIS fine-tuning (<a class="reference external" href="https://www.biorxiv.org">bioRxiv</a>). Fastest decay; tenfold faster than 6f/7f (<a class="reference external" href="https://www.nature.com">Nature</a>).</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>GCaMP8m (medium)</strong></p></td>
+<td><p>~0.3 s</p></td>
+<td><p>Slightly slower than 8f, still ~0.3 s (<a class="reference external" href="https://www.biorxiv.org">bioRxiv</a>; <a class="reference external" href="https://www.nature.com">Nature</a>).</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>GCaMP8s (slow)</strong></p></td>
+<td><p>~0.7 s</p></td>
+<td><p>Spike inference optimal tau ~0.7 s (<a class="reference external" href="https://www.biorxiv.org">bioRxiv</a>). Faster than 6s (<a class="reference external" href="https://www.nature.com">Nature</a>).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Link to this heading">#</a></h2>
+<div class="docutils container" id="id10">
+<div role="list" class="citation-list">
+<div class="citation" id="id20" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id6">1</a><span class="fn-bracket">]</span></span>
+<p>Fatih Dinç, Hakan Inan, Oscar Hernandez, Claudia Schmuckermair, Omer Hazon, Tugce Tasci, Biafra O. Ahanonu, Yanping Zhang, Jérôme Lecoq, Simon Haziza, Mark J. Wagner, Murat A. Erdogdu, and Mark J. Schnitzer. Fast, scalable, and statistically robust cell extraction from large-scale neural calcium imaging datasets. <em>bioRxiv</em>, 2024. URL: <a class="reference external" href="https://www.biorxiv.org/content/10.1101/2021.03.24.436279">https://www.biorxiv.org/content/10.1101/2021.03.24.436279</a>, <a class="reference external" href="https://doi.org/10.1101/2021.03.24.436279">doi:10.1101/2021.03.24.436279</a>.</p>
+</div>
+<div class="citation" id="id18" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id3">2</a><span class="fn-bracket">]</span></span>
+<p>Andrea Giovannucci, Johannes Friedrich, Pat Gunn, Jérémie Kalfon, Brandon L Brown, Sue Ann Koay, Jiannis Taxidis, Farzaneh Najafi, Jeffrey L Gauthier, Pengcheng Zhou, Baljit S Khakh, David W Tank, Dmitri B Chklovskii, and Eftychios A Pnevmatikakis. Caiman an open source tool for scalable calcium imaging data analysis. <em>eLife</em>, 8:e38173, 2019. URL: <a class="reference external" href="https://elifesciences.org/articles/38173">https://elifesciences.org/articles/38173</a>, <a class="reference external" href="https://doi.org/10.7554/eLife.38173">doi:10.7554/eLife.38173</a>.</p>
+</div>
+<div class="citation" id="id16" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span>3<span class="fn-bracket">]</span></span>
+<span class="backrefs">(<a role="doc-backlink" href="#id1">1</a>,<a role="doc-backlink" href="#id9">2</a>)</span>
+<p>Lawrence Huang, Peter Ledochowitsch, Ulf Knoblich, Jérôme Lecoq, Gabe J Murphy, R Clay Reid, Saskia E J de Vries, Christof Koch, Hongkui Zeng, Michael A Buice, Jack Waters, and Lu Li. Relationship between simultaneously recorded spiking activity and fluorescence signal in gcamp6 transgenic mice. <em>eLife</em>, 10:e51675, 2021. URL: <a class="reference external" href="https://elifesciences.org/articles/51675">https://elifesciences.org/articles/51675</a>, <a class="reference external" href="https://doi.org/10.7554/eLife.51675">doi:10.7554/eLife.51675</a>.</p>
+</div>
+<div class="citation" id="id21" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id5">4</a><span class="fn-bracket">]</span></span>
+<p>Hakan Inan, Murat A Erdogdu, and Mark Schnitzer. Robust estimation of neural signals in calcium imaging. In <em>Advances in Neural Information Processing Systems</em>, volume 30. Curran Associates, Inc., 2017. URL: <a class="reference external" href="https://proceedings.neurips.cc/paper/2017/hash/e449b9317dad920c0dd5ad0a2a2d5e49-Abstract.html">https://proceedings.neurips.cc/paper/2017/hash/e449b9317dad920c0dd5ad0a2a2d5e49-Abstract.html</a>.</p>
+</div>
+<div class="citation" id="id17" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id2">5</a><span class="fn-bracket">]</span></span>
+<p>Haifeng Liu, Zhaohui Wu, Xuelong Li, Deng Cai, and Thomas S. Huang. Constrained nonnegative matrix factorization for image representation. <em>IEEE Transactions on Pattern Analysis and Machine Intelligence</em>, 34(7):1299–1311, 2012. <a class="reference external" href="https://doi.org/10.1109/TPAMI.2011.217">doi:10.1109/TPAMI.2011.217</a>.</p>
+</div>
+<div class="citation" id="id19" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id4">6</a><span class="fn-bracket">]</span></span>
+<p>Marius Pachitariu, Carsen Stringer, Mario Dipoppa, Sylvia Schröder, L. Federico Rossi, Henry Dalgleish, Matteo Carandini, and Kenneth D. Harris. Suite2p: beyond 10,000 neurons with standard two-photon microscopy. <em>bioRxiv</em>, 2017. URL: <a class="reference external" href="https://www.biorxiv.org/content/10.1101/061507">https://www.biorxiv.org/content/10.1101/061507</a>, <a class="reference external" href="https://doi.org/10.1101/061507">doi:10.1101/061507</a>.</p>
+</div>
+<div class="citation" id="id15" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id7">7</a><span class="fn-bracket">]</span></span>
+<p>Peter Rupprecht, Wei Fan, Steve J. Sullivan, Fritjof Helmchen, and Andrei D. Sdrulla. Spike inference from mouse spinal cord calcium imaging data. <em>bioRxiv</em>, 2024. URL: <a class="reference external" href="https://www.biorxiv.org/content/10.1101/2024.07.17.603957">https://www.biorxiv.org/content/10.1101/2024.07.17.603957</a>, <a class="reference external" href="https://doi.org/10.1101/2024.07.17.603957">doi:10.1101/2024.07.17.603957</a>.</p>
+</div>
+<div class="citation" id="id14" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id8">8</a><span class="fn-bracket">]</span></span>
+<p>Peter Rupprecht, Márton Rózsa, Xusheng Fang, Karel Svoboda, and Fritjof Helmchen. Spike inference from calcium imaging data acquired with gcamp8 indicators. <em>bioRxiv</em>, 2025. URL: <a class="reference external" href="https://www.biorxiv.org/content/10.1101/2025.03.03.641129">https://www.biorxiv.org/content/10.1101/2025.03.03.641129</a>, <a class="reference external" href="https://doi.org/10.1101/2025.03.03.641129">doi:10.1101/2025.03.03.641129</a>.</p>
+</div>
+</div>
+</div>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="file_formats.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">File Formats</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="api/index.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">API</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#baseline-f0-strategies">Baseline F₀ Strategies</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#standardized-noise-levels">Standardized Noise Levels</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pipelines">Pipelines</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#caiman">CaImAn</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#suite2p">Suite2p</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#extract">EXTRACT</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#calculating-f-f">Calculating ΔF/F</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#indicator-dynamics">Indicator Dynamics</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#references">References</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

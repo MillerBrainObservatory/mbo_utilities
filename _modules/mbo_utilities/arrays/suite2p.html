@@ -1,0 +1,1063 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mbo_utilities.arrays.suite2p &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=26413419" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../../../_static/togglebutton.js?v=1ae7504c"></script>
+    <script src="../../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/mbo_utilities/arrays/suite2p';</script>
+    <link rel="icon" href="../../../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="../../../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="../../../_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../../../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../../user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../usage/gui_guide.html">Graphical User Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2F_modules/mbo_utilities/arrays/suite2p.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button"
+   title="Open an issue"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+
+</a>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for mbo_utilities.arrays.suite2p</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Suite2p binary array reader.</span>
+
+<span class="sd">This module provides Suite2pArray for reading Suite2p binary output files</span>
+<span class="sd">(data.bin, data_raw.bin) with their associated ops.npy metadata.</span>
+
+<span class="sd">Automatically detects single-plane vs multi-plane (volume) directories.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities</span><span class="w"> </span><span class="kn">import</span> <span class="n">log</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays._base</span><span class="w"> </span><span class="kn">import</span> <span class="n">_imwrite_base</span><span class="p">,</span> <span class="n">ReductionMixin</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.features</span><span class="w"> </span><span class="kn">import</span> <span class="n">DimLabels</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.metadata</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_param</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.pipeline_registry</span><span class="w"> </span><span class="kn">import</span> <span class="n">PipelineInfo</span><span class="p">,</span> <span class="n">register_pipeline</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_npy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">TYPE_CHECKING</span>
+
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Sequence</span>
+
+<span class="c1"># register suite2p pipeline info</span>
+<span class="n">_SUITE2P_INFO</span> <span class="o">=</span> <span class="n">PipelineInfo</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;suite2p&quot;</span><span class="p">,</span>
+    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Suite2p binary output files (registered/raw)&quot;</span><span class="p">,</span>
+    <span class="n">input_patterns</span><span class="o">=</span><span class="p">[</span>
+        <span class="s2">&quot;**/ops.npy&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;**/data.bin&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;**/data_raw.bin&quot;</span><span class="p">,</span>
+    <span class="p">],</span>
+    <span class="n">output_patterns</span><span class="o">=</span><span class="p">[</span>
+        <span class="s2">&quot;**/ops.npy&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;**/data.bin&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;**/data_raw.bin&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;**/stat.npy&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;**/iscell.npy&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;**/spks.npy&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;**/F.npy&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;**/Fneu.npy&quot;</span><span class="p">,</span>
+    <span class="p">],</span>
+    <span class="n">input_extensions</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;npy&quot;</span><span class="p">,</span> <span class="s2">&quot;bin&quot;</span><span class="p">],</span>
+    <span class="n">output_extensions</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;npy&quot;</span><span class="p">,</span> <span class="s2">&quot;bin&quot;</span><span class="p">],</span>
+    <span class="n">marker_files</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ops.npy&quot;</span><span class="p">],</span>
+    <span class="n">category</span><span class="o">=</span><span class="s2">&quot;segmentation&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">register_pipeline</span><span class="p">(</span><span class="n">_SUITE2P_INFO</span><span class="p">)</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">log</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;arrays.suite2p&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_extract_plane_number</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Extract plane number from directory name like &#39;plane01_stitched&#39; or &#39;plane14&#39;.&quot;&quot;&quot;</span>
+    <span class="n">match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;plane(\d+)&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">match</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">find_suite2p_plane_dirs</span><span class="p">(</span><span class="n">directory</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Find Suite2p plane directories in a parent directory.</span>
+
+<span class="sd">    Looks for subdirectories containing ops.npy files, sorted by plane number.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    directory : Path</span>
+<span class="sd">        Parent directory to search.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    list[Path]</span>
+<span class="sd">        List of plane directories sorted by plane number.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">plane_dirs</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">subdir</span> <span class="ow">in</span> <span class="n">directory</span><span class="o">.</span><span class="n">iterdir</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">subdir</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+            <span class="n">ops_file</span> <span class="o">=</span> <span class="n">subdir</span> <span class="o">/</span> <span class="s2">&quot;ops.npy&quot;</span>
+            <span class="k">if</span> <span class="n">ops_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="n">plane_dirs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">subdir</span><span class="p">)</span>
+
+    <span class="c1"># Sort by plane number extracted from directory name</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">sort_key</span><span class="p">(</span><span class="n">p</span><span class="p">):</span>
+        <span class="n">num</span> <span class="o">=</span> <span class="n">_extract_plane_number</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">num</span> <span class="k">if</span> <span class="n">num</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">plane_dirs</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">sort_key</span><span class="p">)</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_SinglePlaneReader</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Internal reader for a single Suite2p plane.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ops_path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ops_path</span> <span class="o">=</span> <span class="n">ops_path</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">metadata</span> <span class="o">=</span> <span class="n">load_npy</span><span class="p">(</span><span class="n">ops_path</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+
+        <span class="n">ops_dir</span> <span class="o">=</span> <span class="n">ops_path</span><span class="o">.</span><span class="n">parent</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">raw_file</span> <span class="o">=</span> <span class="n">ops_dir</span> <span class="o">/</span> <span class="s2">&quot;data_raw.bin&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reg_file</span> <span class="o">=</span> <span class="n">ops_dir</span> <span class="o">/</span> <span class="s2">&quot;data.bin&quot;</span>
+
+        <span class="c1"># choose which file to use</span>
+        <span class="k">if</span> <span class="n">use_raw</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">raw_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">active_file</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">raw_file</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">reg_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">active_file</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">reg_file</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">raw_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">active_file</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">raw_file</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;No binary files found in </span><span class="si">{</span><span class="n">ops_dir</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Expected either:</span><span class="se">\n</span><span class="s2">&quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;  - </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">reg_file</span><span class="si">}</span><span class="s2"> (registered)</span><span class="se">\n</span><span class="s2">&quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;  - </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">raw_file</span><span class="si">}</span><span class="s2"> (raw)&quot;</span>
+            <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">Ly</span> <span class="o">=</span> <span class="n">get_param</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">metadata</span><span class="p">,</span> <span class="s2">&quot;Ly&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">Lx</span> <span class="o">=</span> <span class="n">get_param</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">metadata</span><span class="p">,</span> <span class="s2">&quot;Lx&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dtype</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">int16</span>
+
+        <span class="c1"># calculate actual frame count from file size (ops.npy may have stale nframes)</span>
+        <span class="n">actual_bytes</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">active_file</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span>
+        <span class="n">bytes_per_frame</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">Ly</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">Lx</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span><span class="o">.</span><span class="n">itemsize</span>
+        <span class="n">actual_nframes</span> <span class="o">=</span> <span class="n">actual_bytes</span> <span class="o">//</span> <span class="n">bytes_per_frame</span>
+
+        <span class="n">ops_nframes</span> <span class="o">=</span> <span class="n">get_param</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">metadata</span><span class="p">,</span> <span class="s2">&quot;nframes&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">actual_nframes</span> <span class="o">!=</span> <span class="n">ops_nframes</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;ops.npy nframes=</span><span class="si">{</span><span class="n">ops_nframes</span><span class="si">}</span><span class="s2"> differs from file size (</span><span class="si">{</span><span class="n">actual_nframes</span><span class="si">}</span><span class="s2"> frames). &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Using actual frame count.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">nframes</span> <span class="o">=</span> <span class="n">actual_nframes</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">shape</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nframes</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">Ly</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">Lx</span><span class="p">)</span>
+
+        <span class="c1"># warn if file has leftover bytes</span>
+        <span class="n">expected_bytes</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">shape</span><span class="p">))</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span><span class="o">.</span><span class="n">itemsize</span>
+        <span class="k">if</span> <span class="n">actual_bytes</span> <span class="o">&gt;</span> <span class="n">expected_bytes</span><span class="p">:</span>
+            <span class="n">leftover</span> <span class="o">=</span> <span class="n">actual_bytes</span> <span class="o">-</span> <span class="n">expected_bytes</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Binary file </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">active_file</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> has </span><span class="si">{</span><span class="n">leftover</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> extra bytes. &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Ignoring partial frame data.&quot;</span><span class="p">,</span>
+                <span class="ne">UserWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_file</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">memmap</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">active_file</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">shape</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">switch_channel</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="n">new_file</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">raw_file</span> <span class="k">if</span> <span class="n">use_raw</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">reg_file</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">new_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="n">new_file</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_file</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">memmap</span><span class="p">(</span><span class="n">new_file</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">active_file</span> <span class="o">=</span> <span class="n">new_file</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_file</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_file</span><span class="o">.</span><span class="n">_mmap</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Suite2pArray</span><span class="p">(</span><span class="n">ReductionMixin</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Lazy array reader for Suite2p binary output files.</span>
+
+<span class="sd">    Auto-detects single-plane vs multi-plane (volumetric) data:</span>
+<span class="sd">    - Single plane: reads ops.npy + data.bin from one directory → 3D (T, Y, X)</span>
+<span class="sd">    - Volume: reads multiple plane directories → 4D (T, Z, Y, X)</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    filename : str or Path</span>
+<span class="sd">        Path to ops.npy, a .bin file, or a directory containing plane subdirs.</span>
+<span class="sd">    use_raw : bool, optional</span>
+<span class="sd">        If True, prefer data_raw.bin over data.bin. Default False.</span>
+<span class="sd">    dims : str | Sequence[str] | None, optional</span>
+<span class="sd">        Dimension labels. If None, inferred from shape (TZYX or TYX).</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    shape : tuple</span>
+<span class="sd">        Shape as (T, Y, X) for single plane or (T, Z, Y, X) for volume.</span>
+<span class="sd">    dtype : np.dtype</span>
+<span class="sd">        Data type (always np.int16 for Suite2p).</span>
+<span class="sd">    metadata : dict</span>
+<span class="sd">        Contents of ops.npy (first plane for volumes).</span>
+<span class="sd">    is_volumetric : bool</span>
+<span class="sd">        True if this represents multi-plane data.</span>
+<span class="sd">    num_planes : int</span>
+<span class="sd">        Number of Z-planes (1 for single plane).</span>
+<span class="sd">    dims : tuple[str, ...]</span>
+<span class="sd">        Dimension labels.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; # Single plane</span>
+<span class="sd">    &gt;&gt;&gt; arr = Suite2pArray(&quot;suite2p_output/plane0/ops.npy&quot;)</span>
+<span class="sd">    &gt;&gt;&gt; arr.shape</span>
+<span class="sd">    (10000, 512, 512)</span>
+
+<span class="sd">    &gt;&gt;&gt; # Volume (auto-detected from directory structure)</span>
+<span class="sd">    &gt;&gt;&gt; arr = Suite2pArray(&quot;suite2p_output/&quot;)</span>
+<span class="sd">    &gt;&gt;&gt; arr.shape</span>
+<span class="sd">    (10000, 14, 512, 512)</span>
+<span class="sd">    &gt;&gt;&gt; arr.is_volumetric</span>
+<span class="sd">    True</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span><span class="p">,</span>
+        <span class="n">use_raw</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="n">dims</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_use_raw</span> <span class="o">=</span> <span class="n">use_raw</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">_SinglePlaneReader</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_is_volumetric</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="c1"># determine if this is a volume or single plane</span>
+        <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+            <span class="c1"># check for plane subdirectories</span>
+            <span class="n">plane_dirs</span> <span class="o">=</span> <span class="n">find_suite2p_plane_dirs</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">plane_dirs</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_init_volume</span><span class="p">(</span><span class="n">plane_dirs</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># maybe directory contains ops.npy directly</span>
+                <span class="n">ops_file</span> <span class="o">=</span> <span class="n">path</span> <span class="o">/</span> <span class="s2">&quot;ops.npy&quot;</span>
+                <span class="k">if</span> <span class="n">ops_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_init_single_plane</span><span class="p">(</span><span class="n">ops_file</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Directory </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2"> has no plane subdirectories or ops.npy&quot;</span>
+                    <span class="p">)</span>
+        <span class="k">elif</span> <span class="n">path</span><span class="o">.</span><span class="n">suffix</span> <span class="o">==</span> <span class="s2">&quot;.npy&quot;</span> <span class="ow">and</span> <span class="n">path</span><span class="o">.</span><span class="n">stem</span> <span class="o">==</span> <span class="s2">&quot;ops&quot;</span><span class="p">:</span>
+            <span class="c1"># check if parent has sibling plane directories (volume)</span>
+            <span class="n">parent</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span>
+            <span class="n">plane_dirs</span> <span class="o">=</span> <span class="n">find_suite2p_plane_dirs</span><span class="p">(</span><span class="n">parent</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">plane_dirs</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_init_volume</span><span class="p">(</span><span class="n">plane_dirs</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_init_single_plane</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">path</span><span class="o">.</span><span class="n">suffix</span> <span class="o">==</span> <span class="s2">&quot;.bin&quot;</span><span class="p">:</span>
+            <span class="c1"># user explicitly selected a .bin file - load only that plane</span>
+            <span class="n">ops_path</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="s2">&quot;ops.npy&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">ops_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Missing ops.npy near </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_init_single_plane</span><span class="p">(</span><span class="n">ops_path</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported input: </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># initialize dimension labels</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dim_labels</span> <span class="o">=</span> <span class="n">DimLabels</span><span class="p">(</span><span class="n">dims</span><span class="p">,</span> <span class="n">ndim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">ndim</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dims</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Dimension labels.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dim_labels</span><span class="o">.</span><span class="n">value</span>
+
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_init_single_plane</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ops_path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize as single-plane array.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_is_volumetric</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">reader</span> <span class="o">=</span> <span class="n">_SinglePlaneReader</span><span class="p">(</span><span class="n">ops_path</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span> <span class="o">=</span> <span class="p">[</span><span class="n">reader</span><span class="p">]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_nframes</span> <span class="o">=</span> <span class="n">reader</span><span class="o">.</span><span class="n">nframes</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ly</span> <span class="o">=</span> <span class="n">reader</span><span class="o">.</span><span class="n">Ly</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_lx</span> <span class="o">=</span> <span class="n">reader</span><span class="o">.</span><span class="n">Lx</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dtype</span> <span class="o">=</span> <span class="n">reader</span><span class="o">.</span><span class="n">dtype</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_metadata</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">reader</span><span class="o">.</span><span class="n">metadata</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_rois</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;num_rois&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filenames</span> <span class="o">=</span> <span class="p">[</span><span class="n">reader</span><span class="o">.</span><span class="n">active_file</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_init_volume</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">plane_dirs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">],</span> <span class="n">use_raw</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize as volumetric array.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_is_volumetric</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="k">for</span> <span class="n">pdir</span> <span class="ow">in</span> <span class="n">plane_dirs</span><span class="p">:</span>
+            <span class="n">ops_file</span> <span class="o">=</span> <span class="n">pdir</span> <span class="o">/</span> <span class="s2">&quot;ops.npy&quot;</span>
+            <span class="n">reader</span> <span class="o">=</span> <span class="n">_SinglePlaneReader</span><span class="p">(</span><span class="n">ops_file</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">reader</span><span class="p">)</span>
+
+        <span class="c1"># validate consistent shapes</span>
+        <span class="n">shapes</span> <span class="o">=</span> <span class="p">[(</span><span class="n">p</span><span class="o">.</span><span class="n">Ly</span><span class="p">,</span> <span class="n">p</span><span class="o">.</span><span class="n">Lx</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">shapes</span><span class="p">))</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Inconsistent spatial shapes across planes: </span><span class="si">{</span><span class="n">shapes</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">nframes</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">nframes</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">nframes</span><span class="p">))</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Inconsistent frame counts across planes: </span><span class="si">{</span><span class="n">nframes</span><span class="si">}</span><span class="s2">. &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Using minimum: </span><span class="si">{</span><span class="nb">min</span><span class="p">(</span><span class="n">nframes</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_nframes</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">nframes</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_nz</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ly</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lx</span> <span class="o">=</span> <span class="n">shapes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dtype</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">dtype</span>
+
+        <span class="c1"># aggregate metadata from first plane</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_metadata</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">metadata</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_metadata</span><span class="p">[</span><span class="s2">&quot;nplanes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nz</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_metadata</span><span class="p">[</span><span class="s2">&quot;num_planes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nz</span>  <span class="c1"># alias for backward compat</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_metadata</span><span class="p">[</span><span class="s2">&quot;plane_dirs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">ops_path</span><span class="o">.</span><span class="n">parent</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_rois</span> <span class="o">=</span> <span class="n">get_param</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_metadata</span><span class="p">,</span> <span class="s2">&quot;num_rois&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filenames</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">active_file</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">]</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Loaded Suite2p volume: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_nframes</span><span class="si">}</span><span class="s2"> frames, </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_nz</span><span class="si">}</span><span class="s2"> planes, &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_ly</span><span class="si">}</span><span class="s2">x</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_lx</span><span class="si">}</span><span class="s2"> px&quot;</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">is_volumetric</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;True if this array represents multi-plane data.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_volumetric</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">num_planes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Number of Z-planes.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">shape</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_volumetric</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_nframes</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nz</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ly</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lx</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_nframes</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ly</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lx</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ndim</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mi">4</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_volumetric</span> <span class="k">else</span> <span class="mi">3</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dtype</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_dtype</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_target_dtype</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_target_dtype&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_target_dtype</span> <span class="k">else</span> <span class="n">get_dtype</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_dtype</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return metadata as dict. Always returns dict, never None.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_metadata</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_metadata</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">{}</span>
+
+    <span class="nd">@metadata</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;metadata must be a dict, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_metadata</span> <span class="o">=</span> <span class="n">value</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">size</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">shape</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">astype</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dtype</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set target dtype for lazy conversion on data access.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_target_dtype</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_compute_frame_vminmax</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute vmin/vmax from first frame.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_cached_vmin&quot;</span><span class="p">):</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_volumetric</span><span class="p">:</span>
+                <span class="n">frame</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">frame</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cached_vmin</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">min</span><span class="p">())</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cached_vmax</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">vmin</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Min from first frame for display.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_compute_frame_vminmax</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_vmin</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">vmax</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Max from first frame for display.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_compute_frame_vminmax</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_vmax</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nframes</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_volumetric</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_getitem_volume</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_getitem_single</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_getitem_single</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Index single-plane array.&quot;&quot;&quot;</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="n">key</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_target_dtype&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_target_dtype</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_target_dtype</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">out</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_getitem_volume</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Index volumetric array.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="p">(</span><span class="n">key</span><span class="p">,)</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">key</span> <span class="o">+</span> <span class="p">(</span><span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">),)</span> <span class="o">*</span> <span class="p">(</span><span class="mi">4</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">key</span><span class="p">))</span>
+        <span class="n">t_key</span><span class="p">,</span> <span class="n">z_key</span><span class="p">,</span> <span class="n">y_key</span><span class="p">,</span> <span class="n">x_key</span> <span class="o">=</span> <span class="n">key</span>
+
+        <span class="c1"># normalize t_key</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">t_key</span><span class="p">,</span> <span class="nb">slice</span><span class="p">):</span>
+            <span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">step</span> <span class="o">=</span> <span class="n">t_key</span><span class="o">.</span><span class="n">indices</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_nframes</span><span class="p">)</span>
+            <span class="n">t_key</span> <span class="o">=</span> <span class="nb">slice</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">step</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">t_key</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">t_key</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">t_key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nframes</span> <span class="o">+</span> <span class="n">t_key</span>
+            <span class="k">if</span> <span class="n">t_key</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nframes</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">IndexError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Time index </span><span class="si">{</span><span class="n">t_key</span><span class="si">}</span><span class="s2"> out of bounds for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_nframes</span><span class="si">}</span><span class="s2"> frames&quot;</span><span class="p">)</span>
+
+        <span class="c1"># handle z indexing</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">z_key</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">z_key</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">z_key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nz</span> <span class="o">+</span> <span class="n">z_key</span>
+            <span class="k">if</span> <span class="n">z_key</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">z_key</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nz</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">IndexError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Z index </span><span class="si">{</span><span class="n">z_key</span><span class="si">}</span><span class="s2"> out of bounds for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_nz</span><span class="si">}</span><span class="s2"> planes&quot;</span><span class="p">)</span>
+            <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">[</span><span class="n">z_key</span><span class="p">][</span><span class="n">t_key</span><span class="p">,</span> <span class="n">y_key</span><span class="p">,</span> <span class="n">x_key</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">z_key</span><span class="p">,</span> <span class="nb">slice</span><span class="p">):</span>
+                <span class="n">z_indices</span> <span class="o">=</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_nz</span><span class="p">)[</span><span class="n">z_key</span><span class="p">]</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">z_key</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)):</span>
+                <span class="n">z_indices</span> <span class="o">=</span> <span class="n">z_key</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">z_indices</span> <span class="o">=</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_nz</span><span class="p">)</span>
+
+            <span class="n">arrs</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">t_key</span><span class="p">,</span> <span class="n">y_key</span><span class="p">,</span> <span class="n">x_key</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">z_indices</span><span class="p">]</span>
+            <span class="n">out</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">arrs</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_target_dtype&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_target_dtype</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_target_dtype</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">out</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__array__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+        <span class="c1"># return single frame for fast histogram/preview (prevents accidental full load)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_volumetric</span><span class="p">:</span>
+            <span class="n">arrs</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">_file</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">]</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">arrs</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">dtype</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">data</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">switch_channel</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">use_raw</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Switch all planes between raw and registered data.&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">plane</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">:</span>
+            <span class="n">plane</span><span class="o">.</span><span class="n">switch_channel</span><span class="p">(</span><span class="n">use_raw</span><span class="o">=</span><span class="n">use_raw</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filenames</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">active_file</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Close all memory-mapped files.&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">plane</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">:</span>
+            <span class="n">plane</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_imwrite</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">outpath</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">overwrite</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="n">target_chunk_mb</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>
+        <span class="n">ext</span><span class="o">=</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span>
+        <span class="n">progress_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">debug</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">planes</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Write Suite2pArray to disk in various formats.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">_imwrite_base</span><span class="p">(</span>
+            <span class="bp">self</span><span class="p">,</span>
+            <span class="n">outpath</span><span class="p">,</span>
+            <span class="n">planes</span><span class="o">=</span><span class="n">planes</span><span class="p">,</span>
+            <span class="n">ext</span><span class="o">=</span><span class="n">ext</span><span class="p">,</span>
+            <span class="n">overwrite</span><span class="o">=</span><span class="n">overwrite</span><span class="p">,</span>
+            <span class="n">target_chunk_mb</span><span class="o">=</span><span class="n">target_chunk_mb</span><span class="p">,</span>
+            <span class="n">progress_callback</span><span class="o">=</span><span class="n">progress_callback</span><span class="p">,</span>
+            <span class="n">debug</span><span class="o">=</span><span class="n">debug</span><span class="p">,</span>
+            <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">imshow</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Display array using fastplotlib ImageWidget.&quot;&quot;&quot;</span>
+        <span class="n">arrays</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_volumetric</span><span class="p">:</span>
+            <span class="c1"># single plane - try to show both raw and registered</span>
+            <span class="n">plane</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">plane</span><span class="o">.</span><span class="n">raw_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">raw_reader</span> <span class="o">=</span> <span class="n">_SinglePlaneReader</span><span class="p">(</span><span class="n">plane</span><span class="o">.</span><span class="n">ops_path</span><span class="p">,</span> <span class="n">use_raw</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                    <span class="n">raw_arr</span> <span class="o">=</span> <span class="n">Suite2pArray</span><span class="o">.</span><span class="fm">__new__</span><span class="p">(</span><span class="n">Suite2pArray</span><span class="p">)</span>
+                    <span class="n">raw_arr</span><span class="o">.</span><span class="n">_planes</span> <span class="o">=</span> <span class="p">[</span><span class="n">raw_reader</span><span class="p">]</span>
+                    <span class="n">raw_arr</span><span class="o">.</span><span class="n">_is_volumetric</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="n">raw_arr</span><span class="o">.</span><span class="n">_nframes</span> <span class="o">=</span> <span class="n">raw_reader</span><span class="o">.</span><span class="n">nframes</span>
+                    <span class="n">raw_arr</span><span class="o">.</span><span class="n">_ly</span> <span class="o">=</span> <span class="n">raw_reader</span><span class="o">.</span><span class="n">Ly</span>
+                    <span class="n">raw_arr</span><span class="o">.</span><span class="n">_lx</span> <span class="o">=</span> <span class="n">raw_reader</span><span class="o">.</span><span class="n">Lx</span>
+                    <span class="n">raw_arr</span><span class="o">.</span><span class="n">_dtype</span> <span class="o">=</span> <span class="n">raw_reader</span><span class="o">.</span><span class="n">dtype</span>
+                    <span class="n">raw_arr</span><span class="o">.</span><span class="n">_metadata</span> <span class="o">=</span> <span class="p">{}</span>
+                    <span class="n">arrays</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">raw_arr</span><span class="p">)</span>
+                    <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;raw&quot;</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not open raw file: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">plane</span><span class="o">.</span><span class="n">reg_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">reg_reader</span> <span class="o">=</span> <span class="n">_SinglePlaneReader</span><span class="p">(</span><span class="n">plane</span><span class="o">.</span><span class="n">ops_path</span><span class="p">,</span> <span class="n">use_raw</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+                    <span class="n">reg_arr</span> <span class="o">=</span> <span class="n">Suite2pArray</span><span class="o">.</span><span class="fm">__new__</span><span class="p">(</span><span class="n">Suite2pArray</span><span class="p">)</span>
+                    <span class="n">reg_arr</span><span class="o">.</span><span class="n">_planes</span> <span class="o">=</span> <span class="p">[</span><span class="n">reg_reader</span><span class="p">]</span>
+                    <span class="n">reg_arr</span><span class="o">.</span><span class="n">_is_volumetric</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="n">reg_arr</span><span class="o">.</span><span class="n">_nframes</span> <span class="o">=</span> <span class="n">reg_reader</span><span class="o">.</span><span class="n">nframes</span>
+                    <span class="n">reg_arr</span><span class="o">.</span><span class="n">_ly</span> <span class="o">=</span> <span class="n">reg_reader</span><span class="o">.</span><span class="n">Ly</span>
+                    <span class="n">reg_arr</span><span class="o">.</span><span class="n">_lx</span> <span class="o">=</span> <span class="n">reg_reader</span><span class="o">.</span><span class="n">Lx</span>
+                    <span class="n">reg_arr</span><span class="o">.</span><span class="n">_dtype</span> <span class="o">=</span> <span class="n">reg_reader</span><span class="o">.</span><span class="n">dtype</span>
+                    <span class="n">reg_arr</span><span class="o">.</span><span class="n">_metadata</span> <span class="o">=</span> <span class="p">{}</span>
+                    <span class="n">arrays</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">reg_arr</span><span class="p">)</span>
+                    <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;registered&quot;</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not open registered file: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">arrays</span><span class="p">:</span>
+                <span class="n">arrays</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+                <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_planes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">active_file</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">arrays</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+            <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;volume&quot;</span><span class="p">)</span>
+
+        <span class="n">figure_kwargs</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;figure_kwargs&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;size&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mi">800</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)})</span>
+        <span class="n">histogram_widget</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;histogram_widget&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+        <span class="n">window_funcs</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;window_funcs&quot;</span><span class="p">)</span>
+
+        <span class="kn">import</span><span class="w"> </span><span class="nn">fastplotlib</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">fpl</span>
+
+        <span class="k">return</span> <span class="n">fpl</span><span class="o">.</span><span class="n">ImageWidget</span><span class="p">(</span>
+            <span class="n">data</span><span class="o">=</span><span class="n">arrays</span><span class="p">,</span>
+            <span class="n">names</span><span class="o">=</span><span class="n">names</span><span class="p">,</span>
+            <span class="n">histogram_widget</span><span class="o">=</span><span class="n">histogram_widget</span><span class="p">,</span>
+            <span class="n">figure_kwargs</span><span class="o">=</span><span class="n">figure_kwargs</span><span class="p">,</span>
+            <span class="n">figure_shape</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">arrays</span><span class="p">)),</span>
+            <span class="n">graphic_kwargs</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;vmin&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">300</span><span class="p">,</span> <span class="s2">&quot;vmax&quot;</span><span class="p">:</span> <span class="mi">4000</span><span class="p">},</span>
+            <span class="n">window_funcs</span><span class="o">=</span><span class="n">window_funcs</span><span class="p">,</span>
+        <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_add_suite2p_labels</span><span class="p">(</span>
+    <span class="n">root_group</span><span class="p">,</span>
+    <span class="n">suite2p_dirs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">],</span>
+    <span class="n">T</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">Z</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">Y</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">X</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">dtype</span><span class="p">,</span>
+    <span class="n">compression_level</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Add Suite2p segmentation masks as OME-Zarr labels.</span>
+
+<span class="sd">    Creates a &#39;labels&#39; subgroup with ROI masks from Suite2p stat.npy files.</span>
+<span class="sd">    Follows OME-NGFF v0.5 labels specification.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">zarr</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">zarr.codecs</span><span class="w"> </span><span class="kn">import</span> <span class="n">BytesCodec</span><span class="p">,</span> <span class="n">GzipCodec</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Creating labels array from Suite2p masks...&quot;</span><span class="p">)</span>
+
+    <span class="n">labels_group</span> <span class="o">=</span> <span class="n">root_group</span><span class="o">.</span><span class="n">create_group</span><span class="p">(</span><span class="s2">&quot;labels&quot;</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">label_codecs</span> <span class="o">=</span> <span class="p">[</span><span class="n">BytesCodec</span><span class="p">(),</span> <span class="n">GzipCodec</span><span class="p">(</span><span class="n">level</span><span class="o">=</span><span class="n">compression_level</span><span class="p">)]</span>
+    <span class="n">masks</span> <span class="o">=</span> <span class="n">zarr</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+        <span class="n">store</span><span class="o">=</span><span class="n">labels_group</span><span class="o">.</span><span class="n">store</span><span class="p">,</span>
+        <span class="n">path</span><span class="o">=</span><span class="s2">&quot;labels/0&quot;</span><span class="p">,</span>
+        <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">Z</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">X</span><span class="p">),</span>
+        <span class="n">chunks</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">X</span><span class="p">),</span>
+        <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">,</span>
+        <span class="n">codecs</span><span class="o">=</span><span class="n">label_codecs</span><span class="p">,</span>
+        <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">roi_id</span> <span class="o">=</span> <span class="mi">1</span>
+
+    <span class="k">for</span> <span class="n">zi</span><span class="p">,</span> <span class="n">s2p_dir</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">suite2p_dirs</span><span class="p">):</span>
+        <span class="n">stat_path</span> <span class="o">=</span> <span class="n">s2p_dir</span> <span class="o">/</span> <span class="s2">&quot;stat.npy&quot;</span>
+        <span class="n">iscell_path</span> <span class="o">=</span> <span class="n">s2p_dir</span> <span class="o">/</span> <span class="s2">&quot;iscell.npy&quot;</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">stat_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;stat.npy not found in </span><span class="si">{</span><span class="n">s2p_dir</span><span class="si">}</span><span class="s2">, skipping z=</span><span class="si">{</span><span class="n">zi</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+
+        <span class="n">stat</span> <span class="o">=</span> <span class="n">load_npy</span><span class="p">(</span><span class="n">stat_path</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">iscell_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">iscell</span> <span class="o">=</span> <span class="n">load_npy</span><span class="p">(</span><span class="n">iscell_path</span><span class="p">)[:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">iscell</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">stat</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+
+        <span class="n">plane_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">Y</span><span class="p">,</span> <span class="n">X</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">_roi_idx</span><span class="p">,</span> <span class="p">(</span><span class="n">roi_stat</span><span class="p">,</span> <span class="n">is_cell</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">stat</span><span class="p">,</span> <span class="n">iscell</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">)):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">is_cell</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="n">ypix</span> <span class="o">=</span> <span class="n">roi_stat</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ypix&quot;</span><span class="p">,</span> <span class="p">[])</span>
+            <span class="n">xpix</span> <span class="o">=</span> <span class="n">roi_stat</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;xpix&quot;</span><span class="p">,</span> <span class="p">[])</span>
+
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ypix</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="nb">len</span><span class="p">(</span><span class="n">xpix</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="n">ypix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">ypix</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">Y</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">xpix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">xpix</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">X</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+
+            <span class="n">plane_mask</span><span class="p">[</span><span class="n">ypix</span><span class="p">,</span> <span class="n">xpix</span><span class="p">]</span> <span class="o">=</span> <span class="n">roi_id</span>
+            <span class="n">roi_id</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="n">masks</span><span class="p">[</span><span class="n">zi</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">plane_mask</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Added </span><span class="si">{</span><span class="p">(</span><span class="n">plane_mask</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">}</span><span class="s2"> labeled pixels for z-plane </span><span class="si">{</span><span class="n">zi</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">Z</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">labels_metadata</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;version&quot;</span><span class="p">:</span> <span class="s2">&quot;0.5&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;labels&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;0&quot;</span><span class="p">],</span>
+    <span class="p">}</span>
+
+    <span class="n">label_array_meta</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;version&quot;</span><span class="p">:</span> <span class="s2">&quot;0.5&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;image-label&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;version&quot;</span><span class="p">:</span> <span class="s2">&quot;0.5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;colors&quot;</span><span class="p">:</span> <span class="p">[],</span>
+            <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;image&quot;</span><span class="p">:</span> <span class="s2">&quot;../../0&quot;</span><span class="p">},</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="n">labels_group</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">labels_metadata</span><span class="p">)</span>
+    <span class="n">labels_group</span><span class="p">[</span><span class="s2">&quot;0&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">label_array_meta</span><span class="p">)</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Added </span><span class="si">{</span><span class="n">roi_id</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2"> total ROIs across </span><span class="si">{</span><span class="n">Z</span><span class="si">}</span><span class="s2"> z-planes&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="load_ops">
+<a class="viewcode-back" href="../../../api/io.html#mbo_utilities.load_ops">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_ops</span><span class="p">(</span><span class="n">ops_input</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span><span class="p">]):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Simple utility to load a suite2p npy file.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ops_input</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="n">load_npy</span><span class="p">(</span><span class="n">ops_input</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ops_input</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">ops_input</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;No valid ops file provided, returning empty dict.&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{}</span></div>
+
+
+
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

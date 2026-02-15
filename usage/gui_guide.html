@@ -1,0 +1,1113 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>GUI User Guide &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=26413419" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../_static/togglebutton.js?v=1ae7504c"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="../_static/tippy/usage/gui_guide.5dddbd50-9a6b-47b8-af49-a42c3f1d9f4e.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'usage/gui_guide';</script>
+    <link rel="icon" href="../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="File Formats" href="../file_formats.html" />
+    <link rel="prev" title="Command Line Interface" href="cli.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <script>document.write(`<img src="../_static/logo_utilities.png" class="logo__image only-light" alt="mbo_utilities - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command Line Interface</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Graphical User Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/usage/gui_guide.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/usage/gui_guide.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Fusage/gui_guide.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/usage/gui_guide.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>GUI User Guide</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#quick-start">Quick Start</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#opening-data">Opening Data</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#open-file-vs-select-folder">Open File vs Select Folder</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#supported-formats">Supported Formats</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#load-options">Load Options</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#viewers">Viewers</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#time-series-viewer">Time-Series Viewer</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pollen-calibration-viewer">Pollen Calibration Viewer</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#navigation">Navigation</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#keyboard-shortcuts">Keyboard Shortcuts</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#menu-bar">Menu Bar</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#preview-controls">Preview Controls</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#window-functions">Window Functions</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#scan-phase-correction">Scan-Phase Correction</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#frame-averaging">Frame Averaging</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#metadata-viewer">Metadata Viewer</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#z-stats">Z-Stats</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#metrics">Metrics</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visualization">Visualization</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#saving-data">Saving Data</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#output-formats">Output Formats</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#selection">Selection</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#options">Options</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#zarr-specific-options">Zarr-Specific Options</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#metadata">Metadata</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#process-manager">Process Manager</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#suite2p-integration">Suite2p Integration</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#spatial-crop">Spatial Crop</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#external-tools">External Tools</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#results-and-diagnostics">Results and Diagnostics</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="gui-user-guide">
+<span id="gui-guide"></span><h1>GUI User Guide<a class="headerlink" href="#gui-user-guide" title="Link to this heading">#</a></h1>
+<p>Interactive data preview and processing tools for calcium imaging data.</p>
+<a class="reference internal image-reference" href="../_images/02_step_data_view.png"><img alt="MBO Utilities GUI" src="../_images/02_step_data_view.png" style="width: 100%;" />
+</a>
+<section id="quick-start">
+<h2>Quick Start<a class="headerlink" href="#quick-start" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>mbo_utilities
+mbo<span class="w">                    </span><span class="c1"># opens file dialog</span>
+mbo<span class="w"> </span>/path/to/data<span class="w">      </span><span class="c1"># opens specific file</span>
+mbo<span class="w"> </span>/path<span class="w"> </span>--metadata<span class="w">   </span><span class="c1"># metadata only</span>
+</pre></div>
+</div>
+<p>From Python:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.gui</span><span class="w"> </span><span class="kn">import</span> <span class="n">run_gui</span>
+
+<span class="n">run_gui</span><span class="p">(</span><span class="s2">&quot;/path/to/data&quot;</span><span class="p">)</span>
+
+<span class="c1"># or from a numpy array</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">512</span><span class="p">,</span> <span class="mi">512</span><span class="p">)</span>
+<span class="n">run_gui</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>If no input is provided and Qt is available, a file dialog opens automatically.</p>
+</section>
+<section id="opening-data">
+<span id="gui-open-data"></span><h2>Opening Data<a class="headerlink" href="#opening-data" title="Link to this heading">#</a></h2>
+<a class="reference internal image-reference" href="../_images/01_step_file_dialog.png"><img alt="File Selection Dialog" src="../_images/01_step_file_dialog.png" style="width: 80%;" />
+</a>
+<section id="open-file-vs-select-folder">
+<h3>Open File vs Select Folder<a class="headerlink" href="#open-file-vs-select-folder" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><strong>Open File(s)</strong> (<code class="docutils literal notranslate"><span class="pre">o</span></code>): select one or more tiff files</p></li>
+<li><p><strong>Select Folder</strong> (<code class="docutils literal notranslate"><span class="pre">Shift+O</span></code>): load all supported files in a folder</p></li>
+</ul>
+</section>
+<section id="supported-formats">
+<h3>Supported Formats<a class="headerlink" href="#supported-formats" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Format</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.tiff</span></code></p></td>
+<td><p>raw ScanImage, BigTIFF, OME-TIFF, ImageJ hyperstacks</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">.zarr</span></code></p></td>
+<td><p>zarr v3 arrays</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.bin</span></code></p></td>
+<td><p>suite2p binary format</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">.h5</span></code></p></td>
+<td><p>HDF5 files</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.npy</span></code></p></td>
+<td><p>numpy arrays (memory-mapped)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="load-options">
+<h3>Load Options<a class="headerlink" href="#load-options" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Separate ScanImage mROIs</p></td>
+<td><p>split multi-ROI acquisitions into separate panels</p></td>
+</tr>
+<tr class="row-odd"><td><p>Enable Threading</p></td>
+<td><p>parallel z-stats computation on load</p></td>
+</tr>
+<tr class="row-even"><td><p>Enable Data Preview Widget</p></td>
+<td><p>full preview with window functions and controls</p></td>
+</tr>
+<tr class="row-odd"><td><p>Metadata Preview Only</p></td>
+<td><p>show only metadata, skip image rendering</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+<section id="viewers">
+<span id="gui-viewers"></span><h2>Viewers<a class="headerlink" href="#viewers" title="Link to this heading">#</a></h2>
+<p>The GUI selects a viewer automatically based on the data type.</p>
+<section id="time-series-viewer">
+<h3>Time-Series Viewer<a class="headerlink" href="#time-series-viewer" title="Link to this heading">#</a></h3>
+<p>The default viewer for calcium imaging data (TZYX). Used for ScanImage TIFFs, standard TIFFs, ImageJ hyperstacks, and other volumetric data.</p>
+<p>Features:</p>
+<ul class="simple">
+<li><p>temporal projections (mean, max, std) over a sliding window</p></li>
+<li><p>spatial filtering (gaussian blur, mean subtraction)</p></li>
+<li><p>scan-phase correction for bidirectional raster scanning</p></li>
+<li><p>frame averaging for piezo z-stacks</p></li>
+<li><p>z-stats signal quality analysis</p></li>
+<li><p>suite2p pipeline integration</p></li>
+</ul>
+</section>
+<section id="pollen-calibration-viewer">
+<h3>Pollen Calibration Viewer<a class="headerlink" href="#pollen-calibration-viewer" title="Link to this heading">#</a></h3>
+<p>Specialized viewer for LBM beamlet calibration data (<code class="docutils literal notranslate"><span class="pre">stack_type</span> <span class="pre">==</span> <span class="pre">&quot;pollen&quot;</span></code>). Automatically selected when pollen calibration data is loaded.</p>
+<p>Features:</p>
+<ul class="simple">
+<li><p>automatic bead detection via cross-correlation</p></li>
+<li><p>manual interactive calibration (click-to-mark beads)</p></li>
+<li><p>cavity A/B discrimination for dual-cavity LBM</p></li>
+<li><p>result visualization with XY position and offset plots</p></li>
+<li><p>previous calibration result loading from H5 files</p></li>
+</ul>
+</section>
+</section>
+<section id="navigation">
+<span id="gui-navigation"></span><h2>Navigation<a class="headerlink" href="#navigation" title="Link to this heading">#</a></h2>
+<section id="keyboard-shortcuts">
+<h3>Keyboard Shortcuts<a class="headerlink" href="#keyboard-shortcuts" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Key</p></th>
+<th class="head"><p>Action</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>Navigation</strong></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">←</span></code> / <code class="docutils literal notranslate"><span class="pre">→</span></code></p></td>
+<td><p>previous / next frame (T)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">↑</span></code> / <code class="docutils literal notranslate"><span class="pre">↓</span></code></p></td>
+<td><p>previous / next z-plane (Z)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">Shift</span> <span class="pre">+</span> <span class="pre">←/→</span></code></p></td>
+<td><p>jump 10 frames</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">Shift</span> <span class="pre">+</span> <span class="pre">↑/↓</span></code></p></td>
+<td><p>jump 10 z-planes</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>File</strong></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">o</span></code></p></td>
+<td><p>open file</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">Shift+O</span></code></p></td>
+<td><p>open folder</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">s</span></code></p></td>
+<td><p>save as</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>View</strong></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">m</span></code></p></td>
+<td><p>toggle metadata viewer</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">p</span></code></p></td>
+<td><p>toggle side panel</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">v</span></code></p></td>
+<td><p>reset contrast (vmin/vmax)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">c</span></code></p></td>
+<td><p>toggle auto-contrast on z-change</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Help</strong></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">h</span></code> / <code class="docutils literal notranslate"><span class="pre">F1</span></code></p></td>
+<td><p>open help</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">k</span></code></p></td>
+<td><p>keybinds cheatsheet</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Press <code class="docutils literal notranslate"><span class="pre">k</span></code> in the GUI to see this list at any time.</p>
+</section>
+<section id="menu-bar">
+<h3>Menu Bar<a class="headerlink" href="#menu-bar" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><strong>File</strong>: Open File, Open Folder, Save As</p></li>
+<li><p><strong>Docs</strong>: Help viewer, Keybinds, Online Docs link</p></li>
+<li><p><strong>Settings</strong>: Scope Inspector toggle, Status Indicator toggle</p></li>
+</ul>
+</section>
+</section>
+<section id="preview-controls">
+<span id="gui-preview"></span><h2>Preview Controls<a class="headerlink" href="#preview-controls" title="Link to this heading">#</a></h2>
+<section id="window-functions">
+<h3>Window Functions<a class="headerlink" href="#window-functions" title="Link to this heading">#</a></h3>
+<p>Apply temporal projections over a sliding window of frames.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Function</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>mean</p></td>
+<td><p>average intensity over window</p></td>
+</tr>
+<tr class="row-odd"><td><p>max</p></td>
+<td><p>maximum intensity projection</p></td>
+</tr>
+<tr class="row-even"><td><p>std</p></td>
+<td><p>standard deviation over window</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Parameters:</strong></p>
+<ul class="simple">
+<li><p><strong>Window Size</strong>: number of frames to include (3-20 recommended)</p></li>
+<li><p><strong>Gaussian Sigma</strong>: spatial gaussian filter (0 = disabled)</p></li>
+<li><p><strong>Mean Subtraction</strong>: subtract per-z-plane mean image to highlight activity. requires z-stats to finish computing first.</p></li>
+</ul>
+</section>
+<section id="scan-phase-correction">
+<h3>Scan-Phase Correction<a class="headerlink" href="#scan-phase-correction" title="Link to this heading">#</a></h3>
+<p>Preview bidirectional raster-scan phase correction before saving. Only available for ScanImage data.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Fix Phase</p></td>
+<td><p>enable/disable correction</p></td>
+</tr>
+<tr class="row-odd"><td><p>Sub-Pixel</p></td>
+<td><p>FFT-based sub-pixel correction</p></td>
+</tr>
+<tr class="row-even"><td><p>Upsample</p></td>
+<td><p>sub-pixel precision factor (1/N pixel)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Exclude border-px</p></td>
+<td><p>exclude edge pixels from correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>max-offset</p></td>
+<td><p>limit allowed pixel offset</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Workflow:</strong></p>
+<ol class="arabic simple">
+<li><p>view mean or mean-subtracted projection (window 3-15)</p></li>
+<li><p>toggle Fix Phase on/off to compare</p></li>
+<li><p>adjust border-px and max-offset if needed</p></li>
+<li><p>toggle Sub-Pixel for further improvement</p></li>
+<li><p>adjust Upsample factor (2-3 typical)</p></li>
+</ol>
+</section>
+<section id="frame-averaging">
+<h3>Frame Averaging<a class="headerlink" href="#frame-averaging" title="Link to this heading">#</a></h3>
+<p>Available for piezo z-stack data. When <code class="docutils literal notranslate"><span class="pre">frames_per_slice</span> <span class="pre">&gt;</span> <span class="pre">1</span></code>, toggle averaging based on ScanImage’s <code class="docutils literal notranslate"><span class="pre">logAverageFactor</span></code>. This changes the effective shape of the data.</p>
+</section>
+</section>
+<section id="metadata-viewer">
+<span id="gui-metadata"></span><h2>Metadata Viewer<a class="headerlink" href="#metadata-viewer" title="Link to this heading">#</a></h2>
+<p>Toggle with <code class="docutils literal notranslate"><span class="pre">m</span></code> or the <strong>Metadata</strong> button in the status bar.</p>
+<a class="reference internal image-reference" href="../_images/03_metadata_viewer.png"><img alt="Metadata Viewer" src="../_images/03_metadata_viewer.png" style="width: 80%;" />
+</a>
+<p>Displays all metadata attached to the current array, including ScanImage headers, dimension tags, and user-supplied fields.</p>
+</section>
+<section id="z-stats">
+<span id="gui-zstats"></span><h2>Z-Stats<a class="headerlink" href="#z-stats" title="Link to this heading">#</a></h2>
+<p>Per-z-plane signal quality statistics, computed in the background on load.</p>
+<section id="metrics">
+<h3>Metrics<a class="headerlink" href="#metrics" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Metric</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Mean</p></td>
+<td><p>average fluorescence intensity</p></td>
+</tr>
+<tr class="row-odd"><td><p>Std</p></td>
+<td><p>standard deviation</p></td>
+</tr>
+<tr class="row-even"><td><p>SNR</p></td>
+<td><p>signal-to-noise ratio (mean / std)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="visualization">
+<h3>Visualization<a class="headerlink" href="#visualization" title="Link to this heading">#</a></h3>
+<p>The z-stats panel adapts to the data:</p>
+<ul class="simple">
+<li><p><strong>single z-plane</strong>: stats table with bar chart</p></li>
+<li><p><strong>2 z-planes</strong>: grouped bar charts (Z1 vs Z2)</p></li>
+<li><p><strong>many z-planes</strong>: line plots with error bars and z-plane signal profiles</p></li>
+<li><p><strong>multiple ROIs</strong>: combined per-ROI profiles with mean +/- std shading</p></li>
+</ul>
+</section>
+</section>
+<section id="saving-data">
+<span id="gui-save"></span><h2>Saving Data<a class="headerlink" href="#saving-data" title="Link to this heading">#</a></h2>
+<p>Open via <strong>File &gt; Save As</strong> or press <code class="docutils literal notranslate"><span class="pre">s</span></code>.</p>
+<a class="reference internal image-reference" href="../_images/04_save_as_dialog.png"><img alt="Save As Dialog" src="../_images/04_save_as_dialog.png" style="width: 80%;" />
+</a>
+<section id="output-formats">
+<h3>Output Formats<a class="headerlink" href="#output-formats" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Format</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.tiff</span></code></p></td>
+<td><p>BigTIFF with ImageJ/OME metadata</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">.zarr</span></code></p></td>
+<td><p>zarr v3 (recommended for large data)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">.bin</span></code></p></td>
+<td><p>suite2p binary format</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">.h5</span></code></p></td>
+<td><p>HDF5</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="selection">
+<h3>Selection<a class="headerlink" href="#selection" title="Link to this heading">#</a></h3>
+<p>The save dialog provides dimension-specific subsetting:</p>
+<ul class="simple">
+<li><p><strong>Timepoints</strong>: <code class="docutils literal notranslate"><span class="pre">start:stop:step</span></code> syntax with optional exclusion ranges</p></li>
+<li><p><strong>Z-planes</strong>: range and step selection</p></li>
+<li><p><strong>Channels</strong>: multi-channel selection (when applicable)</p></li>
+<li><p><strong>Output suffix</strong>: custom suffix appended to filename</p></li>
+</ul>
+<p>An output preview shows the filename, estimated size, and output shape before saving.</p>
+</section>
+<section id="options">
+<h3>Options<a class="headerlink" href="#options" title="Link to this heading">#</a></h3>
+<a class="reference internal image-reference" href="../_images/05_save_options.png"><img alt="Save Options" src="../_images/05_save_options.png" style="width: 80%;" />
+</a>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Run in Background</p></td>
+<td><p>save without blocking the GUI</p></td>
+</tr>
+<tr class="row-odd"><td><p>Overwrite</p></td>
+<td><p>replace existing output files</p></td>
+</tr>
+<tr class="row-even"><td><p>Fix Scan Phase</p></td>
+<td><p>apply phase correction on write</p></td>
+</tr>
+<tr class="row-odd"><td><p>Subpixel Correction</p></td>
+<td><p>FFT-based phase correction on write</p></td>
+</tr>
+<tr class="row-even"><td><p>Register Z-Planes</p></td>
+<td><p>suite3d axial registration (requires suite3d)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Chunk Size (MB)</p></td>
+<td><p>memory chunk size for writing</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="zarr-specific-options">
+<h3>Zarr-Specific Options<a class="headerlink" href="#zarr-specific-options" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Sharding</p></td>
+<td><p>enable zarr sharding for faster access</p></td>
+</tr>
+<tr class="row-odd"><td><p>OME-Zarr</p></td>
+<td><p>write OME-Zarr compliant metadata</p></td>
+</tr>
+<tr class="row-even"><td><p>Compression Level</p></td>
+<td><p>zstd compression level (0 = none)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Pyramid</p></td>
+<td><p>generate multi-resolution pyramid</p></td>
+</tr>
+<tr class="row-even"><td><p>Pyramid Layers</p></td>
+<td><p>max number of downsampled levels</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="metadata">
+<h3>Metadata<a class="headerlink" href="#metadata" title="Link to this heading">#</a></h3>
+<a class="reference internal image-reference" href="../_images/04_configurable_metadata.png"><img alt="Configurable Metadata" src="../_images/04_configurable_metadata.png" style="width: 80%;" />
+</a>
+<p>The save dialog includes a metadata editor:</p>
+<ul class="simple">
+<li><p>suggested fields are auto-populated from the array</p></li>
+<li><p>fields can be auto-detected from the filename</p></li>
+<li><p>custom key/value pairs can be added</p></li>
+<li><p>missing recommended fields are highlighted</p></li>
+</ul>
+</section>
+</section>
+<section id="process-manager">
+<span id="gui-process-manager"></span><h2>Process Manager<a class="headerlink" href="#process-manager" title="Link to this heading">#</a></h2>
+<p>Click the status indicator in the menu bar to open the process console.</p>
+<p>The status indicator is color-coded:</p>
+<ul class="simple">
+<li><p><strong>green</strong>: idle or completed</p></li>
+<li><p><strong>orange</strong>: task running (with progress percentage)</p></li>
+<li><p><strong>red</strong>: error</p></li>
+</ul>
+<p>The process console shows:</p>
+<ul class="simple">
+<li><p><strong>active tasks</strong>: in-app progress (save, z-stats, registration)</p></li>
+<li><p><strong>background processes</strong>: external processes with PID, elapsed time, and status</p></li>
+<li><p>per-process log output (color-coded, collapsible)</p></li>
+<li><p>kill / dismiss / copy controls</p></li>
+</ul>
+</section>
+<section id="suite2p-integration">
+<span id="gui-suite2p"></span><h2>Suite2p Integration<a class="headerlink" href="#suite2p-integration" title="Link to this heading">#</a></h2>
+<a class="reference internal image-reference" href="../_images/06_suite2p_settings.png"><img alt="Suite2p Processing Settings" src="../_images/06_suite2p_settings.png" style="width: 80%;" />
+</a>
+<p>Available when <code class="docutils literal notranslate"><span class="pre">suite2p</span></code> is installed. Access via the processing pipeline panel.</p>
+<ul class="simple">
+<li><p>run suite2p on selected z-planes</p></li>
+<li><p>all suite2p parameters exposed with descriptions</p></li>
+<li><p>output directory selection</p></li>
+<li><p>scan-phase correction options for processing</p></li>
+<li><p>parallel processing controls</p></li>
+</ul>
+<section id="spatial-crop">
+<h3>Spatial Crop<a class="headerlink" href="#spatial-crop" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>click “Add Crop Selector”</p></li>
+<li><p>drag the yellow rectangle on the image</p></li>
+<li><p>only the cropped region is processed</p></li>
+</ol>
+</section>
+<section id="external-tools">
+<h3>External Tools<a class="headerlink" href="#external-tools" title="Link to this heading">#</a></h3>
+<p>The GUI can launch external tools when installed:</p>
+<ul class="simple">
+<li><p><strong>suite2p GUI</strong> with rastermap integration</p></li>
+<li><p><strong>cellpose GUI</strong> for cell segmentation</p></li>
+<li><p>window polling detects when external tools close</p></li>
+</ul>
+</section>
+<section id="results-and-diagnostics">
+<h3>Results and Diagnostics<a class="headerlink" href="#results-and-diagnostics" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>suite2p results viewer with trace quality stats</p></li>
+<li><p>diagnostics viewer for signal quality analysis</p></li>
+<li><p>grid search viewer for parameter exploration</p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="cli.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Command Line Interface</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="../file_formats.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">File Formats</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#quick-start">Quick Start</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#opening-data">Opening Data</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#open-file-vs-select-folder">Open File vs Select Folder</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#supported-formats">Supported Formats</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#load-options">Load Options</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#viewers">Viewers</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#time-series-viewer">Time-Series Viewer</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pollen-calibration-viewer">Pollen Calibration Viewer</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#navigation">Navigation</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#keyboard-shortcuts">Keyboard Shortcuts</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#menu-bar">Menu Bar</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#preview-controls">Preview Controls</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#window-functions">Window Functions</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#scan-phase-correction">Scan-Phase Correction</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#frame-averaging">Frame Averaging</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#metadata-viewer">Metadata Viewer</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#z-stats">Z-Stats</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#metrics">Metrics</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visualization">Visualization</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#saving-data">Saving Data</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#output-formats">Output Formats</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#selection">Selection</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#options">Options</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#zarr-specific-options">Zarr-Specific Options</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#metadata">Metadata</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#process-manager">Process Manager</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#suite2p-integration">Suite2p Integration</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#spatial-crop">Spatial Crop</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#external-tools">External Tools</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#results-and-diagnostics">Results and Diagnostics</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
