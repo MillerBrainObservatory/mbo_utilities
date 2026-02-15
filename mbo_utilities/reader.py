@@ -174,8 +174,8 @@ def imread(
 
             # Check for tiled corrected/fused isoview TIF files (no TM folders)
             tiled_tifs = [
-                f for f in p.glob("*.tif")
-                if not any(x in f.name for x in ISOVIEW_EXCLUDE_PATTERNS)
+                f for f in p.iterdir()
+                if f.suffix in (".tif", ".tiff") and not any(x in f.name for x in ISOVIEW_EXCLUDE_PATTERNS)
             ]
             if tiled_tifs:
                 if any(_TILED_FUSED_PATTERN.match(f.name) for f in tiled_tifs):

@@ -18,10 +18,10 @@ _TM_PATTERN = re.compile(r"TM(\d{5,6})")
 _TL_PATTERN = re.compile(r"TL(\d+)")
 _TILED_RAW_PATTERN = re.compile(r"(.+)_CM(\d+)\.stack")
 _TILED_CORRECTED_PATTERN = re.compile(
-    r"SPM(\d+)_TL(\d+)_CM(\d+)_VW(\d+)\.(ome\.)?tif$"
+    r"SPM(\d+)_TL(\d+)_CM(\d+)_(?:VW|CHN)(\d+)\.(ome\.)?tiff?$"
 )
 _TILED_FUSED_PATTERN = re.compile(
-    r"SPM(\d+)_TL(\d+)_CM(\d+)_CM(\d+)_VW(\d+)\.fusedStack\.(ome\.)?tif$"
+    r"SPM(\d+)_TL(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)\.fusedStack\.(ome\.)?tiff?$"
 )
 
 
@@ -478,8 +478,8 @@ class IsoviewArray:
     def _find_tiled_tifs(self) -> bool:
         """detect tiled corrected/fused TIF files in current directory."""
         tif_files = [
-            f for f in self.base_path.glob("*.tif")
-            if not any(x in f.name for x in EXCLUDE_PATTERNS)
+            f for f in self.base_path.iterdir()
+            if f.suffix in (".tif", ".tiff") and not any(x in f.name for x in EXCLUDE_PATTERNS)
         ]
         if not tif_files:
             return False
@@ -1300,16 +1300,18 @@ class IsoviewArray:
             for vi, view_idx in enumerate(view_indices):
                 zarr_arr = self._get_zarr(t_idx, view_idx)
 
-                # Index the zarr array (Z, Y, X)
+                # index the underlying (Z, Y, X) array and ensure 3D output
                 data = zarr_arr[z_key, y_key, x_key]
+                data = np.asarray(data)
 
-                # Handle dimension reduction from integer indexing
-                if isinstance(z_key, int):
-                    data = data[np.newaxis, ...]
-                if isinstance(y_key, int):
-                    data = data[:, np.newaxis, :]
+                # re-expand any dimensions squeezed by integer indexing
+                # so data is always (Z, Y, X) before assignment
                 if isinstance(x_key, int):
-                    data = data[:, :, np.newaxis]
+                    data = np.expand_dims(data, -1)
+                if isinstance(y_key, int):
+                    data = np.expand_dims(data, -2)
+                if isinstance(z_key, int):
+                    data = np.expand_dims(data, 0)
 
                 result[ti, :, vi, ...] = data
 
