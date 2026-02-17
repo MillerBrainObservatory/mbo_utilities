@@ -1140,7 +1140,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         )
 
     def _compute_frame_vminmax(self):
-        if not hasattr(self, "_cached_vmin"):
+        if self._cached_vmin is None:
             frame = self[0, 0]
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
