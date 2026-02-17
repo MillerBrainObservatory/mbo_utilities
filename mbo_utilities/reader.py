@@ -353,6 +353,18 @@ def imread(
 
         for array_cls, description in TIFF_ARRAY_CLASSES:
             if array_cls.can_open(first):
+                # filter to only files this class can open, so saved
+                # outputs or unrelated tiffs in the same folder are excluded
+                if len(paths) > 1:
+                    valid = [p for p in paths if array_cls.can_open(p)]
+                    if not valid:
+                        continue
+                    if len(valid) < len(paths):
+                        logger.info(
+                            f"Filtered {len(paths) - len(valid)} non-{description} "
+                            f"file(s) from directory load"
+                        )
+                    paths = valid
                 logger.debug(f"Detected {description}, loading as {array_cls.__name__}.")
                 return array_cls(paths, **_filter_kwargs(array_cls, kwargs))
 
