@@ -1127,7 +1127,8 @@ def _write_volumetric_tiff(
         # iterate over chunks using unified slicing
         pbar = None
         if show_progress:
-            pbar = tqdm(total=n_frames, desc="Writing TIFF", unit="frames")
+            total_pages = n_frames * n_planes * n_channels
+            pbar = tqdm(total=total_pages, desc="Writing TIFF", unit="pg")
 
         # get z-plane indices being written (0-based)
         z_indices = slicing.selections["Z"].indices if "Z" in slicing.selections else list(range(n_planes))
@@ -1173,7 +1174,7 @@ def _write_volumetric_tiff(
 
             if pbar:
                 frames_in_chunk = len(chunk_info.selections.get("T", [1]))
-                pbar.update(frames_in_chunk)
+                pbar.update(frames_in_chunk * n_planes * n_channels)
 
             if progress_callback:
                 progress_callback(chunk_info.progress)
