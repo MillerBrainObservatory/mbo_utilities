@@ -43,8 +43,8 @@ If no input is provided and Qt is available, a file dialog opens automatically.
 
 ### Open File vs Select Folder
 
-- **Open File(s)** (`o`): select one or more tiff files
-- **Select Folder** (`Shift+O`): load all supported files in a folder
+- **Open File(s)** (`o`): select one or more tiff files. loads exactly the file(s) you pick — nothing else in the directory is touched.
+- **Select Folder** (`Shift+O`): scans the directory and loads all compatible files. the reader auto-detects the format from the first file and filters out incompatible files (e.g. previously saved outputs or unrelated TIFFs are excluded).
 
 ### Supported Formats
 
@@ -213,6 +213,12 @@ Open via **File > Save As** or press `s`.
 :alt: Save As Dialog
 ```
 
+### Important: Save As Does Not Change the Active Dataset
+
+Save As exports a copy of the data to a new file. The viewer continues to display the **original** dataset. Any subsequent operations (Suite2p, further saves) still use the original data.
+
+To work with the saved file, open it explicitly via **File > Open File**.
+
 ### Output Formats
 
 | Format | Description |
@@ -298,6 +304,8 @@ The process console shows:
 ```
 
 Available when `suite2p` is installed. Access via the processing pipeline panel.
+
+Suite2p always runs on the dataset currently loaded in the viewer. If you used Save As to export a processed file and want to run Suite2p on that file, you must open it first with **File > Open File**.
 
 - run suite2p on selected z-planes
 - all suite2p parameters exposed with descriptions
