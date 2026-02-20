@@ -4,12 +4,17 @@ from skimage.registration import phase_cross_correlation
 
 
 def snr_roi(data, y0, y1, x0, x1):
-    """Higher = Better."""
+    """SNR via AAPM standard: (mean_fg - mean_bg) / std_bg. higher = better."""
     roi = data[:, y0:y1, x0:x1].astype(np.float32)
-    roi -= roi.min()
-    mean_signal = np.mean(roi)
-    noise = np.std(roi)
-    return mean_signal / noise
+    mean_img = np.mean(roi, axis=0)
+    p80 = np.percentile(mean_img, 80)
+    p50 = np.percentile(mean_img, 50)
+    fg = mean_img >= p80
+    bg = mean_img <= p50
+    fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
+    bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
+    bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
+    return (fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0
 
 
 def mean_row_misalignment(data):

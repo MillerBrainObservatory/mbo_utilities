@@ -154,16 +154,24 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     for i, s in enumerate(slice_range):
         with tiff_lock:
             stack = _get_zslice(arr, slice(None, None, 10), s).astype(np.float32)
-            stack -= float(stack.min())
 
             mean_img = np.mean(stack, axis=0)
             std_img = np.std(stack, axis=0)
-            snr_img = np.zeros_like(mean_img)
-            np.divide(mean_img, std_img + 1e-5, out=snr_img, where=(std_img > 1e-5))
+
+            # SNR: (mean_foreground - mean_background) / std_background
+            # foreground = top 20% brightest pixels, background = bottom 50%
+            p80 = np.percentile(mean_img, 80)
+            p50 = np.percentile(mean_img, 50)
+            fg = mean_img >= p80
+            bg = mean_img <= p50
+            fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
+            bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
+            bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
+            snr_val = (fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0
 
             stats["mean"].append(float(np.mean(mean_img)))
             stats["std"].append(float(np.mean(std_img)))
-            stats["snr"].append(float(np.mean(snr_img)))
+            stats["snr"].append(snr_val)
 
             means.append(mean_img)
             parent._zstats_progress[idx - 1] = (i + 1) / n_slices
@@ -372,7 +380,7 @@ def _draw_array_stats(
             _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, array_idx)
 
 
-SNR_TOOLTIP = "SNR = mean(mean_img / std_img), slice min subtracted for non-negative baseline, computed per-pixel then spatially averaged"
+SNR_TOOLTIP = "SNR = (mean_foreground - mean_background) / std_background, foreground = top 20% brightest pixels, background = bottom 50%"
 
 
 def _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, array_idx=None):

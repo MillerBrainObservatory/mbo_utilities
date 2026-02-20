@@ -287,11 +287,23 @@ class StatsFeature(ArrayFeature):
         data = np.concatenate(samples)
         self._min = [float(np.min(data))]
         self._max = [float(np.max(data))]
-        # subtract slice min so baseline is non-negative for SNR
-        data_nn = data - self._min[0]
-        self._mean = [float(np.mean(data_nn))]
-        self._std = [float(np.std(data_nn))]
-        self._snr = [self._mean[0] / self._std[0] if self._std[0] > 0 else 0.0]
+        self._mean = [float(np.mean(data))]
+        self._std = [float(np.std(data))]
+
+        # SNR: (mean_foreground - mean_background) / std_background
+        # foreground = top 20% brightest pixels, background = bottom 50%
+        # reshape to frames to compute temporal mean image
+        n_samples = len(indices)
+        pixels_per_frame = len(data) // n_samples
+        mean_img = np.mean(data.reshape(n_samples, pixels_per_frame), axis=0)
+        p80 = np.percentile(mean_img, 80)
+        p50 = np.percentile(mean_img, 50)
+        fg = mean_img >= p80
+        bg = mean_img <= p50
+        fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
+        bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
+        bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
+        self._snr = [(fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0]
 
         if compute_mean_images:
             # compute full mean image
@@ -349,16 +361,26 @@ class StatsFeature(ArrayFeature):
             data = np.concatenate(samples)
             min_val = float(np.min(data))
             max_val = float(np.max(data))
-            # subtract slice min so baseline is non-negative for SNR
-            data_nn = data - min_val
-            mean_val = float(np.mean(data_nn))
-            std_val = float(np.std(data_nn))
+            mean_val = float(np.mean(data))
+            std_val = float(np.std(data))
 
             self._mean.append(mean_val)
             self._std.append(std_val)
-            self._snr.append(mean_val / std_val if std_val > 0 else 0.0)
             self._min.append(min_val)
             self._max.append(max_val)
+
+            # SNR: (mean_foreground - mean_background) / std_background
+            n_samples = len(indices)
+            pixels_per_frame = len(data) // n_samples
+            mean_img = np.mean(data.reshape(n_samples, pixels_per_frame), axis=0)
+            p80 = np.percentile(mean_img, 80)
+            p50 = np.percentile(mean_img, 50)
+            fg = mean_img >= p80
+            bg = mean_img <= p50
+            fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
+            bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
+            bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
+            self._snr.append((fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0)
 
             if compute_mean_images:
                 # compute full mean image for this slice
