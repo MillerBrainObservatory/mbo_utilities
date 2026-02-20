@@ -5,7 +5,8 @@ from skimage.registration import phase_cross_correlation
 
 def snr_roi(data, y0, y1, x0, x1):
     """Higher = Better."""
-    roi = data[:, y0:y1, x0:x1]
+    roi = data[:, y0:y1, x0:x1].astype(np.float32)
+    roi -= roi.min()
     mean_signal = np.mean(roi)
     noise = np.std(roi)
     return mean_signal / noise

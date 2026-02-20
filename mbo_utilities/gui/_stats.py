@@ -154,6 +154,7 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     for i, s in enumerate(slice_range):
         with tiff_lock:
             stack = _get_zslice(arr, slice(None, None, 10), s).astype(np.float32)
+            stack -= float(stack.min())
 
             mean_img = np.mean(stack, axis=0)
             std_img = np.std(stack, axis=0)
@@ -371,7 +372,7 @@ def _draw_array_stats(
             _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, array_idx)
 
 
-SNR_TOOLTIP = "SNR = mean(mean_img / std_img), computed per-pixel then spatially averaged"
+SNR_TOOLTIP = "SNR = mean(mean_img / std_img), slice min subtracted for non-negative baseline, computed per-pixel then spatially averaged"
 
 
 def _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, array_idx=None):
