@@ -1842,7 +1842,7 @@ wheels = [
 
 [[package]]
 name = "mbo-utilities"
-version = "2.6.2"
+version = "2.6.3"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },
