@@ -11,7 +11,8 @@ license = "BSD-3-Clause"
 requires-python = ">=3.12.7,<3.13"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
-	"numpy>=2.2.5,<3.0",
+	"setuptools<81",
+	"numpy>=2.2.5,<2.4",
 	"pandas",
 	"scipy",
 	"tifffile>=2025.3.30",
@@ -63,11 +64,11 @@ suite2p = [
     "numba>=0.60.0",
     "lbm_suite2p_python>=2.5.4",
     "suite2p_mbo>=2.0.1",
+    "setuptools",
 ]
-# Suite3D - requires CUPY
+# Suite3D - requires CuPy (installed separately by installer based on CUDA version)
 suite3d = [
     "mbo-suite3d>=0.0.7",
-    "cupy-cuda12x",
 ]
 # Rastermap for activity sorting
 rastermap = [

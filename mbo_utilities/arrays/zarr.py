@@ -190,7 +190,27 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
 
             # convert lowercase axis names to uppercase dim labels
             dims = tuple(ax.get("name", "?").upper() for ax in axes)
-            return dims
+
+            # validate against our presented ndim (always 4)
+            if len(dims) == self.ndim:
+                return dims
+
+            # 3D zarr presented as 4D: OME matches underlying array,
+            # insert Z to reconcile (shape property does the same transform)
+            underlying_ndim = len(self.zs[0].shape)
+            if len(dims) == underlying_ndim and underlying_ndim == 3:
+                dims_list = list(dims)
+                insert_pos = (dims_list.index("T") + 1) if "T" in dims_list else 0
+                dims_list.insert(insert_pos, "Z")
+                return tuple(dims_list)
+
+            # can't reconcile, fall back to default inference
+            logger.warning(
+                "OME axes %s have %d elements but array is %dD; "
+                "ignoring OME dims",
+                dims, len(dims), self.ndim,
+            )
+            return None
         except Exception:
             return None
 
@@ -393,7 +413,9 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
                 out = self.zs[0][t_key, y_key, x_key]
             elif isinstance(z_key, slice):
                 data = self.zs[0][t_key, y_key, x_key]
-                out = data[:, np.newaxis, ...]
+                # insert Z=1 axis: position depends on whether T was scalar
+                z_axis = 0 if isinstance(t_key, (int, np.integer)) else 1
+                out = np.expand_dims(data, axis=z_axis)
             else:
                 out = self.zs[0][t_key, y_key, x_key]
         elif isinstance(z_key, int):

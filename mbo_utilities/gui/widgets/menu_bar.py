@@ -103,10 +103,8 @@ def draw_menu_bar(parent: Any):
         imgui.end_menu_bar()
 
         # Draw process status indicator (consolidated)
+        parent._clear_stale_progress()
         draw_process_status_indicator(parent)
-        if parent._show_progress_overlay:
-            parent._clear_stale_progress()
-
 
 def draw_process_status_indicator(parent: Any):
     """Draw compact process status indicator in top-left with color coding."""
@@ -137,7 +135,7 @@ def draw_process_status_indicator(parent: Any):
     completed_procs = [p for p in all_procs if not p.is_alive() and p.status == "completed"]
     error_procs = [p for p in all_procs if not p.is_alive() and p.status == "error"]
 
-    n_running = len(running_procs) + len(progress_items)
+    n_running = len(running_procs) + sum(1 for item in progress_items if not item.get("done"))
     n_completed = len(completed_procs)
     n_errors = len(error_procs)
 

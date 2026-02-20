@@ -43,22 +43,39 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 > We recommend using a virtual environment. For help setting up a virtual environment, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ```bash
-
-# Base, reader + GUI
+# base: reader + GUI
 pip install mbo_utilities
 
 # with lbm_suite2p_python, suite2p, cellpose
 pip install "mbo_utilities[suite2p]"
 
+# all processing pipelines
 pip install "mbo_utilities[all]"
 ```
 
-### Easy Installation Script with [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
+> **Suite3D + CuPy:** Suite3D requires [CuPy](https://cupy.dev/) for GPU acceleration. CuPy must be installed separately to match your CUDA toolkit version:
+>
+> ```bash
+> # check your CUDA version
+> nvcc --version
+>
+> # CUDA 12.x
+> pip install cupy-cuda12x
+>
+> # CUDA 11.x
+> pip install cupy-cuda11x
+> ```
+>
+> The install script below detects your systems cuda-version automatically.
 
-The install script will allow you to:
+### Installation Script with [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
+
+The install script will prompt several options:
 1. Create a virtual environment with `mbo_utilities`,
 2. Install the image reader globally, with Destkop Icon + use `mbo` any terminal
+3. Install in both a virtual environment and globally
 3. Specify optional dependencies, and environment paths
+
 
 ```powershell
 # Windows (PowerShell)
@@ -123,7 +140,7 @@ mbo scanphase /path/to/data.tiff -o ./output
 | Generic TIFF | ✓ | ✓ | Standard TIFF stacks |
 | Zarr | ✓ | ✓ | Chunked cloud-ready arrays |
 | HDF5 | ✓ | ✓ | Hierarchical data format |
-| Suite2p | ✓ | — | Binary and ops.npy files |
+| Suite2p | ✓ | ✓ | Binary and ops.npy files |
 
 → [Formats Guide](https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html)
 

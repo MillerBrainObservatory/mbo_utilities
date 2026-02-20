@@ -410,6 +410,28 @@ function Test-NvidiaGpu {
     return @{ Available = $false; GpuName = $null; CudaVersion = $null; ToolkitInstalled = $false }
 }
 
+function Get-CupyPackage {
+    <#
+    .SYNOPSIS
+    Returns the correct cupy package name for the detected CUDA toolkit version.
+    Returns $null if no compatible CUDA toolkit is found.
+    #>
+    param([hashtable]$GpuInfo)
+
+    if (-not $GpuInfo.ToolkitInstalled -or -not $GpuInfo.CudaVersion) {
+        return $null
+    }
+
+    $cudaVersion = $GpuInfo.CudaVersion
+    if ($cudaVersion -match '^(\d+)') {
+        $major = [int]$matches[1]
+        if ($major -ge 12) { return "cupy-cuda12x" }
+        if ($major -eq 11) { return "cupy-cuda11x" }
+    }
+
+    return $null
+}
+
 function Show-OptionalDependencies {
     param([hashtable]$GpuInfo)
 
@@ -464,18 +486,37 @@ function Show-OptionalDependencies {
     if ($extras.Count -gt 0) {
         $gpuPackages = @("suite2p", "suite3d", "all")
         $hasGpuPackage = ($extras | Where-Object { $gpuPackages -contains $_ }).Count -gt 0
+        $needsCupy = ($extras | Where-Object { @("suite3d", "all") -contains $_ }).Count -gt 0
 
         if ($hasGpuPackage -and $GpuInfo.Available -and -not $GpuInfo.ToolkitInstalled) {
             Write-Host ""
             Write-Warn "CUDA Toolkit not installed. GPU packages will use CPU (slower)."
             Write-Warn "Install CUDA Toolkit for GPU acceleration."
+            if ($needsCupy) {
+                Write-Warn "Suite3D requires CuPy + CUDA Toolkit. CuPy will NOT be installed."
+            }
         }
         elseif ($hasGpuPackage -and -not $GpuInfo.Available) {
             Write-Host ""
             Write-Warn "No NVIDIA GPU detected. These packages will run in CPU-only mode."
+            if ($needsCupy) {
+                Write-Warn "Suite3D requires CuPy + NVIDIA GPU. CuPy will NOT be installed."
+            }
             $continue = Read-Host "Continue anyway? (y/n)"
             if ($continue -ne "y") {
                 $extras = $extras | Where-Object { $gpuPackages -notcontains $_ }
+            }
+        }
+        elseif ($needsCupy -and $GpuInfo.ToolkitInstalled) {
+            $cupyPkg = Get-CupyPackage -GpuInfo $GpuInfo
+            if ($cupyPkg) {
+                Write-Host ""
+                Write-Info "CuPy will be installed for CUDA $($GpuInfo.CudaVersion): $cupyPkg"
+            }
+            else {
+                Write-Host ""
+                Write-Warn "Unsupported CUDA version $($GpuInfo.CudaVersion). CuPy will NOT be installed."
+                Write-Warn "Suite3D requires CUDA 11.x or 12.x."
             }
         }
     }
@@ -486,7 +527,8 @@ function Show-OptionalDependencies {
 function Install-MboTool {
     param(
         [string]$Spec,
-        [string[]]$Extras = @()
+        [string[]]$Extras = @(),
+        [string]$CupyPackage = $null
     )
 
     Write-Host ""
@@ -508,6 +550,13 @@ function Install-MboTool {
     }
     else {
         $fullSpec = $Spec
+    }
+
+    # add cupy as --with if suite3d is selected and CUDA is available
+    $withArgs = @()
+    if ($CupyPackage) {
+        $withArgs += @("--with", $CupyPackage)
+        Write-Info "  CuPy: $CupyPackage (via --with)"
     }
 
     Write-Info "  Spec: $fullSpec"
@@ -555,8 +604,9 @@ function Install-MboTool {
             }
         }
 
-        # install tool
-        uv tool install $fullSpec --python 3.12 2>&1 | ForEach-Object { Write-Host $_ }
+        # install tool (with cupy if needed for suite3d)
+        $installArgs = @($fullSpec, "--python", "3.12") + $withArgs
+        uv tool install @installArgs 2>&1 | ForEach-Object { Write-Host $_ }
 
         if ($LASTEXITCODE -ne 0) {
             throw "uv tool install failed with exit code $LASTEXITCODE"
@@ -686,7 +736,8 @@ function Install-DevEnvironment {
         [string]$EnvPath,
         [string]$Spec,
         [string[]]$Extras = @(),
-        [hashtable]$GpuInfo = @{}
+        [hashtable]$GpuInfo = @{},
+        [string]$CupyPackage = $null
     )
 
     Write-Host ""
@@ -912,6 +963,18 @@ function Install-DevEnvironment {
 
         if ($LASTEXITCODE -ne 0) {
             throw "uv pip install failed"
+        }
+
+        # install cupy separately if suite3d was selected and CUDA is available
+        if ($CupyPackage) {
+            Write-Info "Installing $CupyPackage for Suite3D..."
+            uv pip install --python $pythonPath $CupyPackage 2>&1 | ForEach-Object { Write-Host $_ }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "CuPy installation failed. Suite3D may not work with GPU acceleration."
+            }
+            else {
+                Write-Success "CuPy installed: $CupyPackage"
+            }
         }
 
         Write-Success "Development environment created successfully"
@@ -1227,6 +1290,13 @@ function Main {
     # step 4: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
+    # step 4.5: determine cupy package for suite3d based on CUDA version
+    $needsCupy = ($extras | Where-Object { @("suite3d", "all", "processing") -contains $_ }).Count -gt 0
+    $cupyPackage = $null
+    if ($needsCupy) {
+        $cupyPackage = Get-CupyPackage -GpuInfo $gpuInfo
+    }
+
     # step 5: get environment location if needed
     $envPath = $null
     $envLocation = $null
@@ -1236,7 +1306,7 @@ function Main {
 
     # step 6: install CLI tool if requested
     if ($installType.InstallCli) {
-        $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras
+        $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras -CupyPackage $cupyPackage
         if (-not $toolInstalled) {
             Write-Err "CLI installation failed."
             exit 1
@@ -1245,7 +1315,7 @@ function Main {
 
     # step 7: create dev environment if requested
     if ($installType.InstallEnv -and $envLocation) {
-        $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo
+        $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -CupyPackage $cupyPackage
     }
 
     # step 8: create desktop shortcut (only if CLI was installed)

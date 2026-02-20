@@ -34,8 +34,24 @@ Preview bidirectional phase correction:
 3. Adjust border-px and max-offset
 4. Enable Sub-Pixel for refinement
 
+## Opening Data
+
+- **Open File** (`o`): loads exactly the file(s) you select
+- **Open Folder** (`Shift+O`): loads all compatible files in a directory
+
+Open File always loads only what you pick. Open Folder scans
+the directory and loads files that match the detected format
+(e.g. only raw ScanImage TIFFs, ignoring previously saved outputs).
+
 ## Saving Data
 
 Access via **File > Save As** or press **s**
 
 Output formats: `.zarr` (recommended), `.tiff`, `.bin`, `.h5`
+
+Save As exports a copy of the current data to a new file.
+The viewer continues to display the original dataset.
+To work with the saved file, open it with File > Open File.
+
+Running Suite2p after Save As still processes the original
+dataset that is loaded in the viewer, not the saved file.
