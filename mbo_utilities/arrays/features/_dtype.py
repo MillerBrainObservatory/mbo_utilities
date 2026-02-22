@@ -12,7 +12,6 @@ import numpy as np
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
 
-
 class DataTypeFeature(ArrayFeature):
     """
     Data type feature for arrays.

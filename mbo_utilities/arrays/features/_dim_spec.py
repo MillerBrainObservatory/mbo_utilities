@@ -224,7 +224,9 @@ class DimensionSpecs:
                 return spec
         raise KeyError(f"No dimension named '{idx}'")
 
-    def get(self, name: str, default: DimensionSpec | None = None) -> DimensionSpec | None:
+    def get(
+        self, name: str, default: DimensionSpec | None = None
+    ) -> DimensionSpec | None:
         """get dimension spec by name, or default if not found."""
         try:
             return self[name]
@@ -285,12 +287,14 @@ class DimensionSpecs:
                 else:
                     scale = 1.0
 
-            specs.append(DimensionSpec(
-                name=name,
-                role=role,
-                size=size,
-                scale=scale,
-            ))
+            specs.append(
+                DimensionSpec(
+                    name=name,
+                    role=role,
+                    size=size,
+                    scale=scale,
+                )
+            )
 
         return cls(specs)
 

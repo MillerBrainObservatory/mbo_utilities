@@ -11,7 +11,6 @@ from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 from mbo_utilities.metadata.base import VoxelSize
 
 
-
 class VoxelSizeFeature(ArrayFeature):
     """
     Voxel size feature for arrays.

@@ -13,7 +13,6 @@ import numpy as np
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
 
-
 class DisplayRange(NamedTuple):
     """Display range as (vmin, vmax) tuple."""
 

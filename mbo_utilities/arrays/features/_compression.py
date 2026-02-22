@@ -12,7 +12,6 @@ from typing import NamedTuple
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
 
-
 class Codec(str, Enum):
     """Supported compression codecs."""
 
@@ -139,7 +138,9 @@ class CompressionFeature(ArrayFeature):
         elif isinstance(value, str):
             self._codec = Codec.from_string(value)
         elif isinstance(value, (tuple, list)):
-            self._codec = Codec.from_string(value[0]) if isinstance(value[0], str) else value[0]
+            self._codec = (
+                Codec.from_string(value[0]) if isinstance(value[0], str) else value[0]
+            )
             if len(value) > 1:
                 self._level = int(value[1])
             if len(value) > 2:
@@ -147,13 +148,17 @@ class CompressionFeature(ArrayFeature):
         elif isinstance(value, dict):
             if "codec" in value:
                 codec = value["codec"]
-                self._codec = Codec.from_string(codec) if isinstance(codec, str) else codec
+                self._codec = (
+                    Codec.from_string(codec) if isinstance(codec, str) else codec
+                )
             if "level" in value:
                 self._level = int(value["level"])
             if "shuffle" in value:
                 self._shuffle = bool(value["shuffle"])
         else:
-            raise TypeError(f"expected CompressionSettings, tuple, dict, or str, got {type(value)}")
+            raise TypeError(
+                f"expected CompressionSettings, tuple, dict, or str, got {type(value)}"
+            )
 
         new_value = self.value
         if old_value != new_value:

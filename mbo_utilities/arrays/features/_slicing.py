@@ -134,6 +134,7 @@ def parse_selection(
     if len(valid_indices) < len(indices):
         # log warning about out-of-range indices being filtered
         import logging
+
         logging.getLogger("mbo_utilities").warning(
             f"Selection contains {len(indices) - len(valid_indices)} out-of-range indices "
             f"(max valid index: {dim_size - 1}). These will be skipped."
@@ -292,7 +293,9 @@ class DimSelection:
         )
 
         if is_uniform:
-            return slice(self.indices[0], self.indices[-1] + 1, step if step > 1 else None)
+            return slice(
+                self.indices[0], self.indices[-1] + 1, step if step > 1 else None
+            )
 
         return self.indices
 
@@ -575,8 +578,14 @@ def read_chunk(
     for t_idx in t_indices:
         if ndim == 5 and "C" in dims and "Z" in dims:
             # TCZYX - preserve both C and Z dimensions
-            c_indices = chunk_info.selections.get("C", list(range(arr.shape[dims.index("C")])))
-            z_sel = z_indices if z_indices is not None else list(range(arr.shape[dims.index("Z")]))
+            c_indices = chunk_info.selections.get(
+                "C", list(range(arr.shape[dims.index("C")]))
+            )
+            z_sel = (
+                z_indices
+                if z_indices is not None
+                else list(range(arr.shape[dims.index("Z")]))
+            )
             c_frames = []
             for c_idx in c_indices:
                 z_frames = []

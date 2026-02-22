@@ -14,7 +14,6 @@ import numpy as np
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
 
-
 class SliceStats(NamedTuple):
     """statistics for a single slice (plane, camera, roi, etc.)."""
 
@@ -252,11 +251,15 @@ class StatsFeature(ArrayFeature):
 
         if array.ndim == 3:
             self._num_slices = 1
-            self._compute_3d(array, sample_frames, subsample_spatial, compute_mean_images)
+            self._compute_3d(
+                array, sample_frames, subsample_spatial, compute_mean_images
+            )
         elif array.ndim == 4:
             axis = slice_axis if slice_axis is not None else 1
             self._num_slices = array.shape[axis]
-            self._compute_4d(array, sample_frames, subsample_spatial, compute_mean_images, axis)
+            self._compute_4d(
+                array, sample_frames, subsample_spatial, compute_mean_images, axis
+            )
         else:
             raise ValueError(f"expected 3D or 4D array, got {array.ndim}D")
 
