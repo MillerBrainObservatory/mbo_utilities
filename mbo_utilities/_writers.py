@@ -30,6 +30,7 @@ def _get_mbo_version():
     """Get mbo_utilities version string."""
     try:
         from . import __version__
+
         return __version__
     except Exception:
         return "unknown"
@@ -112,7 +113,6 @@ def add_processing_step(
 
     metadata["processing_history"].append(step_record)
     return metadata
-
 
 
 def _close_specific_bin_writer(filepath):
@@ -232,7 +232,9 @@ def load_registration_shifts(metadata: dict | None, debug: bool = False):
 
     # load plane shifts from s3d-job
     s3d_job_dir = metadata.get("s3d-job", "")
-    summary_path = Path(s3d_job_dir).joinpath("summary/summary.npy") if s3d_job_dir else None
+    summary_path = (
+        Path(s3d_job_dir).joinpath("summary/summary.npy") if s3d_job_dir else None
+    )
 
     if summary_path and summary_path.is_file():
         try:
@@ -242,12 +244,18 @@ def load_registration_shifts(metadata: dict | None, debug: bool = False):
                 padding = compute_pad_from_shifts(plane_shifts)
                 if debug:
                     pt, pb, pl, pr = padding
-                    logger.info(f"Loaded z-registration shifts with padding: top={pt}, bottom={pb}, left={pl}, right={pr}")
+                    logger.info(
+                        f"Loaded z-registration shifts with padding: top={pt}, bottom={pb}, left={pl}, right={pr}"
+                    )
                 return True, plane_shifts, padding
         except Exception as e:
-            logger.warning(f"Failed to load plane shifts: {e}. Proceeding without registration.")
+            logger.warning(
+                f"Failed to load plane shifts: {e}. Proceeding without registration."
+            )
 
-    logger.warning(f"apply_shift=True but no valid s3d-job summary found. Proceeding without registration.")
+    logger.warning(
+        f"apply_shift=True but no valid s3d-job summary found. Proceeding without registration."
+    )
     return False, None, padding
 
 
@@ -287,7 +295,9 @@ def apply_shifts_to_chunk(chunk_data, plane_shifts, z_indices, padding, Ly_out, 
             shifted_chunk[:, z_local, yy, xx] = chunk_data[:, z_local, :, :]
         else:
             # no shift for this plane, center it
-            shifted_chunk[:, z_local, pt:pt+h, pl:pl+w] = chunk_data[:, z_local, :, :]
+            shifted_chunk[:, z_local, pt : pt + h, pl : pl + w] = chunk_data[
+                :, z_local, :, :
+            ]
 
     return shifted_chunk
 
@@ -348,7 +358,9 @@ def _write_plane(
 
     # Handle empty data
     if ntime == 0:
-        raise ValueError(f"Cannot write file with 0 frames. Data shape: {data.shape}, nframes_target: {nframes_target}")
+        raise ValueError(
+            f"Cannot write file with 0 frames. Data shape: {data.shape}, nframes_target: {nframes_target}"
+        )
 
     bytes_per_t = int(np.prod(dshape[1:], dtype=np.int64)) * int(itemsize)
     chunk_size = int(target_chunk_mb) * 1024 * 1024
@@ -479,7 +491,11 @@ def _write_plane(
         # Extract chunk - handle plane_index and channel_index for z/channel selection
         # NOTE: Use len(data.shape) instead of data.ndim for ScanImageArray compatibility
         # (ScanImageArray.ndim returns metadata ndim, not actual dimensions)
-        if channel_index is not None and plane_index is not None and len(data.shape) >= 5:
+        if (
+            channel_index is not None
+            and plane_index is not None
+            and len(data.shape) >= 5
+        ):
             # 5D TCZYX: extract specific channel and z-plane
             chunk = data[start:end, channel_index, plane_index, :, :]
         elif plane_index is not None and len(data.shape) >= 4:
@@ -544,7 +560,6 @@ def _write_plane(
         _close_specific_bin_writer(fname)
     elif fname.suffix in [".npy"]:
         _close_specific_npy_writer(fname)
-
 
 
 def _get_file_writer(ext, overwrite):
@@ -880,6 +895,7 @@ def _write_tiff(path, data, overwrite=True, metadata=None, imagej=True, **kwargs
             # Delete existing file before creating new writer
             # On Windows, retry if file is locked by another process
             import time
+
             max_retries = 5
             for attempt in range(max_retries):
                 try:
@@ -889,6 +905,7 @@ def _write_tiff(path, data, overwrite=True, metadata=None, imagej=True, **kwargs
                     if attempt < max_retries - 1:
                         time.sleep(0.1)
                         import gc
+
                         gc.collect()
                     else:
                         raise
@@ -898,7 +915,9 @@ def _write_tiff(path, data, overwrite=True, metadata=None, imagej=True, **kwargs
 
         # Create new writer - use imagej mode if requested
         if imagej:
-            _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True, imagej=True)
+            _write_tiff._writers[filename] = TiffWriter(
+                filename, bigtiff=True, imagej=True
+            )
         else:
             _write_tiff._writers[filename] = TiffWriter(filename, bigtiff=True)
         _write_tiff._first_write[filename] = True
@@ -920,6 +939,7 @@ def _write_tiff(path, data, overwrite=True, metadata=None, imagej=True, **kwargs
 
             # store full metadata as JSON in custom TIFF tag 50839
             import json
+
             json_meta = _make_json_serializable(metadata)
             json_bytes = json.dumps(json_meta).encode("utf-8")
             # extratags format: (code, dtype, count, value, writeonce)
@@ -974,6 +994,9 @@ def _write_volumetric_tiff(
     show_progress: bool = True,
     debug: bool = False,
     output_suffix: str | None = None,
+    pyramid: bool = False,
+    pyramid_max_layers: int = 4,
+    pyramid_method: str = "mean",
 ):
     """
     Write volumetric TZYX or TCYX data as single ImageJ hyperstack tiff.
@@ -1008,6 +1031,11 @@ def _write_volumetric_tiff(
         ArraySlicing,
         read_chunk,
     )
+    from mbo_utilities.arrays.features._pyramid import (
+        PyramidConfig,
+        compute_pyramid_shapes,
+        downsample_block,
+    )
 
     if metadata is None:
         metadata = {}
@@ -1029,7 +1057,9 @@ def _write_volumetric_tiff(
 
     # build output filename from dims
     suffix = output_suffix if output_suffix else "stack"
-    output_fn = OutputFilename.from_array(data, planes=planes, frames=frames, channels=channels, suffix=suffix)
+    output_fn = OutputFilename.from_array(
+        data, planes=planes, frames=frames, channels=channels, suffix=suffix
+    )
     filename = path / output_fn.build(".tif")
 
     if filename.exists() and not overwrite:
@@ -1048,11 +1078,15 @@ def _write_volumetric_tiff(
 
     # check for z-registration shift application (shared logic)
     if debug:
-        logger.info(f"  TIFF metadata: apply_shift={metadata.get('apply_shift')}, s3d-job={metadata.get('s3d-job')}")
+        logger.info(
+            f"  TIFF metadata: apply_shift={metadata.get('apply_shift')}, s3d-job={metadata.get('s3d-job')}"
+        )
     apply_shift, plane_shifts, padding = load_registration_shifts(metadata, debug)
     pt, pb, pl, pr = padding
     if debug:
-        logger.info(f"  Registration result: apply_shift={apply_shift}, has_shifts={plane_shifts is not None}")
+        logger.info(
+            f"  Registration result: apply_shift={apply_shift}, has_shifts={plane_shifts is not None}"
+        )
 
     # compute padded output dimensions if shifts are applied
     if apply_shift and plane_shifts is not None:
@@ -1106,6 +1140,7 @@ def _write_volumetric_tiff(
     # use imagej_metadata_tag to create both 50838 and 50839 tags properly
     from tifffile import imagej_metadata_tag
     import json
+
     json_meta = _make_json_serializable(md)
     json_str = json.dumps(json_meta)
     ij_extratags = imagej_metadata_tag({"Info": json_str}, "<")
@@ -1115,13 +1150,33 @@ def _write_volumetric_tiff(
         logger.info(f"Writing volumetric tiff: {filename}")
         shape_label = "TZCYX" if n_channels > 1 else "TZYX"
         logger.info(f"  Shape: {target_shape} ({shape_label})")
-        logger.info(f"  ImageJ meta: frames={ij_meta.get('frames')}, slices={ij_meta.get('slices')}, channels={ij_meta.get('channels')}")
-        logger.info(f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}")
+        logger.info(
+            f"  ImageJ meta: frames={ij_meta.get('frames')}, slices={ij_meta.get('slices')}, channels={ij_meta.get('channels')}"
+        )
+        logger.info(
+            f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}"
+        )
         if out_meta.z_step_factor > 1:
-            logger.info(f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)")
+            logger.info(
+                f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)"
+            )
+
+    # setup pyramids if requested
+    if pyramid:
+        pyramid_config = PyramidConfig(
+            max_layers=pyramid_max_layers,
+            scale_factors=(1, 1, 1, 2, 2) if n_channels > 1 else (1, 1, 2, 2),
+            method=pyramid_method,
+            min_size=64,
+        )
+        pyramid_levels = compute_pyramid_shapes(target_shape, pyramid_config)
+        if debug:
+            logger.info(f"  Pyramid: {len(pyramid_levels)} levels")
+    else:
+        pyramid_levels = None
 
     # open writer
-    with TiffWriter(filename, bigtiff=True, imagej=True) as writer:
+    with TiffWriter(filename, bigtiff=True, imagej=not pyramid, ome=pyramid) as writer:
         first_write = True
 
         # iterate over chunks using unified slicing
@@ -1131,7 +1186,11 @@ def _write_volumetric_tiff(
             pbar = tqdm(total=total_pages, desc="Writing TIFF", unit="pg")
 
         # get z-plane indices being written (0-based)
-        z_indices = slicing.selections["Z"].indices if "Z" in slicing.selections else list(range(n_planes))
+        z_indices = (
+            slicing.selections["Z"].indices
+            if "Z" in slicing.selections
+            else list(range(n_planes))
+        )
 
         for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
             # read chunk using unified reader
@@ -1145,7 +1204,12 @@ def _write_volumetric_tiff(
                 if apply_shift and plane_shifts is not None:
                     for c in range(chunk_data.shape[2]):
                         chunk_data[:, :, c, :, :] = apply_shifts_to_chunk(
-                            chunk_data[:, :, c, :, :], plane_shifts, z_indices, padding, Ly_out, Lx_out
+                            chunk_data[:, :, c, :, :],
+                            plane_shifts,
+                            z_indices,
+                            padding,
+                            Ly_out,
+                            Lx_out,
                         )
                 chunk_5d = chunk_data  # already (T, Z, C, Y, X)
             else:
@@ -1162,14 +1226,44 @@ def _write_volumetric_tiff(
             # write each frame (T) with all its Z slices
             for t in range(chunk_5d.shape[0]):
                 frame_data = chunk_5d[t]  # (Z, C, Y, X)
-                writer.write(
-                    frame_data,
-                    contiguous=True,
-                    photometric="minisblack",
-                    resolution=resolution if first_write else None,
-                    metadata=ij_meta if first_write else None,
-                    extratags=extratags if first_write else None,
-                )
+
+                if pyramid and pyramid_levels and len(pyramid_levels) > 1:
+                    frame_pyramid = []
+                    current = frame_data
+                    scale_factors_frame = (1, 1, 2, 2)  # Z, C, Y, X
+
+                    for _ in range(1, len(pyramid_levels)):
+                        current = downsample_block(
+                            current, scale_factors_frame, pyramid_method
+                        )
+                        if current.dtype != frame_data.dtype:
+                            current = current.astype(frame_data.dtype)
+                        frame_pyramid.append(current)
+
+                    writer.write(
+                        frame_data,
+                        contiguous=True,
+                        photometric="minisblack",
+                        resolution=resolution if first_write else None,
+                        subifds=len(frame_pyramid),
+                    )
+
+                    for downsampled in frame_pyramid:
+                        writer.write(
+                            downsampled,
+                            contiguous=True,
+                            photometric="minisblack",
+                            subfiletype=1,
+                        )
+                else:
+                    writer.write(
+                        frame_data,
+                        contiguous=True,
+                        photometric="minisblack",
+                        resolution=resolution if first_write else None,
+                        metadata=ij_meta if first_write else None,
+                        extratags=extratags if first_write else None,
+                    )
                 first_write = False
 
             if pbar:
@@ -1289,7 +1383,9 @@ def _write_volumetric_zarr(
 
     # build output filename from dims
     suffix = output_suffix if output_suffix else "stack"
-    output_fn = OutputFilename.from_array(data, planes=planes, frames=frames, channels=channels, suffix=suffix)
+    output_fn = OutputFilename.from_array(
+        data, planes=planes, frames=frames, channels=channels, suffix=suffix
+    )
     filename = path / output_fn.build(".zarr")
 
     if filename.exists() and not overwrite:
@@ -1347,9 +1443,13 @@ def _write_volumetric_zarr(
     if debug:
         logger.info(f"Writing volumetric zarr: {filename}")
         logger.info(f"  Shape: {target_shape} (TZYX)")
-        logger.info(f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}")
+        logger.info(
+            f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}"
+        )
         if out_meta.z_step_factor > 1:
-            logger.info(f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)")
+            logger.info(
+                f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)"
+            )
         if apply_shift:
             logger.info(f"  Z-registration: padding=({pt}, {pb}, {pl}, {pr})")
 
@@ -1433,12 +1533,14 @@ def _write_volumetric_zarr(
             physical_scale = [
                 base_scale[i] * lvl.scale[i] for i in range(len(base_scale))
             ]
-            datasets.append({
-                "path": lvl.path,
-                "coordinateTransformations": [
-                    {"type": "scale", "scale": physical_scale}
-                ],
-            })
+            datasets.append(
+                {
+                    "path": lvl.path,
+                    "coordinateTransformations": [
+                        {"type": "scale", "scale": physical_scale}
+                    ],
+                }
+            )
 
         multiscales = [
             {
@@ -1458,7 +1560,9 @@ def _write_volumetric_zarr(
                 "datasets": [
                     {
                         "path": "0",
-                        "coordinateTransformations": ome_meta["coordinateTransformations"],
+                        "coordinateTransformations": ome_meta[
+                            "coordinateTransformations"
+                        ],
                     }
                 ],
             }
@@ -1492,7 +1596,11 @@ def _write_volumetric_zarr(
     t_offset = 0
 
     # get z-plane indices being written (0-based)
-    z_indices = slicing.selections["Z"].indices if "Z" in slicing.selections else list(range(n_planes))
+    z_indices = (
+        slicing.selections["Z"].indices
+        if "Z" in slicing.selections
+        else list(range(n_planes))
+    )
 
     # iterate over chunks using unified slicing
     for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
@@ -1526,7 +1634,9 @@ def _write_volumetric_zarr(
             pbar.update(chunk_data.shape[0])
 
         if progress_callback:
-            progress_callback(chunk_info.progress / (len(pyramid_levels) if pyramid_levels else 1))
+            progress_callback(
+                chunk_info.progress / (len(pyramid_levels) if pyramid_levels else 1)
+            )
 
     if pbar:
         pbar.close()
@@ -1635,7 +1745,6 @@ def _write_zarr(
         shutil.rmtree(filename)
 
     if filename not in _write_zarr._arrays:
-
         import zarr
         from zarr.codecs import BytesCodec, GzipCodec, ShardingCodec, Crc32cCodec
 
@@ -1846,7 +1955,11 @@ def _try_generic_writers(
         if metadata:
             for k, v in metadata.items():
                 try:
-                    z.attrs[k] = v if np.isscalar(v) or isinstance(v, (list, dict, str)) else str(v)
+                    z.attrs[k] = (
+                        v
+                        if np.isscalar(v) or isinstance(v, (list, dict, str))
+                        else str(v)
+                    )
                 except Exception:
                     z.attrs[k] = str(v)
     else:
@@ -1892,7 +2005,11 @@ def write_ops(metadata, raw_filename, **kwargs):
     logger.info(f"Writing ops file to {ops_path}")
 
     shape = metadata["shape"]
-    nt, Ly, Lx = shape[0], shape[-2], shape[-1]  # shape is (T, Y, X), so [-2]=Ly, [-1]=Lx
+    nt, Ly, Lx = (
+        shape[0],
+        shape[-2],
+        shape[-1],
+    )  # shape is (T, Y, X), so [-2]=Ly, [-1]=Lx
 
     # Check if num_frames was explicitly set (takes precedence over shape)
     if "num_frames" in metadata:
@@ -1939,6 +2056,7 @@ def write_ops(metadata, raw_filename, **kwargs):
         ops = load_npy(ops_path).item()
     else:
         from mbo_utilities.metadata import default_ops
+
         ops = default_ops()
 
     # Update shared core fields - ensure all resolution aliases are consistent
@@ -1981,10 +2099,19 @@ def write_ops(metadata, raw_filename, **kwargs):
     # This prevents inconsistency between resolution aliases and frame counts
     protected_keys = {
         # Frame count fields
-        "nframes", "nframes_chan1", "nframes_chan2", "num_frames",
+        "nframes",
+        "nframes_chan1",
+        "nframes_chan2",
+        "num_frames",
         # Resolution fields (we've already set these consistently)
-        "dx", "dy", "dz", "umPerPixX", "umPerPixY", "umPerPixZ",
-        "pixel_resolution", "z_step",
+        "dx",
+        "dy",
+        "dz",
+        "umPerPixX",
+        "umPerPixY",
+        "umPerPixZ",
+        "pixel_resolution",
+        "z_step",
     }
     for key, value in metadata.items():
         if key not in protected_keys:
@@ -2101,7 +2228,9 @@ def to_video(
             raise ValueError(f"plane={plane_idx} but array only has {shape[1]} planes")
         n_frames = shape[0]
         height, width = shape[2], shape[3]
-        logger.info(f"Exporting 4D array plane {plane_idx}: {n_frames} frames, {height}x{width}")
+        logger.info(
+            f"Exporting 4D array plane {plane_idx}: {n_frames} frames, {height}x{width}"
+        )
     elif ndim == 3:
         # (T, Y, X)
         plane_idx = None
@@ -2146,6 +2275,7 @@ def to_video(
     if cmap is not None:
         try:
             import matplotlib.pyplot as plt
+
             colormap = plt.get_cmap(cmap)
         except ImportError:
             logger.warning("matplotlib not available, using grayscale")
@@ -2164,7 +2294,12 @@ def to_video(
         str(output_path),
         fps=output_fps,
         codec=codec,
-        output_params=["-crf", str(crf), "-pix_fmt", "yuv420p"],  # yuv420p for browser compatibility
+        output_params=[
+            "-crf",
+            str(crf),
+            "-pix_fmt",
+            "yuv420p",
+        ],  # yuv420p for browser compatibility
     )
 
     try:
