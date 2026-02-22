@@ -145,7 +145,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # Image widget setup
         self.image_widget = iw
-        self.num_graphics = len(self.image_widget.graphics)
+        self.num_graphics = len(self.image_widget.managed_graphics)
         self.shape = self.image_widget.data[0].shape
 
         # Determine data type (ScanImage or volumetric TIFF)
@@ -251,7 +251,7 @@ class PreviewDataWidget(EdgeWindow):
         """Initialize widget state."""
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
-        self.image_widget._sliders_ui._loop = True
+        self.image_widget._image_widget_sliders._loop = True
 
         # Determine nz and nc (z-planes and channels) using dims property
         arr = self.image_widget.data[0]
@@ -444,14 +444,9 @@ class PreviewDataWidget(EdgeWindow):
     def register_z(self, value):
         self._register_z = value
 
-    @property
-    def processors(self) -> list:
-        """Access to underlying NDImageProcessor instances."""
-        return self.image_widget._image_processors
-
     def _get_data_arrays(self) -> list:
-        """Get underlying data arrays from image processors."""
-        return [proc.data for proc in self.processors]
+        """Get underlying data arrays from the image widget."""
+        return list(self.image_widget.data)
 
     @property
     def current_offset(self) -> list[float]:
@@ -634,13 +629,13 @@ class PreviewDataWidget(EdgeWindow):
             return
         self._window_size = value
         self.logger.info(f"Window size set to {value}.")
-        if not self.processors:
+        if not self.image_widget or "t" not in self.image_widget.slider_dims:
             return
-        n_slider_dims = self.processors[0].n_slider_dims
-        if n_slider_dims == 0:
-            return
-        per_processor_sizes = (self._window_size,) + (None,) * (n_slider_dims - 1)
-        self._set_processor_attr("window_sizes", per_processor_sizes)
+        # update window size in the window_funcs dict
+        wf = self.image_widget.window_funcs
+        if wf and "t" in wf:
+            func = wf["t"].func
+            self.image_widget.window_funcs = {"t": (func, value)}
         if self.image_widget:
             self.image_widget.reset_vmin_vmax_frame()
 
@@ -666,41 +661,24 @@ class PreviewDataWidget(EdgeWindow):
 
     def _refresh_image_widget(self):
         """Trigger a frame refresh on the ImageWidget."""
-        current_indices = list(self.image_widget.indices)
-        self.image_widget.indices = current_indices
+        self.image_widget.current_index = dict(self.image_widget.current_index)
 
     def _set_processor_attr(self, attr: str, value):
-        """Set processor attribute without expensive histogram recomputation."""
-        if not self.processors:
+        """Set image widget attribute (window_funcs, frame_apply, etc.)."""
+        if not self.image_widget:
             return
-
-        # save histogram state and disable recomputation during update
-        saved = [(p._compute_histogram, p._histogram) for p in self.processors]
-        for proc in self.processors:
-            proc._compute_histogram = False
 
         try:
             if attr == "window_funcs":
-                if isinstance(value, tuple):
-                    value = [value] * len(self.processors)
                 self.image_widget.window_funcs = value
-            elif attr == "window_sizes":
-                if isinstance(value, (tuple, list)) and not isinstance(value[0], (tuple, list, type(None))):
-                    value = [value] * len(self.processors)
-                self.image_widget.window_sizes = value
             elif attr == "spatial_func":
-                self.image_widget.spatial_func = value
+                # spatial_func maps to frame_apply in upstream fastplotlib
+                self.image_widget.frame_apply = value
             else:
-                for proc in self.processors:
-                    setattr(proc, attr, value)
                 self._refresh_image_widget()
         except Exception as e:
             self.logger.exception(f"Error setting {attr}: {e}")
         finally:
-            # restore histogram state
-            for proc, (orig_compute, orig_hist) in zip(self.processors, saved):
-                proc._compute_histogram = orig_compute
-                proc._histogram = orig_hist
             # fix dock visibility (fastplotlib sets to 0 when histogram is None)
             for subplot in self.image_widget.figure:
                 if subplot.docks["right"].size < 1:
@@ -719,9 +697,8 @@ class PreviewDataWidget(EdgeWindow):
 
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function."""
-        names = self.image_widget._slider_dim_names or ()
         try:
-            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+            z_idx = self.image_widget.current_index.get("z", 0)
         except (IndexError, KeyError):
             z_idx = 0
 
@@ -733,20 +710,18 @@ class PreviewDataWidget(EdgeWindow):
         )
 
         if not any_mean_sub and sigma is None:
-            def identity(frame):
-                return frame
-            self._set_processor_attr("spatial_func", identity)
+            self._set_processor_attr("spatial_func", None)
             return
 
-        spatial_funcs = []
+        frame_apply_dict = {}
         for i in range(self.num_graphics):
             mean_img = None
             if self._mean_subtraction and self._zstats_done[i] and self._zstats_means[i] is not None:
                 mean_img = self._zstats_means[i][z_idx].astype(np.float32)
 
-            spatial_funcs.append(self._make_spatial_func(mean_img, sigma))
+            frame_apply_dict[i] = self._make_spatial_func(mean_img, sigma)
 
-        self._set_processor_attr("spatial_func", spatial_funcs)
+        self._set_processor_attr("spatial_func", frame_apply_dict)
 
     def _make_spatial_func(self, mean_img: np.ndarray | None, sigma: float | None):
         """Create a spatial function that applies mean subtraction and/or gaussian blur."""
@@ -770,33 +745,14 @@ class PreviewDataWidget(EdgeWindow):
 
     def _update_window_funcs(self):
         """Update window_funcs on image widget based on current projection mode."""
-        if not self.processors:
+        if not self.image_widget or "t" not in self.image_widget.slider_dims:
             return
 
-        def mean_wrapper(data, axis, keepdims):
-            return np.mean(data, axis=axis, keepdims=keepdims)
+        proj_funcs = {"mean": np.mean, "max": np.max, "std": np.std}
+        proj_func = proj_funcs.get(self._proj, np.mean)
 
-        def max_wrapper(data, axis, keepdims):
-            return np.max(data, axis=axis, keepdims=keepdims)
-
-        def std_wrapper(data, axis, keepdims):
-            return np.std(data, axis=axis, keepdims=keepdims)
-
-        proj_funcs = {"mean": mean_wrapper, "max": max_wrapper, "std": std_wrapper}
-        proj_func = proj_funcs.get(self._proj, mean_wrapper)
-
-        n_slider_dims = self.processors[0].n_slider_dims
-
-        if n_slider_dims == 0:
-            return
-        elif n_slider_dims == 1:
-            window_funcs = (proj_func,)
-        elif n_slider_dims == 2:
-            window_funcs = (proj_func, None)
-        else:
-            window_funcs = (proj_func,) + (None,) * (n_slider_dims - 1)
-
-        self._set_processor_attr("window_funcs", window_funcs)
+        ws = self._window_size if self._window_size > 0 else 1
+        self.image_widget.window_funcs = {"t": (proj_func, ws)}
         if self.image_widget:
             self.image_widget.reset_vmin_vmax_frame()
 
@@ -843,7 +799,7 @@ class PreviewDataWidget(EdgeWindow):
         handle_keyboard_shortcuts(self)
         check_file_dialogs(self)
 
-        # Draw independent floating windows
+        # Draw independent floating windows (even when collapsed)
         draw_tools_popups(self)
         draw_saveas_popup(self)
         draw_process_console_popup(self)
@@ -866,9 +822,8 @@ class PreviewDataWidget(EdgeWindow):
             print(f"SLOW FRAME: menu={menu_ms:.1f}ms, draw={draw_ms:.1f}ms")
 
         # Update mean subtraction when z-plane changes
-        names = self.image_widget._slider_dim_names or ()
         try:
-            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+            z_idx = self.image_widget.current_index.get("z", 0)
         except (IndexError, KeyError):
             z_idx = 0
 
@@ -892,10 +847,9 @@ class PreviewDataWidget(EdgeWindow):
 
     def get_raw_frame(self) -> tuple[ndarray, ...]:
         """Get raw frame data at current indices."""
-        idx = self.image_widget.indices
-        names = self.image_widget._slider_dim_names or ()
-        t = idx["t"] if "t" in names else 0
-        z = idx["z"] if "z" in names else 0
+        idx = self.image_widget.current_index
+        t = idx.get("t", 0)
+        z = idx.get("z", 0)
 
         def _ndim_to_frame(arr, t=0, z=0):
             if arr.ndim == 4:

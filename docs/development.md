@@ -444,3 +444,367 @@ dirs = get_mbo_dirs()
 | `~/mbo/cache/` | Temporary cached data |
 | `~/mbo/logs/` | Application logs |
 | `~/mbo/data/` | Sample/user data |
+
+---
+
+### GUI Internals
+
+Reference for the imgui_bundle-based GUI system.
+
+#### Launch Flow
+
+```text
+run_gui(path) or `mbo` CLI
+  → _cli_entry() handles flags (--splash, --check-upgrade, etc.)
+  → _run_gui_impl() does heavy imports
+  → _launch_standard_viewer()
+      ├─ imread(path) → array object
+      ├─ _create_image_widget(array) → fastplotlib.ImageWidget
+      │   sets slider_dim_names from array.dims
+      │   applies window_funcs (mean/max/std projections)
+      └─ PreviewDataWidget(iw, fpath) → EdgeWindow attached to figure
+          ├─ selects viewer via get_viewer_class(array)
+          ├─ initializes panels (debug, stats, metadata, process, pipeline)
+          └─ spawns background thread for z-stats computation
+```
+
+#### Setup (`_setup.py`)
+
+Runs on import. Configures:
+
+- `RENDERCANVAS_BACKEND=qt` for PyQt6 integration
+- wgpu backend (Vulkan/DX12/Metal)
+- copies imgui_bundle fonts to `~/.mbo/imgui/assets/`
+- `hello_imgui.set_assets_folder()` for font/icon loading
+- `set_qt_icon()` sets window icons on QApplication
+
+#### Render Loop
+
+`PreviewDataWidget.update()` is called every frame by fastplotlib:
+
+```text
+update()
+  ├─ handle_keyboard_shortcuts()        # o=open, s=save, m=metadata, etc.
+  ├─ check_file_dialogs()               # poll pfd dialogs, trigger load_new_data()
+  ├─ draw_menu_bar()                    # File/Docs/Settings + process status
+  ├─ draw popups (metadata, process console, save-as, help)
+  ├─ _viewer.draw()                     # delegates to viewer → panels
+  ├─ draw_all_widgets()                 # auto-discovered widgets
+  └─ draw_stats_section() if ready      # implot charts for z-stats
+```
+
+#### Viewer Hierarchy
+
+```text
+BaseViewer (abstract)
+  draw(), on_data_loaded(), draw_menu_bar(), cleanup()
+  ├─ TimeSeriesViewer      (default for TZYX volumetric data)
+  │   panels: DebugPanel, ProcessPanel, MetadataPanel, StatsPanel, PipelinePanel
+  │   properties: proj, window_size, gaussian_sigma, mean_subtraction
+  │   phase correction: fix_phase, use_fft, border, max_offset, phase_upsample
+  └─ PollenCalibrationViewer   (stack_type == "pollen")
+```
+
+#### Panel System
+
+```text
+BasePanel (abstract)
+  draw(), cleanup(), show()/hide()/toggle()
+  ├─ DebugPanel         # routes logging.Handler to scrollable table, filters by level/logger
+  ├─ ProcessPanel       # shows running background tasks from ProcessManager
+  ├─ MetadataPanel      # recursive tree display of array metadata, search/filter
+  ├─ StatsPanel         # implot visualization of z-stats (snr/mean/std per slice)
+  └─ PipelinePanel      # suite2p pipeline config and execution
+```
+
+All lazy-imported via `panels/__init__.py` `__getattr__`.
+
+#### Widget System (Plugin Architecture)
+
+```python
+class Widget(ABC):
+    name: str
+    priority: int          # lower = rendered first
+    is_supported(parent)   # checked per frame
+    draw()                 # imgui rendering
+```
+
+Auto-discovery: `pkgutil.iter_modules()` scans `widgets/`, finds `Widget` subclasses, calls `is_supported()`, instantiates and sorts by priority.
+
+| Widget | Purpose |
+|--------|---------|
+| `MenuBarWidget` | file/docs/settings menus |
+| `RasterScanWidget` | phase correction controls (for `SupportsRasterScan` arrays) |
+| `FrameAveragingWidget` | piezo frame grouping |
+| `Suite2pEmbedded` | pipeline config |
+| `IntegratedClassifierWindow` | ROI classification |
+
+#### Z-Stats Computation (`_stats.py`)
+
+```text
+compute_zstats(parent)
+  → threading.Thread per array in image_widget.data
+    → compute_zstats_single_array(parent, idx, arr)
+        ├─ check arr.stats/arr.zstats for cached values
+        ├─ _get_slice_range() → z-plane or channel indices
+        ├─ for each slice:
+        │   stack = _get_zslice(arr, slice(None,None,10), z)  # every 10th frame
+        │   mean_img = np.mean(stack, axis=0)
+        │   SNR = (fg_mean - bg_mean) / bg_std   # AAPM, top20%/bottom50%
+        └─ stores in parent._zstats[idx]
+```
+
+Visualization via implot:
+
+- single z-plane: bar chart + stats table
+- dual z-plane: grouped bars
+- multi z-plane: line plot with error bands
+- combined view: gray per-ROI lines + shaded mean +/- std
+
+#### Background Tasks (`tasks.py`, `_worker.py`)
+
+```text
+ProcessManager.launch_task(task_type, args)
+  → subprocess: python -m mbo_utilities.gui._worker <type> <json>
+  → writes progress to ~/.mbo/logs/progress_{uuid}.json
+  → survives GUI closure
+```
+
+Task types:
+
+- `save_as`: `imread` -> optional `register_zplanes_s3d` -> `imwrite`
+- `suite2p`: `imread` -> `_ChannelView` (if 5D) -> `lbm_suite2p_python.pipeline`
+
+#### Data Loading on File Change
+
+```
+load_new_data(parent, path)
+  ├─ imread(path) → new array
+  ├─ parent.image_widget.data[0] = arr    # iw-array replacement API
+  ├─ detect nz/nc from shape or dims
+  ├─ reset window functions if ndim changed
+  ├─ get_viewer_class(arr) → reinstantiate viewer
+  └─ refresh_zstats() → new background thread
+```
+
+#### imgui_bundle Primitives
+
+```python
+# layout
+imgui.begin_child("id")          # scrollable container
+imgui.begin_table("id", cols)    # multi-column
+imgui.collapsing_header("label") # collapsible section
+imgui.tree_node("label")         # nested tree
+
+# inputs
+imgui.checkbox("label", val)
+imgui.input_int("##id", val)
+imgui.input_float("##id", val)
+imgui.input_text("##id", val)
+imgui.slider_int("##id", val, min, max)
+
+# popups
+imgui.open_popup("title")
+imgui.begin_popup_modal("title")
+
+# plotting (implot)
+implot.begin_plot("title", size)
+implot.setup_axes("X", "Y")
+implot.plot_line("series", x, y)
+implot.plot_bars("series", x, heights)
+
+# file dialogs (portable_file_dialogs)
+pfd.open_file("title", default_path, filters)
+pfd.select_folder("title", default_path)
+
+# icons
+icons_fontawesome.ICON_FA_FOLDER_OPEN
+icons_fontawesome.ICON_FA_SAVE
+
+# runner
+params = hello_imgui.RunnerParams()
+params.callbacks.show_gui = render_func   # per-frame callback
+immapp.run(runner_params=params, add_ons_params=addons)
+```
+
+#### Protocols (`_protocols.py`)
+
+Runtime-checkable protocols gate widget visibility:
+
+- `SupportsRasterScan` : `fix_phase`, `use_fft`, `border`, `max_offset`, `phase_upsample`
+- `SupportsMetadata` : metadata dict access
+- `SupportsROI` : ROI info access
+
+#### Signal/Slot (PyQt6)
+
+`SharedDataModel(QObject)` provides reactive state for suite2p integration:
+
+- signals: `roi_selected`, `iscell_changed`, `iscell_batch_changed`, `data_loaded`, `data_saved`
+- properties: `stat`, `iscell`, `F`, etc. with change detection
+
+#### Key State on PreviewDataWidget
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `image_widget` | `ImageWidget` | fastplotlib widget |
+| `fpath` | `str \| list[str]` | current file path(s) |
+| `shape` | `tuple` | data shape |
+| `nz`, `nc` | `int` | z-planes, channels |
+| `_viewer` | `BaseViewer` | active viewer |
+| `_zstats` | `list[dict]` | `[{mean:[], std:[], snr:[]}]` per graphic |
+| `_zstats_done` | `list[bool]` | completion flags |
+| `_zstats_progress` | `list[float]` | 0.0-1.0 |
+| `_file_dialog` | pfd dialog | current open file dialog |
+| `_folder_dialog` | pfd dialog | current folder dialog |
+
+---
+
+### Metadata Internals
+
+Detailed reference for the metadata extraction and normalization system.
+
+#### Module Map
+
+| File | Purpose |
+|------|---------|
+| `base.py` | core types: `MetadataParameter`, `VoxelSize`, `RoiMode`, parameter registry |
+| `params.py` | alias resolution (`get_param`), voxel size extraction, normalization |
+| `scanimage.py` | stack type detection, z-plane/channel counting, ROI extraction |
+| `io.py` | TIFF metadata I/O, raw ScanImage detection, OME builder |
+| `output.py` | `OutputMetadata` : reactive metadata for subsetted writes |
+| `_filename_parser.py` | regex extraction of experiment info from filenames |
+
+#### Stack Type Detection
+
+`detect_stack_type(metadata)` classifies acquisitions:
+
+```
+channelSave > 2 AND hStackManager.enable → "pollen"  (LBM + piezo calibration)
+channelSave > 2                          → "lbm"     (beamlets as z-planes)
+hStackManager.enable                     → "piezo"   (z-stack scanning)
+else                                     → "single_plane"
+```
+
+Convenience: `is_lbm_stack()`, `is_piezo_stack()`, `is_pollen_stack()`
+
+#### Z-Plane Counting
+
+`get_num_zplanes(metadata)`:
+
+- LBM/pollen: `len(channelSave) // num_color_channels` (beamlets = z-planes)
+- piezo: `hStackManager.numSlices`
+- single_plane: 1
+
+#### Color Channel Detection
+
+`get_num_color_channels(metadata)`:
+
+- counts unique AI sources from `hScan2D.virtualChannelSettings__N.source`
+- AI0 only = 1 channel, AI0 + AI1 = 2 channels
+- fallback: channelSave length
+
+#### Timepoint Computation
+
+`compute_num_timepoints(total_frames, metadata)`:
+
+- LBM/single_plane: `total_frames` (1 frame = 1 timepoint)
+- piezo/pollen: `total_frames // frames_per_volume`
+  - `frames_per_volume = numSlices * framesPerSlice` (or just `numSlices` if log-averaged)
+
+#### Voxel Size Resolution Priority
+
+`get_voxel_size(metadata, dx, dy, dz)` checks in order:
+
+1. user-provided parameters (dx, dy, dz)
+2. canonical keys (dx, dy, dz)
+3. `pixel_resolution` tuple
+4. legacy keys (`umPerPixX/Y/Z`)
+5. OME keys (`PhysicalSizeX/Y/Z`)
+6. ScanImage SI keys (except dz for LBM, which must be user-supplied)
+7. defaults: 1.0 for dx/dy, None for dz
+
+#### Parameter Alias System
+
+Every parameter has one canonical name and multiple aliases. `get_param(meta, name)` resolves any alias to its value:
+
+```python
+meta = {"PhysicalSizeX": 0.5, "frame_rate": 7.5}
+get_param(meta, "dx")  # 0.5 (via PhysicalSizeX alias)
+get_param(meta, "fs")  # 7.5 (via frame_rate alias)
+```
+
+`normalize_metadata(metadata)` adds all aliases to the dict for cross-tool compatibility.
+
+#### Metadata I/O (`io.py`)
+
+**`is_raw_scanimage(file)`**: True if TIFF has `scanimage_metadata` AND no tag 50839 AND no `shaped_metadata`.
+
+**`get_metadata(file, dx, dy, dz)`**: entry point. accepts path, directory, list of paths, or array with `.metadata`.
+
+**`get_metadata_single(file)`**: extraction from a single file:
+
+- non-raw: tries `shaped_metadata[0]`, tag 50839 JSON, first-page description JSON
+- raw ScanImage: parses `scanimage_metadata`, extracts ROI groups, computes `pixel_resolution`
+- fallback: looks for `ops.npy` in directory tree (suite2p)
+
+**`clean_scanimage_metadata(meta)`**: transforms flat `SI.*` keys to nested dict under `si`, strips numpy types, appends derived fields (`stack_type`, `num_zplanes`, `num_color_channels`, `fs`, `dz`, ROI info), calls `normalize_metadata()`.
+
+**`query_tiff_pages(file_path)`**: fast page count from TIFF header (classic v42 and BigTIFF v43) without loading data.
+
+**`_build_ome_metadata(shape, dtype, metadata, dims)`**: OME-NGFF v0.5 with multiscales, coordinate transforms, OMERO rendering, custom sections (scanimage, roi_groups, acquisition, processing, source_files).
+
+#### Other Extractors (`scanimage.py`)
+
+| Function | Returns |
+|----------|---------|
+| `get_frame_rate()` | Hz, from `hRoiManager.scanFrameRate` or `1/scanFramePeriod` |
+| `get_z_step_size()` | microns, from `hStackManager.actualStackZStepSize` (None for LBM) |
+| `get_frames_per_slice()` | from `hStackManager.framesPerSlice` (NOT `logFramesPerSlice`) |
+| `get_log_average_factor()` | `hScan2D.logAverageFactor` |
+| `get_roi_info()` | `{num_mrois, roi: (w,h), fov: (total_w, h)}` |
+| `get_stack_info()` | aggregates all of the above |
+| `extract_roi_slices()` | pixel boundaries per ROI accounting for fly-to lines |
+
+#### Filename Parser (`_filename_parser.py`)
+
+`parse_filename_metadata(filename)` extracts experiment info via regex:
+
+- `calcium_indicator`: GCaMP6f, jGCaMP8m, Cal-520, OGB-1, Fluo-4, RCaMP, etc.
+- `animal_model`: Mouse, Rat, Zebrafish
+- `brain_region`: V1, S1, M1, A1, OB, PBN, NTS, ACC, PFC, HPC
+- `transgenic_line`: Cux2, Emx1, CaMKII, Thy1, PV, SST, VIP, etc.
+- `induction_method`: AAV, Transgenic, Acute injection
+
+#### End-to-End Metadata Flow
+
+Reading raw ScanImage TIFF:
+
+```
+get_metadata(path, dz=5.0)
+  → is_raw_scanimage() = True
+  → get_metadata_single()
+      → parse tifffile.scanimage_metadata
+      → extract ROI groups, pixel_resolution
+  → clean_scanimage_metadata()
+      → nest SI.* keys under 'si'
+      → detect_stack_type() → "lbm"
+      → get_num_zplanes() → 28
+      → get_num_color_channels() → 1
+      → get_frame_rate() → 9.6 Hz
+      → get_roi_info() → {num_mrois: 2, roi: (256,512), fov: (512,512)}
+  → normalize_resolution(dz=5.0)
+      → adds dx/dy/dz + all aliases
+  → return dict
+```
+
+Writing subsetted data:
+
+```
+OutputMetadata(source_meta, (100,28,512,512), ("T","Z","Y","X"),
+               selections={"Z": [0,2,4,6]})
+  → dz = 5.0 * 2 = 10.0  (every other z-plane)
+  → num_zplanes = 4
+  → fs = 9.6 (unchanged, T not subsetted)
+  → to_imagej((100,4,512,512))
+      → {"images":204800, "frames":100, "slices":4, "spacing":10.0, ...}
+```

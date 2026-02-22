@@ -73,21 +73,17 @@ def load_new_data(parent: Any, path: str):
             old_ndim = len(parent.shape)
         new_ndim = new_data.ndim
 
-        # Reset window functions on processors if dimensionality changes
-        # This prevents tuple index out of range errors when going 3D->4D or vice versa
+        # Reset window functions if dimensionality changes
         if old_ndim != new_ndim:
-            for proc in parent.image_widget._image_processors:
-                proc.window_funcs = None
-                proc.window_sizes = None
-                proc.window_order = None
+            parent.image_widget.window_funcs = None
 
         # iw-array API: use data indexer for replacing data
         # data[0] = new_array triggers _reset_dimensions() automatically
         parent.image_widget.data[0] = new_data
 
-        # reset indices to start of data using public API
-        if parent.image_widget.n_sliders > 0:
-            parent.image_widget.indices = [0] * parent.image_widget.n_sliders
+        # reset indices to start of data
+        if parent.image_widget.slider_dims:
+            parent.image_widget.current_index = {d: 0 for d in parent.image_widget.slider_dims}
 
         # Update internal state
         parent.fpath = path

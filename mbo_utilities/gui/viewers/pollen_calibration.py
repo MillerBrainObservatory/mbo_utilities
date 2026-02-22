@@ -548,8 +548,8 @@ class PollenCalibrationViewer(BaseViewer):
         self.image_widget.data[0] = self._max_projections
 
         # Reset to first channel
-        if self.image_widget.n_sliders > 0:
-            self.image_widget.indices = [0]
+        if self.image_widget.slider_dims:
+            self.image_widget.current_index = {d: 0 for d in self.image_widget.slider_dims}
 
         # Show first beamlet
         self._show_beamlet(0)
@@ -671,8 +671,9 @@ class PollenCalibrationViewer(BaseViewer):
         # Navigate to this channel using ImageWidget indices
         # _max_projections is (C, Y, X) with 1 slider for C
         try:
-            if self.image_widget.n_sliders > 0:
-                self.image_widget.indices = [channel]
+            if self.image_widget.slider_dims:
+                first_dim = self.image_widget.slider_dims[0]
+                self.image_widget.current_index = {first_dim: channel}
 
         except Exception as e:
             self.logger.exception(f"Failed to update display: {e}")
@@ -756,8 +757,8 @@ class PollenCalibrationViewer(BaseViewer):
             self.image_widget.data[0] = arr
 
             # Reset indices to start
-            if self.image_widget.n_sliders > 0:
-                self.image_widget.indices = [0] * self.image_widget.n_sliders
+            if self.image_widget.slider_dims:
+                self.image_widget.current_index = {d: 0 for d in self.image_widget.slider_dims}
 
             self.image_widget.figure[0, 0].auto_scale()
             self.logger.info("Restored original data view")

@@ -736,6 +736,51 @@ wheels = [
 ]
 
 [[package]]
+name = "fastplotlib"
+source = { directory = "../fastplotlib" }
+dependencies = [
+    { name = "cmap" },
+    { name = "numpy" },
+    { name = "pygfx" },
+    { name = "wgpu" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "black", marker = "extra == 'tests'" },
+    { name = "cmap", specifier = ">=0.1.3" },
+    { name = "fastplotlib", extras = ["docs", "notebook", "tests", "imgui"], marker = "extra == 'dev'" },
+    { name = "glfw", marker = "extra == 'docs'" },
+    { name = "imageio", extras = ["ffmpeg"], marker = "extra == 'docs'" },
+    { name = "imageio", extras = ["ffmpeg"], marker = "extra == 'tests'" },
+    { name = "ipywidgets", marker = "extra == 'docs'", specifier = ">=8.0.0,<9" },
+    { name = "ipywidgets", marker = "extra == 'notebook'", specifier = ">=8.0.0,<9" },
+    { name = "jupyter-rfb", marker = "extra == 'notebook'", specifier = ">=0.5.1" },
+    { name = "jupyterlab", marker = "extra == 'notebook'" },
+    { name = "matplotlib", marker = "extra == 'docs'" },
+    { name = "nbmake", marker = "extra == 'tests'" },
+    { name = "numpy", specifier = ">=1.23.0" },
+    { name = "ome-zarr", marker = "extra == 'docs'" },
+    { name = "ome-zarr", marker = "extra == 'tests'" },
+    { name = "pandoc", marker = "extra == 'docs'" },
+    { name = "pydata-sphinx-theme", marker = "extra == 'docs'" },
+    { name = "pygfx", specifier = "==0.15.3" },
+    { name = "pytest", marker = "extra == 'tests'" },
+    { name = "scikit-learn", marker = "extra == 'docs'" },
+    { name = "scikit-learn", marker = "extra == 'tests'" },
+    { name = "scipy", marker = "extra == 'tests'" },
+    { name = "sidecar", marker = "extra == 'notebook'" },
+    { name = "sphinx", marker = "extra == 'docs'" },
+    { name = "sphinx-copybutton", marker = "extra == 'docs'" },
+    { name = "sphinx-design", marker = "extra == 'docs'" },
+    { name = "sphinx-gallery", marker = "extra == 'docs'" },
+    { name = "tqdm", marker = "extra == 'tests'" },
+    { name = "wgpu" },
+    { name = "wgpu", extras = ["imgui"], marker = "extra == 'imgui'" },
+]
+provides-extras = ["dev", "docs", "imgui", "notebook", "tests"]
+
+[[package]]
 name = "fastremap"
 version = "1.17.7"
 source = { registry = "https://pypi.org/simple" }
@@ -1131,22 +1176,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a7/84/62473fb57d61e31fef6e36d64a179c8781605429fd927b5dd608c997be31/imagesize-1.4.1.tar.gz", hash = "sha256:69150444affb9cb0d5cc5a92b3676f0b2fb7cd9ae39e947a5e11a36b4497cd4a", size = 1280026, upload-time = "2022-07-01T12:21:05.687Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ff/62/85c4c919272577931d407be5ba5d71c20f0b616d31a0befe0ae45bb79abd/imagesize-1.4.1-py2.py3-none-any.whl", hash = "sha256:0d8d18d08f840c19d0ee7ca1fd82490fdc3729b7ac93f49870406ddde8ef8d8b", size = 8769, upload-time = "2022-07-01T12:21:02.467Z" },
-]
-
-[[package]]
-name = "imgui-bundle"
-version = "1.92.5"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/f9/8290be29e2fa5c3d7b431bd8c8144726a20ac82908cfb7fa8605911c6793/imgui_bundle-1.92.5.tar.gz", hash = "sha256:b11826b3805cff6064b8aca98def827ff36489128eac8d4f7859a3e155f6aefd", size = 41348284, upload-time = "2025-11-25T22:56:16.306Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/7e/2ac14f99a8464ffadc753b21047ef9932d2c74b4a3706dcaecaeff4fdc3e/imgui_bundle-1.92.5-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:6add8e3fd87e46e763c3ef471ff51f9ee31f59c82c4d97847945f339860d21f1", size = 12531659, upload-time = "2025-11-25T22:55:38.75Z" },
-    { url = "https://files.pythonhosted.org/packages/2b/12/1b05988231ccf5bcf1d391a9d0a29acd18b871ad24a7fe2c3ca9ca54c83a/imgui_bundle-1.92.5-cp312-cp312-macosx_14_0_x86_64.whl", hash = "sha256:b5f8d29a77cd0611aa4ccd445858fb255f0b8b34dbce0ea85a94dfd67f434607", size = 13230004, upload-time = "2025-11-25T22:55:40.98Z" },
-    { url = "https://files.pythonhosted.org/packages/19/2f/7b0bd3074fb906d668bc733641d7ff24729ebeeab7bbfbaeb4d6b5052890/imgui_bundle-1.92.5-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7d7dc7f0c090fc27cfdc5b055a235864f8d948d8de64dba42fdfd100b017d728", size = 22083759, upload-time = "2025-11-25T22:55:43.57Z" },
-    { url = "https://files.pythonhosted.org/packages/02/4c/c3f4f603c77fe696727c66b1c891bad477d2bf6dd615006eabf922ed03d6/imgui_bundle-1.92.5-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:adabaf188c44f03028fff08e28f0f09a09aeea0707665340b196a3d688136560", size = 23791248, upload-time = "2025-11-25T22:55:45.979Z" },
-    { url = "https://files.pythonhosted.org/packages/0b/e1/ed6c166a42c71d1da03a47e93441e2cecc7405d377be1a54c4e87d42277c/imgui_bundle-1.92.5-cp312-cp312-win_amd64.whl", hash = "sha256:6012d907ccded2a0abacd4f361eb0b3ee4a4d37ab41be8cf05eb6f27d8ffe679", size = 34875065, upload-time = "2025-11-25T22:55:48.834Z" },
 ]
 
 [[package]]
@@ -1789,21 +1818,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mbo-fastplotlib"
-version = "0.7.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cmap" },
-    { name = "numpy" },
-    { name = "pygfx" },
-    { name = "wgpu" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d9/f4/8b5e59a7efa88f703f0f898f3e64e73bdb98a78c9e2b31c384c1723b0070/mbo_fastplotlib-0.7.3.tar.gz", hash = "sha256:9ee6d2a4e65b11594ae1a31e966e79712f1720c3911fcb10b4a84f7d22af59fc", size = 169728, upload-time = "2025-12-17T15:49:07.08Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d3/e3/6d559cf03942af1931e00120e4b4dd68bac6ff8c03f33d04111bdf253579/mbo_fastplotlib-0.7.3-py3-none-any.whl", hash = "sha256:d1c6aa29b967ac2a628853dc11371cdc0248ad2fd6b66e7718745f7818b2f16d", size = 204649, upload-time = "2025-12-17T15:49:05.895Z" },
-]
-
-[[package]]
 name = "mbo-suite3d"
 version = "0.0.7"
 source = { registry = "https://pypi.org/simple" }
@@ -1846,36 +1860,32 @@ version = "2.6.3"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },
+    { name = "fastplotlib" },
     { name = "ffmpeg-python" },
     { name = "glfw", marker = "sys_platform != 'linux'" },
     { name = "h5py" },
     { name = "icecream" },
     { name = "imageio", extra = ["ffmpeg"] },
-    { name = "imgui-bundle" },
     { name = "ipykernel" },
     { name = "ipywidgets" },
     { name = "jupyter-rfb" },
     { name = "jupyterlab" },
     { name = "llvmlite" },
     { name = "matplotlib" },
-    { name = "mbo-fastplotlib" },
     { name = "mkl-fft" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
     { name = "pandas" },
-    { name = "pygfx" },
     { name = "pyqt6" },
     { name = "pyqt6-sip" },
     { name = "pyqtgraph" },
     { name = "qtpy" },
-    { name = "rendercanvas" },
     { name = "scikit-image" },
     { name = "scipy" },
     { name = "seaborn" },
     { name = "setuptools" },
     { name = "tifffile" },
     { name = "tqdm" },
-    { name = "wgpu" },
     { name = "zarr" },
 ]
 
@@ -1890,7 +1900,6 @@ all = [
     { name = "nbsphinx" },
     { name = "numba" },
     { name = "numpydoc" },
-    { name = "pygfx" },
     { name = "rastermap" },
     { name = "setuptools" },
     { name = "sphinx" },
@@ -1917,7 +1926,6 @@ docs = [
     { name = "myst-nb" },
     { name = "nbsphinx" },
     { name = "numpydoc" },
-    { name = "pygfx" },
     { name = "sphinx" },
     { name = "sphinx-autodoc2" },
     { name = "sphinx-book-theme" },
@@ -1982,12 +1990,12 @@ dev = [
 requires-dist = [
     { name = "dask", specifier = ">=2025.3.0" },
     { name = "docutils", marker = "extra == 'docs'", specifier = ">=0.19" },
+    { name = "fastplotlib", directory = "../fastplotlib" },
     { name = "ffmpeg-python" },
     { name = "glfw", marker = "sys_platform != 'linux'" },
     { name = "h5py" },
     { name = "icecream", specifier = ">=2.1.4" },
     { name = "imageio", extras = ["ffmpeg"] },
-    { name = "imgui-bundle", specifier = ">=1.92.5" },
     { name = "ipykernel" },
     { name = "ipykernel", marker = "extra == 'docs'" },
     { name = "ipywidgets", specifier = ">=8.0.0,<9" },
@@ -1997,7 +2005,6 @@ requires-dist = [
     { name = "lbm-suite2p-python", marker = "extra == 'suite2p'", specifier = ">=2.5.4" },
     { name = "llvmlite", specifier = ">=0.43.0" },
     { name = "matplotlib", specifier = ">=3.10.1" },
-    { name = "mbo-fastplotlib", specifier = ">=0.7.3" },
     { name = "mbo-suite3d", marker = "extra == 'suite3d'", specifier = ">=0.0.7" },
     { name = "mbo-utilities", extras = ["processing", "docs"], marker = "extra == 'all'" },
     { name = "mbo-utilities", extras = ["suite2p", "suite3d", "rastermap", "torch"], marker = "extra == 'processing'" },
@@ -2012,15 +2019,12 @@ requires-dist = [
     { name = "numpydoc", marker = "extra == 'docs'" },
     { name = "opencv-python-headless" },
     { name = "pandas" },
-    { name = "pygfx", specifier = ">=0.15.2" },
-    { name = "pygfx", marker = "extra == 'docs'", specifier = ">=0.14.0" },
     { name = "pyklb", marker = "extra == 'isoview'" },
     { name = "pyqt6", specifier = ">=6.7" },
     { name = "pyqt6-sip" },
     { name = "pyqtgraph" },
     { name = "qtpy" },
     { name = "rastermap", marker = "extra == 'rastermap'" },
-    { name = "rendercanvas", specifier = ">=2.4.2,<2.5" },
     { name = "scikit-image" },
     { name = "scipy" },
     { name = "seaborn", specifier = ">=0.13.2" },
@@ -2044,7 +2048,6 @@ requires-dist = [
     { name = "torchvision", marker = "(sys_platform == 'linux' and extra == 'torch') or (sys_platform == 'win32' and extra == 'torch')", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torchvision", marker = "sys_platform != 'linux' and sys_platform != 'win32' and extra == 'torch'" },
     { name = "tqdm" },
-    { name = "wgpu", specifier = ">=0.28.1,<0.29" },
     { name = "zarr", specifier = ">=3.1.3" },
 ]
 provides-extras = ["suite2p", "suite3d", "rastermap", "napari", "isoview", "torch", "processing", "docs", "all"]

@@ -436,21 +436,14 @@ def _create_image_widget(data_array, widget: bool = True):
     else:
         figure_kwargs = {"size": (800, 800)}
 
-    # Determine slider dimension names from array's dims property if available
-    # otherwise fall back to defaults based on ndim
+    # build window_funcs dict for the time dimension
     from mbo_utilities.arrays.features import get_slider_dims
 
     slider_dim_names = get_slider_dims(data_array)
-
-    # window_funcs tuple must match slider_dim_names length
-    if slider_dim_names:
-        n_sliders = len(slider_dim_names)
-        # apply mean to first dim (usually t), None for rest
-        window_funcs = (np.mean,) + (None,) * (n_sliders - 1)
-        window_sizes = (1,) + (None,) * (n_sliders - 1)
+    if slider_dim_names and "t" in slider_dim_names:
+        window_funcs = {"t": (np.mean, 1)}
     else:
         window_funcs = None
-        window_sizes = None
 
     # Handle multi-ROI data (duck typing: check for roi_mode attribute)
     if hasattr(data_array, "roi_mode") and hasattr(data_array, "iter_rois"):
@@ -477,9 +470,7 @@ def _create_image_widget(data_array, widget: bool = True):
         iw = fpl.ImageWidget(
             data=arrays,
             names=names,
-            slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
-            window_sizes=window_sizes,
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": -100, "vmax": 4000},
@@ -487,9 +478,7 @@ def _create_image_widget(data_array, widget: bool = True):
     else:
         iw = fpl.ImageWidget(
             data=data_array,
-            slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
-            window_sizes=window_sizes,
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": -100, "vmax": 4000},

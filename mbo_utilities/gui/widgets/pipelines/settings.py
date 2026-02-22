@@ -1767,9 +1767,8 @@ def run_process(self):
         selected_planes = getattr(self, "_selected_planes", None)
         if not selected_planes:
             # Fallback to current plane
-            names = self.image_widget._slider_dim_names or ()
             try:
-                current_z = self.image_widget.indices["z"] if "z" in names else 0
+                current_z = self.image_widget.current_index.get("z", 0)
             except (IndexError, KeyError):
                 current_z = 0
             selected_planes = {current_z + 1}
@@ -1800,8 +1799,8 @@ def run_process(self):
 
             # determine roi
             num_rois = (
-                len(self.image_widget.graphics)
-                if hasattr(self.image_widget, "graphics")
+                len(self.image_widget.managed_graphics)
+                if hasattr(self.image_widget, "managed_graphics")
                 else 1
             )
             roi = 1 if num_rois > 1 else None
@@ -1958,9 +1957,8 @@ def run_plane_from_data(self, arr_idx, z_plane=None, channel=None, base_out_over
     if z_plane is not None:
         current_z = z_plane
     else:
-        names = self.image_widget._slider_dim_names or ()
         try:
-            current_z = self.image_widget.indices["z"] if "z" in names else 0
+            current_z = self.image_widget.current_index.get("z", 0)
         except (IndexError, KeyError):
             current_z = 0
 
@@ -1979,7 +1977,7 @@ def run_plane_from_data(self, arr_idx, z_plane=None, channel=None, base_out_over
     if not base_out.exists():
         base_out.mkdir(exist_ok=True)
 
-    if len(self.image_widget.graphics) > 1:
+    if len(self.image_widget.managed_graphics) > 1:
         plane_dir = base_out / f"plane{current_z + 1:02d}_roi{arr_idx + 1:02d}"
         roi = arr_idx + 1
         plane = current_z + 1

@@ -32,18 +32,19 @@ dependencies = [
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
 	"glfw ; sys_platform != 'linux'",
-	"pygfx>=0.15.2",
+	# "pygfx>=0.15.2",
 	"jupyter_rfb>=0.5.1",
 	"llvmlite>=0.43.0",
 	"mkl_fft>=2.0.0",
-	"mbo-fastplotlib>=0.7.3",
-	"rendercanvas>=2.4.2,<2.5",
-	"imgui-bundle>=1.92.5",
+	# "mbo-fastplotlib>=0.7.3",
+	# "rendercanvas>=2.4.2,<2.5",
+	# "imgui-bundle>=1.92.5",
 	"pyqt6>=6.7",
 	"pyqt6-sip",
 	"pyqtgraph",
 	"qtpy",
-	"wgpu>=0.28.1,<0.29",
+	# "wgpu>=0.28.1,<0.29",
+	"fastplotlib",
 ]
 
 [project.scripts]
@@ -112,7 +113,7 @@ docs = [
     "sphinxcontrib-bibtex",
     "jupytext",
     "myst_nb",
-    "pygfx>=0.14.0",
+    # "pygfx>=0.14.0",
 ]
 # Everything
 all = ["mbo_utilities[processing,docs]"]
@@ -129,6 +130,7 @@ torch = [
 torchvision = [
   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+fastplotlib = { path = "../fastplotlib" }
 
 [tool.ruff]
 line-length = 88

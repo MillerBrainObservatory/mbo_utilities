@@ -224,7 +224,7 @@ def refresh_zstats(parent: Any):
     if not parent.image_widget:
         return
 
-    # Use num_graphics which matches len(iw.graphics)
+    # Use num_graphics which matches len(iw.managed_graphics)
     n = parent.num_graphics
 
     # Reset z-stats state

@@ -162,21 +162,17 @@ class BaseViewer(ABC):
             new_shape = arr.shape
             n_dims = len(new_shape) - 2  # exclude Y, X
 
-            # update slider dimension names if array has dims property
-            if hasattr(arr, "dims"):
-                from mbo_utilities.arrays.features import get_slider_dims
-                new_slider_dims = get_slider_dims(arr)
-                if new_slider_dims:
-                    self.image_widget._slider_dim_names = new_slider_dims
-
             # clamp current indices to new valid range
-            if self.image_widget.n_sliders > 0:
-                current = list(self.image_widget.indices)
-                for i in range(min(len(current), n_dims)):
-                    max_val = new_shape[i] - 1
-                    if current[i] > max_val:
-                        current[i] = max_val
-                self.image_widget.indices = current[:n_dims]
+            if self.image_widget.slider_dims:
+                current = dict(self.image_widget.current_index)
+                for dim in list(current.keys()):
+                    # find the axis for this dim in the data shape
+                    idx = self.image_widget.slider_dims.index(dim) if dim in self.image_widget.slider_dims else None
+                    if idx is not None and idx < n_dims:
+                        max_val = new_shape[idx] - 1
+                        if current[dim] > max_val:
+                            current[dim] = max_val
+                self.image_widget.current_index = current
         except Exception:
             pass
 
