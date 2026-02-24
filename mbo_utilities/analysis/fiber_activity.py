@@ -1,15 +1,3 @@
-"""
-Fiber activity detection and ROI extraction from timelapse fluorescence images.
-
-This module segments neurite-like structures from a mean projection image,
-tiles the segmented mask into small ROIs, extracts temporal fluorescence
-traces, and filters ROIs by an activity threshold (peak dF above baseline).
-
-Can be used as a library (import and call ``run``) or from the command line::
-
-    python -m mbo_utilities.analysis.fiber_activity image.tif --frame-rate 17.58
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -21,11 +9,6 @@ import numpy as np
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-
-
-# ---------------------------------------------------------------------------
-# Result container
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -55,11 +38,6 @@ class FiberActivityResult:
     binary_mask: NDArray[np.bool_]
     frame_rate: float = 1.0
     _metadata: dict = field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# Core pipeline functions
-# ---------------------------------------------------------------------------
 
 
 def _to_3d(data) -> NDArray:
@@ -318,11 +296,6 @@ def save_results(
     return {"traces": ts_path, "locations": loc_path}
 
 
-# ---------------------------------------------------------------------------
-# Single-plane runner
-# ---------------------------------------------------------------------------
-
-
 def _run_single(
     stack: NDArray,
     *,
@@ -360,11 +333,6 @@ def _run_single(
         binary_mask=mask,
         frame_rate=frame_rate,
     )
-
-
-# ---------------------------------------------------------------------------
-# Main entry-point
-# ---------------------------------------------------------------------------
 
 
 def run(
@@ -471,11 +439,6 @@ def run(
     raise ValueError(
         f"Expected 3-D (T, Y, X) or 4-D (T, Z, Y, X), got {arr.ndim}-D {arr.shape}"
     )
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 def _build_parser() -> argparse.ArgumentParser:
