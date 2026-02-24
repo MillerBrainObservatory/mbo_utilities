@@ -1906,7 +1906,8 @@ def run_process(self):
                             )
                             futures[future] = (z_plane, channel, job_idx)
 
-                        for future in futures:
+                        from concurrent.futures import as_completed
+                        for future in as_completed(futures):
                             z_plane, channel, job_idx = futures[future]
                             try:
                                 future.result()
