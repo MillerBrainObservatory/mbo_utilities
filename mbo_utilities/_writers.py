@@ -494,11 +494,14 @@ def _write_plane(
         if (
             channel_index is not None
             and plane_index is not None
-            and len(data.shape) >= 5
+            and data.ndim >= 5
         ):
             # 5D TCZYX: extract specific channel and z-plane
             chunk = data[start:end, channel_index, plane_index, :, :]
-        elif plane_index is not None and len(data.shape) >= 4:
+        elif plane_index is not None and data.ndim >= 5:
+            # 5D TCZYX but no channel index: extract specific z-plane (keep all channels)
+            chunk = data[start:end, :, plane_index, :, :]
+        elif plane_index is not None and data.ndim >= 4:
             # 4D TZYX: extract specific z-plane
             chunk = data[start:end, plane_index, :, :]
         elif plane_index is not None:
