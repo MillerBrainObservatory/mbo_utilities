@@ -569,7 +569,7 @@ def _run_gui_impl(
         if mode == "Standard Viewer":
             return _launch_standard_viewer(data_in, roi, widget, metadata_only)
         if mode == "Napari":
-            return _launch_napari(data_in)
+            return _launch_napari(data_in, roi)
         if mode == "Cellpose":
             return _launch_cellpose(data_in)
         if mode == "Suite2p":
@@ -605,10 +605,50 @@ def _launch_standard_viewer(data_in, roi, widget, metadata_only):
     return None
 
 
-def _launch_napari(data_in):
+class _NapariArray:
+    """Wrapper that prevents napari from eagerly materializing lazy arrays.
+
+    mbo_utilities lazy arrays define __array__() returning the first frame.
+    Napari calls np.asarray() on the object when added, triggering materialization
+    of just that 2D frame instead of the full ND dataset, breaking the viewer.
+    By not defining __array__, we force napari to use __getitem__ to access slices.
+    """
+    def __init__(self, arr):
+        self._arr = arr
+
+    @property
+    def shape(self):
+        return self._arr.shape
+
+    @property
+    def dtype(self):
+        return self._arr.dtype
+
+    @property
+    def ndim(self):
+        return self._arr.ndim
+
+    def __getitem__(self, key):
+        import numpy as np
+        return np.asarray(self._arr[key])
+
+
+def _launch_napari(data_in, roi=None):
+    from mbo_utilities.log import get as get_logger
+    logger = get_logger("gui.napari")
+
     try:
         import napari
-        from mbo_utilities import imread
+    except ImportError:
+        logger.warning("napari not installed. Please install it using `uv pip install napari pyqt6`")
+        return None
+
+    try:
+        from mbo_utilities.reader import imread
+        from mbo_utilities.arrays import normalize_roi
+        from mbo_utilities.arrays.features._dim_labels import get_dims
+        from mbo_utilities.metadata.output import OutputMetadata
+        from pathlib import Path
 
         viewer = napari.Viewer()
         path_str = str(data_in)
@@ -619,31 +659,77 @@ def _launch_napari(data_in):
             try:
                 viewer.open(path_str, plugin="napari-ome-zarr")
                 loaded = True
-            except Exception:
+            except Exception as e:
                 # OME-Zarr plugin failed, fall back to mbo_utilities
-                pass
+                logger.debug(f"napari-ome-zarr failed: {e}")
 
         if not loaded:
             # Load via mbo_utilities and add as layer
             try:
-                arr = imread(data_in)
-                # For lazy arrays, load a subset or use dask
-                if hasattr(arr, "shape"):
-                    # Add as image layer - napari handles dask/numpy arrays
-                    viewer.add_image(arr, name=Path(path_str).name)
-                    loaded = True
-            except Exception:
-                pass
+                roi = normalize_roi(roi)
+                arr = imread(data_in, roi=roi)
+                dims = get_dims(arr)
+
+                channel_axis = list(dims).index("C") if "C" in dims else None
+
+                scale = None
+                try:
+                    om = OutputMetadata(source=arr.metadata, source_shape=arr.shape, source_dims=dims)
+                    scale = om.to_napari_scale(dims)
+                    if scale:
+                        scale = list(scale)
+                except Exception as e:
+                    logger.debug(f"Failed to build scale: {e}")
+
+                axis_labels = list(dims)
+                if channel_axis is not None:
+                    if scale and len(scale) > channel_axis:
+                        scale.pop(channel_axis)
+                    if len(axis_labels) > channel_axis:
+                        axis_labels.pop(channel_axis)
+
+                layer_name = Path(path_str).stem
+
+                def _add_to_viewer(layer_arr, name):
+                    n_arr = _NapariArray(layer_arr)
+                    kwargs = {"name": name}
+                    if scale:
+                        kwargs["scale"] = tuple(scale)
+                    if channel_axis is not None:
+                        kwargs["channel_axis"] = channel_axis
+
+                    try:
+                        viewer.add_image(n_arr, axis_labels=tuple(axis_labels), **kwargs)
+                    except TypeError:
+                        # Older napari versions
+                        viewer.add_image(n_arr, **kwargs)
+
+                # Handle multi-ROI
+                if hasattr(arr, "roi_mode") and hasattr(arr, "iter_rois"):
+                    import copy
+                    for r in arr.iter_rois():
+                        r_arr = copy.copy(arr)
+                        r_arr.fix_phase = False
+                        r_arr.roi = r
+                        name = f"ROI {r}" if r else layer_name
+                        _add_to_viewer(r_arr, name)
+                else:
+                    _add_to_viewer(arr, layer_name)
+
+                loaded = True
+            except Exception as e:
+                logger.error(f"Failed to load via mbo_utilities: {e}")
 
         if not loaded:
             # Last resort: let napari try to open it directly
-            viewer.open(path_str)
+            try:
+                viewer.open(path_str)
+            except Exception as e:
+                logger.error(f"Failed to open via napari default fallback: {e}")
 
         napari.run()
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Error launching napari: {e}")
 
 
 
