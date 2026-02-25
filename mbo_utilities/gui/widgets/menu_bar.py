@@ -52,6 +52,9 @@ def draw_menu_bar(parent: Any):
                         start_dir = str(get_last_dir("open_folder") or Path.home())
                     parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
                 imgui.separator()
+                if imgui.menu_item("Set Metadata", "", p_selected=False, enabled=True)[0]:
+                    parent._metadata_editor_open = True
+                imgui.separator()
                 # Check if current data supports imwrite
                 can_save = parent.is_mbo_scan
                 if parent.image_widget and parent.image_widget.data:
@@ -84,7 +87,7 @@ def draw_menu_bar(parent: Any):
                         "https://millerbrainobservatory.github.io/mbo_utilities/"
                     )
                 imgui.end_menu()
-            if imgui.begin_menu("Settings", True):
+            if imgui.begin_menu("View", True):
                 imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
                 imgui.separator()
                 imgui.spacing()
@@ -199,7 +202,7 @@ def draw_process_status_indicator(parent: Any):
     imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.15, 0.15, 0.15, 1.0))
     imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(0.9, 0.9, 0.9, 1.0))
 
-    if imgui.button("Metadata (m)"):
+    if imgui.button("Metadata Viewer (m)"):
         parent.show_metadata_viewer = not parent.show_metadata_viewer
 
     imgui.pop_style_color(4)

@@ -21,6 +21,7 @@ from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities.gui._imgui_helpers import set_tooltip, checkbox_with_tooltip, draw_checkbox_grid
 from mbo_utilities.gui._availability import HAS_SUITE3D
 from mbo_utilities.gui._selection_ui import draw_selection_table
+from mbo_utilities.gui._metadata_editor import _check_missing_metadata
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
 import contextlib
@@ -203,8 +204,7 @@ def draw_saveas_popup(parent: Any):
         # Options popup (opened by button in _draw_save_button)
         _draw_options_popup(parent)
 
-        # Metadata popup (opened by button in _draw_save_button)
-        _draw_metadata_popup(parent)
+        # Metadata popup is now drawn globally in preview_data.py
 
         imgui.end_popup()
 
@@ -437,270 +437,6 @@ def _draw_options_popup(parent: Any):
                             imgui.set_item_default_focus()
                     imgui.end_combo()
 
-        imgui.spacing()
-        if imgui.button("Close", imgui.ImVec2(80, 0)):
-            imgui.close_current_popup()
-
-        imgui.end_popup()
-
-
-def _get_suggested_metadata(parent: Any) -> list:
-    """Get suggested metadata fields from array."""
-    try:
-        current_data = parent.image_widget.data[0]
-    except (IndexError, AttributeError):
-        return []
-
-    fields = []
-
-    # get array-specific suggested fields (e.g., from LBMArray)
-    if current_data and hasattr(current_data, "get_suggested_metadata"):
-        fields.extend(current_data.get_suggested_metadata())
-    # fallback to old name for backwards compat
-    elif current_data and hasattr(current_data, "get_required_metadata"):
-        fields.extend(current_data.get_required_metadata())
-
-    return fields
-
-
-def _check_missing_metadata(parent: Any) -> list:
-    """Check for missing suggested metadata fields."""
-    fields = _get_suggested_metadata(parent)
-
-    missing = []
-    for field in fields:
-        canonical = field["canonical"]
-        custom_val = parent._saveas_custom_metadata.get(canonical)
-        source_val = field.get("value")
-        if custom_val is None and source_val is None:
-            missing.append(field)
-
-    return missing
-
-
-def _build_suggested_fields(parent: Any) -> list[dict]:
-    """Build the complete list of suggested metadata fields."""
-    from mbo_utilities.metadata import parse_filename_metadata, get_filename_suggestions
-
-    # get array data
-    try:
-        current_data = parent.image_widget.data[0]
-    except (IndexError, AttributeError):
-        current_data = None
-
-    # get array-specific suggested fields
-    suggested_fields = _get_suggested_metadata(parent)
-    existing_canonicals = {f["canonical"] for f in suggested_fields}
-
-    # add z-step if not already provided
-    z_step_canonicals = ("dz", "z_step_um", "axial_step_um")
-    if not any(c in existing_canonicals for c in z_step_canonicals):
-        z_step_field = {
-            "canonical": "dz",
-            "label": "Z Step",
-            "unit": "\u03bcm",
-            "dtype": float,
-            "description": "Distance between Z-planes in micrometers.",
-        }
-        if current_data and hasattr(current_data, "metadata"):
-            meta = current_data.metadata
-            if isinstance(meta, dict):
-                val = meta.get("dz") or meta.get("z_step_um") or meta.get("axial_step_um")
-                if val:
-                    z_step_field["value"] = val
-        suggested_fields.append(z_step_field)
-        existing_canonicals.add("dz")
-
-    # parse filename for auto-detected metadata
-    filename_meta = None
-    if hasattr(parent, "fpath") and parent.fpath:
-        fpath = parent.fpath[0] if isinstance(parent.fpath, list) else parent.fpath
-        if fpath:
-            filename_meta = parse_filename_metadata(str(fpath))
-
-    # add user-provided metadata fields from standard suggestions
-    user_fields = get_filename_suggestions()
-    for canonical, field_def in user_fields.items():
-        if canonical in existing_canonicals:
-            continue
-
-        field = dict(field_def)
-        # check if value detected from filename
-        if filename_meta:
-            detected_val = getattr(filename_meta, canonical, None)
-            if detected_val:
-                field["value"] = detected_val
-                field["detected"] = True  # mark as auto-detected
-
-        # check if value in array metadata
-        if current_data and hasattr(current_data, "metadata"):
-            meta = current_data.metadata
-            if isinstance(meta, dict) and canonical in meta:
-                field["value"] = meta[canonical]
-
-        suggested_fields.append(field)
-        existing_canonicals.add(canonical)
-
-    return suggested_fields
-
-
-def _draw_metadata_popup(parent: Any):
-    """Draw the metadata popup for editing metadata fields."""
-    if not hasattr(parent, "_saveas_metadata_open"):
-        parent._saveas_metadata_open = False
-
-    if parent._saveas_metadata_open:
-        imgui.open_popup("Metadata")
-        parent._saveas_metadata_open = False
-
-    imgui.set_next_window_size(imgui.ImVec2(420, 400), imgui.Cond_.first_use_ever)
-    if imgui.begin_popup("Metadata"):
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Metadata")
-        imgui.dummy(imgui.ImVec2(0, 5))
-
-        # get array data
-        try:
-            current_data = parent.image_widget.data[0]
-        except (IndexError, AttributeError):
-            current_data = None
-
-        # build suggested fields (includes filename detection)
-        suggested_fields = _build_suggested_fields(parent)
-
-        # draw suggested fields in a table
-        if suggested_fields:
-            table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
-            if imgui.begin_table("suggested_meta", 4, table_flags):
-                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(7))
-                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(10))
-                imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(8))
-                imgui.table_setup_column("btn", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
-
-                for field in suggested_fields:
-                    canonical = field["canonical"]
-                    label = field["label"]
-                    unit = field.get("unit", "")
-                    dtype = field.get("dtype", str)
-                    desc = field.get("description", "")
-                    examples = field.get("examples", [])
-                    detected = field.get("detected", False)
-
-                    # get current value (custom overrides source)
-                    custom_val = parent._saveas_custom_metadata.get(canonical)
-                    source_val = field.get("value")
-                    value = custom_val if custom_val is not None else source_val
-                    is_set = value is not None
-
-                    imgui.table_next_row()
-
-                    # label column
-                    imgui.table_next_column()
-                    if is_set:
-                        color = imgui.ImVec4(0.5, 0.8, 0.5, 1.0)
-                    else:
-                        color = imgui.ImVec4(0.6, 0.6, 0.6, 1.0)
-                    imgui.text_colored(color, label)
-                    if imgui.is_item_hovered():
-                        tooltip = desc
-                        if examples:
-                            tooltip += f"\n\nExamples: {', '.join(examples[:5])}"
-                        imgui.set_tooltip(tooltip)
-
-                    # value column
-                    imgui.table_next_column()
-                    if is_set:
-                        val_str = f"{value} {unit}".strip()
-                        if detected and custom_val is None:
-                            # show detected values in cyan
-                            imgui.text_colored(imgui.ImVec4(0.4, 0.8, 0.9, 1.0), val_str)
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip("Detected from filename")
-                        else:
-                            imgui.text_colored(imgui.ImVec4(0.5, 0.8, 0.5, 1.0), val_str)
-                    else:
-                        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "-")
-
-                    # input column
-                    imgui.table_next_column()
-                    input_key = f"_meta_input_{canonical}"
-                    if not hasattr(parent, input_key):
-                        setattr(parent, input_key, "")
-
-                    imgui.set_next_item_width(hello_imgui.em_size(7.5))
-                    flags = imgui.InputTextFlags_.chars_decimal if dtype in (float, int) else 0
-                    _, new_val = imgui.input_text(f"##{canonical}", getattr(parent, input_key), flags=flags)
-                    setattr(parent, input_key, new_val)
-                    if imgui.is_item_hovered():
-                        tip = "Type a value and click Set to save"
-                        if dtype == str:
-                            tip += " (text)"
-                        elif dtype == float:
-                            tip += " (number)"
-                        imgui.set_tooltip(tip)
-
-                    # set button column
-                    imgui.table_next_column()
-                    if imgui.small_button(f"Set##{canonical}"):
-                        input_val = getattr(parent, input_key).strip()
-                        if input_val:
-                            try:
-                                parsed = dtype(input_val)
-                                parent._saveas_custom_metadata[canonical] = parsed
-                                if current_data and hasattr(current_data, "metadata"):
-                                    if isinstance(current_data.metadata, dict):
-                                        current_data.metadata[canonical] = parsed
-                                setattr(parent, input_key, "")
-                            except (ValueError, TypeError):
-                                pass
-
-                imgui.end_table()
-
-            imgui.spacing()
-
-        # show existing custom entries as removable tags
-        suggested_keys = {f["canonical"] for f in suggested_fields}
-        custom_entries = [(k, v) for k, v in parent._saveas_custom_metadata.items() if k not in suggested_keys]
-
-        if custom_entries:
-            imgui.dummy(imgui.ImVec2(0, 2))
-            to_remove = None
-            for key, value in custom_entries:
-                imgui.push_id(f"custom_{key}")
-                imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.25, 0.3, 1.0))
-                imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.35, 0.4, 1.0))
-                tag_text = f"{key}={value}"
-                if imgui.small_button(f"{tag_text}  \u00d7"):
-                    to_remove = key
-                imgui.pop_style_color(2)
-                imgui.same_line()
-                imgui.pop_id()
-            if to_remove:
-                del parent._saveas_custom_metadata[to_remove]
-            imgui.new_line()
-
-        # add new custom entry row
-        imgui.dummy(imgui.ImVec2(0, 2))
-        imgui.set_next_item_width(hello_imgui.em_size(8))
-        _, parent._saveas_custom_key = imgui.input_text("##key", parent._saveas_custom_key)
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Custom key name")
-        imgui.same_line()
-        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "=")
-        imgui.same_line()
-        imgui.set_next_item_width(hello_imgui.em_size(8))
-        _, parent._saveas_custom_value = imgui.input_text("##val", parent._saveas_custom_value)
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Custom value (auto-detects number vs text)")
-        imgui.same_line()
-        if imgui.button("+", imgui.ImVec2(hello_imgui.em_size(2), 0)) and parent._saveas_custom_key.strip():
-            val = parent._saveas_custom_value
-            with contextlib.suppress(ValueError):
-                val = float(val) if "." in val else int(val)
-            parent._saveas_custom_metadata[parent._saveas_custom_key.strip()] = val
-            parent._saveas_custom_key = ""
-            parent._saveas_custom_value = ""
-
-        imgui.spacing()
         imgui.spacing()
         if imgui.button("Close", imgui.ImVec2(80, 0)):
             imgui.close_current_popup()
@@ -1100,7 +836,7 @@ def _draw_save_button(parent: Any):
                     frames = [i + 1 for i in final_indices_0]
 
                 # Build metadata overrides dict from custom metadata
-                metadata_overrides = dict(parent._saveas_custom_metadata)
+                metadata_overrides = dict(getattr(parent, "_custom_metadata", {}))
 
                 # add timepoint selection metadata (include/exclude info)
                 if tp_parsed:
@@ -1243,21 +979,19 @@ def _draw_save_button(parent: Any):
 
     imgui.same_line()
 
-    # metadata button - yellow if missing required fields
-    if missing_fields:
-        # yellow/warning style for button
-        imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.7, 0.6, 0.1, 1.0))
-        imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.8, 0.7, 0.2, 1.0))
-        imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.6, 0.5, 0.1, 1.0))
-        if imgui.button("Metadata", imgui.ImVec2(80, 0)):
-            parent._saveas_metadata_open = True
-        imgui.pop_style_color(3)
-        if imgui.is_item_hovered():
+    # metadata button - deprecation styling
+    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.6, 0.5, 0.2, 1.0))
+    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.7, 0.6, 0.3, 1.0))
+    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.5, 0.4, 0.1, 1.0))
+    if imgui.button("Metadata", imgui.ImVec2(80, 0)):
+        parent._metadata_editor_open = True
+    imgui.pop_style_color(3)
+    if imgui.is_item_hovered():
+        tip = "This menu is deprecated. You can use it for now to set metadata, but in the future use File -> Set Metadata."
+        if missing_fields:
             missing_names = ", ".join(f["label"] for f in missing_fields)
-            imgui.set_tooltip(f"Missing: {missing_names}")
-    else:
-        if imgui.button("Metadata", imgui.ImVec2(80, 0)):
-            parent._saveas_metadata_open = True
+            tip = f"Missing: {missing_names}\n\n{tip}"
+        imgui.set_tooltip(tip)
 
     imgui.same_line()
     if imgui.button("Options", imgui.ImVec2(80, 0)):
