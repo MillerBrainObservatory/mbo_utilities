@@ -428,8 +428,8 @@ dirs = get_mbo_dirs()
 # {
 #     "base": Path("~/mbo"),
 #     "imgui": Path("~/mbo/imgui"),
-#     "cache": Path("~/mbo/cache"),
-#     "logs": Path("~/mbo/logs"),
+#     "cache": Path("~/.mbo/cache"),
+#     "logs": Path("~/.mbo/logs"),
 #     "assets": Path("~/mbo/imgui/assets"),
 #     "settings": Path("~/mbo/imgui/assets/app_settings"),
 #     "data": Path("~/mbo/data"),
@@ -441,6 +441,6 @@ dirs = get_mbo_dirs()
 |-----------|---------|
 | `~/mbo/` | Root directory |
 | `~/mbo/settings/` | Preferences JSON |
-| `~/mbo/cache/` | Temporary cached data |
-| `~/mbo/logs/` | Application logs |
+| `~/.mbo/cache/` | Temporary cached data |
+| `~/.mbo/logs/` | Application logs |
 | `~/mbo/data/` | Sample/user data |

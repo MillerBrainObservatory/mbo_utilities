@@ -57,7 +57,7 @@ class ProcessInfo:
     def update_from_sidecar(self, verbose=False):
         """Read progress_{uuid}.json (preferred) or progress_{pid}.json."""
         # Assume log dir is standard
-        log_dir = Path.home() / "mbo" / "logs"
+        log_dir = Path.home() / ".mbo" / "logs"
 
         uuid = self.args.get("_uuid") if self.args else None
 
@@ -197,7 +197,7 @@ class ProcessManager:
     even after gui restart.
     """
 
-    PROCESS_FILE = Path.home() / "mbo" / "cache" / "running_processes.json"
+    PROCESS_FILE = Path.home() / ".mbo" / "cache" / "running_processes.json"
 
     def __init__(self):
         self._processes: dict[int, ProcessInfo] = {}
@@ -334,6 +334,9 @@ class ProcessManager:
                     stderr=f_out,
                 )
 
+            # Close file handle in parent process, subprocess still owns duped copy
+            f_out.close()
+
             # track the process
             info = ProcessInfo(
                 pid=proc.pid,
@@ -344,8 +347,6 @@ class ProcessManager:
                 args=args,
             )
             self._processes[proc.pid] = info
-            self._save()
-
             self._save()
 
             logger.info(f"Spawned background process {proc.pid}: {description}")

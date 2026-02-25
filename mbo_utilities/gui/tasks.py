@@ -112,7 +112,7 @@ class TaskMonitor:
         # Actually, ProcessManager expects to just read info.
         # Let's write to a standard location that ProcessManager knows about.
         # Standard: ~/.mbo/logs/progress_{pid}.json
-        self.log_dir = Path.home() / "mbo" / "logs"
+        self.log_dir = Path.home() / ".mbo" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         if self.uuid:
             self.progress_file = self.log_dir / f"progress_{self.uuid}.json"
