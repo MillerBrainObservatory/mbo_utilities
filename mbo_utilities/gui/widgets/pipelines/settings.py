@@ -271,7 +271,6 @@ class Suite2pSettings:
     dff_smooth_window: int = 0  # Smooth ΔF/F trace (0 = disabled)
 
     # output settings
-    preclassify: float = 0.0  # apply classifier before extraction (0.0 = keep all)
     save_nwb: bool = False
     save_mat: bool = False  # Save results in Fall.mat
     combined: bool = True  # Combine results across planes
@@ -346,11 +345,6 @@ class Suite2pSettings:
     win_baseline: float = 60.0  # Window for maximin filter (seconds)
     sig_baseline: float = 10.0  # Gaussian filter width (seconds)
     prctile_baseline: float = 8.0  # Percentile for constant_percentile baseline
-
-    # classification settings
-    soma_crop: bool = True  # crop dendrites for classification stats
-    use_builtin_classifier: bool = False  # Use built-in classifier
-    classifier_path: str = ""  # Path to custom classifier
 
     # channel 2 settings
     chan2_file: str = ""  # path to channel 2 data file
@@ -1275,43 +1269,6 @@ def _draw_section_suite2p_content(self):
         )
         set_tooltip("Percentile of Lambda used for neuropil exclusion.")
 
-    # --- Classification ---
-    def draw_classification_settings():
-        _, self.s2p.soma_crop = imgui.checkbox("Soma Crop", self.s2p.soma_crop)
-        set_tooltip("Crop dendrites for soma classification.")
-
-        imgui.spacing()
-        imgui.text("Classifier Path:")
-        path_display = (
-            self.s2p.classifier_path if self.s2p.classifier_path else "(none)"
-        )
-        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x - 80)
-        imgui.text(path_display)
-        imgui.pop_text_wrap_pos()
-        imgui.same_line()
-        if imgui.button("Browse##classifier"):
-            default_dir = (
-                str(Path(self.s2p.classifier_path).parent)
-                if self.s2p.classifier_path
-                else str(Path.home())
-            )
-            self._classifier_dialog = pfd.open_file(
-                "Select classifier file",
-                default_dir,
-                ["Classifier files", "*.npy *.pkl *.pickle", "All files", "*"],
-            )
-        set_tooltip("Select custom classifier file (e.g., .npy or .pkl)")
-
-        # handle file dialog result
-        if hasattr(self, "_classifier_dialog") and self._classifier_dialog is not None:
-            if self._classifier_dialog.ready():
-                result = self._classifier_dialog.result()
-                if result:
-                    self.s2p.classifier_path = (
-                        result[0] if isinstance(result, list) else result
-                    )
-                self._classifier_dialog = None
-
     # --- Spike Deconvolution ---
     def draw_spike_deconv_settings():
         imgui.set_next_item_width(INPUT_WIDTH)
@@ -1359,11 +1316,6 @@ def _draw_section_suite2p_content(self):
 
     # --- Output Settings ---
     def draw_output_settings():
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.preclassify = imgui.input_float(
-            "Preclassify Threshold", self.s2p.preclassify
-        )
-        set_tooltip("Probability threshold to apply classifier before extraction.")
         _, self.s2p.save_nwb = imgui.checkbox("Save NWB", self.s2p.save_nwb)
         _, self.s2p.save_mat = imgui.checkbox("Save MATLAB File", self.s2p.save_mat)
         set_tooltip("Export results to Fall.mat for MATLAB analysis.")
@@ -1463,21 +1415,6 @@ def _draw_section_suite2p_content(self):
             imgui.open_popup("Signal Extraction##extract_settings")
         set_tooltip("Configure signal extraction parameters")
 
-        # --- Classification row ---
-        imgui.table_next_row()
-        imgui.table_next_column()
-        _, self.s2p.use_builtin_classifier = imgui.checkbox(
-            "##classify_cb", self.s2p.use_builtin_classifier
-        )
-        set_tooltip("Enable/disable ROI classification")
-        imgui.table_next_column()
-        imgui.text("Classification")
-        imgui.table_next_column()
-        if imgui.button("Settings##classify"):
-            _popup_states["classify_settings"] = True
-            imgui.open_popup("Classification##classify_settings")
-        set_tooltip("Configure ROI classification settings")
-
         # --- Spike Deconvolution row (with checkbox) ---
         imgui.table_next_row()
         imgui.table_next_column()
@@ -1569,29 +1506,6 @@ def _draw_section_suite2p_content(self):
                     imgui.separator()
                     if imgui.button("Close##extract", imgui.ImVec2(80, 0)):
                         _popup_states["extract_settings"] = False
-                        imgui.close_current_popup()
-            finally:
-                imgui.end_popup()
-
-        # Classification popup
-        imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
-        opened, visible = imgui.begin_popup_modal(
-            "Classification##classify_settings",
-            p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings
-            | imgui.WindowFlags_.always_auto_resize,
-        )
-        if opened:
-            try:
-                if not visible:
-                    _popup_states["classify_settings"] = False
-                    imgui.close_current_popup()
-                else:
-                    draw_classification_settings()
-                    imgui.spacing()
-                    imgui.separator()
-                    if imgui.button("Close##classify", imgui.ImVec2(80, 0)):
-                        _popup_states["classify_settings"] = False
                         imgui.close_current_popup()
             finally:
                 imgui.end_popup()
@@ -1846,17 +1760,12 @@ def run_process(self):
                     Path(last_savedir) if last_savedir else get_mbo_dirs()["data"]
                 )
 
-            # Handle list of paths
-            if isinstance(self.fpath, (list, tuple)):
-                fpath_str = [str(f) for f in self.fpath]
-            else:
-                fpath_str = str(self.fpath) if self.fpath else ""
-
             # Check if parallel processing is enabled
             use_parallel = getattr(self, "_parallel_processing", False)
             max_jobs = getattr(self, "_max_parallel_jobs", 2)
 
-            # Build list of configuration dicts for each job to completely decouple GUI state
+            # Build list of configuration dicts — one job per (array, channel).
+            # pipeline() handles plane iteration internally.
             jobs = []
             for i, _arr in enumerate(self.image_widget.data):
                 for channel in selected_channels:
@@ -1867,47 +1776,39 @@ def run_process(self):
                     else:
                         base_out = Path(s2p_path)
 
-                    for z_plane in sorted(selected_planes):
-                        current_z = z_plane - 1
+                    if len(self.image_widget.graphics) > 1:
+                        roi = i + 1
+                    else:
+                        roi = None
 
-                        if len(self.image_widget.graphics) > 1:
-                            plane_dir = base_out / f"plane{z_plane:02d}_roi{i + 1:02d}"
-                            roi = i + 1
-                        else:
-                            plane_dir = base_out / f"plane{z_plane:02d}_stitched"
-                            roi = None
+                    config = {
+                        "arr": _arr,
+                        "arr_idx": i,
+                        "channel": channel
+                        if (multi_channel or has_channels)
+                        else None,
+                        "base_out": base_out,
+                        "roi": roi,
+                        "selected_planes": sorted(selected_planes),
+                        "s2p_dict": s2p_dict.copy(),
+                        "target_timepoints": target_timepoints,
+                        "keep_raw": keep_raw,
+                        "keep_reg": keep_reg,
+                        "force_reg": force_reg,
+                        "force_detect": force_detect,
+                        "dff_window_size": dff_window_size,
+                        "dff_percentile": dff_percentile,
+                        "dff_smooth_window": dff_smooth_window,
+                        "fix_phase": fix_phase,
+                        "use_fft": use_fft,
+                        "logger": self.logger,
+                    }
 
-                        config = {
-                            "arr": _arr,
-                            "arr_idx": i,
-                            "z_plane": current_z,
-                            "plane": z_plane,
-                            "channel": channel
-                            if (multi_channel or has_channels)
-                            else None,
-                            "base_out": base_out,
-                            "plane_dir": plane_dir,
-                            "roi": roi,
-                            "s2p_dict": s2p_dict.copy(),
-                            "target_timepoints": target_timepoints,
-                            "fpath": fpath_str,
-                            "keep_raw": keep_raw,
-                            "keep_reg": keep_reg,
-                            "force_reg": force_reg,
-                            "force_detect": force_detect,
-                            "dff_window_size": dff_window_size,
-                            "dff_percentile": dff_percentile,
-                            "dff_smooth_window": dff_smooth_window,
-                            "fix_phase": fix_phase,
-                            "use_fft": use_fft,
-                            "logger": self.logger,
-                        }
+                    # restrict Suite2p to single internal process if using ThreadPoolExecutor
+                    if use_parallel:
+                        config["s2p_dict"]["num_workers"] = 0
 
-                        # Fix Issue 2: restrict Suite2p to single internal process if using ThreadPoolExecutor
-                        if use_parallel:
-                            config["s2p_dict"]["num_workers"] = 0
-
-                        jobs.append(config)
+                    jobs.append(config)
 
             if use_parallel and len(jobs) > 1:
                 # Parallel processing with limited concurrency
@@ -1917,13 +1818,12 @@ def run_process(self):
                     self.logger.info(
                         f"Starting parallel processing with max {max_jobs} concurrent jobs..."
                     )
-                    # Fix Issue 3: track executor via 'self' which can handle gracefully closing out tasks on GUI shutdown
                     executor = ThreadPoolExecutor(max_workers=max_jobs)
                     self._active_executor = executor
                     try:
                         futures = {}
                         for job_idx, config in enumerate(jobs):
-                            future = executor.submit(_run_plane_worker_thread, config)
+                            future = executor.submit(_run_pipeline_worker_thread, config)
                             futures[future] = (config, job_idx)
 
                         from concurrent.futures import as_completed
@@ -1932,7 +1832,7 @@ def run_process(self):
                             config, job_idx = futures[future]
                             try:
                                 future.result()
-                                desc = f"Plane {config['plane']}"
+                                desc = f"planes {config['selected_planes']}"
                                 if config["channel"] is not None:
                                     desc += f" ch{config['channel']}"
                                 self.logger.info(
@@ -1940,7 +1840,7 @@ def run_process(self):
                                 )
                             except Exception as e:
                                 self.logger.exception(
-                                    f"Error processing plane {config['plane']}: {e}"
+                                    f"Error processing job {job_idx}: {e}"
                                 )
                     finally:
                         executor.shutdown(wait=False)
@@ -1951,172 +1851,73 @@ def run_process(self):
                 threading.Thread(target=run_parallel, daemon=True).start()
             else:
                 # Sequential processing in a single background thread
-                def run_all_planes_sequential():
+                def run_all_sequential():
                     for job_idx, config in enumerate(jobs):
-                        desc = f"plane {config['plane']}"
+                        desc = f"planes {config['selected_planes']}"
                         if config["channel"] is not None:
                             desc += f" ch{config['channel']}"
                         self.logger.info(
                             f"Processing {desc} ({job_idx + 1}/{len(jobs)})..."
                         )
                         try:
-                            _run_plane_worker_thread(config)
+                            _run_pipeline_worker_thread(config)
                         except Exception as e:
                             self.logger.exception(f"Error processing {desc}: {e}")
                     self.logger.info("Suite2p processing complete.")
 
-                threading.Thread(target=run_all_planes_sequential, daemon=True).start()
+                threading.Thread(target=run_all_sequential, daemon=True).start()
 
 
-def _run_plane_worker_thread(config):
+def _run_pipeline_worker_thread(config):
     """
-    Decoupled pure worker function for processing planes on a thread.
-    Takes a pre-configured dict of snapshot variables to prevent GUI data racing.
+    Worker that delegates to lbm_suite2p_python.pipeline().
+
+    Takes a pre-configured dict of snapshot variables to prevent GUI data
+    racing.  Unlike the old per-plane worker, this hands the full array
+    (or channel view) to ``pipeline()`` which handles plane iteration,
+    binary writing and skip logic internally.
     """
     if not _check_lsp_available():
         if config["logger"]:
             config["logger"].error("lbm_suite2p_python is not installed.")
         return
 
+    from lbm_suite2p_python import pipeline
+
     arr = config["arr"]
-    arr_idx = config["arr_idx"]
-    current_z = config["z_plane"]
-    plane = config["plane"]
     channel = config["channel"]
     base_out = config["base_out"]
-    plane_dir = config["plane_dir"]
-    roi = config["roi"]
 
-    if not base_out.exists():
-        base_out.mkdir(parents=True, exist_ok=True)
+    base_out.mkdir(parents=True, exist_ok=True)
 
-    ops_path = plane_dir / "ops.npy"
-    lazy_mdata = getattr(arr, "metadata", {}).copy()
+    # Wrap for channel extraction if needed
+    input_data = arr
+    if channel is not None:
+        from mbo_utilities.gui.tasks import _ChannelView
+        import lbm_suite2p_python.utils as _lsp_utils
 
-    Lx = arr.shape[-1]
-    Ly = arr.shape[-2]
-
-    from mbo_utilities.metadata import get_param, get_voxel_size
-
-    vs = get_voxel_size(lazy_mdata)
-
-    md = {
-        "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "num_timepoints": config["target_timepoints"],
-        "num_frames": config["target_timepoints"],
-        "nframes": config["target_timepoints"],
-        "n_frames": config["target_timepoints"],
-        "original_file": config["fpath"],
-        "roi_index": arr_idx,
-        "z_index": current_z,
-        "plane": plane,
-        "Ly": Ly,
-        "Lx": Lx,
-        "fs": get_param(lazy_mdata, "fs", 15.0),
-        "dx": vs.dx,
-        "dy": vs.dy,
-        "dz": vs.dz,
-        "ops_path": str(ops_path),
-        "save_path": str(plane_dir),
-        "raw_file": str((plane_dir / "data_raw.bin").resolve()),
-    }
-
-    from lbm_suite2p_python import default_ops
+        if "_ChannelView" not in _lsp_utils._LAZY_ARRAY_TYPES:
+            _lsp_utils._LAZY_ARRAY_TYPES = _lsp_utils._LAZY_ARRAY_TYPES + (
+                "_ChannelView",
+            )
+        input_data = _ChannelView(arr, channel - 1)
 
     ops = config["s2p_dict"].copy()
-    defaults = default_ops()
-    defaults.update(ops)
-    defaults.update(md)
 
-    defaults["shape"] = (config["target_timepoints"], Ly, Lx)
-    defaults["num_timepoints"] = config["target_timepoints"]
-    defaults["num_frames"] = config["target_timepoints"]
-    defaults["nframes"] = config["target_timepoints"]
-
-    if channel is not None:
-        defaults["functional_chan"] = 1
-        defaults["align_by_chan"] = 1
-
-    lazy_mdata.pop("shape", None)
-    lazy_mdata.pop("num_timepoints", None)
-    lazy_mdata.pop("num_frames", None)
-    lazy_mdata.pop("nframes", None)
-    lazy_mdata.pop("n_frames", None)
-
-    from mbo_utilities.writer import imwrite
-
-    plane_dir.mkdir(parents=True, exist_ok=True)
-
-    # Check if binary already exists and we don't need to re-write
-    raw_bin = plane_dir / "data_raw.bin"
-    ops_on_disk = plane_dir / "ops.npy"
-    skip_binary_write = False
-
-    if not config["force_reg"] and raw_bin.exists() and ops_on_disk.exists():
-        try:
-            existing = np.load(ops_on_disk, allow_pickle=True).item()
-            Ly_ex = existing.get("Ly")
-            Lx_ex = existing.get("Lx")
-            nframes_ex = (
-                existing.get("nframes_chan1")
-                or existing.get("nframes")
-                or existing.get("num_frames")
-            )
-            if (
-                Ly_ex == Ly
-                and Lx_ex == Lx
-                and nframes_ex is not None
-                and nframes_ex > 0
-            ):
-                expected_size = int(nframes_ex) * int(Ly_ex) * int(Lx_ex) * 2  # int16
-                if raw_bin.stat().st_size == expected_size:
-                    skip_binary_write = True
-                    # merge: defaults_fresh < existing (has reg results) < new settings
-                    defaults_fresh = defaults.copy()
-                    defaults = {**defaults_fresh, **existing, **ops, **md}
-                    defaults["shape"] = (config["target_timepoints"], Ly, Lx)
-                    defaults["num_timepoints"] = config["target_timepoints"]
-                    defaults["num_frames"] = config["target_timepoints"]
-                    defaults["nframes"] = config["target_timepoints"]
-                    print(
-                        f"  Skipping binary write, data_raw.bin already valid."
-                    )
-        except Exception:
-            pass  # fall through to normal write
-
-    if not skip_binary_write:
-        imwrite(
-            arr,
-            plane_dir,
-            ext=".bin",
-            overwrite=True,
-            register_z=False,
-            planes=plane,
-            channels=[channel] if channel is not None else None,
-            output_name="data_raw.bin",
-            roi=roi,
-            metadata=defaults,
-            num_frames=config["target_timepoints"],
-            fix_phase=config["fix_phase"],
-            use_fft=config["use_fft"],
-        )
-
-    from lbm_suite2p_python import run_plane
-
-    raw_file = plane_dir / "data_raw.bin"
-
-    config["logger"].info(
-        f"Suite2p settings - roidetect: {defaults.get('roidetect')}, force_detect: {config['force_detect']}"
-    )
-    config["logger"].info(
-        f"Detection params - diameter: {defaults.get('diameter')}, sparse_mode: {defaults.get('sparse_mode')}"
-    )
+    writer_kwargs = {
+        "fix_phase": config["fix_phase"],
+        "use_fft": config["use_fft"],
+    }
+    if config["target_timepoints"] and config["target_timepoints"] > 0:
+        ops["nframes"] = config["target_timepoints"]
+        writer_kwargs["num_frames"] = config["target_timepoints"]
 
     try:
-        run_plane(
-            input_data=raw_file,
-            save_path=plane_dir,
-            ops=defaults,
+        pipeline(
+            input_data,
+            save_path=str(base_out),
+            ops=ops,
+            planes=config["selected_planes"],
             keep_raw=config["keep_raw"],
             keep_reg=config["keep_reg"],
             force_reg=config["force_reg"],
@@ -2126,19 +1927,11 @@ def _run_plane_worker_thread(config):
             dff_smooth_window=config["dff_smooth_window"]
             if config["dff_smooth_window"] > 0
             else None,
+            accept_all_cells=True,
+            writer_kwargs=writer_kwargs,
         )
         config["logger"].info(
-            f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}"
+            f"Suite2p processing complete. Results in {base_out}"
         )
-
-        stat_file = plane_dir / "stat.npy"
-        if stat_file.exists():
-            config["logger"].info("Detection succeeded - stat.npy created")
-        else:
-            config["logger"].warning(
-                "Detection did not run - stat.npy not found. Check Suite2p output logs."
-            )
     except Exception as e:
-        config["logger"].exception(
-            f"Suite2p processing failed for plane {current_z}, roi {arr_idx}: {e}"
-        )
+        config["logger"].exception(f"Suite2p processing failed: {e}")
