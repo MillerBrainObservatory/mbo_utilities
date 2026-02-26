@@ -152,6 +152,10 @@ def main():
     # disable tqdm dynamic display for file output (no terminal = no \r updates)
     os.environ["TQDM_DISABLE"] = "1"
 
+    # force non-interactive matplotlib backend so suite2p plotting
+    # doesn't try to init Qt (hangs in worker subprocess)
+    os.environ.setdefault("MPLBACKEND", "Agg")
+
     # early print so we can see the process started even if logging fails
     print(f"Worker starting (pid={os.getpid()})", file=sys.stderr, flush=True)
 
