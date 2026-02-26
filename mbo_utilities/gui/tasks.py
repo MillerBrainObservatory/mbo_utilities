@@ -384,6 +384,54 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     if num_timepoints is not None and num_timepoints > 0:
         writer_kwargs["num_frames"] = num_timepoints
 
+    # Z-registration (Suite3D): compute or reuse axial shifts
+    register_z = args.get("register_z", False)
+    if register_z:
+        monitor.update(0.05, "Checking Z-registration status...")
+
+        # ensure we have an array to read metadata from
+        if isinstance(pipeline_input, (str, Path)):
+            pipeline_input = imread(pipeline_input)
+
+        combined_meta = getattr(pipeline_input, "metadata", {}).copy()
+        num_planes = get_param(combined_meta, "nplanes") or getattr(pipeline_input, "num_planes", 1)
+        job_id = combined_meta.get("job_id", "s3d-preprocessed")
+        candidate = output_dir / job_id
+
+        s3d_job_dir = None
+        if validate_s3d_registration(candidate, num_planes):
+            s3d_job_dir = candidate
+            logger.info(f"Found valid existing s3d-job: {s3d_job_dir}")
+        else:
+            logger.info("Running Suite3D axial registration...")
+            try:
+                filenames = getattr(pipeline_input, "filenames", [])
+                if not filenames and hasattr(pipeline_input, "_files"):
+                    filenames = pipeline_input._files
+                if filenames:
+                    def _reg_cb(progress, msg=""):
+                        monitor.update(0.05 + 0.05 * progress, f"Registration: {msg}")
+
+                    s3d_job_dir = register_zplanes_s3d(
+                        filenames=filenames,
+                        metadata=combined_meta,
+                        outpath=output_dir,
+                        progress_callback=_reg_cb,
+                    )
+            except Exception as e:
+                logger.exception(f"Suite3D registration failed: {e}")
+
+        if s3d_job_dir and validate_s3d_registration(s3d_job_dir, num_planes):
+            md = getattr(pipeline_input, "metadata", {}).copy()
+            md["apply_shift"] = True
+            md["s3d-job"] = str(s3d_job_dir)
+            if hasattr(pipeline_input, "metadata"):
+                pipeline_input.metadata = md
+            monitor.update(0.1, "Z-registration ready.")
+            logger.info(f"Z-registration ready: {s3d_job_dir}")
+        else:
+            logger.warning("Z-registration failed or invalid. Proceeding without shifts.")
+
     try:
         monitor.update(0.1, "Running Suite2p...")
 

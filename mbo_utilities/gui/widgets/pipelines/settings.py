@@ -1703,6 +1703,7 @@ def run_process(self):
                     "ops": self.s2p.to_dict(),
                     "fix_phase": self._s2p_fix_phase,
                     "use_fft": self._s2p_use_fft,
+                    "register_z": getattr(self, "_register_z", False),
                     "channel": channel if (multi_channel or has_channels) else None,
                     "s2p_settings": {
                         "keep_raw": self.s2p.keep_raw,
@@ -1758,6 +1759,7 @@ def run_process(self):
             dff_smooth_window = self.s2p.dff_smooth_window
             fix_phase = getattr(self, "_s2p_fix_phase", False)
             use_fft = getattr(self, "_s2p_use_fft", False)
+            register_z = getattr(self, "_register_z", False)
 
             if not s2p_path:
                 from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
@@ -1808,6 +1810,7 @@ def run_process(self):
                         "dff_smooth_window": dff_smooth_window,
                         "fix_phase": fix_phase,
                         "use_fft": use_fft,
+                        "register_z": register_z,
                         "logger": self.logger,
                     }
 
@@ -1918,6 +1921,47 @@ def _run_pipeline_worker_thread(config):
     if config["target_timepoints"] and config["target_timepoints"] > 0:
         ops["nframes"] = config["target_timepoints"]
         writer_kwargs["num_frames"] = config["target_timepoints"]
+
+    # Z-registration (Suite3D): compute or reuse axial shifts
+    if config.get("register_z", False):
+        from mbo_utilities.arrays import register_zplanes_s3d, validate_s3d_registration
+        from mbo_utilities.metadata import get_param
+
+        log = config["logger"]
+        combined_meta = getattr(input_data, "metadata", {}).copy()
+        num_planes = get_param(combined_meta, "nplanes") or getattr(input_data, "num_planes", 1)
+        job_id = combined_meta.get("job_id", "s3d-preprocessed")
+        candidate = base_out / job_id
+
+        s3d_job_dir = None
+        if validate_s3d_registration(candidate, num_planes):
+            s3d_job_dir = candidate
+            log.info(f"Found valid existing s3d-job: {s3d_job_dir}")
+        else:
+            log.info("Running Suite3D axial registration...")
+            try:
+                filenames = getattr(input_data, "filenames", [])
+                if not filenames and hasattr(input_data, "_files"):
+                    filenames = input_data._files
+                if filenames:
+                    s3d_job_dir = register_zplanes_s3d(
+                        filenames=filenames,
+                        metadata=combined_meta,
+                        outpath=base_out,
+                    )
+            except Exception as e:
+                log.exception(f"Suite3D registration failed: {e}")
+
+        if s3d_job_dir and validate_s3d_registration(s3d_job_dir, num_planes):
+            # Set shifts on array metadata so imwrite applies them during binary write
+            md = getattr(input_data, "metadata", {}).copy()
+            md["apply_shift"] = True
+            md["s3d-job"] = str(s3d_job_dir)
+            if hasattr(input_data, "metadata"):
+                input_data.metadata = md
+            log.info(f"Z-registration ready: {s3d_job_dir}")
+        else:
+            log.warning("Z-registration failed or invalid. Proceeding without shifts.")
 
     try:
         pipeline(
