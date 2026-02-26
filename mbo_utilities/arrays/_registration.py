@@ -152,7 +152,7 @@ def register_zplanes_s3d(
         )
         return None
 
-    if "frame_rate" not in metadata or "num_planes" not in metadata:
+    if get_param(metadata, "fs") is None or get_param(metadata, "nplanes") is None:
         logger.warning(
             "Missing required metadata for axial alignment: frame_rate / num_planes"
         )
