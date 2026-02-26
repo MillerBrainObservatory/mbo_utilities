@@ -233,13 +233,13 @@ class BinArray(ReductionMixin):
                 new_file[:] = self._file[:]
                 new_file.flush()
                 del new_file
+
+                # Write ops.npy alongside the new binary
+                ops_file = outpath / "ops.npy"
+                np.save(ops_file, _convert_paths_to_strings(md))
+                logger.info(f"Wrote ops.npy to {ops_file}")
             else:
                 logger.info(f"Binary file already exists: {outfile}")
-
-            # Write ops.npy (convert Path objects to strings for cross-platform compatibility)
-            ops_file = outpath / "ops.npy"
-            np.save(ops_file, _convert_paths_to_strings(md))
-            logger.info(f"Wrote ops.npy to {ops_file}")
             return outpath
 
         # For other formats, use common implementation

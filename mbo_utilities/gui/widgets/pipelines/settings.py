@@ -8,7 +8,11 @@ import numpy as np
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui
 
-from mbo_utilities.gui._imgui_helpers import set_tooltip, settings_row_with_popup, _popup_states
+from mbo_utilities.gui._imgui_helpers import (
+    set_tooltip,
+    settings_row_with_popup,
+    _popup_states,
+)
 from mbo_utilities.gui._selection_ui import draw_selection_table
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities._parsing import _convert_paths_to_strings
@@ -22,6 +26,7 @@ def _check_lsp_available() -> bool:
     global _HAS_LSP
     if _HAS_LSP is None:
         import importlib.util
+
         _HAS_LSP = importlib.util.find_spec("lbm_suite2p_python") is not None
     return _HAS_LSP
 
@@ -417,6 +422,7 @@ def _init_s2p_selection_state(self):
             # fallback: detect channels from dims/shape for 5D data
             if num_channels <= 1 and data.ndim == 5:
                 from mbo_utilities.arrays.features import get_dims
+
                 dims = get_dims(data)
                 if dims is not None and len(dims) >= 5 and dims[1] == "C":
                     num_channels = data.shape[1]
@@ -489,14 +495,18 @@ def _init_s2p_selection_state(self):
 
     # always ensure _selected_planes stays purely synced to the current z slicing logic
     if num_planes > 1:
-        self._selected_planes = set(range(self._s2p_z_start, self._s2p_z_stop + 1, self._s2p_z_step))
+        self._selected_planes = set(
+            range(self._s2p_z_start, self._s2p_z_stop + 1, self._s2p_z_step)
+        )
     else:
         self._selected_planes = {1}
 
     # parse timepoint selection if needed
     if self._s2p_tp_parsed is None and not self._s2p_tp_error:
         try:
-            self._s2p_tp_parsed = parse_timepoint_selection(self._s2p_tp_selection, max_frames)
+            self._s2p_tp_parsed = parse_timepoint_selection(
+                self._s2p_tp_selection, max_frames
+            )
         except ValueError as e:
             self._s2p_tp_error = str(e)
 
@@ -541,7 +551,9 @@ def _draw_s2p_selection_popup(self):
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Output")
         imgui.dummy(imgui.ImVec2(0, 2))
 
-        s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
+        s2p_path = getattr(self, "_s2p_outdir", "") or getattr(
+            self, "_saveas_outdir", ""
+        )
 
         imgui.text("Path:")
         imgui.same_line()
@@ -555,8 +567,12 @@ def _draw_s2p_selection_popup(self):
 
         imgui.same_line()
         if imgui.button("Browse##s2p_sel"):
-            default_dir = s2p_path or str(get_last_dir("suite2p_output") or pathlib.Path().home())
-            self._s2p_folder_dialog = pfd.select_folder("Select Suite2p output folder", default_dir)
+            default_dir = s2p_path or str(
+                get_last_dir("suite2p_output") or pathlib.Path().home()
+            )
+            self._s2p_folder_dialog = pfd.select_folder(
+                "Select Suite2p output folder", default_dir
+            )
 
         # check async folder dialog
         if self._s2p_folder_dialog is not None and self._s2p_folder_dialog.ready():
@@ -586,15 +602,17 @@ def _draw_s2p_selection_popup(self):
         imgui.dummy(imgui.ImVec2(0, 3))
 
         # draw selection table using shared component
-        tp_parsed, z_start, z_stop, z_step, c_start, c_stop, c_step = draw_selection_table(
-            self,
-            max_frames,
-            num_planes,
-            tp_attr="_s2p_tp",
-            z_attr="_s2p_z",
-            id_suffix="_s2p",
-            num_channels=num_channels,
-            c_attr="_s2p_c",
+        tp_parsed, z_start, z_stop, z_step, c_start, c_stop, c_step = (
+            draw_selection_table(
+                self,
+                max_frames,
+                num_planes,
+                tp_attr="_s2p_tp",
+                z_attr="_s2p_z",
+                id_suffix="_s2p",
+                num_channels=num_channels,
+                c_attr="_s2p_c",
+            )
         )
 
         # (logic moved to unconditionally sync in _init_s2p_selection_state)
@@ -640,13 +658,19 @@ def _draw_s2p_settings_popup(self):
         _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
         set_tooltip("Keep data_raw.bin after processing (uses disk space)")
 
-        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
+        _, self.s2p.keep_reg = imgui.checkbox(
+            "Keep Registered Binary", self.s2p.keep_reg
+        )
         set_tooltip("Keep data.bin after processing (useful for QC)")
 
-        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
+        _, self.s2p.force_reg = imgui.checkbox(
+            "Force Re-registration", self.s2p.force_reg
+        )
         set_tooltip("Force re-registration even if already processed")
 
-        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
+        _, self.s2p.force_detect = imgui.checkbox(
+            "Force Re-detection", self.s2p.force_detect
+        )
         set_tooltip("Force ROI detection even if stat.npy exists")
 
         imgui.spacing()
@@ -656,15 +680,21 @@ def _draw_s2p_settings_popup(self):
         # dF/F settings
         imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "ΔF/F")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_window_size = imgui.input_int("Window", self.s2p.dff_window_size)
+        _, self.s2p.dff_window_size = imgui.input_int(
+            "Window", self.s2p.dff_window_size
+        )
         set_tooltip("Frames for rolling percentile baseline (default: 300)")
 
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_percentile = imgui.input_int("Percentile", self.s2p.dff_percentile)
+        _, self.s2p.dff_percentile = imgui.input_int(
+            "Percentile", self.s2p.dff_percentile
+        )
         set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
 
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_smooth_window = imgui.input_int("Smooth", self.s2p.dff_smooth_window)
+        _, self.s2p.dff_smooth_window = imgui.input_int(
+            "Smooth", self.s2p.dff_smooth_window
+        )
         set_tooltip("Smooth ΔF/F trace with rolling window (0 = disabled)")
 
         imgui.spacing()
@@ -676,7 +706,9 @@ def _draw_s2p_settings_popup(self):
 
         if not hasattr(self, "_s2p_background"):
             self._s2p_background = True
-        _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
+        _, self._s2p_background = imgui.checkbox(
+            "Run in background", self._s2p_background
+        )
         set_tooltip("Run as separate process that continues after closing GUI")
 
         if not hasattr(self, "_parallel_processing"):
@@ -701,13 +733,19 @@ def _draw_s2p_settings_popup(self):
             pass
 
         if num_planes > 1 and n_selected > 1:
-            _, self._parallel_processing = imgui.checkbox("Parallel plane processing", self._parallel_processing)
+            _, self._parallel_processing = imgui.checkbox(
+                "Parallel plane processing", self._parallel_processing
+            )
             set_tooltip("Process multiple planes simultaneously (uses more memory)")
 
             if self._parallel_processing:
                 imgui.set_next_item_width(INPUT_WIDTH)
-                _, self._max_parallel_jobs = imgui.input_int("Max parallel jobs", self._max_parallel_jobs, step=1)
-                self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, n_selected))
+                _, self._max_parallel_jobs = imgui.input_int(
+                    "Max parallel jobs", self._max_parallel_jobs, step=1
+                )
+                self._max_parallel_jobs = max(
+                    1, min(self._max_parallel_jobs, n_selected)
+                )
 
         imgui.spacing()
         imgui.spacing()
@@ -767,14 +805,18 @@ def _draw_data_options_content(self):
 
         # max offset
         imgui.set_next_item_width(INPUT_WIDTH)
-        max_offset_changed, max_offset_val = imgui.input_int("Max Offset", self.max_offset, step=1)
+        max_offset_changed, max_offset_val = imgui.input_int(
+            "Max Offset", self.max_offset, step=1
+        )
         set_tooltip("Maximum allowed pixel shift for phase correction")
         if max_offset_changed:
             self.max_offset = max(1, max_offset_val)
 
         # upsample factor
         imgui.set_next_item_width(INPUT_WIDTH)
-        upsample_changed, upsample_val = imgui.input_int("Upsample", self.phase_upsample, step=1)
+        upsample_changed, upsample_val = imgui.input_int(
+            "Upsample", self.phase_upsample, step=1
+        )
         set_tooltip("Upsampling factor for sub-pixel alignment")
         if upsample_changed:
             self.phase_upsample = max(1, upsample_val)
@@ -797,7 +839,9 @@ def _draw_data_options_content(self):
 
         if has_z_reg:
             reg_z_val = getattr(self, "_register_z", False)
-            reg_changed, reg_value = imgui.checkbox("Register Z-Planes Axially", reg_z_val)
+            reg_changed, reg_value = imgui.checkbox(
+                "Register Z-Planes Axially", reg_z_val
+            )
             set_tooltip(
                 "Use Suite3D to register z-planes axially before processing.\n"
                 "This corrects for z-drift between planes."
@@ -809,7 +853,9 @@ def _draw_data_options_content(self):
             imgui.begin_disabled()
             imgui.checkbox("Register Z-Planes Axially", False)
             imgui.end_disabled()
-            imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Install suite3d to enable")
+            imgui.text_colored(
+                imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Install suite3d to enable"
+            )
 
     if not has_any_options:
         imgui.text_disabled("No available options for this data type.")
@@ -824,7 +870,9 @@ def draw_section_suite2p(self):
 
     # set proper padding and spacing using context manager for safety
     with imgui_ctx.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4)):
-        with imgui_ctx.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 2)):
+        with imgui_ctx.push_style_var(
+            imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 2)
+        ):
             _draw_section_suite2p_content(self)
 
 
@@ -876,7 +924,9 @@ def _draw_section_suite2p_content(self):
     imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_width - button_width) / 2)
 
     imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
-    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0))
+    imgui.push_style_color(
+        imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0)
+    )
     imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.45, 0.1, 1.0))
 
     if not has_save_path:
@@ -889,7 +939,9 @@ def _draw_section_suite2p_content(self):
 
     imgui.pop_style_color(3)
 
-    if not has_save_path and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+    if not has_save_path and imgui.is_item_hovered(
+        imgui.HoveredFlags_.allow_when_disabled
+    ):
         imgui.set_tooltip("Set output path via Selection button")
 
     # handle run button click
@@ -898,11 +950,17 @@ def _draw_section_suite2p_content(self):
 
     if self._install_error:
         if self._show_red_text:
-            imgui.text_colored(imgui.ImVec4(1.0, 0.0, 0.0, 1.0), "Error: lbm_suite2p_python is not installed.")
+            imgui.text_colored(
+                imgui.ImVec4(1.0, 0.0, 0.0, 1.0),
+                "Error: lbm_suite2p_python is not installed.",
+            )
         if self._show_green_text:
-            imgui.text_colored(imgui.ImVec4(0.0, 1.0, 0.0, 1.0), "lbm_suite2p_python install success.")
+            imgui.text_colored(
+                imgui.ImVec4(0.0, 1.0, 0.0, 1.0), "lbm_suite2p_python install success."
+            )
         if self._show_install_button and imgui.button("Install"):
             import subprocess
+
             self.logger.log("info", "Installing lbm_suite2p_python...")
             try:
                 subprocess.check_call(["pip", "install", "lbm_suite2p_python"])
@@ -1224,13 +1282,19 @@ def _draw_section_suite2p_content(self):
 
         imgui.spacing()
         imgui.text("Classifier Path:")
-        path_display = self.s2p.classifier_path if self.s2p.classifier_path else "(none)"
+        path_display = (
+            self.s2p.classifier_path if self.s2p.classifier_path else "(none)"
+        )
         imgui.push_text_wrap_pos(imgui.get_content_region_avail().x - 80)
         imgui.text(path_display)
         imgui.pop_text_wrap_pos()
         imgui.same_line()
         if imgui.button("Browse##classifier"):
-            default_dir = str(Path(self.s2p.classifier_path).parent) if self.s2p.classifier_path else str(Path.home())
+            default_dir = (
+                str(Path(self.s2p.classifier_path).parent)
+                if self.s2p.classifier_path
+                else str(Path.home())
+            )
             self._classifier_dialog = pfd.open_file(
                 "Select classifier file",
                 default_dir,
@@ -1243,7 +1307,9 @@ def _draw_section_suite2p_content(self):
             if self._classifier_dialog.ready():
                 result = self._classifier_dialog.result()
                 if result:
-                    self.s2p.classifier_path = result[0] if isinstance(result, list) else result
+                    self.s2p.classifier_path = (
+                        result[0] if isinstance(result, list) else result
+                    )
                 self._classifier_dialog = None
 
     # --- Spike Deconvolution ---
@@ -1323,7 +1389,9 @@ def _draw_section_suite2p_content(self):
 
     # === PIPELINE SETTINGS TABLE ===
     # tabular layout: [checkbox/empty] | [label] | [settings button]
-    table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
+    table_flags = (
+        imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
+    )
     if imgui.begin_table("pipeline_settings_table", 3, table_flags):
         imgui.table_setup_column("checkbox", imgui.TableColumnFlags_.width_fixed, 24)
         imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, 100)
@@ -1348,12 +1416,16 @@ def _draw_section_suite2p_content(self):
         if imgui.button("Settings##data_opts"):
             _popup_states["data_options"] = True
             imgui.open_popup("Data Options##data_options")
-        set_tooltip("Data-specific options (scan-phase correction, frame averaging, etc.)")
+        set_tooltip(
+            "Data-specific options (scan-phase correction, frame averaging, etc.)"
+        )
 
         # --- Registration row (with checkbox) ---
         imgui.table_next_row()
         imgui.table_next_column()
-        _, self.s2p.do_registration = imgui.checkbox("##reg_cb", self.s2p.do_registration)
+        _, self.s2p.do_registration = imgui.checkbox(
+            "##reg_cb", self.s2p.do_registration
+        )
         set_tooltip("Enable/disable motion registration")
         imgui.table_next_column()
         imgui.text("Registration")
@@ -1379,7 +1451,9 @@ def _draw_section_suite2p_content(self):
         # --- Signal Extraction row (with checkbox) ---
         imgui.table_next_row()
         imgui.table_next_column()
-        _, self.s2p.neuropil_extract = imgui.checkbox("##extract_cb", self.s2p.neuropil_extract)
+        _, self.s2p.neuropil_extract = imgui.checkbox(
+            "##extract_cb", self.s2p.neuropil_extract
+        )
         set_tooltip("Enable/disable signal extraction")
         imgui.table_next_column()
         imgui.text("Signal Extraction")
@@ -1392,7 +1466,9 @@ def _draw_section_suite2p_content(self):
         # --- Classification row ---
         imgui.table_next_row()
         imgui.table_next_column()
-        _, self.s2p.use_builtin_classifier = imgui.checkbox("##classify_cb", self.s2p.use_builtin_classifier)
+        _, self.s2p.use_builtin_classifier = imgui.checkbox(
+            "##classify_cb", self.s2p.use_builtin_classifier
+        )
         set_tooltip("Enable/disable ROI classification")
         imgui.table_next_column()
         imgui.text("Classification")
@@ -1433,7 +1509,8 @@ def _draw_section_suite2p_content(self):
         opened, visible = imgui.begin_popup_modal(
             "Registration##reg_settings",
             p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            flags=imgui.WindowFlags_.no_saved_settings
+            | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
             try:
@@ -1455,7 +1532,8 @@ def _draw_section_suite2p_content(self):
         opened, visible = imgui.begin_popup_modal(
             "ROI Detection##roi_settings",
             p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            flags=imgui.WindowFlags_.no_saved_settings
+            | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
             try:
@@ -1477,7 +1555,8 @@ def _draw_section_suite2p_content(self):
         opened, visible = imgui.begin_popup_modal(
             "Signal Extraction##extract_settings",
             p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            flags=imgui.WindowFlags_.no_saved_settings
+            | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
             try:
@@ -1499,7 +1578,8 @@ def _draw_section_suite2p_content(self):
         opened, visible = imgui.begin_popup_modal(
             "Classification##classify_settings",
             p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            flags=imgui.WindowFlags_.no_saved_settings
+            | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
             try:
@@ -1521,7 +1601,8 @@ def _draw_section_suite2p_content(self):
         opened, visible = imgui.begin_popup_modal(
             "Spike Deconv##spike_settings",
             p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            flags=imgui.WindowFlags_.no_saved_settings
+            | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
             try:
@@ -1543,7 +1624,8 @@ def _draw_section_suite2p_content(self):
         opened, visible = imgui.begin_popup_modal(
             "Output##output_settings",
             p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            flags=imgui.WindowFlags_.no_saved_settings
+            | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
             try:
@@ -1565,7 +1647,8 @@ def _draw_section_suite2p_content(self):
         opened, visible = imgui.begin_popup_modal(
             "Data Options##data_options",
             p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            flags=imgui.WindowFlags_.no_saved_settings
+            | imgui.WindowFlags_.always_auto_resize,
         )
         if opened:
             try:
@@ -1596,13 +1679,17 @@ def _build_channel_dirname(self, channel: int) -> str:
     z_start = getattr(self, "_s2p_z_start", 1)
     z_stop = getattr(self, "_s2p_z_stop", 1)
     z_step = getattr(self, "_s2p_z_step", 1)
-    tags.append(DimensionTag(TAG_REGISTRY["Z"], start=z_start, stop=z_stop, step=z_step))
+    tags.append(
+        DimensionTag(TAG_REGISTRY["Z"], start=z_start, stop=z_stop, step=z_step)
+    )
     # timepoints last (same across sibling dirs)
     tp = self._s2p_tp_parsed
     if tp and tp.final_indices:
         tp_start = tp.final_indices[0] + 1
         tp_stop = tp.final_indices[-1] + 1
-        tags.append(DimensionTag(TAG_REGISTRY["T"], start=tp_start, stop=tp_stop, step=1))
+        tags.append(
+            DimensionTag(TAG_REGISTRY["T"], start=tp_start, stop=tp_stop, step=1)
+        )
     return "_".join(tag.to_string() for tag in tags)
 
 
@@ -1680,7 +1767,9 @@ def run_process(self):
             for channel in selected_channels:
                 # per-channel output subdir when multiple channels selected
                 if multi_channel:
-                    output_dir = str(Path(s2p_path) / _build_channel_dirname(self, channel))
+                    output_dir = str(
+                        Path(s2p_path) / _build_channel_dirname(self, channel)
+                    )
                 else:
                     output_dir = s2p_path
 
@@ -1751,8 +1840,11 @@ def run_process(self):
 
             if not s2p_path:
                 from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
+
                 last_savedir = get_last_savedir_path()
-                s2p_path = str(Path(last_savedir) if last_savedir else get_mbo_dirs()["data"])
+                s2p_path = str(
+                    Path(last_savedir) if last_savedir else get_mbo_dirs()["data"]
+                )
 
             # Handle list of paths
             if isinstance(self.fpath, (list, tuple)):
@@ -1769,7 +1861,9 @@ def run_process(self):
             for i, _arr in enumerate(self.image_widget.data):
                 for channel in selected_channels:
                     if multi_channel:
-                        base_out = Path(s2p_path) / _build_channel_dirname(self, channel)
+                        base_out = Path(s2p_path) / _build_channel_dirname(
+                            self, channel
+                        )
                     else:
                         base_out = Path(s2p_path)
 
@@ -1788,7 +1882,9 @@ def run_process(self):
                             "arr_idx": i,
                             "z_plane": current_z,
                             "plane": z_plane,
-                            "channel": channel if (multi_channel or has_channels) else None,
+                            "channel": channel
+                            if (multi_channel or has_channels)
+                            else None,
                             "base_out": base_out,
                             "plane_dir": plane_dir,
                             "roi": roi,
@@ -1804,7 +1900,7 @@ def run_process(self):
                             "dff_smooth_window": dff_smooth_window,
                             "fix_phase": fix_phase,
                             "use_fft": use_fft,
-                            "logger": self.logger
+                            "logger": self.logger,
                         }
 
                         # Fix Issue 2: restrict Suite2p to single internal process if using ThreadPoolExecutor
@@ -1831,12 +1927,13 @@ def run_process(self):
                             futures[future] = (config, job_idx)
 
                         from concurrent.futures import as_completed
+
                         for future in as_completed(futures):
                             config, job_idx = futures[future]
                             try:
                                 future.result()
                                 desc = f"Plane {config['plane']}"
-                                if config['channel'] is not None:
+                                if config["channel"] is not None:
                                     desc += f" ch{config['channel']}"
                                 self.logger.info(
                                     f"{desc} completed ({job_idx + 1}/{len(jobs)})"
@@ -1857,7 +1954,7 @@ def run_process(self):
                 def run_all_planes_sequential():
                     for job_idx, config in enumerate(jobs):
                         desc = f"plane {config['plane']}"
-                        if config['channel'] is not None:
+                        if config["channel"] is not None:
                             desc += f" ch{config['channel']}"
                         self.logger.info(
                             f"Processing {desc} ({job_idx + 1}/{len(jobs)})..."
@@ -1865,9 +1962,7 @@ def run_process(self):
                         try:
                             _run_plane_worker_thread(config)
                         except Exception as e:
-                            self.logger.exception(
-                                f"Error processing {desc}: {e}"
-                            )
+                            self.logger.exception(f"Error processing {desc}: {e}")
                     self.logger.info("Suite2p processing complete.")
 
                 threading.Thread(target=run_all_planes_sequential, daemon=True).start()
@@ -1952,21 +2047,59 @@ def _run_plane_worker_thread(config):
 
     plane_dir.mkdir(parents=True, exist_ok=True)
 
-    imwrite(
-        arr,
-        plane_dir,
-        ext=".bin",
-        overwrite=True,
-        register_z=False,
-        planes=plane,
-        channels=[channel] if channel is not None else None,
-        output_name="data_raw.bin",
-        roi=roi,
-        metadata=defaults,
-        num_frames=config["target_timepoints"],
-        fix_phase=config["fix_phase"],
-        use_fft=config["use_fft"],
-    )
+    # Check if binary already exists and we don't need to re-write
+    raw_bin = plane_dir / "data_raw.bin"
+    ops_on_disk = plane_dir / "ops.npy"
+    skip_binary_write = False
+
+    if not config["force_reg"] and raw_bin.exists() and ops_on_disk.exists():
+        try:
+            existing = np.load(ops_on_disk, allow_pickle=True).item()
+            Ly_ex = existing.get("Ly")
+            Lx_ex = existing.get("Lx")
+            nframes_ex = (
+                existing.get("nframes_chan1")
+                or existing.get("nframes")
+                or existing.get("num_frames")
+            )
+            if (
+                Ly_ex == Ly
+                and Lx_ex == Lx
+                and nframes_ex is not None
+                and nframes_ex > 0
+            ):
+                expected_size = int(nframes_ex) * int(Ly_ex) * int(Lx_ex) * 2  # int16
+                if raw_bin.stat().st_size == expected_size:
+                    skip_binary_write = True
+                    # merge: defaults_fresh < existing (has reg results) < new settings
+                    defaults_fresh = defaults.copy()
+                    defaults = {**defaults_fresh, **existing, **ops, **md}
+                    defaults["shape"] = (config["target_timepoints"], Ly, Lx)
+                    defaults["num_timepoints"] = config["target_timepoints"]
+                    defaults["num_frames"] = config["target_timepoints"]
+                    defaults["nframes"] = config["target_timepoints"]
+                    print(
+                        f"  Skipping binary write, data_raw.bin already valid."
+                    )
+        except Exception:
+            pass  # fall through to normal write
+
+    if not skip_binary_write:
+        imwrite(
+            arr,
+            plane_dir,
+            ext=".bin",
+            overwrite=True,
+            register_z=False,
+            planes=plane,
+            channels=[channel] if channel is not None else None,
+            output_name="data_raw.bin",
+            roi=roi,
+            metadata=defaults,
+            num_frames=config["target_timepoints"],
+            fix_phase=config["fix_phase"],
+            use_fft=config["use_fft"],
+        )
 
     from lbm_suite2p_python import run_plane
 
@@ -1981,7 +2114,7 @@ def _run_plane_worker_thread(config):
 
     try:
         run_plane(
-            input_path=raw_file,
+            input_data=raw_file,
             save_path=plane_dir,
             ops=defaults,
             keep_raw=config["keep_raw"],
@@ -1990,7 +2123,9 @@ def _run_plane_worker_thread(config):
             force_detect=config["force_detect"],
             dff_window_size=config["dff_window_size"],
             dff_percentile=config["dff_percentile"],
-            dff_smooth_window=config["dff_smooth_window"] if config["dff_smooth_window"] > 0 else None,
+            dff_smooth_window=config["dff_smooth_window"]
+            if config["dff_smooth_window"] > 0
+            else None,
         )
         config["logger"].info(
             f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}"
@@ -2007,4 +2142,3 @@ def _run_plane_worker_thread(config):
         config["logger"].exception(
             f"Suite2p processing failed for plane {current_z}, roi {arr_idx}: {e}"
         )
-
