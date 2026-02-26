@@ -333,7 +333,11 @@ def imwrite(
             with contextlib.suppress(AttributeError):
                 lazy_array.metadata = file_metadata
     else:
-        file_metadata["apply_shift"] = False
+        # only disable apply_shift if it wasn't already set by the caller
+        # (run_plane sets apply_shift=True + s3d-job and passes register_z=False
+        # because it handles per-plane shifts via shift_vector separately)
+        if "apply_shift" not in file_metadata:
+            file_metadata["apply_shift"] = False
         if hasattr(lazy_array, "metadata"):
             with contextlib.suppress(AttributeError):
                 lazy_array.metadata = file_metadata
