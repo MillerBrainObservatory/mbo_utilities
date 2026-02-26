@@ -412,6 +412,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             dff_window_size=s2p_settings.get("dff_window_size", 300),
             dff_percentile=s2p_settings.get("dff_percentile", 20),
             dff_smooth_window=s2p_settings.get("dff_smooth_window"),
+            accept_all_cells=True,
             writer_kwargs=writer_kwargs,
             progress_callback=_progress,
         )
