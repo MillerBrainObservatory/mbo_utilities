@@ -874,6 +874,18 @@ def _draw_section_suite2p_content(self):
     """inner content for suite2p section (called within style context)."""
     INPUT_WIDTH = 120
 
+    # === TITLE ===
+    imgui.text("Suite2p/Cellpose Processing Pipeline")
+    imgui.same_line()
+    imgui.text_disabled("(?)")
+    set_tooltip(
+        "Run plane-by-plane suite2p on the currently loaded dataset.\n"
+        "Set metadata via File -> Set Metadata.\n\n"
+        "Use the Selection button to choose output path, frames,\n"
+        "planes, and channels. Configure pipeline settings below\n"
+        "then click Run Suite2p to start processing."
+    )
+
     # initialize selection state (timepoints, z-planes, channels)
     max_frames, num_planes, num_channels = _init_s2p_selection_state(self)
 
@@ -886,11 +898,6 @@ def _draw_section_suite2p_content(self):
     if imgui.button("Selection"):
         self._s2p_selection_open = True
     set_tooltip("Output path and frame/plane selection")
-
-    imgui.same_line()
-    if imgui.button("Metadata"):
-        self._metadata_editor_open = True
-    set_tooltip("Edit dataset metadata prior to processing")
 
     # draw the selection popup
     _draw_s2p_selection_popup(self)

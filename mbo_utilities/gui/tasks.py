@@ -381,6 +381,8 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         "fix_phase": args.get("fix_phase", True),
         "use_fft": args.get("use_fft", True),
     }
+    if num_timepoints is not None and num_timepoints > 0:
+        writer_kwargs["num_frames"] = num_timepoints
 
     try:
         monitor.update(0.1, "Running Suite2p...")
