@@ -163,10 +163,12 @@ class BaseViewer(ABC):
             n_dims = len(new_shape) - 2  # exclude Y, X
 
             # update slider dimension names if array has dims property
+            # include all non-spatial dims (even singletons) to match fpl's slider count
             if hasattr(arr, "dims"):
-                from mbo_utilities.arrays.features import get_slider_dims
-                new_slider_dims = get_slider_dims(arr)
-                if new_slider_dims:
+                from mbo_utilities.arrays.features._dim_labels import get_dims
+                dims = get_dims(arr, normalize=False)
+                if dims is not None and len(dims) > 2:
+                    new_slider_dims = tuple(d.lower() for d in dims[:-2])
                     self.image_widget._slider_dim_names = new_slider_dims
 
             # clamp current indices to new valid range

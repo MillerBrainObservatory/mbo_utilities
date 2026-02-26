@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 import os
 import traceback
@@ -373,6 +374,13 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
 
         # load data and wrap with channel view (presents 5D as 4D TZYX)
         arr = imread(input_path)
+
+        # merge custom metadata overrides (e.g. dz) before suite2p export
+        if "metadata_overrides" in args:
+            metadata_dict = getattr(arr, "metadata", {})
+            metadata_dict.update(args["metadata_overrides"])
+            arr.metadata = metadata_dict
+
         pipeline_input = _ChannelView(arr, channel - 1)
         logger.info(f"Wrapped as 4D view: shape={pipeline_input.shape}")
 
@@ -386,11 +394,13 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
 
     # Z-registration (Suite3D): compute or reuse axial shifts
     register_z = args.get("register_z", False)
+    s3d_event = None
+    s3d_thread = None
     if register_z:
         monitor.update(0.05, "Checking Z-registration status...")
 
         # ensure we have an array to read metadata from
-        if isinstance(pipeline_input, (str, Path)):
+        if isinstance(pipeline_input, (str, Path, list)):
             pipeline_input = imread(pipeline_input)
 
         combined_meta = getattr(pipeline_input, "metadata", {}).copy()
@@ -398,39 +408,53 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         job_id = combined_meta.get("job_id", "s3d-preprocessed")
         candidate = output_dir / job_id
 
-        s3d_job_dir = None
         if validate_s3d_registration(candidate, num_planes):
-            s3d_job_dir = candidate
-            logger.info(f"Found valid existing s3d-job: {s3d_job_dir}")
-        else:
-            logger.info("Running Suite3D axial registration...")
-            try:
-                filenames = getattr(pipeline_input, "filenames", [])
-                if not filenames and hasattr(pipeline_input, "_files"):
-                    filenames = pipeline_input._files
-                if filenames:
-                    def _reg_cb(progress, msg=""):
-                        monitor.update(0.05 + 0.05 * progress, f"Registration: {msg}")
-
-                    s3d_job_dir = register_zplanes_s3d(
-                        filenames=filenames,
-                        metadata=combined_meta,
-                        outpath=output_dir,
-                        progress_callback=_reg_cb,
-                    )
-            except Exception as e:
-                logger.exception(f"Suite3D registration failed: {e}")
-
-        if s3d_job_dir and validate_s3d_registration(s3d_job_dir, num_planes):
+            # already done, set metadata directly
+            logger.info(f"Found valid existing s3d-job: {candidate}")
             md = getattr(pipeline_input, "metadata", {}).copy()
             md["apply_shift"] = True
-            md["s3d-job"] = str(s3d_job_dir)
+            md["s3d-job"] = str(candidate)
             if hasattr(pipeline_input, "metadata"):
                 pipeline_input.metadata = md
             monitor.update(0.1, "Z-registration ready.")
-            logger.info(f"Z-registration ready: {s3d_job_dir}")
         else:
-            logger.warning("Z-registration failed or invalid. Proceeding without shifts.")
+            # start suite3d in background thread
+            s3d_event = threading.Event()
+            s3d_result = {"success": False}
+
+            def _run_s3d():
+                try:
+                    logger.info("Running Suite3D axial registration (background)...")
+                    filenames = getattr(pipeline_input, "filenames", [])
+                    if not filenames and hasattr(pipeline_input, "_files"):
+                        filenames = pipeline_input._files
+
+                    def _reg_cb(progress, msg=""):
+                        monitor.update(0.05 + 0.05 * progress, f"Registration: {msg}")
+
+                    if filenames:
+                        register_zplanes_s3d(
+                            filenames=filenames,
+                            metadata=combined_meta,
+                            outpath=output_dir,
+                            progress_callback=_reg_cb,
+                        )
+                        s3d_result["success"] = True
+                except Exception as e:
+                    logger.exception(f"Suite3D registration failed: {e}")
+                finally:
+                    s3d_event.set()
+
+            s3d_thread = threading.Thread(target=_run_s3d, daemon=True)
+            s3d_thread.start()
+
+            # set metadata optimistically so run_plane waits for shifts
+            md = getattr(pipeline_input, "metadata", {}).copy()
+            md["apply_shift"] = True
+            md["s3d-job"] = str(candidate)
+            md["_s3d_event"] = s3d_event
+            if hasattr(pipeline_input, "metadata"):
+                pipeline_input.metadata = md
 
     try:
         monitor.update(0.1, "Running Suite2p...")
@@ -467,10 +491,16 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             progress_callback=_progress,
         )
 
+        # wait for background suite3d thread if still running
+        if s3d_thread is not None:
+            s3d_thread.join(timeout=60)
+
         monitor.finish("Suite2p pipeline completed.")
         logger.info("Suite2p completed successfully")
 
     except Exception as e:
+        if s3d_thread is not None:
+            s3d_thread.join(timeout=10)
         monitor.fail(str(e), details={"traceback": traceback.format_exc()})
         logger.exception(f"Suite2p failed: {e}")
         raise

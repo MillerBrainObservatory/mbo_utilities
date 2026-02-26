@@ -22,6 +22,17 @@ logger = log.get("writers")
 
 warnings.filterwarnings("ignore")
 
+
+def _is_picklable(value):
+    """check if a value can be pickled (safe for np.save)."""
+    import pickle
+    try:
+        pickle.dumps(value, protocol=4)
+        return True
+    except (pickle.PicklingError, TypeError, AttributeError):
+        return False
+
+
 ARRAY_METADATA = ["dtype", "shape", "nbytes", "size"]
 CHUNKS = {0: "auto", 1: -1, 2: -1}
 
@@ -235,6 +246,13 @@ def load_registration_shifts(metadata: dict | None, debug: bool = False):
     summary_path = (
         Path(s3d_job_dir).joinpath("summary/summary.npy") if s3d_job_dir else None
     )
+
+    # if summary doesn't exist yet, wait for background suite3d thread
+    if summary_path and not summary_path.is_file():
+        event = metadata.get("_s3d_event") if metadata else None
+        if event is not None:
+            logger.info("waiting for suite3d registration to complete...")
+            event.wait(timeout=600)
 
     if summary_path and summary_path.is_file():
         try:
@@ -2117,7 +2135,7 @@ def write_ops(metadata, raw_filename, **kwargs):
         "z_step",
     }
     for key, value in metadata.items():
-        if key not in protected_keys:
+        if key not in protected_keys and _is_picklable(value):
             ops[key] = value
 
     # Convert Path objects to strings for cross-platform compatibility

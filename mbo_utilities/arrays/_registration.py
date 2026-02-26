@@ -18,6 +18,34 @@ from mbo_utilities.util import load_npy
 
 logger = log.get("arrays._registration")
 
+# valid TIFF magic bytes (first 4 bytes)
+_TIFF_LE = b"II\x2a\x00"  # little-endian TIFF
+_TIFF_BE = b"MM\x00\x2a"  # big-endian TIFF
+_BIGTIFF_LE = b"II\x2b\x00"  # little-endian BigTIFF
+_BIGTIFF_BE = b"MM\x00\x2b"  # big-endian BigTIFF
+_TIFF_HEADERS = (_TIFF_LE, _TIFF_BE, _BIGTIFF_LE, _BIGTIFF_BE)
+
+
+def _is_scanimage_tiff(path: Path) -> bool:
+    """check if a file is a raw ScanImage TIFF by verifying header bytes
+    and the presence of ScanImage ROI metadata (Artist tag)."""
+    path = Path(path)
+    if not path.is_file():
+        return False
+    try:
+        with open(path, "rb") as f:
+            header = f.read(4)
+        if header not in _TIFF_HEADERS:
+            return False
+        from tifffile import TiffFile
+        with TiffFile(path) as tf:
+            page0 = tf.pages.first
+            if "Artist" not in page0.tags:
+                return False
+        return True
+    except Exception:
+        return False
+
 
 def validate_s3d_registration(s3d_job_dir: Path, num_planes: int | None = None) -> bool:
     """
@@ -187,13 +215,29 @@ def register_zplanes_s3d(
         logger.warning("Suite3D Job class not available.")
         return None
 
+    # suite3d requires raw ScanImage TIFFs with ROI metadata
+    valid_tifs = [f for f in filenames if _is_scanimage_tiff(f)]
+    if not valid_tifs:
+        skipped = [str(f) for f in filenames]
+        logger.warning(
+            f"No valid raw ScanImage TIFFs found in {len(filenames)} files. "
+            f"Suite3D requires raw ScanImage TIFFs with ROI metadata (Artist tag). "
+            f"Skipped: {skipped}"
+        )
+        return None
+    if len(valid_tifs) < len(filenames):
+        logger.info(
+            f"Filtered {len(filenames) - len(valid_tifs)} non-ScanImage files, "
+            f"using {len(valid_tifs)} valid TIFFs for registration"
+        )
+
     job = Job(
         str(job_path),
         job_id,
         create=True,
         overwrite=True,
         verbosity=-1,
-        tifs=filenames,
+        tifs=valid_tifs,
         params=params,
         progress_callback=progress_callback,
     )

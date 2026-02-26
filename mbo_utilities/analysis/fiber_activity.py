@@ -114,8 +114,9 @@ def enhance_fibers(
     gy = gx.T
 
     # Filter and rectify negative responses
-    ix = convolve(mean_image, gx, mode="reflect")
-    iy = convolve(mean_image, gy, mode="reflect")
+    # mode='nearest' matches MATLAB imfilter(..., 'replicate')
+    ix = convolve(mean_image, gx, mode="nearest")
+    iy = convolve(mean_image, gy, mode="nearest")
     ix[ix < 0] = 0
     iy[iy < 0] = 0
 
@@ -400,9 +401,9 @@ def run(
     """
     # Materialise lazy arrays / load from path
     if isinstance(data, (str, Path)):
-        import tifffile
+        from mbo_utilities import imread as _imread
 
-        arr = tifffile.imread(str(data)).astype(np.float64)
+        arr = np.asarray(_imread(data), dtype=np.float64)
     else:
         arr = np.asarray(data, dtype=np.float64)
 

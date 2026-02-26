@@ -294,6 +294,25 @@ def _check_suite3d() -> FeatureStatus:
         )
 
 
+def _check_lbm_suite2p_python() -> FeatureStatus:
+    """Check lbm_suite2p_python installation."""
+    try:
+        import lbm_suite2p_python
+        version = getattr(lbm_suite2p_python, "__version__", "installed")
+        return FeatureStatus(
+            name="LBM-Suite2p-Python",
+            status=Status.OK,
+            version=version,
+            message="ready"
+        )
+    except ImportError:
+        return FeatureStatus(
+            name="LBM-Suite2p-Python",
+            status=Status.MISSING,
+            message="not installed"
+        )
+
+
 def _check_rastermap() -> FeatureStatus:
     """Check rastermap installation."""
     try:
@@ -450,6 +469,9 @@ def check_installation(callback: type[object] | None = None) -> InstallStatus:
     elif suite3d_status.status == Status.OK:
         suite3d_status.gpu_ok = cupy_status.gpu_ok
     status.features.append(suite3d_status)
+
+    _update(0.83, "Checking LBM-Suite2p-Python...")
+    status.features.append(_check_lbm_suite2p_python())
 
     _update(0.85, "Checking Rastermap...")
     status.features.append(_check_rastermap())

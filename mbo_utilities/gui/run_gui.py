@@ -436,11 +436,16 @@ def _create_image_widget(data_array, widget: bool = True):
     else:
         figure_kwargs = {"size": (800, 800)}
 
-    # Determine slider dimension names from array's dims property if available
-    # otherwise fall back to defaults based on ndim
-    from mbo_utilities.arrays.features import get_slider_dims
+    # determine slider dimension names from array dims
+    # fpl creates sliders for all non-spatial dims (everything except last 2),
+    # so we must include singleton dims to keep counts in sync
+    from mbo_utilities.arrays.features._dim_labels import get_dims
 
-    slider_dim_names = get_slider_dims(data_array)
+    dims = get_dims(data_array, normalize=False)
+    if dims is not None and len(dims) > 2:
+        slider_dim_names = tuple(d.lower() for d in dims[:-2])
+    else:
+        slider_dim_names = None
 
     # window_funcs tuple must match slider_dim_names length
     if slider_dim_names:

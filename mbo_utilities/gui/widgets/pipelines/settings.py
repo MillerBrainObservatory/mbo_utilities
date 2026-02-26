@@ -876,8 +876,6 @@ def _draw_section_suite2p_content(self):
 
     # === TITLE ===
     imgui.text("Suite2p/Cellpose Processing Pipeline")
-    imgui.same_line()
-    imgui.text_disabled("(?)")
     set_tooltip(
         "Run plane-by-plane suite2p on the currently loaded dataset.\n"
         "Set metadata via File -> Set Metadata.\n\n"
@@ -947,7 +945,10 @@ def _draw_section_suite2p_content(self):
 
     # handle run button click
     if button_clicked and has_save_path:
-        run_process(self)
+        try:
+            run_process(self)
+        except Exception as e:
+            self.logger.error(f"Failed to start Suite2p: {e}")
 
     if self._install_error:
         if self._show_red_text:
@@ -1685,6 +1686,9 @@ def run_process(self):
             # always pass channel for multi-channel source data (5D needs _ChannelView)
             has_channels = getattr(self, "_s2p_last_num_channels", 1) > 1
 
+            # fetch custom metadata overrides (e.g., explicitly set dz)
+            metadata_overrides = dict(getattr(self, "_custom_metadata", {}))
+
             for channel in selected_channels:
                 # per-channel output subdir when multiple channels selected
                 if multi_channel:
@@ -1714,6 +1718,7 @@ def run_process(self):
                         "dff_percentile": self.s2p.dff_percentile,
                         "dff_smooth_window": self.s2p.dff_smooth_window,
                     },
+                    "metadata_overrides": metadata_overrides,
                 }
 
                 description = f"Suite2p: {len(selected_planes)} plane(s)"
@@ -1773,7 +1778,10 @@ def run_process(self):
             use_parallel = getattr(self, "_parallel_processing", False)
             max_jobs = getattr(self, "_max_parallel_jobs", 2)
 
-            # Build list of configuration dicts — one job per (array, channel).
+            # fetch custom metadata overrides
+            metadata_overrides = dict(getattr(self, "_custom_metadata", {}))
+
+            # build list of configuration dicts — one job per (array, channel).
             # pipeline() handles plane iteration internally.
             jobs = []
             for i, _arr in enumerate(self.image_widget.data):
@@ -1811,6 +1819,7 @@ def run_process(self):
                         "fix_phase": fix_phase,
                         "use_fft": use_fft,
                         "register_z": register_z,
+                        "metadata_overrides": metadata_overrides,
                         "logger": self.logger,
                     }
 
@@ -1912,6 +1921,14 @@ def _run_pipeline_worker_thread(config):
             )
         input_data = _ChannelView(arr, channel - 1)
 
+    # merge custom metadata overrides (e.g. dz) before pipeline
+    metadata_overrides = config.get("metadata_overrides", {})
+    if metadata_overrides:
+        md = getattr(input_data, "metadata", {}).copy()
+        md.update(metadata_overrides)
+        if hasattr(input_data, "metadata"):
+            input_data.metadata = md
+
     ops = config["s2p_dict"].copy()
 
     writer_kwargs = {
@@ -1923,6 +1940,7 @@ def _run_pipeline_worker_thread(config):
         writer_kwargs["num_frames"] = config["target_timepoints"]
 
     # Z-registration (Suite3D): compute or reuse axial shifts
+    s3d_thread = None
     if config.get("register_z", False):
         from mbo_utilities.arrays import register_zplanes_s3d, validate_s3d_registration
         from mbo_utilities.metadata import get_param
@@ -1933,35 +1951,45 @@ def _run_pipeline_worker_thread(config):
         job_id = combined_meta.get("job_id", "s3d-preprocessed")
         candidate = base_out / job_id
 
-        s3d_job_dir = None
         if validate_s3d_registration(candidate, num_planes):
-            s3d_job_dir = candidate
-            log.info(f"Found valid existing s3d-job: {s3d_job_dir}")
-        else:
-            log.info("Running Suite3D axial registration...")
-            try:
-                filenames = getattr(input_data, "filenames", [])
-                if not filenames and hasattr(input_data, "_files"):
-                    filenames = input_data._files
-                if filenames:
-                    s3d_job_dir = register_zplanes_s3d(
-                        filenames=filenames,
-                        metadata=combined_meta,
-                        outpath=base_out,
-                    )
-            except Exception as e:
-                log.exception(f"Suite3D registration failed: {e}")
-
-        if s3d_job_dir and validate_s3d_registration(s3d_job_dir, num_planes):
-            # Set shifts on array metadata so imwrite applies them during binary write
+            # already done, set metadata directly
+            log.info(f"Found valid existing s3d-job: {candidate}")
             md = getattr(input_data, "metadata", {}).copy()
             md["apply_shift"] = True
-            md["s3d-job"] = str(s3d_job_dir)
+            md["s3d-job"] = str(candidate)
             if hasattr(input_data, "metadata"):
                 input_data.metadata = md
-            log.info(f"Z-registration ready: {s3d_job_dir}")
         else:
-            log.warning("Z-registration failed or invalid. Proceeding without shifts.")
+            # start suite3d in background thread
+            s3d_event = threading.Event()
+
+            def _run_s3d():
+                try:
+                    log.info("Running Suite3D axial registration (background)...")
+                    filenames = getattr(input_data, "filenames", [])
+                    if not filenames and hasattr(input_data, "_files"):
+                        filenames = input_data._files
+                    if filenames:
+                        register_zplanes_s3d(
+                            filenames=filenames,
+                            metadata=combined_meta,
+                            outpath=base_out,
+                        )
+                except Exception as e:
+                    log.exception(f"Suite3D registration failed: {e}")
+                finally:
+                    s3d_event.set()
+
+            s3d_thread = threading.Thread(target=_run_s3d, daemon=True)
+            s3d_thread.start()
+
+            # set metadata optimistically so run_plane waits for shifts
+            md = getattr(input_data, "metadata", {}).copy()
+            md["apply_shift"] = True
+            md["s3d-job"] = str(candidate)
+            md["_s3d_event"] = s3d_event
+            if hasattr(input_data, "metadata"):
+                input_data.metadata = md
 
     try:
         pipeline(
@@ -1981,8 +2009,14 @@ def _run_pipeline_worker_thread(config):
             accept_all_cells=True,
             writer_kwargs=writer_kwargs,
         )
+        # wait for background suite3d thread if still running
+        if s3d_thread is not None:
+            s3d_thread.join(timeout=60)
+
         config["logger"].info(
             f"Suite2p processing complete. Results in {base_out}"
         )
     except Exception as e:
+        if s3d_thread is not None:
+            s3d_thread.join(timeout=10)
         config["logger"].exception(f"Suite2p processing failed: {e}")

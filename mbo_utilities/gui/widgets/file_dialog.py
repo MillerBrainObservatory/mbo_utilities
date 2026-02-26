@@ -236,60 +236,6 @@ class FileDialog:
             label += f" ({source})"
         imgui.text_colored(COL_TEXT_DIM, label)
 
-    def _draw_dependency_group(self, name: str, pipeline_feature: str, requires: list[tuple[str, str]]):
-        """Draw a single dependency group inline: Name - Requirement vX.X (GPU/CPU)."""
-        pipeline = self._get_feature(pipeline_feature)
-
-        # not installed
-        if pipeline is None or pipeline.status == Status.MISSING:
-            imgui.text_colored(COL_NA, f"{name} - not installed")
-            return
-
-        # build the line: "Suite2p - PyTorch v2.1.0 (GPU)"
-        parts = [name]
-
-        # add requirement info inline
-        for req_name, feature_name in requires:
-            feat = self._get_feature(feature_name)
-            if feat is None or feat.status == Status.MISSING:
-                parts.append(f"- {req_name}: missing")
-            else:
-                ver_str = f"v{feat.version}" if feat.version and feat.version != "installed" else ""
-                gpu_str = ""
-                if feat.gpu_ok is True:
-                    gpu_str = "GPU"
-                elif feat.gpu_ok is False:
-                    gpu_str = "CPU"
-
-                req_parts = [f"- {req_name}"]
-                if ver_str:
-                    req_parts.append(ver_str)
-                if gpu_str:
-                    req_parts.append(f"({gpu_str})")
-                parts.append(" ".join(req_parts))
-
-        line = " ".join(parts)
-
-        # color based on status
-        if pipeline.status == Status.OK:
-            imgui.text_colored(COL_OK, line)
-        elif pipeline.status == Status.WARN:
-            imgui.text_colored(COL_WARN, line)
-        else:
-            imgui.text_colored(COL_ERR, line)
-
-        # tooltip with detailed info
-        if imgui.is_item_hovered():
-            tooltip_parts = []
-            if pipeline.version and pipeline.version != "installed":
-                tooltip_parts.append(f"{name} v{pipeline.version}")
-            for req_name, feature_name in requires:
-                feat = self._get_feature(feature_name)
-                if feat and feat.message:
-                    tooltip_parts.append(f"{req_name}: {feat.message}")
-            if tooltip_parts:
-                imgui.set_tooltip("\n".join(tooltip_parts))
-
     def _draw_formats_card_content(self):
         """Draw supported formats - always shown immediately."""
         # version line (shows ? while loading)
@@ -346,78 +292,80 @@ class FileDialog:
         # dependency status - small inline section
         self._draw_dependency_status_line()
 
+    def _dep_line(self, name: str, feature_name: str | None = None, suffix: str = ""):
+        """Draw a single dependency line: icon  name vX.X.X (suffix)."""
+        feat = self._get_feature(feature_name or name)
+        installed = feat is not None and feat.status != Status.MISSING
+        ver = ""
+        if installed and feat.version and feat.version != "installed":
+            ver = f" v{feat.version}"
+        label = f"{name}{ver}"
+        if suffix:
+            label += f" ({suffix})"
+        if not installed:
+            imgui.text_colored(COL_NA, f"  {fa.ICON_FA_XMARK}  {name} - not installed")
+        elif feat.status == Status.OK:
+            imgui.text_colored(COL_OK, f"  {fa.ICON_FA_CHECK}  {label}")
+        elif feat.status == Status.WARN:
+            imgui.text_colored(COL_WARN, f"  {fa.ICON_FA_TRIANGLE_EXCLAMATION}  {label}")
+        else:
+            imgui.text_colored(COL_ERR, f"  {fa.ICON_FA_XMARK}  {label}")
+        if installed and feat.message and imgui.is_item_hovered():
+            imgui.set_tooltip(feat.message)
+
     def _draw_dependency_status_line(self):
-        """Draw compact dependency status with popup for details."""
+        """Draw dependency status with expandable details."""
         checking = self._install_status is None
 
         if checking:
-            # show spinner while checking
             imgui.text_colored(COL_TEXT_DIM, f"{fa.ICON_FA_CIRCLE_NOTCH}  checking dependencies...")
+            return
+
+        # determine pytorch cpu/gpu suffix
+        pytorch = self._get_feature("PyTorch")
+        pytorch_suffix = ""
+        if pytorch and pytorch.status != Status.MISSING:
+            if pytorch.gpu_ok is True:
+                pytorch_suffix = "GPU"
+            elif pytorch.gpu_ok is False:
+                pytorch_suffix = "CPU"
+
+        # count installed
+        deps = ["Suite2p", "PyTorch", "Suite3D", "LBM-Suite2p-Python"]
+        ok_count = sum(
+            1 for d in deps
+            if (f := self._get_feature(d)) is not None and f.status != Status.MISSING
+        )
+
+        # header with toggle
+        if ok_count == len(deps):
+            imgui.text_colored(COL_OK, f"{fa.ICON_FA_CIRCLE_CHECK}")
         else:
-            # count ok/warn/missing
-            ok_count = 0
-            issue_count = 0
-            deps = ["Suite2p", "Suite3D", "Rastermap", "PyTorch", "CuPy"]
-            for name in deps:
-                feat = self._get_feature(name)
-                if feat is None or feat.status == Status.MISSING:
-                    continue
-                if feat.status == Status.OK:
-                    ok_count += 1
-                else:
-                    issue_count += 1
+            imgui.text_colored(COL_WARN, f"{fa.ICON_FA_CIRCLE_EXCLAMATION}")
+        imgui.same_line()
 
-            # status icon and text
-            if issue_count > 0:
-                imgui.text_colored(COL_WARN, f"{fa.ICON_FA_CIRCLE_EXCLAMATION}")
-            else:
-                imgui.text_colored(COL_OK, f"{fa.ICON_FA_CIRCLE_CHECK}")
-            imgui.same_line()
+        push_button_style(primary=False)
+        if imgui.small_button(f"dependencies ({ok_count}/{len(deps)})"):
+            self._show_deps_popup = True
+        pop_button_style()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("click for details")
 
-            # clickable text to show popup
-            push_button_style(primary=False)
-            if imgui.small_button(f"dependencies ({ok_count} installed)"):
-                self._show_deps_popup = True
-            pop_button_style()
-
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Click for details")
-
-        # popup with full dependency info
+        # popup
         if self._show_deps_popup:
             imgui.open_popup("##deps_popup")
             self._show_deps_popup = False
 
         popup_flags = imgui.WindowFlags_.always_auto_resize
         if imgui.begin_popup("##deps_popup", popup_flags):
-            imgui.text_colored(COL_ACCENT, "Optional Dependencies")
+            imgui.text_colored(COL_ACCENT, "Pipeline Dependencies")
             imgui.separator()
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
-            # suite2p group
-            self._draw_dependency_group(
-                "Suite2p",
-                "Suite2p",
-                [("PyTorch", "PyTorch")]
-            )
-
-            # suite3d group
-            self._draw_dependency_group(
-                "Suite3D",
-                "Suite3D",
-                [("CuPy", "CuPy")]
-            )
-
-            # rastermap
-            rastermap = self._get_feature("Rastermap")
-            if rastermap is None or rastermap.status == Status.MISSING:
-                imgui.text_colored(COL_NA, "Rastermap - not installed")
-            else:
-                ver = f" v{rastermap.version}" if rastermap.version and rastermap.version != "installed" else ""
-                if rastermap.status == Status.OK:
-                    imgui.text_colored(COL_OK, f"Rastermap{ver}")
-                else:
-                    imgui.text_colored(COL_WARN, f"Rastermap{ver}")
+            self._dep_line("Suite2p")
+            self._dep_line("PyTorch", suffix=pytorch_suffix)
+            self._dep_line("Suite3D")
+            self._dep_line("LBM-Suite2p-Python")
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
             imgui.end_popup()

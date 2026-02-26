@@ -296,6 +296,9 @@ def draw_stats_section(parent: Any):
     if parent._selected_array >= len(array_labels):
         parent._selected_array = 0
 
+    if not hasattr(parent, "_stats_metric"):
+        parent._stats_metric = "Mean"
+
     avail = imgui.get_content_region_avail().x
     xpos = 0
 
@@ -312,6 +315,17 @@ def draw_stats_section(parent: Any):
             imgui.new_line()
         else:
             imgui.same_line()
+
+    imgui.separator()
+
+    # metric selector
+    imgui.text("Plot Metric:")
+    imgui.same_line()
+    if imgui.radio_button("Mean Fluorescence", parent._stats_metric == "Mean"):
+        parent._stats_metric = "Mean"
+    imgui.same_line()
+    if imgui.radio_button("SNR", parent._stats_metric == "SNR"):
+        parent._stats_metric = "SNR"
 
     imgui.separator()
 
@@ -357,6 +371,7 @@ def _draw_array_stats(
     z_vals = np.ascontiguousarray(np.arange(1, len(mean_vals) + 1, dtype=np.float64))
     mean_vals = np.ascontiguousarray(mean_vals, dtype=np.float64)
     std_vals = np.ascontiguousarray(std_vals, dtype=np.float64)
+    snr_vals = np.ascontiguousarray(snr_vals, dtype=np.float64)
 
     # Draw table and chart based on z-plane count
     if is_single_zplane or is_dual_zplane:
@@ -370,14 +385,22 @@ def _draw_array_stats(
             _draw_signal_metrics_chart(mean_vals, std_vals, snr_vals, is_dual_zplane, array_idx)
     else:
         # Multi-z-plane: show table and line plot
-        _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals, array_idx)
+        current_z = 1
+        if parent.image_widget and hasattr(parent.image_widget, "indices"):
+            names = getattr(parent.image_widget, "_slider_dim_names", None) or ()
+            if "z" in names:
+                try:
+                    current_z = parent.image_widget.indices["z"] + 1
+                except (IndexError, KeyError):
+                    pass
+        _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals, array_idx, current_z)
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
         if is_combined:
-            _draw_combined_zplane_plot(parent, z_vals, stats_list)
+            _draw_combined_zplane_plot(parent, z_vals, stats_list, current_z)
         else:
-            _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, array_idx)
+            _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, snr_vals, array_idx, parent, current_z)
 
 
 SNR_TOOLTIP = "SNR = (mean_foreground - mean_background) / std_background, foreground = top 20% brightest pixels, background = bottom 50%"
@@ -442,25 +465,32 @@ def _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, arra
         imgui.end_table()
 
 
-def _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals, array_idx=None):
-    """Draw z-plane stats table for multi-z data."""
+def _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals, array_idx, current_z=1):
+    """Draw z-plane stats table for multi-z data, highlighting the active Z row."""
     table_id = f"zstats{array_idx}" if array_idx is not None else "Stats, averaged over graphics"
 
     if imgui.begin_table(
         table_id,
         4,
-        imgui.TableFlags_.borders | imgui.TableFlags_.row_bg,
+        imgui.TableFlags_.borders | imgui.TableFlags_.row_bg | imgui.TableFlags_.scroll_y,
+        outer_size=imgui.ImVec2(0, 150),
     ):
         for col in ["Z", "Mean", "Std", "SNR (?)"]:
             imgui.table_setup_column(col, imgui.TableColumnFlags_.width_stretch)
         imgui.table_headers_row()
-        # tooltip for SNR header - hover anywhere on header row
+        # tooltip for SNR header
         if imgui.is_item_hovered():
             imgui.begin_tooltip()
             imgui.text(SNR_TOOLTIP)
             imgui.end_tooltip()
         for i in range(len(z_vals)):
             imgui.table_next_row()
+            # highlight current Z row
+            if int(z_vals[i]) == current_z:
+                imgui.table_set_bg_color(
+                    imgui.TableBgTarget_.row_bg0,
+                    imgui.color_convert_float4_to_u32(imgui.ImVec4(0.3, 0.5, 0.7, 0.5)),
+                )
             for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):
                 imgui.table_next_column()
                 imgui.text(f"{val:.2f}")
@@ -663,7 +693,7 @@ def _draw_signal_metrics_chart(mean_vals, std_vals, snr_vals, is_dual_zplane, ar
             implot.end_plot()
 
 
-def _draw_combined_zplane_plot(parent, z_vals, stats_list):
+def _draw_combined_zplane_plot(parent, z_vals, stats_list, current_z=1):
     """Draw combined z-plane signal plot."""
     imgui.text("Z-plane Signal: Combined")
     set_tooltip(
@@ -688,6 +718,8 @@ def _draw_combined_zplane_plot(parent, z_vals, stats_list):
     lower = mean_vals - std_vals
     upper = mean_vals + std_vals
 
+    n_zplanes = len(z)
+
     # Use available width to prevent cutoff
     plot_width = imgui.get_content_region_avail().x
     if implot.begin_plot(
@@ -695,6 +727,7 @@ def _draw_combined_zplane_plot(parent, z_vals, stats_list):
     ):
         try:
             style_seaborn_dark()
+            implot.setup_legend(implot.Location_.east.value, implot.LegendFlags_.outside.value)
             implot.setup_axes(
                 "Z-Plane",
                 "Mean Fluorescence",
@@ -726,29 +759,49 @@ def _draw_combined_zplane_plot(parent, z_vals, stats_list):
             implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
             implot.plot_line("Mean##line", z, mean_vals)
             implot.pop_style_var()
+
+            if n_zplanes > 2:
+                implot.push_style_color(implot.Col_.line.value, (1.0, 1.0, 0.0, 0.8))
+                implot.plot_inf_lines("Current Z", np.array([current_z], dtype=np.float64))
+                implot.pop_style_color()
         finally:
             implot.end_plot()
 
 
-def _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, array_idx):
-    """Draw z-plane signal plot with error bars."""
+def _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, snr_vals, array_idx, parent=None, current_z=1):
+    """Draw z-plane signal plot with error bars and optional current-Z marker."""
+    is_snr = getattr(parent, "_stats_metric", "Mean") == "SNR"
+    metric_name = "SNR" if is_snr else "Mean Fluorescence"
+    plot_vals = snr_vals if is_snr else mean_vals
+    plot_errs = np.zeros_like(snr_vals) if is_snr else std_vals
+
+    n_zplanes = len(z_vals)
+
     style_seaborn_dark()
-    imgui.text("Z-plane Signal: Mean ± Std")
+    imgui.text(f"Z-plane Signal: {metric_name}" + ("" if is_snr else " (Mean ± Std)"))
     plot_width = imgui.get_content_region_avail().x
     if implot.begin_plot(
         f"Z-Plane Signal {array_idx}", imgui.ImVec2(plot_width, 300)
     ):
         try:
+            implot.setup_legend(implot.Location_.east.value, implot.LegendFlags_.outside.value)
             implot.setup_axes(
                 "Z-Plane",
-                "Mean Fluorescence",
+                metric_name,
                 implot.AxisFlags_.auto_fit.value,
                 implot.AxisFlags_.auto_fit.value,
             )
             implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
-            implot.plot_error_bars(
-                f"Mean ± Std {array_idx}", z_vals, mean_vals, std_vals
-            )
-            implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals)
+
+            if not is_snr:
+                implot.plot_error_bars(
+                    f"Mean ± Std {array_idx}", z_vals, plot_vals, plot_errs
+                )
+            implot.plot_line(f"{metric_name} {array_idx}", z_vals, plot_vals)
+
+            if n_zplanes > 2:
+                implot.push_style_color(implot.Col_.line.value, (1.0, 1.0, 0.0, 0.8))
+                implot.plot_inf_lines("Current Z", np.array([current_z], dtype=np.float64))
+                implot.pop_style_color()
         finally:
             implot.end_plot()
