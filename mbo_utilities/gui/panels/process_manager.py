@@ -397,9 +397,9 @@ class ProcessPanel(BasePanel):
         # Log output
         if proc.output_path and Path(proc.output_path).is_file():
             if imgui.tree_node(f"Output##proc_{proc.pid}"):
-                lines = proc.tail_log(20)
+                lines = proc.tail_log(500)
                 line_height = imgui.get_text_line_height_with_spacing()
-                output_height = min(len(lines) * line_height + 10, 150) if lines else line_height + 10
+                output_height = min(len(lines) * line_height + 10, 400) if lines else line_height + 10
 
                 if imgui.begin_child(f"##proc_output_{proc.pid}", imgui.ImVec2(0, output_height), imgui.ChildFlags_.borders):
                     for line in lines:

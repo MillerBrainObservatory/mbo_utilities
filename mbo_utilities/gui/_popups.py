@@ -207,7 +207,7 @@ def _draw_process_entry(pm: Any, proc: Any) -> None:
         tree_open = imgui.tree_node(f"Log Output##proc_{proc.pid}")
         if tree_open:
             try:
-                lines = proc.tail_log(30)
+                lines = proc.tail_log(500)
                 line_height = imgui.get_text_line_height_with_spacing()
                 max_height = 180
                 content_h = min(len(lines) * line_height + 8, max_height) if lines else line_height + 8
@@ -314,7 +314,7 @@ def draw_background_processes_section(parent: Any):
                 parent._viewing_process_pid = None
 
             # tail log
-            lines = v_proc.tail_log(30)
+            lines = v_proc.tail_log(500)
             # Calculate height to fit content, with a max height and scrollbar when needed
             line_height = imgui.get_text_line_height_with_spacing()
             content_height = len(lines) * line_height + 10  # padding
