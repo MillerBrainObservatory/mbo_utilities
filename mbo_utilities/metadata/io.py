@@ -3,6 +3,7 @@ metadata file I/O - reading/writing metadata from TIFF files.
 
 functions for extracting metadata from ScanImage TIFFs and other file formats.
 """
+
 from __future__ import annotations
 
 import json
@@ -293,6 +294,7 @@ def get_metadata_single(file: Path):
             page0 = tiff_file.pages.first
             if page0 and 50839 in page0.tags:
                 import json
+
                 tag_value = page0.tags[50839].value
                 # handle different formats:
                 # 1. bytes: raw JSON bytes
@@ -324,6 +326,7 @@ def get_metadata_single(file: Path):
             page0 = tiff_file.pages.first
             if page0 and page0.description:
                 import json
+
                 meta = json.loads(page0.description)
                 if isinstance(meta, dict):
                     return meta
@@ -413,7 +416,10 @@ def get_metadata_single(file: Path):
 
         roi_fov_x_um = round(objective_resolution * size_xy[0])
         roi_fov_y_um = round(objective_resolution * size_xy[1])
-        pixel_resolution = (roi_fov_x_um / num_pixel_xy[0], roi_fov_y_um / num_pixel_xy[1])
+        pixel_resolution = (
+            roi_fov_x_um / num_pixel_xy[0],
+            roi_fov_y_um / num_pixel_xy[1],
+        )
 
         # roi is per-strip dimensions (width, height)
         # fov/fov_um are total tiled field of view (num_rois * per-roi)
@@ -753,6 +759,7 @@ def clean_scanimage_metadata(meta: dict) -> dict:
 
     # add all standard aliases for backward compatibility
     from .params import normalize_metadata
+
     normalize_metadata(result)
 
     return result
@@ -841,12 +848,12 @@ def default_ops():
         "spatial_hp_detect": 25,  # window for spatial high-pass filtering for neuropil subtraction before detection
         "denoise": False,  # denoise binned movie for cell detection in sparse_mode
         # cell detection settings with cellpose (used if anatomical_only > 0)
-        "anatomical_only": 0,  # run cellpose to get masks on 1: max_proj / mean_img; 2: mean_img; 3: mean_img enhanced, 4: max_proj
+        "anatomical_only": 3,  # run cellpose to get masks on 1: max_proj / mean_img; 2: mean_img; 3: mean_img enhanced, 4: max_proj
         "diameter": 0,  # use diameter for cellpose, if 0 estimate diameter
         "cellprob_threshold": 0.0,  # cellprob_threshold for cellpose
         "flow_threshold": 1.5,  # flow_threshold for cellpose
         "spatial_hp_cp": 0,  # high-pass image spatially by a multiple of the diameter
-        "pretrained_model": "cyto",  # path to pretrained model or model type string in Cellpose (can be user model)
+        "pretrained_model": "cpsam",  # path to pretrained model or model type string in Cellpose (can be user model)
         # classification parameters
         "soma_crop": True,  # crop dendrites for cell classification stats like compactness
         # ROI extraction parameters
@@ -1159,7 +1166,9 @@ def _build_ome_metadata(
     if "file_paths" in metadata or "num_files" in metadata:
         custom_meta["source_files"] = {
             "num_files": metadata.get("num_files"),
-            "num_timepoints": metadata.get("num_timepoints", metadata.get("num_frames")),
+            "num_timepoints": metadata.get(
+                "num_timepoints", metadata.get("num_frames")
+            ),
             "frames_per_file": metadata.get("frames_per_file"),
         }
 
@@ -1306,4 +1315,3 @@ def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
         },
         "version": "0.5",
     }
-
