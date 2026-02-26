@@ -334,6 +334,7 @@ def _write_plane(
     plane_index=None,
     channel_index=None,
     shift_vector=None,
+    all_plane_shifts=None,
     **kwargs,
 ):
     if dshape is None:
@@ -418,7 +419,13 @@ def _write_plane(
         apply_shift = True
         if plane_index is not None:
             iy, ix = map(int, shift_vector)
-            pt, pb, pl, pr = compute_pad_from_shifts([shift_vector])
+            # use global padding from all shifts so every plane gets the same
+            # output dimensions (stackable volume); fall back to per-plane
+            # padding when full shifts aren't available
+            if all_plane_shifts is not None:
+                pt, pb, pl, pr = compute_pad_from_shifts(all_plane_shifts)
+            else:
+                pt, pb, pl, pr = compute_pad_from_shifts([shift_vector])
             H_out = H0 + pt + pb
             W_out = W0 + pl + pr
             yy = slice(pt + iy, pt + iy + H0)
@@ -426,6 +433,14 @@ def _write_plane(
             out_shape = (ntime, H_out, W_out)
             shift_applied = True
             metadata[f"plane{plane_index}_shift"] = (iy, ix)
+            # store the valid (non-padded) pixel region so detection can
+            # ignore the zero-filled border.  _pad_yrange/_pad_xrange are
+            # never overwritten by suite2p's compute_crop; the caller
+            # intersects them with the registration-derived yrange/xrange.
+            metadata["yrange"] = [int(pt + iy), int(pt + iy + H0)]
+            metadata["xrange"] = [int(pl + ix), int(pl + ix + W0)]
+            metadata["_pad_yrange"] = [int(pt + iy), int(pt + iy + H0)]
+            metadata["_pad_xrange"] = [int(pl + ix), int(pl + ix + W0)]
         else:
             raise ValueError("plane_index must be provided when using shift_vector")
 
@@ -497,10 +512,18 @@ def _write_plane(
         out_shape = (ntime, H_out, W_out)
         shift_applied = True
         metadata[f"plane{plane_index}_shift"] = (iy, ix)
+        metadata["yrange"] = [int(pt + iy), int(pt + iy + H0)]
+        metadata["xrange"] = [int(pl + ix), int(pl + ix + W0)]
+        metadata["_pad_yrange"] = [int(pt + iy), int(pt + iy + H0)]
+        metadata["_pad_xrange"] = [int(pl + ix), int(pl + ix + W0)]
         logger.debug(f"Applying shift for plane {plane_index}: y={iy}, x={ix}")
 
     if not shift_applied:
         out_shape = (ntime, H0, W0)
+
+    # update shape to reflect actual output dimensions (including any padding
+    # from axial shifts) so write_ops gets the correct Ly/Lx
+    metadata["shape"] = out_shape
 
     start = 0
     for i in range(nchunks):
@@ -2124,6 +2147,9 @@ def write_ops(metadata, raw_filename, **kwargs):
         "nframes_chan1",
         "nframes_chan2",
         "num_frames",
+        # Spatial dimension fields (derived from shape which reflects padding)
+        "Ly",
+        "Lx",
         # Resolution fields (we've already set these consistently)
         "dx",
         "dy",
