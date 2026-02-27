@@ -262,6 +262,11 @@ def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -
     is_flag=True,
     help="Clear environment cache and exit.",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Launch GUI with verbose crash logging to ~/.mbo/logs/gui_debug.log",
+)
 @click.pass_context
 def main(
     ctx,
@@ -272,6 +277,7 @@ def main(
     check_install=False,
     no_cache=False,
     clear_cache=False,
+    debug=False,
 ):
     r"""
     MBO Utilities CLI - data preview and processing tools.
@@ -338,6 +344,40 @@ def main(
             ensure_cache()
         except Exception:
             pass  # don't crash if cache fails
+
+    if debug:
+        import traceback as _tb
+        log_dir = Path.home() / ".mbo" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "gui_debug.log"
+        click.echo(f"Debug mode: logging to {log_file}")
+        with open(log_file, "w") as f:
+            try:
+                f.write("=== mbo --debug ===\n")
+                f.write(f"python: {sys.version}\n")
+                f.write(f"executable: {sys.executable}\n\n")
+
+                f.write("importing run_gui...\n")
+                f.flush()
+                from mbo_utilities.gui.run_gui import run_gui
+
+                f.write("import ok, launching GUI...\n")
+                f.flush()
+                run_gui(data_in=None, roi=None, widget=True, metadata_only=False)
+
+                f.write("run_gui returned normally\n")
+            except SystemExit as e:
+                f.write(f"\nSystemExit: code={e.code}\n")
+                _tb.print_exc(file=f)
+            except Exception:
+                f.write("\nException:\n")
+                _tb.print_exc(file=f)
+            finally:
+                f.flush()
+        click.echo(f"Log written to {log_file}")
+        with open(log_file) as f:
+            click.echo(f.read())
+        return
 
     # show loading spinner while importing heavy dependencies
     spinner = LoadingSpinner("Loading GUI")
