@@ -1379,5 +1379,370 @@ def notebook(template, output_path, name, data_path, list_templates, templates_d
         raise click.Abort()
 
 
+def _rewrite_paths_in_value(obj, old_root, new_root, key_path="", changes=None):
+    """recursively rewrite path strings in a nested dict/list/array structure."""
+    if changes is None:
+        changes = []
+
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            obj[k] = _rewrite_paths_in_value(v, old_root, new_root, f"{key_path}.{k}", changes)
+        return obj
+
+    if isinstance(obj, list):
+        return [_rewrite_paths_in_value(item, old_root, new_root, f"{key_path}[{i}]", changes) for i, item in enumerate(obj)]
+
+    if isinstance(obj, str) and len(obj) > 3:
+        try:
+            p = Path(obj)
+            if p.is_absolute() and p.is_relative_to(old_root):
+                new_val = str(new_root / p.relative_to(old_root))
+                changes.append((key_path.lstrip("."), obj, new_val))
+                return new_val
+        except (ValueError, TypeError, OSError):
+            pass
+
+    import numpy as np
+    if isinstance(obj, np.ndarray) and obj.dtype.kind in ("U", "S", "O"):
+        flat = obj.flat
+        for i in range(obj.size):
+            flat[i] = _rewrite_paths_in_value(flat[i], old_root, new_root, f"{key_path}[{i}]", changes)
+
+    return obj
+
+
+def _find_npy_configs(dataset_dir):
+    """find ops.npy and s3d summary files in a dataset directory."""
+    dataset_dir = Path(dataset_dir)
+    targets = []
+    for p in sorted(dataset_dir.rglob("ops.npy")):
+        targets.append(p)
+    for p in sorted(dataset_dir.rglob("summary.npy")):
+        if "summary" in p.parent.name or "s3d" in str(p.parent.parent).lower():
+            targets.append(p)
+    return targets
+
+
+def _detect_old_root(npy_path, dataset_dir):
+    """auto-detect old root by comparing ops paths to current dataset location."""
+    import numpy as np
+    try:
+        data = np.load(npy_path, allow_pickle=True).item()
+    except Exception:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    dataset_dir = Path(dataset_dir).resolve()
+    for key in ("save_path", "data_path", "ops_path"):
+        val = data.get(key)
+        if not isinstance(val, str):
+            continue
+        try:
+            old_path = Path(val)
+            if not old_path.is_absolute():
+                continue
+            # walk up old_path until we find the matching suffix with dataset_dir
+            # e.g. old: F:\data\session\s2p\zplane01, dataset: D:\shared\session\s2p
+            # find common suffix: s2p\zplane01 -> old_root = F:\data\session
+            for i in range(len(old_path.parts)):
+                old_tail = Path(*old_path.parts[-(i + 1):]) if i + 1 <= len(old_path.parts) else old_path
+                for j in range(len(dataset_dir.parts)):
+                    ds_tail = Path(*dataset_dir.parts[-(j + 1):]) if j + 1 <= len(dataset_dir.parts) else dataset_dir
+                    if str(old_tail).lower() == str(ds_tail).lower():
+                        # matched suffix, compute roots
+                        old_root = Path(*old_path.parts[:len(old_path.parts) - (i + 1)])
+                        new_root = Path(*dataset_dir.parts[:len(dataset_dir.parts) - (j + 1)])
+                        if old_root != new_root and len(old_root.parts) > 1:
+                            return old_root, new_root
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+@main.command("relocate")
+@click.argument("dataset_dir", type=click.Path(exists=True))
+@click.option("--old-root", "old_root_str", type=click.Path(), default=None,
+              help="Old path prefix to replace. Auto-detected if not given.")
+@click.option("--new-root", "new_root_str", type=click.Path(), default=None,
+              help="New path prefix. Auto-detected if not given.")
+@click.option("--dry-run", is_flag=True, help="Show changes without writing.")
+def relocate(dataset_dir, old_root_str, new_root_str, dry_run):
+    r"""
+    Rewrite file paths in ops.npy and s3d summary after moving a dataset.
+
+    Scans for ops.npy and summary.npy files, replaces old path prefixes
+    with new ones. Useful when sharing data between machines or moving
+    to a different drive.
+
+    \b
+    Examples:
+      mbo relocate ./s2p_output --dry-run                  # auto-detect, preview
+      mbo relocate ./s2p_output                             # auto-detect and fix
+      mbo relocate ./s2p_output --old-root F:\\data --new-root D:\\shared
+    """
+    import numpy as np
+
+    dataset_path = Path(dataset_dir).resolve()
+    click.secho(f"Scanning {dataset_path} ...", bold=True)
+
+    targets = _find_npy_configs(dataset_path)
+    if not targets:
+        click.secho("No ops.npy or summary.npy files found.", fg="yellow")
+        return
+
+    click.echo(f"Found {len(targets)} config file(s)")
+
+    # resolve or auto-detect roots
+    if old_root_str and new_root_str:
+        old_root = Path(old_root_str)
+        new_root = Path(new_root_str)
+    else:
+        click.echo("Auto-detecting path roots...")
+        detected = _detect_old_root(targets[0], dataset_path)
+        if detected is None:
+            click.secho(
+                "Could not auto-detect old root. "
+                "Provide --old-root and --new-root explicitly.",
+                fg="red",
+            )
+            return
+        old_root, new_root = detected
+        if old_root_str:
+            old_root = Path(old_root_str)
+        if new_root_str:
+            new_root = Path(new_root_str)
+        click.echo(f"  old root: {old_root}")
+        click.echo(f"  new root: {new_root}")
+        if not dry_run:
+            if not click.confirm("  Proceed with these roots?"):
+                return
+
+    click.echo()
+
+    total_changes = 0
+    for npy_path in targets:
+        rel = npy_path.relative_to(dataset_path)
+        try:
+            data = np.load(npy_path, allow_pickle=True).item()
+        except Exception as e:
+            click.secho(f"  {rel}: failed to load ({e})", fg="red")
+            continue
+
+        if not isinstance(data, dict):
+            continue
+
+        changes = []
+        _rewrite_paths_in_value(data, old_root, new_root, changes=changes)
+
+        if not changes:
+            click.secho(f"  {rel}: no paths to update", fg="bright_black")
+            continue
+
+        total_changes += len(changes)
+        click.secho(f"  {rel}: {len(changes)} path(s)", fg="cyan")
+        for key, old_val, new_val in changes:
+            click.echo(f"    {key}")
+            click.secho(f"      - {old_val}", fg="red")
+            click.secho(f"      + {new_val}", fg="green")
+
+        if not dry_run:
+            np.save(npy_path, data)
+
+    click.echo()
+    if dry_run:
+        click.secho(f"Dry run: {total_changes} path(s) would be updated. "
+                     "Run without --dry-run to apply.", fg="yellow")
+    else:
+        click.secho(f"Updated {total_changes} path(s) across {len(targets)} file(s).", fg="green")
+
+
+@main.command("doctor")
+@click.option("--fix", is_flag=True, help="Attempt to fix detected issues.")
+def doctor(fix):
+    r"""
+    Diagnose and repair environment issues.
+
+    \b
+    Checks:
+      - Python version compatibility
+      - Core package imports
+      - GPU/rendering stack (wgpu, pygfx)
+      - Optional pipelines (suite2p, suite3d, cellpose)
+      - Stale lockfile / venv health
+
+    \b
+    Examples:
+      mbo doctor        # Check environment health
+      mbo doctor --fix  # Attempt to repair issues
+    """
+    import importlib
+    import subprocess
+
+    ok_count = 0
+    warn_count = 0
+    err_count = 0
+
+    def ok(msg):
+        nonlocal ok_count
+        ok_count += 1
+        click.secho(f"  [OK] {msg}", fg="green")
+
+    def warn(msg):
+        nonlocal warn_count
+        warn_count += 1
+        click.secho(f"  [WARN] {msg}", fg="yellow")
+
+    def err(msg):
+        nonlocal err_count
+        err_count += 1
+        click.secho(f"  [ERR] {msg}", fg="red")
+
+    click.secho("mbo doctor", bold=True)
+    click.echo()
+
+    # python version
+    click.secho("Python:", bold=True)
+    click.echo(f"  {sys.version}")
+    vi = sys.version_info
+    if vi >= (3, 12, 7) and vi < (3, 13):
+        ok(f"Python {vi.major}.{vi.minor}.{vi.micro}")
+    elif vi >= (3, 13):
+        warn(f"Python {vi.major}.{vi.minor}.{vi.micro} (mbo_utilities targets 3.12.x)")
+    else:
+        err(f"Python {vi.major}.{vi.minor}.{vi.micro} (need >=3.12.7)")
+    click.echo()
+
+    # core imports
+    click.secho("Core packages:", bold=True)
+    core = [
+        "mbo_utilities", "numpy", "tifffile", "scipy",
+        "dask", "zarr", "matplotlib", "pandas",
+    ]
+    for pkg in core:
+        try:
+            m = importlib.import_module(pkg)
+            v = getattr(m, "__version__", "?")
+            ok(f"{pkg} {v}")
+        except Exception as e:
+            err(f"{pkg}: {e}")
+    click.echo()
+
+    # rendering
+    click.secho("Rendering:", bold=True)
+    render_pkgs = ["wgpu", "pygfx", "rendercanvas", "imgui_bundle", "fastplotlib"]
+    for pkg in render_pkgs:
+        try:
+            m = importlib.import_module(pkg)
+            v = getattr(m, "__version__", "?")
+            ok(f"{pkg} {v}")
+        except Exception as e:
+            err(f"{pkg}: {e}")
+
+    try:
+        import wgpu
+        adapter = wgpu.gpu.request_adapter_sync()
+        if adapter:
+            info = getattr(adapter, "info", None)
+            if info and hasattr(info, "device"):
+                ok(f"GPU adapter: {info.device}")
+            else:
+                ok("GPU adapter: available")
+        else:
+            err("No GPU adapter found (wgpu)")
+    except Exception as e:
+        err(f"GPU adapter test: {e}")
+    click.echo()
+
+    # optional pipelines
+    click.secho("Pipelines:", bold=True)
+    optional = {
+        "suite2p": "suite2p",
+        "lbm_suite2p_python": "lbm_suite2p_python",
+        "suite3d": "suite3d.job",
+        "cellpose": "cellpose",
+        "cupy": "cupy",
+    }
+    for name, mod in optional.items():
+        try:
+            m = importlib.import_module(mod)
+            v = getattr(m, "__version__", "?")
+            ok(f"{name} {v}")
+        except ImportError:
+            warn(f"{name} not installed")
+        except Exception as e:
+            warn(f"{name}: {e}")
+    click.echo()
+
+    # lockfile health
+    click.secho("Environment:", bold=True)
+    venv_path = Path(sys.prefix)
+    lock_path = Path.cwd() / "uv.lock"
+    pyproject_path = Path.cwd() / "pyproject.toml"
+
+    if venv_path.exists():
+        ok(f"venv: {venv_path}")
+    else:
+        err(f"venv not found: {venv_path}")
+
+    if lock_path.exists() and pyproject_path.exists():
+        lock_mtime = lock_path.stat().st_mtime
+        proj_mtime = pyproject_path.stat().st_mtime
+        if lock_mtime < proj_mtime:
+            warn("uv.lock is older than pyproject.toml (stale lockfile)")
+            if fix:
+                click.echo("  Regenerating lockfile...")
+                try:
+                    subprocess.run(
+                        [sys.executable, "-m", "uv", "lock"],
+                        check=True, capture_output=True,
+                    )
+                    ok("Lockfile regenerated")
+                except Exception as e:
+                    err(f"Failed to regenerate lockfile: {e}")
+        else:
+            ok("uv.lock is up to date")
+    elif not lock_path.exists():
+        warn("No uv.lock found")
+    click.echo()
+
+    # stale worker processes
+    click.secho("Processes:", bold=True)
+    log_dir = Path.home() / ".mbo" / "logs"
+    if log_dir.exists():
+        import json as _json
+        stale = 0
+        for p in log_dir.glob("progress_*.json"):
+            try:
+                data = _json.loads(p.read_text())
+                if data.get("status") == "running":
+                    age = time.time() - data.get("timestamp", 0)
+                    if age > 3600:
+                        stale += 1
+                        if fix:
+                            data["status"] = "error"
+                            data["message"] = "cleared by mbo doctor"
+                            p.write_text(_json.dumps(data))
+            except Exception:
+                pass
+        if stale:
+            warn(f"{stale} stale progress file(s) (running > 1 hour)")
+            if fix:
+                ok(f"Cleared {stale} stale progress file(s)")
+        else:
+            ok("No stale processes")
+    else:
+        ok("No log directory")
+    click.echo()
+
+    # summary
+    click.secho("Summary:", bold=True)
+    click.secho(f"  {ok_count} ok, {warn_count} warnings, {err_count} errors")
+    if err_count and not fix:
+        click.echo()
+        click.secho("  Run 'mbo doctor --fix' to attempt repairs", fg="cyan")
+
+
 if __name__ == "__main__":
     main()
