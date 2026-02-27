@@ -655,8 +655,23 @@ def _launch_napari(data_in, roi=None):
         from mbo_utilities.metadata.output import OutputMetadata
         from pathlib import Path
 
-        viewer = napari.Viewer()
+        # determine ndisplay before creating viewer
+        ndisplay = 2
         path_str = str(data_in)
+
+        # peek at dims to decide 2D vs 3D display
+        try:
+            roi_norm = normalize_roi(roi)
+            arr_peek = imread(data_in, roi=roi_norm)
+            dims_peek = get_dims(arr_peek)
+            has_z = "Z" in dims_peek and arr_peek.shape[list(dims_peek).index("Z")] > 1
+            if has_z:
+                ndisplay = 3
+        except Exception:
+            arr_peek = None
+            dims_peek = None
+
+        viewer = napari.Viewer(ndisplay=ndisplay)
 
         # Try napari-ome-zarr plugin first for .zarr files
         loaded = False
@@ -665,24 +680,42 @@ def _launch_napari(data_in, roi=None):
                 viewer.open(path_str, plugin="napari-ome-zarr")
                 loaded = True
             except Exception as e:
-                # OME-Zarr plugin failed, fall back to mbo_utilities
                 logger.debug(f"napari-ome-zarr failed: {e}")
 
         if not loaded:
-            # Load via mbo_utilities and add as layer
             try:
-                roi = normalize_roi(roi)
-                arr = imread(data_in, roi=roi)
-                dims = get_dims(arr)
+                if arr_peek is not None:
+                    arr = arr_peek
+                    dims = dims_peek
+                else:
+                    roi = normalize_roi(roi)
+                    arr = imread(data_in, roi=roi)
+                    dims = get_dims(arr)
 
                 channel_axis = list(dims).index("C") if "C" in dims else None
 
                 scale = None
                 try:
-                    om = OutputMetadata(source=arr.metadata, source_shape=arr.shape, source_dims=dims)
-                    scale = om.to_napari_scale(dims)
-                    if scale:
-                        scale = list(scale)
+                    from mbo_utilities.metadata import get_voxel_size
+                    meta = getattr(arr, "metadata", {}) or {}
+                    om = OutputMetadata(source=meta, source_shape=arr.shape, source_dims=dims)
+                    vs = get_voxel_size(meta)
+
+                    # build scale with z as ratio to xy for better 3D visualization
+                    scale = []
+                    for dim in dims:
+                        d = dim.upper()
+                        if d == "T":
+                            scale.append(1.0)
+                        elif d == "Z":
+                            z_ratio = vs.dz / vs.dx if vs.dx and vs.dz else 1.0
+                            scale.append(z_ratio)
+                        elif d in ("Y", "X"):
+                            scale.append(1.0)
+                        elif d == "C":
+                            scale.append(1.0)
+
+                    logger.info(f"napari scale: {scale} (dz={vs.dz}, dx={vs.dx})")
                 except Exception as e:
                     logger.debug(f"Failed to build scale: {e}")
 
@@ -706,7 +739,6 @@ def _launch_napari(data_in, roi=None):
                     try:
                         viewer.add_image(n_arr, axis_labels=tuple(axis_labels), **kwargs)
                     except TypeError:
-                        # Older napari versions
                         viewer.add_image(n_arr, **kwargs)
 
                 # Handle multi-ROI
