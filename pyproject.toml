@@ -59,12 +59,9 @@ Repository = "https://github.com/millerbrainobservatory/mbo_utilities"
 Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
-# Suite2p alone will not include torch
 suite2p = [
     "numba>=0.60.0",
-    "lbm_suite2p_python>=2.5.4",
     "suite2p_mbo>=2.0.1",
-    "setuptools",
 ]
 # Suite3D - requires CuPy (installed separately by installer based on CUDA version)
 suite3d = [
