@@ -251,8 +251,13 @@ def load_registration_shifts(metadata: dict | None, debug: bool = False):
     if summary_path and not summary_path.is_file():
         event = metadata.get("_s3d_event") if metadata else None
         if event is not None:
+            print("  Waiting for Suite3D registration to complete (up to 10 min)...")
             logger.info("waiting for suite3d registration to complete...")
             event.wait(timeout=600)
+            if event.is_set():
+                print("  Suite3D registration complete.")
+            else:
+                print("  Suite3D wait timed out, proceeding without axial shifts.")
 
     if summary_path and summary_path.is_file():
         try:
