@@ -1602,6 +1602,20 @@ def doctor(fix):
     click.secho("mbo doctor", bold=True)
     click.echo()
 
+    def _get_pkg_version(module, dist_name=None):
+        """get version from module attr, then importlib.metadata fallback."""
+        v = getattr(module, "__version__", None)
+        if v:
+            return v
+        v = getattr(module, "version", None)
+        if isinstance(v, str):
+            return v
+        try:
+            from importlib.metadata import version as meta_version
+            return meta_version(dist_name or module.__name__.split(".")[0])
+        except Exception:
+            return "?"
+
     # python version
     click.secho("Python:", bold=True)
     click.echo(f"  {sys.version}")
@@ -1623,8 +1637,7 @@ def doctor(fix):
     for pkg in core:
         try:
             m = importlib.import_module(pkg)
-            v = getattr(m, "__version__", "?")
-            ok(f"{pkg} {v}")
+            ok(f"{pkg} {_get_pkg_version(m)}")
         except Exception as e:
             err(f"{pkg}: {e}")
     click.echo()
@@ -1635,8 +1648,7 @@ def doctor(fix):
     for pkg in render_pkgs:
         try:
             m = importlib.import_module(pkg)
-            v = getattr(m, "__version__", "?")
-            ok(f"{pkg} {v}")
+            ok(f"{pkg} {_get_pkg_version(m)}")
         except Exception as e:
             err(f"{pkg}: {e}")
 
@@ -1657,18 +1669,18 @@ def doctor(fix):
 
     # optional pipelines
     click.secho("Pipelines:", bold=True)
-    optional = {
-        "suite2p": "suite2p",
-        "lbm_suite2p_python": "lbm_suite2p_python",
-        "suite3d": "suite3d.job",
-        "cellpose": "cellpose",
-        "cupy": "cupy",
-    }
-    for name, mod in optional.items():
+    # (display_name, import_module, dist_name_for_metadata)
+    optional = [
+        ("suite2p_mbo", "suite2p", "suite2p_mbo"),
+        ("lbm_suite2p_python", "lbm_suite2p_python", "lbm_suite2p_python"),
+        ("suite3d", "suite3d.job", "mbo-suite3d"),
+        ("cellpose", "cellpose", "cellpose"),
+        ("cupy", "cupy", "cupy-cuda12x"),
+    ]
+    for name, mod, dist in optional:
         try:
             m = importlib.import_module(mod)
-            v = getattr(m, "__version__", "?")
-            ok(f"{name} {v}")
+            ok(f"{name} {_get_pkg_version(m, dist)}")
         except ImportError:
             warn(f"{name} not installed")
         except Exception as e:
