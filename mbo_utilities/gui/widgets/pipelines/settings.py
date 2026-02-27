@@ -1940,10 +1940,10 @@ def _run_pipeline_worker_thread(config):
         writer_kwargs["num_frames"] = config["target_timepoints"]
 
     # Z-registration (Suite3D): compute or reuse axial shifts
-    s3d_thread = None
     if config.get("register_z", False):
         from mbo_utilities.arrays import register_zplanes_s3d, validate_s3d_registration
         from mbo_utilities.metadata import get_param
+        from mbo_utilities.gui.tasks import _s3d_subprocess_target
 
         log = config["logger"]
         combined_meta = getattr(input_data, "metadata", {}).copy()
@@ -1952,44 +1952,48 @@ def _run_pipeline_worker_thread(config):
         candidate = base_out / job_id
 
         if validate_s3d_registration(candidate, num_planes):
-            # already done, set metadata directly
             log.info(f"Found valid existing s3d-job: {candidate}")
+        else:
+            log.info("Starting Suite3D in isolated subprocess...")
+
+            filenames = getattr(input_data, "filenames", [])
+            if not filenames and hasattr(input_data, "_files"):
+                filenames = input_data._files
+
+            if filenames:
+                import multiprocessing as mp
+
+                ctx = mp.get_context("spawn")
+                filenames_str = [str(f) for f in filenames]
+                proc = ctx.Process(
+                    target=_s3d_subprocess_target,
+                    args=(filenames_str, combined_meta, str(base_out)),
+                )
+                proc.start()
+                proc.join(timeout=600)
+
+                if proc.is_alive():
+                    log.warning("Suite3D timed out after 10 minutes, terminating...")
+                    proc.terminate()
+                    proc.join(timeout=10)
+                    if proc.is_alive():
+                        proc.kill()
+                elif proc.exitcode != 0:
+                    log.warning(
+                        f"Suite3D failed (exit code {proc.exitcode}), "
+                        "proceeding without z-registration"
+                    )
+                else:
+                    log.info("Suite3D registration completed successfully")
+
+        if validate_s3d_registration(candidate, num_planes):
             md = getattr(input_data, "metadata", {}).copy()
             md["apply_shift"] = True
             md["s3d-job"] = str(candidate)
             if hasattr(input_data, "metadata"):
                 input_data.metadata = md
         else:
-            # start suite3d in background thread
-            s3d_event = threading.Event()
-
-            def _run_s3d():
-                try:
-                    log.info("Running Suite3D axial registration (background)...")
-                    filenames = getattr(input_data, "filenames", [])
-                    if not filenames and hasattr(input_data, "_files"):
-                        filenames = input_data._files
-                    if filenames:
-                        register_zplanes_s3d(
-                            filenames=filenames,
-                            metadata=combined_meta,
-                            outpath=base_out,
-                        )
-                except Exception as e:
-                    log.exception(f"Suite3D registration failed: {e}")
-                finally:
-                    s3d_event.set()
-
-            s3d_thread = threading.Thread(target=_run_s3d, daemon=True)
-            s3d_thread.start()
-
-            # set metadata optimistically so run_plane waits for shifts
-            md = getattr(input_data, "metadata", {}).copy()
-            md["apply_shift"] = True
-            md["s3d-job"] = str(candidate)
-            md["_s3d_event"] = s3d_event
-            if hasattr(input_data, "metadata"):
-                input_data.metadata = md
+            log.warning("No valid z-registration available, proceeding without axial shifts")
 
     try:
         pipeline(
@@ -2009,14 +2013,8 @@ def _run_pipeline_worker_thread(config):
             accept_all_cells=True,
             writer_kwargs=writer_kwargs,
         )
-        # wait for background suite3d thread if still running
-        if s3d_thread is not None:
-            s3d_thread.join(timeout=60)
-
         config["logger"].info(
             f"Suite2p processing complete. Results in {base_out}"
         )
     except Exception as e:
-        if s3d_thread is not None:
-            s3d_thread.join(timeout=10)
         config["logger"].exception(f"Suite2p processing failed: {e}")
