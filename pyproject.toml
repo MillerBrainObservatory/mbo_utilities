@@ -26,24 +26,9 @@ dependencies = [
 	"opencv-python-headless",
 	"h5py",
 	"tqdm",
-	"jupyterlab>=4.2.6",
-	# "jupyterlab",
-	"ipykernel",
-	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
-	"glfw ; sys_platform != 'linux'",
-	"pygfx>=0.15.2",
-	"jupyter_rfb>=0.5.1",
 	"llvmlite>=0.43.0",
 	"mkl_fft>=2.0.0",
-	"mbo-fastplotlib>=0.7.3",
-	"rendercanvas>=2.4.2,<2.5",
-	"imgui-bundle>=1.92.5",
-	"pyqt6>=6.7",
-	"pyqt6-sip",
-	"pyqtgraph",
-	"qtpy",
-	"wgpu>=0.28.1,<0.29",
 ]
 
 [project.scripts]
@@ -59,38 +44,55 @@ Repository = "https://github.com/millerbrainobservatory/mbo_utilities"
 Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
+# gui/visualization stack (imgui, fastplotlib, qt, wgpu)
+gui = [
+    "mbo-fastplotlib>=0.7.3",
+    "pygfx>=0.15.2",
+    "wgpu>=0.28.1,<0.29",
+    "rendercanvas>=2.4.2,<2.5",
+    "imgui-bundle>=1.92.5",
+    "pyqt6>=6.7",
+    "pyqt6-sip",
+    "pyqtgraph",
+    "qtpy",
+    "glfw ; sys_platform != 'linux'",
+    "jupyter_rfb>=0.5.1",
+]
+# jupyter environment
+notebook = [
+    "jupyterlab>=4.2.6",
+    "ipykernel",
+    "ipywidgets>=8.0.0,<9",
+]
 suite2p = [
     "numba>=0.60.0",
     "suite2p_mbo>=2.0.1",
 ]
-# Suite3D - requires CuPy (installed separately by installer based on CUDA version)
+# suite3d requires cupy installed separately based on cuda version
 suite3d = [
     "mbo-suite3d>=0.0.7",
 ]
-# Rastermap for activity sorting
 rastermap = [
     "rastermap",
 ]
-# Napari interactive viewer with plugins
 napari = [
     "napari",
     "napari-ome-zarr",
     "napari-animation",
 ]
-# Isoview lightsheet support (clusterPT KLB files)
 isoview = [
     "pyklb",
 ]
-# PyTorch for neural network operations
+# torch/cuda must be installed separately with correct index:
+#   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 torch = [
     "torch",
     "torchvision",
 ]
-# All processing pipelines
+# all processing pipelines (no gui)
 processing = [
     "mbo_utilities[suite2p,suite3d,rastermap,torch]",
 ]
-# Documentation build
 docs = [
     "sphinx>=6.1.3",
     "docutils>=0.19",
@@ -111,21 +113,8 @@ docs = [
     "myst_nb",
     "pygfx>=0.14.0",
 ]
-# Everything
-all = ["mbo_utilities[processing,docs]"]
-
-[[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
-
-[tool.uv.sources]
-torch = [
-  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
-torchvision = [
-  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
+# everything
+all = ["mbo_utilities[gui,notebook,processing,docs]"]
 
 [tool.ruff]
 line-length = 88

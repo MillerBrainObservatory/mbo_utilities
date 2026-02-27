@@ -96,115 +96,11 @@ class TimingStats:
 
 
 def check():
-    import importlib
-    import pandas as pd
-
-    rows = []
-
-    try:
-        torch = importlib.import_module("torch")
-        t_ver = getattr(torch, "__version__", "") or ""
-        rows.append(
-            {
-                "component": "torch-cpu",
-                "ok": True,
-                "version": t_ver,
-                "details": "import ok",
-            }
-        )
-        try:
-            cuda_ver = getattr(getattr(torch, "version", None), "cuda", "") or ""
-            cuda_avail = bool(
-                getattr(getattr(torch, "cuda", None), "is_available", lambda: False)()
-            )
-            dev_count = (
-                getattr(getattr(torch, "cuda", None), "device_count", lambda: 0)()
-                if cuda_avail
-                else 0
-            )
-            dev_name = ""
-            if cuda_avail and dev_count > 0:
-                try:
-                    dev_name = torch.cuda.get_device_name(0)
-                except Exception:
-                    dev_name = "GPU detected"
-            rows.append(
-                {
-                    "component": "torch-gpu",
-                    "ok": cuda_avail,
-                    "version": cuda_ver,
-                    "details": f"devices={dev_count}; name={dev_name}",
-                }
-            )
-        except Exception as e:
-            rows.append(
-                {
-                    "component": "torch-gpu",
-                    "ok": False,
-                    "version": "",
-                    "details": f"check error: {e}",
-                }
-            )
-    except Exception as e:
-        rows.append(
-            {"component": "torch-cpu", "ok": False, "version": "", "details": str(e)}
-        )
-        rows.append(
-            {
-                "component": "torch-gpu",
-                "ok": False,
-                "version": "",
-                "details": "torch not available",
-            }
-        )
-
-    try:
-        cupy = importlib.import_module("cupy")
-        cu_ver = getattr(cupy, "__version__", "") or ""
-        rows.append(
-            {
-                "component": "cupy-cpu",
-                "ok": True,
-                "version": cu_ver,
-                "details": "import ok",
-            }
-        )
-        try:
-            get_dc = getattr(getattr(cupy, "cuda", None), "runtime", None)
-            get_dc = getattr(get_dc, "getDeviceCount", None)
-            n = int(get_dc()) if callable(get_dc) else 0
-            rows.append(
-                {
-                    "component": "cupy-gpu",
-                    "ok": n > 0,
-                    "version": cu_ver,
-                    "details": f"devices={n}",
-                }
-            )
-        except Exception as e:
-            rows.append(
-                {
-                    "component": "cupy-gpu",
-                    "ok": False,
-                    "version": cu_ver,
-                    "details": f"device check error: {e}",
-                }
-            )
-    except Exception as e:
-        rows.append(
-            {"component": "cupy-cpu", "ok": False, "version": "", "details": str(e)}
-        )
-        rows.append(
-            {
-                "component": "cupy-gpu",
-                "ok": False,
-                "version": "",
-                "details": "cupy not available",
-            }
-        )
-
-    df = pd.DataFrame(rows, columns=["component", "ok", "version", "details"])
-    return df.sort_values("component").reset_index(drop=True)
+    """run installation check and return status. delegates to install module."""
+    from mbo_utilities.install import check_installation, print_status_cli
+    status = check_installation()
+    print_status_cli(status)
+    return status
 
 
 def smooth_data(data, window_size=5):
@@ -361,10 +257,9 @@ def match_array_size(arr1, arr2, mode="trim"):
 
 
 def is_qt_installed() -> bool:
-    """Returns True if PyQt5 is installed, otherwise False."""
+    """Returns True if PyQt6 is installed, otherwise False."""
     try:
-        import PyQt5
-
+        import PyQt6
         return True
     except ImportError:
         return False

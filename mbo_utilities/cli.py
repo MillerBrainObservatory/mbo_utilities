@@ -320,12 +320,16 @@ def main(
         return
 
     if check_install:
-        # force full cache rebuild including install status
-        from mbo_utilities.env_cache import build_full_cache_with_install_status, save_cache
-        cache = build_full_cache_with_install_status()
-        save_cache(cache)
-        from mbo_utilities.gui.run_gui import _check_installation
-        _check_installation()
+        from mbo_utilities.install import check_installation, print_status_cli
+        status = check_installation()
+        print_status_cli(status)
+        # update cache
+        try:
+            from mbo_utilities.env_cache import build_full_cache_with_install_status, save_cache
+            cache = build_full_cache_with_install_status()
+            save_cache(cache)
+        except Exception:
+            pass
         return
 
     # If a subcommand is invoked, skip main logic
