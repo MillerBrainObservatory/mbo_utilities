@@ -57,7 +57,7 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
     """Ensure process status is reported to sidecar file."""
     try:
         # Match location used by TaskMonitor and ProcessManager
-        log_dir = Path.home() / "mbo" / "logs"
+        log_dir = Path.home() / ".mbo" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         if uuid:
             sidecar = log_dir / f"progress_{uuid}.json"
@@ -104,7 +104,7 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
 def _start_watchdog(uuid: str | None, logger: logging.Logger):
     """daemon thread that kills this process if progress stalls."""
     def _watchdog():
-        log_dir = Path.home() / "mbo" / "logs"
+        log_dir = Path.home() / ".mbo" / "logs"
         last_progress = 0.0
         last_change = time.time()
         stall_seconds = MAX_STALL_MINUTES * 60

@@ -25,7 +25,7 @@ MAX_RECENT_FILES = 20
 
 def _get_settings_dir() -> Path:
     """Get the settings directory, creating it if needed."""
-    settings_dir = Path.home() / "mbo" / "settings"
+    settings_dir = Path.home() / ".mbo" / "settings"
     settings_dir.mkdir(parents=True, exist_ok=True)
     return settings_dir
 

@@ -78,9 +78,9 @@ DIM_ALIASES: dict[str, str] = {
 class TagDefinition:
     """definition for a dimension tag type."""
 
-    label: str        # filename prefix: "tp", "zplane", "cam"
+    label: str  # filename prefix: "tp", "zplane", "cam"
     description: str  # human readable
-    zero_pad: int = 2 # pad with how many digits could this value be
+    zero_pad: int = 2  # pad with how many digits could this value be
 
 
 # built-in tag definitions
@@ -101,9 +101,9 @@ class DimensionTag:
     """single dimension tag instance with range information."""
 
     definition: TagDefinition
-    start: int        # 1-based start index
+    start: int  # 1-based start index
     stop: int | None  # 1-based stop index (None = single value)
-    step: int = 1     # step size (default 1)
+    step: int = 1  # step size (default 1)
 
     def to_string(self) -> str:
         """format as filename component.
@@ -187,8 +187,7 @@ class DimensionTag:
         if len(indices) >= 2:
             step = indices[1] - indices[0]
             is_uniform = all(
-                indices[i + 1] - indices[i] == step
-                for i in range(len(indices) - 1)
+                indices[i + 1] - indices[i] == step for i in range(len(indices) - 1)
             )
             if is_uniform and step > 0:
                 return cls(definition, start=indices[0], stop=indices[-1], step=step)
@@ -212,7 +211,7 @@ class DimensionTag:
         for dim_char, tag_def in TAG_REGISTRY.items():
             if s.startswith(tag_def.label):
                 definition = tag_def
-                s = s[len(tag_def.label):]
+                s = s[len(tag_def.label) :]
                 break
 
         if definition is None:
@@ -225,7 +224,9 @@ class DimensionTag:
         elif len(parts) == 2:
             return cls(definition, start=int(parts[0]), stop=int(parts[1]), step=1)
         elif len(parts) == 3:
-            return cls(definition, start=int(parts[0]), stop=int(parts[1]), step=int(parts[2]))
+            return cls(
+                definition, start=int(parts[0]), stop=int(parts[1]), step=int(parts[2])
+            )
         else:
             raise ValueError(f"invalid tag format: '{s}'")
 

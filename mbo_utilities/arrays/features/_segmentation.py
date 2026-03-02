@@ -3,6 +3,7 @@ Segmentation features for arrays.
 
 Provides compatibility between Cellpose (dense masks) and Suite2p (sparse stats).
 """
+
 from __future__ import annotations
 
 import logging
@@ -361,9 +362,7 @@ class SegmentationMixin:
         ds[:] = masks
 
         # Metadata
-        labels_grp.attrs["labels"] = list(
-            {*labels_grp.attrs.get("labels", []), name}
-        )
+        labels_grp.attrs["labels"] = list({*labels_grp.attrs.get("labels", []), name})
 
         ds.attrs["image-label"] = {
             "version": "0.4",

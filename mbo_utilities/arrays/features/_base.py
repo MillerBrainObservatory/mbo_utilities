@@ -104,7 +104,10 @@ class ArrayFeature:
             try:
                 func(event)
             except Exception as e:
-                warn(f"Error in {self.__class__.__name__} event handler: {e}", stacklevel=2)
+                warn(
+                    f"Error in {self.__class__.__name__} event handler: {e}",
+                    stacklevel=2,
+                )
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self._property_name!r})"

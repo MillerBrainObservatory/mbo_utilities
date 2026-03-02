@@ -403,6 +403,13 @@ def _init_s2p_selection_state(self):
                 num_planes = data.num_planes
             elif data.ndim == 4:
                 num_planes = data.shape[1]
+
+            # fallback: if multiple files loaded but each is single-plane natively,
+            # treat the list of files as a volumetric stack (used when reloading Suite2p output)
+            if isinstance(self.fpath, (list, tuple)) and len(self.fpath) > 1:
+                if num_planes == 1:
+                    num_planes = len(self.fpath)
+
             if hasattr(data, "num_color_channels"):
                 num_channels = data.num_color_channels
             elif hasattr(data, "_num_color_channels"):
@@ -480,9 +487,11 @@ def _init_s2p_selection_state(self):
         self._s2p_c_stop = num_channels
         self._s2p_c_step = 1
 
-    # ensure _selected_planes is initialized (used by run_process)
-    if not hasattr(self, "_selected_planes"):
-        self._selected_planes = set(range(1, num_planes + 1))
+    # always ensure _selected_planes stays purely synced to the current z slicing logic
+    if num_planes > 1:
+        self._selected_planes = set(range(self._s2p_z_start, self._s2p_z_stop + 1, self._s2p_z_step))
+    else:
+        self._selected_planes = {1}
 
     # parse timepoint selection if needed
     if self._s2p_tp_parsed is None and not self._s2p_tp_error:
@@ -588,11 +597,7 @@ def _draw_s2p_selection_popup(self):
             c_attr="_s2p_c",
         )
 
-        # update _selected_planes for run_process
-        if num_planes > 1:
-            self._selected_planes = set(range(z_start, z_stop + 1, z_step))
-        else:
-            self._selected_planes = {1}
+        # (logic moved to unconditionally sync in _init_s2p_selection_state)
 
         # update s2p.target_timepoints from selection
         if tp_parsed:
@@ -685,8 +690,12 @@ def _draw_s2p_settings_popup(self):
         try:
             if hasattr(self, "image_widget") and self.image_widget.data:
                 data = self.image_widget.data[0]
-                if data.ndim == 4:
+                if hasattr(data, "num_planes"):
+                    num_planes = data.num_planes
+                elif data.ndim == 4:
                     num_planes = data.shape[1]
+                elif data.ndim == 5:
+                    num_planes = data.shape[2]
             n_selected = len(getattr(self, "_selected_planes", {1}))
         except Exception:
             pass
@@ -706,109 +715,6 @@ def _draw_s2p_settings_popup(self):
             imgui.close_current_popup()
 
         imgui.end_popup()
-
-
-# def _load_suite2p_results(self):
-#     """Load Suite2p results (stat.npy) from a folder."""
-#     s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
-#     default_dir = s2p_path or str(get_last_dir("suite2p_output") or pathlib.Path().home())
-#
-#     # open folder dialog
-#     self._s2p_load_dialog = pfd.select_folder("Select Suite2p results folder", default_dir)
-#     self._s2p_load_type = "suite2p"
-#
-#
-# def _load_cellpose_results(self):
-#     """Load Cellpose masks from a file."""
-#     s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
-#     default_dir = s2p_path or str(get_last_dir("cellpose_masks") or pathlib.Path().home())
-#
-#     # open file dialog
-#     self._s2p_load_dialog = pfd.open_file(
-#         "Select Cellpose masks file",
-#         default_dir,
-#         ["*.npy", "*.png", "*_seg.npy"],
-#     )
-#     self._s2p_load_type = "cellpose"
-#
-#
-# def _check_load_results_dialog(self):
-#     """Check if load results dialog has finished and process results."""
-#     if not hasattr(self, "_s2p_load_dialog") or self._s2p_load_dialog is None:
-#         return
-#
-#     if not self._s2p_load_dialog.ready():
-#         return
-#
-#     result = self._s2p_load_dialog.result()
-#     self._s2p_load_dialog = None
-#
-#     if not result:
-#         return
-#
-#     load_type = getattr(self, "_s2p_load_type", "suite2p")
-#
-#     if load_type == "suite2p":
-#         _process_suite2p_load(self, result)
-#     elif load_type == "cellpose":
-#         # result is a list of files
-#         if result:
-#             _process_cellpose_load(self, result[0])
-#
-#
-# def _process_suite2p_load(self, folder_path: str):
-#     """Process loaded Suite2p results folder."""
-#     import numpy as np
-#     from pathlib import Path
-#
-#     folder = Path(folder_path)
-#     try:
-#         # find stat.npy
-#         stat_files = list(folder.rglob("stat.npy"))
-#         if not stat_files:
-#             self.logger.error(f"No stat.npy found in {folder}")
-#             return
-#
-#         stat_path = stat_files[0]
-#         ops_path = stat_path.parent / "ops.npy"
-#         iscell_path = stat_path.parent / "iscell.npy"
-#
-#         stat = np.load(stat_path, allow_pickle=True)
-#         ops = np.load(ops_path, allow_pickle=True).item() if ops_path.exists() else {}
-#         iscell = np.load(iscell_path, allow_pickle=True)[:, 0].astype(bool) if iscell_path.exists() else np.ones(len(stat), dtype=bool)
-#
-#         n_cells = iscell.sum()
-#         self.logger.info(f"Loaded {n_cells} cells from {stat_path}")
-#
-#         # store for visualization
-#         self._s2p_stat = stat
-#         self._s2p_ops = ops
-#         self._s2p_iscell = iscell
-#
-#         set_last_dir("suite2p_output", folder_path)
-#
-#     except Exception as e:
-#         self.logger.error(f"Failed to load Suite2p results: {e}")
-#
-#
-# def _process_cellpose_load(self, file_path: str):
-#     """Process loaded Cellpose masks file."""
-#     import numpy as np
-#     from pathlib import Path
-#
-#     try:
-#         masks = np.load(file_path, allow_pickle=True)
-#         if isinstance(masks, np.ndarray) and masks.dtype == object:
-#             # may be a dict stored in npy
-#             masks = masks.item() if masks.ndim == 0 else masks
-#
-#         self.logger.info(f"Loaded Cellpose masks from {file_path}")
-#         self._cellpose_masks = masks
-#
-#         set_last_dir("cellpose_masks", str(Path(file_path).parent))
-#
-#     except Exception as e:
-#         self.logger.error(f"Failed to load Cellpose masks: {e}")
 
 
 def _draw_data_options_content(self):
@@ -938,6 +844,11 @@ def _draw_section_suite2p_content(self):
     if imgui.button("Selection"):
         self._s2p_selection_open = True
     set_tooltip("Output path and frame/plane selection")
+
+    imgui.same_line()
+    if imgui.button("Metadata"):
+        self._metadata_editor_open = True
+    set_tooltip("Edit dataset metadata prior to processing")
 
     # draw the selection popup
     _draw_s2p_selection_popup(self)
@@ -1672,55 +1583,6 @@ def _draw_section_suite2p_content(self):
                 imgui.end_popup()
 
         imgui.end_table()
-    # if imgui.button("Load Suite2p Masks"):
-    #     try:
-    #         import numpy as np
-    #         from pathlib import Path
-    #
-    #         res = pfd.select_folder(self._saveas_outdir or str(Path().home()))
-    #         if res:
-    #             self.s2p_dir = res.result()
-    #
-    #         s2p_dir = Path(self._saveas_outdir)
-    #         ops = np.load(next(s2p_dir.rglob("ops.npy")), allow_pickle=True).item()
-    #         stat = np.load(next(s2p_dir.rglob("stat.npy")), allow_pickle=True)
-    #         iscell = np.load(next(s2p_dir.rglob("iscell.npy")), allow_pickle=True)[:, 0].astype(bool)
-    #
-    #         Ly, Lx = ops["Ly"], ops["Lx"]
-    #         mask_rgb = np.zeros((Ly, Lx, 3), dtype=np.float32)
-    #
-    #         # build ROI overlay (green for accepted cells)
-    #         for s, ok in zip(stat, iscell):
-    #             if not ok:
-    #                 continue
-    #             ypix, xpix, lam = s["ypix"], s["xpix"], s["lam"]
-    #             lam = lam / lam.max()
-    #             mask_rgb[ypix, xpix, 1] = np.maximum(mask_rgb[ypix, xpix, 1], lam)  # G channel
-    #
-    #         self._mask_color_strength = 0.5
-    #         self._mask_rgb = mask_rgb
-    #         self._mean_img = ops["meanImg"].astype(np.float32)
-    #         self._show_mask_slider = True
-    #
-    #         combined = self._mean_img[..., None].repeat(3, axis=2)
-    #         combined = combined / combined.max()
-    #         combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
-    #         self.image_widget.graphics[1].data = combined
-    #         self.logger.info(f"Loaded and displayed {iscell.sum()} Suite2p masks.")
-    #
-    #     except Exception as e:
-    #         self.logger.error(f"Mask load failed: {e}")
-
-    # if getattr(self, "_show_mask_slider", False):
-    #     imgui.separator_text("Mask Overlay")
-    #     changed, self._mask_color_strength = imgui.slider_float(
-    #         "Color Strength", self._mask_color_strength, 0.0, 2.0
-    #     )
-    #     if changed:
-    #         combined = self._mean_img[..., None].repeat(3, axis=2)
-    #         combined = combined / combined.max()
-    #         combined = np.clip(combined + self._mask_color_strength * self._mask_rgb, 0, 1)
-    #         self.image_widget.graphics[1].data = combined
 
 
 def _build_channel_dirname(self, channel: int) -> str:
@@ -1874,20 +1736,82 @@ def run_process(self):
                 self, "_saveas_outdir", ""
             )
 
-            # build list of (arr_idx, z_plane, channel, base_out) jobs
-            jobs = []
-            for i, _arr in enumerate(self.image_widget.data):
-                for channel in selected_channels:
-                    if multi_channel:
-                        base_out = str(Path(s2p_path) / _build_channel_dirname(self, channel))
-                    else:
-                        base_out = None  # use default path logic
-                    for plane in sorted(selected_planes):
-                        jobs.append((i, plane - 1, channel if (multi_channel or has_channels) else None, base_out))
+            # Pre-extract shared state
+            s2p_dict = self.s2p.to_dict()
+            target_timepoints = self.s2p.target_timepoints
+            keep_raw = self.s2p.keep_raw
+            keep_reg = self.s2p.keep_reg
+            force_reg = self.s2p.force_reg
+            force_detect = self.s2p.force_detect
+            dff_window_size = self.s2p.dff_window_size
+            dff_percentile = self.s2p.dff_percentile
+            dff_smooth_window = self.s2p.dff_smooth_window
+            fix_phase = getattr(self, "_s2p_fix_phase", False)
+            use_fft = getattr(self, "_s2p_use_fft", False)
+
+            if not s2p_path:
+                from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
+                last_savedir = get_last_savedir_path()
+                s2p_path = str(Path(last_savedir) if last_savedir else get_mbo_dirs()["data"])
+
+            # Handle list of paths
+            if isinstance(self.fpath, (list, tuple)):
+                fpath_str = [str(f) for f in self.fpath]
+            else:
+                fpath_str = str(self.fpath) if self.fpath else ""
 
             # Check if parallel processing is enabled
             use_parallel = getattr(self, "_parallel_processing", False)
             max_jobs = getattr(self, "_max_parallel_jobs", 2)
+
+            # Build list of configuration dicts for each job to completely decouple GUI state
+            jobs = []
+            for i, _arr in enumerate(self.image_widget.data):
+                for channel in selected_channels:
+                    if multi_channel:
+                        base_out = Path(s2p_path) / _build_channel_dirname(self, channel)
+                    else:
+                        base_out = Path(s2p_path)
+
+                    for z_plane in sorted(selected_planes):
+                        current_z = z_plane - 1
+
+                        if len(self.image_widget.graphics) > 1:
+                            plane_dir = base_out / f"plane{z_plane:02d}_roi{i + 1:02d}"
+                            roi = i + 1
+                        else:
+                            plane_dir = base_out / f"plane{z_plane:02d}_stitched"
+                            roi = None
+
+                        config = {
+                            "arr": _arr,
+                            "arr_idx": i,
+                            "z_plane": current_z,
+                            "plane": z_plane,
+                            "channel": channel if (multi_channel or has_channels) else None,
+                            "base_out": base_out,
+                            "plane_dir": plane_dir,
+                            "roi": roi,
+                            "s2p_dict": s2p_dict.copy(),
+                            "target_timepoints": target_timepoints,
+                            "fpath": fpath_str,
+                            "keep_raw": keep_raw,
+                            "keep_reg": keep_reg,
+                            "force_reg": force_reg,
+                            "force_detect": force_detect,
+                            "dff_window_size": dff_window_size,
+                            "dff_percentile": dff_percentile,
+                            "dff_smooth_window": dff_smooth_window,
+                            "fix_phase": fix_phase,
+                            "use_fft": use_fft,
+                            "logger": self.logger
+                        }
+
+                        # Fix Issue 2: restrict Suite2p to single internal process if using ThreadPoolExecutor
+                        if use_parallel:
+                            config["s2p_dict"]["num_workers"] = 0
+
+                        jobs.append(config)
 
             if use_parallel and len(jobs) > 1:
                 # Parallel processing with limited concurrency
@@ -1897,47 +1821,49 @@ def run_process(self):
                     self.logger.info(
                         f"Starting parallel processing with max {max_jobs} concurrent jobs..."
                     )
-                    with ThreadPoolExecutor(max_workers=max_jobs) as executor:
+                    # Fix Issue 3: track executor via 'self' which can handle gracefully closing out tasks on GUI shutdown
+                    executor = ThreadPoolExecutor(max_workers=max_jobs)
+                    self._active_executor = executor
+                    try:
                         futures = {}
-                        for job_idx, (arr_idx, z_plane, channel, base_out) in enumerate(jobs):
-                            future = executor.submit(
-                                run_plane_from_data, self, arr_idx, z_plane,
-                                channel=channel, base_out_override=base_out,
-                            )
-                            futures[future] = (z_plane, channel, job_idx)
+                        for job_idx, config in enumerate(jobs):
+                            future = executor.submit(_run_plane_worker_thread, config)
+                            futures[future] = (config, job_idx)
 
-                        for future in futures:
-                            z_plane, channel, job_idx = futures[future]
+                        from concurrent.futures import as_completed
+                        for future in as_completed(futures):
+                            config, job_idx = futures[future]
                             try:
                                 future.result()
-                                desc = f"Plane {z_plane + 1}"
-                                if channel is not None:
-                                    desc += f" ch{channel}"
+                                desc = f"Plane {config['plane']}"
+                                if config['channel'] is not None:
+                                    desc += f" ch{config['channel']}"
                                 self.logger.info(
                                     f"{desc} completed ({job_idx + 1}/{len(jobs)})"
                                 )
                             except Exception as e:
                                 self.logger.exception(
-                                    f"Error processing plane {z_plane + 1}: {e}"
+                                    f"Error processing plane {config['plane']}: {e}"
                                 )
+                    finally:
+                        executor.shutdown(wait=False)
+                        if getattr(self, "_active_executor", None) is executor:
+                            self._active_executor = None
                     self.logger.info("Suite2p parallel processing complete.")
 
                 threading.Thread(target=run_parallel, daemon=True).start()
             else:
                 # Sequential processing in a single background thread
                 def run_all_planes_sequential():
-                    for job_idx, (arr_idx, z_plane, channel, base_out) in enumerate(jobs):
-                        desc = f"plane {z_plane + 1}"
-                        if channel is not None:
-                            desc += f" ch{channel}"
+                    for job_idx, config in enumerate(jobs):
+                        desc = f"plane {config['plane']}"
+                        if config['channel'] is not None:
+                            desc += f" ch{config['channel']}"
                         self.logger.info(
                             f"Processing {desc} ({job_idx + 1}/{len(jobs)})..."
                         )
                         try:
-                            run_plane_from_data(
-                                self, arr_idx, z_plane,
-                                channel=channel, base_out_override=base_out,
-                            )
+                            _run_plane_worker_thread(config)
                         except Exception as e:
                             self.logger.exception(
                                 f"Error processing {desc}: {e}"
@@ -1947,71 +1873,45 @@ def run_process(self):
                 threading.Thread(target=run_all_planes_sequential, daemon=True).start()
 
 
-def run_plane_from_data(self, arr_idx, z_plane=None, channel=None, base_out_override=None):
+def _run_plane_worker_thread(config):
+    """
+    Decoupled pure worker function for processing planes on a thread.
+    Takes a pre-configured dict of snapshot variables to prevent GUI data racing.
+    """
     if not _check_lsp_available():
-        self.logger.error("lbm_suite2p_python is not installed.")
-        self._install_error = True
+        if config["logger"]:
+            config["logger"].error("lbm_suite2p_python is not installed.")
         return
 
-    arr = self.image_widget.data[arr_idx]
-    # Use provided z_plane or fall back to current index
-    if z_plane is not None:
-        current_z = z_plane
-    else:
-        names = self.image_widget._slider_dim_names or ()
-        try:
-            current_z = self.image_widget.indices["z"] if "z" in names else 0
-        except (IndexError, KeyError):
-            current_z = 0
+    arr = config["arr"]
+    arr_idx = config["arr_idx"]
+    current_z = config["z_plane"]
+    plane = config["plane"]
+    channel = config["channel"]
+    base_out = config["base_out"]
+    plane_dir = config["plane_dir"]
+    roi = config["roi"]
 
-    # Use base_out_override (per-channel subdir), or fall back to _s2p_outdir
-    if base_out_override:
-        base_out = Path(base_out_override)
-    else:
-        s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
-        base_out = Path(s2p_path) if s2p_path else None
-    if not base_out:
-        from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
-
-        # find last saved dir
-        last_savedir = get_last_savedir_path()
-        base_out = Path(last_savedir) if last_savedir else get_mbo_dirs()["data"]
     if not base_out.exists():
-        base_out.mkdir(exist_ok=True)
-
-    if len(self.image_widget.graphics) > 1:
-        plane_dir = base_out / f"plane{current_z + 1:02d}_roi{arr_idx + 1:02d}"
-        roi = arr_idx + 1
-        plane = current_z + 1
-    else:
-        plane_dir = base_out / f"plane{current_z + 1:02d}_stitched"
-        roi = None
-        plane = current_z + 1
+        base_out.mkdir(parents=True, exist_ok=True)
 
     ops_path = plane_dir / "ops.npy"
-
     lazy_mdata = getattr(arr, "metadata", {}).copy()
 
-    # Get dimensions without extracting - let imwrite handle extraction lazily
-    # For 4D: shape is (T, Z, H, W), imwrite with planes=N will write that z-plane
-    # For 3D: shape is (T, H, W), imwrite writes all frames
     Lx = arr.shape[-1]
     Ly = arr.shape[-2]
 
-    # Use standard metadata accessors to ensure we get correct values from any alias
     from mbo_utilities.metadata import get_param, get_voxel_size
 
     vs = get_voxel_size(lazy_mdata)
 
-    # extract only scalar metadata needed for suite2p - do NOT pass shape arrays
-    # that could confuse the pipeline when processing 4D data
     md = {
         "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "num_timepoints": self.s2p.target_timepoints,
-        "num_frames": self.s2p.target_timepoints,  # legacy alias
-        "nframes": self.s2p.target_timepoints,  # suite2p alias
-        "n_frames": self.s2p.target_timepoints,
-        "original_file": str(self.fpath),
+        "num_timepoints": config["target_timepoints"],
+        "num_frames": config["target_timepoints"],
+        "nframes": config["target_timepoints"],
+        "n_frames": config["target_timepoints"],
+        "original_file": config["fpath"],
         "roi_index": arr_idx,
         "z_index": current_z,
         "plane": plane,
@@ -2028,55 +1928,33 @@ def run_plane_from_data(self, arr_idx, z_plane=None, channel=None, base_out_over
 
     from lbm_suite2p_python import default_ops
 
-    ops = self.s2p.to_dict()
+    ops = config["s2p_dict"].copy()
     defaults = default_ops()
     defaults.update(ops)
-    # Only update with md dict, not the full lazy_mdata which may have 4D shape
     defaults.update(md)
 
-    # set the correct 3D shape for the output binary (T, Ly, Lx)
-    # this is needed by write_ops to create ops.npy
-    # CRITICAL: override any 4D shape from the source array with the correct 3D shape
-    defaults["shape"] = (self.s2p.target_timepoints, Ly, Lx)
-    defaults["num_timepoints"] = self.s2p.target_timepoints
-    defaults["num_frames"] = self.s2p.target_timepoints  # legacy alias
-    defaults["nframes"] = self.s2p.target_timepoints  # suite2p alias
+    defaults["shape"] = (config["target_timepoints"], Ly, Lx)
+    defaults["num_timepoints"] = config["target_timepoints"]
+    defaults["num_frames"] = config["target_timepoints"]
+    defaults["nframes"] = config["target_timepoints"]
 
-    # single-channel extraction: suite2p only sees 1 channel
     if channel is not None:
         defaults["functional_chan"] = 1
         defaults["align_by_chan"] = 1
 
-    # also clean lazy_mdata to prevent shape contamination from arr.metadata
-    # TODO: Do we need this?
     lazy_mdata.pop("shape", None)
     lazy_mdata.pop("num_timepoints", None)
     lazy_mdata.pop("num_frames", None)
     lazy_mdata.pop("nframes", None)
     lazy_mdata.pop("n_frames", None)
 
-    # CRITICAL: Also clean arr.metadata directly to prevent imwrite from getting
-    # the full shape when it does file_metadata = dict(lazy_array.metadata)
-    # Note: Some arrays have read-only metadata, so wrap in try/except
-    if hasattr(arr, "metadata"):
-        try:
-            arr.metadata.pop("shape", None)
-            arr.metadata.pop("num_timepoints", None)
-            arr.metadata.pop("num_frames", None)
-            arr.metadata.pop("nframes", None)
-            arr.metadata.pop("n_frames", None)
-        except (TypeError, AttributeError):
-            # read-only metadata, skip cleaning
-            pass
-
     from mbo_utilities.writer import imwrite
 
-    # Ensure plane_dir exists
     plane_dir.mkdir(parents=True, exist_ok=True)
 
     imwrite(
-        arr,  # Keep it lazy
-        plane_dir,  # Write directly to plane directory
+        arr,
+        plane_dir,
         ext=".bin",
         overwrite=True,
         register_z=False,
@@ -2085,21 +1963,19 @@ def run_plane_from_data(self, arr_idx, z_plane=None, channel=None, base_out_over
         output_name="data_raw.bin",
         roi=roi,
         metadata=defaults,
-        num_frames=self.s2p.target_timepoints,
-        fix_phase=self._s2p_fix_phase,
-        use_fft=self._s2p_use_fft,
+        num_frames=config["target_timepoints"],
+        fix_phase=config["fix_phase"],
+        use_fft=config["use_fft"],
     )
 
-    # Use run_plane instead of run_plane_bin - it handles initialization properly
     from lbm_suite2p_python import run_plane
 
     raw_file = plane_dir / "data_raw.bin"
 
-    # Log detection settings for debugging
-    self.logger.info(
-        f"Suite2p settings - roidetect: {defaults.get('roidetect')}, force_detect: {self.s2p.force_detect}"
+    config["logger"].info(
+        f"Suite2p settings - roidetect: {defaults.get('roidetect')}, force_detect: {config['force_detect']}"
     )
-    self.logger.info(
+    config["logger"].info(
         f"Detection params - diameter: {defaults.get('diameter')}, sparse_mode: {defaults.get('sparse_mode')}"
     )
 
@@ -2108,471 +1984,27 @@ def run_plane_from_data(self, arr_idx, z_plane=None, channel=None, base_out_over
             input_path=raw_file,
             save_path=plane_dir,
             ops=defaults,
-            keep_raw=self.s2p.keep_raw,
-            keep_reg=self.s2p.keep_reg,
-            force_reg=self.s2p.force_reg,
-            force_detect=self.s2p.force_detect,
-            dff_window_size=self.s2p.dff_window_size,
-            dff_percentile=self.s2p.dff_percentile,
-            dff_smooth_window=self.s2p.dff_smooth_window
-            if self.s2p.dff_smooth_window > 0
-            else None,
+            keep_raw=config["keep_raw"],
+            keep_reg=config["keep_reg"],
+            force_reg=config["force_reg"],
+            force_detect=config["force_detect"],
+            dff_window_size=config["dff_window_size"],
+            dff_percentile=config["dff_percentile"],
+            dff_smooth_window=config["dff_smooth_window"] if config["dff_smooth_window"] > 0 else None,
         )
-        self.logger.info(
+        config["logger"].info(
             f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}"
         )
 
-        # Check if detection outputs were created
         stat_file = plane_dir / "stat.npy"
         if stat_file.exists():
-            self.logger.info("Detection succeeded - stat.npy created")
+            config["logger"].info("Detection succeeded - stat.npy created")
         else:
-            self.logger.warning(
+            config["logger"].warning(
                 "Detection did not run - stat.npy not found. Check Suite2p output logs."
             )
     except Exception as e:
-        self.logger.exception(
+        config["logger"].exception(
             f"Suite2p processing failed for plane {current_z}, roi {arr_idx}: {e}"
         )
-        import traceback
 
-        traceback.print_exc()
-
-
-#
-# def _run_plane_worker(
-#     source_file,
-#     arr_idx,
-#     plane_num,
-#     base_out,
-#     roi,
-#     num_frames,
-#     user_ops,
-#     s2p_settings,
-# ):
-#     """
-#     Worker function for processing a single plane in a separate process.
-#     This function is module-level (not a method) so it can be pickled for multiprocessing.
-#     """
-#     try:
-#         # Import here to avoid issues with multiprocessing pickling
-#         from pathlib import Path
-#         import numpy as np
-#         from mbo_utilities.lazy_array import imread, imwrite
-#         from lbm_suite2p_python.run_lsp import run_plane
-#
-#         print(f"Process ROI={arr_idx}, Plane={plane_num} started (PID={os.getpid()})")
-#
-#         base_out = Path(base_out)
-#
-#         # Reload array (lazy loading)
-#         print(f"Loading from source: {source_file}")
-#         print(f"roi parameter: {roi}")
-#         try:
-#             arr = imread(source_file, roi=roi)
-#             print(f"Loaded array shape: {arr.shape}, ndim: {arr.ndim}")
-#             print(f"Array type: {type(arr)}")
-#             print(f"Has num_rois: {hasattr(arr, 'num_rois')}")
-#             if hasattr(arr, 'num_rois'):
-#                 print(f"Array num_rois: {arr.num_rois}")
-#         except Exception as e:
-#             import traceback
-#             print(f"ERROR in imread: {e}")
-#             print(traceback.format_exc())
-#             raise
-#
-#         # For 4D arrays, extract the specific plane before writing
-#         # For 3D arrays, write directly (they're already single-plane)
-#         if arr.ndim == 4:
-#             # Extract the specific z-plane (0-indexed)
-#             z_idx = plane_num - 1
-#             if z_idx >= arr.shape[1]:
-#                 raise IndexError(
-#                     f"Plane {plane_num} requested but array only has {arr.shape[1]} planes. "
-#                     f"Array shape: {arr.shape}"
-#                 )
-#             # Extract plane: arr[:, z_idx, :, :] gives us (T, H, W)
-#             plane_data = arr[:, z_idx, :, :]
-#             print(f"Extracted plane_data type: {type(plane_data)}, shape: {plane_data.shape}")
-#             write_planes = None  # Don't specify planes for extracted 3D data
-#         else:
-#             # 3D array - already a single plane
-#             plane_data = arr
-#             print(f"Using 3D array directly, type: {type(plane_data)}, shape: {plane_data.shape}")
-#             write_planes = None
-#
-#         print(f"plane_data has num_rois: {hasattr(plane_data, 'num_rois')}")
-#
-#         # Write functional channel using imwrite (lazy!)
-#         print(f"Writing plane {plane_num} for ROI {arr_idx} to {base_out}")
-#
-#         # Update metadata with plane-specific info
-#         plane_metadata = user_ops.copy()
-#         plane_metadata.update({
-#             "plane": plane_num,
-#             "z_index": plane_num - 1,
-#             "num_rois": arr.num_rois if hasattr(arr, 'num_rois') else 1,
-#         })
-#
-#         imwrite(
-#             plane_data,
-#             base_out,
-#             ext=".bin",
-#             planes=write_planes,  # None for extracted plane data
-#             num_frames=num_frames,
-#             metadata=plane_metadata,
-#             overwrite=True,
-#         )
-#
-#         # Determine the plane directory that imwrite() created
-#         if roi is None:
-#             plane_dir = base_out / f"plane{plane_num:02d}_stitched"
-#         else:
-#             plane_dir = base_out / f"plane{plane_num:02d}_roi{roi}"
-#
-#         # Handle channel 2 if specified (only if path is valid and exists)
-#         chan2_path = user_ops.get("chan2_file")
-#         if chan2_path and Path(chan2_path).exists():
-#             try:
-#                 print(f"Loading channel 2 from: {chan2_path}")
-#                 chan2_arr = imread(chan2_path, roi=roi)
-#
-#                 # Extract plane for 4D arrays
-#                 if chan2_arr.ndim == 4:
-#                     z_idx = plane_num - 1
-#                     if z_idx >= chan2_arr.shape[1]:
-#                         raise IndexError(
-#                             f"Plane {plane_num} requested but channel 2 array only has {chan2_arr.shape[1]} planes"
-#                         )
-#                     chan2_plane_data = chan2_arr[:, z_idx, :, :]
-#                 else:
-#                     chan2_plane_data = chan2_arr
-#
-#                 chan2_metadata = user_ops.copy()
-#                 chan2_metadata["structural"] = True
-#                 chan2_metadata.update({
-#                     "plane": plane_num,
-#                     "z_index": plane_num - 1,
-#                     "num_rois": chan2_arr.num_rois if hasattr(chan2_arr, 'num_rois') else 1,
-#                 })
-#
-#                 imwrite(
-#                     chan2_plane_data,
-#                     base_out,
-#                     ext=".bin",
-#                     planes=None,  # Already extracted
-#                     num_frames=num_frames,
-#                     metadata=chan2_metadata,
-#                     overwrite=True,
-#                     structural=True,
-#                 )
-#             except Exception as e:
-#                 print(f"WARNING: Could not load channel 2 data: {e}")
-#
-#         # Define file paths
-#         raw_file = plane_dir / "data_raw.bin"
-#         ops_path = plane_dir / "ops.npy"
-#
-#         # Load ops
-#         ops_dict = np.load(ops_path, allow_pickle=True).item() if ops_path.exists() else {}
-#
-#         # Run Suite2p processing
-#         print(f"Running Suite2p for plane {plane_num}, ROI {arr_idx}")
-#         print(f"="*60)
-#         print(f"Suite2p run_plane() parameters:")
-#         print(f"  input_path: {raw_file}")
-#         print(f"  save_path: {plane_dir}")
-#         print(f"  input_path exists: {raw_file.exists()}")
-#         print(f"  save_path exists: {plane_dir.exists()}")
-#
-#         # Only pass chan2_file if it's actually set (not empty string)
-#         chan2 = user_ops.get("chan2_file")
-#         if chan2 and Path(chan2).exists():
-#             chan2_file_arg = chan2
-#             print(f"  chan2_file: {chan2_file_arg}")
-#         else:
-#             chan2_file_arg = None
-#             print(f"  chan2_file: None")
-#
-#         print(f"  keep_raw: {s2p_settings.get('keep_raw', False)}")
-#         print(f"  keep_reg: {s2p_settings.get('keep_reg', True)}")
-#         print(f"  force_reg: {s2p_settings.get('force_reg', False)}")
-#         print(f"  force_detect: {s2p_settings.get('force_detect', False)}")
-#         print(f"="*60)
-#
-#         print(f"CALLING run_plane() NOW...")
-#         result_ops = run_plane(
-#             input_path=raw_file,
-#             save_path=plane_dir,
-#             ops=ops_dict,
-#             chan2_file=chan2_file_arg,
-#             keep_raw=s2p_settings.get("keep_raw", False),
-#             keep_reg=s2p_settings.get("keep_reg", True),
-#             force_reg=s2p_settings.get("force_reg", False),
-#             force_detect=s2p_settings.get("force_detect", False),
-#             dff_window_size=s2p_settings.get("dff_window_size", 300),
-#             dff_percentile=s2p_settings.get("dff_percentile", 20),
-#             save_json=s2p_settings.get("save_json", False),
-#         )
-#         print(f"run_plane() RETURNED!")
-#         print(f"  Return type: {type(result_ops)}")
-#         print(f"  Return value: {result_ops}")
-#         print(f"="*60)
-#
-#         print(f"Suite2p complete for plane {plane_num}, ROI {arr_idx}")
-#         return (arr_idx, plane_num, "success", {"result_ops": str(result_ops)})
-#
-#     except ValueError as e:
-#         print(f"WARNING: No cells found for plane {plane_num}, ROI {arr_idx}: {e}")
-#         return (arr_idx, plane_num, "no_cells", {"error": str(e)})
-#     except Exception as e:
-#         print(f"ERROR: Suite2p failed for plane {plane_num}, ROI {arr_idx}: {e}")
-#         import traceback
-#         return (arr_idx, plane_num, "error", {"error": str(e), "traceback": traceback.format_exc()})
-#
-#
-# def run_process(self):
-#     """Runs the selected processing pipeline using parallel processing."""
-#     print(f"DEBUG: run_process called, pipeline={self._current_pipeline}")
-#
-#     if self._current_pipeline != "suite2p":
-#         if self._current_pipeline == "masknmf":
-#             self.logger.info("Running MaskNMF pipeline (not yet implemented).")
-#         else:
-#             self.logger.error(f"Unknown pipeline selected: {self._current_pipeline}")
-#         return
-#
-#     print(f"DEBUG: About to check HAS_LSP={HAS_LSP}")
-#     self.logger.info(f"Running Suite2p pipeline with settings: {self.s2p}")
-#     if not HAS_LSP:
-#         self.logger.warning(
-#             "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline. "
-#             "`uv pip install lbm_suite2p_python`",
-#         )
-#         self._install_error = True
-#         return
-#
-#     if self._install_error:
-#         return
-#
-#     from mbo_utilities.file_io import load_last_savedir, save_last_savedir
-#
-#     # Prepare tasks for all selected planes and ROIs
-#     tasks = []
-#
-#     # Determine if we have a single 4D array or multiple 3D arrays
-#     data_arrays = (
-#         self.image_widget.data
-#         if isinstance(self.image_widget.data, list)
-#         else [self.image_widget.data]
-#     )
-#     first_array = data_arrays[0] if len(data_arrays) > 0 else None
-#
-#     # Case 1: Single 4D array (T, Z, H, W) - one file with multiple planes
-#     # Case 2: Multiple 3D arrays (T, H, W) - multiple files, one plane each
-#     is_single_4d = (
-#         first_array is not None
-#         and first_array.ndim == 4
-#         and len(data_arrays) == 1
-#     )
-#
-#     if is_single_4d:
-#         # Single 4D array: loop over selected planes only
-#         arr = data_arrays[0]
-#         # Pass all files if it's a multi-file volume, or single file if it's a merged volume
-#         source_file = self.fpath
-#         roi = None  # No multi-ROI for single 4D case
-#
-#         base_out = Path(self._saveas_outdir or load_last_savedir())
-#         base_out.mkdir(exist_ok=True)
-#
-#         # Build metadata and ops dict
-#         user_ops = {}
-#         if hasattr(self, "s2p"):
-#             try:
-#                 user_ops = (
-#                     vars(self.s2p).copy()
-#                     if hasattr(self.s2p, "__dict__")
-#                     else dict(self.s2p)
-#                 )
-#             except Exception as e:
-#                 self.logger.warning(f"Could not merge Suite2p params: {e}")
-#
-#         # Determine num_frames
-#         num_frames = None
-#         if user_ops.get("frames_include", -1) > 0:
-#             num_frames = user_ops["frames_include"]
-#
-#         # Create tasks for each selected plane
-#         for plane_num in self._selected_planes:
-#             # Update metadata for this specific plane
-#             task_ops = user_ops.copy()
-#             task_ops.update({
-#                 "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-#                 "original_file": str(source_file),
-#                 "roi_index": 0,
-#                 "mroi": roi,
-#                 "roi": roi,
-#                 "z_index": plane_num - 1,  # 0-indexed
-#                 "plane": plane_num,  # 1-indexed
-#                 "fs": arr.metadata.get("frame_rate", 15.0),
-#                 "dx": arr.metadata.get("pixel_size_xy", 1.0),
-#                 "dz": arr.metadata.get("z_step", 1.0),
-#             })
-#
-#             # Extract s2p settings as dict for pickling
-#             s2p_dict = self.s2p.to_dict() if hasattr(self.s2p, "to_dict") else vars(self.s2p)
-#
-#             tasks.append({
-#                 "source_file": str(source_file),
-#                 "arr_idx": 0,
-#                 "plane_num": plane_num,
-#                 "base_out": str(base_out),
-#                 "roi": roi,
-#                 "num_frames": num_frames,
-#                 "user_ops": task_ops,
-#                 "s2p_settings": s2p_dict,
-#             })
-#     else:
-#         # Multiple 3D arrays: each array is already a single plane/ROI
-#         for i, arr in enumerate(data_arrays):
-#             # Determine source file
-#             if isinstance(self.fpath, list):
-#                 source_file = self.fpath[i]
-#             else:
-#                 source_file = self.fpath
-#
-#             # Determine ROI
-#             roi = self.image_widget.data[0].roi
-#             # if self.num_rois > 1 and i < self.num_rois:
-#             #     roi = i + 1
-#             # else:
-#             #     roi = None
-#
-#             # For 3D arrays, plane_num should be derived from array index or metadata
-#             # Use i+1 as plane_num (1-indexed) if planes are selected
-#             if self._selected_planes and (i + 1) in self._selected_planes:
-#                 plane_num = i + 1
-#             elif not self._selected_planes:
-#                 # If no planes selected, skip
-#                 continue
-#             else:
-#                 # This array's plane is not in selected_planes
-#                 continue
-#
-#             # Output base directory
-#             base_out = Path(self._saveas_outdir or load_last_savedir())
-#             base_out.mkdir(exist_ok=True)
-#
-#             # Build metadata and ops dict
-#             user_ops = {}
-#             if hasattr(self, "s2p"):
-#                 try:
-#                     user_ops = (
-#                         vars(self.s2p).copy()
-#                         if hasattr(self.s2p, "__dict__")
-#                         else dict(self.s2p)
-#                     )
-#                 except Exception as e:
-#                     self.logger.warning(f"Could not merge Suite2p params: {e}")
-#
-#             # Determine num_frames
-#             num_frames = None
-#             if user_ops.get("frames_include", -1) > 0:
-#                 num_frames = user_ops["frames_include"]
-#
-#             # Update metadata for this specific plane
-#             task_ops = user_ops.copy()
-#             task_ops.update({
-#                 "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-#                 "original_file": str(source_file),
-#                 "roi_index": i,
-#                 "mroi": roi,
-#                 "roi": roi,
-#                 "z_index": plane_num - 1,  # 0-indexed
-#                 "plane": plane_num,  # 1-indexed
-#                 "fs": arr.metadata.get("frame_rate", 15.0),
-#                 "dx": arr.metadata.get("pixel_size_xy", 1.0),
-#                 "dz": arr.metadata.get("z_step", 1.0),
-#             })
-#
-#             # Extract s2p settings as dict for pickling
-#             s2p_dict = self.s2p.to_dict() if hasattr(self.s2p, "to_dict") else vars(self.s2p)
-#
-#             tasks.append({
-#                 "source_file": str(source_file),
-#                 "arr_idx": i,
-#                 "plane_num": plane_num,
-#                 "base_out": str(base_out),
-#                 "roi": roi,
-#                 "num_frames": num_frames,
-#                 "user_ops": task_ops,
-#                 "s2p_settings": s2p_dict,
-#             })
-#
-#     print(f"DEBUG: Created {len(tasks)} tasks")
-#     for i, task in enumerate(tasks):
-#         print(f"  Task {i}: plane={task['plane_num']}, arr_idx={task['arr_idx']}, source={task['source_file']}")
-#
-#     if not tasks:
-#         self.logger.warning("No planes selected for processing.")
-#         return
-#
-#     # Determine optimal number of workers
-#     # Use min of: number of tasks, CPU count, or 4 (to avoid memory issues)
-#     max_workers = min(len(tasks), os.cpu_count() or 4, 4)
-#
-#     self.logger.info(f"Starting parallel processing of {len(tasks)} tasks with {max_workers} workers...")
-#
-#     # Run tasks in parallel using ProcessPoolExecutor
-#     completed_count = 0
-#     error_count = 0
-#     no_cells_count = 0
-#
-#     with ProcessPoolExecutor(max_workers=max_workers) as executor:
-#         # Submit all tasks
-#         future_to_task = {
-#             executor.submit(_run_plane_worker, **task): task
-#             for task in tasks
-#         }
-#
-#         # Process results as they complete
-#         for future in as_completed(future_to_task):
-#             task = future_to_task[future]
-#             try:
-#                 arr_idx, plane_num, status, info = future.result()
-#
-#                 if status == "success":
-#                     completed_count += 1
-#                     self.logger.info(
-#                         f"[{completed_count}/{len(tasks)}] ✓ Plane {plane_num}, ROI {arr_idx} complete"
-#                     )
-#                     # Save the last successful directory
-#                     if "result_ops" in info:
-#                         save_last_savedir(Path(info["result_ops"]).parent)
-#
-#                 elif status == "no_cells":
-#                     no_cells_count += 1
-#                     self.logger.warning(
-#                         f"[{completed_count + error_count + no_cells_count}/{len(tasks)}] "
-#                         f"WARNING: Plane {plane_num}, ROI {arr_idx}: No cells found"
-#                     )
-#                 else:  # error
-#                     error_count += 1
-#                     self.logger.error(
-#                         f"[{completed_count + error_count + no_cells_count}/{len(tasks)}] "
-#                         f"✗ Plane {plane_num}, ROI {arr_idx} failed: {info.get('error', 'Unknown error')}"
-#                     )
-#
-#             except Exception as e:
-#                 error_count += 1
-#                 self.logger.error(
-#                     f"Task for plane {task['plane_num']}, ROI {task['arr_idx']} "
-#                     f"raised exception: {e}"
-#                 )
-#
-#     # Final summary
-#     self.logger.info(
-#         f"Processing complete: {completed_count} succeeded, "
-#         f"{no_cells_count} had no cells, {error_count} failed"
-#     )

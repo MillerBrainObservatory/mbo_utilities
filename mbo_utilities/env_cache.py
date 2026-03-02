@@ -3,7 +3,7 @@
 caches package availability, versions, and other slow-to-compute info
 per Python environment to avoid redundant checks on every run.
 
-cache location: ~/mbo/cache/envs/{env_hash}.json
+cache location: ~/.mbo/cache/envs/{env_hash}.json
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def get_env_hash() -> str:
 def get_cache_dir() -> Path:
     """get cache directory for environment caches."""
     # avoid importing file_io (has heavy deps like numpy)
-    cache_dir = Path.home() / "mbo" / "cache" / "envs"
+    cache_dir = Path.home() / ".mbo" / "cache" / "envs"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 

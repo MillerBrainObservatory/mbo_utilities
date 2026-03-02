@@ -12,7 +12,6 @@ import numpy as np
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
 
-
 # default chunk patterns
 CHUNKS_2D = (-1, -1)  # full spatial
 CHUNKS_3D = (1, -1, -1)  # single frame, full spatial

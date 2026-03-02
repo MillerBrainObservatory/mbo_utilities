@@ -10,7 +10,6 @@ from __future__ import annotations
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
 
-
 class FrameRateFeature(ArrayFeature):
     """
     Frame rate feature for arrays.

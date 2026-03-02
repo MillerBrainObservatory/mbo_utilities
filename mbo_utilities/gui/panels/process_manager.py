@@ -57,7 +57,7 @@ class ProcessInfo:
 
     def update_from_sidecar(self, verbose: bool = False) -> None:
         """Read progress_{uuid}.json (preferred) or progress_{pid}.json."""
-        log_dir = Path.home() / "mbo" / "logs"
+        log_dir = Path.home() / ".mbo" / "logs"
         uuid = self.args.get("_uuid") if self.args else None
 
         sidecar = None
@@ -145,7 +145,7 @@ class ProcessManager:
     even after GUI restart.
     """
 
-    PROCESS_FILE = Path.home() / "mbo" / "cache" / "running_processes.json"
+    PROCESS_FILE = Path.home() / ".mbo" / "cache" / "running_processes.json"
 
     def __init__(self):
         self._processes: dict[int, ProcessInfo] = {}

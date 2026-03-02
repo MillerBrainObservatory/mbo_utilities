@@ -1,12 +1,13 @@
 """
-pyramid generation for ome-zarr multiscale images.
+Pyramid generation for ome-zarr multiscale images.
 
-provides functions for generating resolution pyramids compatible with
+Provides functions for generating resolution pyramids compatible with
 ome-ngff v0.5 specification and napari-ome-zarr plugin.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -29,16 +30,16 @@ class PyramidLevel:
 
     @property
     def scale_factor(self) -> int:
-        """downsampling factor relative to level 0."""
+        """Downsampling factor relative to level 0."""
         return 2**self.level
 
 
 @dataclass
 class PyramidConfig:
     """
-    configuration for pyramid generation.
+    Configuration for pyramid generation.
 
-    parameters
+    Parameters
     ----------
     max_layers : int
         maximum number of additional resolution levels beyond level 0.
@@ -59,16 +60,14 @@ class PyramidConfig:
     min_size: int = 64
 
     def get_scale_factors_for_ndim(self, ndim: int) -> tuple[int, ...]:
-        """get scale factors padded/trimmed for array ndim."""
+        """Get scale factors padded/trimmed for array ndim."""
         if ndim == len(self.scale_factors):
             return self.scale_factors
         if ndim == 3:
-            # TYX: (1, 2, 2)
             return (1, 2, 2)
         if ndim == 4:
             return self.scale_factors
         if ndim == 5:
-            # TCZYX: (1, 1, 1, 2, 2)
             return (1, 1, 1, 2, 2)
         # fallback: only downsample last 2 dims
         return (1,) * (ndim - 2) + (2, 2)
@@ -79,16 +78,16 @@ def compute_pyramid_shapes(
     config: PyramidConfig | None = None,
 ) -> list[PyramidLevel]:
     """
-    compute shapes for all pyramid levels without generating data.
+    Compute shapes for all pyramid levels without generating data.
 
-    parameters
+    Parameters
     ----------
     base_shape : tuple
         shape of the full-resolution array (e.g., TZYX).
     config : PyramidConfig, optional
         pyramid configuration. uses defaults if not provided.
 
-    returns
+    Returns
     -------
     list[PyramidLevel]
         list of pyramid levels from level 0 (full res) to lowest resolution.
@@ -139,9 +138,9 @@ def downsample_block(
     method: DownsampleMethod = "mean",
 ) -> np.ndarray:
     """
-    downsample a data block by given factors per axis.
+    Downsample a data block by given factors per axis.
 
-    parameters
+    Parameters
     ----------
     data : np.ndarray
         input data block.
@@ -153,7 +152,7 @@ def downsample_block(
         "gaussian" - gaussian blur then subsample
         "local_mean" - local mean with antialiasing
 
-    returns
+    Returns
     -------
     np.ndarray
         downsampled data.
@@ -183,7 +182,7 @@ def downsample_block(
 
 
 def _downsample_mean(data: np.ndarray, factors: tuple[int, ...]) -> np.ndarray:
-    """downsample using mean pooling (reshape + mean approach)."""
+    """Downsample using mean pooling (reshape + mean approach)."""
     # compute output shape
     out_shape = tuple(s // f for s, f in zip(data.shape, factors, strict=True))
 
@@ -205,7 +204,7 @@ def _downsample_mean(data: np.ndarray, factors: tuple[int, ...]) -> np.ndarray:
 
 
 def _downsample_gaussian(data: np.ndarray, factors: tuple[int, ...]) -> np.ndarray:
-    """downsample with gaussian blur for antialiasing."""
+    """Downsample with gaussian blur for antialiasing."""
     from scipy.ndimage import gaussian_filter
 
     # sigma proportional to downsampling factor
@@ -218,7 +217,7 @@ def _downsample_gaussian(data: np.ndarray, factors: tuple[int, ...]) -> np.ndarr
 
 
 def _downsample_local_mean(data: np.ndarray, factors: tuple[int, ...]) -> np.ndarray:
-    """downsample using skimage local_mean if available, else fall back to mean."""
+    """Downsample using skimage local_mean if available, else fall back to mean."""
     try:
         from skimage.transform import downscale_local_mean
 
@@ -232,19 +231,19 @@ def generate_pyramid(
     config: PyramidConfig | None = None,
 ) -> Iterator[tuple[int, np.ndarray]]:
     """
-    generate pyramid levels from full-resolution data.
+    Generate pyramid levels from full-resolution data.
 
     yields (level_index, downsampled_data) tuples.
     level 0 is the original data.
 
-    parameters
+    Parameters
     ----------
     data : np.ndarray
         full-resolution data.
     config : PyramidConfig, optional
         pyramid configuration.
 
-    yields
+    Yields
     ------
     tuple[int, np.ndarray]
         (level_index, data_at_level)
@@ -272,9 +271,9 @@ def build_multiscales_metadata(
     downsample_type: str = "mean",
 ) -> dict:
     """
-    build ome-ngff v0.5 multiscales metadata for a pyramid.
+    Build ome-ngff v0.5 multiscales metadata for a pyramid.
 
-    parameters
+    Parameters
     ----------
     levels : list[PyramidLevel]
         pyramid levels from compute_pyramid_shapes().
@@ -287,7 +286,7 @@ def build_multiscales_metadata(
     downsample_type : str
         downsampling method used (for metadata).
 
-    returns
+    Returns
     -------
     dict
         ome-ngff v0.5 "multiscales" metadata ready for zarr attrs.
@@ -326,18 +325,18 @@ def build_napari_scale_attrs(
     base_scale: tuple[float, ...],
 ) -> list[list[float]]:
     """
-    build napari-compatible scale attributes for each pyramid level.
+    Build napari-compatible scale attributes for each pyramid level.
 
     napari reads the 'scale' attr from each array for proper display.
 
-    parameters
+    Parameters
     ----------
     levels : list[PyramidLevel]
         pyramid levels.
     base_scale : tuple[float, ...]
         physical scale at level 0.
 
-    returns
+    Returns
     -------
     list[list[float]]
         scale arrays for each level, ordered by level index.

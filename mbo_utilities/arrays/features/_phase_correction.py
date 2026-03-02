@@ -21,7 +21,6 @@ from enum import Enum
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
 
 
-
 class PhaseCorrMethod(str, Enum):
     """Phase correction methods."""
 
@@ -293,7 +292,9 @@ class PhaseCorrectionFeature(ArrayFeature):
         # compute using phasecorr module
         _corrected, shift = bidir_phasecorr(
             window,
-            method=self._method.value if self._method != PhaseCorrMethod.none else "mean",
+            method=self._method.value
+            if self._method != PhaseCorrMethod.none
+            else "mean",
             return_shift=True,
             use_fft=self._use_fft,
         )

@@ -356,7 +356,7 @@ def get_mbo_dirs() -> dict:
 
     Returns a dict with paths to the root, settings, and cache directories.
     """
-    base = Path.home().joinpath("mbo")
+    base = Path.home().joinpath(".mbo")
     imgui = base.joinpath("imgui")
     cache = base.joinpath("cache")
     logs = base.joinpath("logs")
@@ -393,7 +393,7 @@ def get_last_savedir_path() -> Path:
         DeprecationWarning,
         stacklevel=2,
     )
-    return Path.home().joinpath("mbo", "settings", "last_savedir.json")
+    return Path.home().joinpath(".mbo", "settings", "last_savedir.json")
 
 
 def load_last_savedir(default=None) -> Path:

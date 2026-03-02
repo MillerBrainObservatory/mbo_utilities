@@ -30,6 +30,10 @@ if TYPE_CHECKING:
         avg_sharpness as avg_sharpness,
         frame_correlations as frame_correlations,
     )
+    from mbo_utilities.analysis.fiber_activity import (
+        run as run_fiber_activity,
+        FiberActivityResult as FiberActivityResult,
+    )
 
 __all__ = [
     "ALL_PHASECORR_METHODS",
@@ -59,6 +63,9 @@ __all__ = [
     # cellpose/lbm_suite2p_python (optional)
     "save_cellpose_results",
     "sharpness_metric",
+    # fiber_activity
+    "FiberActivityResult",
+    "run_fiber_activity",
     # metrics
     "snr_roi",
     "stat_to_masks",
@@ -77,6 +84,9 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "ScanPhaseResults": (".scanphase", "ScanPhaseResults"),
     "analyze_scanphase": (".scanphase", "analyze_scanphase"),
     "run_scanphase_analysis": (".scanphase", "run_scanphase_analysis"),
+    # fiber_activity
+    "run_fiber_activity": (".fiber_activity", "run"),
+    "FiberActivityResult": (".fiber_activity", "FiberActivityResult"),
     # metrics
     "snr_roi": (".metrics", "snr_roi"),
     "mean_row_misalignment": (".metrics", "mean_row_misalignment"),

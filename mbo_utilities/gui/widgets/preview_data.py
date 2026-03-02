@@ -61,6 +61,7 @@ from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts
 from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
 from mbo_utilities.gui._help_viewer import draw_help_popup
+from mbo_utilities.gui._metadata_editor import draw_metadata_editor_popup
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
@@ -336,6 +337,12 @@ class PreviewDataWidget(EdgeWindow):
         self._folder_dialog = None
         self._load_status_msg = ""
         self._load_status_color = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
+
+        # Initialize Metadata Editor state
+        self._custom_metadata = {}
+        self._custom_key = ""
+        self._custom_value = ""
+        self._metadata_editor_open = False
 
         # Initialize widgets
         self._widgets = get_supported_widgets(self)
@@ -849,6 +856,7 @@ class PreviewDataWidget(EdgeWindow):
         draw_process_console_popup(self)
         draw_keybinds_popup(self)
         draw_help_popup(self)
+        draw_metadata_editor_popup(self)
 
         super().draw_window()
 

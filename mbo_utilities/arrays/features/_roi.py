@@ -107,9 +107,7 @@ class ROIFeature(ArrayFeature):
             ROI index (1-based), None for stitched view
         """
         if value is not None and (value < 1 or value > self._num_rois):
-            raise ValueError(
-                f"ROI index {value} out of range [1, {self._num_rois}]"
-            )
+            raise ValueError(f"ROI index {value} out of range [1, {self._num_rois}]")
 
         old_value = self._current
         self._current = value

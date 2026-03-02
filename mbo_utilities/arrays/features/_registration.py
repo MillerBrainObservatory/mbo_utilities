@@ -1,4 +1,5 @@
 """Suite2p rigid registration feature."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -8,6 +9,7 @@ from mbo_utilities import log
 from mbo_utilities.util import get_dtype
 
 logger = log.get("arrays.features.registration")
+
 
 class Suite2pRegistrationMixin:
     """
@@ -50,7 +52,9 @@ class Suite2pRegistrationMixin:
             from suite2p import default_ops
             from suite2p.registration import register, rigid
         except ImportError:
-            raise ImportError("suite2p is required. Install with `uv pip install suite2p`.")
+            raise ImportError(
+                "suite2p is required. Install with `uv pip install suite2p`."
+            )
 
         user_ops = ops or {}
         ops = default_ops()
@@ -65,12 +69,7 @@ class Suite2pRegistrationMixin:
         Y = self.shape[y_idx]
         X = self.shape[x_idx]
 
-        ops.update({
-            "nframes": T,
-            "Ly": Y,
-            "Lx": X,
-            "batch_size": batch_size
-        })
+        ops.update({"nframes": T, "Ly": Y, "Lx": X, "batch_size": batch_size})
 
         # 2. Compute Reference
         # We need to grab a subset of frames.
@@ -100,7 +99,7 @@ class Suite2pRegistrationMixin:
 
         if self.ndim == 4:
             if z_idx is not None and self.shape[z_idx] > 1:
-                 raise ValueError(
+                raise ValueError(
                     "Input array has multiple Z-planes. "
                     "Please slice to a single plane before registering (e.g. arr[:, z_idx])."
                 )
@@ -110,7 +109,7 @@ class Suite2pRegistrationMixin:
         slices = [slice(None)] * self.ndim
         # T subset
         if t_idx is not None:
-             slices[t_idx] = slice(0, n_init)
+            slices[t_idx] = slice(0, n_init)
 
         init_data = self[tuple(slices)]
 
@@ -118,17 +117,17 @@ class Suite2pRegistrationMixin:
         # We assume init_data preserves ndim
         # If input was (T, 1, Y, X), output is (N_init, 1, Y, X)
         if hasattr(init_data, "shape") and len(init_data.shape) == 4:
-             # Squeeze Z
-             # If dims are TZYX, axis 1.
-             # We rely on shape check: if dimension is 1, squeeze.
-             # But we must be careful not to squeeze T=1 if n_init=1.
-             # We want to squeeze the SPATIAL Z.
-             if z_idx is not None and init_data.shape[z_idx] == 1:
-                  init_frames = np.squeeze(init_data, axis=z_idx)
-             else:
-                  init_frames = init_data
+            # Squeeze Z
+            # If dims are TZYX, axis 1.
+            # We rely on shape check: if dimension is 1, squeeze.
+            # But we must be careful not to squeeze T=1 if n_init=1.
+            # We want to squeeze the SPATIAL Z.
+            if z_idx is not None and init_data.shape[z_idx] == 1:
+                init_frames = np.squeeze(init_data, axis=z_idx)
+            else:
+                init_frames = init_data
         else:
-             init_frames = init_data
+            init_frames = init_data
 
         # Ensure numpy
         if not isinstance(init_frames, np.ndarray):
@@ -137,9 +136,11 @@ class Suite2pRegistrationMixin:
         # Ref computation requires (N, Y, X)
         # Fail if not 3D at this point
         if init_frames.ndim != 3:
-             # Might happen if data was strictly 3D and we didn't squeeze anything?
-             # Or if we squeezed too much?
-             raise ValueError(f"Expected 3D frames for reference computation, got {init_frames.shape}")
+            # Might happen if data was strictly 3D and we didn't squeeze anything?
+            # Or if we squeezed too much?
+            raise ValueError(
+                f"Expected 3D frames for reference computation, got {init_frames.shape}"
+            )
 
         # Ref computation
         ref = register.compute_reference(init_frames, ops)
@@ -150,7 +151,9 @@ class Suite2pRegistrationMixin:
             ops["refImg"] = ref
 
         # 3. Compute Masks (The API Fix)
-        logger.info(f"Reference computed (shape {ops['refImg'].shape}). Computing masks...")
+        logger.info(
+            f"Reference computed (shape {ops['refImg'].shape}). Computing masks..."
+        )
         refAndMasks = register.compute_reference_masks(ops["refImg"], ops)
 
         # 4. Prepare Output Zarr
@@ -163,24 +166,25 @@ class Suite2pRegistrationMixin:
         out_shape = list(self.shape)
 
         chunks = [1] * self.ndim
-        if y_idx is not None: chunks[y_idx] = Y
-        if x_idx is not None: chunks[x_idx] = X
+        if y_idx is not None:
+            chunks[y_idx] = Y
+        if x_idx is not None:
+            chunks[x_idx] = X
 
         z_arr = z_grp.create_dataset(
             "0",
             shape=tuple(out_shape),
             chunks=tuple(chunks),
             dtype=dtype,
-            overwrite=True
+            overwrite=True,
         )
 
         # Metadata
-        z_grp.attrs["multiscales"] = [{
-            "version": "0.5",
-            "datasets": [{"path": "0"}]
-        }]
+        z_grp.attrs["multiscales"] = [{"version": "0.5", "datasets": [{"path": "0"}]}]
 
-        ops_serializable = {k: v.tolist() if isinstance(v, np.ndarray) else v for k,v in ops.items()}
+        ops_serializable = {
+            k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in ops.items()
+        }
         z_grp.attrs["ops"] = ops_serializable
 
         # 5. Registration Loop
@@ -198,7 +202,7 @@ class Suite2pRegistrationMixin:
             # Reduce to 3D for Suite2p
             chunk_3d = chunk_data
             if chunk_data.ndim == 4 and z_idx is not None:
-                 chunk_3d = np.squeeze(chunk_data, axis=z_idx)
+                chunk_3d = np.squeeze(chunk_data, axis=z_idx)
 
             if not isinstance(chunk_3d, np.ndarray):
                 chunk_3d = np.array(chunk_3d)
@@ -212,10 +216,10 @@ class Suite2pRegistrationMixin:
 
             # Expand back to 4D for writing if needed
             if self.ndim == 4 and reg_chunk.ndim == 3:
-                 # Insert Z axis back
-                 reg_chunk_out = np.expand_dims(reg_chunk, axis=z_idx)
+                # Insert Z axis back
+                reg_chunk_out = np.expand_dims(reg_chunk, axis=z_idx)
             else:
-                 reg_chunk_out = reg_chunk
+                reg_chunk_out = reg_chunk
 
             # Write output
             z_arr[tuple(sl)] = reg_chunk_out

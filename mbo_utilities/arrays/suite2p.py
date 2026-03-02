@@ -319,6 +319,25 @@ class Suite2pArray(ReductionMixin):
         self.num_rois = get_param(self._metadata, "num_rois", default=1)
         self.filenames = [p.active_file for p in self._planes]
 
+        # adjust z-step based on plane directory numbering (e.g. planes 1, 3, 5 -> step=2)
+        if self._nz > 1:
+            plane_nums = []
+            for pdir in plane_dirs:
+                pnum = _extract_plane_number(pdir.name)
+                if pnum is not None:
+                    plane_nums.append(pnum)
+
+            if len(plane_nums) == self._nz:
+                steps = [plane_nums[i + 1] - plane_nums[i] for i in range(len(plane_nums) - 1)]
+                unique_steps = set(steps)
+                if len(unique_steps) == 1:
+                    z_step_factor = steps[0]
+                    if z_step_factor > 1:
+                        orig_dz = get_param(self._metadata, "dz")
+                        if orig_dz is not None:
+                            self._metadata["dz"] = orig_dz * z_step_factor
+                            logger.info(f"Adjusted dz by factor {z_step_factor} (new dz: {self._metadata['dz']})")
+
         logger.info(
             f"Loaded Suite2p volume: {self._nframes} frames, {self._nz} planes, "
             f"{self._ly}x{self._lx} px"
