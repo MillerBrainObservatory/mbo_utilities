@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.arrays._base import _imwrite_base, _normalize_key, ReductionMixin
 from mbo_utilities.arrays.features import (
     DimLabelsMixin,
     DimensionSpecMixin,
@@ -381,8 +381,8 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
         return self.shape[0]
 
     def __getitem__(self, key):
-        if not isinstance(key, tuple):
-            key = (key,)
+
+        key = _normalize_key(key, 4)
         key = key + (slice(None),) * (4 - len(key))
         t_key, z_key, y_key, x_key = key
 
