@@ -36,46 +36,64 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 ## Installation
 
-`mbo_utilities` is available in [pypi](https://pypi.org/project/mbo_utilities/):
-
-`pip install mbo_utilities`
-
-> We recommend using a virtual environment. For help setting up a virtual environment, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
+We recommend [uv](https://docs.astral.sh/uv/) for managing environments. For help setting up, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ```bash
-# base: reader + GUI
-pip install mbo_utilities
-
-# with lbm_suite2p_python, suite2p, cellpose
-pip install "mbo_utilities[suite2p]"
-
-# all processing pipelines
-pip install "mbo_utilities[all]"
+uv venv --python 3.12
+source .venv/bin/activate  # linux/mac
+# .venv\Scripts\activate   # windows
 ```
 
-> **Suite3D + CuPy:** Suite3D requires [CuPy](https://cupy.dev/) for GPU acceleration. CuPy must be installed separately to match your CUDA toolkit version:
->
-> ```bash
-> # check your CUDA version
-> nvcc --version
->
-> # CUDA 12.x
-> pip install cupy-cuda12x
->
-> # CUDA 11.x
-> pip install cupy-cuda11x
-> ```
->
-> The install script below detects your systems cuda-version automatically.
+### Core (I/O, metadata, plotting)
 
-### Installation Script with [UV](https://docs.astral.sh/uv/getting-started/features/) (Recommended)
+```bash
+uv pip install mbo_utilities
+```
 
-The install script will prompt several options:
-1. Create a virtual environment with `mbo_utilities`,
-2. Install the image reader globally, with Destkop Icon + use `mbo` any terminal
-3. Install in both a virtual environment and globally
-3. Specify optional dependencies, and environment paths
+### With GUI (interactive viewer)
 
+```bash
+uv pip install "mbo_utilities[gui]"
+```
+
+### With processing pipelines
+
+```bash
+# suite2p pipeline
+uv pip install "mbo_utilities[suite2p]"
+
+# suite3d volumetric pipeline
+uv pip install "mbo_utilities[suite3d]"
+
+# everything (gui + notebook + all pipelines)
+uv pip install "mbo_utilities[all]"
+```
+
+### GPU dependencies
+
+PyTorch and CuPy require CUDA-specific wheels that must be installed separately.
+
+```bash
+# pytorch with CUDA 12.6 (required for suite2p GPU)
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+# cupy (required for suite3d GPU)
+nvcc --version  # check your cuda version first
+uv pip install cupy-cuda12x  # for CUDA 12.x
+uv pip install cupy-cuda11x  # for CUDA 11.x
+```
+
+### Verify installation
+
+```bash
+mbo --check-install
+```
+
+This will show the status of all packages, GPU availability, and provide exact install commands for anything missing.
+
+### Installation script (recommended for new users)
+
+The install script handles environment creation, GPU detection, and optional dependencies automatically.
 
 ```powershell
 # Windows (PowerShell)
@@ -87,7 +105,7 @@ irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/maste
 curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
 ```
 
-> **Note:** The `mbo` command is available globally thanks to [uv tools](https://docs.astral.sh/uv/concepts/tools/). Update with the install script or manually with `uv tool upgrade mbo_utilities`.
+> **Note:** The `mbo` command is available globally thanks to [uv tools](https://docs.astral.sh/uv/concepts/tools/). Update with `uv tool upgrade mbo_utilities`.
 
 ## Usage
 
@@ -145,8 +163,6 @@ mbo scanphase /path/to/data.tiff -o ./output
 → [Formats Guide](https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html)
 
 ### Upgrade
-
-The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the package can be upgraded with `uv pip install -U mbo_utilities`.
 
 The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the package can be upgraded with `uv pip install -U mbo_utilities`.
 
