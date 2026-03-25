@@ -59,12 +59,14 @@ def _get_zslice(arr: Any, t_slice: slice, z: int) -> np.ndarray:
                 # single-timepoint: (Z, Views, Y, X) -> (Y, X)
                 # expand to (1, Y, X) for consistent stats computation
                 return arr[z, 0][np.newaxis, ...]
-        elif "z" in dims_lower or any(d in dims_lower for d in ("z-planes", "z-slices", "volumes")):
+        elif "z" in dims_lower or any(d in dims_lower for d in ("z-planes", "z-slices")):
             # has z but no views
             if "t" in dims_lower or "timepoints" in dims_lower:
                 return arr[t_slice, z]
+            elif "volumes" in dims_lower:
+                # piezo: dim 0 is volumes, dim 1 is z-slices/frames
+                return arr[0, z][np.newaxis, ...]
             else:
-                # single z-slice, expand to (1, Y, X)
                 return arr[z][np.newaxis, ...]
         elif "channels" in dims_lower or "channel" in dims_lower or "c" in dims_lower:
             # multi-channel single-plane: (T, C, Y, X) - z indexes channel
@@ -72,6 +74,9 @@ def _get_zslice(arr: Any, t_slice: slice, z: int) -> np.ndarray:
                 return arr[t_slice, z]
             else:
                 return arr[z][np.newaxis, ...]
+        elif "volumes" in dims_lower or "frames" in dims_lower:
+            # piezo without z-slices label: dim 0 is volumes, dim 1 is frames
+            return arr[0, z][np.newaxis, ...]
         else:
             # no z or channel dimension, just time (3D TYX)
             return arr[t_slice]
@@ -94,11 +99,17 @@ def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
     For 3D data (TYX), returns ([0], 'z').
     For 4D data with z-planes, iterates over z.
     For 4D data with channels (no z), iterates over channels.
+    For piezo arrays, uses num_slices to iterate z-slices within volumes.
     """
     if arr.ndim == 3:
         return [0], "z"
 
-    # check if this is channel data (nz=1 but nc>1)
+    # piezo arrays: enable averaging to get per-z-slice stats
+    if hasattr(arr, "num_slices") and hasattr(arr, "average_frames"):
+        if not arr.average_frames and arr.can_average:
+            arr.average_frames = True
+        return list(range(arr.shape[1])), "z"
+
     nz = getattr(parent, "nz", 1)
     nc = getattr(parent, "nc", 1)
 
@@ -106,8 +117,12 @@ def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
         return list(range(nz)), "z"
     elif nc > 1:
         return list(range(nc)), "c"
-    else:
-        return [0], "z"
+
+    # fallback for 4D+ with an undetected second dim
+    if arr.ndim >= 4 and arr.shape[1] > 1:
+        return list(range(arr.shape[1])), "z"
+
+    return [0], "z"
 
 
 def compute_zstats_single_array(parent: Any, idx: int, arr: Any):

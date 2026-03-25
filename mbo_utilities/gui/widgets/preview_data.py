@@ -263,13 +263,22 @@ class PreviewDataWidget(EdgeWindow):
         if dims_lower is not None and "z" in dims_lower:
             z_idx = dims_lower.index("z")
             self.nz = self.shape[z_idx]
-        elif dims_lower is not None and any(d in dims_lower for d in ("z-planes", "z-slices", "volumes")):
-            # handle verbose dim names from piezo/lbm arrays
-            for d in ("z-planes", "z-slices", "volumes"):
+        elif dims_lower is not None and any(d in dims_lower for d in ("z-planes", "z-slices")):
+            for d in ("z-planes", "z-slices"):
                 if d in dims_lower:
                     z_idx = dims_lower.index(d)
                     self.nz = self.shape[z_idx]
                     break
+        elif dims_lower is not None and "volumes" in dims_lower:
+            # piezo: use num_slices if available, otherwise shape[1]
+            if hasattr(arr, "num_slices"):
+                self.nz = arr.num_slices
+            else:
+                vol_idx = dims_lower.index("volumes")
+                if len(self.shape) >= 2 and self.shape[vol_idx] <= 1 and vol_idx + 1 < len(self.shape):
+                    self.nz = self.shape[vol_idx + 1]
+                else:
+                    self.nz = self.shape[vol_idx]
         elif len(self.shape) >= 4 and (dims_lower is None or "channel" not in dims_lower):
             # only use shape[1] as z if not a channel dimension
             self.nz = self.shape[1]
