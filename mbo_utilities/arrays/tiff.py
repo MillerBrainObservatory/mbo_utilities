@@ -1976,7 +1976,9 @@ class SinglePlaneArray(ScanImageArray):
 
     @property
     def dims(self) -> tuple[str, ...]:
-        """Dimension labels for single-plane arrays: (timepoints, channels, Y, X)."""
+        """Dimension labels for single-plane arrays."""
+        if self._num_color_channels > 1:
+            return ("timepoints", "channels", "z-planes", "Y", "X")
         return ("timepoints", "channels", "Y", "X")
 
 
