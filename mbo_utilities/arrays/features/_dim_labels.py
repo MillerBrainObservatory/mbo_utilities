@@ -134,12 +134,11 @@ def get_slider_dims(arr_or_dims) -> tuple[str, ...] | None:
         return None
 
     # filter out spatial dims and convert to lowercase for fastplotlib
-    # also skip singleton dims when shape is available (no slider needed for size-1 dims)
-    shape = getattr(arr_or_dims, "shape", None)
+    # include size-1 dims since ImageWidget creates sliders for all non-spatial dims
     slider_dims = tuple(
         d.lower()
-        for i, d in enumerate(dims)
-        if d not in ("Y", "X") and (shape is None or i >= len(shape) or shape[i] > 1)
+        for d in dims
+        if d not in ("Y", "X")
     )
     return slider_dims if slider_dims else None
 
