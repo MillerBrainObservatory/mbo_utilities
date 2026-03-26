@@ -61,7 +61,7 @@ from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts
 from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
 from mbo_utilities.gui._help_viewer import draw_help_popup
-from mbo_utilities.gui._metadata_editor import draw_metadata_editor_popup
+
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
@@ -437,7 +437,7 @@ class PreviewDataWidget(EdgeWindow):
             if self.fpath is None:
                 return
             name = Path(self.fpath[0]).parent.name if isinstance(self.fpath, list) else Path(self.fpath).name
-            hello_imgui.get_runner_params().app_shallow_settings.window_title = f"MBO Utilities - {name}"
+            hello_imgui.get_runner_params().app_shallow_settings.window_title = f"Miller Brain Suite - {name}"
         except (RuntimeError, TypeError):
             pass
 
@@ -865,7 +865,6 @@ class PreviewDataWidget(EdgeWindow):
         draw_process_console_popup(self)
         draw_keybinds_popup(self)
         draw_help_popup(self)
-        draw_metadata_editor_popup(self)
 
         super().draw_window()
 

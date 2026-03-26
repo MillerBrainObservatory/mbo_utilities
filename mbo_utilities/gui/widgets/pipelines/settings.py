@@ -847,7 +847,8 @@ def _draw_section_suite2p_content(self):
 
     imgui.same_line()
     if imgui.button("Metadata"):
-        self._metadata_editor_open = True
+        self._saveas_popup_open = True
+        self._saveas_select_metadata_tab = True
     set_tooltip("Edit dataset metadata prior to processing")
 
     # draw the selection popup

@@ -10,7 +10,7 @@ maxdepth: 1
 ---
 User Guide <user_guide>
 Command Line Interface <usage/cli>
-Graphical User Interface <usage/gui_guide>
+Miller Brain Suite <usage/gui_guide>
 Supported File Formats <file_formats>
 DF/F Analysis <dff>
 API <api/index>

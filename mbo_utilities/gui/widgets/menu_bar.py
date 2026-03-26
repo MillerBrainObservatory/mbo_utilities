@@ -53,7 +53,8 @@ def draw_menu_bar(parent: Any):
                     parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
                 imgui.separator()
                 if imgui.menu_item("Set Metadata", "", p_selected=False, enabled=True)[0]:
-                    parent._metadata_editor_open = True
+                    parent._saveas_popup_open = True
+                    parent._saveas_select_metadata_tab = True
                 imgui.separator()
                 # Check if current data supports imwrite
                 can_save = parent.is_mbo_scan
