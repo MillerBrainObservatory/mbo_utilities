@@ -21,7 +21,7 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 - **Modern Image Reader/Writer**: Fast, lazy I/O for ScanImage/generic TIFFs, Suite2p `.bin`, Zarr, HDF5, and Numpy (in memeory or saved to `.npy`)
 - **Run processing pipelines** for calcium imaging - motion correction, cell extraction, and signal analysis
 - Operates on **3D timeseries** natively and is extendable to ND-arrays
-- **Visualize data interactively** with a GPU-accelerated GUI for exploring large datasets with [fastplotlib](https://fastplotlib.org/user_guide/guide.html#what-is-fastplotlib)
+- **Visualize data interactively** with the **Miller Brain Suite**, a GPU-accelerated GUI for exploring large datasets with [fastplotlib](https://fastplotlib.org/user_guide/guide.html#what-is-fastplotlib)
 
 <p align="center">
   <img src="docs/_images/gui/readme/01_step_file_dialog.png" height="280" alt="File Selection" />
@@ -128,7 +128,7 @@ The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/usa
 
 → [CLI Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/cli.html)
 
-### GUI
+### Miller Brain Suite
 
 Launch an interactive GPU-accelerated viewer for exploring large imaging datasets. Supports all MBO file formats with real-time visualization.
 
@@ -195,7 +195,7 @@ The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the packag
 # Windows
 uv tool uninstall mbo_utilities
 Remove-Item -Recurse -Force "$env:USERPROFILE\.mbo"
-Remove-Item "$env:USERPROFILE\Desktop\MBO Utilities.lnk" -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\Desktop\Miller Brain Suite.lnk" -ErrorAction SilentlyContinue
 ```
 
 ```bash
