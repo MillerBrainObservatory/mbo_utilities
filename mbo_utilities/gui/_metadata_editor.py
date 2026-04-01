@@ -112,175 +112,152 @@ def _build_suggested_fields(parent: Any) -> list[dict]:
     return suggested_fields
 
 
-def draw_metadata_editor_popup(parent: Any):
-    """Draw the metadata popup for editing metadata fields."""
-    if not hasattr(parent, "_metadata_editor_open"):
-        parent._metadata_editor_open = False
+def draw_metadata_editor_content(parent: Any):
+    """Draw metadata editor fields. can be embedded in any container (tab, popup, etc.)."""
+    if not hasattr(parent, "_custom_metadata"):
         parent._custom_metadata = {}
+    if not hasattr(parent, "_custom_key"):
         parent._custom_key = ""
+    if not hasattr(parent, "_custom_value"):
         parent._custom_value = ""
 
-    if parent._metadata_editor_open:
-        imgui.open_popup("Set Metadata")
-        parent._metadata_editor_open = False
+    # get array data
+    try:
+        current_data = parent.image_widget.data[0]
+    except (IndexError, AttributeError):
+        current_data = None
 
-    imgui.set_next_window_size(imgui.ImVec2(420, 400), imgui.Cond_.first_use_ever)
-    if imgui.begin_popup_modal("Set Metadata", flags=imgui.WindowFlags_.no_saved_settings)[0]:
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Metadata Editor")
-        imgui.dummy(imgui.ImVec2(0, 5))
+    # build suggested fields (includes filename detection)
+    suggested_fields = _build_suggested_fields(parent)
 
-        # get array data
-        try:
-            current_data = parent.image_widget.data[0]
-        except (IndexError, AttributeError):
-            current_data = None
+    # draw suggested fields in a table
+    if suggested_fields:
+        table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
+        if imgui.begin_table("suggested_meta", 4, table_flags):
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(7))
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(10))
+            imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(8))
+            imgui.table_setup_column("btn", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
 
-        # build suggested fields (includes filename detection)
-        suggested_fields = _build_suggested_fields(parent)
+            for field in suggested_fields:
+                canonical = field["canonical"]
+                label = field["label"]
+                unit = field.get("unit", "")
+                dtype = field.get("dtype", str)
+                desc = field.get("description", "")
+                examples = field.get("examples", [])
+                detected = field.get("detected", False)
 
-        if not hasattr(parent, "_custom_metadata"):
-            parent._custom_metadata = {}
+                # get current value (custom overrides source)
+                custom_val = parent._custom_metadata.get(canonical)
+                source_val = field.get("value")
+                value = custom_val if custom_val is not None else source_val
+                is_set = value is not None
 
-        # draw suggested fields in a table
-        if suggested_fields:
-            table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
-            if imgui.begin_table("suggested_meta", 4, table_flags):
-                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(7))
-                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(10))
-                imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(8))
-                imgui.table_setup_column("btn", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
+                imgui.table_next_row()
 
-                for field in suggested_fields:
-                    canonical = field["canonical"]
-                    label = field["label"]
-                    unit = field.get("unit", "")
-                    dtype = field.get("dtype", str)
-                    desc = field.get("description", "")
-                    examples = field.get("examples", [])
-                    detected = field.get("detected", False)
+                # label column
+                imgui.table_next_column()
+                if is_set:
+                    color = imgui.ImVec4(0.5, 0.8, 0.5, 1.0)
+                else:
+                    color = imgui.ImVec4(0.6, 0.6, 0.6, 1.0)
+                imgui.text_colored(color, label)
+                if imgui.is_item_hovered():
+                    tooltip = desc
+                    if examples:
+                        tooltip += f"\n\nExamples: {', '.join(examples[:5])}"
+                    imgui.set_tooltip(tooltip)
 
-                    # get current value (custom overrides source)
-                    custom_val = parent._custom_metadata.get(canonical)
-                    source_val = field.get("value")
-                    value = custom_val if custom_val is not None else source_val
-                    is_set = value is not None
-
-                    imgui.table_next_row()
-
-                    # label column
-                    imgui.table_next_column()
-                    if is_set:
-                        color = imgui.ImVec4(0.5, 0.8, 0.5, 1.0)
+                # value column
+                imgui.table_next_column()
+                if is_set:
+                    val_str = f"{value} {unit}".strip()
+                    if detected and custom_val is None:
+                        imgui.text_colored(imgui.ImVec4(0.4, 0.8, 0.9, 1.0), val_str)
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("Detected from filename")
                     else:
-                        color = imgui.ImVec4(0.6, 0.6, 0.6, 1.0)
-                    imgui.text_colored(color, label)
-                    if imgui.is_item_hovered():
-                        tooltip = desc
-                        if examples:
-                            tooltip += f"\n\nExamples: {', '.join(examples[:5])}"
-                        imgui.set_tooltip(tooltip)
+                        imgui.text_colored(imgui.ImVec4(0.5, 0.8, 0.5, 1.0), val_str)
+                else:
+                    imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "-")
 
-                    # value column
-                    imgui.table_next_column()
-                    if is_set:
-                        val_str = f"{value} {unit}".strip()
-                        if detected and custom_val is None:
-                            # show detected values in cyan
-                            imgui.text_colored(imgui.ImVec4(0.4, 0.8, 0.9, 1.0), val_str)
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip("Detected from filename")
-                        else:
-                            imgui.text_colored(imgui.ImVec4(0.5, 0.8, 0.5, 1.0), val_str)
-                    else:
-                        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "-")
+                # input column
+                imgui.table_next_column()
+                input_key = f"_meta_input_{canonical}"
+                if not hasattr(parent, input_key):
+                    setattr(parent, input_key, "")
 
-                    # input column
-                    imgui.table_next_column()
-                    input_key = f"_meta_input_{canonical}"
-                    if not hasattr(parent, input_key):
-                        setattr(parent, input_key, "")
+                imgui.set_next_item_width(hello_imgui.em_size(7.5))
+                flags = imgui.InputTextFlags_.chars_decimal if dtype in (float, int) else 0
+                _, new_val = imgui.input_text(f"##{canonical}", getattr(parent, input_key), flags=flags)
+                setattr(parent, input_key, new_val)
+                if imgui.is_item_hovered():
+                    tip = "Type a value and click Set to save"
+                    if dtype == str:
+                        tip += " (text)"
+                    elif dtype == float:
+                        tip += " (number)"
+                    imgui.set_tooltip(tip)
 
-                    imgui.set_next_item_width(hello_imgui.em_size(7.5))
-                    flags = imgui.InputTextFlags_.chars_decimal if dtype in (float, int) else 0
-                    _, new_val = imgui.input_text(f"##{canonical}", getattr(parent, input_key), flags=flags)
-                    setattr(parent, input_key, new_val)
-                    if imgui.is_item_hovered():
-                        tip = "Type a value and click Set to save"
-                        if dtype == str:
-                            tip += " (text)"
-                        elif dtype == float:
-                            tip += " (number)"
-                        imgui.set_tooltip(tip)
+                # set button column
+                imgui.table_next_column()
+                if imgui.small_button(f"Set##{canonical}"):
+                    input_val = getattr(parent, input_key).strip()
+                    if input_val:
+                        try:
+                            parsed = dtype(input_val)
+                            parent._custom_metadata[canonical] = parsed
+                            if current_data and hasattr(current_data, "metadata"):
+                                if isinstance(current_data.metadata, dict):
+                                    current_data.metadata[canonical] = parsed
+                            setattr(parent, input_key, "")
+                        except (ValueError, TypeError):
+                            pass
 
-                    # set button column
-                    imgui.table_next_column()
-                    if imgui.small_button(f"Set##{canonical}"):
-                        input_val = getattr(parent, input_key).strip()
-                        if input_val:
-                            try:
-                                parsed = dtype(input_val)
-                                parent._custom_metadata[canonical] = parsed
-                                if current_data and hasattr(current_data, "metadata"):
-                                    if isinstance(current_data.metadata, dict):
-                                        current_data.metadata[canonical] = parsed
-                                setattr(parent, input_key, "")
-                            except (ValueError, TypeError):
-                                pass
+            imgui.end_table()
 
-                imgui.end_table()
+        imgui.spacing()
 
-            imgui.spacing()
+    # show existing custom entries as removable tags
+    suggested_keys = {f["canonical"] for f in suggested_fields}
+    custom_entries = [(k, v) for k, v in parent._custom_metadata.items() if k not in suggested_keys]
 
-        # show existing custom entries as removable tags
-        suggested_keys = {f["canonical"] for f in suggested_fields}
-        custom_entries = [(k, v) for k, v in parent._custom_metadata.items() if k not in suggested_keys]
-
-        if custom_entries:
-            imgui.dummy(imgui.ImVec2(0, 2))
-            to_remove = None
-            for key, value in custom_entries:
-                imgui.push_id(f"custom_{key}")
-                imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.25, 0.3, 1.0))
-                imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.35, 0.4, 1.0))
-                tag_text = f"{key}={value}"
-                if imgui.small_button(f"{tag_text}  \u00d7"):
-                    to_remove = key
-                imgui.pop_style_color(2)
-                imgui.same_line()
-                imgui.pop_id()
-            if to_remove:
-                del parent._custom_metadata[to_remove]
-            imgui.new_line()
-
-        # add new custom entry row
+    if custom_entries:
         imgui.dummy(imgui.ImVec2(0, 2))
-        imgui.set_next_item_width(hello_imgui.em_size(8))
-        if not hasattr(parent, "_custom_key"):
-            parent._custom_key = ""
-        _, parent._custom_key = imgui.input_text("##key", parent._custom_key)
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Custom key name")
-        imgui.same_line()
-        imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "=")
-        imgui.same_line()
-        imgui.set_next_item_width(hello_imgui.em_size(8))
-        if not hasattr(parent, "_custom_value"):
-            parent._custom_value = ""
-        _, parent._custom_value = imgui.input_text("##val", parent._custom_value)
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Custom value (auto-detects number vs text)")
-        imgui.same_line()
-        if imgui.button("+", imgui.ImVec2(hello_imgui.em_size(2), 0)) and parent._custom_key.strip():
-            val = parent._custom_value
-            with contextlib.suppress(ValueError):
-                val = float(val) if "." in val else int(val)
-            parent._custom_metadata[parent._custom_key.strip()] = val
-            parent._custom_key = ""
-            parent._custom_value = ""
+        to_remove = None
+        for key, value in custom_entries:
+            imgui.push_id(f"custom_{key}")
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.25, 0.3, 1.0))
+            imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.35, 0.4, 1.0))
+            tag_text = f"{key}={value}"
+            if imgui.small_button(f"{tag_text}  \u00d7"):
+                to_remove = key
+            imgui.pop_style_color(2)
+            imgui.same_line()
+            imgui.pop_id()
+        if to_remove:
+            del parent._custom_metadata[to_remove]
+        imgui.new_line()
 
-        imgui.spacing()
-        imgui.spacing()
-        if imgui.button("Done", imgui.ImVec2(80, 0)):
-            imgui.close_current_popup()
-
-        imgui.end_popup()
+    # add new custom entry row
+    imgui.dummy(imgui.ImVec2(0, 2))
+    imgui.set_next_item_width(hello_imgui.em_size(8))
+    _, parent._custom_key = imgui.input_text("##key", parent._custom_key)
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Custom key name")
+    imgui.same_line()
+    imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "=")
+    imgui.same_line()
+    imgui.set_next_item_width(hello_imgui.em_size(8))
+    _, parent._custom_value = imgui.input_text("##val", parent._custom_value)
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Custom value (auto-detects number vs text)")
+    imgui.same_line()
+    if imgui.button("+", imgui.ImVec2(hello_imgui.em_size(2), 0)) and parent._custom_key.strip():
+        val = parent._custom_value
+        with contextlib.suppress(ValueError):
+            val = float(val) if "." in val else int(val)
+        parent._custom_metadata[parent._custom_key.strip()] = val
+        parent._custom_key = ""
+        parent._custom_value = ""

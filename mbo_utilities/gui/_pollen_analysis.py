@@ -16,9 +16,10 @@ from scipy.optimize import curve_fit
 from mbo_utilities.metadata import get_param
 
 
-# =============================================================================
-# H5 File Helpers - Unified pollen calibration file structure
-# =============================================================================
+def line_profile(img: np.ndarray):
+    pass
+
+
 
 def get_pollen_h5_path(filepath):
     """Get the unified pollen calibration H5 file path.
@@ -61,13 +62,8 @@ def get_mode_group(h5_file, mode, create=True):
     return h5_file[mode]
 
 
-# =============================================================================
-# Color Palette - Consistent dark theme colors
-# =============================================================================
-
 class Colors:
-    """Consistent color palette for pollen calibration plots."""
-
+    """Dark color theme for use across GUI widgets."""
     # Background colors
     BG_DARK = "#1e1e1e"       # Main figure background
     BG_AXES = "#2d2d2d"       # Axes background
@@ -576,7 +572,6 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info, mode="auto"
 
         grp.create_dataset("cavity_a_channels", data=np.array(cavity_info["cavity_a"]))
         grp.create_dataset("cavity_b_channels", data=np.array(cavity_info["cavity_b"]))
-
 
 
 def plot_comparison(filepath):

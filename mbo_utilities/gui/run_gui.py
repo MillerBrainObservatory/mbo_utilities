@@ -366,7 +366,7 @@ def _select_file(runner_params: Any | None = None) -> tuple[Any, Any, Any, bool,
 
     if runner_params is None:
         params = hello_imgui.RunnerParams()
-        params.app_window_params.window_title = "MBO Utilities – Data Selection"
+        params.app_window_params.window_title = "Miller Brain Suite – Data Selection"
         params.app_window_params.window_geometry.size = (340, 720)
         params.app_window_params.window_geometry.size_auto = False
         params.app_window_params.resizable = True
@@ -403,7 +403,7 @@ def _show_metadata_viewer(metadata: dict) -> None:
     from mbo_utilities.gui._setup import get_default_ini_path
 
     params = hello_imgui.RunnerParams()
-    params.app_window_params.window_title = "MBO Metadata Viewer"
+    params.app_window_params.window_title = "Miller Brain Suite – Metadata"
     params.app_window_params.window_geometry.size = (800, 800)
     params.ini_filename = get_default_ini_path("metadata_viewer")
     params.callbacks.show_gui = lambda: draw_metadata_inspector(metadata)
@@ -500,7 +500,7 @@ def _create_image_widget(data_array, widget: bool = True):
     # set qt window title and icon after canvas is created
     canvas = iw.figure.canvas
     if hasattr(canvas, "set_title"):
-        canvas.set_title("Miller Brain Studio")
+        canvas.set_title("Miller Brain Suite")
     _set_qt_icon()
 
     # Add PreviewDataWidget if requested
