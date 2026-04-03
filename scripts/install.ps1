@@ -1155,7 +1155,7 @@ function New-DesktopShortcut {
     }
 
     $desktopPath = [Environment]::GetFolderPath("Desktop")
-    $shortcutName = if ($BranchRef -and $BranchRef -ne "master") { "MBO Utilities ($BranchRef).lnk" } else { "MBO Utilities.lnk" }
+    $shortcutName = if ($BranchRef -and $BranchRef -ne "master") { "Miller Brain Suite ($BranchRef).lnk" } else { "Miller Brain Suite.lnk" }
     $shortcutPath = Join-Path $desktopPath $shortcutName
 
     # setup mbo directory for launcher and icon

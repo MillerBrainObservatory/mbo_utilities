@@ -1,12 +1,12 @@
 (gui_guide)=
 
-# GUI User Guide
+# Miller Brain Suite
 
 Interactive data preview and processing tools for calcium imaging data.
 
 ```{image} /_images/gui/readme/02_step_data_view.png
 :width: 100%
-:alt: MBO Utilities GUI
+:alt: Miller Brain Suite
 ```
 
 ## Quick Start

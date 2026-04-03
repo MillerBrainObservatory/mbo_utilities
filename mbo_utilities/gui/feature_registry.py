@@ -558,7 +558,7 @@ def capture_feature(
             hello_imgui.get_runner_params().app_shall_exit = True
 
     params = hello_imgui.RunnerParams()
-    params.app_window_params.window_title = f"MBO - {feature.title}"
+    params.app_window_params.window_title = f"Miller Brain Suite - {feature.title}"
     params.app_window_params.window_geometry.size = feature.window_size
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = False

@@ -23,6 +23,17 @@ CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
 
+def _normalize_key(key, ndim):
+    """Normalize an indexing key: wrap in tuple, expand Ellipsis, strip trailing Ellipsis."""
+    if not isinstance(key, tuple):
+        key = (key,)
+    if Ellipsis in key:
+        idx = key.index(Ellipsis)
+        n_missing = ndim - (len(key) - 1)
+        key = key[:idx] + (slice(None),) * max(n_missing, 0) + key[idx + 1:]
+    return key
+
+
 def supports_roi(obj):
     """
     Check if object supports ROI operations.
@@ -657,6 +668,10 @@ class ReductionMixin:
     scalar = arr.mean()           # Mean of all elements (like numpy)
     volume = arr.mean(axis=0)     # Mean over first axis
     """
+
+    # prevent numpy/xarray from implicitly converting lazy arrays
+    __array_ufunc__ = None
+    __array_function__ = None
 
     def _is_numpy_like(self) -> bool:
         """Check if this array can be reduced directly by numpy."""

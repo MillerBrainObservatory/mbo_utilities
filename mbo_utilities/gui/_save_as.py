@@ -21,7 +21,7 @@ from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities.gui._imgui_helpers import set_tooltip, checkbox_with_tooltip, draw_checkbox_grid
 from mbo_utilities.gui._availability import HAS_SUITE3D
 from mbo_utilities.gui._selection_ui import draw_selection_table
-from mbo_utilities.gui._metadata_editor import _check_missing_metadata
+from mbo_utilities.gui._metadata_editor import _check_missing_metadata, draw_metadata_editor_content
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
 import contextlib
@@ -156,55 +156,83 @@ def draw_saveas_popup(parent: Any):
     # If we are here, popup is open and visible
     if opened:
         parent._saveas_modal_open = True
-        imgui.dummy(imgui.ImVec2(0, 5))
 
-        # === PATH SECTION ===
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Output")
-        imgui.dummy(imgui.ImVec2(0, 5))
+        # one-shot tab selection: consume on the frame AFTER open_popup
+        # so imgui has time to create the tab bar first
+        select_meta = getattr(parent, "_saveas_select_metadata_tab", 0)
+        if select_meta is True:
+            # first frame: mark as pending, don't apply yet
+            parent._saveas_select_metadata_tab = 2
+            select_meta = False
+        elif isinstance(select_meta, int) and select_meta > 1:
+            # second frame: apply and clear
+            parent._saveas_select_metadata_tab = False
+            select_meta = True
+        else:
+            select_meta = False
 
-        imgui.set_next_item_width(hello_imgui.em_size(25))
+        if imgui.begin_tab_bar("SaveAsTabBar"):
 
-        # Directory
-        current_dir_str = parent._saveas_outdir or ""
-        changed, new_str = imgui.input_text("Save Dir", current_dir_str)
-        if changed:
-            parent._saveas_outdir = new_str
+            # === Save tab ===
+            if imgui.begin_tab_item("Save")[0]:
+                imgui.dummy(imgui.ImVec2(0, 5))
 
-        imgui.same_line()
-        if imgui.button("Browse"):
-            default_dir = parent._saveas_outdir or str(get_last_dir("save_as") or Path.home())
-            parent._saveas_folder_dialog = pfd.select_folder("Select output folder", default_dir)
+                # === PATH SECTION ===
+                imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Output")
+                imgui.dummy(imgui.ImVec2(0, 5))
 
-        # Check if async folder dialog has a result
-        if parent._saveas_folder_dialog is not None and parent._saveas_folder_dialog.ready():
-            result = parent._saveas_folder_dialog.result()
-            if result:
-                parent._saveas_outdir = str(result)
-                set_last_dir("save_as", result)
-            parent._saveas_folder_dialog = None
+                imgui.set_next_item_width(hello_imgui.em_size(25))
 
-        # Extension
-        imgui.set_next_item_width(hello_imgui.em_size(25))
-        _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_SUPPORTED_FTYPES)
-        parent._ext = MBO_SUPPORTED_FTYPES[parent._ext_idx]
+                # Directory
+                current_dir_str = parent._saveas_outdir or ""
+                changed, new_str = imgui.input_text("Save Dir", current_dir_str)
+                if changed:
+                    parent._saveas_outdir = new_str
 
-        imgui.spacing()
-        imgui.separator()
+                imgui.same_line()
+                if imgui.button("Browse"):
+                    default_dir = parent._saveas_outdir or str(get_last_dir("save_as") or Path.home())
+                    parent._saveas_folder_dialog = pfd.select_folder("Select output folder", default_dir)
 
-        # === SELECTION SECTION ===
-        _draw_selection_section(parent)
+                # Check if async folder dialog has a result
+                if parent._saveas_folder_dialog is not None and parent._saveas_folder_dialog.ready():
+                    result = parent._saveas_folder_dialog.result()
+                    if result:
+                        parent._saveas_outdir = str(result)
+                        set_last_dir("save_as", result)
+                    parent._saveas_folder_dialog = None
 
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
+                # Extension
+                imgui.set_next_item_width(hello_imgui.em_size(25))
+                _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_SUPPORTED_FTYPES)
+                parent._ext = MBO_SUPPORTED_FTYPES[parent._ext_idx]
 
-        # === SAVE/OPTIONS BUTTONS ===
-        _draw_save_button(parent)
+                imgui.spacing()
+                imgui.separator()
 
-        # Options popup (opened by button in _draw_save_button)
-        _draw_options_popup(parent)
+                # === SELECTION SECTION ===
+                _draw_selection_section(parent)
 
-        # Metadata popup is now drawn globally in preview_data.py
+                imgui.spacing()
+                imgui.separator()
+                imgui.spacing()
+
+                # === SAVE/OPTIONS BUTTONS ===
+                _draw_save_button(parent)
+
+                # Options popup (opened by button in _draw_save_button)
+                _draw_options_popup(parent)
+
+                imgui.end_tab_item()
+
+            # === Metadata tab ===
+            meta_flags = imgui.TabItemFlags_.set_selected if select_meta else 0
+            if imgui.begin_tab_item("Metadata", flags=meta_flags)[0]:
+                imgui.dummy(imgui.ImVec2(0, 5))
+                draw_metadata_editor_content(parent)
+                imgui.end_tab_item()
+
+            imgui.end_tab_bar()
 
         imgui.end_popup()
 
@@ -976,22 +1004,6 @@ def _draw_save_button(parent: Any):
             parent.logger.info(f"Error saving data: {e}")
             parent._saveas_modal_open = False
             imgui.close_current_popup()
-
-    imgui.same_line()
-
-    # metadata button - deprecation styling
-    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.6, 0.5, 0.2, 1.0))
-    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.7, 0.6, 0.3, 1.0))
-    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.5, 0.4, 0.1, 1.0))
-    if imgui.button("Metadata", imgui.ImVec2(80, 0)):
-        parent._metadata_editor_open = True
-    imgui.pop_style_color(3)
-    if imgui.is_item_hovered():
-        tip = "This menu is deprecated. You can use it for now to set metadata, but in the future use File -> Set Metadata."
-        if missing_fields:
-            missing_names = ", ".join(f["label"] for f in missing_fields)
-            tip = f"Missing: {missing_names}\n\n{tip}"
-        imgui.set_tooltip(tip)
 
     imgui.same_line()
     if imgui.button("Options", imgui.ImVec2(80, 0)):

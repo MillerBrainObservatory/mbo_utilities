@@ -61,7 +61,7 @@ from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts
 from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
 from mbo_utilities.gui._help_viewer import draw_help_popup
-from mbo_utilities.gui._metadata_editor import draw_metadata_editor_popup
+
 
 import fastplotlib as fpl
 from fastplotlib.ui import EdgeWindow
@@ -263,13 +263,22 @@ class PreviewDataWidget(EdgeWindow):
         if dims_lower is not None and "z" in dims_lower:
             z_idx = dims_lower.index("z")
             self.nz = self.shape[z_idx]
-        elif dims_lower is not None and any(d in dims_lower for d in ("z-planes", "z-slices", "volumes")):
-            # handle verbose dim names from piezo/lbm arrays
-            for d in ("z-planes", "z-slices", "volumes"):
+        elif dims_lower is not None and any(d in dims_lower for d in ("z-planes", "z-slices")):
+            for d in ("z-planes", "z-slices"):
                 if d in dims_lower:
                     z_idx = dims_lower.index(d)
                     self.nz = self.shape[z_idx]
                     break
+        elif dims_lower is not None and "volumes" in dims_lower:
+            # piezo: use num_slices if available, otherwise shape[1]
+            if hasattr(arr, "num_slices"):
+                self.nz = arr.num_slices
+            else:
+                vol_idx = dims_lower.index("volumes")
+                if len(self.shape) >= 2 and self.shape[vol_idx] <= 1 and vol_idx + 1 < len(self.shape):
+                    self.nz = self.shape[vol_idx + 1]
+                else:
+                    self.nz = self.shape[vol_idx]
         elif len(self.shape) >= 4 and (dims_lower is None or "channel" not in dims_lower):
             # only use shape[1] as z if not a channel dimension
             self.nz = self.shape[1]
@@ -428,7 +437,7 @@ class PreviewDataWidget(EdgeWindow):
             if self.fpath is None:
                 return
             name = Path(self.fpath[0]).parent.name if isinstance(self.fpath, list) else Path(self.fpath).name
-            hello_imgui.get_runner_params().app_shallow_settings.window_title = f"MBO Utilities - {name}"
+            hello_imgui.get_runner_params().app_shallow_settings.window_title = f"Miller Brain Suite - {name}"
         except (RuntimeError, TypeError):
             pass
 
@@ -856,7 +865,6 @@ class PreviewDataWidget(EdgeWindow):
         draw_process_console_popup(self)
         draw_keybinds_popup(self)
         draw_help_popup(self)
-        draw_metadata_editor_popup(self)
 
         super().draw_window()
 

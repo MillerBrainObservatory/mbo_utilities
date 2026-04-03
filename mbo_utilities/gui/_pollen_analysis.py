@@ -16,9 +16,36 @@ from scipy.optimize import curve_fit
 from mbo_utilities.metadata import get_param
 
 
-# =============================================================================
-# H5 File Helpers - Unified pollen calibration file structure
-# =============================================================================
+def _upsample_traces(Iz, DZ):
+    """upsample z-traces to ~1um effective resolution using cubic interpolation.
+
+    for coarse z-steps (e.g. 5um), the raw traces have too few samples
+    per peak for accurate smoothing and peak detection. upsampling to
+    ~1um effective resolution makes results consistent across step sizes.
+    """
+    from scipy.interpolate import interp1d
+
+    nz = Iz.shape[1]
+    upsample = max(1, round(DZ))
+    if upsample <= 1:
+        return Iz, DZ, nz
+
+    z_orig = np.arange(nz)
+    nz_fine = (nz - 1) * upsample + 1
+    z_fine = np.linspace(0, nz - 1, nz_fine)
+    Iz_fine = np.zeros((Iz.shape[0], nz_fine), dtype=Iz.dtype)
+    for i in range(Iz.shape[0]):
+        f = interp1d(z_orig, Iz[i, :], kind="cubic")
+        Iz_fine[i, :] = f(z_fine)
+
+    DZ_eff = DZ / upsample
+    return Iz_fine, DZ_eff, nz_fine
+
+
+def line_profile(img: np.ndarray):
+    pass
+
+
 
 def get_pollen_h5_path(filepath):
     """Get the unified pollen calibration H5 file path.
@@ -61,13 +88,8 @@ def get_mode_group(h5_file, mode, create=True):
     return h5_file[mode]
 
 
-# =============================================================================
-# Color Palette - Consistent dark theme colors
-# =============================================================================
-
 class Colors:
-    """Consistent color palette for pollen calibration plots."""
-
+    """Dark color theme for use across GUI widgets."""
     # Background colors
     BG_DARK = "#1e1e1e"       # Main figure background
     BG_AXES = "#2d2d2d"       # Axes background
@@ -256,52 +278,121 @@ def plot_beamlet_grid(vol, order, filepath, mode="auto"):
 
 def analyze_power_vs_z(Iz, filepath, DZ, order, nc, mode="auto"):
     """Analyze power vs Z depth."""
-    nz = Iz.shape[1]
-    ZZ = np.flip(np.arange(nz) * DZ)
+    # upsample traces to ~1um effective resolution for coarse z-steps
+    Iz_up, DZ_eff, nz_up = _upsample_traces(Iz, DZ)
 
-    amt = max(1, round(10.0 / DZ))
-    smoothed = uniform_filter1d(Iz, size=amt, axis=1, mode="nearest")
+    ZZ = np.flip(np.arange(nz_up) * DZ_eff)
+
+    amt = max(1, round(10.0 / DZ_eff))
+    smoothed = uniform_filter1d(Iz_up, size=amt, axis=1, mode="nearest")
 
     zoi = smoothed.argmax(axis=1)
     pp = smoothed.max(axis=1)
+    z_peaks = ZZ[zoi]
+
+    # signed sqrt preserves negatives and compresses the y-range
+    def _signed_sqrt(x):
+        return np.sign(x) * np.sqrt(np.abs(x))
 
     _fig, ax = plt.subplots(figsize=(8, 6))
 
+    plot_data = _signed_sqrt(smoothed)
     for i in range(len(order)):
-        ax.plot(ZZ, np.sqrt(smoothed[i, :]), alpha=0.7)
-
-    ax.plot(ZZ[zoi], np.sqrt(pp), ".", color=Colors.WHITE, markersize=10)
+        ax.plot(ZZ, plot_data[i, :], alpha=0.7)
 
     sqrt_pp = np.sqrt(pp)
+    ax.plot(z_peaks, sqrt_pp, ".", color=Colors.WHITE, markersize=10)
+
     label_offset = 0.03 * (sqrt_pp.max() - sqrt_pp.min())
     for i in range(len(order)):
         ax.text(
-            ZZ[zoi[i]],
-            np.sqrt(pp[i]) + label_offset,
+            z_peaks[i],
+            sqrt_pp[i] + label_offset,
             str(i + 1),
             ha="center",
             fontsize=8,
             color=Colors.TEXT,
         )
 
+    # x-axis: extend until outermost beams' plot curves drop near y=0
+    first_beam = int(np.argmin(zoi))  # peak at highest z (right side)
+    last_beam = int(np.argmax(zoi))   # peak at lowest z (left side)
+    y_near_zero = 2.0  # threshold on the sqrt scale
+
+    # right bound: first beam's tail toward lower indices (higher z)
+    curve_r = plot_data[first_beam, :zoi[first_beam]]
+    below_r = np.where(curve_r < y_near_zero)[0]
+    i_lo = max(0, below_r[-1]) if len(below_r) > 0 else 0
+
+    # left bound: last beam's tail toward higher indices (lower z)
+    curve_l = plot_data[last_beam, zoi[last_beam]:]
+    below_l = np.where(curve_l < y_near_zero)[0]
+    i_hi = min(len(ZZ) - 1, zoi[last_beam] + below_l[0]) if len(below_l) > 0 else len(ZZ) - 1
+
     ax.set_xlabel("Piezo Z (um)", fontweight="bold")
     ax.set_ylabel("2p signal (a.u.)", fontweight="bold")
     ax.set_title(f"Power vs. Z-depth ({Colors.mode_label(mode)})", fontweight="bold")
     ax.grid(True)
     plt.tight_layout()
+    # set limits after tight_layout so they stick
+    ax.set_xlim(ZZ[i_hi], ZZ[i_lo])
+    y_max = sqrt_pp.max() + label_offset * 4
+    ax.set_ylim(-10, y_max)
     out_name = f"pollen_{mode}_power_vs_z.png"
     plt.savefig(filepath.with_name(out_name), dpi=150)
     plt.close()
 
-    return ZZ, zoi, pp
+    plot_z_extent(ZZ, smoothed, z_peaks, pp, order, filepath, mode)
+
+    return z_peaks, pp
 
 
-def analyze_z_positions(ZZ, zoi, order, filepath, cavity_info, mode="auto"):
+def plot_z_extent(ZZ, smoothed, z_peaks, pp, order, filepath, mode="auto"):
+    """plot start, peak, and stop z-plane for each beam.
+
+    uses half-max of each beam's curve as the threshold for start/stop.
+    """
+    n_beams = len(order)
+    z_starts = np.zeros(n_beams)
+    z_stops = np.zeros(n_beams)
+
+    for i in range(n_beams):
+        curve = smoothed[i, :]
+        peak_val = curve.max()
+        half_max = 0.5 * peak_val
+        above = curve >= half_max
+        indices = np.where(above)[0]
+        if len(indices) > 0:
+            z_starts[i] = ZZ[indices[-1]]   # ZZ is flipped (descending)
+            z_stops[i] = ZZ[indices[0]]
+        else:
+            z_starts[i] = z_peaks[i]
+            z_stops[i] = z_peaks[i]
+
+    _fig, ax = plt.subplots(figsize=(8, 5))
+
+    for i in range(n_beams):
+        ax.plot([i + 1, i + 1], [z_starts[i], z_stops[i]],
+                color=Colors.CAVITY_A, linewidth=2, solid_capstyle="round")
+        ax.plot(i + 1, z_peaks[i], "o", color=Colors.WHITE, markersize=6, zorder=5)
+
+    ax.set_xlabel("Beam number", fontweight="bold")
+    ax.set_ylabel("Z position (um)", fontweight="bold")
+    ax.set_title(f"Z Extent per Beam - FWHM ({Colors.mode_label(mode)})", fontweight="bold")
+    ax.set_xticks(range(1, n_beams + 1))
+    ax.grid(True, axis="y")
+    plt.tight_layout()
+    out_name = f"pollen_{mode}_z_extent.png"
+    plt.savefig(filepath.with_name(out_name), dpi=150)
+    plt.close()
+
+
+def analyze_z_positions(z_peaks, order, filepath, cavity_info, mode="auto"):
     """Analyze Z positions vs beam number with cavity split."""
     n_beams = len(order)
 
-    Z0 = ZZ[zoi[0]]
-    z_rel = ZZ[zoi] - Z0
+    Z0 = z_peaks[0]
+    z_rel = z_peaks - Z0
 
     _fig, ax = plt.subplots(figsize=(7, 5))
 
@@ -373,7 +464,7 @@ def analyze_z_positions(ZZ, zoi, order, filepath, cavity_info, mode="auto"):
             grp.attrs["z_slope_um_per_beam"] = z_slope
 
 
-def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"):
+def fit_exp_decay(z_peaks, order, filepath, pp, cavity_info, DZ, nz, mode="auto"):
     """Fit exponential decay with cavity splits."""
     def exp_func(z, a, b):
         return a * np.exp(b * z)
@@ -395,7 +486,7 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"
         else:
             cavity_a_beams.append(beam_idx)
 
-    z_all = ZZ[zoi]
+    z_all = z_peaks
     p_all = np.sqrt(pp)
 
     z1 = np.array([z_all[i] for i in cavity_a_beams]) if cavity_a_beams else np.array([])
@@ -412,7 +503,8 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"
     if len(z2) > 0:
         ax.plot(z2, p2, "s", color=Colors.CAVITY_B, markersize=6, label="Data Cavity B")
 
-    z_fit_range = DZ * np.linspace(0, nz - 1, 1001)
+    z_total = DZ * (nz - 1)
+    z_fit_range = np.linspace(0, z_total, 1001)
 
     # Track decay lengths for saving
     decay_length_a = None
@@ -451,6 +543,18 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"
         except Exception:
             pass
 
+    # fit axes to where data actually lives
+    z_all_pts = np.concatenate([z1, z2]) if len(z2) > 0 else z1
+    p_all_pts = np.concatenate([p1, p2]) if len(p2) > 0 else p1
+    if len(z_all_pts) > 0:
+        z_min, z_max = z_all_pts.min(), z_all_pts.max()
+        z_span = z_max - z_min
+        # enough room to show the fit curve tails
+        z_pad = max(0.5 * z_span, 10.0)
+        ax.set_xlim(max(0, z_min - z_pad), z_max + z_pad)
+        p_max = p_all_pts.max()
+        ax.set_ylim(-0.02 * p_max, p_max * 1.15)
+
     ax.set_xlabel("Z (um)", fontweight="bold")
     ax.set_ylabel("Power (a.u.)", fontweight="bold")
     ax.set_title(f"Power vs Depth ({Colors.mode_label(mode)})", fontweight="bold")
@@ -473,9 +577,9 @@ def fit_exp_decay(ZZ, zoi, order, filepath, pp, cavity_info, DZ, nz, mode="auto"
             grp.attrs["decay_length_um"] = decay_length_combined
 
 
-def plot_z_spacing(ZZ, zoi, order, filepath, mode="auto"):
+def plot_z_spacing(z_peaks, order, filepath, mode="auto"):
     """Plot Z spacing between consecutive beams."""
-    z_positions = ZZ[zoi]
+    z_positions = z_peaks
     z_diff = np.diff(z_positions)
 
     _fig, ax = plt.subplots(figsize=(7, 4))
@@ -576,7 +680,6 @@ def calibrate_xy(xs, ys, III, filepath, dx, dy, nx, ny, cavity_info, mode="auto"
 
         grp.create_dataset("cavity_a_channels", data=np.array(cavity_info["cavity_a"]))
         grp.create_dataset("cavity_b_channels", data=np.array(cavity_info["cavity_b"]))
-
 
 
 def plot_comparison(filepath):

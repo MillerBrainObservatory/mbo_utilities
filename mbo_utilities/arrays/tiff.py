@@ -15,7 +15,7 @@ import numpy as np
 from tifffile import TiffFile
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import ReductionMixin, TiffReaderMixin
+from mbo_utilities.arrays._base import ReductionMixin, TiffReaderMixin, _normalize_key
 from mbo_utilities.file_io import expand_paths
 from mbo_utilities.metadata import get_metadata, get_param, extract_roi_slices
 from mbo_utilities.metadata.scanimage import (
@@ -299,8 +299,8 @@ class _SingleTiffPlaneReader:
         return get_dtype(self._dtype)
 
     def __getitem__(self, key):
-        if not isinstance(key, tuple):
-            key = (key,)
+
+        key = _normalize_key(key, 3)
 
         t_key = key[0] if len(key) > 0 else slice(None)
         y_key = key[1] if len(key) > 1 else slice(None)
@@ -756,10 +756,9 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
         return self._nframes
 
     def __getitem__(self, key):
-        if not isinstance(key, tuple):
-            key = (key,)
 
         ndim = self.ndim
+        key = _normalize_key(key, ndim)
         key = key + (slice(None),) * (ndim - len(key))
 
         if ndim == 5:
@@ -1334,11 +1333,10 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         return buf.reshape(len(frames), len(chans), tiff_height_px, tiff_width_px)
 
     def __getitem__(self, key):
-        t0 = time.perf_counter()
-        if not isinstance(key, tuple):
-            key = (key,)
 
+        t0 = time.perf_counter()
         ndim = len(self.shape)
+        key = _normalize_key(key, ndim)
         key = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (ndim - len(key))
 
         # 5D: (T, C, Z, Y, X) — dual-channel LBM
@@ -1844,8 +1842,8 @@ class PiezoArray(ScanImageArray):
         When averaging: frame_idx maps to z-slices (averaged)
         When not averaging: frame_idx maps to raw frames (flattened z * frames_per_slice)
         """
-        if not isinstance(key, tuple):
-            key = (key,)
+
+        key = _normalize_key(key, 4)
 
         # pad key to full dimensions
         while len(key) < 4:
@@ -1978,7 +1976,9 @@ class SinglePlaneArray(ScanImageArray):
 
     @property
     def dims(self) -> tuple[str, ...]:
-        """Dimension labels for single-plane arrays: (timepoints, channels, Y, X)."""
+        """Dimension labels for single-plane arrays."""
+        if self._num_color_channels > 1:
+            return ("timepoints", "channels", "z-planes", "Y", "X")
         return ("timepoints", "channels", "Y", "X")
 
 
