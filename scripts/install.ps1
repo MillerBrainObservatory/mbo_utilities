@@ -466,11 +466,19 @@ function Show-OptionalDependencies {
     do {
         $choice = Read-Host "Select option (1-5, or comma-separated like 1,3)"
         $valid = $choice -match '^[1-5](,[1-5])*$'
-        if (-not $valid) { Write-Warn "Invalid selection. Enter 1-5 or comma-separated." }
+        if (-not $valid) {
+            Write-Warn "Invalid selection. Enter 1-5 or comma-separated."
+            continue
+        }
+        $choices = $choice -split ',' | ForEach-Object { $_.Trim() } | Select-Object -Unique
+        # reject contradictory combos: 4 or 5 with other selections
+        if ($choices.Count -gt 1 -and ($choices -contains "4" -or $choices -contains "5")) {
+            Write-Warn "Options 4 (All) and 5 (None) cannot be combined with other selections."
+            $valid = $false
+        }
     } while (-not $valid)
 
     $extras = @()
-    $choices = $choice -split ',' | ForEach-Object { $_.Trim() } | Select-Object -Unique
 
     :parseLoop foreach ($c in $choices) {
         switch ($c) {
@@ -534,23 +542,7 @@ function Install-MboTool {
     Write-Host ""
     Write-Info "Installing mbo CLI tool via uv tool install..."
 
-    # build spec with extras
-    # For git URLs: "mbo_utilities @ git+..." -> "mbo_utilities[extras] @ git+..."
-    # For PyPI: "mbo_utilities" -> "mbo_utilities[extras]"
-    if ($Extras.Count -gt 0) {
-        $extrasStr = "[" + ($Extras -join ',') + "]"
-        if ($Spec -match '^([^\s@]+)(\s*@\s*.*)$') {
-            # Git URL format: insert extras after package name, before @ URL
-            $fullSpec = $matches[1] + $extrasStr + $matches[2]
-        }
-        else {
-            # PyPI format: just append extras
-            $fullSpec = "$Spec$extrasStr"
-        }
-    }
-    else {
-        $fullSpec = $Spec
-    }
+    $fullSpec = Build-InstallSpec -Spec $Spec -Extras $Extras
 
     # add cupy as --with if suite3d is selected and CUDA is available
     $withArgs = @()
@@ -695,21 +687,27 @@ try:
     from importlib.metadata import version, distribution
     v = version('mbo_utilities')
     d = distribution('mbo_utilities')
-    # Check if installed from git
     direct_url = None
     try:
         import json
-        from pathlib import Path
-        dist_info = Path(d._path)
-        direct_url_file = dist_info / 'direct_url.json'
-        if direct_url_file.exists():
-            direct_url = json.loads(direct_url_file.read_text())
-    except: pass
+        du_files = [f for f in (d.files or []) if str(f).endswith('direct_url.json')]
+        if du_files:
+            du_path = d.locate_file(du_files[0])
+            if du_path.exists():
+                direct_url = json.loads(du_path.read_text())
+    except Exception:
+        pass
     if direct_url and 'vcs_info' in direct_url:
         vcs = direct_url['vcs_info']
         commit = vcs.get('commit_id', 'unknown')[:8]
         branch = vcs.get('requested_revision', 'unknown')
         print(f'{v}|git|{branch}|{commit}')
+    elif direct_url and direct_url.get('dir_info', {}).get('editable', False):
+        url = direct_url.get('url', '')
+        print(f'{v}|editable|{url}|')
+    elif direct_url:
+        url = direct_url.get('url', '')
+        print(f'{v}|local|{url}|')
     else:
         print(f'{v}|pypi||')
 except Exception as e:
@@ -729,6 +727,43 @@ except Exception as e:
     catch {}
 
     return $null
+}
+
+function Format-MboSourceLabel {
+    <#
+    .SYNOPSIS
+    Returns a display string for mbo_utilities install source.
+    #>
+    param([hashtable]$Info)
+
+    if (-not $Info) { return "" }
+
+    switch ($Info.Source) {
+        "git"      { return " (git: $($Info.Branch)@$($Info.Commit))" }
+        "editable" { return " (editable)" }
+        "local"    { return " (local)" }
+        "pypi"     { return " (PyPI)" }
+        default    { return "" }
+    }
+}
+
+function Build-InstallSpec {
+    <#
+    .SYNOPSIS
+    Build a pip/tool install spec string with extras.
+    #>
+    param(
+        [string]$Spec,
+        [string[]]$Extras = @()
+    )
+
+    if ($Extras.Count -eq 0) { return $Spec }
+
+    $extrasStr = "[" + ($Extras -join ',') + "]"
+    if ($Spec -match '^([^\s@]+)(\s*@\s*.*)$') {
+        return $matches[1] + $extrasStr + $matches[2]
+    }
+    return "$Spec$extrasStr"
 }
 
 function Install-DevEnvironment {
@@ -772,16 +807,16 @@ function Install-DevEnvironment {
                 if ($installedInfo) {
                     Write-Host "    mbo_utilities: " -NoNewline -ForegroundColor Gray
                     Write-Host "v$($installedInfo.Version)" -NoNewline -ForegroundColor Cyan
-                    if ($installedInfo.Source -eq "git") {
-                        Write-Host " (git: $($installedInfo.Branch)@$($installedInfo.Commit))" -ForegroundColor Gray
-                    } else {
-                        Write-Host " (PyPI)" -ForegroundColor Gray
-                    }
+                    Write-Host (Format-MboSourceLabel $installedInfo) -ForegroundColor Gray
                 } else {
                     Write-Host "    mbo_utilities: " -NoNewline -ForegroundColor Gray
                     Write-Host "not installed or error reading" -ForegroundColor Yellow
                 }
                 Write-Host "    Python: $venvPythonPath" -ForegroundColor Gray
+                Write-Host ""
+                $displaySpec = Build-InstallSpec -Spec $Spec -Extras $Extras
+                Write-Host "  Will install: " -NoNewline -ForegroundColor Gray
+                Write-Host $displaySpec -ForegroundColor White
                 Write-Host ""
                 Write-Host "  [1] Overwrite - Delete .venv and recreate" -ForegroundColor Cyan
                 Write-Host "  [2] Update    - Install/upgrade mbo_utilities in existing .venv" -ForegroundColor Cyan
@@ -885,13 +920,13 @@ function Install-DevEnvironment {
             if ($installedInfo) {
                 Write-Host "  Installed: " -NoNewline -ForegroundColor Gray
                 Write-Host "mbo_utilities v$($installedInfo.Version)" -NoNewline -ForegroundColor Cyan
-                if ($installedInfo.Source -eq "git") {
-                    Write-Host " (git: $($installedInfo.Branch)@$($installedInfo.Commit))" -ForegroundColor Gray
-                } else {
-                    Write-Host " (PyPI)" -ForegroundColor Gray
-                }
+                Write-Host (Format-MboSourceLabel $installedInfo) -ForegroundColor Gray
                 Write-Host ""
             }
+            $displaySpec = Build-InstallSpec -Spec $Spec -Extras $Extras
+            Write-Host "  Will install: " -NoNewline -ForegroundColor Gray
+            Write-Host $displaySpec -ForegroundColor White
+            Write-Host ""
             Write-Host "  [1] Overwrite - Delete and recreate" -ForegroundColor Cyan
             Write-Host "  [2] Update    - Install into existing" -ForegroundColor Cyan
             Write-Host "  [3] Skip      - Don't modify dev environment" -ForegroundColor Cyan
@@ -934,23 +969,7 @@ function Install-DevEnvironment {
         }
     }
 
-    # build spec with extras
-    # For git URLs: "mbo_utilities @ git+..." -> "mbo_utilities[extras] @ git+..."
-    # For PyPI: "mbo_utilities" -> "mbo_utilities[extras]"
-    if ($Extras.Count -gt 0) {
-        $extrasStr = "[" + ($Extras -join ',') + "]"
-        if ($Spec -match '^([^\s@]+)(\s*@\s*.*)$') {
-            # Git URL format: insert extras after package name, before @ URL
-            $fullSpec = $matches[1] + $extrasStr + $matches[2]
-        }
-        else {
-            # PyPI format: just append extras
-            $fullSpec = "$Spec$extrasStr"
-        }
-    }
-    else {
-        $fullSpec = $Spec
-    }
+    $fullSpec = Build-InstallSpec -Spec $Spec -Extras $Extras
 
     Write-Info "Installing mbo_utilities into environment..."
     Write-Info "  Spec: $fullSpec"
@@ -1225,34 +1244,24 @@ function Show-UsageInstructions {
     )
 
     Write-Host ""
-    Write-Host "Installation Complete" -ForegroundColor White
+    Write-Host "Installation Complete" -ForegroundColor Green
     Write-Host ""
 
     if ($CliInstalled) {
-        $binDir = Get-UvToolBinDir
-        Write-Host "  CLI Location:" -ForegroundColor Gray
-        Write-Host "    $binDir\mbo.exe" -ForegroundColor Cyan
+        Write-Host "  Launch:" -ForegroundColor Gray
+        Write-Host "    mbo" -ForegroundColor White
         Write-Host ""
-        Write-Host "  Usage:" -ForegroundColor Gray
-        Write-Host "    mbo                    # Open GUI" -ForegroundColor White
-        Write-Host "    mbo /path/to/data      # Open specific file" -ForegroundColor White
-        Write-Host "    mbo --help             # Show all commands" -ForegroundColor White
+        Write-Host "  Update:" -ForegroundColor Gray
+        Write-Host "    uv tool upgrade mbo_utilities" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Reinstall:" -ForegroundColor Gray
+        Write-Host "    uv tool install mbo_utilities --force" -ForegroundColor White
         Write-Host ""
     }
 
     if ($EnvPath) {
-        Write-Host "  Development Environment:" -ForegroundColor Gray
+        Write-Host "  Dev environment:" -ForegroundColor Gray
         Write-Host "    $EnvPath" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "  Activate:" -ForegroundColor Gray
-        Write-Host "    $EnvPath\Scripts\activate" -ForegroundColor White
-        Write-Host ""
-        Write-Host "  Use in VSCode:" -ForegroundColor Gray
-        Write-Host "    Ctrl+Shift+P -> 'Python: Select Interpreter'" -ForegroundColor White
-        Write-Host "    Choose: $EnvPath\Scripts\python.exe" -ForegroundColor White
-        Write-Host ""
-        Write-Host "  Add packages:" -ForegroundColor Gray
-        Write-Host "    uv pip install --python `"$EnvPath\Scripts\python.exe`" <package>" -ForegroundColor White
         Write-Host ""
     }
 }
