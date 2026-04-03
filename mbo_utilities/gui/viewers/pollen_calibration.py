@@ -834,16 +834,16 @@ class PollenCalibrationViewer(BaseViewer):
             ys = np.array([p[1] for p in positions])
 
             self._progress = 0.5
-            ZZ, zoi, pp = analyze_power_vs_z(Iz, fpath, self._z_step_um, self._beam_order, nc, mode="manual")
+            z_peaks, pp = analyze_power_vs_z(Iz, fpath, self._z_step_um, self._beam_order, nc, mode="manual")
 
             self._progress = 0.6
-            analyze_z_positions(ZZ, zoi, self._beam_order, fpath, self._cavity_info, mode="manual")
+            analyze_z_positions(z_peaks, self._beam_order, fpath, self._cavity_info, mode="manual")
 
             self._progress = 0.7
-            fit_exp_decay(ZZ, zoi, self._beam_order, fpath, pp, self._cavity_info, self._z_step_um, nz, mode="manual")
+            fit_exp_decay(z_peaks, self._beam_order, fpath, pp, self._cavity_info, self._z_step_um, nz, mode="manual")
 
             self._progress = 0.8
-            plot_z_spacing(ZZ, zoi, self._beam_order, fpath, mode="manual")
+            plot_z_spacing(z_peaks, self._beam_order, fpath, mode="manual")
 
             self._progress = 0.9
             dx = dy = self._pixel_size_um
@@ -935,15 +935,15 @@ class PollenCalibrationViewer(BaseViewer):
             xs = np.array([p[0] for p in positions])
             ys = np.array([p[1] for p in positions])
 
-            ZZ, zoi, pp = analyze_power_vs_z(Iz, fpath, self._z_step_um, self._beam_order, nc, mode="auto")
+            z_peaks, pp = analyze_power_vs_z(Iz, fpath, self._z_step_um, self._beam_order, nc, mode="auto")
             self._progress = 0.7
 
-            analyze_z_positions(ZZ, zoi, self._beam_order, fpath, self._cavity_info, mode="auto")
+            analyze_z_positions(z_peaks, self._beam_order, fpath, self._cavity_info, mode="auto")
 
-            fit_exp_decay(ZZ, zoi, self._beam_order, fpath, pp, self._cavity_info, self._z_step_um, nz, mode="auto")
+            fit_exp_decay(z_peaks, self._beam_order, fpath, pp, self._cavity_info, self._z_step_um, nz, mode="auto")
             self._progress = 0.8
 
-            plot_z_spacing(ZZ, zoi, self._beam_order, fpath, mode="auto")
+            plot_z_spacing(z_peaks, self._beam_order, fpath, mode="auto")
             self._progress = 0.9
 
             dx = dy = self._pixel_size_um
