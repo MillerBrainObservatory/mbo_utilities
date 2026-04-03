@@ -482,7 +482,7 @@ def _create_image_widget(data_array, widget: bool = True):
             window_sizes=window_sizes,
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -100, "vmax": 4000},
+            graphic_kwargs={"vmin": -100, "vmax": 4000, "cmap": "gnuplot2"},
         )
     else:
         iw = fpl.ImageWidget(
@@ -492,7 +492,7 @@ def _create_image_widget(data_array, widget: bool = True):
             window_sizes=window_sizes,
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -100, "vmax": 4000},
+            graphic_kwargs={"vmin": -100, "vmax": 4000, "cmap": "gnuplot2"},
         )
 
     iw.show()

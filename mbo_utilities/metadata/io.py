@@ -495,10 +495,12 @@ def get_metadata_batch(file_paths: list | tuple):
     # Count frames for all files
     frames_per_file = [
         query_tiff_pages(fp) // nchannels
-        for fp in tqdm(file_paths, desc="Counting frames", disable=len(file_paths) < 2)
+        for fp in tqdm(file_paths, desc="Counting frames", unit="file", disable=len(file_paths) < 2)
     ]
 
     total_frames = sum(frames_per_file)
+    if len(file_paths) >= 2:
+        tqdm.write(f"  {total_frames} frames across {len(file_paths)} files")
     return metadata | {
         "num_timepoints": total_frames,
         "nframes": total_frames,  # suite2p alias

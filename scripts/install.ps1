@@ -687,27 +687,44 @@ try:
     from importlib.metadata import version, distribution
     v = version('mbo_utilities')
     d = distribution('mbo_utilities')
+    import json, glob
+    from pathlib import Path
     direct_url = None
-    try:
-        import json
-        du_files = [f for f in (d.files or []) if str(f).endswith('direct_url.json')]
-        if du_files:
-            du_path = d.locate_file(du_files[0])
-            if du_path.exists():
-                direct_url = json.loads(du_path.read_text())
-    except Exception:
-        pass
+    dist_path = str(Path(d._path).resolve())
+    is_egg = '.egg-info' in dist_path
+    # egg-info from editable installs can shadow dist-info in site-packages.
+    # check site-packages for a dist-info with direct_url.json first.
+    if is_egg and 'site-packages' not in dist_path:
+        sp_dirs = [p for p in sys.path if 'site-packages' in p]
+        for sp in sp_dirs:
+            for di in glob.glob(str(Path(sp) / 'mbo_utilities-*.dist-info')):
+                du_file = Path(di) / 'direct_url.json'
+                if du_file.exists():
+                    direct_url = json.loads(du_file.read_text())
+                    is_egg = False
+                    break
+            if direct_url:
+                break
+    if not direct_url:
+        try:
+            du_files = [f for f in (d.files or []) if str(f).endswith('direct_url.json')]
+            if du_files:
+                du_path = d.locate_file(du_files[0])
+                if du_path.exists():
+                    direct_url = json.loads(du_path.read_text())
+        except Exception:
+            pass
     if direct_url and 'vcs_info' in direct_url:
         vcs = direct_url['vcs_info']
         commit = vcs.get('commit_id', 'unknown')[:8]
         branch = vcs.get('requested_revision', 'unknown')
         print(f'{v}|git|{branch}|{commit}')
     elif direct_url and direct_url.get('dir_info', {}).get('editable', False):
-        url = direct_url.get('url', '')
-        print(f'{v}|editable|{url}|')
+        print(f'{v}|editable||')
+    elif is_egg and 'site-packages' not in dist_path:
+        print(f'{v}|editable||')
     elif direct_url:
-        url = direct_url.get('url', '')
-        print(f'{v}|local|{url}|')
+        print(f'{v}|local||')
     else:
         print(f'{v}|pypi||')
 except Exception as e:

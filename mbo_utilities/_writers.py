@@ -1186,6 +1186,15 @@ def _write_volumetric_tiff(
         pbar = None
         if show_progress:
             total_pages = n_frames * n_planes * n_channels
+            parts = []
+            if n_frames > 1:
+                parts.append(f"{n_frames} frames")
+            if n_planes > 1:
+                parts.append(f"{n_planes} planes")
+            if n_channels > 1:
+                parts.append(f"{n_channels} channels")
+            if len(parts) > 1:
+                tqdm.write(f"  {' x '.join(parts)} = {total_pages} pages")
             pbar = tqdm(total=total_pages, desc="Writing TIFF", unit="pg")
 
         # get z-plane indices being written (0-based)
