@@ -480,9 +480,10 @@ def _create_image_widget(data_array, widget: bool = True):
             slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
             window_sizes=window_sizes,
+            cmap="gnuplot2",
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -100, "vmax": 4000, "cmap": "gnuplot2"},
+            graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
     else:
         iw = fpl.ImageWidget(
@@ -490,9 +491,10 @@ def _create_image_widget(data_array, widget: bool = True):
             slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
             window_sizes=window_sizes,
+            cmap="gnuplot2",
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -100, "vmax": 4000, "cmap": "gnuplot2"},
+            graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
 
     iw.show()

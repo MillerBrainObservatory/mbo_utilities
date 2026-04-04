@@ -634,7 +634,8 @@ class TiffReaderMixin:
             data=self,
             histogram_widget=histogram_widget,
             figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": self.vmin, "vmax": self.vmax, "cmap": "gnuplot2"},
+            cmap="gnuplot2",
+            graphic_kwargs={"vmin": self.vmin, "vmax": self.vmax},
             window_funcs=window_funcs,
         )
 
