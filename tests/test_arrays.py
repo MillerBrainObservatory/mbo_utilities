@@ -31,9 +31,10 @@ class TestNumpyArray:
         """Create NumpyArray from numpy ndarray."""
         arr = NumpyArray(synthetic_3d_data)
 
-        assert arr.shape == synthetic_3d_data.shape
+        # 3D input (T, Y, X) is promoted to 5D (T, C, Z, Y, X)
+        assert arr.shape == (20, 1, 1, 128, 128)
         assert arr.dtype == synthetic_3d_data.dtype
-        assert arr.ndim == synthetic_3d_data.ndim
+        assert arr.ndim == 5
 
     def test_indexing_single_frame(self, synthetic_3d_data):
         """Index single frame."""
@@ -222,9 +223,9 @@ class TestZarrArray:
 
         arr = ZarrArray(zarr_path)
 
-        # ZarrArray normalizes to TZYX format, so 3D (T,Y,X) becomes 4D (T,1,Y,X)
+        # ZarrArray normalizes to 5D (T, C, Z, Y, X)
         if expected_data.ndim == 3:
-            expected_shape = (expected_data.shape[0], 1, expected_data.shape[1], expected_data.shape[2])
+            expected_shape = (expected_data.shape[0], 1, 1, expected_data.shape[1], expected_data.shape[2])
         else:
             expected_shape = expected_data.shape
 
@@ -341,8 +342,10 @@ class TestSuite2pArray:
         ops_path = s2p_path / "ops.npy"
         arr = Suite2pArray(ops_path)
 
+        # single-plane: shape is (20, 1, 1, 128, 128), arr[0] -> (1, 1, 128, 128)
         frame = arr[0]
         frame_np = np.asarray(frame)
+        assert frame_np.ndim == 4
         assert frame_np.shape[-2:] == expected_data[0].shape[-2:]
 
 
@@ -367,16 +370,17 @@ class TestTiffVolumeAutoDetection:
         return vol_dir, synthetic_4d_data
 
     def test_volume_directory_detection(self, tiff_volume_dir):
-        """TiffArray should detect volume directory and return 4D shape."""
+        """TiffArray should detect volume directory and return 5D shape."""
         vol_dir, expected_data = tiff_volume_dir
 
         arr = TiffArray(vol_dir)
 
-        # should be 4D: (T, Z, Y, X)
-        assert arr.ndim == 4, f"Expected 4D array, got {arr.ndim}D"
+        # should be 5D: (T, C, Z, Y, X) with C=1
+        assert arr.ndim == 5, f"Expected 5D array, got {arr.ndim}D"
         assert arr.shape[0] == expected_data.shape[0], "Frame count mismatch"
-        assert arr.shape[1] == expected_data.shape[1], "Plane count mismatch"
-        assert arr.shape[2:] == expected_data.shape[2:], "Spatial dims mismatch"
+        assert arr.shape[1] == 1, "Channel dim should be 1"
+        assert arr.shape[2] == expected_data.shape[1], "Plane count mismatch"
+        assert arr.shape[3:] == expected_data.shape[2:], "Spatial dims mismatch"
 
     def test_volume_indexing(self, tiff_volume_dir):
         """Test indexing volume TiffArray."""
@@ -384,12 +388,11 @@ class TestTiffVolumeAutoDetection:
 
         arr = TiffArray(vol_dir)
 
-        # index single timepoint
+        # index single timepoint: 5D -> 4D (C, Z, Y, X) = (1, 3, 64, 64)
         frame = arr[0]
         frame_np = np.asarray(frame)
-        # verify total elements match (axis order may differ)
         assert frame_np.size == expected_data[0].size, "Element count mismatch"
-        assert frame_np.ndim == 3, "Single frame should be 3D"
+        assert frame_np.ndim == 4, "Single frame should be 4D (C, Z, Y, X)"
 
     def test_find_tiff_plane_files(self, tiff_volume_dir):
         """Test find_tiff_plane_files helper function."""
@@ -443,16 +446,17 @@ class TestSuite2pVolumeAutoDetection:
         return parent_dir, synthetic_4d_data
 
     def test_volume_directory_detection(self, suite2p_volume_dir):
-        """Suite2pArray should detect multi-plane directory and return 4D shape."""
+        """Suite2pArray should detect multi-plane directory and return 5D shape."""
         parent_dir, expected_data = suite2p_volume_dir
 
         arr = Suite2pArray(parent_dir)
 
-        # should be 4D: (T, Z, Y, X)
-        assert arr.ndim == 4, f"Expected 4D array, got {arr.ndim}D"
+        # should be 5D: (T, C, Z, Y, X) with C=1
+        assert arr.ndim == 5, f"Expected 5D array, got {arr.ndim}D"
         assert arr.shape[0] == expected_data.shape[0], "Frame count mismatch"
-        assert arr.shape[1] == expected_data.shape[1], "Plane count mismatch"
-        assert arr.shape[2:] == expected_data.shape[2:], "Spatial dims mismatch"
+        assert arr.shape[1] == 1, "Channel dim should be 1"
+        assert arr.shape[2] == expected_data.shape[1], "Plane count mismatch"
+        assert arr.shape[3:] == expected_data.shape[2:], "Spatial dims mismatch"
 
     def test_volume_indexing(self, suite2p_volume_dir):
         """Test indexing volume Suite2pArray."""
@@ -460,12 +464,11 @@ class TestSuite2pVolumeAutoDetection:
 
         arr = Suite2pArray(parent_dir)
 
-        # index single timepoint
+        # index single timepoint: 5D -> 4D (C, Z, Y, X) = (1, 3, 64, 64)
         frame = arr[0]
         frame_np = np.asarray(frame)
-        # verify total elements match (axis order may differ)
         assert frame_np.size == expected_data[0].size, "Element count mismatch"
-        assert frame_np.ndim == 3, "Single frame should be 3D"
+        assert frame_np.ndim == 4, "Single frame should be 4D (C, Z, Y, X)"
 
     def test_find_suite2p_plane_dirs(self, suite2p_volume_dir):
         """Test find_suite2p_plane_dirs helper function."""
@@ -618,5 +621,6 @@ class TestImreadDispatcher:
 
         arr = mbo.imread(bin_dir)
 
+        # imread returns Suite2pArray which is always 5D (T, C, Z, Y, X)
         assert hasattr(arr, "shape")
-        assert arr.shape == synthetic_3d_data.shape
+        assert arr.shape == (20, 1, 1, 128, 128)
