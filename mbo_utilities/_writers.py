@@ -488,45 +488,18 @@ def _write_plane(
     for i in range(nchunks):
         end = start + base + (1 if i < extra else 0)
 
-        # Extract chunk - handle plane_index and channel_index for z/channel selection
-        # NOTE: Use len(data.shape) instead of data.ndim for ScanImageArray compatibility
-        # (ScanImageArray.ndim returns metadata ndim, not actual dimensions)
-        if (
-            channel_index is not None
-            and plane_index is not None
-            and data.ndim >= 5
-        ):
-            # 5D TCZYX: extract specific channel and z-plane
-            chunk = data[start:end, channel_index, plane_index, :, :]
-        elif plane_index is not None and data.ndim >= 5:
-            # 5D TCZYX but no channel index: extract specific z-plane (keep all channels)
-            chunk = data[start:end, :, plane_index, :, :]
-        elif plane_index is not None and data.ndim >= 4:
-            # 4D TZYX: extract specific z-plane
-            chunk = data[start:end, plane_index, :, :]
-        elif plane_index is not None:
-            # 3D or 2D data, plane_index is just metadata
-            chunk = data[start:end]
-        else:
-            # No plane_index: standard slicing
-            chunk = data[start:end]
+        # extract chunk as 3D (T, Y, X) from 5D TCZYX input
+        c_idx = channel_index if channel_index is not None else 0
+        z_idx = plane_index if plane_index is not None else 0
+        chunk = data[start:end, c_idx, z_idx, :, :]
 
-        # Convert lazy/disk-backed arrays to contiguous numpy arrays
-        # This is critical for performance - memmap slices pass isinstance(np.ndarray)
-        # but are extremely slow when passed to writers (220x+ slower)
+        # convert lazy/disk-backed arrays to contiguous numpy
         if hasattr(chunk, "compute"):
-            # Dask arrays - can hang during implicit compute in writers
             chunk = chunk.compute()
         elif isinstance(chunk, np.memmap):
-            # Memmap slices are disk-backed - force copy to memory for fast writes
             chunk = np.array(chunk)
         elif not isinstance(chunk, np.ndarray):
             chunk = np.asarray(chunk)
-
-        # Ensure chunk is 3D (T, Y, X) - squeeze any remaining singleton dimensions
-        # This handles cases where plane_index is None but Z dimension is singleton
-        if len(chunk.shape) == 4 and chunk.shape[1] == 1:
-            chunk = chunk.squeeze(axis=1)
 
         if shift_applied:
             if chunk.shape[-2:] != (H0, W0):
@@ -540,7 +513,6 @@ def _write_plane(
             buf = np.zeros(
                 (chunk.shape[0], out_shape[1], out_shape[2]), dtype=chunk.dtype
             )
-            # if chunk is 4D with singleton second dim, squeeze it
             buf[:, yy, xx] = chunk
             metadata["padded_shape"] = buf.shape
 
@@ -641,11 +613,6 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     bf = _write_bin._writers[key]
     off = _write_bin._offsets[key]
 
-    # Squeeze singleton Z dimension if present (but only Z, not time)
-    # NOTE: Use len(data.shape) instead of data.ndim for ScanImageArray compatibility
-    if len(data.shape) == 4 and data.shape[1] == 1:
-        data = data.squeeze(axis=1)
-
     bf[off : off + data.shape[0]] = data
     bf.flush()
     _write_bin._offsets[key] = off + data.shape[0]
@@ -710,11 +677,6 @@ def _write_npy(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     mmap = _write_npy._arrays[key]
     off = _write_npy._offsets[key]
 
-    # Squeeze singleton Z dimension if present
-    if len(data.shape) == 4 and data.shape[1] == 1:
-        data = data.squeeze(axis=1)
-
-    # Write chunk
     mmap[off : off + data.shape[0]] = data
     mmap.flush()
     _write_npy._offsets[key] = off + data.shape[0]
@@ -815,24 +777,10 @@ def _build_imagej_metadata(metadata: dict, shape: tuple) -> tuple[dict, tuple]:
         "loop": False,
     }
 
-    # imagej hyperstack dimensions: frames (T), slices (Z), channels (C)
-    # we must explicitly set these so imagej doesn't interpret pages as channels
-    ndim = len(shape)
-    if ndim == 4:
-        # TZYX: shape is (T, Z, Y, X)
-        ij_meta["frames"] = shape[0]
-        ij_meta["slices"] = shape[1]
-        ij_meta["channels"] = 1
-    elif ndim == 3:
-        # TYX: shape is (T, Y, X) - all pages are time frames
-        ij_meta["frames"] = shape[0]
-        ij_meta["slices"] = 1
-        ij_meta["channels"] = 1
-    else:
-        # YX: single frame
-        ij_meta["frames"] = 1
-        ij_meta["slices"] = 1
-        ij_meta["channels"] = 1
+    # always 5D TCZYX
+    ij_meta["frames"] = shape[0]
+    ij_meta["slices"] = shape[2]
+    ij_meta["channels"] = shape[1]
 
     # z-spacing (for hyperstacks with Z dimension)
     if dz is not None:
@@ -949,18 +897,11 @@ def _write_tiff(path, data, overwrite=True, metadata=None, imagej=True, **kwargs
             # dtype 2 = ASCII string
             extratags = [(50839, 2, len(json_bytes), json_bytes, True)]
 
-        # always reshape data to TZCYX so tifffile interprets T as frames
-        # 3D (T, Y, X) -> 5D (T, 1, 1, Y, X)
-        # 4D (T, Z, Y, X) -> 5D (T, Z, 1, Y, X)
-        if data.ndim == 3:
-            data_5d = data[:, np.newaxis, np.newaxis, :, :]
-        elif data.ndim == 4:
-            data_5d = data[:, :, np.newaxis, :, :]
-        else:
-            data_5d = data
+        # data is always 5D TCZYX; transpose to TZCYX for imagej page ordering
+        data_5d = np.moveaxis(data, 1, 2)  # TCZYX -> TZCYX
 
         for frame in data_5d:
-            # frame is now (Z, C, Y, X) or (1, 1, Y, X)
+            # frame is (Z, C, Y, X) after TZCYX transpose
             writer.write(
                 frame,
                 contiguous=True,
@@ -1098,10 +1039,8 @@ def _write_volumetric_tiff(
     else:
         Ly_out, Lx_out = Ly, Lx
 
-    if n_channels > 1:
-        target_shape = (n_frames, n_planes, n_channels, Ly_out, Lx_out)
-    else:
-        target_shape = (n_frames, n_planes, Ly_out, Lx_out)
+    # always 5D TZCYX for imagej page ordering
+    target_shape = (n_frames, n_planes, n_channels, Ly_out, Lx_out)
 
     # update metadata for imagej using OutputMetadata for reactive values
     from mbo_utilities.metadata import OutputMetadata
@@ -1151,8 +1090,7 @@ def _write_volumetric_tiff(
 
     if debug:
         logger.info(f"Writing volumetric tiff: {filename}")
-        shape_label = "TZCYX" if n_channels > 1 else "TZYX"
-        logger.info(f"  Shape: {target_shape} ({shape_label})")
+        logger.info(f"  Shape: {target_shape} (TZCYX)")
         logger.info(
             f"  ImageJ meta: frames={ij_meta.get('frames')}, slices={ij_meta.get('slices')}, channels={ij_meta.get('channels')}"
         )
@@ -1199,32 +1137,22 @@ def _write_volumetric_tiff(
             # read chunk using unified reader
             chunk_data = read_chunk(data, chunk_info, slicing.dims)
 
-            if chunk_data.ndim == 5:
-                # TCZYX -> TZCYX for ImageJ
-                chunk_data = chunk_data.transpose(0, 2, 1, 3, 4)
-                chunk_data = np.ascontiguousarray(chunk_data)
-                # apply z-registration per channel (apply_shifts_to_chunk expects 4D)
-                if apply_shift and plane_shifts is not None:
-                    for c in range(chunk_data.shape[2]):
-                        chunk_data[:, :, c, :, :] = apply_shifts_to_chunk(
-                            chunk_data[:, :, c, :, :],
-                            plane_shifts,
-                            z_indices,
-                            padding,
-                            Ly_out,
-                            Lx_out,
-                        )
-                chunk_5d = chunk_data  # already (T, Z, C, Y, X)
-            else:
-                # existing 4D path
-                if chunk_data.ndim == 3:
-                    chunk_data = chunk_data[:, np.newaxis, :, :]
-                chunk_data = np.ascontiguousarray(chunk_data)
-                if apply_shift and plane_shifts is not None:
-                    chunk_data = apply_shifts_to_chunk(
-                        chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out
+            # always 5D TCZYX input → transpose to TZCYX for ImageJ page order
+            chunk_data = chunk_data.transpose(0, 2, 1, 3, 4)
+            chunk_data = np.ascontiguousarray(chunk_data)
+
+            if apply_shift and plane_shifts is not None:
+                for c in range(chunk_data.shape[2]):
+                    chunk_data[:, :, c, :, :] = apply_shifts_to_chunk(
+                        chunk_data[:, :, c, :, :],
+                        plane_shifts,
+                        z_indices,
+                        padding,
+                        Ly_out,
+                        Lx_out,
                     )
-                chunk_5d = chunk_data[:, :, np.newaxis, :, :]
+
+            chunk_5d = chunk_data  # (T, Z, C, Y, X)
 
             # write each frame (T) with all its Z slices
             for t in range(chunk_5d.shape[0]):
@@ -1610,10 +1538,6 @@ def _write_volumetric_zarr(
         # read chunk using unified reader
         chunk_data = read_chunk(data, chunk_info, slicing.dims)
 
-        # ensure 4D (T, Z, Y, X)
-        if chunk_data.ndim == 3:
-            chunk_data = chunk_data[:, np.newaxis, :, :]
-
         # ensure contiguous for efficient writes
         chunk_data = np.ascontiguousarray(chunk_data)
 
@@ -1927,9 +1851,9 @@ def _try_generic_writers(
         # Write ops.npy alongside
         if metadata:
             ops = metadata.copy()
-            ops["Ly"] = arr.shape[-2] if arr.ndim >= 2 else 1
-            ops["Lx"] = arr.shape[-1] if arr.ndim >= 1 else 1
-            ops["nframes"] = arr.shape[0] if arr.ndim >= 1 else 1
+            ops["Ly"] = arr.shape[-2]
+            ops["Lx"] = arr.shape[-1]
+            ops["nframes"] = arr.shape[0]
             # Convert Path objects to strings for cross-platform compatibility
             np.save(outpath.parent / "ops.npy", _convert_paths_to_strings(ops))
     elif outpath.suffix.lower() == ".zarr":
@@ -1939,8 +1863,8 @@ def _try_generic_writers(
 
         arr = np.asarray(data)
 
-        # Compute chunks: (1, ..., H, W) for time-series data
-        chunks = (1,) * (arr.ndim - 2) + arr.shape[-2:] if arr.ndim >= 3 else arr.shape
+        # chunks: (1, ..., Y, X) - singleton leading dims, full spatial
+        chunks = (1,) * (arr.ndim - 2) + arr.shape[-2:]
 
         # Create zarr array with compression
         z = zarr.create(
@@ -2219,29 +2143,22 @@ def to_video(
 
     output_path = Path(output_path)
 
-    # Get array info
-    arr = data
-    ndim = arr.ndim
+    # normalize to 5D TCZYX (handles raw numpy arrays from external callers)
+    arr = np.asarray(data)
+    if arr.ndim == 3:
+        arr = arr[:, np.newaxis, np.newaxis, :, :]
+    elif arr.ndim == 4:
+        arr = arr[:, np.newaxis, :, :, :]
     shape = arr.shape
 
-    if ndim == 4:
-        # (T, Z, Y, X) - select plane
-        plane_idx = plane if plane is not None else 0
-        if plane_idx >= shape[1]:
-            raise ValueError(f"plane={plane_idx} but array only has {shape[1]} planes")
-        n_frames = shape[0]
-        height, width = shape[2], shape[3]
-        logger.info(
-            f"Exporting 4D array plane {plane_idx}: {n_frames} frames, {height}x{width}"
-        )
-    elif ndim == 3:
-        # (T, Y, X)
-        plane_idx = None
-        n_frames = shape[0]
-        height, width = shape[1], shape[2]
-        logger.info(f"Exporting 3D array: {n_frames} frames, {height}x{width}")
-    else:
-        raise ValueError(f"Expected 3D or 4D array, got {ndim}D")
+    plane_idx = plane if plane is not None else 0
+    if plane_idx >= shape[2]:
+        raise ValueError(f"plane={plane_idx} but array only has {shape[2]} planes")
+    n_frames = shape[0]
+    height, width = shape[3], shape[4]
+    logger.info(
+        f"Exporting plane {plane_idx}: {n_frames} frames, {height}x{width}"
+    )
 
     # Limit frames if requested
     if max_frames is not None:
@@ -2263,7 +2180,7 @@ def to_video(
         sample_indices = np.linspace(0, n_frames - 1, n_samples, dtype=int)
         samples = []
         for i in sample_indices:
-            frame = np.asarray(arr[i, plane_idx]) if ndim == 4 else np.asarray(arr[i])
+            frame = np.asarray(arr[i, 0, plane_idx])
             samples.append(frame)
         sample_stack = np.stack(samples)
 
@@ -2307,11 +2224,8 @@ def to_video(
 
     try:
         for i in tqdm(range(n_frames), desc="Writing video", unit="frames"):
-            # Get frame
-            if ndim == 4:
-                frame = np.asarray(arr[i, plane_idx], dtype=np.float32)
-            else:
-                frame = np.asarray(arr[i], dtype=np.float32)
+            # get frame from 5D TCZYX (first channel, selected plane)
+            frame = np.asarray(arr[i, 0, plane_idx], dtype=np.float32)
 
             # Temporal smoothing (rolling average)
             if temporal_smooth > 0:
