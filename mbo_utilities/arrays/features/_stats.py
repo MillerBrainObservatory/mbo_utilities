@@ -234,7 +234,7 @@ class StatsFeature(ArrayFeature):
         Parameters
         ----------
         array : array-like
-            array to compute stats from. typically 3D (T, Y, X) or 4D (T, Z, Y, X)
+            5D TCZYX array to compute stats from
         sample_frames : int
             number of frames to sample for scalar stats
         subsample_spatial : int
@@ -242,82 +242,21 @@ class StatsFeature(ArrayFeature):
         compute_mean_images : bool
             whether to compute full mean images for each slice
         slice_axis : int | None
-            axis to slice along. if None, auto-detect:
-            - 3D arrays: single slice (whole array)
-            - 4D arrays: axis 1 (z-planes)
+            axis to slice along. defaults to 2 (Z in TCZYX)
         """
         self._progress = 0.0
         self._current_slice = 0
 
-        if array.ndim == 3:
-            self._num_slices = 1
-            self._compute_3d(
-                array, sample_frames, subsample_spatial, compute_mean_images
-            )
-        elif array.ndim == 4:
-            axis = slice_axis if slice_axis is not None else 1
-            self._num_slices = array.shape[axis]
-            self._compute_4d(
-                array, sample_frames, subsample_spatial, compute_mean_images, axis
-            )
-        else:
-            raise ValueError(f"expected 3D or 4D array, got {array.ndim}D")
+        axis = slice_axis if slice_axis is not None else 2
+        self._num_slices = array.shape[axis]
+        self._compute_sliced(
+            array, sample_frames, subsample_spatial, compute_mean_images, axis
+        )
 
         self._computed = True
         self._progress = 1.0
 
-    def _compute_3d(
-        self,
-        array,
-        sample_frames: int,
-        subsample: int,
-        compute_mean_images: bool,
-    ) -> None:
-        """Compute stats for 3D (TYX) array."""
-        n_frames = len(array)
-        if n_frames <= sample_frames:
-            indices = list(range(n_frames))
-        else:
-            indices = np.linspace(0, n_frames - 1, sample_frames, dtype=int).tolist()
-
-        samples = []
-        for i in indices:
-            frame = np.asarray(array[i])
-            if subsample > 1:
-                frame = frame[::subsample, ::subsample]
-            samples.append(frame.ravel())
-
-        data = np.concatenate(samples)
-        self._min = [float(np.min(data))]
-        self._max = [float(np.max(data))]
-        self._mean = [float(np.mean(data))]
-        self._std = [float(np.std(data))]
-
-        # SNR: (mean_foreground - mean_background) / std_background
-        # foreground = top 20% brightest pixels, background = bottom 50%
-        # reshape to frames to compute temporal mean image
-        n_samples = len(indices)
-        pixels_per_frame = len(data) // n_samples
-        mean_img = np.mean(data.reshape(n_samples, pixels_per_frame), axis=0)
-        p80 = np.percentile(mean_img, 80)
-        p50 = np.percentile(mean_img, 50)
-        fg = mean_img >= p80
-        bg = mean_img <= p50
-        fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
-        bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
-        bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
-        self._snr = [(fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0]
-
-        if compute_mean_images:
-            # compute full mean image
-            acc = np.zeros(array[0].shape, dtype=np.float64)
-            for i in indices:
-                acc += np.asarray(array[i])
-            self._mean_images = [acc / len(indices)]
-
-        self._progress = 1.0
-
-    def _compute_4d(
+    def _compute_sliced(
         self,
         array,
         sample_frames: int,
@@ -325,7 +264,7 @@ class StatsFeature(ArrayFeature):
         compute_mean_images: bool,
         slice_axis: int,
     ) -> None:
-        """Compute stats for 4D array along given axis."""
+        """Compute stats for 5D TCZYX array along given axis."""
         n_frames = array.shape[0]
         n_slices = array.shape[slice_axis]
 

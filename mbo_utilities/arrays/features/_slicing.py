@@ -491,6 +491,15 @@ class ChunkInfo:
         return (self.chunk_index + 1) / self.total_chunks
 
 
+def _is_contiguous(indices: list[int]) -> bool:
+    """check if indices form a contiguous range (e.g. [3,4,5])."""
+    if not indices:
+        return False
+    return len(indices) == (indices[-1] - indices[0] + 1) and all(
+        indices[i] + 1 == indices[i + 1] for i in range(len(indices) - 1)
+    )
+
+
 def read_chunk(
     arr,
     chunk_info: ChunkInfo,
@@ -516,132 +525,30 @@ def read_chunk(
     np.ndarray
         chunk data with shape (T_chunk, Z_sel, Y, X) or (T_chunk, Y, X)
     """
+    # always 5D TCZYX — use slice indexing for contiguous ranges
     t_indices = chunk_info.selections.get("T")
+    c_indices = chunk_info.selections.get("C")
     z_indices = chunk_info.selections.get("Z")
 
-    ndim = len(dims)
-
-    # detect views dimension (CM, V, C when not channel, etc.)
-    # views are non-spatial dims that aren't T or Z
-    views_dim_idx = None
-    views_key = None
-    for i, d in enumerate(dims):
-        if d not in ("T", "Z", "Y", "X"):
-            views_dim_idx = i
-            views_key = d
-            break
-
-    # get view selection (default to first view if not specified)
-    v_indices = chunk_info.selections.get(views_key) if views_key else None
-    if v_indices is None and views_key:
-        v_indices = [0]  # default to first view
-
-    # handle ZYX or ZVYX (no T dimension)
-    if "T" not in dims:
-        if ndim == 4 and views_dim_idx is not None:
-            # ZVYX - select first view, then handle Z
-            v_idx = v_indices[0] if v_indices else 0
-            if z_indices is not None:
-                frames = []
-                for z_idx in z_indices:
-                    frame = arr[z_idx, v_idx, :, :]
-                    frames.append(np.asarray(frame))
-                result = np.stack(frames, axis=0)
-                return result[np.newaxis, :, :, :]
-            else:
-                result = np.asarray(arr[:, v_idx, :, :])
-                return result[np.newaxis, :, :, :]
-        elif z_indices is not None:
-            # ZYX with z selection
-            if ndim == 3 and dims[0] == "Z":
-                frames = []
-                for z_idx in z_indices:
-                    frame = arr[z_idx, :, :]
-                    frames.append(np.asarray(frame))
-                result = np.stack(frames, axis=0)
-                # add T=1 dimension at front
-                return result[np.newaxis, :, :, :]
-            else:
-                # unknown ordering, try direct slice
-                result = np.asarray(arr[z_indices, :, :])
-                return result[np.newaxis, :, :, :]
-        else:
-            # ZYX full selection
-            result = np.asarray(arr[:, :, :])
-            return result[np.newaxis, :, :, :]
-
-    # handle TYX, TZYX, TCYX, and TZVYX
     if t_indices is None:
-        t_indices = [0]
+        t_sel = slice(None)
+    elif _is_contiguous(t_indices):
+        t_sel = slice(t_indices[0], t_indices[-1] + 1)
+    else:
+        t_sel = t_indices
 
-    frames = []
-    for t_idx in t_indices:
-        if ndim == 5 and "C" in dims and "Z" in dims:
-            # TCZYX - preserve both C and Z dimensions
-            c_indices = chunk_info.selections.get(
-                "C", list(range(arr.shape[dims.index("C")]))
-            )
-            z_sel = (
-                z_indices
-                if z_indices is not None
-                else list(range(arr.shape[dims.index("Z")]))
-            )
-            c_frames = []
-            for c_idx in c_indices:
-                z_frames = []
-                for z_idx in z_sel:
-                    z_frames.append(np.asarray(arr[t_idx, c_idx, z_idx, :, :]))
-                c_frames.append(np.stack(z_frames, axis=0))  # (Z_sel, Y, X)
-            frame = np.stack(c_frames, axis=0)  # (C_sel, Z_sel, Y, X)
-        elif ndim == 5 and views_dim_idx is not None:
-            # TZVYX - 5D with views dimension
-            v_idx = v_indices[0] if v_indices else 0
-            if z_indices is not None:
-                z_frames = []
-                for z_idx in z_indices:
-                    z_frame = arr[t_idx, z_idx, v_idx, :, :]
-                    z_frames.append(np.asarray(z_frame))
-                frame = np.stack(z_frames, axis=0)  # (Z_sel, Y, X)
-            else:
-                frame = np.asarray(arr[t_idx, :, v_idx, :, :])  # (Z, Y, X)
-        elif ndim == 4:
-            # TZYX or TCYX (4D with Z or channel dimension)
-            if z_indices is not None:
-                # select specific z planes (TZYX)
-                z_frames = []
-                for z_idx in z_indices:
-                    z_frame = arr[t_idx, z_idx, :, :]
-                    z_frames.append(np.asarray(z_frame))
-                frame = np.stack(z_frames, axis=0)  # (Z_sel, Y, X)
-            elif views_key is not None and v_indices is not None:
-                # TCYX - select specific channels (views_key is 'C')
-                c_frames = []
-                for c_idx in v_indices:
-                    c_frame = arr[t_idx, c_idx, :, :]
-                    c_frames.append(np.asarray(c_frame))
-                frame = np.stack(c_frames, axis=0)  # (C_sel, Y, X)
-            else:
-                # all z planes or channels
-                frame = np.asarray(arr[t_idx, :, :, :])  # (Z, Y, X) or (C, Y, X)
-        elif ndim == 3:
-            if dims[0] == "T":
-                # TYX
-                frame = np.asarray(arr[t_idx, :, :])  # (Y, X)
-            else:
-                # unknown 3D ordering
-                frame = np.asarray(arr[t_idx])
-        else:
-            # 2D or other
-            frame = np.asarray(arr[t_idx])
+    if c_indices is None:
+        c_sel = slice(None)
+    elif _is_contiguous(c_indices):
+        c_sel = slice(c_indices[0], c_indices[-1] + 1)
+    else:
+        c_sel = c_indices
 
-        frames.append(frame)
+    if z_indices is None:
+        z_sel = slice(None)
+    elif _is_contiguous(z_indices):
+        z_sel = slice(z_indices[0], z_indices[-1] + 1)
+    else:
+        z_sel = z_indices
 
-    # stack along T axis
-    result = np.stack(frames, axis=0)
-
-    # ensure output is at least 4D (T, Z, Y, X) for consistency
-    if result.ndim == 3:
-        # (T, Y, X) -> (T, 1, Y, X)
-        result = result[:, np.newaxis, :, :]
-
-    return result
+    return np.asarray(arr[t_sel, c_sel, z_sel, :, :])

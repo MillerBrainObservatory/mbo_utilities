@@ -283,11 +283,8 @@ class PhaseCorrectionFeature(ArrayFeature):
         n_sample = min(window_size, n_frames)
         start = max(0, (n_frames - n_sample) // 2)
 
-        if array.ndim == 4:
-            # use first plane
-            window = array[start : start + n_sample, 0]
-        else:
-            window = array[start : start + n_sample]
+        # 5D TCZYX: T=start:end, C=0, Z=0
+        window = array[start : start + n_sample, 0, 0]
 
         # compute using phasecorr module
         _corrected, shift = bidir_phasecorr(
