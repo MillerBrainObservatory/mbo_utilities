@@ -12,7 +12,7 @@ import h5py
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin, Shape5DMixin
 from mbo_utilities.metadata import get_param
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
@@ -39,7 +39,7 @@ _H5_INFO = PipelineInfo(
 register_pipeline(_H5_INFO)
 
 
-class H5Array(ReductionMixin):
+class H5Array(ReductionMixin, Shape5DMixin):
     """
     Lazy array reader for HDF5 datasets.
 
@@ -110,6 +110,18 @@ class H5Array(ReductionMixin):
         self.ndim = self._d.ndim
         self._target_dtype = None
 
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        s = self.shape
+        if len(s) == 5:
+            return s
+        if len(s) == 4:
+            return (s[0], 1, s[1], s[2], s[3])
+        if len(s) == 3:
+            return (s[0], 1, 1, s[1], s[2])
+        if len(s) == 2:
+            return (1, 1, 1, s[0], s[1])
+        return (1, 1, 1, 1, s[0]) if len(s) == 1 else (1, 1, 1, 1, 1)
+
     @property
     def dtype(self):
         return self._target_dtype if self._target_dtype is not None else self._dtype
@@ -120,10 +132,9 @@ class H5Array(ReductionMixin):
         return self
 
     def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        """Compute vmin/vmax from first frame (frame 0, channel 0, plane 0)."""
         if not hasattr(self, "_cached_vmin"):
-            frame = self[0, 0] if self.ndim == 4 else self[0]
-            frame = np.asarray(frame)
+            frame = np.asarray(self[0, 0, 0])
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
 
@@ -141,26 +152,17 @@ class H5Array(ReductionMixin):
 
     @property
     def num_planes(self) -> int:
-        """Number of Z-planes in the dataset."""
+        """Number of Z-planes in the dataset (index 2 in 5D TCZYX)."""
         # try to get from metadata first using canonical lookup
         nplanes = get_param(self.metadata, "nplanes")
         if nplanes is not None:
             return int(nplanes)
 
-        # infer from shape based on data dimensionality
-        if self.ndim >= 4:  # (T, Z, Y, X) - volumetric time series
-            return int(self.shape[1])
-        if self.ndim == 3:  # (T, Y, X) - single plane time series
-            return 1
-        if self.ndim == 1:
-            # special case: pollen scan_corrections (nc,)
-            if self.dataset_name == "scan_corrections":
-                return int(self.shape[0])
-            return 1
-        if self.ndim == 2:  # (Y, X) - single frame
-            return 1
+        # special case: pollen scan_corrections (1D)
+        if self.dataset_name == "scan_corrections" and len(self._d.shape) == 1:
+            return int(self._d.shape[0])
 
-        return 1
+        return self._shape5d()[2]
 
     def __len__(self) -> int:
         return self.shape[0]
@@ -196,12 +198,8 @@ class H5Array(ReductionMixin):
         return data
 
     def __array__(self, dtype=None, copy=None):
-        # return single frame for fast histogram/preview (prevents accidental full load)
-        # for 1D/2D data, return all (small anyway)
-        if self.ndim <= 2:
-            data = self._d[:]
-        else:
-            data = self._d[0]
+        # return first frame for fast histogram/preview (prevents accidental full load)
+        data = self._d[0]
         if self._target_dtype is not None:
             data = data.astype(self._target_dtype)
         if dtype is not None:

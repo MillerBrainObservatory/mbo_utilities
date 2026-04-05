@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base
+from mbo_utilities.arrays._base import _imwrite_base, Shape5DMixin
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
 logger = log.get("arrays.nwb")
@@ -27,7 +27,7 @@ _NWB_INFO = PipelineInfo(
 register_pipeline(_NWB_INFO)
 
 
-class NWBArray:
+class NWBArray(Shape5DMixin):
     """lazy array reader for nwb files."""
 
     def __init__(self, path: Path | str):
@@ -49,6 +49,18 @@ class NWBArray:
         self.dtype = self.data.dtype
         self.ndim = self.data.ndim
         self._metadata = {}
+
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        s = self.shape
+        if len(s) == 5:
+            return s
+        if len(s) == 4:
+            return (s[0], 1, s[1], s[2], s[3])
+        if len(s) == 3:
+            return (s[0], 1, 1, s[1], s[2])
+        if len(s) == 2:
+            return (1, 1, 1, s[0], s[1])
+        return (1, 1, 1, 1, s[0]) if len(s) == 1 else (1, 1, 1, 1, 1)
 
     def __getitem__(self, item):
         return self.data[item]

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays.features._dim_labels import get_dims, get_num_planes
+from mbo_utilities.arrays.features._dim_labels import get_dims
 from mbo_utilities._writers import _write_plane, _write_volumetric_tiff, _write_volumetric_zarr
 from numpy.exceptions import AxisError
 
@@ -21,6 +21,55 @@ logger = log.get("arrays._base")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
+
+# canonical 5D dimension order (OME-NGFF 0.5)
+DIMS = ("T", "C", "Z", "Y", "X")
+
+
+class Shape5DMixin:
+    """
+    mixin providing always-5D shape accessors.
+
+    array classes that include this mixin must implement `_shape5d()`
+    returning a 5-tuple (T, C, Z, Y, X) with singletons for unused dims.
+
+    provides named size accessors (nt, nc, nz, ny, nx) and a shape5d
+    property so consumers never need to guess dimension positions.
+    """
+
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        """return the 5D TCZYX shape. subclasses must implement this."""
+        raise NotImplementedError
+
+    @property
+    def shape5d(self) -> tuple[int, int, int, int, int]:
+        """shape as 5D TCZYX, always length 5."""
+        return self._shape5d()
+
+    @property
+    def nt(self) -> int:
+        """number of timepoints."""
+        return self._shape5d()[0]
+
+    @property
+    def nc(self) -> int:
+        """number of channels."""
+        return self._shape5d()[1]
+
+    @property
+    def nz(self) -> int:
+        """number of z-planes."""
+        return self._shape5d()[2]
+
+    @property
+    def ny(self) -> int:
+        """spatial height."""
+        return self._shape5d()[3]
+
+    @property
+    def nx(self) -> int:
+        """spatial width."""
+        return self._shape5d()[4]
 
 
 def _normalize_key(key, ndim):
@@ -336,8 +385,8 @@ def _imwrite_base(
 
     md = _sanitize_metadata(md)
 
-    # normalize plane selection to 1-based list
-    num_planes = get_num_planes(arr)
+    # Z is always at index 2 in 5D TCZYX
+    num_planes = arr.shape[2]
     if planes is not None:
         if isinstance(planes, int):
             planes_list = [planes]
@@ -408,36 +457,19 @@ def _imwrite_base(
         )
         return result
 
-    # other formats: use per-plane streaming writer
-    # (bin, h5, npy)
-    dims = get_dims(arr)
-
-    # resolve channel_index for 5D TCZYX data with channel selection
+    # other formats: use per-plane streaming writer (bin, h5, npy)
+    # always 5D TCZYX
     channel_index = None
-    if len(arr.shape) == 5 and channels_list is not None and len(channels_list) == 1:
+    if channels_list is not None and len(channels_list) == 1:
         channel_index = channels_list[0] - 1  # 0-based
 
-    # extract shape info
-    if len(arr.shape) >= 4:
-        nframes = arr.shape[0]
-    elif len(arr.shape) == 3 and dims[0] in {"T", "timepoints"}:
-        nframes = arr.shape[0]
-    else:
-        nframes = 1
+    nframes = arr.shape[0]  # T
     Ly, Lx = arr.shape[-2], arr.shape[-1]
 
-    # validate num_planes against actual shape
-    if len(arr.shape) == 5:
-        # 5D TCZYX: z-planes at index 2
-        actual_z_size = arr.shape[2]
-        if num_planes > actual_z_size:
-            num_planes = actual_z_size
-    elif len(arr.shape) == 4:
-        actual_z_size = arr.shape[1]
-        if num_planes > actual_z_size:
-            num_planes = actual_z_size
-    elif len(arr.shape) == 3:
-        num_planes = 1
+    # validate num_planes against Z dimension
+    actual_z_size = arr.shape[2]  # Z is always at index 2
+    if num_planes > actual_z_size:
+        num_planes = actual_z_size
 
     # use OutputMetadata for reactive dz/fs values
     from mbo_utilities.metadata import OutputMetadata
@@ -568,11 +600,8 @@ class TiffReaderMixin:
     def _compute_frame_vminmax(self):
         """Compute and cache vmin/vmax from first frame."""
         if self._cached_vmin is None:
-            # get first frame (handles both 3D and 4D)
-            if len(self.shape) == 4:
-                frame = np.asarray(self[0, 0])
-            else:
-                frame = np.asarray(self[0])
+            # always 5D: get first t, first c, first z → 2D (Y, X)
+            frame = np.asarray(self[0, 0, 0])
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
 

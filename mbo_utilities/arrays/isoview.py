@@ -7,6 +7,7 @@ import logging
 
 import numpy as np
 
+from mbo_utilities.arrays._base import Shape5DMixin
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
 
@@ -266,7 +267,7 @@ class _PagedTiffReader:
             pass
 
 
-class IsoviewArray:
+class IsoviewArray(Shape5DMixin):
     """
     Lazy loader for isoview lightsheet microscopy data.
 
@@ -1019,6 +1020,14 @@ class IsoviewArray:
         """Array data type."""
         return self._dtype
 
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        z, y, x = self._single_shape
+        nv = len(self._views)
+        if self._single_timepoint:
+            return (1, nv, z, y, x)
+        num_t = len(self._timepoints) if self._structure == "raw" else len(self.tm_folders)
+        return (num_t, nv, z, y, x)
+
     @property
     def ndim(self) -> int:
         """Number of dimensions."""
@@ -1538,7 +1547,7 @@ DATA_PATTERNS = [
 ]
 
 
-class IsoViewOutputArray:
+class IsoViewOutputArray(Shape5DMixin):
     """
     Generic lazy array for IsoView pipeline outputs.
 
@@ -1996,6 +2005,13 @@ class IsoViewOutputArray:
             return (z, len(self._views), y, x)
         return (len(self.tm_folders), z, len(self._views), y, x)
 
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        z, y, x = self._single_shape
+        nv = len(self._views)
+        if self._single_timepoint:
+            return (1, nv, z, y, x)
+        return (len(self.tm_folders), nv, z, y, x)
+
     @property
     def dtype(self):
         """Array data type."""
@@ -2288,7 +2304,7 @@ def _check_pyklb():
         )
 
 
-class ClusterPTArray:
+class ClusterPTArray(Shape5DMixin):
     """
     Lazy loader for clusterPT (IsoView-Processing) KLB output files.
 
@@ -2471,6 +2487,13 @@ class ClusterPTArray:
         if self._single_timepoint:
             return (z, len(self._views), y, x)
         return (len(self.tm_folders), z, len(self._views), y, x)
+
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        z, y, x = self._single_shape
+        nv = len(self._views)
+        if self._single_timepoint:
+            return (1, nv, z, y, x)
+        return (len(self.tm_folders), nv, z, y, x)
 
     @property
     def dtype(self):

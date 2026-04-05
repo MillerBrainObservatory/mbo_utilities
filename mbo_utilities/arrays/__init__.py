@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from mbo_utilities.arrays._base import (
     CHUNKS_3D,
     CHUNKS_4D,
+    DIMS,
+    Shape5DMixin,
     _axes_or_guess,
     _build_output_path,
     _imwrite_base,

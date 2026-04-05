@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin, Shape5DMixin
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 import contextlib
 
@@ -36,7 +36,7 @@ _NUMPY_INFO = PipelineInfo(
 register_pipeline(_NUMPY_INFO)
 
 
-class NumpyArray(ReductionMixin):
+class NumpyArray(ReductionMixin, Shape5DMixin):
     """
     Lazy array wrapper for NumPy arrays and .npy files.
 
@@ -123,13 +123,32 @@ class NumpyArray(ReductionMixin):
         if metadata is not None:
             self._metadata = metadata
 
-        self.shape = self.data.shape
+        self._raw_shape = self.data.shape
         self._dtype = self.data.dtype
-        self.ndim = self.data.ndim
         self._target_dtype = None
 
         # Set dimension labels based on array shape
         self._dims = self._infer_dims()
+
+    @property
+    def shape(self) -> tuple[int, int, int, int, int]:
+        return self._shape5d()
+
+    @property
+    def ndim(self) -> int:
+        return 5
+
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        s = self._raw_shape
+        if len(s) == 5:
+            return s
+        if len(s) == 4:
+            return (s[0], 1, s[1], s[2], s[3])
+        if len(s) == 3:
+            return (s[0], 1, 1, s[1], s[2])
+        if len(s) == 2:
+            return (1, 1, 1, s[0], s[1])
+        return (1, 1, 1, 1, s[0]) if len(s) == 1 else (1, 1, 1, 1, 1)
 
     @property
     def dtype(self):
@@ -141,31 +160,44 @@ class NumpyArray(ReductionMixin):
         return self
 
     def _infer_dims(self) -> str:
-        """Infer dimension labels from array shape."""
-        if self.ndim == 2:
-            return "YX"
-        if self.ndim == 3:
-            return "TYX"
-        if self.ndim == 4:
-            return "TZYX"
-        if self.ndim == 5:
-            return "TCZYX"
-        return "".join([f"D{i}" for i in range(self.ndim)])
+        return "TCZYX"
 
     def __getitem__(self, item):
-        out = self.data[item]
+        # translate 5D indexing to the underlying array's actual ndim
+        # shape5d pads missing dims with singletons at the front
+        # e.g., 3D TYX data has shape5d (T, 1, 1, Y, X)
+        # key (t, c, z, y, x) maps to (t, y, x) by dropping singleton dims
+        if not isinstance(item, tuple):
+            item = (item,)
+        raw_ndim = len(self._raw_shape)
+        skip = set()
+        if len(item) > raw_ndim:
+            if raw_ndim <= 3:
+                skip = {1, 2}  # C, Z
+            elif raw_ndim == 4:
+                skip = {1}  # C
+            raw_key = tuple(k for i, k in enumerate(item) if i not in skip)
+            raw_key = raw_key[:raw_ndim]
+        else:
+            raw_key = item
+
+        out = self.data[raw_key]
         if self._target_dtype is not None:
             out = out.astype(self._target_dtype)
+
+        # re-expand stripped singleton dims (only for slice keys, not int keys)
+        for axis in sorted(skip):
+            if axis < len(item) and not isinstance(item[axis], (int, np.integer)):
+                out = np.expand_dims(out, axis=axis)
+
         return out
 
     def __len__(self) -> int:
-        """Return length of first dimension (number of frames for 3D/4D)."""
-        return self.shape[0]
+        return self.nt
 
     def __array__(self, dtype=None, copy=None):
-        # return single frame for fast histogram/preview (prevents accidental full load)
-        # for 1D/2D data, return all (small anyway)
-        if self.ndim <= 2:
+        # return single frame for fast preview
+        if len(self._raw_shape) <= 2:
             data = self.data
         else:
             data = self.data[0]
@@ -178,29 +210,26 @@ class NumpyArray(ReductionMixin):
         return f"NumpyArray(shape={self.shape}, dtype={self.dtype}, dims='{self.dims}'{mem_str})"
 
     @property
-    def dims(self) -> str:
-        """Return dimension labels (e.g., 'TYX', 'TZYX')."""
-        return self._dims
+    def dims(self) -> tuple[str, ...]:
+        from mbo_utilities.arrays._base import DIMS
+        return DIMS
 
     @dims.setter
-    def dims(self, value: str):
-        """Set dimension labels."""
+    def dims(self, value):
+        """Set dimension labels (ignored, always TCZYX)."""
         if len(value) != self.ndim:
             raise ValueError(f"dims length {len(value)} doesn't match ndim {self.ndim}")
         self._dims = value
 
     @property
     def num_planes(self) -> int:
-        """Return number of Z-planes (1 for 3D data, Z dimension for 4D)."""
-        if self.ndim == 4:
-            return self.shape[1]  # TZYX -> Z is index 1
-        return 1
+        """Number of Z-planes (index 2 in 5D TCZYX)."""
+        return self.shape[2]
 
     def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        """Compute vmin/vmax from first frame (frame 0, channel 0, plane 0)."""
         if not hasattr(self, "_cached_vmin"):
-            frame = self[0, 0] if self.ndim == 4 else self[0]
-            frame = np.asarray(frame)
+            frame = np.asarray(self[0, 0, 0])
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
 
@@ -229,14 +258,14 @@ class NumpyArray(ReductionMixin):
         # ensure basic metadata is always present
         md = dict(self._metadata) if self._metadata is not None else {}
         if "num_timepoints" not in md:
-            md["num_timepoints"] = self.shape[0] if self.ndim >= 1 else 1
+            md["num_timepoints"] = self.shape[0]
         if "nframes" not in md:
             md["nframes"] = md["num_timepoints"]  # suite2p alias
         if "num_frames" not in md:
             md["num_frames"] = md["num_timepoints"]  # legacy alias
-        if "Ly" not in md and self.ndim >= 2:
+        if "Ly" not in md:
             md["Ly"] = self.shape[-2]
-        if "Lx" not in md and self.ndim >= 2:
+        if "Lx" not in md:
             md["Lx"] = self.shape[-1]
         return md
 
@@ -287,25 +316,16 @@ class NumpyArray(ReductionMixin):
 
         histogram_widget = kwargs.pop("histogram_widget", True)
         figure_kwargs = kwargs.pop("figure_kwargs", {"size": (800, 800)})
-        # Get min/max from first frame for contrast scaling
-        first_frame = self.data[0] if self.ndim >= 1 else self.data
+        # get min/max from first frame for contrast scaling
+        first_frame = self.data[0]
         graphic_kwargs = kwargs.pop(
             "graphic_kwargs", {"vmin": float(first_frame.min()), "vmax": float(first_frame.max())}
         )
 
-        # Set up slider dimensions based on array dimensionality
-        if self.ndim == 4:
-            slider_dim_names = ("t", "z")
-            window_funcs = kwargs.pop("window_funcs", (np.mean, None))
-            window_sizes = kwargs.pop("window_sizes", (1, None))
-        elif self.ndim == 3:
-            slider_dim_names = ("t",)
-            window_funcs = kwargs.pop("window_funcs", (np.mean,))
-            window_sizes = kwargs.pop("window_sizes", (1,))
-        else:
-            slider_dim_names = None
-            window_funcs = None
-            window_sizes = None
+        # always 5D TCZYX: sliders for t, c, z
+        slider_dim_names = ("t", "c", "z")
+        window_funcs = kwargs.pop("window_funcs", (np.mean, None, None))
+        window_sizes = kwargs.pop("window_sizes", (1, None, None))
 
         return fpl.ImageWidget(
             data=self.data,

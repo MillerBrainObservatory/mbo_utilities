@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base, _normalize_key, ReductionMixin
+from mbo_utilities.arrays._base import _imwrite_base, _normalize_key, ReductionMixin, Shape5DMixin
 from mbo_utilities.arrays.features import (
     DimLabelsMixin,
     DimensionSpecMixin,
@@ -51,7 +51,7 @@ _ZARR_INFO = PipelineInfo(
 register_pipeline(_ZARR_INFO)
 
 
-class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegistrationMixin, SegmentationMixin):
+class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegistrationMixin, SegmentationMixin, Shape5DMixin):
     """
     Reader for Zarr stores (including OME-Zarr).
 
@@ -191,24 +191,31 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
             # convert lowercase axis names to uppercase dim labels
             dims = tuple(ax.get("name", "?").upper() for ax in axes)
 
-            # validate against our presented ndim (always 4)
-            if len(dims) == self.ndim:
+            # always 5D TCZYX
+            if len(dims) == 5:
                 return dims
 
-            # 3D zarr presented as 4D: OME matches underlying array,
-            # insert Z to reconcile (shape property does the same transform)
+            # underlying zarr may be 3D/4D; pad to 5D
             underlying_ndim = len(self.zs[0].shape)
-            if len(dims) == underlying_ndim and underlying_ndim == 3:
-                dims_list = list(dims)
+            dims_list = list(dims)
+
+            # insert missing C dimension after T
+            if "C" not in dims_list and len(dims_list) < 5:
                 insert_pos = (dims_list.index("T") + 1) if "T" in dims_list else 0
+                dims_list.insert(insert_pos, "C")
+
+            # insert missing Z dimension after C
+            if "Z" not in dims_list and len(dims_list) < 5:
+                insert_pos = (dims_list.index("C") + 1) if "C" in dims_list else 1
                 dims_list.insert(insert_pos, "Z")
+
+            if len(dims_list) == 5:
                 return tuple(dims_list)
 
             # can't reconcile, fall back to default inference
             logger.warning(
-                "OME axes %s have %d elements but array is %dD; "
-                "ignoring OME dims",
-                dims, len(dims), self.ndim,
+                "OME axes %s couldn't be reconciled to 5D; ignoring OME dims",
+                dims,
             )
             return None
         except Exception:
@@ -319,7 +326,12 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
             self._metadata[0] = value
 
     @property
-    def shape(self) -> tuple[int, int, int, int]:
+    def shape(self) -> tuple[int, int, int, int, int]:
+        return self._shape5d()
+
+    @property
+    def _shape_tzyx(self) -> tuple[int, int, int, int]:
+        """internal 4D shape for zarr indexing."""
         first_shape = self.zs[0].shape
         if len(first_shape) == 4:
             return first_shape
@@ -342,10 +354,9 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
         return self
 
     def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame (frame 0, plane 0)."""
+        """Compute vmin/vmax from first frame (frame 0, channel 0, plane 0)."""
         if not hasattr(self, "_cached_vmin"):
-            frame = self[0, 0] if self.ndim == 4 else self[0]
-            frame = np.asarray(frame)
+            frame = np.asarray(self[0, 0, 0])
             self._cached_vmin = float(frame.min())
             self._cached_vmax = float(frame.max())
 
@@ -373,18 +384,27 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
         return data
 
 
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        s = self._shape_tzyx
+        return (s[0], 1, s[1], s[2], s[3])
+
     @property
     def ndim(self):
-        return 4
+        return 5
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        from mbo_utilities.arrays._base import DIMS
+        return DIMS
 
     def __len__(self) -> int:
-        return self.shape[0]
+        return self.nt
 
     def __getitem__(self, key):
 
-        key = _normalize_key(key, 4)
-        key = key + (slice(None),) * (4 - len(key))
-        t_key, z_key, y_key, x_key = key
+        key = _normalize_key(key, 5)
+        key = key + (slice(None),) * (5 - len(key))
+        t_key, c_key, z_key, y_key, x_key = key
 
         def normalize(idx):
             if isinstance(idx, range):
@@ -402,6 +422,7 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
         x_key = normalize(x_key)
         z_key = normalize(z_key)
 
+        # internal zarr stores are TZYX — read without C
         is_single_4d = len(self.zs) == 1 and len(self.zs[0].shape) == 4
 
         if is_single_4d:
@@ -413,7 +434,6 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
                 out = self.zs[0][t_key, y_key, x_key]
             elif isinstance(z_key, slice):
                 data = self.zs[0][t_key, y_key, x_key]
-                # insert Z=1 axis: position depends on whether T was scalar
                 z_axis = 0 if isinstance(t_key, (int, np.integer)) else 1
                 out = np.expand_dims(data, axis=z_axis)
             else:
@@ -429,6 +449,28 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
                 z_indices = range(len(self.zs))
             arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
             out = np.stack(arrs, axis=1)
+
+        # insert C=1 dimension — find correct axis position after T/Z squeeze
+        # out is currently TZYX (or subsets thereof). insert C after T.
+        if not isinstance(t_key, (int, np.integer)):
+            # T is kept, insert C at axis 1
+            c_axis = 1
+        else:
+            # T was squeezed, insert C at axis 0
+            c_axis = 0
+        out = np.expand_dims(out, axis=c_axis)
+
+        # squeeze integer-indexed dimensions (in 5D order: T=0, C=1, Z=2)
+        squeeze_axes = []
+        if isinstance(key[0], (int, np.integer)):
+            squeeze_axes.append(0)
+        if isinstance(key[1], (int, np.integer)):
+            squeeze_axes.append(1)
+        if isinstance(key[2], (int, np.integer)):
+            squeeze_axes.append(2)
+        for ax in sorted(squeeze_axes, reverse=True):
+            if ax < out.ndim:
+                out = np.squeeze(out, axis=ax)
 
         if self._target_dtype is not None:
             out = out.astype(self._target_dtype)
