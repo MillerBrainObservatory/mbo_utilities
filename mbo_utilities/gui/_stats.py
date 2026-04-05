@@ -27,69 +27,35 @@ def _has_time_dim(arr: Any) -> bool:
     return arr.ndim >= 3
 
 
-def _get_zslice(arr: Any, t_slice: slice, z: int) -> np.ndarray:
-    """Get a z-slice or channel-slice from an array for stats computation.
+def _load_subsampled(arr: Any, subsample: int = 10) -> np.ndarray:
+    """Load temporally subsampled data for stats.
 
-    Uses dims property to correctly index arrays with non-standard layouts
-    like IsoviewArray and ClusterPTArray which have a views/camera dimension,
-    and SinglePlaneArray which has channels instead of z-planes.
-
-    Returns a stack of frames (T, Y, X) for computing temporal statistics,
-    or a single frame (Y, X) expanded to (1, Y, X) for single-timepoint data.
-
-    Supports:
-    - 3D: (T, Y, X) -> arr[t_slice]
-    - 4D standard: (T, Z, Y, X) -> arr[t_slice, z]
-    - 4D channels: (T, C, Y, X) -> arr[t_slice, z] (z indexes channel)
-    - 4D single-timepoint views: (Z, Views, Y, X) -> arr[z, 0] expanded to (1, Y, X)
-    - 5D with views: (T, Z, Views, Y, X) -> arr[t_slice, z, 0]
+    Returns (T_sub, Z, Y, X) reading all z-planes at once to minimize IO.
+    Handles both 5D TCZYX arrays (uses channel 0) and 4D TZYX
+    (e.g. _ChannelSqueeze wrappers).
     """
-    dims = getattr(arr, "dims", None)
+    cache_key = f"_stats_cache_{subsample}"
+    if hasattr(arr, cache_key):
+        return getattr(arr, cache_key)
 
-    # use dims property to determine correct indexing
-    # normalize to lowercase for comparison (dims may be uppercase or mixed)
-    if dims is not None:
-        dims_lower = tuple(d.lower() for d in dims)
-        # check if this is a views-type array (isoview, clusterpt)
-        if "cm" in dims_lower:
-            if "t" in dims_lower or "timepoints" in dims_lower:
-                # multi-timepoint: (T, Z, Views, Y, X)
-                return arr[t_slice, z, 0]
-            else:
-                # single-timepoint: (Z, Views, Y, X) -> (Y, X)
-                # expand to (1, Y, X) for consistent stats computation
-                return arr[z, 0][np.newaxis, ...]
-        elif "z" in dims_lower or any(d in dims_lower for d in ("z-planes", "z-slices")):
-            # has z but no views
-            if "t" in dims_lower or "timepoints" in dims_lower:
-                return arr[t_slice, z]
-            elif "volumes" in dims_lower:
-                # piezo: dim 0 is volumes, dim 1 is z-slices/frames
-                return arr[0, z][np.newaxis, ...]
-            else:
-                return arr[z][np.newaxis, ...]
-        elif "channels" in dims_lower or "channel" in dims_lower or "c" in dims_lower:
-            # multi-channel single-plane: (T, C, Y, X) - z indexes channel
-            if "t" in dims_lower or "timepoints" in dims_lower:
-                return arr[t_slice, z]
-            else:
-                return arr[z][np.newaxis, ...]
-        elif "volumes" in dims_lower or "frames" in dims_lower:
-            # piezo without z-slices label: dim 0 is volumes, dim 1 is frames
-            return arr[0, z][np.newaxis, ...]
-        else:
-            # no z or channel dimension, just time (3D TYX)
-            return arr[t_slice]
-
-    # fallback for arrays without dims property
-    if arr.ndim == 3:
-        return arr[t_slice]
-    elif arr.ndim == 4:
-        return arr[t_slice, z]
-    elif arr.ndim == 5:
-        return arr[t_slice, z, 0]
+    if len(arr.shape) == 5:
+        data = np.asarray(arr[::subsample, 0, :, :, :])  # (T_sub, Z, Y, X)
+    elif len(arr.shape) == 4:
+        data = np.asarray(arr[::subsample, :, :, :])  # (T_sub, Z, Y, X)
     else:
-        return arr[t_slice]
+        data = np.asarray(arr[::subsample])
+        if data.ndim == 2:
+            data = data[np.newaxis, :, :]  # (1, Y, X)
+
+    # ensure at least 4D (T, Z, Y, X)
+    if data.ndim == 3:
+        data = data[:, np.newaxis, :, :]
+
+    try:
+        setattr(arr, cache_key, data)
+    except (AttributeError, TypeError):
+        pass
+    return data
 
 
 def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
@@ -101,26 +67,27 @@ def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
     For 4D data with channels (no z), iterates over channels.
     For piezo arrays, uses num_slices to iterate z-slices within volumes.
     """
-    if arr.ndim == 3:
-        return [0], "z"
+    # use parent widget's detected nz/nc which handles both 4D and 5D arrays
+    nz = getattr(parent, "nz", None)
+    nc = getattr(parent, "nc", None)
 
     # piezo arrays: enable averaging to get per-z-slice stats
     if hasattr(arr, "num_slices") and hasattr(arr, "average_frames"):
         if not arr.average_frames and arr.can_average:
             arr.average_frames = True
-        return list(range(arr.shape[1])), "z"
+        if nz is not None:
+            return list(range(nz)), "z"
 
-    nz = getattr(parent, "nz", 1)
-    nc = getattr(parent, "nc", 1)
+    # fallback: detect from shape5d if available, else from parent
+    if nz is None:
+        nz = arr.nz if hasattr(arr, "nz") else 1
+    if nc is None:
+        nc = arr.nc if hasattr(arr, "nc") else 1
 
     if nz > 1:
         return list(range(nz)), "z"
     elif nc > 1:
         return list(range(nc)), "c"
-
-    # fallback for 4D+ with an undetected second dim
-    if arr.ndim >= 4 and arr.shape[1] > 1:
-        return list(range(arr.shape[1])), "z"
 
     return [0], "z"
 
@@ -139,17 +106,14 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         parent._zstats[idx - 1] = stats
         # Still need to compute mean images for visualization
         means = []
-        tiff_lock = threading.Lock()
-        # determine slice range (z-planes or channels)
         slice_range, slice_label = _get_slice_range(parent, arr)
         n_slices = len(slice_range)
+        subsampled = _load_subsampled(arr, subsample=10)
         for i, s in enumerate(slice_range):
-            with tiff_lock:
-                stack = _get_zslice(arr, slice(None, None, 10), s)
-                mean_img = np.mean(stack, axis=0)
-                means.append(mean_img)
-                parent._zstats_progress[idx - 1] = (i + 1) / n_slices
-                parent._zstats_current_z[idx - 1] = s
+            mean_img = np.mean(subsampled[:, s, :, :].astype(np.float32), axis=0)
+            means.append(mean_img)
+            parent._zstats_progress[idx - 1] = (i + 1) / n_slices
+            parent._zstats_current_z[idx - 1] = s
         means_stack = np.stack(means)
         parent._zstats_means[idx - 1] = means_stack
         parent._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
@@ -159,38 +123,37 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         return
 
     stats, means = {"mean": [], "std": [], "snr": []}, []
-    tiff_lock = threading.Lock()
 
     # determine slice range (z-planes or channels)
     slice_range, slice_label = _get_slice_range(parent, arr)
     n_slices = len(slice_range)
-    stats["slice_label"] = slice_label  # track what we're iterating over
+    stats["slice_label"] = slice_label
+
+    # bulk-load subsampled data once (T_sub, Z, Y, X), then slice per plane
+    subsampled = _load_subsampled(arr, subsample=10)
 
     for i, s in enumerate(slice_range):
-        with tiff_lock:
-            stack = _get_zslice(arr, slice(None, None, 10), s).astype(np.float32)
+        stack = subsampled[:, s, :, :].astype(np.float32)
 
-            mean_img = np.mean(stack, axis=0)
-            std_img = np.std(stack, axis=0)
+        mean_img = np.mean(stack, axis=0)
+        std_img = np.std(stack, axis=0)
 
-            # SNR: (mean_foreground - mean_background) / std_background
-            # foreground = top 20% brightest pixels, background = bottom 50%
-            p80 = np.percentile(mean_img, 80)
-            p50 = np.percentile(mean_img, 50)
-            fg = mean_img >= p80
-            bg = mean_img <= p50
-            fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
-            bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
-            bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
-            snr_val = (fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0
+        p80 = np.percentile(mean_img, 80)
+        p50 = np.percentile(mean_img, 50)
+        fg = mean_img >= p80
+        bg = mean_img <= p50
+        fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
+        bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
+        bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
+        snr_val = (fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0
 
-            stats["mean"].append(float(np.mean(mean_img)))
-            stats["std"].append(float(np.mean(std_img)))
-            stats["snr"].append(snr_val)
+        stats["mean"].append(float(np.mean(mean_img)))
+        stats["std"].append(float(np.mean(std_img)))
+        stats["snr"].append(snr_val)
 
-            means.append(mean_img)
-            parent._zstats_progress[idx - 1] = (i + 1) / n_slices
-            parent._zstats_current_z[idx - 1] = s
+        means.append(mean_img)
+        parent._zstats_progress[idx - 1] = (i + 1) / n_slices
+        parent._zstats_current_z[idx - 1] = s
 
     parent._zstats[idx - 1] = stats
     means_stack = np.stack(means)

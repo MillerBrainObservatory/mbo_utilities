@@ -416,6 +416,50 @@ def _show_metadata_viewer(metadata: dict) -> None:
     immapp.run(runner_params=params, add_ons_params=addons)
 
 
+class _ChannelSqueeze:
+    """wraps a 5D TCZYX array as 4D TZYX by dropping singleton C=1.
+
+    fastplotlib's ImageWidget can't handle singleton slider dims,
+    so we squeeze C out when nc==1.
+    """
+
+    def __init__(self, arr):
+        self._arr = arr
+
+    @property
+    def shape(self):
+        s = self._arr.shape
+        return (s[0], s[2], s[3], s[4])
+
+    @property
+    def ndim(self):
+        return 4
+
+    @property
+    def dtype(self):
+        return self._arr.dtype
+
+    @property
+    def dims(self):
+        return ("T", "Z", "Y", "X")
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+        # pad short keys to 4D (TZYX)
+        if len(key) < 4:
+            key = key + (slice(None),) * (4 - len(key))
+        # map 4D TZYX key → 5D TCZYX by inserting C=0 at index 1
+        key = (key[0], 0, key[1], key[2], key[3])
+        return self._arr[key]
+
+    def __len__(self):
+        return self._arr.shape[0]
+
+    def __getattr__(self, name):
+        return getattr(self._arr, name)
+
+
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
     import copy
@@ -437,7 +481,6 @@ def _create_image_widget(data_array, widget: bool = True):
         figure_kwargs = {"size": (800, 800)}
 
     # Determine slider dimension names from array's dims property if available
-    # otherwise fall back to defaults based on ndim
     from mbo_utilities.arrays.features import get_slider_dims
 
     slider_dim_names = get_slider_dims(data_array)
@@ -451,6 +494,16 @@ def _create_image_widget(data_array, widget: bool = True):
     else:
         window_funcs = None
         window_sizes = None
+
+    def _squeeze_for_viewer(arr):
+        """squeeze singleton non-spatial dims that fastplotlib can't handle.
+
+        fastplotlib expects ndim == len(slider_dim_names) + 2.
+        if C=1, squeeze it out since it has no slider.
+        """
+        if hasattr(arr, "shape") and len(arr.shape) == 5 and arr.shape[1] == 1:
+            return _ChannelSqueeze(arr)
+        return arr
 
     # Handle multi-ROI data (duck typing: check for roi_mode attribute)
     if hasattr(data_array, "roi_mode") and hasattr(data_array, "iter_rois"):
@@ -471,7 +524,7 @@ def _create_image_widget(data_array, widget: bool = True):
             arr = copy.copy(data_array)
             arr.fix_phase = False
             arr.roi = r
-            arrays.append(arr)
+            arrays.append(_squeeze_for_viewer(arr))
             names.append(f"ROI {r}" if r else (base_name or "Full Image"))
 
         iw = fpl.ImageWidget(
@@ -486,7 +539,7 @@ def _create_image_widget(data_array, widget: bool = True):
         )
     else:
         iw = fpl.ImageWidget(
-            data=data_array,
+            data=_squeeze_for_viewer(data_array),
             slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
             window_sizes=window_sizes,
