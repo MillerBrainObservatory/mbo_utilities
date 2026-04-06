@@ -661,6 +661,7 @@ class TiffReaderMixin:
         window_funcs = kwargs.get("window_funcs")
         return fpl.ImageWidget(
             data=self,
+            cmap="gnuplot2",
             histogram_widget=histogram_widget,
             figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": self.vmin, "vmax": self.vmax},
