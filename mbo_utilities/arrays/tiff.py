@@ -716,8 +716,25 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
         return self._nz
 
     @property
-    def shape(self) -> tuple[int, int, int, int, int]:
-        return self._shape5d()
+    def _natural_dropped_axes(self) -> tuple[int, ...]:
+        # indices in (T, C, Z) that are singleton; Y, X are always kept.
+        # shape/ndim/__getitem__ hide these axes so generic tiffs present
+        # at their real rank (2D image stays 2D, TYX timeseries stays 3D, etc.).
+        # shape5d and Shape5DMixin accessors (nt/nc/nz/ny/nx) remain 5D.
+        dropped = []
+        if self._nframes <= 1:
+            dropped.append(0)
+        if self._nc <= 1:
+            dropped.append(1)
+        if self._nz <= 1:
+            dropped.append(2)
+        return tuple(dropped)
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        full = self._shape5d()
+        dropped = self._natural_dropped_axes
+        return tuple(s for i, s in enumerate(full) if i not in dropped)
 
     def _shape5d(self) -> tuple[int, int, int, int, int]:
         return (self._nframes, self._nc, self._nz, self._ly, self._lx)
@@ -734,12 +751,13 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
 
     @property
     def ndim(self) -> int:
-        return 5
+        return 5 - len(self._natural_dropped_axes)
 
     @property
     def dims(self) -> tuple[str, ...]:
         from mbo_utilities.arrays._base import DIMS
-        return DIMS
+        dropped = self._natural_dropped_axes
+        return tuple(d for i, d in enumerate(DIMS) if i not in dropped)
 
     @property
     def metadata(self) -> dict:
@@ -757,8 +775,28 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
 
     def __getitem__(self, key):
 
+        # key interpretation:
+        #   len(key) <= natural_ndim  → natural-rank key: pad with slices
+        #     to natural_ndim, then rebuild a 5D key by inserting 0 at
+        #     each dropped (singleton) axis.
+        #   len(key) > natural_ndim   → legacy 5D key: pad with slices on
+        #     the right to reach 5. this keeps callers that still pass
+        #     explicit 5-length keys (e.g. `arr[0, 0, 0]` to get a Y,X
+        #     frame) working against singleton-heavy data.
+        dropped = self._natural_dropped_axes
+        natural_ndim = 5 - len(dropped)
         key = _normalize_key(key, 5)
-        key = key + (slice(None),) * (5 - len(key))
+        if len(key) <= natural_ndim:
+            key = key + (slice(None),) * (natural_ndim - len(key))
+            full = [None] * 5
+            for d in dropped:
+                full[d] = 0
+            kept = [i for i in range(5) if i not in dropped]
+            for slot, user_k in zip(kept, key):
+                full[slot] = user_k
+            key = tuple(full)
+        else:
+            key = key + (slice(None),) * (5 - len(key))
 
         t_key, c_key, z_key, y_key, x_key = key
 
@@ -1748,29 +1786,19 @@ class PiezoArray(ScanImageArray):
             value = False
         self._average_frames = value
 
-    @property
-    def shape(self):
-        """
-        Return shape as (num_volumes, frames_dim, Ly, Lx).
-
-        The second dimension depends on averaging state:
-        - When averaging or pre-averaged: num_slices (one averaged frame per z-slice)
-        - When not averaging: num_slices * frames_per_slice (all raw frames)
-        """
-        base_shape = super().shape
-        h, w = base_shape[-2], base_shape[-1]
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        # piezo: T=num_volumes, C=1, Z=frames_dim, Y, X
+        # frames_dim collapses to num_slices when averaged (or pre-averaged),
+        # otherwise num_slices * frames_per_slice to expose raw frames
+        total_width = sum(r["width"] for r in self._rois)
+        max_height = max(r["height"] for r in self._rois)
 
         if self._average_frames or self._log_average_factor > 1:
-            # averaging enabled or pre-averaged: one frame per slice
             frames_dim = self._num_slices
         else:
-            # not averaging: show all raw frames
             frames_dim = self._num_slices * self._frames_per_slice
 
-        return (self._num_volumes, 1, frames_dim, h, w)
-
-    def _shape5d(self) -> tuple[int, int, int, int, int]:
-        return self.shape
+        return (self._num_volumes, 1, frames_dim, max_height, total_width)
 
     @property
     def dims(self) -> tuple[str, ...]:
@@ -2031,10 +2059,12 @@ class LBMPiezoArray(ScanImageArray):
         from mbo_utilities.arrays._base import DIMS
         return DIMS
 
-    def _shape5d(self) -> tuple[int, int, int, int, int]:
-        # pollen: T=1, C=beamlets, Z=z-positions, Y, X
-        s = self.shape  # (z-planes, beamlets, Y, X) from parent
-        return (1, s[1], s[0], s[2], s[3])
+    # no _shape5d override: parent's native layout
+    # (num_frames=z_positions, num_color_channels=1, num_zplanes=beamlets, Y, X)
+    # is exactly what pollen_calibration.py and the stats pipeline expect,
+    # post-singleton-squeeze in _SqueezeSingletonDims: (z_positions, beamlets, Y, X).
+    # labels stay (T, Z, Y, X) — semantically misleading, but all pollen
+    # downstreams unpack positionally, not by label.
 
     @property
     def num_zplanes(self) -> int:
