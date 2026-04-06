@@ -1335,13 +1335,21 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         self.logger.debug(f"__getitem__ took {(t1 - t0) * 1000:.1f}ms")
 
         # reshape (T, C*Z, Y, X) -> (T, C, Z, Y, X)
-        if isinstance(out, tuple):
-            out = tuple(
-                x.reshape(len(frames), len(colors), len(zplanes), x.shape[-2], x.shape[-1])
-                for x in out
-            )
+        nc, nz = len(colors), len(zplanes)
+        if nc == 1:
+            # C=1: insert axis as view (no copy)
+            if isinstance(out, tuple):
+                out = tuple(np.expand_dims(x, axis=1) for x in out)
+            else:
+                out = np.expand_dims(out, axis=1)
         else:
-            out = out.reshape(len(frames), len(colors), len(zplanes), out.shape[-2], out.shape[-1])
+            if isinstance(out, tuple):
+                out = tuple(
+                    x.reshape(len(frames), nc, nz, x.shape[-2], x.shape[-1])
+                    for x in out
+                )
+            else:
+                out = out.reshape(len(frames), nc, nz, out.shape[-2], out.shape[-1])
 
         # squeeze integer-indexed dimensions
         squeeze = []
