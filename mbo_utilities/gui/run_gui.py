@@ -416,24 +416,38 @@ def _show_metadata_viewer(metadata: dict) -> None:
     immapp.run(runner_params=params, add_ons_params=addons)
 
 
-class _ChannelSqueeze:
-    """wraps a 5D TCZYX array as 4D TZYX by dropping singleton C=1.
+class _SqueezeSingletonDims:
+    """wraps a 5D TCZYX array, dropping every singleton non-spatial dim.
 
-    fastplotlib's ImageWidget can't handle singleton slider dims,
-    so we squeeze C out when nc==1.
+    fastplotlib's ImageWidget derives its slider count from ndim-2 and
+    doesn't handle singleton sliders, so any T/C/Z with size 1 must be
+    removed before handoff. get_slider_dims filters by the same
+    size>1 predicate; this wrapper keeps the shape in lockstep so
+    len(slider_dim_names) always equals wrapped.ndim - 2.
     """
 
     def __init__(self, arr):
         self._arr = arr
+        full = tuple(arr.shape)
+        if len(full) != 5:
+            raise ValueError(f"expected 5D TCZYX array, got shape {full}")
+        # keep non-spatial dims only if size > 1, always keep Y, X
+        self._kept = [i for i in range(3) if full[i] > 1] + [3, 4]
+        self._dropped = [i for i in range(3) if full[i] <= 1]
+        self._shape = tuple(full[i] for i in self._kept)
+        orig_dims = getattr(arr, "dims", None)
+        if orig_dims is not None and len(orig_dims) == 5:
+            self._dims = tuple(orig_dims[i] for i in self._kept)
+        else:
+            self._dims = None
 
     @property
     def shape(self):
-        s = self._arr.shape
-        return (s[0], s[2], s[3], s[4])
+        return self._shape
 
     @property
     def ndim(self):
-        return 4
+        return len(self._shape)
 
     @property
     def dtype(self):
@@ -441,22 +455,50 @@ class _ChannelSqueeze:
 
     @property
     def dims(self):
-        return ("T", "Z", "Y", "X")
+        return self._dims
 
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
-        # pad short keys to 4D (TZYX)
-        if len(key) < 4:
-            key = key + (slice(None),) * (4 - len(key))
-        # map 4D TZYX key → 5D TCZYX by inserting C=0 at index 1
-        key = (key[0], 0, key[1], key[2], key[3])
-        return self._arr[key]
+        # pad short keys to wrapped ndim
+        if len(key) < self.ndim:
+            key = key + (slice(None),) * (self.ndim - len(key))
+        # rebuild a 5D key: 0 at dropped axes, user key at kept axes
+        full_key = [None] * 5
+        for d in self._dropped:
+            full_key[d] = 0
+        it = iter(key)
+        for i in self._kept:
+            full_key[i] = next(it)
+        return self._arr[tuple(full_key)]
 
     def __len__(self):
-        return self._arr.shape[0]
+        return self._shape[0]
+
+    def __array__(self, dtype=None, copy=None):
+        # materialize through __getitem__ so the squeezed shape is honored.
+        # without this, np.asarray() / .astype() / etc. fall through
+        # __getattr__ to the underlying array and leak the unsqueezed rank.
+        import numpy as np
+        arr = np.asarray(self[tuple(slice(None) for _ in range(self.ndim))])
+        if dtype is not None:
+            arr = arr.astype(dtype)
+        return arr
+
+    def astype(self, dtype, *args, **kwargs):
+        # fastplotlib's TextureArray._fix_data calls data.astype(np.float32).
+        # route through __array__ so the cast sees the squeezed shape.
+        import numpy as np
+        return np.asarray(self).astype(dtype, *args, **kwargs)
 
     def __getattr__(self, name):
+        # IMPORTANT: do not forward numpy-array-protocol methods here
+        # (__array__, astype, reshape, etc.) — those must be defined
+        # explicitly above so they respect the squeezed shape. this
+        # fallback exists only for domain-specific attributes like
+        # `metadata`, `stack_type`, `num_beamlets`, etc.
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
         return getattr(self._arr, name)
 
 
@@ -496,13 +538,16 @@ def _create_image_widget(data_array, widget: bool = True):
         window_sizes = None
 
     def _squeeze_for_viewer(arr):
-        """squeeze singleton non-spatial dims that fastplotlib can't handle.
+        """drop every singleton non-spatial dim so fastplotlib's ndim-2
+        slider count matches get_slider_dims output.
 
-        fastplotlib expects ndim == len(slider_dim_names) + 2.
-        if C=1, squeeze it out since it has no slider.
+        fastplotlib expects ndim == len(slider_dim_names) + 2. any
+        T/C/Z with size 1 must be squeezed, not just C.
         """
-        if hasattr(arr, "shape") and len(arr.shape) == 5 and arr.shape[1] == 1:
-            return _ChannelSqueeze(arr)
+        if not hasattr(arr, "shape") or len(arr.shape) != 5:
+            return arr
+        if any(arr.shape[i] == 1 for i in range(3)):
+            return _SqueezeSingletonDims(arr)
         return arr
 
     # Handle multi-ROI data (duck typing: check for roi_mode attribute)

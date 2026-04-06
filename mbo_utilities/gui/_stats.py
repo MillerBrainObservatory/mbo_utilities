@@ -32,7 +32,7 @@ def _load_subsampled(arr: Any, subsample: int = 10) -> np.ndarray:
 
     Returns (T_sub, Z, Y, X) reading all z-planes at once to minimize IO.
     Handles both 5D TCZYX arrays (uses channel 0) and 4D TZYX
-    (e.g. _ChannelSqueeze wrappers).
+    (e.g. _SqueezeSingletonDims wrappers).
     """
     cache_key = f"_stats_cache_{subsample}"
     if hasattr(arr, cache_key):
