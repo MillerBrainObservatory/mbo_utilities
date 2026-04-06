@@ -370,29 +370,34 @@ class TestTiffVolumeAutoDetection:
         return vol_dir, synthetic_4d_data
 
     def test_volume_directory_detection(self, tiff_volume_dir):
-        """TiffArray should detect volume directory and return 5D shape."""
+        """TiffArray detects volume directory. Natural rank drops C=1."""
         vol_dir, expected_data = tiff_volume_dir
 
         arr = TiffArray(vol_dir)
 
-        # should be 5D: (T, C, Z, Y, X) with C=1
-        assert arr.ndim == 5, f"Expected 5D array, got {arr.ndim}D"
-        assert arr.shape[0] == expected_data.shape[0], "Frame count mismatch"
-        assert arr.shape[1] == 1, "Channel dim should be 1"
-        assert arr.shape[2] == expected_data.shape[1], "Plane count mismatch"
-        assert arr.shape[3:] == expected_data.shape[2:], "Spatial dims mismatch"
+        # natural rank: (T, Z, Y, X) — C=1 dropped
+        assert arr.ndim == 4, f"Expected 4D array (C=1 squeezed), got {arr.ndim}D"
+        assert arr.shape == expected_data.shape, "Natural shape mismatch"
+        # 5D contract preserved via shape5d
+        assert arr.shape5d == (
+            expected_data.shape[0],
+            1,
+            expected_data.shape[1],
+            expected_data.shape[2],
+            expected_data.shape[3],
+        )
 
     def test_volume_indexing(self, tiff_volume_dir):
-        """Test indexing volume TiffArray."""
+        """Test indexing volume TiffArray at natural rank."""
         vol_dir, expected_data = tiff_volume_dir
 
         arr = TiffArray(vol_dir)
 
-        # index single timepoint: 5D -> 4D (C, Z, Y, X) = (1, 3, 64, 64)
+        # natural rank is (T, Z, Y, X); arr[0] squeezes T -> (Z, Y, X)
         frame = arr[0]
         frame_np = np.asarray(frame)
         assert frame_np.size == expected_data[0].size, "Element count mismatch"
-        assert frame_np.ndim == 4, "Single frame should be 4D (C, Z, Y, X)"
+        assert frame_np.ndim == 3, "Single T-frame should be 3D (Z, Y, X)"
 
     def test_find_tiff_plane_files(self, tiff_volume_dir):
         """Test find_tiff_plane_files helper function."""
