@@ -149,13 +149,16 @@ class PreviewDataWidget(EdgeWindow):
         self.num_graphics = len(self.image_widget.graphics)
         self.shape = self.image_widget.data[0].shape
 
-        # Determine data type (ScanImage or volumetric TIFF)
+        # Determine data type (ScanImage or volumetric TIFF).
+        # Peel the squeeze wrapper so isinstance sees the real class.
         from mbo_utilities.arrays import TiffArray
+        first_arr = self.image_widget.data[0]
+        underlying = getattr(first_arr, "_arr", first_arr)
         self.is_mbo_scan = (
-            isinstance(self.image_widget.data[0], ScanImageArray) or
-            isinstance(self.image_widget.data[0], TiffArray)
+            isinstance(underlying, ScanImageArray) or
+            isinstance(underlying, TiffArray)
         )
-        self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
+        self.logger.info(f"Data type: {type(first_arr).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
         # Initialize state
         self._init_state()
@@ -308,14 +311,13 @@ class PreviewDataWidget(EdgeWindow):
 
         self.logger.info(f"Detected nz={self.nz}, nc={self.nc}, n_views={self.n_views} from dims={dims}")
 
-        # Window/projection state
-        self._window_size = 1
-        self._gaussian_sigma = 0.0
-        self._auto_update = False
-        self._proj = "mean"
-        self._mean_subtraction = False
-        self._auto_contrast_on_z = False  # auto-reset contrast when z changes (toggle with 'c')
-        self._last_z_idx = 0
+        # Window/projection/contrast state — all per-data widget controls
+        # are reset by _reset_per_data_state. Also called on every reload
+        # in load_new_data, so initial-launch defaults and reload defaults
+        # never drift.
+        self._auto_update = False  # not data-specific, kept here
+        from mbo_utilities.gui._dialogs import _reset_per_data_state
+        _reset_per_data_state(self)
 
         # Registration state
         self._register_z = False
@@ -626,6 +628,13 @@ class PreviewDataWidget(EdgeWindow):
         if value != self._mean_subtraction:
             self._mean_subtraction = value
             self._update_mean_subtraction()
+            # one-shot vmin/vmax reset on toggle: the pixel scale changes
+            # dramatically when turning mean subtraction on/off, so without
+            # this the image would be unreadable until the user presses 'v'.
+            # subsequent z-slider movement does NOT reset — that path is
+            # gated on auto_contrast_on_z in the update loop.
+            if self.image_widget:
+                self.image_widget.reset_vmin_vmax_frame()
 
     @property
     def auto_contrast_on_z(self) -> bool:
@@ -727,11 +736,15 @@ class PreviewDataWidget(EdgeWindow):
         self._widgets = get_supported_widgets(self)
 
     def _update_mean_subtraction(self):
-        """Update spatial_func to apply mean subtraction."""
+        """Update spatial_func to apply mean subtraction.
+
+        does NOT reset vmin/vmax — callers that need a contrast reset
+        (e.g. the mean_subtraction setter on initial toggle) must do so
+        explicitly. this keeps per-z-plane rebuilds from silently
+        overriding the user's auto_contrast_on_z preference.
+        """
         self._rebuild_spatial_func()
         self._refresh_image_widget()
-        if self.image_widget:
-            self.image_widget.reset_vmin_vmax_frame()
 
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function."""
@@ -770,7 +783,10 @@ class PreviewDataWidget(EdgeWindow):
         ksize = (int(sigma * 6) | 1) if sigma else 0
 
         def spatial_func(frame):
-            result = frame
+            # fastplotlib passes the raw data object when n_slider_dims==0,
+            # which for our lazy arrays is not yet a numpy array.
+            # materialize first so arithmetic/ufuncs work.
+            result = np.asarray(frame)
             if mean_img is not None and result.ndim == 2:
                 # only subtract when frame is 2D (Y, X); skip if 3D since
                 # mean_img is z-specific and can't be applied to a full stack
@@ -890,9 +906,11 @@ class PreviewDataWidget(EdgeWindow):
 
         if z_idx != self._last_z_idx:
             self._last_z_idx = z_idx
+            # rebuild mean-sub (if active) and reset contrast (if auto) are
+            # independent concerns — both can apply on the same z change.
             if self._mean_subtraction:
                 self._update_mean_subtraction()
-            elif self._auto_contrast_on_z and self.image_widget:
+            if self._auto_contrast_on_z and self.image_widget:
                 self.image_widget.reset_vmin_vmax_frame()
 
     def draw_stats_section(self):
