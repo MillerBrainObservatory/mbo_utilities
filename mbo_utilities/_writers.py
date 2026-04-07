@@ -696,10 +696,14 @@ def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
         metadata = {}
 
     filename = Path(path).with_suffix(".h5")
+    # Default to "mov" — matches H5Array auto-detect, suite2p, caiman.
+    # Callers can override via the dataset_name kwarg flowing from imwrite.
+    dataset_name = kwargs.get("dataset_name") or "mov"
 
     if not hasattr(_write_h5, "_initialized"):
         _write_h5._initialized = {}
         _write_h5._offsets = {}
+        _write_h5._dataset_names = {}
 
     if filename not in _write_h5._initialized:
         nframes = metadata.get("num_frames")
@@ -708,7 +712,7 @@ def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
         h, w = data.shape[-2:]
         with h5py.File(filename, "w" if overwrite else "a") as f:
             f.create_dataset(
-                "mov",
+                dataset_name,
                 shape=(nframes, h, w),
                 maxshape=(None, h, w),
                 chunks=(1, h, w),
@@ -721,11 +725,16 @@ def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
 
         _write_h5._initialized[filename] = True
         _write_h5._offsets[filename] = 0
+        _write_h5._dataset_names[filename] = dataset_name
 
     offset = _write_h5._offsets[filename]
+    # use the dataset name registered on first write so chunked appends
+    # always target the same dataset, even if a later call passes a
+    # different (or no) dataset_name kwarg.
+    active_name = _write_h5._dataset_names[filename]
 
     with h5py.File(filename, "a") as f:
-        f["mov"][offset : offset + data.shape[0]] = data
+        f[active_name][offset : offset + data.shape[0]] = data
 
     _write_h5._offsets[filename] = offset + data.shape[0]
 
@@ -1788,6 +1797,7 @@ def _try_generic_writers(
     outpath: str | Path,
     overwrite: bool = True,
     metadata: dict | None = None,
+    dataset_name: str | None = None,
 ):
     import shutil
     import gc
@@ -1833,8 +1843,13 @@ def _try_generic_writers(
             photometric="minisblack",
         )
     elif outpath.suffix.lower() in {".h5", ".hdf5"}:
+        # Default to "mov" — matches the streaming `_write_h5` path,
+        # suite2p / caiman convention, and the auto-detect order in
+        # `H5Array.__init__` (mov → data → scan_corrections). Callers
+        # who need the legacy name can pass `dataset_name="data"`.
+        h5_dataset = dataset_name if dataset_name is not None else "mov"
         with h5py.File(outpath, "w" if overwrite else "a") as f:
-            f.create_dataset("data", data=data)
+            f.create_dataset(h5_dataset, data=data)
             if metadata:
                 for k, v in metadata.items():
                     f.attrs[k] = v if np.isscalar(v) else str(v)

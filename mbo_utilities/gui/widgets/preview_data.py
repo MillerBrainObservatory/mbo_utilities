@@ -603,8 +603,6 @@ class PreviewDataWidget(EdgeWindow):
         self._gaussian_sigma = max(0.0, value)
         self._rebuild_spatial_func()
         self._refresh_image_widget()
-        if self.image_widget:
-            self.image_widget.reset_vmin_vmax_frame()
 
     @property
     def proj(self) -> str:
@@ -628,13 +626,6 @@ class PreviewDataWidget(EdgeWindow):
         if value != self._mean_subtraction:
             self._mean_subtraction = value
             self._update_mean_subtraction()
-            # one-shot vmin/vmax reset on toggle: the pixel scale changes
-            # dramatically when turning mean subtraction on/off, so without
-            # this the image would be unreadable until the user presses 'v'.
-            # subsequent z-slider movement does NOT reset — that path is
-            # gated on auto_contrast_on_z in the update loop.
-            if self.image_widget:
-                self.image_widget.reset_vmin_vmax_frame()
 
     @property
     def auto_contrast_on_z(self) -> bool:
@@ -666,8 +657,6 @@ class PreviewDataWidget(EdgeWindow):
             return
         per_processor_sizes = (self._window_size,) + (None,) * (n_slider_dims - 1)
         self._set_processor_attr("window_sizes", per_processor_sizes)
-        if self.image_widget:
-            self.image_widget.reset_vmin_vmax_frame()
 
     @property
     def phase_upsample(self) -> int:
@@ -829,8 +818,6 @@ class PreviewDataWidget(EdgeWindow):
             window_funcs = (proj_func,) + (None,) * (n_slider_dims - 1)
 
         self._set_processor_attr("window_funcs", window_funcs)
-        if self.image_widget:
-            self.image_widget.reset_vmin_vmax_frame()
 
     def gui_progress_callback(self, frac, meta=None):
         """Handle progress callbacks from save operations."""

@@ -1701,6 +1701,17 @@ def run_process(self):
                     # invoking lbm_suite2p_python.pipeline so the user's
                     # z_step / dx / dy / fs reach ops.npy.
                     "custom_metadata": dict(getattr(self, "_custom_metadata", {})),
+                    # User's timepoint selection (0-based, full list).
+                    # The subprocess uses this with OutputMetadata to
+                    # reactively scale fs based on the timepoint stride.
+                    "tp_indices": (
+                        list(self._s2p_tp_parsed.final_indices)
+                        if getattr(self, "_s2p_tp_parsed", None) is not None
+                        else None
+                    ),
+                    # FULL list of selected planes (0-based) — for
+                    # reactive dz scaling via OutputMetadata.
+                    "selected_planes_0based": [p - 1 for p in sorted(selected_planes)],
                     "s2p_settings": {
                         "keep_raw": self.s2p.keep_raw,
                         "keep_reg": self.s2p.keep_reg,
@@ -1771,6 +1782,19 @@ def run_process(self):
             use_parallel = getattr(self, "_parallel_processing", False)
             max_jobs = getattr(self, "_max_parallel_jobs", 2)
 
+            # Snapshot the user's selections so the worker can rebuild
+            # the OutputMetadata reactive layer (fs/dz reactively scaled
+            # by the timepoint and z-plane stride). Without these, the
+            # worker would fall back to source values and the resulting
+            # ops.npy reports the wrong fs/dz when the user struds the
+            # selection.
+            tp_indices = (
+                list(self._s2p_tp_parsed.final_indices)
+                if getattr(self, "_s2p_tp_parsed", None) is not None
+                else None
+            )
+            selected_planes_0based = [p - 1 for p in sorted(selected_planes)]
+
             # Build list of configuration dicts for each job to completely decouple GUI state
             jobs = []
             for i, _arr in enumerate(self.image_widget.data):
@@ -1820,6 +1844,14 @@ def run_process(self):
                             # (often None for LBM, 1.0 default otherwise)
                             # ends up in ops.npy.
                             "custom_metadata": dict(getattr(self, "_custom_metadata", {})),
+                            # User's timepoint selection — 0-based final
+                            # indices from TimeSelection. None means all.
+                            "tp_indices": tp_indices,
+                            # FULL list of all selected planes (0-based)
+                            # — needed by OutputMetadata to compute the
+                            # z-step factor reactively, even though each
+                            # job processes only one plane at a time.
+                            "selected_planes_0based": selected_planes_0based,
                             "logger": self.logger
                         }
 
@@ -1915,9 +1947,8 @@ def _run_plane_worker_thread(config):
     lazy_mdata = getattr(arr, "metadata", {}).copy()
 
     # Merge GUI-set custom metadata (e.g. dz from the metadata editor)
-    # into lazy_mdata BEFORE computing voxel size, so vs.dz reflects the
-    # user's value rather than the source file's. Without this, the
-    # user's z_step never reaches ops.npy.
+    # into lazy_mdata BEFORE computing voxel size, so the OutputMetadata
+    # reactive layer sees the user's value rather than the source file's.
     custom_metadata = config.get("custom_metadata") or {}
     if custom_metadata:
         lazy_mdata.update(custom_metadata)
@@ -1925,30 +1956,82 @@ def _run_plane_worker_thread(config):
     Lx = arr.shape[-1]
     Ly = arr.shape[-2]
 
-    from mbo_utilities.metadata import get_param, get_voxel_size
+    from mbo_utilities.metadata import OutputMetadata, get_param
 
-    vs = get_voxel_size(lazy_mdata)
+    # Build the output metadata via the reactive layer. fs scales by
+    # the timepoint stride, dz scales by the z-plane stride, and every
+    # alias (num_timepoints/T/nt/...) gets updated consistently.
+    # Anything done by hand here would just re-introduce the kind of
+    # alias-drift bugs we just spent a week chasing.
+    tp_indices = config.get("tp_indices")
+    selected_planes_0based = config.get("selected_planes_0based")
 
-    md = {
-        "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "num_timepoints": config["target_timepoints"],
-        "num_frames": config["target_timepoints"],
-        "nframes": config["target_timepoints"],
-        "n_frames": config["target_timepoints"],
-        "original_file": config["fpath"],
-        "roi_index": arr_idx,
-        "z_index": current_z,
-        "plane": plane,
-        "Ly": Ly,
-        "Lx": Lx,
-        "fs": get_param(lazy_mdata, "fs", 15.0),
-        "dx": vs.dx,
-        "dy": vs.dy,
-        "dz": vs.dz,
-        "ops_path": str(ops_path),
-        "save_path": str(plane_dir),
-        "raw_file": str((plane_dir / "data_raw.bin").resolve()),
-    }
+    selections = {}
+    if tp_indices is not None:
+        selections["T"] = list(tp_indices)
+    if selected_planes_0based is not None:
+        selections["Z"] = list(selected_planes_0based)
+
+    # source shape/dims must come from the lazy array's 5D contract,
+    # not from arr.shape (which may be natural-rank for TiffArray).
+    source_shape = tuple(arr.shape5d) if hasattr(arr, "shape5d") else None
+    source_dims = ("T", "C", "Z", "Y", "X")
+
+    # Log raw source values BEFORE scaling — critical diagnostic when
+    # the user reports a wrong fs/dz in the output.
+    raw_src_fs = get_param(lazy_mdata, "fs")
+    raw_src_dz = get_param(lazy_mdata, "dz")
+    config["logger"].info(
+        f"_run_plane_worker_thread: source fs={raw_src_fs}, dz={raw_src_dz}, "
+        f"plane={plane}"
+    )
+
+    if raw_src_fs is None:
+        config["logger"].warning(
+            f"_run_plane_worker_thread: source metadata for plane {plane} has "
+            f"NO fs field — reactive scaling cannot compute the output rate. "
+            f"ops.npy fs will fall through to lbm_suite2p_python's default "
+            f"(10 Hz). To fix: set fs via the metadata editor before running, "
+            f"or fix the source TIFF metadata."
+        )
+
+    out_meta = OutputMetadata(
+        source=lazy_mdata,
+        source_shape=source_shape,
+        source_dims=source_dims,
+        selections=selections,
+    )
+
+    # to_dict() gives reactively-scaled fs/dz/dx/dy and consistent
+    # timepoint aliases. Add only the per-plane bookkeeping on top.
+    md = out_meta.to_dict()
+
+    # Strip fs/dz keys if they're None — otherwise `defaults.update(md)`
+    # below would clobber the lbm default with None, which then leaks
+    # into ops.npy as either None or write_ops's hardcoded fs=10
+    # fallback. Removing the key surfaces the missing-data signal
+    # explicitly to the user (they get None in ops.npy, not a fake 10).
+    for key in ("fs", "dz"):
+        if key in md and md[key] is None:
+            md.pop(key)
+
+    md["process_timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    md["original_file"] = config["fpath"]
+    md["roi_index"] = arr_idx
+    md["z_index"] = current_z
+    md["plane"] = plane
+    md["Ly"] = Ly
+    md["Lx"] = Lx
+    md["ops_path"] = str(ops_path)
+    md["save_path"] = str(plane_dir)
+    md["raw_file"] = str((plane_dir / "data_raw.bin").resolve())
+
+    config["logger"].info(
+        f"_run_plane_worker_thread: applied reactive metadata -> "
+        f"fs={md.get('fs')}, dz={md.get('dz')} "
+        f"(t-stride from {len(tp_indices) if tp_indices else 0} indices, "
+        f"z-stride from {len(selected_planes_0based) if selected_planes_0based else 0} planes)"
+    )
 
     from lbm_suite2p_python import default_ops
 
@@ -1957,24 +2040,22 @@ def _run_plane_worker_thread(config):
     defaults.update(ops)
     defaults.update(md)
 
-    defaults["shape"] = (config["target_timepoints"], Ly, Lx)
-    defaults["num_timepoints"] = config["target_timepoints"]
-    defaults["num_frames"] = config["target_timepoints"]
-    defaults["nframes"] = config["target_timepoints"]
-
     if channel is not None:
         defaults["functional_chan"] = 1
         defaults["align_by_chan"] = 1
 
-    lazy_mdata.pop("shape", None)
-    lazy_mdata.pop("num_timepoints", None)
-    lazy_mdata.pop("num_frames", None)
-    lazy_mdata.pop("nframes", None)
-    lazy_mdata.pop("n_frames", None)
-
     from mbo_utilities.writer import imwrite
 
     plane_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pass `frames=` (1-based) to imwrite when the user has a stride
+    # selection. Without this, only the COUNT was honored — the actual
+    # stride was silently dropped and ops.npy ended up with raw source
+    # fs even though the writer thought it was truncating.
+    if tp_indices:
+        frames_arg = [i + 1 for i in tp_indices]
+    else:
+        frames_arg = None
 
     imwrite(
         arr,
@@ -1987,7 +2068,8 @@ def _run_plane_worker_thread(config):
         output_name="data_raw.bin",
         roi=roi,
         metadata=defaults,
-        num_frames=config["target_timepoints"],
+        frames=frames_arg,
+        num_frames=config["target_timepoints"] if frames_arg is None else None,
         fix_phase=config["fix_phase"],
         use_fft=config["use_fft"],
     )

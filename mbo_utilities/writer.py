@@ -52,6 +52,7 @@ def imwrite(
     shift_vectors: np.ndarray | None = None,
     output_name: str | None = None,
     output_suffix: str | None = None,
+    dataset_name: str | None = None,
     **kwargs,
 ):
     """
@@ -152,6 +153,13 @@ def imwrite(
         for specific ROIs. Examples: "_stitched", "_processed", "_session1".
         The suffix is automatically sanitized (illegal characters removed, double
         extensions prevented, underscore prefix added if missing).
+
+    dataset_name : str, optional
+        Name of the HDF5 dataset to write under (only applies when writing
+        ``.h5`` / ``.hdf5``). Default is ``"mov"`` — matches suite2p / caiman
+        convention and the auto-detect order in :class:`H5Array`. Pass
+        ``"data"`` for the legacy mbo name, or any other key for custom
+        consumers. Ignored for non-h5 formats.
 
     **kwargs
         Additional format-specific options passed to writer backends.
@@ -365,6 +373,8 @@ def imwrite(
         write_kwargs = kwargs.copy()
         if num_frames is not None:
             write_kwargs["num_frames"] = num_frames
+        if dataset_name is not None:
+            write_kwargs["dataset_name"] = dataset_name
 
         result = lazy_array._imwrite(
             outpath,
@@ -388,6 +398,7 @@ def imwrite(
             lazy_array,
             outpath,
             overwrite=overwrite,
+            dataset_name=dataset_name,
         )
         result = outpath
 

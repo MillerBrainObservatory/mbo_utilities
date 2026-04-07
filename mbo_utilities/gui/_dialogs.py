@@ -204,10 +204,6 @@ def load_new_data(parent: Any, path: str):
         if isinstance(parent._viewer, TimeSeriesViewer):
             parent.refresh_zstats()
 
-        # Automatically reset vmin/vmax for initial view of new data
-        if parent.image_widget:
-            parent.image_widget.reset_vmin_vmax_frame()
-
     except Exception as e:
         parent.logger.exception(f"Error loading data: {e}")
         parent._load_status_msg = f"Error: {e!s}"

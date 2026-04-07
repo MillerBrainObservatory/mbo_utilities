@@ -347,14 +347,111 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
 
     # Merge GUI-set custom metadata (e.g. dz from the metadata editor)
     # into ops. The user explicitly set these in the editor, so they win
-    # over both ops defaults and the source file's voxel size — the
-    # latter would otherwise be picked up via lbm_suite2p_python's own
-    # source-file metadata fallback. Same merge semantics as the thread
-    # path in `pipelines/settings.py:_run_plane_worker_thread`.
+    # over both ops defaults and the source file's voxel size.
     custom_metadata = args.get("custom_metadata") or {}
     if custom_metadata:
         ops.update(custom_metadata)
         logger.info(f"Applied custom metadata to ops: {sorted(custom_metadata.keys())}")
+
+    # ALWAYS load source metadata and propagate fs/dz to ops, even when
+    # no stride selection is present. lbm's default_ops ships fs=10.0
+    # hardcoded, and that leaks into ops.npy unless we explicitly
+    # replace it with the source value here. This was the root cause of
+    # repeated "ops.npy fs=10 even though my source is 14Hz" reports.
+    from mbo_utilities.metadata import OutputMetadata, get_param
+
+    try:
+        _src_arr = imread(input_path)
+        src_meta = dict(getattr(_src_arr, "metadata", {}) or {})
+        src_shape = (
+            tuple(_src_arr.shape5d) if hasattr(_src_arr, "shape5d") else None
+        )
+    except Exception as e:
+        logger.warning(
+            f"task_suite2p: could not load source metadata for reactive "
+            f"fs/dz scaling: {e}. Falling back to ops defaults."
+        )
+        src_meta = {}
+        src_shape = None
+
+    # Carry over the user's editor metadata so it wins over the source.
+    if custom_metadata:
+        src_meta.update(custom_metadata)
+
+    raw_src_fs = get_param(src_meta, "fs") if src_meta else None
+    raw_src_dz = get_param(src_meta, "dz") if src_meta else None
+    logger.info(
+        f"task_suite2p: source fs={raw_src_fs}, dz={raw_src_dz}, "
+        f"input_path={input_path!r}"
+    )
+
+    if raw_src_fs is None:
+        logger.warning(
+            "task_suite2p: source metadata has NO fs field — "
+            "ops.npy fs will fall through to lbm_suite2p_python's default "
+            "(10 Hz). To fix: set fs via the metadata editor, or fix the "
+            "source TIFF metadata."
+        )
+    else:
+        # Pull the raw source fs into ops, replacing lbm's hardcoded 10.
+        # The reactive scaling block below may overwrite this with a
+        # stride-scaled value when tp_indices is non-None.
+        if ops.get("fs") in (None, 10.0):
+            ops["fs"] = float(raw_src_fs)
+            logger.info(f"task_suite2p: replaced lbm default fs=10 with source fs={raw_src_fs}")
+
+    # Same for dz — only override the lbm default, not a user-set value.
+    if raw_src_dz is not None:
+        if ops.get("dz") in (None, 1.0):
+            ops["dz"] = float(raw_src_dz)
+            logger.info(f"task_suite2p: pulled source dz={raw_src_dz} into ops")
+
+    # Reactively scale fs/dz via OutputMetadata when the user has a
+    # timepoint or z-plane stride selection. This block REPLACES the
+    # source values pulled above with stride-scaled versions when
+    # appropriate.
+    tp_indices = args.get("tp_indices")
+    selected_planes_0based = args.get("selected_planes_0based")
+    if tp_indices is not None or selected_planes_0based is not None:
+        if src_meta:
+            selections = {}
+            if tp_indices is not None:
+                selections["T"] = list(tp_indices)
+            if selected_planes_0based is not None:
+                selections["Z"] = list(selected_planes_0based)
+
+            out_meta = OutputMetadata(
+                source=src_meta,
+                source_shape=src_shape,
+                source_dims=("T", "C", "Z", "Y", "X"),
+                selections=selections,
+            )
+
+            scaled = out_meta.to_dict()
+            # Merge reactive values into ops:
+            # - When the scaled value is non-None, write it (the
+            #   normal path — source had the field, we scaled it).
+            # - When the scaled value IS None, EXPLICITLY remove the
+            #   key from ops so downstream code can't pick up a stale
+            #   default and pretend it's the answer. The user will see
+            #   None in ops.npy and immediately know something's wrong,
+            #   instead of silently getting fs=10.
+            for key in ("fs", "dz", "dx", "dy", "z_step",
+                        "umPerPixZ", "umPerPixX", "umPerPixY"):
+                if key in scaled and scaled[key] is not None:
+                    ops[key] = scaled[key]
+                elif key in ("fs", "dz") and key in ops:
+                    # only fs/dz get the strict "remove if missing"
+                    # treatment — the others have sensible 1.0 defaults
+                    # in get_voxel_size and aren't worth surfacing as
+                    # missing-data signals.
+                    ops.pop(key, None)
+            logger.info(
+                f"task_suite2p: applied reactive metadata -> "
+                f"fs={ops.get('fs')}, dz={ops.get('dz')} "
+                f"(t-stride from {len(tp_indices) if tp_indices else 0} indices, "
+                f"z-stride from {len(selected_planes_0based) if selected_planes_0based else 0} planes)"
+            )
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
