@@ -345,6 +345,17 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     ops = args.get("ops", {})
     s2p_settings = args.get("s2p_settings", {})
 
+    # Merge GUI-set custom metadata (e.g. dz from the metadata editor)
+    # into ops. The user explicitly set these in the editor, so they win
+    # over both ops defaults and the source file's voxel size — the
+    # latter would otherwise be picked up via lbm_suite2p_python's own
+    # source-file metadata fallback. Same merge semantics as the thread
+    # path in `pipelines/settings.py:_run_plane_worker_thread`.
+    custom_metadata = args.get("custom_metadata") or {}
+    if custom_metadata:
+        ops.update(custom_metadata)
+        logger.info(f"Applied custom metadata to ops: {sorted(custom_metadata.keys())}")
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # display name for logging
