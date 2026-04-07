@@ -1848,12 +1848,21 @@ def _try_generic_writers(
         with open(outpath, "wb") as f:
             arr.tofile(f)
 
-        # Write ops.npy alongside
+        # Write ops.npy alongside. All timepoint aliases must be set
+        # consistently from the actual chunk size; otherwise downstream
+        # readers see stale source values for keys we forgot to update.
         if metadata:
             ops = metadata.copy()
             ops["Ly"] = arr.shape[-2]
             ops["Lx"] = arr.shape[-1]
-            ops["nframes"] = arr.shape[0]
+            nt = arr.shape[0]
+            ops["nframes"] = nt
+            ops["num_frames"] = nt
+            ops["num_timepoints"] = nt
+            ops["n_frames"] = nt
+            ops["timepoints"] = nt
+            ops["T"] = nt
+            ops["nt"] = nt
             # Convert Path objects to strings for cross-platform compatibility
             np.save(outpath.parent / "ops.npy", _convert_paths_to_strings(ops))
     elif outpath.suffix.lower() == ".zarr":
@@ -2018,18 +2027,32 @@ def write_ops(metadata, raw_filename, **kwargs):
 
     ops["align_by_chan"] = chan
 
-    # Set top-level nframes to match the written channel
-    # This ensures consistency between nframes and nframes_chan1/chan2
+    # Set top-level frame-count fields consistently from `nt`. We
+    # protect these from the metadata-merge below to prevent stale
+    # source values from clobbering the truncated count, but that means
+    # we MUST set every alias here — otherwise they end up missing /
+    # None in ops.npy and downstream readers get inconsistent values.
     ops["nframes"] = nt
+    ops["num_frames"] = nt
+    ops["num_timepoints"] = nt
+    ops["n_frames"] = nt
+    ops["timepoints"] = nt
+    ops["T"] = nt
+    ops["nt"] = nt
 
     # Merge extra metadata, but DON'T overwrite fields we've already set consistently
     # This prevents inconsistency between resolution aliases and frame counts
     protected_keys = {
-        # Frame count fields
+        # Frame count fields — every alias is set explicitly above
         "nframes",
         "nframes_chan1",
         "nframes_chan2",
         "num_frames",
+        "num_timepoints",
+        "n_frames",
+        "timepoints",
+        "T",
+        "nt",
         # Resolution fields (we've already set these consistently)
         "dx",
         "dy",
