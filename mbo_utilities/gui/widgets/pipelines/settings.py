@@ -1695,6 +1695,12 @@ def run_process(self):
                     "fix_phase": self._s2p_fix_phase,
                     "use_fft": self._s2p_use_fft,
                     "channel": channel if (multi_channel or has_channels) else None,
+                    # User-set metadata from the GUI metadata editor
+                    # (lives on parent._custom_metadata, NOT on the source
+                    # file). The worker merges this into ops before
+                    # invoking lbm_suite2p_python.pipeline so the user's
+                    # z_step / dx / dy / fs reach ops.npy.
+                    "custom_metadata": dict(getattr(self, "_custom_metadata", {})),
                     "s2p_settings": {
                         "keep_raw": self.s2p.keep_raw,
                         "keep_reg": self.s2p.keep_reg,
@@ -1805,6 +1811,15 @@ def run_process(self):
                             "dff_smooth_window": dff_smooth_window,
                             "fix_phase": fix_phase,
                             "use_fft": use_fft,
+                            # User-set metadata (e.g. dz from the metadata
+                            # editor) lives on parent._custom_metadata, NOT
+                            # on arr.metadata. Snapshot it here so the
+                            # worker can merge it before computing voxel
+                            # size — otherwise the user's z_step is
+                            # silently dropped and the source-file dz
+                            # (often None for LBM, 1.0 default otherwise)
+                            # ends up in ops.npy.
+                            "custom_metadata": dict(getattr(self, "_custom_metadata", {})),
                             "logger": self.logger
                         }
 
@@ -1898,6 +1913,14 @@ def _run_plane_worker_thread(config):
 
     ops_path = plane_dir / "ops.npy"
     lazy_mdata = getattr(arr, "metadata", {}).copy()
+
+    # Merge GUI-set custom metadata (e.g. dz from the metadata editor)
+    # into lazy_mdata BEFORE computing voxel size, so vs.dz reflects the
+    # user's value rather than the source file's. Without this, the
+    # user's z_step never reaches ops.npy.
+    custom_metadata = config.get("custom_metadata") or {}
+    if custom_metadata:
+        lazy_mdata.update(custom_metadata)
 
     Lx = arr.shape[-1]
     Ly = arr.shape[-2]
