@@ -395,27 +395,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         self._target_dtype = np.dtype(dtype)
         return self
 
-    def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame."""
-        if not hasattr(self, "_cached_vmin"):
-            if self._is_volumetric:
-                frame = np.asarray(self[0, 0])
-            else:
-                frame = np.asarray(self[0])
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        """Min from first frame for display."""
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        """Max from first frame for display."""
-        self._compute_frame_vminmax()
-        return self._cached_vmax
+    # _compute_frame_vminmax / vmin / vmax inherited from ReductionMixin
 
     def __len__(self) -> int:
         return self._nframes

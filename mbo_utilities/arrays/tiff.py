@@ -1159,21 +1159,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
             self._target_dtype if self._target_dtype is not None else self._source_dtype
         )
 
-    def _compute_frame_vminmax(self):
-        if self._cached_vmin is None:
-            frame = self[0, 0]
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        self._compute_frame_vminmax()
-        return self._cached_vmax
+    # _compute_frame_vminmax / vmin / vmax inherited from ReductionMixin
 
     @property
     def metadata(self) -> dict:

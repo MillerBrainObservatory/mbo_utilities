@@ -131,24 +131,7 @@ class H5Array(ReductionMixin, Shape5DMixin):
         self._target_dtype = np.dtype(dtype)
         return self
 
-    def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame (frame 0, channel 0, plane 0)."""
-        if not hasattr(self, "_cached_vmin"):
-            frame = np.asarray(self[0, 0, 0])
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        """Min from first frame for display (avoids full data read)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        """Max from first frame for display (avoids full data read)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmax
+    # _compute_frame_vminmax / vmin / vmax inherited from ReductionMixin
 
     @property
     def num_planes(self) -> int:

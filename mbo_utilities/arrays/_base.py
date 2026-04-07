@@ -385,8 +385,11 @@ def _imwrite_base(
 
     md = _sanitize_metadata(md)
 
-    # Z is always at index 2 in 5D TCZYX
-    num_planes = arr.shape[2]
+    # Use the 5D-aware accessors so natural-rank arrays (e.g. TiffArray
+    # exposing 4D TZYX with C=1 dropped) don't pick up Y or X by accident.
+    # arr.shape[2] is Z under the 5D contract, but it's Y on a natural 4D
+    # TZYX array — that's the bug behind the volumetric .bin write crash.
+    num_planes = arr.shape5d[2]
     if planes is not None:
         if isinstance(planes, int):
             planes_list = [planes]
@@ -458,16 +461,17 @@ def _imwrite_base(
         return result
 
     # other formats: use per-plane streaming writer (bin, h5, npy)
-    # always 5D TCZYX
+    # always 5D TCZYX. Use shape5d so natural-rank arrays still report the
+    # correct T/Z sizes (arr.shape[0] is T for 4D, but Y for 2D natural).
     channel_index = None
     if channels_list is not None and len(channels_list) == 1:
         channel_index = channels_list[0] - 1  # 0-based
 
-    nframes = arr.shape[0]  # T
-    Ly, Lx = arr.shape[-2], arr.shape[-1]
+    nframes = arr.shape5d[0]  # T
+    Ly, Lx = arr.shape5d[3], arr.shape5d[4]
 
     # validate num_planes against Z dimension
-    actual_z_size = arr.shape[2]  # Z is always at index 2
+    actual_z_size = arr.shape5d[2]
     if num_planes > actual_z_size:
         num_planes = actual_z_size
 
@@ -493,11 +497,39 @@ def _imwrite_base(
 
     # get adjusted metadata dict with reactive dz/fs values
     md = out_meta.to_dict()
+
+    # Resolve the effective output timepoint count from three sources, in
+    # priority order:
+    #   1. explicit `frames=[...]` selection (out_meta.num_frames when
+    #      frame_indices were actually passed to OutputMetadata)
+    #   2. `num_frames=N` truncation kwarg (set via imwrite)
+    #   3. source frame count (last-resort fallback)
+    # Then propagate to EVERY timepoint alias so downstream readers see
+    # a consistent dict. Previously only num_timepoints/nframes/num_frames
+    # got updated, leaving T/nt/n_frames/timepoints at whatever
+    # OutputMetadata.to_dict computed (which is 1 when source_shape isn't
+    # passed) — that produced the "num_timepoints=1574 but nframes=700"
+    # inconsistency the user reported.
+    truncated_n = kwargs.get("num_frames")
+    has_frame_selection = bool(frame_indices_0)
+    if has_frame_selection and out_meta.num_frames is not None:
+        effective_nt = int(out_meta.num_frames)
+    elif truncated_n is not None and int(truncated_n) > 0:
+        effective_nt = int(truncated_n)
+    elif out_meta.num_frames is not None:
+        effective_nt = int(out_meta.num_frames)
+    else:
+        effective_nt = int(nframes)
+
     md["Ly"] = Ly
     md["Lx"] = Lx
-    md["num_timepoints"] = out_meta.num_frames or nframes
-    md["nframes"] = out_meta.num_frames or nframes
-    md["num_frames"] = out_meta.num_frames or nframes
+    md["num_timepoints"] = effective_nt
+    md["nframes"] = effective_nt
+    md["num_frames"] = effective_nt
+    md["n_frames"] = effective_nt
+    md["T"] = effective_nt
+    md["nt"] = effective_nt
+    md["timepoints"] = effective_nt
 
     # normalize planes to 0-indexed list for iteration
     planes_0idx = _normalize_planes(planes_list, num_planes)
@@ -589,37 +621,27 @@ class TiffReaderMixin:
     """
 
     _target_dtype = None
-    _cached_vmin = None
-    _cached_vmax = None
+    # _cached_vmin/_cached_vmax and vmin/vmax/_compute_frame_vminmax now
+    # live on ReductionMixin so every lazy array class gets them
+    # uniformly, not just TIFF readers.
 
     def astype(self, dtype, copy=True):
         """Set target dtype for lazy conversion on read."""
         self._target_dtype = np.dtype(dtype)
         return self
 
-    def _compute_frame_vminmax(self):
-        """Compute and cache vmin/vmax from first frame."""
-        if self._cached_vmin is None:
-            # always 5D: get first t, first c, first z → 2D (Y, X)
-            frame = np.asarray(self[0, 0, 0])
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        """Minimum value from first frame (cached)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        """Maximum value from first frame (cached)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmax
-
     def __array__(self, dtype=None, copy=None):
-        """Return first frame for fast preview (prevents accidental full load)."""
-        data = self[0]
+        """Return a representative frame (prevents accidental full load).
+
+        for 2D data the whole image IS the frame; self[0] would return
+        a single row. for 3D+ we take self[0] as the first slice along
+        the outer dim.
+        """
+        ndim = getattr(self, "ndim", None)
+        if ndim == 2:
+            data = np.asarray(self[:])
+        else:
+            data = np.asarray(self[0])
         if dtype is not None:
             data = data.astype(dtype)
         return data
@@ -702,6 +724,40 @@ class ReductionMixin:
     # prevent numpy/xarray from implicitly converting lazy arrays
     __array_ufunc__ = None
     __array_function__ = None
+
+    # display-range cache, populated lazily by _compute_frame_vminmax.
+    # lives here (not on TiffReaderMixin) because every lazy array class
+    # needs vmin/vmax for the viewer histogram and they all already inherit
+    # ReductionMixin. previously each non-tiff class re-implemented this
+    # locally and the copies drifted out of sync — that's how the zarr
+    # vminmax crash slipped in after the natural-rank refactor.
+    _cached_vmin = None
+    _cached_vmax = None
+
+    def _compute_frame_vminmax(self):
+        """Compute and cache vmin/vmax via __array__.
+
+        delegates to each subclass's __array__ so the result honors that
+        class's lazy-read strategy and reported rank. do NOT hardcode
+        index counts here (e.g. self[0,0,0]) — that breaks any class
+        whose __getitem__ doesn't tolerate over-long keys.
+        """
+        if self._cached_vmin is None:
+            frame = np.asarray(self)
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
+
+    @property
+    def vmin(self) -> float:
+        """Minimum value from a representative frame (cached)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmin
+
+    @property
+    def vmax(self) -> float:
+        """Maximum value from a representative frame (cached)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmax
 
     def _is_numpy_like(self) -> bool:
         """Check if this array can be reduced directly by numpy."""
