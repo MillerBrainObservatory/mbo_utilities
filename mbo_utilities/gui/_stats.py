@@ -28,28 +28,66 @@ def _has_time_dim(arr: Any) -> bool:
 
 
 def _load_subsampled(arr: Any, subsample: int = 10) -> np.ndarray:
-    """Load temporally subsampled data for stats.
+    """Load a stats buffer canonicalized to (T_sub, Z, Y, X).
 
-    Returns (T_sub, Z, Y, X) reading all z-planes at once to minimize IO.
-    Handles both 5D TCZYX arrays (uses channel 0) and 4D TZYX
-    (e.g. _SqueezeSingletonDims wrappers).
+    Uses arr.dims (if present) to identify the T, C, Z, Y, X axes and
+    builds an index that subsamples T, pins C=0, and keeps Z/Y/X. Then
+    inserts size-1 axes for any missing T or Z so the downstream stats
+    loop can always index `[:, z, :, :]` regardless of the input rank.
+
+    Falls back to positional TCZYX assumptions when dims is unavailable.
+
+    Handles every shape the readers produce:
+    - (Y, X)             → (1, 1, Y, X)
+    - (T, Y, X)          → (T_sub, 1, Y, X)
+    - (Z, Y, X)          → (1, Z, Y, X)           ← was crashing
+    - (T, Z, Y, X)       → (T_sub, Z, Y, X)
+    - (C, Z, Y, X)       → (1, Z, Y, X)           ← squeezed pollen etc.
+    - (T, C, Z, Y, X)    → (T_sub, Z, Y, X)
     """
     cache_key = f"_stats_cache_{subsample}"
     if hasattr(arr, cache_key):
         return getattr(arr, cache_key)
 
-    if len(arr.shape) == 5:
-        data = np.asarray(arr[::subsample, 0, :, :, :])  # (T_sub, Z, Y, X)
-    elif len(arr.shape) == 4:
-        data = np.asarray(arr[::subsample, :, :, :])  # (T_sub, Z, Y, X)
-    else:
-        data = np.asarray(arr[::subsample])
-        if data.ndim == 2:
-            data = data[np.newaxis, :, :]  # (1, Y, X)
+    dims_lower = tuple(d.lower() for d in (getattr(arr, "dims", None) or ()))
+    shape = arr.shape
 
-    # ensure at least 4D (T, Z, Y, X)
-    if data.ndim == 3:
-        data = data[:, np.newaxis, :, :]
+    if dims_lower and len(dims_lower) == len(shape):
+        # dim-aware: build index per-axis from labels
+        idx = []
+        for d in dims_lower:
+            if d == "t":
+                idx.append(slice(None, None, subsample))
+            elif d == "c":
+                idx.append(0)
+            else:
+                idx.append(slice(None))
+        data = np.asarray(arr[tuple(idx)])
+        has_t = "t" in dims_lower
+        has_z = "z" in dims_lower
+    else:
+        # fallback: positional TCZYX assumption by rank
+        ndim = len(shape)
+        if ndim == 5:
+            data = np.asarray(arr[::subsample, 0, :, :, :])
+            has_t, has_z = True, True
+        elif ndim == 4:
+            data = np.asarray(arr[::subsample, :, :, :])
+            has_t, has_z = True, True
+        elif ndim == 3:
+            data = np.asarray(arr[::subsample])
+            has_t, has_z = True, False
+        else:  # 2D or weird
+            data = np.asarray(arr)
+            has_t, has_z = False, False
+
+    # canonicalize to (T_sub, Z, Y, X) — remaining dims (post C-pin) are
+    # always a subset of (T, Z, Y, X) in that order, so insertions are
+    # positional: T at axis 0, Z at axis 1.
+    if not has_t:
+        data = data[np.newaxis, ...]
+    if not has_z:
+        data = data[:, np.newaxis, ...]
 
     try:
         setattr(arr, cache_key, data)

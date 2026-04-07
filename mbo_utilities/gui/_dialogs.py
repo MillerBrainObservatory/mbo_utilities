@@ -42,6 +42,37 @@ def check_file_dialogs(parent: Any):
         parent._folder_dialog = None
 
 
+def _reset_per_data_state(parent: Any) -> None:
+    """Clear per-dataset display/widget state that must not carry across loads.
+
+    Widget controls in the side panel bind to attributes on the parent
+    (e.g. `parent.gaussian_sigma`), not on the widget instance. The
+    widget objects themselves are reconstructed by `_refresh_widgets()`
+    on every load, but the bound parent attributes persist unless
+    explicitly cleared here. Without this, opening a new file leaves
+    the previous file's gaussian sigma, projection mode, window size,
+    auto-contrast toggle, and mean-subtraction checkbox in place.
+
+    Mirror the defaults in `PreviewDataWidget._init_state` so a reload
+    starts in the same state as initial launch.
+
+    Lives as a standalone helper so the reset contract can be
+    unit-tested without spinning up the full GUI module-load chain.
+    """
+    # spatial functions
+    parent._mean_subtraction = False
+    parent._gaussian_sigma = 0.0
+    # window functions
+    parent._proj = "mean"
+    parent._window_size = 1
+    # contrast / z-tracking
+    parent._auto_contrast_on_z = False
+    parent._last_z_idx = 0
+    # save-as dialog selections
+    parent._saveas_selected_roi = set()
+    parent._saveas_rois = False
+
+
 def load_new_data(parent: Any, path: str):
     """
     Load new data from the specified path using iw-array API.
@@ -49,6 +80,7 @@ def load_new_data(parent: Any, path: str):
     Uses iw.set_data() to swap data arrays, which handles shape changes.
     """
     from mbo_utilities.arrays import TiffArray
+    from mbo_utilities.gui.run_gui import _SqueezeSingletonDims
 
     path_obj = Path(path)
     if not path_obj.exists():
@@ -63,8 +95,25 @@ def load_new_data(parent: Any, path: str):
         parent._load_status_color = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
 
         parent.logger.debug(f"Calling imread on: {path}")
-        new_data = imread(path)
-        parent.logger.debug(f"imread returned: type={type(new_data).__name__}, shape={getattr(new_data, 'shape', 'N/A')}")
+        raw_data = imread(path)
+        parent.logger.debug(f"imread returned: type={type(raw_data).__name__}, shape={getattr(raw_data, 'shape', 'N/A')}")
+
+        # Apply the same singleton-dim squeeze that _create_image_widget
+        # uses on initial launch, so reload via file dialog produces the
+        # same natural-rank view. Without this, a 5D Suite2pArray (T,1,Z,Y,X)
+        # reload would expose Z at index 2 here, but at index 1 on initial
+        # launch — different code paths giving different shapes for the
+        # same file. Squeeze keeps them in lockstep.
+        if hasattr(raw_data, "shape") and len(raw_data.shape) == 5 and any(
+            raw_data.shape[i] == 1 for i in range(3)
+        ):
+            new_data = _SqueezeSingletonDims(raw_data)
+        else:
+            new_data = raw_data
+
+        # Reset stale per-data display state via the standalone helper
+        # so the reset contract can be tested in isolation.
+        _reset_per_data_state(parent)
 
         # Check if dimensionality is changing - if so, reset window functions
         # to avoid IndexError in fastplotlib's _apply_window_function
@@ -93,10 +142,13 @@ def load_new_data(parent: Any, path: str):
         parent.fpath = path
         parent.shape = new_data.shape
 
-        # Check if this is MBO data (ScanImage or volumetric TIFF)
+        # Check if this is MBO data (ScanImage or volumetric TIFF).
+        # Peel _SqueezeSingletonDims so the wrapper doesn't hide the
+        # underlying class from isinstance.
+        underlying = getattr(new_data, "_arr", new_data)
         parent.is_mbo_scan = (
-            isinstance(new_data, ScanImageArray) or
-            isinstance(new_data, TiffArray)
+            isinstance(underlying, ScanImageArray) or
+            isinstance(underlying, TiffArray)
         )
 
         # Suggest s2p output directory if not set
@@ -115,10 +167,6 @@ def load_new_data(parent: Any, path: str):
         else:
             parent.nz = 1
             parent.nc = 1
-
-        # Reset save dialog state for new data
-        parent._saveas_selected_roi = set()
-        parent._saveas_rois = False
 
         parent._load_status_msg = f"Loaded: {path_obj.name}"
         parent._load_status_color = imgui.ImVec4(0.3, 1.0, 0.3, 1.0)
