@@ -422,6 +422,22 @@ def _write_plane(
             out_shape = (ntime, H_out, W_out)
             shift_applied = True
             metadata[f"plane{plane_index}_shift"] = (iy, ix)
+            # valid region: intersection of every plane's shifted footprint
+            # within the padded canvas. lsp.run_plane reads these as
+            # `_pad_yrange`/`_pad_xrange` and uses them to clip cellpose
+            # detection to the area where ALL planes have real data —
+            # without them, cellpose segments spurious "cells" in the
+            # zero-padding regions above/below the valid image.
+            if all_plane_shifts is not None:
+                _ps = np.asarray(all_plane_shifts, dtype=int)
+                metadata["_pad_yrange"] = [
+                    int((pt + _ps[:, 0]).max()),
+                    int((pt + _ps[:, 0] + H0).min()),
+                ]
+                metadata["_pad_xrange"] = [
+                    int((pl + _ps[:, 1]).max()),
+                    int((pl + _ps[:, 1] + W0).min()),
+                ]
         else:
             raise ValueError("plane_index must be provided when using shift_vector")
 
@@ -493,6 +509,17 @@ def _write_plane(
         out_shape = (ntime, H_out, W_out)
         shift_applied = True
         metadata[f"plane{plane_index}_shift"] = (iy, ix)
+        # valid region — same calc as the shift_vector branch above. lsp
+        # consumes _pad_yrange/_pad_xrange to keep cellpose off the
+        # zero-padded borders.
+        metadata["_pad_yrange"] = [
+            int((pt + plane_shifts[:, 0]).max()),
+            int((pt + plane_shifts[:, 0] + H0).min()),
+        ]
+        metadata["_pad_xrange"] = [
+            int((pl + plane_shifts[:, 1]).max()),
+            int((pl + plane_shifts[:, 1] + W0).min()),
+        ]
         logger.debug(f"Applying shift for plane {plane_index}: y={iy}, x={ix}")
 
     if not shift_applied:
