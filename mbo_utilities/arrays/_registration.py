@@ -87,7 +87,7 @@ def validate_s3d_registration(s3d_job_dir: Path, num_planes: int | None = None) 
 
 
 def register_zplanes_s3d(
-    filenames, metadata, outpath=None, progress_callback=None
+    filenames, metadata, outpath=None, progress_callback=None, s3d_params=None
 ) -> Path | None:
     """
     Register z-planes using Suite3D.
@@ -100,16 +100,34 @@ def register_zplanes_s3d(
     filenames : list[Path]
         List of TIFF file paths to process.
     metadata : dict
-        Metadata dictionary containing:
-        - frame_rate : float (required)
-        - num_planes : int (required)
-        - tau : float (optional, default 1.3)
-        - lbm : bool (optional, default True)
-        - Other Suite3D parameters
+        Metadata dictionary. Required keys: ``frame_rate``, ``num_planes``.
+        Optional Suite3D tunables (any value here is overridden by an
+        explicit ``s3d_params`` entry of the same name):
+
+        - ``tau`` : float, default 1.3
+        - ``lbm`` : bool, default True
+        - ``init_n_frames`` : int, default 500 — frames pulled into the init pass
+        - ``n_init_files`` : int, default 1 — TIFFs read in parallel during init
+        - ``n_proc_corr`` : int, default 4 — multiprocessing workers used by
+          ``load_and_stitch_full_tif_mp``. each worker reserves a shared-memory
+          block sized to one tile; lower this if you hit Windows ``WinError 1455``
+          (commitment limit) or run out of RAM.
+        - ``max_rigid_shift_pix`` : int, default 150
+        - ``3d_reg`` : bool, default True
+        - ``gpu_reg`` : bool, default True
+        - ``block_size`` : list[int], default [64, 64]
+        - ``fuse_planes`` : bool, default False
+        - ``subtract_crosstalk`` : bool, default False
     outpath : Path, optional
         Output directory for Suite3D job. If None, creates directory next to input.
     progress_callback : callable, optional
         Progress callback function.
+    s3d_params : dict, optional
+        Explicit overrides for the Suite3D ``params`` dict, applied last so
+        they win over both metadata-derived values and built-in defaults.
+        Use this when calling from code that wants to set resource knobs
+        (e.g. ``{"n_proc_corr": 2, "init_n_frames": 200}``) without polluting
+        ``metadata``.
 
     Returns
     -------
@@ -166,6 +184,11 @@ def register_zplanes_s3d(
     job_id = metadata.get("job_id", "preprocessed")
 
     nplanes = get_param(metadata, "nplanes", default=1)
+    # default n_proc_corr lowered from 15 -> 4 to avoid Windows commit-limit
+    # blowups (WinError 1455). each worker reserves a tile-sized shared-memory
+    # block via mmap; on windows that always counts against the pagefile commit
+    # ceiling regardless of free ram. raise via metadata or s3d_params if you
+    # know your machine can handle it.
     params = {
         "fs": get_param(metadata, "fs"),
         "planes": np.arange(nplanes),
@@ -176,12 +199,21 @@ def register_zplanes_s3d(
         "subtract_crosstalk": metadata.get("subtract_crosstalk", False),
         "init_n_frames": metadata.get("init_n_frames", 500),
         "n_init_files": metadata.get("n_init_files", 1),
-        "n_proc_corr": metadata.get("n_proc_corr", 15),
+        "n_proc_corr": metadata.get("n_proc_corr", 4),
         "max_rigid_shift_pix": metadata.get("max_rigid_shift_pix", 150),
         "3d_reg": metadata.get("3d_reg", True),
         "gpu_reg": metadata.get("gpu_reg", True),
         "block_size": metadata.get("block_size", [64, 64]),
     }
+    # explicit s3d_params overrides win last so api callers can tune
+    # resource knobs without touching metadata.
+    if s3d_params:
+        params.update(s3d_params)
+    logger.info(
+        f"Suite3D init: n_proc_corr={params['n_proc_corr']} "
+        f"init_n_frames={params['init_n_frames']} "
+        f"n_init_files={params['n_init_files']}"
+    )
 
     if Job is None:
         logger.warning("Suite3D Job class not available.")

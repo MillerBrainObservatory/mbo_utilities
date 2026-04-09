@@ -1324,6 +1324,14 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
 
                 buf[idxs] = corrected
                 self._last_offset = offset
+                # store offset per (t, c, z) so the GUI can show the value for
+                # the *currently displayed* frame, not whatever was read last.
+                # without this, any background read (histogram subsampler,
+                # zstats worker, etc.) clobbers _last_offset and the displayed
+                # number drifts even when the user isn't scrubbing.
+                self._record_offset_for_pages(
+                    [pages[i] for i in idxs], float(offset)
+                )
                 _t1 = _t.perf_counter()
                 logger.debug(
                     f"phase_corr: offset={offset:.2f}, method={self.phasecorr_method}, "
@@ -1332,6 +1340,9 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
             else:
                 buf[idxs] = chunk
                 self._last_offset = 0.0
+                self._record_offset_for_pages(
+                    [pages[i] for i in idxs], 0.0
+                )
             start = end
 
         logger.debug(
@@ -1396,6 +1407,57 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                 out = out.astype(self._target_dtype)
 
         return out
+
+    def _record_offset_for_pages(self, page_indices, offset_value: float) -> None:
+        """Stamp `offset_value` against every (t, c, z) cell that maps to a
+        given list of global page indices.
+
+        Page index decomposition (mirrors `_read_pages`'s page formula
+        `f * num_channels + (c*nz + z)`):
+            f = p // num_channels
+            chan_encoded = p % num_channels
+            c = chan_encoded // num_zplanes
+            z = chan_encoded % num_zplanes
+
+        We cache per (t, c, z) so the GUI's scan-phase widget can show the
+        offset for the *currently displayed* frame, not the offset of
+        whatever happened to be read last by a background subsampler.
+        """
+        cache = getattr(self, "_offset_cache", None)
+        if cache is None:
+            cache = {}
+            self._offset_cache = cache
+        nch = self.num_channels
+        nz = max(1, self._num_zplanes)
+        for p in page_indices:
+            t = int(p) // nch
+            chan_encoded = int(p) % nch
+            c = chan_encoded // nz
+            z = chan_encoded % nz
+            cache[(t, c, z)] = float(offset_value)
+
+    def get_offset_at(self, t: int, c: int = 0, z: int = 0):
+        """Return the cached scan-phase offset for the (t, c, z) cell, or
+        None if it has not been computed yet.
+
+        This is the canonical accessor for "what's the offset for the frame
+        currently on screen" — never read `self._last_offset` for that, since
+        any background read clobbers it.
+        """
+        cache = getattr(self, "_offset_cache", None)
+        if cache is None:
+            return None
+        return cache.get((int(t), int(c), int(z)))
+
+    def _invalidate_offset_cache(self) -> None:
+        """Drop every cached offset.
+
+        Called when phase-correction settings (border, max_offset, upsample,
+        method, use_fft) change — those parameters affect the result of
+        bidir_phasecorr, so previously cached values are no longer valid.
+        """
+        if hasattr(self, "_offset_cache"):
+            self._offset_cache.clear()
 
     def process_rois(self, frames, chans):
         if self.roi is not None and isinstance(self.roi, int) and self.roi != 0:

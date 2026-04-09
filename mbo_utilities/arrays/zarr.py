@@ -400,60 +400,67 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
                 return np.array(idx)
             return idx
 
-        t_key = normalize(t_key)
-        y_key = normalize(y_key)
-        x_key = normalize(x_key)
-        z_key = normalize(z_key)
+        # convert int keys to slice-of-one for the underlying zarr read so the
+        # result preserves rank. integer-indexed axes get squeezed in a single
+        # pass at the end. this avoids the subtle axis-tracking bug where an
+        # int t_key removes T during the read, then the C-insert + 5D-indexed
+        # squeeze loop end up squeezing the wrong axis (e.g. Z=7) and crash
+        # with `cannot select an axis to squeeze out which has size != 1`.
+        def to_keep_slice(k):
+            if isinstance(k, (int, np.integer)):
+                k_int = int(k)
+                return slice(k_int, k_int + 1)
+            return normalize(k)
+
+        t_read = to_keep_slice(t_key)
+        z_read = to_keep_slice(z_key)
+        y_read = normalize(y_key)
+        x_read = normalize(x_key)
 
         # internal zarr stores are TZYX — read without C
         is_single_4d = len(self.zs) == 1 and len(self.zs[0].shape) == 4
 
         if is_single_4d:
-            out = self.zs[0][t_key, z_key, y_key, x_key]
+            out = self.zs[0][t_read, z_read, y_read, x_read]
         elif len(self.zs) == 1:
-            if isinstance(z_key, int):
-                if z_key != 0:
-                    raise IndexError("Z dimension has size 1, only index 0 is valid")
-                out = self.zs[0][t_key, y_key, x_key]
-            elif isinstance(z_key, slice):
-                data = self.zs[0][t_key, y_key, x_key]
-                z_axis = 0 if isinstance(t_key, (int, np.integer)) else 1
-                out = np.expand_dims(data, axis=z_axis)
-            else:
-                out = self.zs[0][t_key, y_key, x_key]
-        elif isinstance(z_key, int):
-            out = self.zs[z_key][t_key, y_key, x_key]
+            # 3D zarr with implicit Z=1
+            if isinstance(z_key, int) and z_key != 0:
+                raise IndexError("Z dimension has size 1, only index 0 is valid")
+            data = self.zs[0][t_read, y_read, x_read]
+            # data is (T, Y, X); insert Z at position 1 to match TZYX layout
+            out = np.expand_dims(data, axis=1)
+        elif isinstance(z_key, (int, np.integer)):
+            # one zarr file per plane: pick the right plane store
+            z_int = int(z_key)
+            data = self.zs[z_int][t_read, y_read, x_read]
+            # data is (T, Y, X); reinsert Z at position 1 as singleton
+            out = np.expand_dims(data, axis=1)
         else:
             if isinstance(z_key, slice):
                 z_indices = range(len(self.zs))[z_key]
             elif isinstance(z_key, (np.ndarray, list)):
-                z_indices = z_key
+                z_indices = list(z_key)
             else:
                 z_indices = range(len(self.zs))
-            arrs = [self.zs[i][t_key, y_key, x_key] for i in z_indices]
+            arrs = [self.zs[i][t_read, y_read, x_read] for i in z_indices]
             out = np.stack(arrs, axis=1)
 
-        # insert C=1 dimension — find correct axis position after T/Z squeeze
-        # out is currently TZYX (or subsets thereof). insert C after T.
-        if not isinstance(t_key, (int, np.integer)):
-            # T is kept, insert C at axis 1
-            c_axis = 1
-        else:
-            # T was squeezed, insert C at axis 0
-            c_axis = 0
-        out = np.expand_dims(out, axis=c_axis)
+        # at this point `out` is always 4D TZYX. insert C=1 at axis 1 so it
+        # matches the 5D contract advertised by `shape` / `ndim`.
+        out = np.expand_dims(out, axis=1)
 
-        # squeeze integer-indexed dimensions (in 5D order: T=0, C=1, Z=2)
+        # squeeze every axis the user passed as an integer, in 5D order
+        # (T=0, C=1, Z=2). every such axis is guaranteed size-1 here because
+        # we read with slice-of-one above (T, Z) or because C is always 1.
         squeeze_axes = []
-        if isinstance(key[0], (int, np.integer)):
+        if isinstance(t_key, (int, np.integer)):
             squeeze_axes.append(0)
-        if isinstance(key[1], (int, np.integer)):
+        if isinstance(c_key, (int, np.integer)):
             squeeze_axes.append(1)
-        if isinstance(key[2], (int, np.integer)):
+        if isinstance(z_key, (int, np.integer)):
             squeeze_axes.append(2)
         for ax in sorted(squeeze_axes, reverse=True):
-            if ax < out.ndim:
-                out = np.squeeze(out, axis=ax)
+            out = np.squeeze(out, axis=ax)
 
         if self._target_dtype is not None:
             out = out.astype(self._target_dtype)

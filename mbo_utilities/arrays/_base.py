@@ -442,6 +442,8 @@ def _imwrite_base(
         output_suffix = kwargs.pop("output_suffix", None)
         sharded = kwargs.pop("sharded", True)
         compression_level = kwargs.pop("compression_level", 1)
+        compressor = kwargs.pop("compressor", "gzip")
+        shuffle = kwargs.pop("shuffle", None)
         result = _write_volumetric_zarr(
             arr,
             outpath,
@@ -457,10 +459,41 @@ def _imwrite_base(
             output_suffix=output_suffix,
             sharded=sharded,
             compression_level=compression_level,
+            compressor=compressor,
+            shuffle=shuffle,
         )
         return result
 
-    # other formats: use per-plane streaming writer (bin, h5, npy)
+    # h5: single-file volumetric writer (matches zarr behavior — one file
+    # for the whole volume rather than the per-plane streaming output of
+    # the legacy `_write_plane` path).
+    if ext_clean in ("h5", "hdf5"):
+        from mbo_utilities._writers import _write_volumetric_h5
+
+        output_suffix = kwargs.pop("output_suffix", None)
+        dataset_name = kwargs.pop("dataset_name", None) or "mov"
+        h5_compression = kwargs.pop("compression", "gzip")
+        h5_compression_level = kwargs.pop("compression_level", 1)
+        result = _write_volumetric_h5(
+            arr,
+            outpath,
+            metadata=md,
+            planes=planes_list,
+            frames=frames_list,
+            channels=channels_list,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            show_progress=show_progress,
+            debug=debug,
+            output_suffix=output_suffix,
+            dataset_name=dataset_name,
+            compression=h5_compression,
+            compression_level=h5_compression_level,
+        )
+        return result
+
+    # other formats: use per-plane streaming writer (bin, npy)
     # always 5D TCZYX. Use shape5d so natural-rank arrays still report the
     # correct T/Z sizes (arr.shape[0] is T for 4D, but Y for 2D natural).
     channel_index = None
@@ -521,8 +554,13 @@ def _imwrite_base(
     else:
         effective_nt = int(nframes)
 
-    md["Ly"] = Ly
-    md["Lx"] = Lx
+    # Ly/Lx are already carried through by OutputMetadata.to_dict's
+    # setdefault path — either the caller pre-set padded dims (axial
+    # shift case) or to_dict filled in the raw shape as a default. Do
+    # NOT stamp them again here: that was overwriting the padded values
+    # lsp.run_plane puts into metadata for suite2p binary writes, which
+    # caused ops.npy to record the raw spatial shape while the binary
+    # itself was written at the padded shape.
     md["num_timepoints"] = effective_nt
     md["nframes"] = effective_nt
     md["num_frames"] = effective_nt
