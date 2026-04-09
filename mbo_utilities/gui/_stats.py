@@ -130,6 +130,66 @@ def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
     return [0], "z"
 
 
+def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 200) -> np.ndarray:
+    """Read a single z-plane subsampled in T, capped at `max_samples` frames.
+
+    This is the per-plane equivalent of `_load_subsampled` and is used by
+    the stats compute loop so progress reports as each plane finishes
+    rather than blocking on one giant bulk read of the whole stack. The
+    per-plane budget keeps the network read bounded regardless of how
+    many timepoints the recording has — without it, an N-thousand-frame
+    LBM dataset on a slow share would pull tens of GB over the wire and
+    leave the progress bar pinned at 0% for the duration.
+
+    Returns a (T_sub, Y, X) stack of float32 ready for stats math.
+    """
+    dims_lower = tuple(d.lower() for d in (getattr(arr, "dims", None) or ()))
+    shape = arr.shape
+    has_dims = bool(dims_lower) and len(dims_lower) == len(shape)
+
+    # find T axis size to compute the dynamic stride
+    if has_dims and "t" in dims_lower:
+        t_axis = dims_lower.index("t")
+        n_t = int(shape[t_axis])
+    elif has_dims:
+        n_t = 1
+    else:
+        # positional fallback: assume axis 0 is T for ndim >= 3
+        n_t = int(shape[0]) if len(shape) >= 3 else 1
+
+    stride = max(1, n_t // max(1, max_samples))
+
+    if has_dims:
+        idx = []
+        for d in dims_lower:
+            if d == "t":
+                idx.append(slice(None, None, stride))
+            elif d == "c":
+                idx.append(0)
+            elif d == "z":
+                idx.append(int(z))
+            else:
+                idx.append(slice(None))
+        data = np.asarray(arr[tuple(idx)])
+    else:
+        # positional 5D TCZYX or 4D TZYX assumption
+        ndim = len(shape)
+        if ndim == 5:
+            data = np.asarray(arr[::stride, 0, int(z), :, :])
+        elif ndim == 4:
+            data = np.asarray(arr[::stride, int(z), :, :])
+        elif ndim == 3:
+            data = np.asarray(arr[::stride])
+        else:
+            data = np.asarray(arr)
+
+    # we may end up with (T, Y, X) or (Y, X) depending on how many indexed
+    # dims got squeezed. coerce to 3D so the caller can always axis-0 reduce.
+    if data.ndim == 2:
+        data = data[np.newaxis, ...]
+    return data.astype(np.float32, copy=False)
+
+
 def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     """Compute slice-stats (z-plane or channel) for a single array."""
     # Check for pre-computed stats in zarr metadata (instant loading)
@@ -142,13 +202,19 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     if pre_stats is not None:
         stats = pre_stats
         parent._zstats[idx - 1] = stats
-        # Still need to compute mean images for visualization
+        # Still need to compute mean images for visualization. read per
+        # plane so progress reports as each one finishes — same per-plane
+        # capped read the compute path uses below.
         means = []
         slice_range, slice_label = _get_slice_range(parent, arr)
         n_slices = len(slice_range)
-        subsampled = _load_subsampled(arr, subsample=10)
+        # nudge to a non-zero value so the progress bar shows "started"
+        # before the first plane finishes (the first read can take a
+        # while on a slow share even with the per-plane cap).
+        parent._zstats_progress[idx - 1] = 0.01
         for i, s in enumerate(slice_range):
-            mean_img = np.mean(subsampled[:, s, :, :].astype(np.float32), axis=0)
+            stack = _read_plane_subsampled(arr, z=s, max_samples=200)
+            mean_img = np.mean(stack, axis=0)
             means.append(mean_img)
             parent._zstats_progress[idx - 1] = (i + 1) / n_slices
             parent._zstats_current_z[idx - 1] = s
@@ -167,11 +233,20 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     n_slices = len(slice_range)
     stats["slice_label"] = slice_label
 
-    # bulk-load subsampled data once (T_sub, Z, Y, X), then slice per plane
-    subsampled = _load_subsampled(arr, subsample=10)
+    # nudge progress so the bar shows we've started before the first
+    # plane finishes — on a network share the first read can take tens
+    # of seconds and the user otherwise sees a stuck 0%.
+    parent._zstats_progress[idx - 1] = 0.01
 
+    # read each z-plane independently with a capped sample count. this
+    # used to be a single bulk `_load_subsampled` call that pulled every
+    # 10th frame across ALL planes at once — fine for a few-thousand
+    # frame LBM file, catastrophic for a 388-file network dataset where
+    # the bulk read is tens of GB. per-plane reads keep total bytes
+    # bounded (max_samples * n_planes * Y * X) and let the progress
+    # callback tick once per plane.
     for i, s in enumerate(slice_range):
-        stack = subsampled[:, s, :, :].astype(np.float32)
+        stack = _read_plane_subsampled(arr, z=s, max_samples=200)
 
         mean_img = np.mean(stack, axis=0)
         std_img = np.std(stack, axis=0)

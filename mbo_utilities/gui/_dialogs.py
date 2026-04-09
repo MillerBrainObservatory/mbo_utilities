@@ -115,16 +115,16 @@ def load_new_data(parent: Any, path: str):
         # so the reset contract can be tested in isolation.
         _reset_per_data_state(parent)
 
-        # Check if dimensionality is changing - if so, reset window functions
-        # to avoid IndexError in fastplotlib's _apply_window_function
-        old_ndim = 0
-        if hasattr(parent, "shape") and parent.shape and isinstance(parent.shape, tuple):
-            old_ndim = len(parent.shape)
-        new_ndim = new_data.ndim
-
-        # Reset window functions on processors if dimensionality changes
-        # This prevents tuple index out of range errors when going 3D->4D or vice versa
-        if old_ndim != new_ndim:
+        # Drop stale closures *before* swapping data. The processor's
+        # spatial_func is a closure that captured the previous dataset's
+        # mean_img, so the next render after data[0] = new_data would crash
+        # if the new shape differs. _reset_per_data_state already cleared
+        # _mean_subtraction and _gaussian_sigma, so _rebuild_spatial_func
+        # will install the identity passthrough. Window funcs/sizes get
+        # cleared too since they're bound to the old t-rank.
+        if hasattr(parent, "_rebuild_spatial_func"):
+            parent._rebuild_spatial_func()
+        if hasattr(parent, "image_widget") and parent.image_widget is not None:
             for proc in parent.image_widget._image_processors:
                 proc.window_funcs = None
                 proc.window_sizes = None

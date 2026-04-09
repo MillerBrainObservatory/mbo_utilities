@@ -20,6 +20,7 @@ from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY, parse_time
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities.gui._imgui_helpers import set_tooltip, checkbox_with_tooltip, draw_checkbox_grid
 from mbo_utilities.gui._availability import HAS_SUITE3D
+from mbo_utilities.install import cupy_install_hint
 from mbo_utilities.gui._selection_ui import draw_selection_table
 from mbo_utilities.gui._metadata_editor import _check_missing_metadata, draw_metadata_editor_content
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
@@ -207,6 +208,23 @@ def draw_saveas_popup(parent: Any):
                 _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_SUPPORTED_FTYPES)
                 parent._ext = MBO_SUPPORTED_FTYPES[parent._ext_idx]
 
+                # H5-specific: let the user pick the internal dataset name.
+                # only meaningful when saving .h5. uses the same 2-arg
+                # input_text idiom as the rest of the dialog — passing a
+                # third positional arg gets interpreted as imgui flags,
+                # not a buffer size, which silently mangles the value.
+                if parent._ext == ".h5":
+                    imgui.set_next_item_width(hello_imgui.em_size(25))
+                    _, parent._h5_dataset_name = imgui.input_text(
+                        "H5 dataset name", parent._h5_dataset_name
+                    )
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip(
+                            "Path to the dataset inside the .h5 file. "
+                            "'mov' is the H5Array auto-detect default; "
+                            "use whatever your downstream tool expects."
+                        )
+
                 imgui.spacing()
                 imgui.separator()
 
@@ -331,7 +349,19 @@ def _draw_options_popup(parent: Any):
             imgui.begin_tooltip()
             imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
             if not HAS_SUITE3D:
-                imgui.text_unformatted("suite3d is not installed. Install with: pip install suite3d")
+                # most common cause: cupy missing or built for the wrong cuda
+                # major. surface the recommended uv pip install line so the
+                # user can fix it without leaving the gui.
+                imgui.text_unformatted(
+                    "Suite3D registration unavailable. The most common cause "
+                    "is that CuPy is not installed or doesn't match your CUDA "
+                    "driver. Try:"
+                )
+                imgui.text_unformatted(f"  {cupy_install_hint()}")
+                imgui.text_unformatted(
+                    "Then restart the GUI. See dependencies popup on the "
+                    "start screen for details."
+                )
             elif parent.nz <= 1:
                 imgui.text_unformatted("Requires multi-plane (4D) data with more than one z-plane.")
             else:
@@ -340,6 +370,50 @@ def _draw_options_popup(parent: Any):
             imgui.end_tooltip()
         if not features.get("z_registration", False):
             imgui.end_disabled()
+
+        # suite3d resource knobs — only relevant when z-registration is on.
+        # n_proc_corr is the big one: each worker reserves a tile-sized
+        # shared-memory block, and on windows that always counts against the
+        # pagefile commit limit even when ram is free. dialing this down
+        # avoids WinError 1455 on machines with modest pagefiles.
+        if features.get("z_registration", False) and parent._register_z:
+            imgui.indent(16)
+            imgui.text_colored(
+                imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Suite3D resources"
+            )
+            imgui.set_next_item_width(80)
+            _changed, _val = imgui.input_int(
+                "Workers (n_proc_corr)", parent._s3d_n_proc_corr, 1, 4
+            )
+            if _changed:
+                parent._s3d_n_proc_corr = max(1, _val)
+            set_tooltip(
+                "Multiprocessing workers for the TIFF load+stitch pass.\n"
+                "Each worker reserves a tile-sized shared-memory block.\n"
+                "Lower this if you hit WinError 1455 (commitment limit) "
+                "or run out of RAM. Default 4."
+            )
+
+            imgui.set_next_item_width(80)
+            _changed, _val = imgui.input_int(
+                "Init frames", parent._s3d_init_n_frames, 50, 500
+            )
+            if _changed:
+                parent._s3d_init_n_frames = max(50, _val)
+            set_tooltip(
+                "Frames pulled into the Suite3D init pass. Lower = less RAM."
+            )
+
+            imgui.set_next_item_width(80)
+            _changed, _val = imgui.input_int(
+                "Init files", parent._s3d_n_init_files, 1, 1
+            )
+            if _changed:
+                parent._s3d_n_init_files = max(1, _val)
+            set_tooltip(
+                "Number of TIFFs read in parallel during init. Default 1."
+            )
+            imgui.unindent(16)
 
         # Phase correction: only show if data supports it
         # uses separate _saveas_* settings (default True) instead of display settings
@@ -904,6 +978,10 @@ def _draw_save_button(parent: Any):
                     "phase_upsample": parent.phase_upsample,
                     "border": parent.border,
                     "register_z": parent._register_z,
+                    # suite3d resource knobs — only meaningful when register_z=True
+                    "s3d_n_proc_corr": parent._s3d_n_proc_corr,
+                    "s3d_init_n_frames": parent._s3d_init_n_frames,
+                    "s3d_n_init_files": parent._s3d_n_init_files,
                     "mean_subtraction": parent.mean_subtraction,
                     "progress_callback": lambda frac,
                     current_plane: parent.gui_progress_callback(frac, current_plane),
@@ -921,6 +999,10 @@ def _draw_save_button(parent: Any):
                     if parent._zarr_pyramid:
                         save_kwargs["pyramid_max_layers"] = parent._zarr_pyramid_max_layers
                         save_kwargs["pyramid_method"] = parent._zarr_pyramid_method
+
+                # H5-specific: dataset name (default "mov" for suite2p compat)
+                if parent._ext == ".h5":
+                    save_kwargs["dataset_name"] = parent._h5_dataset_name
 
                 n_frames = len(frames) if frames else max_timepoints
                 # build frames message from parsed selection
@@ -960,6 +1042,10 @@ def _draw_save_button(parent: Any):
                         "fix_phase": parent._saveas_fix_phase,
                         "use_fft": parent._saveas_use_fft,
                         "register_z": parent._register_z,
+                        # suite3d resource knobs picked up by task_save_as
+                        "s3d_n_proc_corr": parent._s3d_n_proc_corr,
+                        "s3d_init_n_frames": parent._s3d_init_n_frames,
+                        "s3d_n_init_files": parent._s3d_n_init_files,
                         "metadata": metadata_overrides if metadata_overrides else {},
                         "kwargs": {
                             "sharded": parent._zarr_sharded if parent._ext == ".zarr" else False,
@@ -968,6 +1054,8 @@ def _draw_save_button(parent: Any):
                             "pyramid": parent._zarr_pyramid if parent._ext == ".zarr" else False,
                             "pyramid_max_layers": parent._zarr_pyramid_max_layers if parent._ext == ".zarr" and parent._zarr_pyramid else 4,
                             "pyramid_method": parent._zarr_pyramid_method if parent._ext == ".zarr" and parent._zarr_pyramid else "mean",
+                            # h5: dataset name inside the .h5 file (default "mov")
+                            **({"dataset_name": parent._h5_dataset_name} if parent._ext == ".h5" else {}),
                         }
                     }
                     pid = pm.spawn(
