@@ -13,7 +13,7 @@ from mbo_utilities.preferences import (
     set_last_dir,
     add_recent_file,
 )
-from mbo_utilities.install import check_installation, Status
+from mbo_utilities.install import check_installation, cupy_install_hint, Status
 
 # re-export for backwards compatibility
 setup_imgui = _setup.setup_imgui
@@ -407,6 +407,39 @@ class FileDialog:
                 "Suite3D",
                 [("CuPy", "CuPy")]
             )
+
+            # cupy install hint when suite3d/cupy is unhealthy. the most common
+            # cause is the wrong cupy wheel for the installed cuda driver, so
+            # show the recommended `uv pip install cupy-cudaXXx` command.
+            cupy_feat = self._get_feature("CuPy")
+            suite3d_feat = self._get_feature("Suite3D")
+            cupy_unhealthy = (
+                cupy_feat is None
+                or cupy_feat.status in (Status.MISSING, Status.ERROR)
+            )
+            suite3d_unhealthy = (
+                suite3d_feat is not None
+                and suite3d_feat.status in (Status.MISSING, Status.ERROR)
+            )
+            if cupy_unhealthy or suite3d_unhealthy:
+                driver_cuda = None
+                if self._install_status is not None:
+                    driver_cuda = self._install_status.cuda_info.driver_version
+                hint = cupy_install_hint(driver_cuda)
+                imgui.indent(hello_imgui.em_size(0.6))
+                imgui.text_colored(COL_TEXT_DIM, "Common fix:")
+                imgui.same_line()
+                imgui.text_colored(COL_ACCENT, hint)
+                imgui.same_line()
+                push_button_style(primary=False)
+                if imgui.small_button(f"{fa.ICON_FA_COPY}##cupy_hint"):
+                    imgui.set_clipboard_text(hint)
+                pop_button_style()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Copy command to clipboard")
+                if cupy_feat is not None and cupy_feat.message:
+                    imgui.text_colored(COL_TEXT_DIM, cupy_feat.message)
+                imgui.unindent(hello_imgui.em_size(0.6))
 
             # rastermap
             rastermap = self._get_feature("Rastermap")
