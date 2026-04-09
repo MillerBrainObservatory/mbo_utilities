@@ -503,9 +503,14 @@ class OutputMetadata:
         # update shape
         result["shape"] = self.output_shape
 
-        # update spatial dimensions (always reactive)
-        result["Lx"] = self.Lx
-        result["Ly"] = self.Ly
+        # fill spatial dimensions only when the source doesn't already
+        # carry them. upstream writers (e.g. suite3d axial-shift bin
+        # writes) pre-compute padded Ly/Lx and put them in the source
+        # dict before calling us — clobbering those with the raw
+        # output_shape derivation was corrupting ops.npy, making suite2p
+        # miscount frames in the padded binary.
+        result.setdefault("Lx", self.Lx)
+        result.setdefault("Ly", self.Ly)
 
         # update with computed voxel size
         vs = self.voxel_size
