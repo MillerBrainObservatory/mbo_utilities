@@ -157,6 +157,19 @@ def imread(
         if not p.exists():
             raise ValueError(f"Input path does not exist: {p}")
 
+        # if the user (or a file dialog) handed us a path inside a .zarr v3
+        # store, redirect to the store root. file pickers default to selecting
+        # the inner zarr.json/zgroup.json/zarray rather than the .zarr folder
+        # itself, and that previously failed with "no supported files".
+        if not p.is_dir():
+            for ancestor in p.parents:
+                if ancestor.suffix.lower() == ".zarr" and ancestor.is_dir():
+                    logger.debug(
+                        f"Redirecting {p.name} -> parent zarr store {ancestor}"
+                    )
+                    p = ancestor
+                    break
+
         if p.suffix.lower() == ".zarr" and p.is_dir():
             paths = [p]
         elif p.is_dir():

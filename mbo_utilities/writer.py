@@ -117,7 +117,13 @@ def imwrite(
         Number of frames to export. If None (default), exports all frames.
 
     register_z : bool, default=False
-        Perform z-plane registration using Suite3D before writing.
+        Perform z-plane registration using Suite3D before writing. Resource
+        knobs for the Suite3D init pass can be tuned via the kwargs
+        ``s3d_n_proc_corr`` (default 4), ``s3d_init_n_frames`` (default 500),
+        ``s3d_n_init_files`` (default 1), or by passing a single
+        ``s3d_params={...}`` dict. Lower ``s3d_n_proc_corr`` if you hit
+        Windows ``WinError 1455`` (commitment limit) — each worker reserves
+        a tile-sized shared-memory block.
 
     shift_vectors : np.ndarray, optional
         Pre-computed z-shift vectors with shape (n_planes, 2) for [dy, dx] shifts.
@@ -269,6 +275,16 @@ def imwrite(
         with contextlib.suppress(AttributeError):
             lazy_array.metadata = file_metadata
 
+    # collect explicit suite3d resource overrides from kwargs. callers can
+    # pass either a single `s3d_params` dict, or individual `s3d_<key>` args
+    # (e.g. from the gui save-as dialog) — both styles are merged here.
+    s3d_params: dict = dict(kwargs.pop("s3d_params", {}) or {})
+    for _k in ("n_proc_corr", "init_n_frames", "n_init_files",
+               "max_rigid_shift_pix"):
+        _v = kwargs.pop(f"s3d_{_k}", None)
+        if _v is not None:
+            s3d_params[_k] = _v
+
     s3d_job_dir = None
     if register_z:
         file_metadata["apply_shift"] = True
@@ -315,6 +331,7 @@ def imwrite(
                     metadata=file_metadata,
                     outpath=outpath,
                     progress_callback=progress_callback,
+                    s3d_params=s3d_params or None,
                 )
 
                 if s3d_job_dir:

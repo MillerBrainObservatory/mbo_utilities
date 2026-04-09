@@ -400,7 +400,21 @@ def _write_plane(
         apply_shift = True
         if plane_index is not None:
             iy, ix = map(int, shift_vector)
-            pt, pb, pl, pr = compute_pad_from_shifts([shift_vector])
+            # CRITICAL: padding must be global across every plane in the
+            # volume, not computed from the single plane's shift. Using
+            # only `[shift_vector]` gives each plane a different H_out /
+            # W_out, which means each .bin has a different row stride.
+            # Suite2p then reads later planes at the wrong byte offsets
+            # (the classic "angled rows" artifact). lsp.run_plane passes
+            # the full shifts table via `all_plane_shifts` for exactly
+            # this reason — consume it here if present, and only fall
+            # back to the single-plane list when the caller genuinely
+            # has nothing else (single-plane writes).
+            all_plane_shifts = kwargs.get("all_plane_shifts")
+            if all_plane_shifts is not None:
+                pt, pb, pl, pr = compute_pad_from_shifts(all_plane_shifts)
+            else:
+                pt, pb, pl, pr = compute_pad_from_shifts([shift_vector])
             H_out = H0 + pt + pb
             W_out = W0 + pl + pr
             yy = slice(pt + iy, pt + iy + H0)
@@ -1151,8 +1165,19 @@ def _write_volumetric_tiff(
             chunk_data = np.ascontiguousarray(chunk_data)
 
             if apply_shift and plane_shifts is not None:
-                for c in range(chunk_data.shape[2]):
-                    chunk_data[:, :, c, :, :] = apply_shifts_to_chunk(
+                # apply_shifts_to_chunk returns a (T, Z, Ly_out, Lx_out)
+                # buffer at the PADDED spatial dims; we cannot assign
+                # back into chunk_data[:, :, c, :, :] because that slice
+                # is still at the raw (Ly, Lx). Allocate the padded
+                # 5D destination once and fill per channel — same
+                # reassignment pattern the zarr writer uses, lifted to
+                # 5D so the C axis survives.
+                n_t, n_z, n_c = chunk_data.shape[:3]
+                padded = np.zeros(
+                    (n_t, n_z, n_c, Ly_out, Lx_out), dtype=chunk_data.dtype
+                )
+                for c in range(n_c):
+                    padded[:, :, c, :, :] = apply_shifts_to_chunk(
                         chunk_data[:, :, c, :, :],
                         plane_shifts,
                         z_indices,
@@ -1160,6 +1185,7 @@ def _write_volumetric_tiff(
                         Ly_out,
                         Lx_out,
                     )
+                chunk_data = padded
 
             chunk_5d = chunk_data  # (T, Z, C, Y, X)
 
@@ -1222,6 +1248,249 @@ def _write_volumetric_tiff(
     return filename
 
 
+def _write_volumetric_h5(
+    data,
+    path: Path,
+    metadata: dict | None = None,
+    planes: list | None = None,
+    frames: list | None = None,
+    channels: list | None = None,
+    overwrite: bool = True,
+    target_chunk_mb: int = 50,
+    progress_callback=None,
+    show_progress: bool = True,
+    debug: bool = False,
+    output_suffix: str | None = None,
+    dataset_name: str = "mov",
+    compression: str | None = "gzip",
+    compression_level: int = 1,
+):
+    """Write volumetric TZYX data into a single HDF5 file.
+
+    This is the h5 analogue of `_write_volumetric_zarr`. Previously, h5
+    output went through the per-plane streaming writer (`_write_plane`),
+    which produced one `.h5` file per z-plane (`zplane01_stack.h5`,
+    `zplane03_stack.h5`, ...). That mismatched zarr's behaviour, where the
+    full volume lives in a single store. This writer puts everything into
+    one `.h5` with a 4D `(T, Z, Y, X)` dataset under `dataset_name`,
+    matching what mbo's H5Array reader expects on the read side.
+
+    parameters
+    ----------
+    data : array-like
+        Source array. The 5D TCZYX shape is read via `read_chunk`; the
+        singleton C dim is dropped before writing (h5 dataset is 4D).
+    path : Path
+        Output directory. Filename is auto-generated from dim tags.
+    metadata : dict | None
+        Imaging metadata; serializable values land on the file's
+        root attrs and on the dataset attrs.
+    planes, frames, channels : list | None
+        1-based selections that subset the source on the way out.
+    overwrite : bool
+        Replace existing file rather than failing.
+    target_chunk_mb : int
+        Sizing hint for the streaming read loop. Each h5 chunk on disk
+        is fixed at one frame `(1, Z, Y, X)` for fast random access.
+    dataset_name : str
+        H5 dataset name (default 'mov' — same default as `_write_h5`
+        and what mbo's H5Array reader auto-detects). Pass via the
+        save-as dialog's H5 dataset-name field.
+    compression : str | None
+        H5 compression filter ('gzip', 'lzf', or None).
+    compression_level : int
+        Gzip level 0-9 (ignored for lzf/None).
+    """
+    import h5py
+    from mbo_utilities.arrays.features import (
+        OutputFilename,
+        ArraySlicing,
+        read_chunk,
+        get_dims,
+    )
+    from mbo_utilities.metadata import OutputMetadata
+
+    if metadata is None:
+        metadata = {}
+
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+
+    # build selections dict for ArraySlicing — same idiom as the zarr writer
+    selections = {}
+    if frames is not None:
+        selections["T"] = [frames] if isinstance(frames, int) else frames
+    if planes is not None:
+        selections["Z"] = [planes] if isinstance(planes, int) else planes
+    if channels is not None:
+        selections["C"] = [channels] if isinstance(channels, int) else channels
+
+    slicing = ArraySlicing.from_array(data, selections=selections, one_based=True)
+
+    suffix = output_suffix if output_suffix else "stack"
+    output_fn = OutputFilename.from_array(
+        data, planes=planes, frames=frames, channels=channels, suffix=suffix
+    )
+    filename = path / output_fn.build(".h5")
+
+    if filename.exists() and not overwrite:
+        logger.warning(f"File {filename} exists and overwrite=False. Skipping.")
+        return filename
+    if filename.exists():
+        filename.unlink()
+
+    # target shape after selection — same n_channels==1 enforcement as zarr
+    n_frames = slicing.selections["T"].count if "T" in slicing.selections else 1
+    n_planes = slicing.selections["Z"].count if "Z" in slicing.selections else 1
+    n_channels = slicing.selections["C"].count if "C" in slicing.selections else 1
+    if n_channels != 1:
+        raise NotImplementedError(
+            f"_write_volumetric_h5 writes 4D TZYX and only supports a single "
+            f"channel; got n_channels={n_channels}. Select one channel via the "
+            f"`channels` kwarg."
+        )
+
+    Ly, Lx = slicing.spatial_shape
+
+    # check for z-registration shift application (shared with zarr/_write_plane)
+    apply_shift, plane_shifts, padding = load_registration_shifts(metadata, debug)
+    pt, pb, pl, pr = padding
+
+    if apply_shift and plane_shifts is not None:
+        Ly_out = int(Ly) + int(pt) + int(pb)
+        Lx_out = int(Lx) + int(pl) + int(pr)
+    else:
+        Ly_out, Lx_out = int(Ly), int(Lx)
+    n_frames = int(n_frames)
+    n_planes = int(n_planes)
+
+    target_shape = (n_frames, n_planes, Ly_out, Lx_out)
+
+    # update metadata using OutputMetadata for reactive dz/fs values
+    source_dims = get_dims(data)
+    output_selections: dict[str, list[int]] = {}
+    if "T" in slicing.selections:
+        output_selections["T"] = list(slicing.selections["T"].indices)
+    if "Z" in slicing.selections:
+        output_selections["Z"] = list(slicing.selections["Z"].indices)
+    if "C" in slicing.selections:
+        output_selections["C"] = list(slicing.selections["C"].indices)
+
+    out_meta = OutputMetadata(
+        source=metadata or {},
+        source_shape=data.shape,
+        source_dims=source_dims,
+        selections=output_selections,
+    )
+
+    md = out_meta.to_dict()
+    md["shape"] = target_shape
+    md["dataset_name"] = dataset_name
+    md["dims"] = ("T", "Z", "Y", "X")
+    if apply_shift and plane_shifts is not None:
+        md["padded_shape"] = (Ly_out, Lx_out)
+        md["original_shape"] = (Ly, Lx)
+
+    if debug:
+        logger.info(f"Writing volumetric h5: {filename}")
+        logger.info(f"  Shape: {target_shape} (TZYX)")
+        logger.info(f"  Dataset: /{dataset_name}")
+        logger.info(
+            f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}"
+        )
+        if apply_shift:
+            logger.info(f"  Z-registration: padding=({pt}, {pb}, {pl}, {pr})")
+
+    # h5 chunking — one frame per chunk so any (t, z, y, x) read pulls
+    # exactly its plane's worth of bytes off disk. matches the zarr
+    # `inner_chunk = (1, n_planes, Ly_out, Lx_out)` decision.
+    inner_chunk = (1, n_planes, Ly_out, Lx_out)
+
+    # h5 compression knobs
+    h5_compression = None
+    h5_compression_opts = None
+    if compression is not None and compression_level > 0:
+        if compression.lower() == "gzip":
+            h5_compression = "gzip"
+            h5_compression_opts = int(compression_level)
+        elif compression.lower() == "lzf":
+            h5_compression = "lzf"
+        else:
+            logger.warning(
+                f"Unknown h5 compression '{compression}'; falling back to none."
+            )
+
+    z_indices = (
+        slicing.selections["Z"].indices
+        if "Z" in slicing.selections
+        else list(range(n_planes))
+    )
+
+    pbar = None
+    if show_progress:
+        pbar = tqdm(total=n_frames, desc="Writing H5", unit="frames")
+
+    try:
+        with h5py.File(filename, "w") as f:
+            dset = f.create_dataset(
+                dataset_name,
+                shape=target_shape,
+                maxshape=(None, n_planes, Ly_out, Lx_out),
+                chunks=inner_chunk,
+                dtype=data.dtype,
+                compression=h5_compression,
+                compression_opts=h5_compression_opts,
+            )
+
+            # serialize metadata onto root attrs. h5 doesn't accept None or
+            # arbitrary Python objects so coerce to scalar where possible
+            # and stringify everything else; skip None entirely.
+            serializable_md = _make_json_serializable(md)
+            for k, v in serializable_md.items():
+                if v is None:
+                    continue
+                try:
+                    f.attrs[k] = v if np.isscalar(v) else str(v)
+                except (TypeError, ValueError):
+                    f.attrs[k] = str(v)
+            dset.attrs["dims"] = ["T", "Z", "Y", "X"]
+
+            t_offset = 0
+            for chunk_info in slicing.iter_chunks(
+                chunk_dim="T", target_mb=target_chunk_mb
+            ):
+                chunk_data = read_chunk(data, chunk_info, slicing.dims)
+                # squeeze singleton C — h5 dataset is 4D TZYX
+                if chunk_data.ndim == 5:
+                    chunk_data = chunk_data[:, 0, :, :, :]
+                chunk_data = np.ascontiguousarray(chunk_data)
+
+                if apply_shift and plane_shifts is not None:
+                    chunk_data = apply_shifts_to_chunk(
+                        chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out
+                    )
+
+                t_start = t_offset
+                t_end = t_start + chunk_data.shape[0]
+                dset[t_start:t_end, :, :, :] = chunk_data
+                t_offset = t_end
+
+                if pbar:
+                    pbar.update(chunk_data.shape[0])
+                if progress_callback:
+                    progress_callback(chunk_info.progress)
+    finally:
+        if pbar:
+            pbar.close()
+
+    if debug:
+        logger.info(
+            f"Wrote {filename} ({filename.stat().st_size / 1e9:.2f} GB)"
+        )
+
+    return filename
+
+
 def _write_volumetric_zarr(
     data,
     path: Path,
@@ -1237,6 +1506,8 @@ def _write_volumetric_zarr(
     output_suffix: str | None = None,
     sharded: bool = True,
     compression_level: int = 1,
+    compressor: str = "gzip",
+    shuffle: str | None = None,
     pyramid: bool = False,
     pyramid_max_layers: int = 4,
     pyramid_method: str = "mean",
@@ -1273,7 +1544,11 @@ def _write_volumetric_zarr(
     sharded : bool
         use zarr v3 sharding codec
     compression_level : int
-        gzip compression level (0=none, 1-9)
+        compression level. meaning depends on `compressor`:
+        gzip: 0=none, 1-9. zstd: 1-22. blosc: 1-9. ignored for "none".
+    compressor : str
+        compression codec. one of "none", "gzip", "zstd", "blosc-lz4",
+        "blosc-zstd". default "gzip".
     pyramid : bool
         generate multi-resolution pyramid (default False).
         enables napari multiscale viewing and faster navigation.
@@ -1286,6 +1561,36 @@ def _write_volumetric_zarr(
     """
     import zarr
     from zarr.codecs import BytesCodec, GzipCodec, ShardingCodec, Crc32cCodec
+
+    def _build_inner_codecs(name: str, level: int, shuffle: str | None = None) -> list:
+        # build the codec chain that sits inside a shard (or replaces the
+        # whole chain when sharded=False). bytescodec is always the first
+        # stage; compressor is appended unless name == "none".
+        # `shuffle` only applies to blosc-* and must be one of
+        # "noshuffle", "shuffle", "bitshuffle", or None (= blosc default).
+        name = (name or "none").lower()
+        if name == "none" or level == 0:
+            return [BytesCodec()]
+        if name == "gzip":
+            return [BytesCodec(), GzipCodec(level=level)]
+        if name == "zstd":
+            from zarr.codecs import ZstdCodec
+            return [BytesCodec(), ZstdCodec(level=level)]
+        if name in ("blosc-lz4", "blosc-zstd"):
+            from zarr.codecs import BloscCodec
+            cname = "lz4" if name == "blosc-lz4" else "zstd"
+            blosc_kwargs = {
+                "cname": cname,
+                "clevel": level,
+                "typesize": np.dtype(data.dtype).itemsize,
+            }
+            if shuffle is not None:
+                blosc_kwargs["shuffle"] = shuffle
+            return [BytesCodec(), BloscCodec(**blosc_kwargs)]
+        raise ValueError(
+            f"unknown compressor {name!r}; expected one of "
+            "'none', 'gzip', 'zstd', 'blosc-lz4', 'blosc-zstd'"
+        )
 
     from mbo_utilities.arrays.features import (
         OutputFilename,
@@ -1338,18 +1643,31 @@ def _write_volumetric_zarr(
     # get target shape after selection
     n_frames = slicing.selections["T"].count if "T" in slicing.selections else 1
     n_planes = slicing.selections["Z"].count if "Z" in slicing.selections else 1
+    n_channels = slicing.selections["C"].count if "C" in slicing.selections else 1
+    if n_channels != 1:
+        raise NotImplementedError(
+            f"_write_volumetric_zarr writes 4D TZYX and only supports a single "
+            f"channel; got n_channels={n_channels}. Select one channel via the "
+            f"`channels` kwarg."
+        )
     Ly, Lx = slicing.spatial_shape
 
     # check for z-registration shift application (shared logic)
     apply_shift, plane_shifts, padding = load_registration_shifts(metadata, debug)
     pt, pb, pl, pr = padding
 
-    # compute padded output dimensions if shifts are applied
+    # compute padded output dimensions if shifts are applied. coerce to plain
+    # python int — `slicing.spatial_shape` returns np.int from `arr.shape`, and
+    # `padding` from `compute_pad_from_shifts` is np.int as well. zarr v3's
+    # `parse_shapelike` rejects np.int64 with a TypeError, so we normalize here
+    # and use the cleaned values for every downstream tuple.
     if apply_shift and plane_shifts is not None:
-        Ly_out = Ly + pt + pb
-        Lx_out = Lx + pl + pr
+        Ly_out = int(Ly) + int(pt) + int(pb)
+        Lx_out = int(Lx) + int(pl) + int(pr)
     else:
-        Ly_out, Lx_out = Ly, Lx
+        Ly_out, Lx_out = int(Ly), int(Lx)
+    n_frames = int(n_frames)
+    n_planes = int(n_planes)
 
     target_shape = (n_frames, n_planes, Ly_out, Lx_out)
 
@@ -1404,10 +1722,7 @@ def _write_volumetric_zarr(
     inner_chunk = (1, n_planes, Ly_out, Lx_out)
 
     # build codec chain
-    if compression_level == 0:
-        inner_codecs = [BytesCodec()]
-    else:
-        inner_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+    inner_codecs = _build_inner_codecs(compressor, compression_level, shuffle=shuffle)
 
     if sharded:
         # shard size: multiple frames per shard for efficient sequential reads
@@ -1543,39 +1858,44 @@ def _write_volumetric_zarr(
     )
 
     # iterate over chunks using unified slicing
-    for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
-        # read chunk using unified reader
-        chunk_data = read_chunk(data, chunk_info, slicing.dims)
+    try:
+        for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
+            # read chunk using unified reader (returns 5D TCZYX)
+            chunk_data = read_chunk(data, chunk_info, slicing.dims)
 
-        # ensure contiguous for efficient writes
-        chunk_data = np.ascontiguousarray(chunk_data)
+            # squeeze singleton C — zarr target is 4D TZYX (n_channels==1 enforced above)
+            if chunk_data.ndim == 5:
+                chunk_data = chunk_data[:, 0, :, :, :]
 
-        # apply z-registration shifts if enabled (shared logic)
-        if apply_shift and plane_shifts is not None:
-            chunk_data = apply_shifts_to_chunk(
-                chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out
-            )
+            # ensure contiguous for efficient writes
+            chunk_data = np.ascontiguousarray(chunk_data)
 
-        # get the output T range for this chunk
-        t_start = t_offset
-        t_end = t_start + chunk_data.shape[0]
+            # apply z-registration shifts if enabled (shared logic)
+            if apply_shift and plane_shifts is not None:
+                chunk_data = apply_shifts_to_chunk(
+                    chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out
+                )
 
-        # write to zarr level 0
-        z[t_start:t_end, :, :, :] = chunk_data
+            # get the output T range for this chunk
+            t_start = t_offset
+            t_end = t_start + chunk_data.shape[0]
 
-        # update offset
-        t_offset = t_end
+            # write to zarr level 0
+            z[t_start:t_end, :, :, :] = chunk_data
 
+            # update offset
+            t_offset = t_end
+
+            if pbar:
+                pbar.update(chunk_data.shape[0])
+
+            if progress_callback:
+                progress_callback(
+                    chunk_info.progress / (len(pyramid_levels) if pyramid_levels else 1)
+                )
+    finally:
         if pbar:
-            pbar.update(chunk_data.shape[0])
-
-        if progress_callback:
-            progress_callback(
-                chunk_info.progress / (len(pyramid_levels) if pyramid_levels else 1)
-            )
-
-    if pbar:
-        pbar.close()
+            pbar.close()
 
     # generate pyramid levels from level 0 data
     if pyramid_levels and len(pyramid_levels) > 1:
@@ -1609,10 +1929,7 @@ def _write_volumetric_zarr(
             )
 
             # create array for this level (simpler codec for smaller levels)
-            if compression_level == 0:
-                lvl_codecs = [BytesCodec()]
-            else:
-                lvl_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+            lvl_codecs = _build_inner_codecs(compressor, compression_level, shuffle=shuffle)
 
             lvl_z = zarr.create(
                 store=root.store,

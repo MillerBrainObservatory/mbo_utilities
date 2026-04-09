@@ -325,6 +325,12 @@ class PreviewDataWidget(EdgeWindow):
         self._register_z_done = False
         self._register_z_running = False
         self._register_z_current_msg = ""
+        # suite3d resource knobs (None = use library default). exposed in the
+        # save-as options popup so users hitting WinError 1455 / OOM can
+        # dial back parallelism without editing source.
+        self._s3d_n_proc_corr = 4
+        self._s3d_init_n_frames = 500
+        self._s3d_n_init_files = 1
 
         # Selection state
         self._selected_pipelines = None
@@ -385,6 +391,12 @@ class PreviewDataWidget(EdgeWindow):
         self._zarr_pyramid = False
         self._zarr_pyramid_max_layers = 4
         self._zarr_pyramid_method = "mean"
+
+        # H5 options
+        # dataset name inside the .h5 file. suite2p reads from "mov" by
+        # default and lbm_suite2p_python expects the same; only change this
+        # if you're targeting a downstream tool that wants something else.
+        self._h5_dataset_name = "mov"
 
         # Save dialog state
         self._saveas_popup_open = False
@@ -473,19 +485,47 @@ class PreviewDataWidget(EdgeWindow):
 
     @property
     def current_offset(self) -> list[float]:
-        """Get current phase offset from each data array."""
+        """Scan-phase offset of the *currently displayed* frame, per graphic.
+
+        Reads from each array's per-(t, c, z) offset cache via
+        `arr.get_offset_at(t, c, z)` rather than `arr.offset`. The latter
+        returns `_last_offset`, which is global mutable state clobbered by
+        every read on the array — including background reads from histogram
+        subsamplers and zstats workers — so it drifts even when the user
+        isn't scrubbing. The cached lookup, by contrast, is keyed to the
+        exact (t, c, z) cell on screen, so the displayed value only changes
+        when the user actually moves a slider.
+        """
+        # current displayed indices, defaulting to 0 when a slider is absent
+        # (e.g. T-only data has no z slider, so we report z=0).
+        indices = {}
+        if self.image_widget is not None:
+            try:
+                names = self.image_widget._slider_dim_names or ()
+                for name in names:
+                    try:
+                        indices[name] = int(self.image_widget.indices[name])
+                    except (KeyError, IndexError, TypeError):
+                        pass
+            except Exception:
+                pass
+        t_idx = indices.get("t", 0)
+        c_idx = indices.get("c", 0)
+        z_idx = indices.get("z", 0)
+
         offsets = []
         for arr in self._get_data_arrays():
-            if hasattr(arr, "offset"):
-                arr_offset = arr.offset
-                if arr_offset is None:
-                    offsets.append(0.0)
-                elif isinstance(arr_offset, np.ndarray):
-                    offsets.append(float(arr_offset.mean()) if arr_offset.size > 0 else 0.0)
-                else:
-                    offsets.append(float(arr_offset))
-            else:
+            value = None
+            getter = getattr(arr, "get_offset_at", None)
+            if callable(getter):
+                value = getter(t_idx, c_idx, z_idx)
+            if value is None:
+                # cache miss (frame hasn't been read yet under current
+                # settings) or array doesn't expose the per-frame cache —
+                # leave the display at 0.0 rather than showing stale state.
                 offsets.append(0.0)
+            else:
+                offsets.append(float(value))
         return offsets
 
     @property

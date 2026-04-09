@@ -202,11 +202,22 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
         combined_meta = getattr(arr, "metadata", {}).copy()
         combined_meta.update(metadata)
 
+        # collect explicit suite3d resource knobs from the task args. these
+        # let the gui (or any caller) override the n_proc_corr / init-pass
+        # defaults that otherwise blow past windows commit limits on big tiles.
+        s3d_params: dict = {}
+        for key in ("n_proc_corr", "init_n_frames", "n_init_files",
+                    "max_rigid_shift_pix"):
+            val = args.get(f"s3d_{key}")
+            if val is not None:
+                s3d_params[key] = val
+
         # Helper to bridge progress callback
         def _reg_cb(progress, msg=""):
              monitor.update(0.05 + 0.05 * progress, f"Registration: {msg}")
 
         s3d_job_dir = None
+        reg_error: Exception | None = None
         num_planes = get_param(combined_meta, "nplanes") or getattr(arr, "num_planes", 1)
 
         # Determine directory for registration outputs
@@ -228,36 +239,83 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
                  if not filenames and hasattr(arr, "_files"):
                      filenames = arr._files
 
-                 if filenames:
+                 if not filenames:
+                     reg_error = RuntimeError(
+                         "Cannot run Z-registration: array has no source filenames."
+                     )
+                 else:
                      s3d_job_dir = register_zplanes_s3d(
                          filenames=filenames,
                          metadata=combined_meta,
                          outpath=reg_out_dir,
                          progress_callback=_reg_cb,
+                         s3d_params=s3d_params or None,
                      )
+                     if s3d_job_dir is None:
+                         # register_zplanes_s3d returns None when Suite3D or CuPy
+                         # is missing, or when required metadata is absent. it
+                         # already logged the specific reason; surface that
+                         # message in the exception so the gui can show it.
+                         reg_error = RuntimeError(
+                             "Suite3D registration could not run. Check the log "
+                             "for the specific reason (commonly: CuPy or Suite3D "
+                             "is not installed). Install with "
+                             "`pip install mbo_utilities[suite3d, cuda12]` or "
+                             "uncheck Z-registration to proceed without it."
+                         )
              except Exception as e:
-                 logger.exception(f"Registration failed: {e}")
+                 reg_error = e
 
         if s3d_job_dir and validate_s3d_registration(s3d_job_dir, num_planes):
             metadata["apply_shift"] = True
             metadata["s3d-job"] = str(s3d_job_dir)
             monitor.update(0.1, "Z-registration ready.")
         else:
-            logger.warning("Registration failed or invalid. Proceeding without shift.")
-            metadata["apply_shift"] = False
+            # the user explicitly asked for z-registration; do not silently fall
+            # through to an unregistered write. fail loudly so the gui surfaces
+            # the error and the user knows their setting was not honored.
+            if reg_error is None:
+                reg_error = RuntimeError(
+                    "Suite3D registration failed validation. Check the log for "
+                    "details, or uncheck Z-registration to proceed without it."
+                )
+            logger.error(f"Z-registration aborted: {reg_error}")
+            raise reg_error
 
     monitor.update(0.1, f"Saving to {output_path.name}...")
 
-    # Define progress callback for imwrite
+    # Define progress callback for imwrite. Multiple writers in mbo call
+    # this with different conventions:
+    #   - cb(fraction)                 — _writers.py per-chunk
+    #   - cb(current, total)           — generic per-frame writers
+    #   - cb(1.0, "Complete")          — _imwrite_base completion sentinel
+    # so we have to peek at `total` to figure out which form we got. If
+    # `total` is numeric, treat as (current, total) progress; otherwise
+    # treat it as a message override.
     def _progress_cb(current, total=None, **kwargs):
+        msg = "Writing..."
         if total is None:
-            # Called from _writers.py with progress fraction as first arg
-            p = 0.1 + 0.9 * float(current)
-            msg = "Writing..."
-        else:
-            # Called from generic writer with (current, total)
-            p = 0.1 + 0.9 * (current / min(total, 1)) if total > 0 else 0.5
+            # fraction-only form
+            try:
+                p = 0.1 + 0.9 * float(current)
+            except (TypeError, ValueError):
+                p = 0.5
+        elif isinstance(total, (int, float)) and not isinstance(total, bool):
+            # (current, total) form — guard against div-by-zero by clamping
+            # the divisor to >= 1 (max, not min — the previous code used
+            # min(total,1) which always returns 1 for total>=1 and made the
+            # division a no-op).
+            denom = max(float(total), 1.0)
+            p = 0.1 + 0.9 * (float(current) / denom)
             msg = f"Writing frame {current}/{total}"
+        else:
+            # second positional arg is a string (e.g. "Complete") — treat
+            # `current` as a fraction and `total` as the status message.
+            try:
+                p = 0.1 + 0.9 * float(current)
+            except (TypeError, ValueError):
+                p = 1.0
+            msg = str(total)
 
         # throttle updates to avoid IO thrashing
         monitor.update(p, msg)
@@ -469,6 +527,103 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     logger.info(f"Input: {input_path}")
     logger.info(f"Output: {output_dir}")
     logger.info(f"Planes: {planes}")
+
+    # axial registration: locate (or run) the suite3d job that produced the
+    # per-plane offsets, then plumb apply_shift+s3d-job into ops so lsp's
+    # run_plane picks them up at line 1871 of run_lsp.py and passes
+    # shift_vector through to mbo's _write_plane. The shift_vector path
+    # bypasses _write_plane's data_raw.bin guard, so the suite2p binary
+    # gets written with each plane translated to its globally-aligned y/x.
+    #
+    # Detection order matches what task_save_as does: try the standard
+    # `s3d-preprocessed` subdirs at the input/output roots before running.
+    # If a valid job already exists (the user's typical workflow — they ran
+    # save_as register_z first), we just consume it; otherwise we kick off
+    # a fresh suite3d run, mirroring task_save_as.
+    register_z = args.get("register_z", True)
+    if register_z:
+        from mbo_utilities.arrays._registration import (
+            register_zplanes_s3d,
+            validate_s3d_registration,
+        )
+
+        try:
+            _src_arr_for_s3d = imread(
+                input_path[0] if isinstance(input_path, list) else input_path
+            )
+            num_planes_s3d = int(_src_arr_for_s3d.shape5d[2])
+        except Exception as e:
+            logger.warning(
+                f"task_suite2p: cannot probe num_planes for suite3d: {e}. "
+                f"Skipping axial registration."
+            )
+            num_planes_s3d = None
+
+        if num_planes_s3d is not None and num_planes_s3d > 1:
+            # candidate locations for an existing s3d job, in priority order
+            input_root = Path(
+                input_path[0] if isinstance(input_path, list) else input_path
+            )
+            input_parent = input_root.parent if input_root.is_file() else input_root
+            candidates = [
+                output_dir / "s3d-preprocessed",
+                input_parent / "s3d-preprocessed",
+                input_root / "s3d-preprocessed",
+            ]
+
+            s3d_dir = None
+            for c in candidates:
+                if validate_s3d_registration(c, num_planes_s3d):
+                    s3d_dir = c
+                    logger.info(f"task_suite2p: reusing existing s3d-job at {s3d_dir}")
+                    break
+
+            if s3d_dir is None:
+                # no existing job — run suite3d ourselves, same as task_save_as
+                logger.info(
+                    "task_suite2p: no existing s3d-job found, running suite3d "
+                    "registration to produce axial offsets..."
+                )
+                try:
+                    filenames = list(getattr(_src_arr_for_s3d, "filenames", []) or [])
+                    if not filenames and hasattr(_src_arr_for_s3d, "_files"):
+                        filenames = list(_src_arr_for_s3d._files)
+                    if filenames:
+                        combined_meta = dict(getattr(_src_arr_for_s3d, "metadata", {}) or {})
+                        combined_meta.update(custom_metadata)
+                        new_dir = register_zplanes_s3d(
+                            filenames=filenames,
+                            metadata=combined_meta,
+                            outpath=output_dir,
+                        )
+                        if new_dir is not None and validate_s3d_registration(
+                            new_dir, num_planes_s3d
+                        ):
+                            s3d_dir = new_dir
+                            logger.info(f"task_suite2p: produced new s3d-job at {s3d_dir}")
+                        else:
+                            logger.warning(
+                                "task_suite2p: suite3d ran but produced no valid "
+                                "summary; binaries will be written without axial shift."
+                            )
+                    else:
+                        logger.warning(
+                            "task_suite2p: source array has no filenames; cannot "
+                            "run suite3d. Binaries will be written without axial shift."
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"task_suite2p: suite3d registration failed: {e}. "
+                        f"Binaries will be written without axial shift."
+                    )
+
+            if s3d_dir is not None:
+                ops["apply_shift"] = True
+                ops["s3d-job"] = str(s3d_dir)
+                logger.info(
+                    f"task_suite2p: axial shifts wired into ops "
+                    f"(apply_shift=True, s3d-job={s3d_dir})"
+                )
 
     # handle num_timepoints limit
     if num_timepoints is not None and num_timepoints > 0:
