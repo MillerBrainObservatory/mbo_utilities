@@ -1023,11 +1023,20 @@ def _draw_save_button(parent: Any):
                 if parent._saveas_background:
                     # spawn as detached subprocess via process manager
                     pm = get_process_manager()
-                    # handle fpath being a list (from directory) or single path
+                    # pass the actual file path(s) to the worker, NOT the
+                    # parent directory. the old code did
+                    # `Path(fpath[0]).parent` which made imread scan every
+                    # file in the directory — so loading one .tif from a
+                    # folder of hundreds and saving it would write the
+                    # entire dataset (61k frames) instead of just the
+                    # loaded file's frames.
                     if isinstance(parent.fpath, (list, tuple)):
-                        # pass parent directory so worker loads all files
-                        input_path = str(Path(parent.fpath[0]).parent) if parent.fpath else ""
-                        fname = Path(parent.fpath[0]).parent.name if parent.fpath else "data"
+                        if len(parent.fpath) == 1:
+                            input_path = str(parent.fpath[0])
+                            fname = Path(parent.fpath[0]).name
+                        else:
+                            input_path = [str(f) for f in parent.fpath]
+                            fname = Path(parent.fpath[0]).parent.name
                     else:
                         input_path = str(parent.fpath) if parent.fpath else ""
                         fname = Path(parent.fpath).name if parent.fpath else "data"

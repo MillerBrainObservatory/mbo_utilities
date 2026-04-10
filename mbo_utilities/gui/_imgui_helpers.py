@@ -103,11 +103,13 @@ def style_seaborn_dark():
     """Apply seaborn dark theme to ImPlot."""
     style = implot.get_style()
 
-    # Auto colors for lines and markers
-    style.set_color_(implot.Col_.line.value, implot.AUTO_COL)
-    style.set_color_(implot.Col_.fill.value, implot.AUTO_COL)
-    style.set_color_(implot.Col_.marker_outline.value, implot.AUTO_COL)
-    style.set_color_(implot.Col_.marker_fill.value, implot.AUTO_COL)
+    # auto colors for lines and markers. `Col_.line` was removed in newer
+    # imgui_bundle builds; guard each attr so the theme still applies on
+    # both old and new versions.
+    for attr in ("line", "fill", "marker_outline", "marker_fill"):
+        col = getattr(implot.Col_, attr, None)
+        if col is not None:
+            style.set_color_(col.value, implot.AUTO_COL)
 
     # Backgrounds and axes
     style.set_color_(implot.Col_.frame_bg.value, ImVec4(0.15, 0.17, 0.2, 1.00))
