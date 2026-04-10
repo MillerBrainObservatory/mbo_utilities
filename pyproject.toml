@@ -38,7 +38,7 @@ dependencies = [
 	"mkl_fft>=2.0.0",
 	"mbo-fastplotlib>=0.7.3",
 	"rendercanvas>=2.4.2,<2.5",
-	"imgui-bundle>=1.92.5",
+	"imgui-bundle>=1.92.5,<1.92.601",
 	"pyqt6>=6.7",
 	"pyqt6-sip",
 	"pyqtgraph",

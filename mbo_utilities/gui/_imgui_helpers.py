@@ -100,32 +100,37 @@ def style_seaborn():
 
 
 def style_seaborn_dark():
-    """Apply seaborn dark theme to ImPlot."""
+    """Apply seaborn dark theme to ImPlot.
+
+    Every Col_ access is guarded because the enum members differ across
+    imgui_bundle versions (e.g. `Col_.line` was removed in 1.92.601).
+    """
     style = implot.get_style()
 
-    # auto colors for lines and markers. `Col_.line` was removed in newer
-    # imgui_bundle builds; guard each attr so the theme still applies on
-    # both old and new versions.
-    for attr in ("line", "fill", "marker_outline", "marker_fill"):
-        col = getattr(implot.Col_, attr, None)
+    def _set(attr_name, color):
+        col = getattr(implot.Col_, attr_name, None)
         if col is not None:
-            style.set_color_(col.value, implot.AUTO_COL)
+            style.set_color_(col.value, color)
 
-    # Backgrounds and axes
-    style.set_color_(implot.Col_.frame_bg.value, ImVec4(0.15, 0.17, 0.2, 1.00))
-    style.set_color_(implot.Col_.plot_bg.value, ImVec4(0.13, 0.15, 0.18, 1.00))
-    style.set_color_(implot.Col_.plot_border.value, ImVec4(0.00, 0.00, 0.00, 0.00))
-    style.set_color_(implot.Col_.axis_grid.value, ImVec4(0.35, 0.40, 0.45, 0.5))
-    style.set_color_(implot.Col_.axis_text.value, ImVec4(0.9, 0.9, 0.9, 1.0))
-    style.set_color_(implot.Col_.axis_bg_hovered.value, ImVec4(0.25, 0.27, 0.3, 1.00))
-    style.set_color_(implot.Col_.axis_bg_active.value, ImVec4(0.25, 0.27, 0.3, 0.75))
+    # auto colors for lines and markers
+    for attr in ("line", "fill", "marker_outline", "marker_fill"):
+        _set(attr, implot.AUTO_COL)
 
-    # Legends and labels
-    style.set_color_(implot.Col_.legend_bg.value, ImVec4(0.13, 0.15, 0.18, 1.00))
-    style.set_color_(implot.Col_.legend_border.value, ImVec4(0.4, 0.4, 0.4, 1.00))
-    style.set_color_(implot.Col_.legend_text.value, ImVec4(0.9, 0.9, 0.9, 1.00))
-    style.set_color_(implot.Col_.title_text.value, ImVec4(1.0, 1.0, 1.0, 1.00))
-    style.set_color_(implot.Col_.inlay_text.value, ImVec4(0.9, 0.9, 0.9, 1.00))
+    # backgrounds and axes
+    _set("frame_bg", ImVec4(0.15, 0.17, 0.2, 1.00))
+    _set("plot_bg", ImVec4(0.13, 0.15, 0.18, 1.00))
+    _set("plot_border", ImVec4(0.00, 0.00, 0.00, 0.00))
+    _set("axis_grid", ImVec4(0.35, 0.40, 0.45, 0.5))
+    _set("axis_text", ImVec4(0.9, 0.9, 0.9, 1.0))
+    _set("axis_bg_hovered", ImVec4(0.25, 0.27, 0.3, 1.00))
+    _set("axis_bg_active", ImVec4(0.25, 0.27, 0.3, 0.75))
+
+    # legends and labels
+    _set("legend_bg", ImVec4(0.13, 0.15, 0.18, 1.00))
+    _set("legend_border", ImVec4(0.4, 0.4, 0.4, 1.00))
+    _set("legend_text", ImVec4(0.9, 0.9, 0.9, 1.00))
+    _set("title_text", ImVec4(1.0, 1.0, 1.0, 1.00))
+    _set("inlay_text", ImVec4(0.9, 0.9, 0.9, 1.00))
 
     # Misc
     style.set_color_(implot.Col_.error_bar.value, ImVec4(0.9, 0.9, 0.9, 1.00))
