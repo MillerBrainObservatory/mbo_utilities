@@ -169,7 +169,7 @@ class FileDialog:
         self._show_deps_popup = False
 
         # GUI Modes (pollen calibration auto-detected, not user-selectable)
-        self.gui_modes = ["Standard Viewer", "Napari", "Cellpose", "Suite2p"]
+        self.gui_modes = ["Standard Viewer", "Napari"]
         self.selected_mode_index = 0
 
         # start dependency check immediately in background
