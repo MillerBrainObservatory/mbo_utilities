@@ -82,11 +82,9 @@ class OutputMetadata:
         if self.plane_indices is not None and "Z" not in self.selections:
             self.selections["Z"] = list(self.plane_indices)
 
-        # infer source dims if not provided
+        # default to 5D TCZYX if not provided
         if self.source_dims is None:
-            ndim = len(self.source_shape) if self.source_shape else 4
-            from mbo_utilities.arrays.features._dim_labels import DEFAULT_DIMS
-            self.source_dims = DEFAULT_DIMS.get(ndim, ("T", "Z", "Y", "X"))
+            self.source_dims = ("T", "C", "Z", "Y", "X")
 
         # compute derived values
         self._compute_contiguity()
@@ -382,7 +380,7 @@ class OutputMetadata:
         parameters
         ----------
         shape : tuple
-            output array shape (T, Z, Y, X) or (T, Y, X) or (Y, X)
+            output array shape, always 5D TZCYX
 
         returns
         -------
@@ -396,35 +394,15 @@ class OutputMetadata:
             "loop": False,
         }
 
-        ndim = len(shape)
-        if ndim == 5:
-            # TZCYX order
-            n_frames = shape[0]
-            n_slices = shape[1]
-            n_channels = shape[2]
-            ij_meta["images"] = n_frames * n_slices * n_channels
-            ij_meta["frames"] = n_frames
-            ij_meta["slices"] = n_slices
-            ij_meta["channels"] = n_channels
-            ij_meta["hyperstack"] = True
-        elif ndim == 4:
-            n_frames = shape[0]
-            n_slices = shape[1]
-            ij_meta["images"] = n_frames * n_slices
-            ij_meta["frames"] = n_frames
-            ij_meta["slices"] = n_slices
-            ij_meta["channels"] = 1
-            ij_meta["hyperstack"] = True
-        elif ndim == 3:
-            ij_meta["images"] = shape[0]
-            ij_meta["frames"] = shape[0]
-            ij_meta["slices"] = 1
-            ij_meta["channels"] = 1
-        else:
-            ij_meta["images"] = 1
-            ij_meta["frames"] = 1
-            ij_meta["slices"] = 1
-            ij_meta["channels"] = 1
+        # always 5D TZCYX
+        n_frames = shape[0]
+        n_slices = shape[1]
+        n_channels = shape[2]
+        ij_meta["images"] = n_frames * n_slices * n_channels
+        ij_meta["frames"] = n_frames
+        ij_meta["slices"] = n_slices
+        ij_meta["channels"] = n_channels
+        ij_meta["hyperstack"] = True
 
         if vs.dz is not None:
             ij_meta["spacing"] = vs.dz
@@ -525,9 +503,14 @@ class OutputMetadata:
         # update shape
         result["shape"] = self.output_shape
 
-        # update spatial dimensions (always reactive)
-        result["Lx"] = self.Lx
-        result["Ly"] = self.Ly
+        # fill spatial dimensions only when the source doesn't already
+        # carry them. upstream writers (e.g. suite3d axial-shift bin
+        # writes) pre-compute padded Ly/Lx and put them in the source
+        # dict before calling us — clobbering those with the raw
+        # output_shape derivation was corrupting ops.npy, making suite2p
+        # miscount frames in the padded binary.
+        result.setdefault("Lx", self.Lx)
+        result.setdefault("Ly", self.Ly)
 
         # update with computed voxel size
         vs = self.voxel_size

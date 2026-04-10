@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays.features._dim_labels import get_dims, get_num_planes
+from mbo_utilities.arrays.features._dim_labels import get_dims
 from mbo_utilities._writers import _write_plane, _write_volumetric_tiff, _write_volumetric_zarr
 from numpy.exceptions import AxisError
 
@@ -21,6 +21,55 @@ logger = log.get("arrays._base")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
+
+# canonical 5D dimension order (OME-NGFF 0.5)
+DIMS = ("T", "C", "Z", "Y", "X")
+
+
+class Shape5DMixin:
+    """
+    mixin providing always-5D shape accessors.
+
+    array classes that include this mixin must implement `_shape5d()`
+    returning a 5-tuple (T, C, Z, Y, X) with singletons for unused dims.
+
+    provides named size accessors (nt, nc, nz, ny, nx) and a shape5d
+    property so consumers never need to guess dimension positions.
+    """
+
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        """return the 5D TCZYX shape. subclasses must implement this."""
+        raise NotImplementedError
+
+    @property
+    def shape5d(self) -> tuple[int, int, int, int, int]:
+        """shape as 5D TCZYX, always length 5."""
+        return self._shape5d()
+
+    @property
+    def nt(self) -> int:
+        """number of timepoints."""
+        return self._shape5d()[0]
+
+    @property
+    def nc(self) -> int:
+        """number of channels."""
+        return self._shape5d()[1]
+
+    @property
+    def nz(self) -> int:
+        """number of z-planes."""
+        return self._shape5d()[2]
+
+    @property
+    def ny(self) -> int:
+        """spatial height."""
+        return self._shape5d()[3]
+
+    @property
+    def nx(self) -> int:
+        """spatial width."""
+        return self._shape5d()[4]
 
 
 def _normalize_key(key, ndim):
@@ -336,8 +385,11 @@ def _imwrite_base(
 
     md = _sanitize_metadata(md)
 
-    # normalize plane selection to 1-based list
-    num_planes = get_num_planes(arr)
+    # Use the 5D-aware accessors so natural-rank arrays (e.g. TiffArray
+    # exposing 4D TZYX with C=1 dropped) don't pick up Y or X by accident.
+    # arr.shape[2] is Z under the 5D contract, but it's Y on a natural 4D
+    # TZYX array — that's the bug behind the volumetric .bin write crash.
+    num_planes = arr.shape5d[2]
     if planes is not None:
         if isinstance(planes, int):
             planes_list = [planes]
@@ -390,6 +442,8 @@ def _imwrite_base(
         output_suffix = kwargs.pop("output_suffix", None)
         sharded = kwargs.pop("sharded", True)
         compression_level = kwargs.pop("compression_level", 1)
+        compressor = kwargs.pop("compressor", "gzip")
+        shuffle = kwargs.pop("shuffle", None)
         result = _write_volumetric_zarr(
             arr,
             outpath,
@@ -405,39 +459,54 @@ def _imwrite_base(
             output_suffix=output_suffix,
             sharded=sharded,
             compression_level=compression_level,
+            compressor=compressor,
+            shuffle=shuffle,
         )
         return result
 
-    # other formats: use per-plane streaming writer
-    # (bin, h5, npy)
-    dims = get_dims(arr)
+    # h5: single-file volumetric writer (matches zarr behavior — one file
+    # for the whole volume rather than the per-plane streaming output of
+    # the legacy `_write_plane` path).
+    if ext_clean in ("h5", "hdf5"):
+        from mbo_utilities._writers import _write_volumetric_h5
 
-    # resolve channel_index for 5D TCZYX data with channel selection
+        output_suffix = kwargs.pop("output_suffix", None)
+        dataset_name = kwargs.pop("dataset_name", None) or "mov"
+        h5_compression = kwargs.pop("compression", "gzip")
+        h5_compression_level = kwargs.pop("compression_level", 1)
+        result = _write_volumetric_h5(
+            arr,
+            outpath,
+            metadata=md,
+            planes=planes_list,
+            frames=frames_list,
+            channels=channels_list,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            show_progress=show_progress,
+            debug=debug,
+            output_suffix=output_suffix,
+            dataset_name=dataset_name,
+            compression=h5_compression,
+            compression_level=h5_compression_level,
+        )
+        return result
+
+    # other formats: use per-plane streaming writer (bin, npy)
+    # always 5D TCZYX. Use shape5d so natural-rank arrays still report the
+    # correct T/Z sizes (arr.shape[0] is T for 4D, but Y for 2D natural).
     channel_index = None
-    if len(arr.shape) == 5 and channels_list is not None and len(channels_list) == 1:
+    if channels_list is not None and len(channels_list) == 1:
         channel_index = channels_list[0] - 1  # 0-based
 
-    # extract shape info
-    if len(arr.shape) >= 4:
-        nframes = arr.shape[0]
-    elif len(arr.shape) == 3 and dims[0] in {"T", "timepoints"}:
-        nframes = arr.shape[0]
-    else:
-        nframes = 1
-    Ly, Lx = arr.shape[-2], arr.shape[-1]
+    nframes = arr.shape5d[0]  # T
+    Ly, Lx = arr.shape5d[3], arr.shape5d[4]
 
-    # validate num_planes against actual shape
-    if len(arr.shape) == 5:
-        # 5D TCZYX: z-planes at index 2
-        actual_z_size = arr.shape[2]
-        if num_planes > actual_z_size:
-            num_planes = actual_z_size
-    elif len(arr.shape) == 4:
-        actual_z_size = arr.shape[1]
-        if num_planes > actual_z_size:
-            num_planes = actual_z_size
-    elif len(arr.shape) == 3:
-        num_planes = 1
+    # validate num_planes against Z dimension
+    actual_z_size = arr.shape5d[2]
+    if num_planes > actual_z_size:
+        num_planes = actual_z_size
 
     # use OutputMetadata for reactive dz/fs values
     from mbo_utilities.metadata import OutputMetadata
@@ -461,11 +530,44 @@ def _imwrite_base(
 
     # get adjusted metadata dict with reactive dz/fs values
     md = out_meta.to_dict()
-    md["Ly"] = Ly
-    md["Lx"] = Lx
-    md["num_timepoints"] = out_meta.num_frames or nframes
-    md["nframes"] = out_meta.num_frames or nframes
-    md["num_frames"] = out_meta.num_frames or nframes
+
+    # Resolve the effective output timepoint count from three sources, in
+    # priority order:
+    #   1. explicit `frames=[...]` selection (out_meta.num_frames when
+    #      frame_indices were actually passed to OutputMetadata)
+    #   2. `num_frames=N` truncation kwarg (set via imwrite)
+    #   3. source frame count (last-resort fallback)
+    # Then propagate to EVERY timepoint alias so downstream readers see
+    # a consistent dict. Previously only num_timepoints/nframes/num_frames
+    # got updated, leaving T/nt/n_frames/timepoints at whatever
+    # OutputMetadata.to_dict computed (which is 1 when source_shape isn't
+    # passed) — that produced the "num_timepoints=1574 but nframes=700"
+    # inconsistency the user reported.
+    truncated_n = kwargs.get("num_frames")
+    has_frame_selection = bool(frame_indices_0)
+    if has_frame_selection and out_meta.num_frames is not None:
+        effective_nt = int(out_meta.num_frames)
+    elif truncated_n is not None and int(truncated_n) > 0:
+        effective_nt = int(truncated_n)
+    elif out_meta.num_frames is not None:
+        effective_nt = int(out_meta.num_frames)
+    else:
+        effective_nt = int(nframes)
+
+    # Ly/Lx are already carried through by OutputMetadata.to_dict's
+    # setdefault path — either the caller pre-set padded dims (axial
+    # shift case) or to_dict filled in the raw shape as a default. Do
+    # NOT stamp them again here: that was overwriting the padded values
+    # lsp.run_plane puts into metadata for suite2p binary writes, which
+    # caused ops.npy to record the raw spatial shape while the binary
+    # itself was written at the padded shape.
+    md["num_timepoints"] = effective_nt
+    md["nframes"] = effective_nt
+    md["num_frames"] = effective_nt
+    md["n_frames"] = effective_nt
+    md["T"] = effective_nt
+    md["nt"] = effective_nt
+    md["timepoints"] = effective_nt
 
     # normalize planes to 0-indexed list for iteration
     planes_0idx = _normalize_planes(planes_list, num_planes)
@@ -557,40 +659,27 @@ class TiffReaderMixin:
     """
 
     _target_dtype = None
-    _cached_vmin = None
-    _cached_vmax = None
+    # _cached_vmin/_cached_vmax and vmin/vmax/_compute_frame_vminmax now
+    # live on ReductionMixin so every lazy array class gets them
+    # uniformly, not just TIFF readers.
 
     def astype(self, dtype, copy=True):
         """Set target dtype for lazy conversion on read."""
         self._target_dtype = np.dtype(dtype)
         return self
 
-    def _compute_frame_vminmax(self):
-        """Compute and cache vmin/vmax from first frame."""
-        if self._cached_vmin is None:
-            # get first frame (handles both 3D and 4D)
-            if len(self.shape) == 4:
-                frame = np.asarray(self[0, 0])
-            else:
-                frame = np.asarray(self[0])
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        """Minimum value from first frame (cached)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        """Maximum value from first frame (cached)."""
-        self._compute_frame_vminmax()
-        return self._cached_vmax
-
     def __array__(self, dtype=None, copy=None):
-        """Return first frame for fast preview (prevents accidental full load)."""
-        data = self[0]
+        """Return a representative frame (prevents accidental full load).
+
+        for 2D data the whole image IS the frame; self[0] would return
+        a single row. for 3D+ we take self[0] as the first slice along
+        the outer dim.
+        """
+        ndim = getattr(self, "ndim", None)
+        if ndim == 2:
+            data = np.asarray(self[:])
+        else:
+            data = np.asarray(self[0])
         if dtype is not None:
             data = data.astype(dtype)
         return data
@@ -632,6 +721,7 @@ class TiffReaderMixin:
         window_funcs = kwargs.get("window_funcs")
         return fpl.ImageWidget(
             data=self,
+            cmap="gnuplot2",
             histogram_widget=histogram_widget,
             figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": self.vmin, "vmax": self.vmax},
@@ -672,6 +762,40 @@ class ReductionMixin:
     # prevent numpy/xarray from implicitly converting lazy arrays
     __array_ufunc__ = None
     __array_function__ = None
+
+    # display-range cache, populated lazily by _compute_frame_vminmax.
+    # lives here (not on TiffReaderMixin) because every lazy array class
+    # needs vmin/vmax for the viewer histogram and they all already inherit
+    # ReductionMixin. previously each non-tiff class re-implemented this
+    # locally and the copies drifted out of sync — that's how the zarr
+    # vminmax crash slipped in after the natural-rank refactor.
+    _cached_vmin = None
+    _cached_vmax = None
+
+    def _compute_frame_vminmax(self):
+        """Compute and cache vmin/vmax via __array__.
+
+        delegates to each subclass's __array__ so the result honors that
+        class's lazy-read strategy and reported rank. do NOT hardcode
+        index counts here (e.g. self[0,0,0]) — that breaks any class
+        whose __getitem__ doesn't tolerate over-long keys.
+        """
+        if self._cached_vmin is None:
+            frame = np.asarray(self)
+            self._cached_vmin = float(frame.min())
+            self._cached_vmax = float(frame.max())
+
+    @property
+    def vmin(self) -> float:
+        """Minimum value from a representative frame (cached)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmin
+
+    @property
+    def vmax(self) -> float:
+        """Maximum value from a representative frame (cached)."""
+        self._compute_frame_vminmax()
+        return self._cached_vmax
 
     def _is_numpy_like(self) -> bool:
         """Check if this array can be reduced directly by numpy."""

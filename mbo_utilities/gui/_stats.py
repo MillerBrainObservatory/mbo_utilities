@@ -27,69 +27,73 @@ def _has_time_dim(arr: Any) -> bool:
     return arr.ndim >= 3
 
 
-def _get_zslice(arr: Any, t_slice: slice, z: int) -> np.ndarray:
-    """Get a z-slice or channel-slice from an array for stats computation.
+def _load_subsampled(arr: Any, subsample: int = 10) -> np.ndarray:
+    """Load a stats buffer canonicalized to (T_sub, Z, Y, X).
 
-    Uses dims property to correctly index arrays with non-standard layouts
-    like IsoviewArray and ClusterPTArray which have a views/camera dimension,
-    and SinglePlaneArray which has channels instead of z-planes.
+    Uses arr.dims (if present) to identify the T, C, Z, Y, X axes and
+    builds an index that subsamples T, pins C=0, and keeps Z/Y/X. Then
+    inserts size-1 axes for any missing T or Z so the downstream stats
+    loop can always index `[:, z, :, :]` regardless of the input rank.
 
-    Returns a stack of frames (T, Y, X) for computing temporal statistics,
-    or a single frame (Y, X) expanded to (1, Y, X) for single-timepoint data.
+    Falls back to positional TCZYX assumptions when dims is unavailable.
 
-    Supports:
-    - 3D: (T, Y, X) -> arr[t_slice]
-    - 4D standard: (T, Z, Y, X) -> arr[t_slice, z]
-    - 4D channels: (T, C, Y, X) -> arr[t_slice, z] (z indexes channel)
-    - 4D single-timepoint views: (Z, Views, Y, X) -> arr[z, 0] expanded to (1, Y, X)
-    - 5D with views: (T, Z, Views, Y, X) -> arr[t_slice, z, 0]
+    Handles every shape the readers produce:
+    - (Y, X)             → (1, 1, Y, X)
+    - (T, Y, X)          → (T_sub, 1, Y, X)
+    - (Z, Y, X)          → (1, Z, Y, X)           ← was crashing
+    - (T, Z, Y, X)       → (T_sub, Z, Y, X)
+    - (C, Z, Y, X)       → (1, Z, Y, X)           ← squeezed pollen etc.
+    - (T, C, Z, Y, X)    → (T_sub, Z, Y, X)
     """
-    dims = getattr(arr, "dims", None)
+    cache_key = f"_stats_cache_{subsample}"
+    if hasattr(arr, cache_key):
+        return getattr(arr, cache_key)
 
-    # use dims property to determine correct indexing
-    # normalize to lowercase for comparison (dims may be uppercase or mixed)
-    if dims is not None:
-        dims_lower = tuple(d.lower() for d in dims)
-        # check if this is a views-type array (isoview, clusterpt)
-        if "cm" in dims_lower:
-            if "t" in dims_lower or "timepoints" in dims_lower:
-                # multi-timepoint: (T, Z, Views, Y, X)
-                return arr[t_slice, z, 0]
-            else:
-                # single-timepoint: (Z, Views, Y, X) -> (Y, X)
-                # expand to (1, Y, X) for consistent stats computation
-                return arr[z, 0][np.newaxis, ...]
-        elif "z" in dims_lower or any(d in dims_lower for d in ("z-planes", "z-slices")):
-            # has z but no views
-            if "t" in dims_lower or "timepoints" in dims_lower:
-                return arr[t_slice, z]
-            elif "volumes" in dims_lower:
-                # piezo: dim 0 is volumes, dim 1 is z-slices/frames
-                return arr[0, z][np.newaxis, ...]
-            else:
-                return arr[z][np.newaxis, ...]
-        elif "channels" in dims_lower or "channel" in dims_lower or "c" in dims_lower:
-            # multi-channel single-plane: (T, C, Y, X) - z indexes channel
-            if "t" in dims_lower or "timepoints" in dims_lower:
-                return arr[t_slice, z]
-            else:
-                return arr[z][np.newaxis, ...]
-        elif "volumes" in dims_lower or "frames" in dims_lower:
-            # piezo without z-slices label: dim 0 is volumes, dim 1 is frames
-            return arr[0, z][np.newaxis, ...]
-        else:
-            # no z or channel dimension, just time (3D TYX)
-            return arr[t_slice]
+    dims_lower = tuple(d.lower() for d in (getattr(arr, "dims", None) or ()))
+    shape = arr.shape
 
-    # fallback for arrays without dims property
-    if arr.ndim == 3:
-        return arr[t_slice]
-    elif arr.ndim == 4:
-        return arr[t_slice, z]
-    elif arr.ndim == 5:
-        return arr[t_slice, z, 0]
+    if dims_lower and len(dims_lower) == len(shape):
+        # dim-aware: build index per-axis from labels
+        idx = []
+        for d in dims_lower:
+            if d == "t":
+                idx.append(slice(None, None, subsample))
+            elif d == "c":
+                idx.append(0)
+            else:
+                idx.append(slice(None))
+        data = np.asarray(arr[tuple(idx)])
+        has_t = "t" in dims_lower
+        has_z = "z" in dims_lower
     else:
-        return arr[t_slice]
+        # fallback: positional TCZYX assumption by rank
+        ndim = len(shape)
+        if ndim == 5:
+            data = np.asarray(arr[::subsample, 0, :, :, :])
+            has_t, has_z = True, True
+        elif ndim == 4:
+            data = np.asarray(arr[::subsample, :, :, :])
+            has_t, has_z = True, True
+        elif ndim == 3:
+            data = np.asarray(arr[::subsample])
+            has_t, has_z = True, False
+        else:  # 2D or weird
+            data = np.asarray(arr)
+            has_t, has_z = False, False
+
+    # canonicalize to (T_sub, Z, Y, X) — remaining dims (post C-pin) are
+    # always a subset of (T, Z, Y, X) in that order, so insertions are
+    # positional: T at axis 0, Z at axis 1.
+    if not has_t:
+        data = data[np.newaxis, ...]
+    if not has_z:
+        data = data[:, np.newaxis, ...]
+
+    try:
+        setattr(arr, cache_key, data)
+    except (AttributeError, TypeError):
+        pass
+    return data
 
 
 def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
@@ -101,28 +105,89 @@ def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
     For 4D data with channels (no z), iterates over channels.
     For piezo arrays, uses num_slices to iterate z-slices within volumes.
     """
-    if arr.ndim == 3:
-        return [0], "z"
+    # use parent widget's detected nz/nc which handles both 4D and 5D arrays
+    nz = getattr(parent, "nz", None)
+    nc = getattr(parent, "nc", None)
 
     # piezo arrays: enable averaging to get per-z-slice stats
     if hasattr(arr, "num_slices") and hasattr(arr, "average_frames"):
         if not arr.average_frames and arr.can_average:
             arr.average_frames = True
-        return list(range(arr.shape[1])), "z"
+        if nz is not None:
+            return list(range(nz)), "z"
 
-    nz = getattr(parent, "nz", 1)
-    nc = getattr(parent, "nc", 1)
+    # fallback: detect from shape5d if available, else from parent
+    if nz is None:
+        nz = arr.nz if hasattr(arr, "nz") else 1
+    if nc is None:
+        nc = arr.nc if hasattr(arr, "nc") else 1
 
     if nz > 1:
         return list(range(nz)), "z"
     elif nc > 1:
         return list(range(nc)), "c"
 
-    # fallback for 4D+ with an undetected second dim
-    if arr.ndim >= 4 and arr.shape[1] > 1:
-        return list(range(arr.shape[1])), "z"
-
     return [0], "z"
+
+
+def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 200) -> np.ndarray:
+    """Read a single z-plane subsampled in T, capped at `max_samples` frames.
+
+    This is the per-plane equivalent of `_load_subsampled` and is used by
+    the stats compute loop so progress reports as each plane finishes
+    rather than blocking on one giant bulk read of the whole stack. The
+    per-plane budget keeps the network read bounded regardless of how
+    many timepoints the recording has — without it, an N-thousand-frame
+    LBM dataset on a slow share would pull tens of GB over the wire and
+    leave the progress bar pinned at 0% for the duration.
+
+    Returns a (T_sub, Y, X) stack of float32 ready for stats math.
+    """
+    dims_lower = tuple(d.lower() for d in (getattr(arr, "dims", None) or ()))
+    shape = arr.shape
+    has_dims = bool(dims_lower) and len(dims_lower) == len(shape)
+
+    # find T axis size to compute the dynamic stride
+    if has_dims and "t" in dims_lower:
+        t_axis = dims_lower.index("t")
+        n_t = int(shape[t_axis])
+    elif has_dims:
+        n_t = 1
+    else:
+        # positional fallback: assume axis 0 is T for ndim >= 3
+        n_t = int(shape[0]) if len(shape) >= 3 else 1
+
+    stride = max(1, n_t // max(1, max_samples))
+
+    if has_dims:
+        idx = []
+        for d in dims_lower:
+            if d == "t":
+                idx.append(slice(None, None, stride))
+            elif d == "c":
+                idx.append(0)
+            elif d == "z":
+                idx.append(int(z))
+            else:
+                idx.append(slice(None))
+        data = np.asarray(arr[tuple(idx)])
+    else:
+        # positional 5D TCZYX or 4D TZYX assumption
+        ndim = len(shape)
+        if ndim == 5:
+            data = np.asarray(arr[::stride, 0, int(z), :, :])
+        elif ndim == 4:
+            data = np.asarray(arr[::stride, int(z), :, :])
+        elif ndim == 3:
+            data = np.asarray(arr[::stride])
+        else:
+            data = np.asarray(arr)
+
+    # we may end up with (T, Y, X) or (Y, X) depending on how many indexed
+    # dims got squeezed. coerce to 3D so the caller can always axis-0 reduce.
+    if data.ndim == 2:
+        data = data[np.newaxis, ...]
+    return data.astype(np.float32, copy=False)
 
 
 def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
@@ -137,19 +202,22 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     if pre_stats is not None:
         stats = pre_stats
         parent._zstats[idx - 1] = stats
-        # Still need to compute mean images for visualization
+        # Still need to compute mean images for visualization. read per
+        # plane so progress reports as each one finishes — same per-plane
+        # capped read the compute path uses below.
         means = []
-        tiff_lock = threading.Lock()
-        # determine slice range (z-planes or channels)
         slice_range, slice_label = _get_slice_range(parent, arr)
         n_slices = len(slice_range)
+        # nudge to a non-zero value so the progress bar shows "started"
+        # before the first plane finishes (the first read can take a
+        # while on a slow share even with the per-plane cap).
+        parent._zstats_progress[idx - 1] = 0.01
         for i, s in enumerate(slice_range):
-            with tiff_lock:
-                stack = _get_zslice(arr, slice(None, None, 10), s)
-                mean_img = np.mean(stack, axis=0)
-                means.append(mean_img)
-                parent._zstats_progress[idx - 1] = (i + 1) / n_slices
-                parent._zstats_current_z[idx - 1] = s
+            stack = _read_plane_subsampled(arr, z=s, max_samples=200)
+            mean_img = np.mean(stack, axis=0)
+            means.append(mean_img)
+            parent._zstats_progress[idx - 1] = (i + 1) / n_slices
+            parent._zstats_current_z[idx - 1] = s
         means_stack = np.stack(means)
         parent._zstats_means[idx - 1] = means_stack
         parent._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
@@ -159,38 +227,46 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         return
 
     stats, means = {"mean": [], "std": [], "snr": []}, []
-    tiff_lock = threading.Lock()
 
     # determine slice range (z-planes or channels)
     slice_range, slice_label = _get_slice_range(parent, arr)
     n_slices = len(slice_range)
-    stats["slice_label"] = slice_label  # track what we're iterating over
+    stats["slice_label"] = slice_label
 
+    # nudge progress so the bar shows we've started before the first
+    # plane finishes — on a network share the first read can take tens
+    # of seconds and the user otherwise sees a stuck 0%.
+    parent._zstats_progress[idx - 1] = 0.01
+
+    # read each z-plane independently with a capped sample count. this
+    # used to be a single bulk `_load_subsampled` call that pulled every
+    # 10th frame across ALL planes at once — fine for a few-thousand
+    # frame LBM file, catastrophic for a 388-file network dataset where
+    # the bulk read is tens of GB. per-plane reads keep total bytes
+    # bounded (max_samples * n_planes * Y * X) and let the progress
+    # callback tick once per plane.
     for i, s in enumerate(slice_range):
-        with tiff_lock:
-            stack = _get_zslice(arr, slice(None, None, 10), s).astype(np.float32)
+        stack = _read_plane_subsampled(arr, z=s, max_samples=200)
 
-            mean_img = np.mean(stack, axis=0)
-            std_img = np.std(stack, axis=0)
+        mean_img = np.mean(stack, axis=0)
+        std_img = np.std(stack, axis=0)
 
-            # SNR: (mean_foreground - mean_background) / std_background
-            # foreground = top 20% brightest pixels, background = bottom 50%
-            p80 = np.percentile(mean_img, 80)
-            p50 = np.percentile(mean_img, 50)
-            fg = mean_img >= p80
-            bg = mean_img <= p50
-            fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
-            bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
-            bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
-            snr_val = (fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0
+        p80 = np.percentile(mean_img, 80)
+        p50 = np.percentile(mean_img, 50)
+        fg = mean_img >= p80
+        bg = mean_img <= p50
+        fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
+        bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
+        bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
+        snr_val = (fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0
 
-            stats["mean"].append(float(np.mean(mean_img)))
-            stats["std"].append(float(np.mean(std_img)))
-            stats["snr"].append(snr_val)
+        stats["mean"].append(float(np.mean(mean_img)))
+        stats["std"].append(float(np.mean(std_img)))
+        stats["snr"].append(snr_val)
 
-            means.append(mean_img)
-            parent._zstats_progress[idx - 1] = (i + 1) / n_slices
-            parent._zstats_current_z[idx - 1] = s
+        means.append(mean_img)
+        parent._zstats_progress[idx - 1] = (i + 1) / n_slices
+        parent._zstats_current_z[idx - 1] = s
 
     parent._zstats[idx - 1] = stats
     means_stack = np.stack(means)

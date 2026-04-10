@@ -611,112 +611,6 @@ def _draw_s2p_selection_popup(self):
         imgui.end_popup()
 
 
-def _draw_s2p_settings_popup(self):
-    """Draw settings popup with main Suite2p parameters."""
-    INPUT_WIDTH = 120
-
-    if getattr(self, "_s2p_settings_open", False):
-        imgui.open_popup("Settings##s2p_main")
-        self._s2p_settings_open = False
-
-    imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
-    if imgui.begin_popup("Settings##s2p_main"):
-        # tau
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
-        set_tooltip(
-            "Calcium indicator decay timescale in seconds.\n"
-            "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
-        )
-
-        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
-        set_tooltip("Denoise binned movie before cell detection.")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # processing control options
-        _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
-        set_tooltip("Keep data_raw.bin after processing (uses disk space)")
-
-        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
-        set_tooltip("Keep data.bin after processing (useful for QC)")
-
-        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
-        set_tooltip("Force re-registration even if already processed")
-
-        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
-        set_tooltip("Force ROI detection even if stat.npy exists")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # dF/F settings
-        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "ΔF/F")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_window_size = imgui.input_int("Window", self.s2p.dff_window_size)
-        set_tooltip("Frames for rolling percentile baseline (default: 300)")
-
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_percentile = imgui.input_int("Percentile", self.s2p.dff_percentile)
-        set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
-
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_smooth_window = imgui.input_int("Smooth", self.s2p.dff_smooth_window)
-        set_tooltip("Smooth ΔF/F trace with rolling window (0 = disabled)")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # processing options
-        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Processing")
-
-        if not hasattr(self, "_s2p_background"):
-            self._s2p_background = True
-        _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
-        set_tooltip("Run as separate process that continues after closing GUI")
-
-        if not hasattr(self, "_parallel_processing"):
-            self._parallel_processing = False
-        if not hasattr(self, "_max_parallel_jobs"):
-            self._max_parallel_jobs = 2
-
-        # get num_planes from data
-        num_planes = 1
-        n_selected = 1
-        try:
-            if hasattr(self, "image_widget") and self.image_widget.data:
-                data = self.image_widget.data[0]
-                if hasattr(data, "num_planes"):
-                    num_planes = data.num_planes
-                elif data.ndim == 4:
-                    num_planes = data.shape[1]
-                elif data.ndim == 5:
-                    num_planes = data.shape[2]
-            n_selected = len(getattr(self, "_selected_planes", {1}))
-        except Exception:
-            pass
-
-        if num_planes > 1 and n_selected > 1:
-            _, self._parallel_processing = imgui.checkbox("Parallel plane processing", self._parallel_processing)
-            set_tooltip("Process multiple planes simultaneously (uses more memory)")
-
-            if self._parallel_processing:
-                imgui.set_next_item_width(INPUT_WIDTH)
-                _, self._max_parallel_jobs = imgui.input_int("Max parallel jobs", self._max_parallel_jobs, step=1)
-                self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, n_selected))
-
-        imgui.spacing()
-        imgui.spacing()
-        if imgui.button("Close", imgui.ImVec2(80, 0)):
-            imgui.close_current_popup()
-
-        imgui.end_popup()
-
-
 def _draw_data_options_content(self):
     """Draw data options content showing settings that affect Suite2p processing."""
     from mbo_utilities.gui._availability import HAS_SUITE3D
@@ -920,8 +814,93 @@ def _draw_section_suite2p_content(self):
     # === PIPELINE SETTINGS ===
     imgui.separator_text("Pipeline Settings")
 
-    # draw the main settings popup (triggered from table below)
-    _draw_s2p_settings_popup(self)
+    # --- Main settings (closure, drawn inside the popup block below
+    # alongside Registration / ROI Detection / etc., so it follows the
+    # same begin_popup_modal lifecycle as every other settings panel) ---
+    def draw_main_settings():
+        # Tau / denoise
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
+        set_tooltip(
+            "Calcium indicator decay timescale in seconds.\n"
+            "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
+        )
+        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
+        set_tooltip("Denoise binned movie before cell detection.")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # processing control options
+        _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
+        set_tooltip("Keep data_raw.bin after processing (uses disk space)")
+        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
+        set_tooltip("Keep data.bin after processing (useful for QC)")
+        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
+        set_tooltip("Force re-registration even if already processed")
+        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
+        set_tooltip("Force ROI detection even if stat.npy exists")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # dF/F settings
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "\u0394F/F")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_window_size = imgui.input_int("Window", self.s2p.dff_window_size)
+        set_tooltip("Frames for rolling percentile baseline (default: 300)")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_percentile = imgui.input_int("Percentile", self.s2p.dff_percentile)
+        set_tooltip("Percentile for baseline F\u2080 estimation (default: 20)")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_smooth_window = imgui.input_int("Smooth", self.s2p.dff_smooth_window)
+        set_tooltip("Smooth \u0394F/F trace with rolling window (0 = disabled)")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # processing options
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Processing")
+        if not hasattr(self, "_s2p_background"):
+            self._s2p_background = True
+        _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
+        set_tooltip("Run as separate process that continues after closing GUI")
+
+        if not hasattr(self, "_parallel_processing"):
+            self._parallel_processing = False
+        if not hasattr(self, "_max_parallel_jobs"):
+            self._max_parallel_jobs = 2
+
+        # get num_planes from data
+        num_planes_main = 1
+        n_selected_main = 1
+        try:
+            if hasattr(self, "image_widget") and self.image_widget.data:
+                data = self.image_widget.data[0]
+                if hasattr(data, "num_planes"):
+                    num_planes_main = data.num_planes
+                elif data.ndim == 4:
+                    num_planes_main = data.shape[1]
+                elif data.ndim == 5:
+                    num_planes_main = data.shape[2]
+            n_selected_main = len(getattr(self, "_selected_planes", {1}))
+        except Exception:
+            pass
+
+        if num_planes_main > 1 and n_selected_main > 1:
+            _, self._parallel_processing = imgui.checkbox(
+                "Parallel plane processing", self._parallel_processing
+            )
+            set_tooltip("Process multiple planes simultaneously (uses more memory)")
+            if self._parallel_processing:
+                imgui.set_next_item_width(INPUT_WIDTH)
+                _, self._max_parallel_jobs = imgui.input_int(
+                    "Max parallel jobs", self._max_parallel_jobs, step=1
+                )
+                self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, n_selected_main))
 
     # --- Registration ---
     def draw_registration_settings():
@@ -1337,7 +1316,8 @@ def _draw_section_suite2p_content(self):
         imgui.text("Main")
         imgui.table_next_column()
         if imgui.button("Settings##main"):
-            self._s2p_settings_open = True
+            _popup_states["main_settings"] = True
+            imgui.open_popup("Main##main_settings")
         set_tooltip("Main Suite2p parameters (Tau, denoise, dF/F, etc.)")
 
         # --- Data Options row (no checkbox) - shows available data-specific widgets ---
@@ -1428,6 +1408,31 @@ def _draw_section_suite2p_content(self):
         set_tooltip("Configure output options")
 
         # --- Draw all popups (inside table context) ---
+
+        # Main settings popup — same modal lifecycle as the rest of the
+        # rows below. Previously this was a free-floating non-modal popup
+        # owned by `_draw_s2p_settings_popup`, which rendered as a
+        # separate window outside the table context.
+        imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
+        opened, visible = imgui.begin_popup_modal(
+            "Main##main_settings",
+            p_open=True,
+            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+        )
+        if opened:
+            try:
+                if not visible:
+                    _popup_states["main_settings"] = False
+                    imgui.close_current_popup()
+                else:
+                    draw_main_settings()
+                    imgui.spacing()
+                    imgui.separator()
+                    if imgui.button("Close##main", imgui.ImVec2(80, 0)):
+                        _popup_states["main_settings"] = False
+                        imgui.close_current_popup()
+            finally:
+                imgui.end_popup()
 
         # Registration popup
         imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)
@@ -1695,6 +1700,23 @@ def run_process(self):
                     "fix_phase": self._s2p_fix_phase,
                     "use_fft": self._s2p_use_fft,
                     "channel": channel if (multi_channel or has_channels) else None,
+                    # User-set metadata from the GUI metadata editor
+                    # (lives on parent._custom_metadata, NOT on the source
+                    # file). The worker merges this into ops before
+                    # invoking lbm_suite2p_python.pipeline so the user's
+                    # z_step / dx / dy / fs reach ops.npy.
+                    "custom_metadata": dict(getattr(self, "_custom_metadata", {})),
+                    # User's timepoint selection (0-based, full list).
+                    # The subprocess uses this with OutputMetadata to
+                    # reactively scale fs based on the timepoint stride.
+                    "tp_indices": (
+                        list(self._s2p_tp_parsed.final_indices)
+                        if getattr(self, "_s2p_tp_parsed", None) is not None
+                        else None
+                    ),
+                    # FULL list of selected planes (0-based) — for
+                    # reactive dz scaling via OutputMetadata.
+                    "selected_planes_0based": [p - 1 for p in sorted(selected_planes)],
                     "s2p_settings": {
                         "keep_raw": self.s2p.keep_raw,
                         "keep_reg": self.s2p.keep_reg,
@@ -1765,6 +1787,19 @@ def run_process(self):
             use_parallel = getattr(self, "_parallel_processing", False)
             max_jobs = getattr(self, "_max_parallel_jobs", 2)
 
+            # Snapshot the user's selections so the worker can rebuild
+            # the OutputMetadata reactive layer (fs/dz reactively scaled
+            # by the timepoint and z-plane stride). Without these, the
+            # worker would fall back to source values and the resulting
+            # ops.npy reports the wrong fs/dz when the user struds the
+            # selection.
+            tp_indices = (
+                list(self._s2p_tp_parsed.final_indices)
+                if getattr(self, "_s2p_tp_parsed", None) is not None
+                else None
+            )
+            selected_planes_0based = [p - 1 for p in sorted(selected_planes)]
+
             # Build list of configuration dicts for each job to completely decouple GUI state
             jobs = []
             for i, _arr in enumerate(self.image_widget.data):
@@ -1805,6 +1840,23 @@ def run_process(self):
                             "dff_smooth_window": dff_smooth_window,
                             "fix_phase": fix_phase,
                             "use_fft": use_fft,
+                            # User-set metadata (e.g. dz from the metadata
+                            # editor) lives on parent._custom_metadata, NOT
+                            # on arr.metadata. Snapshot it here so the
+                            # worker can merge it before computing voxel
+                            # size — otherwise the user's z_step is
+                            # silently dropped and the source-file dz
+                            # (often None for LBM, 1.0 default otherwise)
+                            # ends up in ops.npy.
+                            "custom_metadata": dict(getattr(self, "_custom_metadata", {})),
+                            # User's timepoint selection — 0-based final
+                            # indices from TimeSelection. None means all.
+                            "tp_indices": tp_indices,
+                            # FULL list of all selected planes (0-based)
+                            # — needed by OutputMetadata to compute the
+                            # z-step factor reactively, even though each
+                            # job processes only one plane at a time.
+                            "selected_planes_0based": selected_planes_0based,
                             "logger": self.logger
                         }
 
@@ -1899,33 +1951,92 @@ def _run_plane_worker_thread(config):
     ops_path = plane_dir / "ops.npy"
     lazy_mdata = getattr(arr, "metadata", {}).copy()
 
+    # Merge GUI-set custom metadata (e.g. dz from the metadata editor)
+    # into lazy_mdata BEFORE computing voxel size, so the OutputMetadata
+    # reactive layer sees the user's value rather than the source file's.
+    custom_metadata = config.get("custom_metadata") or {}
+    if custom_metadata:
+        lazy_mdata.update(custom_metadata)
+
     Lx = arr.shape[-1]
     Ly = arr.shape[-2]
 
-    from mbo_utilities.metadata import get_param, get_voxel_size
+    from mbo_utilities.metadata import OutputMetadata, get_param
 
-    vs = get_voxel_size(lazy_mdata)
+    # Build the output metadata via the reactive layer. fs scales by
+    # the timepoint stride, dz scales by the z-plane stride, and every
+    # alias (num_timepoints/T/nt/...) gets updated consistently.
+    # Anything done by hand here would just re-introduce the kind of
+    # alias-drift bugs we just spent a week chasing.
+    tp_indices = config.get("tp_indices")
+    selected_planes_0based = config.get("selected_planes_0based")
 
-    md = {
-        "process_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "num_timepoints": config["target_timepoints"],
-        "num_frames": config["target_timepoints"],
-        "nframes": config["target_timepoints"],
-        "n_frames": config["target_timepoints"],
-        "original_file": config["fpath"],
-        "roi_index": arr_idx,
-        "z_index": current_z,
-        "plane": plane,
-        "Ly": Ly,
-        "Lx": Lx,
-        "fs": get_param(lazy_mdata, "fs", 15.0),
-        "dx": vs.dx,
-        "dy": vs.dy,
-        "dz": vs.dz,
-        "ops_path": str(ops_path),
-        "save_path": str(plane_dir),
-        "raw_file": str((plane_dir / "data_raw.bin").resolve()),
-    }
+    selections = {}
+    if tp_indices is not None:
+        selections["T"] = list(tp_indices)
+    if selected_planes_0based is not None:
+        selections["Z"] = list(selected_planes_0based)
+
+    # source shape/dims must come from the lazy array's 5D contract,
+    # not from arr.shape (which may be natural-rank for TiffArray).
+    source_shape = tuple(arr.shape5d) if hasattr(arr, "shape5d") else None
+    source_dims = ("T", "C", "Z", "Y", "X")
+
+    # Log raw source values BEFORE scaling — critical diagnostic when
+    # the user reports a wrong fs/dz in the output.
+    raw_src_fs = get_param(lazy_mdata, "fs")
+    raw_src_dz = get_param(lazy_mdata, "dz")
+    config["logger"].info(
+        f"_run_plane_worker_thread: source fs={raw_src_fs}, dz={raw_src_dz}, "
+        f"plane={plane}"
+    )
+
+    if raw_src_fs is None:
+        config["logger"].warning(
+            f"_run_plane_worker_thread: source metadata for plane {plane} has "
+            f"NO fs field — reactive scaling cannot compute the output rate. "
+            f"ops.npy fs will fall through to lbm_suite2p_python's default "
+            f"(10 Hz). To fix: set fs via the metadata editor before running, "
+            f"or fix the source TIFF metadata."
+        )
+
+    out_meta = OutputMetadata(
+        source=lazy_mdata,
+        source_shape=source_shape,
+        source_dims=source_dims,
+        selections=selections,
+    )
+
+    # to_dict() gives reactively-scaled fs/dz/dx/dy and consistent
+    # timepoint aliases. Add only the per-plane bookkeeping on top.
+    md = out_meta.to_dict()
+
+    # Strip fs/dz keys if they're None — otherwise `defaults.update(md)`
+    # below would clobber the lbm default with None, which then leaks
+    # into ops.npy as either None or write_ops's hardcoded fs=10
+    # fallback. Removing the key surfaces the missing-data signal
+    # explicitly to the user (they get None in ops.npy, not a fake 10).
+    for key in ("fs", "dz"):
+        if key in md and md[key] is None:
+            md.pop(key)
+
+    md["process_timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    md["original_file"] = config["fpath"]
+    md["roi_index"] = arr_idx
+    md["z_index"] = current_z
+    md["plane"] = plane
+    md["Ly"] = Ly
+    md["Lx"] = Lx
+    md["ops_path"] = str(ops_path)
+    md["save_path"] = str(plane_dir)
+    md["raw_file"] = str((plane_dir / "data_raw.bin").resolve())
+
+    config["logger"].info(
+        f"_run_plane_worker_thread: applied reactive metadata -> "
+        f"fs={md.get('fs')}, dz={md.get('dz')} "
+        f"(t-stride from {len(tp_indices) if tp_indices else 0} indices, "
+        f"z-stride from {len(selected_planes_0based) if selected_planes_0based else 0} planes)"
+    )
 
     from lbm_suite2p_python import default_ops
 
@@ -1934,24 +2045,22 @@ def _run_plane_worker_thread(config):
     defaults.update(ops)
     defaults.update(md)
 
-    defaults["shape"] = (config["target_timepoints"], Ly, Lx)
-    defaults["num_timepoints"] = config["target_timepoints"]
-    defaults["num_frames"] = config["target_timepoints"]
-    defaults["nframes"] = config["target_timepoints"]
-
     if channel is not None:
         defaults["functional_chan"] = 1
         defaults["align_by_chan"] = 1
 
-    lazy_mdata.pop("shape", None)
-    lazy_mdata.pop("num_timepoints", None)
-    lazy_mdata.pop("num_frames", None)
-    lazy_mdata.pop("nframes", None)
-    lazy_mdata.pop("n_frames", None)
-
     from mbo_utilities.writer import imwrite
 
     plane_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pass `frames=` (1-based) to imwrite when the user has a stride
+    # selection. Without this, only the COUNT was honored — the actual
+    # stride was silently dropped and ops.npy ended up with raw source
+    # fs even though the writer thought it was truncating.
+    if tp_indices:
+        frames_arg = [i + 1 for i in tp_indices]
+    else:
+        frames_arg = None
 
     imwrite(
         arr,
@@ -1964,7 +2073,8 @@ def _run_plane_worker_thread(config):
         output_name="data_raw.bin",
         roi=roi,
         metadata=defaults,
-        num_frames=config["target_timepoints"],
+        frames=frames_arg,
+        num_frames=config["target_timepoints"] if frames_arg is None else None,
         fix_phase=config["fix_phase"],
         use_fft=config["use_fft"],
     )

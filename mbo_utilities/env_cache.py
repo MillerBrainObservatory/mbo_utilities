@@ -83,6 +83,19 @@ def clear_all_caches() -> int:
             pass
     return count
 
+_CUPY_DIST_VARIANTS = ("cupy-cuda13x", "cupy-cuda12x", "cupy-cuda11x", "cupy")
+
+
+def _find_installed_dist(candidates: tuple[str, ...]) -> tuple[str, str] | None:
+    """Return (dist_name, version) of the first candidate that resolves."""
+    from importlib.metadata import version, PackageNotFoundError
+    for name in candidates:
+        try:
+            return name, version(name)
+        except PackageNotFoundError:
+            continue
+    return None
+
 
 def get_env_fingerprint() -> str:
     """generate fingerprint of installed packages to detect env changes.
@@ -94,7 +107,7 @@ def get_env_fingerprint() -> str:
         from importlib.metadata import version, PackageNotFoundError
         # check specific packages directly (faster than iterating all)
         key_packages = [
-            "mbo-utilities", "torch", "cupy", "suite3d", "lbm-suite2p-python",
+            "mbo-utilities", "torch", "suite3d", "lbm-suite2p-python",
             "rastermap", "imgui-bundle", "fastplotlib", "pyqt6", "napari",
         ]
         installed = []
@@ -104,6 +117,10 @@ def get_env_fingerprint() -> str:
                 installed.append(f"{pkg}:{ver}")
             except PackageNotFoundError:
                 pass  # not installed
+        # cupy gets special handling because its dist is variant-named
+        cupy_found = _find_installed_dist(_CUPY_DIST_VARIANTS)
+        if cupy_found is not None:
+            installed.append(f"{cupy_found[0]}:{cupy_found[1]}")
         fingerprint = hashlib.md5("|".join(installed).encode()).hexdigest()[:12]
         return fingerprint
     except Exception:
@@ -323,7 +340,7 @@ def _check_all_packages() -> dict:
     checks = [
         ("suite2p", "lbm_suite2p_python", "lbm-suite2p-python"),
         ("suite3d", "suite3d", "suite3d"),
-        ("cupy", "cupy", "cupy"),
+        ("cupy", "cupy", None),  # variant dist names handled below
         ("torch", "torch", "torch"),
         ("rastermap", "rastermap", "rastermap"),
         ("imgui_bundle", "imgui_bundle", "imgui-bundle"),
@@ -338,9 +355,17 @@ def _check_all_packages() -> dict:
         available = _check_import(module)
         info: dict[str, Any] = {"available": available}
         if available:
-            ver = _get_package_version(pkg_name)
-            if ver:
-                info["version"] = ver
+            if key == "cupy":
+                # cupy ships under cupy-cuda{12,13,...}x; resolve whichever
+                # variant is installed and record both name and version.
+                found = _find_installed_dist(_CUPY_DIST_VARIANTS)
+                if found is not None:
+                    info["dist_name"] = found[0]
+                    info["version"] = found[1]
+            else:
+                ver = _get_package_version(pkg_name)
+                if ver:
+                    info["version"] = ver
         packages[key] = info
 
     return packages

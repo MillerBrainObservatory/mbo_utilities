@@ -416,6 +416,92 @@ def _show_metadata_viewer(metadata: dict) -> None:
     immapp.run(runner_params=params, add_ons_params=addons)
 
 
+class _SqueezeSingletonDims:
+    """wraps a 5D TCZYX array, dropping every singleton non-spatial dim.
+
+    fastplotlib's ImageWidget derives its slider count from ndim-2 and
+    doesn't handle singleton sliders, so any T/C/Z with size 1 must be
+    removed before handoff. get_slider_dims filters by the same
+    size>1 predicate; this wrapper keeps the shape in lockstep so
+    len(slider_dim_names) always equals wrapped.ndim - 2.
+    """
+
+    def __init__(self, arr):
+        self._arr = arr
+        full = tuple(arr.shape)
+        if len(full) != 5:
+            raise ValueError(f"expected 5D TCZYX array, got shape {full}")
+        # keep non-spatial dims only if size > 1, always keep Y, X
+        self._kept = [i for i in range(3) if full[i] > 1] + [3, 4]
+        self._dropped = [i for i in range(3) if full[i] <= 1]
+        self._shape = tuple(full[i] for i in self._kept)
+        orig_dims = getattr(arr, "dims", None)
+        if orig_dims is not None and len(orig_dims) == 5:
+            self._dims = tuple(orig_dims[i] for i in self._kept)
+        else:
+            self._dims = None
+
+    @property
+    def shape(self):
+        return self._shape
+
+    @property
+    def ndim(self):
+        return len(self._shape)
+
+    @property
+    def dtype(self):
+        return self._arr.dtype
+
+    @property
+    def dims(self):
+        return self._dims
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+        # pad short keys to wrapped ndim
+        if len(key) < self.ndim:
+            key = key + (slice(None),) * (self.ndim - len(key))
+        # rebuild a 5D key: 0 at dropped axes, user key at kept axes
+        full_key = [None] * 5
+        for d in self._dropped:
+            full_key[d] = 0
+        it = iter(key)
+        for i in self._kept:
+            full_key[i] = next(it)
+        return self._arr[tuple(full_key)]
+
+    def __len__(self):
+        return self._shape[0]
+
+    def __array__(self, dtype=None, copy=None):
+        # materialize through __getitem__ so the squeezed shape is honored.
+        # without this, np.asarray() / .astype() / etc. fall through
+        # __getattr__ to the underlying array and leak the unsqueezed rank.
+        import numpy as np
+        arr = np.asarray(self[tuple(slice(None) for _ in range(self.ndim))])
+        if dtype is not None:
+            arr = arr.astype(dtype)
+        return arr
+
+    def astype(self, dtype, *args, **kwargs):
+        # fastplotlib's TextureArray._fix_data calls data.astype(np.float32).
+        # route through __array__ so the cast sees the squeezed shape.
+        import numpy as np
+        return np.asarray(self).astype(dtype, *args, **kwargs)
+
+    def __getattr__(self, name):
+        # IMPORTANT: do not forward numpy-array-protocol methods here
+        # (__array__, astype, reshape, etc.) — those must be defined
+        # explicitly above so they respect the squeezed shape. this
+        # fallback exists only for domain-specific attributes like
+        # `metadata`, `stack_type`, `num_beamlets`, etc.
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        return getattr(self._arr, name)
+
+
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
     import copy
@@ -437,7 +523,6 @@ def _create_image_widget(data_array, widget: bool = True):
         figure_kwargs = {"size": (800, 800)}
 
     # Determine slider dimension names from array's dims property if available
-    # otherwise fall back to defaults based on ndim
     from mbo_utilities.arrays.features import get_slider_dims
 
     slider_dim_names = get_slider_dims(data_array)
@@ -451,6 +536,19 @@ def _create_image_widget(data_array, widget: bool = True):
     else:
         window_funcs = None
         window_sizes = None
+
+    def _squeeze_for_viewer(arr):
+        """drop every singleton non-spatial dim so fastplotlib's ndim-2
+        slider count matches get_slider_dims output.
+
+        fastplotlib expects ndim == len(slider_dim_names) + 2. any
+        T/C/Z with size 1 must be squeezed, not just C.
+        """
+        if not hasattr(arr, "shape") or len(arr.shape) != 5:
+            return arr
+        if any(arr.shape[i] == 1 for i in range(3)):
+            return _SqueezeSingletonDims(arr)
+        return arr
 
     # Handle multi-ROI data (duck typing: check for roi_mode attribute)
     if hasattr(data_array, "roi_mode") and hasattr(data_array, "iter_rois"):
@@ -471,7 +569,7 @@ def _create_image_widget(data_array, widget: bool = True):
             arr = copy.copy(data_array)
             arr.fix_phase = False
             arr.roi = r
-            arrays.append(arr)
+            arrays.append(_squeeze_for_viewer(arr))
             names.append(f"ROI {r}" if r else (base_name or "Full Image"))
 
         iw = fpl.ImageWidget(
@@ -480,16 +578,18 @@ def _create_image_widget(data_array, widget: bool = True):
             slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
             window_sizes=window_sizes,
+            cmap="gnuplot2",
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": -100, "vmax": 4000},
         )
     else:
         iw = fpl.ImageWidget(
-            data=data_array,
+            data=_squeeze_for_viewer(data_array),
             slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,
             window_sizes=window_sizes,
+            cmap="gnuplot2",
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
             graphic_kwargs={"vmin": -100, "vmax": 4000},
@@ -615,13 +715,34 @@ class _NapariArray:
     Napari calls np.asarray() on the object when added, triggering materialization
     of just that 2D frame instead of the full ND dataset, breaking the viewer.
     By not defining __array__, we force napari to use __getitem__ to access slices.
+
+    When `c_index` is set, the wrapper presents the underlying 5D TCZYX
+    array as a 4D TZYX view by pinning C to that index. This is what
+    `_launch_napari` uses when the data is single-channel — passing the
+    raw 5D array makes napari see 5 dimensions and reject 4-element
+    `axis_labels`, while `channel_axis=1` would create a stray
+    one-channel split. Squeezing C here gets us a clean 4D view that
+    napari treats as a single (T, Z, Y, X) image layer.
     """
-    def __init__(self, arr):
+    def __init__(self, arr, c_index: int | None = None):
         self._arr = arr
+        self._c_index = c_index
+        if c_index is not None:
+            # advertise 4D (T, Z, Y, X) by stripping the C axis at index 1
+            full = tuple(arr.shape)
+            if len(full) != 5:
+                raise ValueError(
+                    f"_NapariArray(c_index=...) expects 5D TCZYX input, got shape {full}"
+                )
+            self._shape = (full[0], full[2], full[3], full[4])
+            self._ndim = 4
+        else:
+            self._shape = tuple(arr.shape)
+            self._ndim = arr.ndim
 
     @property
     def shape(self):
-        return self._arr.shape
+        return self._shape
 
     @property
     def dtype(self):
@@ -629,11 +750,78 @@ class _NapariArray:
 
     @property
     def ndim(self):
-        return self._arr.ndim
+        return self._ndim
 
     def __getitem__(self, key):
         import numpy as np
-        return np.asarray(self._arr[key])
+
+        if self._c_index is None:
+            return np.asarray(self._arr[key])
+
+        # rebuild a 5D TCZYX key from the user's 4D TZYX key by inserting
+        # the pinned c_index at position 1. napari's slicing protocol
+        # passes a tuple of slices/ints; pad short keys with full slices
+        # the same way numpy does so partial indexes still work.
+        if not isinstance(key, tuple):
+            key = (key,)
+        if len(key) < 4:
+            key = key + (slice(None),) * (4 - len(key))
+        full_key = (key[0], int(self._c_index), key[1], key[2], key[3])
+        return np.asarray(self._arr[full_key])
+
+
+# napari layer defaults — used for every layer added by `_launch_napari`,
+# including the napari-ome-zarr plugin path (we set them post-add there).
+# If you want to change them globally, change them here, not at every
+# add_image call site.
+_NAPARI_DEFAULTS = {
+    "colormap": "gnuplot2",
+    "contrast_limits": (0, 400),
+}
+
+
+def _prompt_for_dz(default: float = 16.0) -> float | None:
+    """Pop a Qt input dialog asking the user for the z-spacing.
+
+    Used by `_launch_napari` when the source metadata doesn't supply `dz`
+    (LBM TIFFs are the common case — `dz` has to come from the user). The
+    napari Viewer is already running so its QApplication is alive; we
+    just need a modal QInputDialog on top of it.
+
+    Returns the entered value in micrometers, or None if the user
+    cancelled. The dialog uses QInputDialog.getDouble which validates
+    range and decimals natively, so we don't need a separate validator.
+
+    Range: 0.1 - 1000.0 µm. Anything outside that is almost certainly a
+    typo (sub-100nm pixels are nanoscale; >1mm is not light microscopy).
+    """
+    try:
+        from qtpy.QtWidgets import QInputDialog, QApplication
+    except ImportError:
+        try:
+            from PyQt6.QtWidgets import QInputDialog, QApplication
+        except ImportError:
+            return None  # no Qt available — caller falls back to default
+
+    # need a QApplication instance to parent the dialog. napari's already
+    # running one by the time we get here, but be defensive.
+    app = QApplication.instance()
+    if app is None:
+        return None
+
+    value, ok = QInputDialog.getDouble(
+        None,
+        "Z-spacing required",
+        (
+            "No `dz` (z-step) found in source metadata.\n\n"
+            "Enter the z-spacing in micrometers (\u00b5m):"
+        ),
+        float(default),  # initial value
+        0.1,             # min
+        1000.0,          # max
+        3,               # decimals
+    )
+    return float(value) if ok else None
 
 
 def _launch_napari(data_in, roi=None):
@@ -653,14 +841,49 @@ def _launch_napari(data_in, roi=None):
         from mbo_utilities.metadata.output import OutputMetadata
         from pathlib import Path
 
-        viewer = napari.Viewer()
         path_str = str(data_in)
+
+        # Probe the source up front so we can pick the right viewer mode
+        # (3D when there's a real Z axis) and log the spatial scale we'll
+        # be passing to napari. We re-load below for the actual layer when
+        # falling out of the ome-zarr plugin path; the probe is cheap.
+        probe_arr = None
+        probe_dims = None
+        probe_z_size = 1
+        try:
+            probe_arr = imread(data_in, roi=normalize_roi(roi))
+            probe_dims = get_dims(probe_arr)
+            if "Z" in probe_dims:
+                probe_z_size = int(probe_arr.shape[probe_dims.index("Z")])
+        except Exception as e:
+            logger.debug(f"napari probe failed (will still try plugin path): {e}")
+
+        # 3D display when the data actually has multiple z-planes; otherwise
+        # 2D so the canvas isn't constantly switching back and forth.
+        ndisplay = 3 if probe_z_size > 1 else 2
+        viewer = napari.Viewer(ndisplay=ndisplay)
+        logger.info(f"napari viewer launched (ndisplay={ndisplay})")
+
+        def _apply_layer_defaults(layer):
+            """Force colormap + contrast on a layer, ignoring failures."""
+            try:
+                layer.colormap = _NAPARI_DEFAULTS["colormap"]
+            except Exception:
+                pass
+            try:
+                layer.contrast_limits = _NAPARI_DEFAULTS["contrast_limits"]
+            except Exception:
+                pass
 
         # Try napari-ome-zarr plugin first for .zarr files
         loaded = False
         if path_str.endswith(".zarr"):
             try:
-                viewer.open(path_str, plugin="napari-ome-zarr")
+                added = viewer.open(path_str, plugin="napari-ome-zarr")
+                # `viewer.open` returns the list of layers it created
+                if added:
+                    for layer in added:
+                        _apply_layer_defaults(layer)
                 loaded = True
             except Exception as e:
                 # OME-Zarr plugin failed, fall back to mbo_utilities
@@ -669,43 +892,125 @@ def _launch_napari(data_in, roi=None):
         if not loaded:
             # Load via mbo_utilities and add as layer
             try:
-                roi = normalize_roi(roi)
-                arr = imread(data_in, roi=roi)
-                dims = get_dims(arr)
+                arr = probe_arr if probe_arr is not None else imread(
+                    data_in, roi=normalize_roi(roi)
+                )
+                dims = probe_dims if probe_dims is not None else get_dims(arr)
 
-                channel_axis = list(dims).index("C") if "C" in dims else None
+                # 5D TCZYX contract:
+                #   - real multi-channel (C > 1) → use napari's channel_axis,
+                #     leave the array 5D, napari splits per channel
+                #   - singleton C (the common case for LBM) → tell the
+                #     wrapper to squeeze C, so napari sees a clean 4D
+                #     (T, Z, Y, X) layer with no stray "channels" slider
+                # We must NOT just drop C from axis_labels while leaving
+                # the underlying array 5D — napari rejects that with
+                # `axis_labels must have length ndim=5`.
+                channel_axis = None
+                squeeze_c_index = None
+                if "C" in dims:
+                    c_idx = list(dims).index("C")
+                    c_size = int(arr.shape[c_idx]) if c_idx < len(arr.shape) else 1
+                    if c_size > 1:
+                        channel_axis = c_idx
+                    else:
+                        squeeze_c_index = 0
 
+                # Build scale via OutputMetadata.to_napari_scale, which
+                # already pulls dx/dy/dz off the source metadata via the
+                # voxel_size feature. Log the resolved values so the user
+                # can confirm the metadata was actually picked up rather
+                # than silently falling back to (1, 1, 1).
                 scale = None
+                resolved_dz = None
                 try:
-                    om = OutputMetadata(source=arr.metadata, source_shape=arr.shape, source_dims=dims)
-                    scale = om.to_napari_scale(dims)
-                    if scale:
-                        scale = list(scale)
+                    om = OutputMetadata(
+                        source=arr.metadata,
+                        source_shape=arr.shape,
+                        source_dims=dims,
+                    )
+                    vs = om.voxel_size
+                    logger.info(
+                        f"napari scale source: dx={vs.dx}, dy={vs.dy}, dz={vs.dz}"
+                    )
+                    scale = list(om.to_napari_scale(dims))
+                    resolved_dz = vs.dz
                 except Exception as e:
                     logger.debug(f"Failed to build scale: {e}")
 
+                # If the source didn't supply a dz and we actually have
+                # multiple z-planes, prompt the user. Otherwise napari
+                # silently falls back to dz=1.0 and the 3D view is
+                # squashed in the wrong proportion. The dialog is the
+                # same one the metadata editor would show, so the value
+                # entered here is treated as authoritative for this
+                # session and written into the array's scale tuple.
+                if (
+                    resolved_dz is None
+                    and "Z" in dims
+                    and probe_z_size > 1
+                    and scale is not None
+                ):
+                    user_dz = _prompt_for_dz()
+                    if user_dz is not None:
+                        z_idx = list(dims).index("Z")
+                        if z_idx < len(scale):
+                            scale[z_idx] = float(user_dz)
+                        logger.info(
+                            f"napari scale: applied user-entered dz={user_dz} um"
+                        )
+                    else:
+                        logger.warning(
+                            "napari scale: user cancelled dz prompt; "
+                            "falling back to dz=1.0 (z-axis will be squashed)"
+                        )
+
                 axis_labels = list(dims)
-                if channel_axis is not None:
-                    if scale and len(scale) > channel_axis:
-                        scale.pop(channel_axis)
-                    if len(axis_labels) > channel_axis:
-                        axis_labels.pop(channel_axis)
+                # Drop the C axis from scale and labels regardless of whether
+                # it's a real channel split — napari's `channel_axis` strips
+                # it from the displayed dims for us, and for the singleton
+                # case we collapsed it to None and want it gone anyway.
+                if "C" in dims:
+                    c_idx_for_strip = list(dims).index("C")
+                    if scale and len(scale) > c_idx_for_strip:
+                        scale.pop(c_idx_for_strip)
+                    if len(axis_labels) > c_idx_for_strip:
+                        axis_labels.pop(c_idx_for_strip)
 
                 layer_name = Path(path_str).stem
 
                 def _add_to_viewer(layer_arr, name):
-                    n_arr = _NapariArray(layer_arr)
-                    kwargs = {"name": name}
+                    # squeeze the singleton C axis when there isn't a
+                    # real channel split — napari then sees a 4D
+                    # (T, Z, Y, X) view with rank matching axis_labels.
+                    n_arr = _NapariArray(layer_arr, c_index=squeeze_c_index)
+                    kwargs = {
+                        "name": name,
+                        "colormap": _NAPARI_DEFAULTS["colormap"],
+                        "contrast_limits": _NAPARI_DEFAULTS["contrast_limits"],
+                    }
                     if scale:
                         kwargs["scale"] = tuple(scale)
                     if channel_axis is not None:
                         kwargs["channel_axis"] = channel_axis
 
                     try:
-                        viewer.add_image(n_arr, axis_labels=tuple(axis_labels), **kwargs)
+                        added_layers = viewer.add_image(
+                            n_arr, axis_labels=tuple(axis_labels), **kwargs
+                        )
                     except TypeError:
-                        # Older napari versions
-                        viewer.add_image(n_arr, **kwargs)
+                        # Older napari without axis_labels kwarg
+                        added_layers = viewer.add_image(n_arr, **kwargs)
+
+                    # add_image returns either a single layer or a list when
+                    # channel_axis is set; normalize and re-apply the
+                    # defaults in case napari overrode them after add.
+                    if added_layers is None:
+                        return
+                    if not isinstance(added_layers, (list, tuple)):
+                        added_layers = [added_layers]
+                    for layer in added_layers:
+                        _apply_layer_defaults(layer)
 
                 # Handle multi-ROI
                 if hasattr(arr, "roi_mode") and hasattr(arr, "iter_rois"):
@@ -726,7 +1031,10 @@ def _launch_napari(data_in, roi=None):
         if not loaded:
             # Last resort: let napari try to open it directly
             try:
-                viewer.open(path_str)
+                added = viewer.open(path_str)
+                if added:
+                    for layer in added:
+                        _apply_layer_defaults(layer)
             except Exception as e:
                 logger.error(f"Failed to open via napari default fallback: {e}")
 

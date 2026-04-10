@@ -21,8 +21,19 @@ class WindowFunctionsWidget(Widget):
 
     @classmethod
     def is_supported(cls, parent: Any) -> bool:
-        """Supported when data has more than 1 timepoint."""
-        return getattr(parent, "shape", (0,))[0] > 1
+        """Supported when data has a time dimension with more than 1 frame."""
+        arr = parent.image_widget.data[0] if getattr(parent, "image_widget", None) else None
+        if arr is None:
+            return False
+        dims = getattr(arr, "dims", None)
+        shape = getattr(arr, "shape", None)
+        if dims and shape:
+            dims_lower = tuple(d.lower() for d in dims)
+            if "t" in dims_lower:
+                return shape[dims_lower.index("t")] > 1
+            return False
+        # fallback: any shape with >1 in the outer dim and rank >= 3
+        return bool(shape) and len(shape) >= 3 and shape[0] > 1
 
     def draw(self) -> None:
         """Draw window functions controls."""
@@ -72,8 +83,17 @@ class SpatialFunctionsWidget(Widget):
 
     @classmethod
     def is_supported(cls, parent: Any) -> bool:
-        """Always supported."""
-        return True
+        """Supported when data has rank > 2 (something to stack across).
+
+        A pure 2D image has no temporal or z axis — mean subtraction is
+        ill-defined and gaussian blur is trivially available on the
+        already-displayed frame without this control.
+        """
+        arr = parent.image_widget.data[0] if getattr(parent, "image_widget", None) else None
+        if arr is None:
+            return False
+        shape = getattr(arr, "shape", None)
+        return bool(shape) and len(shape) > 2
 
     def draw(self) -> None:
         """Draw spatial functions controls."""

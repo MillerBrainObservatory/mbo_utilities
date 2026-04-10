@@ -133,14 +133,17 @@ def get_slider_dims(arr_or_dims) -> tuple[str, ...] | None:
     if dims is None:
         return None
 
-    # filter out spatial dims and convert to lowercase for fastplotlib
-    # include size-1 dims since ImageWidget creates sliders for all non-spatial dims
-    slider_dims = tuple(
-        d.lower()
-        for d in dims
-        if d not in ("Y", "X")
-    )
-    return slider_dims if slider_dims else None
+    # filter out spatial dims and singleton dims, convert to lowercase for fastplotlib
+    # skip size-1 dims since fastplotlib doesn't handle singleton sliders well
+    shape = getattr(arr_or_dims, "shape", None)
+    slider_dims = []
+    for i, d in enumerate(dims):
+        if d in ("Y", "X"):
+            continue
+        if shape is not None and i < len(shape) and shape[i] <= 1:
+            continue
+        slider_dims.append(d.lower())
+    return tuple(slider_dims) if slider_dims else None
 
 
 def get_dim_index(dims: tuple[str, ...], label: str) -> int | None:
@@ -374,32 +377,16 @@ def get_num_planes(arr) -> int:
     """
     Get number of Z-planes from an array.
 
-    Checks:
-    1. explicit num_planes property
-    2. num_channels property (alias)
-    3. shape at Z dimension index
+    Always 5D TCZYX, so Z is at index 2.
 
     Parameters
     ----------
     arr : array-like
-        array with shape
+        array with shape (always 5D TCZYX)
 
     Returns
     -------
     int
-        number of planes (1 if no Z dimension)
+        number of z-planes
     """
-    # check explicit properties
-    if hasattr(arr, "num_planes") and arr.num_planes is not None:
-        return arr.num_planes
-    if hasattr(arr, "num_channels") and arr.num_channels is not None:
-        return arr.num_channels
-
-    # infer from dims
-    dims = get_dims(arr)
-    if "Z" in dims:
-        return arr.shape[dims.index("Z")]
-    if "C" in dims:
-        return arr.shape[dims.index("C")]
-
-    return 1
+    return arr.shape[2]

@@ -149,13 +149,16 @@ class PreviewDataWidget(EdgeWindow):
         self.num_graphics = len(self.image_widget.graphics)
         self.shape = self.image_widget.data[0].shape
 
-        # Determine data type (ScanImage or volumetric TIFF)
+        # Determine data type (ScanImage or volumetric TIFF).
+        # Peel the squeeze wrapper so isinstance sees the real class.
         from mbo_utilities.arrays import TiffArray
+        first_arr = self.image_widget.data[0]
+        underlying = getattr(first_arr, "_arr", first_arr)
         self.is_mbo_scan = (
-            isinstance(self.image_widget.data[0], ScanImageArray) or
-            isinstance(self.image_widget.data[0], TiffArray)
+            isinstance(underlying, ScanImageArray) or
+            isinstance(underlying, TiffArray)
         )
-        self.logger.info(f"Data type: {type(self.image_widget.data[0]).__name__}, is_mbo_scan: {self.is_mbo_scan}")
+        self.logger.info(f"Data type: {type(first_arr).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
         # Initialize state
         self._init_state()
@@ -308,14 +311,13 @@ class PreviewDataWidget(EdgeWindow):
 
         self.logger.info(f"Detected nz={self.nz}, nc={self.nc}, n_views={self.n_views} from dims={dims}")
 
-        # Window/projection state
-        self._window_size = 1
-        self._gaussian_sigma = 0.0
-        self._auto_update = False
-        self._proj = "mean"
-        self._mean_subtraction = False
-        self._auto_contrast_on_z = False  # auto-reset contrast when z changes (toggle with 'c')
-        self._last_z_idx = 0
+        # Window/projection/contrast state — all per-data widget controls
+        # are reset by _reset_per_data_state. Also called on every reload
+        # in load_new_data, so initial-launch defaults and reload defaults
+        # never drift.
+        self._auto_update = False  # not data-specific, kept here
+        from mbo_utilities.gui._dialogs import _reset_per_data_state
+        _reset_per_data_state(self)
 
         # Registration state
         self._register_z = False
@@ -323,6 +325,12 @@ class PreviewDataWidget(EdgeWindow):
         self._register_z_done = False
         self._register_z_running = False
         self._register_z_current_msg = ""
+        # suite3d resource knobs (None = use library default). exposed in the
+        # save-as options popup so users hitting WinError 1455 / OOM can
+        # dial back parallelism without editing source.
+        self._s3d_n_proc_corr = 4
+        self._s3d_init_n_frames = 500
+        self._s3d_n_init_files = 1
 
         # Selection state
         self._selected_pipelines = None
@@ -383,6 +391,12 @@ class PreviewDataWidget(EdgeWindow):
         self._zarr_pyramid = False
         self._zarr_pyramid_max_layers = 4
         self._zarr_pyramid_method = "mean"
+
+        # H5 options
+        # dataset name inside the .h5 file. suite2p reads from "mov" by
+        # default and lbm_suite2p_python expects the same; only change this
+        # if you're targeting a downstream tool that wants something else.
+        self._h5_dataset_name = "mov"
 
         # Save dialog state
         self._saveas_popup_open = False
@@ -471,19 +485,47 @@ class PreviewDataWidget(EdgeWindow):
 
     @property
     def current_offset(self) -> list[float]:
-        """Get current phase offset from each data array."""
+        """Scan-phase offset of the *currently displayed* frame, per graphic.
+
+        Reads from each array's per-(t, c, z) offset cache via
+        `arr.get_offset_at(t, c, z)` rather than `arr.offset`. The latter
+        returns `_last_offset`, which is global mutable state clobbered by
+        every read on the array — including background reads from histogram
+        subsamplers and zstats workers — so it drifts even when the user
+        isn't scrubbing. The cached lookup, by contrast, is keyed to the
+        exact (t, c, z) cell on screen, so the displayed value only changes
+        when the user actually moves a slider.
+        """
+        # current displayed indices, defaulting to 0 when a slider is absent
+        # (e.g. T-only data has no z slider, so we report z=0).
+        indices = {}
+        if self.image_widget is not None:
+            try:
+                names = self.image_widget._slider_dim_names or ()
+                for name in names:
+                    try:
+                        indices[name] = int(self.image_widget.indices[name])
+                    except (KeyError, IndexError, TypeError):
+                        pass
+            except Exception:
+                pass
+        t_idx = indices.get("t", 0)
+        c_idx = indices.get("c", 0)
+        z_idx = indices.get("z", 0)
+
         offsets = []
         for arr in self._get_data_arrays():
-            if hasattr(arr, "offset"):
-                arr_offset = arr.offset
-                if arr_offset is None:
-                    offsets.append(0.0)
-                elif isinstance(arr_offset, np.ndarray):
-                    offsets.append(float(arr_offset.mean()) if arr_offset.size > 0 else 0.0)
-                else:
-                    offsets.append(float(arr_offset))
-            else:
+            value = None
+            getter = getattr(arr, "get_offset_at", None)
+            if callable(getter):
+                value = getter(t_idx, c_idx, z_idx)
+            if value is None:
+                # cache miss (frame hasn't been read yet under current
+                # settings) or array doesn't expose the per-frame cache —
+                # leave the display at 0.0 rather than showing stale state.
                 offsets.append(0.0)
+            else:
+                offsets.append(float(value))
         return offsets
 
     @property
@@ -601,8 +643,6 @@ class PreviewDataWidget(EdgeWindow):
         self._gaussian_sigma = max(0.0, value)
         self._rebuild_spatial_func()
         self._refresh_image_widget()
-        if self.image_widget:
-            self.image_widget.reset_vmin_vmax_frame()
 
     @property
     def proj(self) -> str:
@@ -657,8 +697,6 @@ class PreviewDataWidget(EdgeWindow):
             return
         per_processor_sizes = (self._window_size,) + (None,) * (n_slider_dims - 1)
         self._set_processor_attr("window_sizes", per_processor_sizes)
-        if self.image_widget:
-            self.image_widget.reset_vmin_vmax_frame()
 
     @property
     def phase_upsample(self) -> int:
@@ -727,11 +765,15 @@ class PreviewDataWidget(EdgeWindow):
         self._widgets = get_supported_widgets(self)
 
     def _update_mean_subtraction(self):
-        """Update spatial_func to apply mean subtraction."""
+        """Update spatial_func to apply mean subtraction.
+
+        does NOT reset vmin/vmax — callers that need a contrast reset
+        (e.g. the mean_subtraction setter on initial toggle) must do so
+        explicitly. this keeps per-z-plane rebuilds from silently
+        overriding the user's auto_contrast_on_z preference.
+        """
         self._rebuild_spatial_func()
         self._refresh_image_widget()
-        if self.image_widget:
-            self.image_widget.reset_vmin_vmax_frame()
 
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function."""
@@ -770,7 +812,10 @@ class PreviewDataWidget(EdgeWindow):
         ksize = (int(sigma * 6) | 1) if sigma else 0
 
         def spatial_func(frame):
-            result = frame
+            # fastplotlib passes the raw data object when n_slider_dims==0,
+            # which for our lazy arrays is not yet a numpy array.
+            # materialize first so arithmetic/ufuncs work.
+            result = np.asarray(frame)
             if mean_img is not None and result.ndim == 2:
                 # only subtract when frame is 2D (Y, X); skip if 3D since
                 # mean_img is z-specific and can't be applied to a full stack
@@ -813,8 +858,6 @@ class PreviewDataWidget(EdgeWindow):
             window_funcs = (proj_func,) + (None,) * (n_slider_dims - 1)
 
         self._set_processor_attr("window_funcs", window_funcs)
-        if self.image_widget:
-            self.image_widget.reset_vmin_vmax_frame()
 
     def gui_progress_callback(self, frac, meta=None):
         """Handle progress callbacks from save operations."""
@@ -890,9 +933,11 @@ class PreviewDataWidget(EdgeWindow):
 
         if z_idx != self._last_z_idx:
             self._last_z_idx = z_idx
+            # rebuild mean-sub (if active) and reset contrast (if auto) are
+            # independent concerns — both can apply on the same z change.
             if self._mean_subtraction:
                 self._update_mean_subtraction()
-            elif self._auto_contrast_on_z and self.image_widget:
+            if self._auto_contrast_on_z and self.image_widget:
                 self.image_widget.reset_vmin_vmax_frame()
 
     def draw_stats_section(self):

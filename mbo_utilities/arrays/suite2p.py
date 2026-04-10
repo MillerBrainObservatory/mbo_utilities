@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base, _normalize_key, ReductionMixin
+from mbo_utilities.arrays._base import _imwrite_base, _normalize_key, ReductionMixin, Shape5DMixin
 from mbo_utilities.arrays.features import DimLabels
 
 from mbo_utilities.metadata import get_param
@@ -168,7 +168,7 @@ class _SinglePlaneReader:
         self._file._mmap.close()
 
 
-class Suite2pArray(ReductionMixin):
+class Suite2pArray(ReductionMixin, Shape5DMixin):
     """
     Lazy array reader for Suite2p binary output files.
 
@@ -278,6 +278,7 @@ class Suite2pArray(ReductionMixin):
         self._planes = [reader]
 
         self._nframes = reader.nframes
+        self._nz = 1
         self._ly = reader.Ly
         self._lx = reader.Lx
         self._dtype = reader.dtype
@@ -354,14 +355,20 @@ class Suite2pArray(ReductionMixin):
         return len(self._planes)
 
     @property
-    def shape(self) -> tuple:
-        if self._is_volumetric:
-            return (self._nframes, self._nz, self._ly, self._lx)
-        return (self._nframes, self._ly, self._lx)
+    def shape(self) -> tuple[int, int, int, int, int]:
+        return self._shape5d()
+
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        return (self._nframes, 1, self._nz, self._ly, self._lx)
 
     @property
     def ndim(self) -> int:
-        return 4 if self._is_volumetric else 3
+        return 5
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        from mbo_utilities.arrays._base import DIMS
+        return DIMS
 
     @property
     def dtype(self):
@@ -388,49 +395,15 @@ class Suite2pArray(ReductionMixin):
         self._target_dtype = np.dtype(dtype)
         return self
 
-    def _compute_frame_vminmax(self):
-        """Compute vmin/vmax from first frame."""
-        if not hasattr(self, "_cached_vmin"):
-            if self._is_volumetric:
-                frame = np.asarray(self[0, 0])
-            else:
-                frame = np.asarray(self[0])
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        """Min from first frame for display."""
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        """Max from first frame for display."""
-        self._compute_frame_vminmax()
-        return self._cached_vmax
+    # _compute_frame_vminmax / vmin / vmax inherited from ReductionMixin
 
     def __len__(self) -> int:
         return self._nframes
 
     def __getitem__(self, key):
-        if self._is_volumetric:
-            return self._getitem_volume(key)
-        return self._getitem_single(key)
-
-    def _getitem_single(self, key):
-        """Index single-plane array."""
-        out = self._planes[0][key]
-        if hasattr(self, "_target_dtype") and self._target_dtype is not None:
-            out = out.astype(self._target_dtype)
-        return out
-
-    def _getitem_volume(self, key):
-        """Index volumetric array."""
-
-        key = _normalize_key(key, 4)
-        key = key + (slice(None),) * (4 - len(key))
-        t_key, z_key, y_key, x_key = key
+        key = _normalize_key(key, 5)
+        key = key + (slice(None),) * (5 - len(key))
+        t_key, c_key, z_key, y_key, x_key = key
 
         # normalize t_key
         if isinstance(t_key, slice):
@@ -458,7 +431,38 @@ class Suite2pArray(ReductionMixin):
                 z_indices = range(self._nz)
 
             arrs = [self._planes[i][t_key, y_key, x_key] for i in z_indices]
-            out = np.stack(arrs, axis=1)
+            # each arr may be 2D (Y,X) if t_key was int, or 3D (T,Y,X) if slice
+            if arrs and arrs[0].ndim == 2:
+                # int t_key: stack on axis=0 -> (Z, Y, X)
+                out = np.stack(arrs, axis=0)
+            else:
+                out = np.stack(arrs, axis=1)  # (T, Z, Y, X)
+
+        # ensure 5D: insert missing dims
+        if out.ndim == 2:
+            # single t + single z -> (Y, X)
+            out = out[np.newaxis, np.newaxis, np.newaxis, :, :]
+        elif out.ndim == 3:
+            if isinstance(z_key, int):
+                # (T, Y, X) - z was squeezed by int index
+                out = out[:, np.newaxis, np.newaxis, :, :]
+            else:
+                # (Z, Y, X) - t was int-indexed, add T and C dims
+                out = out[np.newaxis, np.newaxis, :, :, :]
+        elif out.ndim == 4:
+            # (T, Z, Y, X) - insert C=1
+            out = out[:, np.newaxis, :, :, :]
+
+        # squeeze integer-indexed dimensions
+        squeeze_axes = []
+        if isinstance(key[0], int):
+            squeeze_axes.append(0)
+        if isinstance(key[1], int):
+            squeeze_axes.append(1)
+        if isinstance(key[2], int):
+            squeeze_axes.append(2)
+        for ax in sorted(squeeze_axes, reverse=True):
+            out = np.squeeze(out, axis=ax)
 
         if hasattr(self, "_target_dtype") and self._target_dtype is not None:
             out = out.astype(self._target_dtype)

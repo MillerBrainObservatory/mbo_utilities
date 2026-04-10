@@ -283,11 +283,8 @@ class PhaseCorrectionFeature(ArrayFeature):
         n_sample = min(window_size, n_frames)
         start = max(0, (n_frames - n_sample) // 2)
 
-        if array.ndim == 4:
-            # use first plane
-            window = array[start : start + n_sample, 0]
-        else:
-            window = array[start : start + n_sample]
+        # 5D TCZYX: T=start:end, C=0, Z=0
+        window = array[start : start + n_sample, 0, 0]
 
         # compute using phasecorr module
         _corrected, shift = bidir_phasecorr(
@@ -396,6 +393,7 @@ class PhaseCorrectionMixin:
         pc = getattr(self, "phase_correction", None)
         if pc is not None:
             pc.enabled = value
+            self._invalidate_phase_offset_cache()
 
     @property
     def use_fft(self) -> bool:
@@ -411,6 +409,18 @@ class PhaseCorrectionMixin:
         pc = getattr(self, "phase_correction", None)
         if pc is not None:
             pc.use_fft = value
+            self._invalidate_phase_offset_cache()
+
+    def _invalidate_phase_offset_cache(self) -> None:
+        """Drop cached per-frame offsets when settings change.
+
+        Subclasses with a real cache override `_invalidate_offset_cache`;
+        this base method just calls into it if present so the mixin stays
+        decoupled from any specific reader's storage.
+        """
+        invalidate = getattr(self, "_invalidate_offset_cache", None)
+        if callable(invalidate):
+            invalidate()
 
     @property
     def phasecorr_method(self) -> str:
@@ -444,6 +454,7 @@ class PhaseCorrectionMixin:
         pc = getattr(self, "phase_correction", None)
         if pc is not None:
             pc.border = value
+            self._invalidate_phase_offset_cache()
 
     @property
     def upsample(self) -> int:
@@ -459,6 +470,7 @@ class PhaseCorrectionMixin:
         pc = getattr(self, "phase_correction", None)
         if pc is not None:
             pc.upsample = value
+            self._invalidate_phase_offset_cache()
 
     @property
     def max_offset(self) -> int:
@@ -474,6 +486,7 @@ class PhaseCorrectionMixin:
         pc = getattr(self, "phase_correction", None)
         if pc is not None:
             pc.max_offset = value
+            self._invalidate_phase_offset_cache()
 
     @property
     def offset(self) -> float | None:

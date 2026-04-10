@@ -339,7 +339,7 @@ def benchmark_indexing(
     """
     results = {}
     max_frames = arr.shape[0]
-    num_zplanes = arr.shape[1] if arr.ndim >= 4 else 1
+    num_zplanes = arr.shape[2]  # Z at index 2 in 5D TCZYX
 
     # warmup
     if warmup:
@@ -488,8 +488,8 @@ def benchmark_parallel_planes(
         timing stats for each plane position
     """
     results = {}
-    if arr.ndim < 4 or arr.shape[1] < 3:
-        logger.warning("need 4D array with at least 3 z-planes for parallel plane benchmark")
+    if arr.shape[2] < 3:
+        logger.warning("need at least 3 z-planes for parallel plane benchmark")
         return results
 
     num_zplanes = arr.shape[1]
@@ -612,11 +612,8 @@ def benchmark_throughput(
         if n > max_frames:
             continue
 
-        # calculate bytes for this read
-        if arr.ndim == 4:
-            bytes_read = n * arr.shape[1] * arr.shape[2] * arr.shape[3] * dtype_size
-        else:
-            bytes_read = n * arr.shape[1] * arr.shape[2] * dtype_size
+        # always 5D TCZYX: bytes = T_chunk * C * Z * Y * X * itemsize
+        bytes_read = n * arr.shape[1] * arr.shape[2] * arr.shape[3] * arr.shape[4] * dtype_size
 
         mb_read = bytes_read / (1024 * 1024)
 
@@ -935,10 +932,7 @@ def benchmark_file_sizes(
 
     # calculate theoretical uncompressed size
     dtype_size = np.dtype(arr.dtype).itemsize
-    if arr.ndim == 4:
-        raw_bytes = write_frames * arr.shape[1] * arr.shape[2] * arr.shape[3] * dtype_size
-    else:
-        raw_bytes = write_frames * arr.shape[1] * arr.shape[2] * dtype_size
+    raw_bytes = write_frames * arr.shape[1] * arr.shape[2] * arr.shape[3] * arr.shape[4] * dtype_size
     raw_mb = raw_bytes / (1024 * 1024)
 
     cleanup_temp = False
@@ -1262,9 +1256,9 @@ def benchmark_zarr_chunking(
 
     # for multi-plane arrays, benchmark uses plane 0 only (single 3D slice)
     # this avoids multi-file output and tests pure zarr chunking performance
-    is_multiplane = arr.ndim == 4 and arr.shape[1] > 1
+    is_multiplane = arr.shape[2] > 1
     if is_multiplane:
-        logger.info(f"using plane 0 of {arr.shape[1]} planes for zarr benchmark")
+        logger.info(f"using plane 0 of {arr.shape[2]} planes for zarr benchmark")
 
     frame_bytes = h * w * 2  # assuming uint16
     total_bytes = write_timepoints * frame_bytes
@@ -2405,7 +2399,7 @@ def benchmark_release(
     # load array to get info
     arr = imread(data_path, fix_phase=False)
     shape = arr.shape
-    num_zplanes = shape[1] if arr.ndim >= 4 else 1
+    num_zplanes = shape[2]  # Z at index 2 in 5D TCZYX
     num_files = len(arr.filenames) if hasattr(arr, "filenames") else 1
 
     data_info = {

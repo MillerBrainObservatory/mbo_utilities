@@ -144,18 +144,14 @@ class DisplayRangeFeature(ArrayFeature):
         Parameters
         ----------
         array : array-like
-            the array to compute range from
+            5D TCZYX array to compute range from
         frame_idx : int
             frame index to sample
         plane_idx : int
-            plane index to sample (for 4D data)
+            plane index to sample
         """
-        if array.ndim == 4:
-            frame = np.asarray(array[frame_idx, plane_idx])
-        elif array.ndim == 3:
-            frame = np.asarray(array[frame_idx])
-        else:
-            frame = np.asarray(array)
+        # 5D TCZYX: T=frame_idx, C=0, Z=plane_idx
+        frame = np.asarray(array[frame_idx, 0, plane_idx])
 
         self._vmin = float(frame.min())
         self._vmax = float(frame.max())
@@ -191,12 +187,8 @@ class DisplayRangeFeature(ArrayFeature):
 
         samples = []
         for i in indices:
-            if array.ndim == 4:
-                frame = np.asarray(array[i, 0])
-            elif array.ndim == 3:
-                frame = np.asarray(array[i])
-            else:
-                frame = np.asarray(array)
+            # 5D TCZYX: T=i, C=0, Z=0
+            frame = np.asarray(array[i, 0, 0])
             samples.append(frame.ravel())
 
         data = np.concatenate(samples)

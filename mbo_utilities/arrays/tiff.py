@@ -15,7 +15,7 @@ import numpy as np
 from tifffile import TiffFile
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import ReductionMixin, TiffReaderMixin, _normalize_key
+from mbo_utilities.arrays._base import ReductionMixin, Shape5DMixin, TiffReaderMixin, _normalize_key
 from mbo_utilities.file_io import expand_paths
 from mbo_utilities.metadata import get_metadata, get_param, extract_roi_slices
 from mbo_utilities.metadata.scanimage import (
@@ -28,7 +28,6 @@ from mbo_utilities.analysis.phasecorr import bidir_phasecorr
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
 from mbo_utilities.arrays.features import (
-    DimLabels,
     DimensionSpecMixin,
     PhaseCorrectionFeature,
     PhaseCorrectionMixin,
@@ -365,7 +364,7 @@ class _SingleTiffPlaneReader:
             tf.close()
 
 
-class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
+class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixin):
     """
     Lazy TIFF array reader with auto-detection of single file vs volume.
 
@@ -488,12 +487,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
             # STEP 3: fall back to file structure heuristics
             self._init_from_file_structure(file_list)
 
-        # STEP 4: set dimension labels
-        self._dim_labels = DimLabels(dims, ndim=self.ndim)
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        return self._dim_labels.value
+        self._dim_labels = None
 
     def _init_volume_from_groups(self, plane_groups: list[list[Path]]):
         """initialize as volumetric array from groups of files (one group per plane)."""
@@ -722,10 +716,28 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
         return self._nz
 
     @property
+    def _natural_dropped_axes(self) -> tuple[int, ...]:
+        # indices in (T, C, Z) that are singleton; Y, X are always kept.
+        # shape/ndim/__getitem__ hide these axes so generic tiffs present
+        # at their real rank (2D image stays 2D, TYX timeseries stays 3D, etc.).
+        # shape5d and Shape5DMixin accessors (nt/nc/nz/ny/nx) remain 5D.
+        dropped = []
+        if self._nframes <= 1:
+            dropped.append(0)
+        if self._nc <= 1:
+            dropped.append(1)
+        if self._nz <= 1:
+            dropped.append(2)
+        return tuple(dropped)
+
+    @property
     def shape(self) -> tuple[int, ...]:
-        if self._nc > 1:
-            return (self._nframes, self._nc, self._nz, self._ly, self._lx)
-        return (self._nframes, self._nz, self._ly, self._lx)
+        full = self._shape5d()
+        dropped = self._natural_dropped_axes
+        return tuple(s for i, s in enumerate(full) if i not in dropped)
+
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        return (self._nframes, self._nc, self._nz, self._ly, self._lx)
 
     @property
     def dtype(self):
@@ -739,7 +751,13 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
 
     @property
     def ndim(self) -> int:
-        return 5 if self._nc > 1 else 4
+        return 5 - len(self._natural_dropped_axes)
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        from mbo_utilities.arrays._base import DIMS
+        dropped = self._natural_dropped_axes
+        return tuple(d for i, d in enumerate(DIMS) if i not in dropped)
 
     @property
     def metadata(self) -> dict:
@@ -757,22 +775,34 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
 
     def __getitem__(self, key):
 
-        ndim = self.ndim
-        key = _normalize_key(key, ndim)
-        key = key + (slice(None),) * (ndim - len(key))
-
-        if ndim == 5:
-            # TCZYX indexing
-            t_key, c_key, z_key, y_key, x_key = key
+        # key interpretation:
+        #   len(key) <= natural_ndim  → natural-rank key: pad with slices
+        #     to natural_ndim, then rebuild a 5D key by inserting 0 at
+        #     each dropped (singleton) axis.
+        #   len(key) > natural_ndim   → legacy 5D key: pad with slices on
+        #     the right to reach 5. this keeps callers that still pass
+        #     explicit 5-length keys (e.g. `arr[0, 0, 0]` to get a Y,X
+        #     frame) working against singleton-heavy data.
+        dropped = self._natural_dropped_axes
+        natural_ndim = 5 - len(dropped)
+        key = _normalize_key(key, 5)
+        if len(key) <= natural_ndim:
+            key = key + (slice(None),) * (natural_ndim - len(key))
+            full = [None] * 5
+            for d in dropped:
+                full[d] = 0
+            kept = [i for i in range(5) if i not in dropped]
+            for slot, user_k in zip(kept, key):
+                full[slot] = user_k
+            key = tuple(full)
         else:
-            # TZYX indexing
-            t_key, z_key, y_key, x_key = key
-            c_key = slice(None)
+            key = key + (slice(None),) * (5 - len(key))
+
+        t_key, c_key, z_key, y_key, x_key = key
 
         t_key = _convert_range_to_slice(t_key)
         z_key = _convert_range_to_slice(z_key)
-        if ndim == 5:
-            c_key = _convert_range_to_slice(c_key)
+        c_key = _convert_range_to_slice(c_key)
 
         # normalize t_key to list of indices
         if isinstance(t_key, slice):
@@ -790,7 +820,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
         else:
             t_indices = list(range(self._nframes))
 
-        # normalize c_key to list of indices (for 5D)
+        # normalize c_key to list of indices
         c_indices = None
         if self._nc > 1:
             if isinstance(c_key, int):
@@ -820,45 +850,35 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
         else:
             z_indices = list(range(self._nz))
 
-        # use interleaved reader if available
+        # read data — always produce 5D (T, C, Z, Y, X)
         if self._interleaved_reader is not None:
             out = self._interleaved_reader.read_tzyx(t_indices, z_indices, c_indices)
-            # apply spatial slicing
-            if self._nc > 1:
-                # out is (T, C, Z, Y, X)
-                if y_key != slice(None) or x_key != slice(None):
-                    out = out[:, :, :, y_key, x_key]
-            else:
-                # out is (T, Z, Y, X)
-                if y_key != slice(None) or x_key != slice(None):
-                    out = out[:, :, y_key, x_key]
+            # reader returns (T, C, Z, Y, X) when nc>1, (T, Z, Y, X) when nc==1
+            if self._nc == 1:
+                out = out[:, np.newaxis, :, :, :]  # insert C=1
+            if y_key != slice(None) or x_key != slice(None):
+                out = out[:, :, :, y_key, x_key]
         else:
-            # use per-plane readers
+            # per-plane readers: each returns (T, Y, X)
             arrs = []
             for z_idx in z_indices:
                 plane_data = self._planes[z_idx][t_indices, y_key, x_key]
                 if plane_data.ndim == 2:
                     plane_data = plane_data[np.newaxis, ...]
                 arrs.append(plane_data)
-            out = np.stack(arrs, axis=1)
+            out = np.stack(arrs, axis=1)  # (T, Z, Y, X)
+            out = out[:, np.newaxis, :, :, :]  # (T, 1, Z, Y, X) — insert C=1
 
-        # squeeze singleton dimensions based on original key types
-        if ndim == 5:
-            # TCZYX: squeeze T(0), C(1), Z(2) as needed
-            squeeze_axes = []
-            if isinstance(key[0], int):
-                squeeze_axes.append(0)
-            if isinstance(key[1], int):
-                squeeze_axes.append(1)
-            if isinstance(key[2], int):
-                squeeze_axes.append(2)
-            for ax in sorted(squeeze_axes, reverse=True):
-                out = np.squeeze(out, axis=ax)
-        else:
-            if isinstance(key[0], int):
-                out = out[0]
-            if isinstance(key[1], int) and out.ndim >= 3:
-                out = out[:, 0] if out.ndim == 4 else out[0]
+        # squeeze integer-indexed dimensions (standard numpy behavior)
+        squeeze_axes = []
+        if isinstance(key[0], int):
+            squeeze_axes.append(0)
+        if isinstance(key[1], int):
+            squeeze_axes.append(1)
+        if isinstance(key[2], int):
+            squeeze_axes.append(2)
+        for ax in sorted(squeeze_axes, reverse=True):
+            out = np.squeeze(out, axis=ax)
 
         if self._target_dtype is not None:
             out = out.astype(self._target_dtype)
@@ -871,7 +891,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin):
             plane.close()
 
 
-class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, DimensionSpecMixin, PhaseCorrectionMixin):
+class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, DimensionSpecMixin, PhaseCorrectionMixin, Shape5DMixin):
     """
     Base class for raw ScanImage TIFF readers with phase correction support.
 
@@ -1099,11 +1119,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
 
         self.phase_correction.add_event_handler(self._on_feature_change)
 
-        self._dim_labels = DimLabels(dims, ndim=self.ndim)
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        return self._dim_labels.value
+        self._dim_labels = None
 
     def _on_feature_change(self, event):
         # Optional: handle feature changes (log, etc)
@@ -1125,7 +1141,12 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
 
     @property
     def ndim(self):
-        return len(self.shape)
+        return 5
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        from mbo_utilities.arrays._base import DIMS
+        return DIMS
 
     @property
     def stack_type(self) -> StackType:
@@ -1138,21 +1159,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
             self._target_dtype if self._target_dtype is not None else self._source_dtype
         )
 
-    def _compute_frame_vminmax(self):
-        if self._cached_vmin is None:
-            frame = self[0, 0]
-            self._cached_vmin = float(frame.min())
-            self._cached_vmax = float(frame.max())
-
-    @property
-    def vmin(self) -> float:
-        self._compute_frame_vminmax()
-        return self._cached_vmin
-
-    @property
-    def vmax(self) -> float:
-        self._compute_frame_vminmax()
-        return self._cached_vmax
+    # _compute_frame_vminmax / vmin / vmax inherited from ReductionMixin
 
     @property
     def metadata(self) -> dict:
@@ -1179,11 +1186,17 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                 "num_frames": self.num_frames,
                 "use_fft": self.use_fft,
                 "mean_subtraction": self.mean_subtraction,
-                # stitched image dimensions (accounts for multi-ROI layout)
-                "Ly": self.shape[-2],
-                "Lx": self.shape[-1],
             }
         )
+        # spatial dims (Ly/Lx) are NOT auto-filled here. they used to be
+        # `self.shape[-2:]`, but that turned the getter into a third
+        # clobber path: any caller (e.g. lsp.run_plane) that pre-set
+        # padded Ly/Lx via the setter would have those values silently
+        # overwritten on the very next `arr.metadata` read, before the
+        # writer could see them. callers that need spatial dims should
+        # use `arr.shape` / `arr.shape5d` directly; downstream metadata
+        # consumers (OutputMetadata.to_dict) fill them in via setdefault
+        # when missing, so removing the auto-fill costs nothing.
         return self._metadata
 
     @metadata.setter
@@ -1317,6 +1330,14 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
 
                 buf[idxs] = corrected
                 self._last_offset = offset
+                # store offset per (t, c, z) so the GUI can show the value for
+                # the *currently displayed* frame, not whatever was read last.
+                # without this, any background read (histogram subsampler,
+                # zstats worker, etc.) clobbers _last_offset and the displayed
+                # number drifts even when the user isn't scrubbing.
+                self._record_offset_for_pages(
+                    [pages[i] for i in idxs], float(offset)
+                )
                 _t1 = _t.perf_counter()
                 logger.debug(
                     f"phase_corr: offset={offset:.2f}, method={self.phasecorr_method}, "
@@ -1325,6 +1346,9 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
             else:
                 buf[idxs] = chunk
                 self._last_offset = 0.0
+                self._record_offset_for_pages(
+                    [pages[i] for i in idxs], 0.0
+                )
             start = end
 
         logger.debug(
@@ -1335,53 +1359,47 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
     def __getitem__(self, key):
 
         t0 = time.perf_counter()
-        ndim = len(self.shape)
-        key = _normalize_key(key, ndim)
-        key = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (ndim - len(key))
+        key = _normalize_key(key, 5)
+        key = tuple(_convert_range_to_slice(k) for k in key) + (slice(None),) * (5 - len(key))
 
-        # 5D: (T, C, Z, Y, X) — dual-channel LBM
-        if ndim == 5:
-            t_key, c_key, z_key, y_key, x_key = key
-            frames = listify_index(t_key, self.num_frames)
-            colors = listify_index(c_key, self._num_color_channels)
-            zplanes = listify_index(z_key, self._num_zplanes)
-            if not frames or not colors or not zplanes:
-                return np.empty(0)
-            # map (c, z) -> virtual channel index for page formula
-            chans = [c * self._num_zplanes + z for c in colors for z in zplanes]
-        else:
-            t_key, z_key = key[0], key[1]
-            frames = listify_index(t_key, self.num_frames)
-            chans = listify_index(z_key, self.num_channels)
-            if not frames or not chans:
-                return np.empty(0)
+        t_key, c_key, z_key, y_key, x_key = key
+        frames = listify_index(t_key, self.num_frames)
+        colors = listify_index(c_key, self._num_color_channels)
+        zplanes = listify_index(z_key, self._num_zplanes)
+        if not frames or not colors or not zplanes:
+            return np.empty(0)
+        # map (c, z) -> virtual channel index for page formula
+        chans = [c * self._num_zplanes + z for c in colors for z in zplanes]
 
         out = self.process_rois(frames, chans)
         t1 = time.perf_counter()
         self.logger.debug(f"__getitem__ took {(t1 - t0) * 1000:.1f}ms")
 
-        # reshape (T, C*Z, Y, X) -> (T, C, Z, Y, X) for 5D
-        if ndim == 5:
+        # reshape (T, C*Z, Y, X) -> (T, C, Z, Y, X)
+        nc, nz = len(colors), len(zplanes)
+        if nc == 1:
+            # C=1: insert axis as view (no copy)
+            if isinstance(out, tuple):
+                out = tuple(np.expand_dims(x, axis=1) for x in out)
+            else:
+                out = np.expand_dims(out, axis=1)
+        else:
             if isinstance(out, tuple):
                 out = tuple(
-                    x.reshape(len(frames), len(colors), len(zplanes), x.shape[-2], x.shape[-1])
+                    x.reshape(len(frames), nc, nz, x.shape[-2], x.shape[-1])
                     for x in out
                 )
             else:
-                out = out.reshape(len(frames), len(colors), len(zplanes), out.shape[-2], out.shape[-1])
+                out = out.reshape(len(frames), nc, nz, out.shape[-2], out.shape[-1])
 
         # squeeze integer-indexed dimensions
         squeeze = []
         if isinstance(key[0], int):
             squeeze.append(0)
-        if ndim == 5:
-            if isinstance(key[1], int):
-                squeeze.append(1)
-            if isinstance(key[2], int):
-                squeeze.append(2)
-        else:
-            if isinstance(key[1], int):
-                squeeze.append(1)
+        if isinstance(key[1], int):
+            squeeze.append(1)
+        if isinstance(key[2], int):
+            squeeze.append(2)
         if squeeze:
             if isinstance(out, tuple):
                 out = tuple(np.squeeze(x, axis=tuple(squeeze)) for x in out)
@@ -1395,6 +1413,57 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                 out = out.astype(self._target_dtype)
 
         return out
+
+    def _record_offset_for_pages(self, page_indices, offset_value: float) -> None:
+        """Stamp `offset_value` against every (t, c, z) cell that maps to a
+        given list of global page indices.
+
+        Page index decomposition (mirrors `_read_pages`'s page formula
+        `f * num_channels + (c*nz + z)`):
+            f = p // num_channels
+            chan_encoded = p % num_channels
+            c = chan_encoded // num_zplanes
+            z = chan_encoded % num_zplanes
+
+        We cache per (t, c, z) so the GUI's scan-phase widget can show the
+        offset for the *currently displayed* frame, not the offset of
+        whatever happened to be read last by a background subsampler.
+        """
+        cache = getattr(self, "_offset_cache", None)
+        if cache is None:
+            cache = {}
+            self._offset_cache = cache
+        nch = self.num_channels
+        nz = max(1, self._num_zplanes)
+        for p in page_indices:
+            t = int(p) // nch
+            chan_encoded = int(p) % nch
+            c = chan_encoded // nz
+            z = chan_encoded % nz
+            cache[(t, c, z)] = float(offset_value)
+
+    def get_offset_at(self, t: int, c: int = 0, z: int = 0):
+        """Return the cached scan-phase offset for the (t, c, z) cell, or
+        None if it has not been computed yet.
+
+        This is the canonical accessor for "what's the offset for the frame
+        currently on screen" — never read `self._last_offset` for that, since
+        any background read clobbers it.
+        """
+        cache = getattr(self, "_offset_cache", None)
+        if cache is None:
+            return None
+        return cache.get((int(t), int(c), int(z)))
+
+    def _invalidate_offset_cache(self) -> None:
+        """Drop every cached offset.
+
+        Called when phase-correction settings (border, max_offset, upsample,
+        method, use_fft) change — those parameters affect the result of
+        bidir_phasecorr, so previously cached values are no longer valid.
+        """
+        if hasattr(self, "_offset_cache"):
+            self._offset_cache.clear()
 
     def process_rois(self, frames, chans):
         if self.roi is not None and isinstance(self.roi, int) and self.roi != 0:
@@ -1442,19 +1511,17 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         return self._num_color_channels
 
     @property
-    def shape(self):
+    def shape(self) -> tuple[int, int, int, int, int]:
+        return self._shape5d()
+
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
         if self.roi is not None and not isinstance(self.roi, (list, tuple)):
             if self.roi > 0:
                 roi = self._rois[self.roi - 1]
-                h, w = roi["height"], roi["width"]
-                if self._num_color_channels > 1:
-                    return (self.num_frames, self._num_color_channels, self._num_zplanes, h, w)
-                return (self.num_frames, self.num_channels, h, w)
+                return (self.num_frames, self._num_color_channels, self._num_zplanes, roi["height"], roi["width"])
         total_width = sum(roi["width"] for roi in self._rois)
         max_height = max(roi["height"] for roi in self._rois)
-        if self._num_color_channels > 1:
-            return (self.num_frames, self._num_color_channels, self._num_zplanes, max_height, total_width)
-        return (self.num_frames, self.num_channels, max_height, total_width)
+        return (self.num_frames, self._num_color_channels, self._num_zplanes, max_height, total_width)
 
     @property
     def size(self):
@@ -1578,14 +1645,12 @@ class LBMArray(ScanImageArray):
                 f"LBMArray requires LBM stack data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
-        # clear _dim_labels so get_dims() uses our dims property instead
         self._dim_labels = None
 
     @property
     def dims(self) -> tuple[str, ...]:
-        if self._num_color_channels > 1:
-            return ("timepoints", "channels", "z-planes", "Y", "X")
-        return ("timepoints", "z-planes", "Y", "X")
+        from mbo_utilities.arrays._base import DIMS
+        return DIMS
 
 
 class PiezoArray(ScanImageArray):
@@ -1725,7 +1790,6 @@ class PiezoArray(ScanImageArray):
 
         self._average_frames = average_frames and self.can_average
 
-        # clear _dim_labels so get_dims() uses our dims property instead
         self._dim_labels = None
 
     @property
@@ -1776,39 +1840,24 @@ class PiezoArray(ScanImageArray):
             value = False
         self._average_frames = value
 
-    @property
-    def shape(self):
-        """
-        Return shape as (num_volumes, frames_dim, Ly, Lx).
-
-        The second dimension depends on averaging state:
-        - When averaging or pre-averaged: num_slices (one averaged frame per z-slice)
-        - When not averaging: num_slices * frames_per_slice (all raw frames)
-        """
-        base_shape = super().shape
-        h, w = base_shape[-2], base_shape[-1]
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        # piezo: T=num_volumes, C=1, Z=frames_dim, Y, X
+        # frames_dim collapses to num_slices when averaged (or pre-averaged),
+        # otherwise num_slices * frames_per_slice to expose raw frames
+        total_width = sum(r["width"] for r in self._rois)
+        max_height = max(r["height"] for r in self._rois)
 
         if self._average_frames or self._log_average_factor > 1:
-            # averaging enabled or pre-averaged: one frame per slice
             frames_dim = self._num_slices
         else:
-            # not averaging: show all raw frames
             frames_dim = self._num_slices * self._frames_per_slice
 
-        return (self._num_volumes, frames_dim, h, w)
+        return (self._num_volumes, 1, frames_dim, max_height, total_width)
 
     @property
     def dims(self) -> tuple[str, ...]:
-        """
-        Dimension labels for piezo arrays.
-
-        Returns ("volumes", "z-slices", "Y", "X") when averaging/pre-averaged,
-        or ("volumes", "frames", "Y", "X") when showing all raw frames.
-        """
-        if self._average_frames or self._log_average_factor > 1:
-            return ("volumes", "z-slices", "Y", "X")
-        else:
-            return ("volumes", "frames", "Y", "X")
+        from mbo_utilities.arrays._base import DIMS
+        return DIMS
 
     def _volume_slice_to_raw_frame(self, vol_idx: int, slice_idx: int) -> int:
         """
@@ -1843,13 +1892,11 @@ class PiezoArray(ScanImageArray):
         When not averaging: frame_idx maps to raw frames (flattened z * frames_per_slice)
         """
 
-        key = _normalize_key(key, 4)
-
-        # pad key to full dimensions
-        while len(key) < 4:
+        key = _normalize_key(key, 5)
+        while len(key) < 5:
             key = key + (slice(None),)
 
-        vol_key, frame_key, y_key, x_key = key
+        vol_key, c_key, frame_key, y_key, x_key = key
 
         # determine frame dimension size based on averaging state
         if self._average_frames or self._log_average_factor > 1:
@@ -1861,7 +1908,7 @@ class PiezoArray(ScanImageArray):
         frame_indices = listify_index(frame_key, frame_dim_size)
 
         if not vol_indices or not frame_indices:
-            return np.empty((0, 0, *self.shape[2:]), dtype=self.dtype)
+            return np.empty((0, 1, 0, *self.shape[3:]), dtype=self.dtype)
 
         needs_averaging = self._average_frames and self.can_average
 
@@ -1870,36 +1917,38 @@ class PiezoArray(ScanImageArray):
             vol_frames = []
             for f_idx in frame_indices:
                 if needs_averaging:
-                    # f_idx is a z-slice index, average all frames at this slice
                     raw_frame = self._volume_slice_to_raw_frame(vol_idx, f_idx)
                     frame_data = []
                     for f in range(self._frames_per_slice):
-                        data = super().__getitem__((raw_frame + f, 0, y_key, x_key))
+                        data = super().__getitem__((raw_frame + f, 0, 0, y_key, x_key))
                         frame_data.append(data)
                     averaged = np.mean(frame_data, axis=0)
                     vol_frames.append(averaged)
                 elif self._log_average_factor > 1:
-                    # pre-averaged: f_idx is a z-slice, 1 frame per slice
                     raw_frame = self._volume_slice_to_raw_frame(vol_idx, f_idx)
-                    data = super().__getitem__((raw_frame, 0, y_key, x_key))
+                    data = super().__getitem__((raw_frame, 0, 0, y_key, x_key))
                     vol_frames.append(data)
                 else:
-                    # not averaging: f_idx is a raw frame index within volume
                     frames_per_volume = self._num_slices * self._frames_per_slice
                     raw_frame = vol_idx * frames_per_volume + f_idx
-                    data = super().__getitem__((raw_frame, 0, y_key, x_key))
+                    data = super().__getitem__((raw_frame, 0, 0, y_key, x_key))
                     vol_frames.append(data)
 
             results.append(np.stack(vol_frames, axis=0))
 
-        out = np.stack(results, axis=0)
+        out = np.stack(results, axis=0)  # (T, Z, Y, X)
+        out = out[:, np.newaxis, :, :, :]  # (T, 1, Z, Y, X)
 
-        # handle integer indexing - squeeze appropriate dimensions
+        # squeeze integer-indexed dimensions
+        squeeze = []
         if isinstance(vol_key, int):
-            out = out[0]
+            squeeze.append(0)
+        if isinstance(c_key, int):
+            squeeze.append(1)
         if isinstance(frame_key, int):
-            if out.ndim > 0:
-                out = out[..., 0, :, :] if isinstance(vol_key, int) else out[:, 0, :, :]
+            squeeze.append(2)
+        for ax in sorted(squeeze, reverse=True):
+            out = np.squeeze(out, axis=ax)
 
         return out
 
@@ -1971,15 +2020,12 @@ class SinglePlaneArray(ScanImageArray):
                 f"SinglePlaneArray requires single-plane data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
-        # clear _dim_labels so get_dims() uses our dims property instead
         self._dim_labels = None
 
     @property
     def dims(self) -> tuple[str, ...]:
-        """Dimension labels for single-plane arrays."""
-        if self._num_color_channels > 1:
-            return ("timepoints", "channels", "z-planes", "Y", "X")
-        return ("timepoints", "channels", "Y", "X")
+        from mbo_utilities.arrays._base import DIMS
+        return DIMS
 
 
 class LBMPiezoArray(ScanImageArray):
@@ -2060,13 +2106,19 @@ class LBMPiezoArray(ScanImageArray):
                 f"LBMPiezoArray requires pollen calibration data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
-        # clear _dim_labels so get_dims() uses our dims property instead
         self._dim_labels = None
 
     @property
     def dims(self) -> tuple[str, ...]:
-        """Dimension labels for calibration arrays: (z-planes, beamlets, Y, X)."""
-        return ("z-planes", "beamlets", "Y", "X")
+        from mbo_utilities.arrays._base import DIMS
+        return DIMS
+
+    # no _shape5d override: parent's native layout
+    # (num_frames=z_positions, num_color_channels=1, num_zplanes=beamlets, Y, X)
+    # is exactly what pollen_calibration.py and the stats pipeline expect,
+    # post-singleton-squeeze in _SqueezeSingletonDims: (z_positions, beamlets, Y, X).
+    # labels stay (T, Z, Y, X) — semantically misleading, but all pollen
+    # downstreams unpack positionally, not by label.
 
     @property
     def num_zplanes(self) -> int:

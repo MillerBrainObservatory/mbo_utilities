@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin
+from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin, Shape5DMixin
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import load_npy
 from mbo_utilities._parsing import _convert_paths_to_strings
@@ -39,7 +39,7 @@ register_pipeline(_BIN_INFO)
 
 
 @dataclass
-class BinArray(ReductionMixin):
+class BinArray(ReductionMixin, Shape5DMixin):
     """
     Read/write raw binary files (Suite2p format) without requiring ops.npy.
 
@@ -146,6 +146,10 @@ class BinArray(ReductionMixin):
         if dtype is not None:
             data = data.astype(dtype)
         return data
+
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        s = self.shape  # always (T, Y, X)
+        return (s[0], 1, 1, s[1], s[2])
 
     @property
     def ndim(self):

@@ -43,8 +43,9 @@ class ProcessInfo:
     completed_time: float | None = None  # when process finished
 
     def elapsed_seconds(self) -> float:
-        """Seconds since process started."""
-        return time.time() - self.start_time
+        """Seconds since process started, frozen once it reaches a terminal state."""
+        end = self.completed_time if self.completed_time is not None else time.time()
+        return end - self.start_time
 
     def elapsed_str(self) -> str:
         """Human-readable elapsed time."""
@@ -88,6 +89,9 @@ class ProcessInfo:
                         self.progress = data.get("progress", self.progress)
                         self.status_message = data.get("message", self.status_message)
                         self.error_details = data.get("details", self.error_details)
+                        # freeze elapsed timer the moment we observe a terminal state
+                        if self.status in ("completed", "error") and self.completed_time is None:
+                            self.completed_time = data.get("timestamp", time.time())
             except Exception:
                 pass
 
