@@ -605,7 +605,11 @@ function Install-MboTool {
         }
 
         # install tool (with cupy if needed for suite3d)
-        $installArgs = @($fullSpec, "--python", "3.12") + $withArgs
+        # --reinstall forces uv to re-fetch and rebuild even if the same
+        # branch name is already cached. without it, pushing fixes to a
+        # branch and re-running the script would silently keep the stale
+        # version in the tool environment.
+        $installArgs = @($fullSpec, "--python", "3.12", "--reinstall") + $withArgs
         uv tool install @installArgs 2>&1 | ForEach-Object { Write-Host $_ }
 
         if ($LASTEXITCODE -ne 0) {
@@ -959,7 +963,9 @@ function Install-DevEnvironment {
     $ErrorActionPreference = "Continue"
 
     try {
-        uv pip install --python $pythonPath $fullSpec 2>&1 | ForEach-Object { Write-Host $_ }
+        # --reinstall-package ensures the latest commit on the branch is
+        # fetched even when uv has a cached copy with the same branch name.
+        uv pip install --python $pythonPath --reinstall-package mbo-utilities $fullSpec 2>&1 | ForEach-Object { Write-Host $_ }
 
         if ($LASTEXITCODE -ne 0) {
             throw "uv pip install failed"
