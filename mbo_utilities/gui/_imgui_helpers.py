@@ -100,10 +100,8 @@ def style_seaborn():
 
 
 def style_seaborn_dark():
-    """Apply seaborn dark theme to ImPlot.
-
-    Every Col_ access is guarded because the enum members differ across
-    imgui_bundle versions (e.g. `Col_.line` was removed in 1.92.601).
+    """
+    Apply seaborn dark theme to ImPlot.
     """
     style = implot.get_style()
 
