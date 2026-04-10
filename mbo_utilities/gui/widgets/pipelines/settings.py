@@ -611,112 +611,6 @@ def _draw_s2p_selection_popup(self):
         imgui.end_popup()
 
 
-def _draw_s2p_settings_popup(self):
-    """Draw settings popup with main Suite2p parameters."""
-    INPUT_WIDTH = 120
-
-    if getattr(self, "_s2p_settings_open", False):
-        imgui.open_popup("Settings##s2p_main")
-        self._s2p_settings_open = False
-
-    imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
-    if imgui.begin_popup("Settings##s2p_main"):
-        # tau
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
-        set_tooltip(
-            "Calcium indicator decay timescale in seconds.\n"
-            "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
-        )
-
-        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
-        set_tooltip("Denoise binned movie before cell detection.")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # processing control options
-        _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
-        set_tooltip("Keep data_raw.bin after processing (uses disk space)")
-
-        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
-        set_tooltip("Keep data.bin after processing (useful for QC)")
-
-        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
-        set_tooltip("Force re-registration even if already processed")
-
-        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
-        set_tooltip("Force ROI detection even if stat.npy exists")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # dF/F settings
-        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "ΔF/F")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_window_size = imgui.input_int("Window", self.s2p.dff_window_size)
-        set_tooltip("Frames for rolling percentile baseline (default: 300)")
-
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_percentile = imgui.input_int("Percentile", self.s2p.dff_percentile)
-        set_tooltip("Percentile for baseline F₀ estimation (default: 20)")
-
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_smooth_window = imgui.input_int("Smooth", self.s2p.dff_smooth_window)
-        set_tooltip("Smooth ΔF/F trace with rolling window (0 = disabled)")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # processing options
-        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Processing")
-
-        if not hasattr(self, "_s2p_background"):
-            self._s2p_background = True
-        _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
-        set_tooltip("Run as separate process that continues after closing GUI")
-
-        if not hasattr(self, "_parallel_processing"):
-            self._parallel_processing = False
-        if not hasattr(self, "_max_parallel_jobs"):
-            self._max_parallel_jobs = 2
-
-        # get num_planes from data
-        num_planes = 1
-        n_selected = 1
-        try:
-            if hasattr(self, "image_widget") and self.image_widget.data:
-                data = self.image_widget.data[0]
-                if hasattr(data, "num_planes"):
-                    num_planes = data.num_planes
-                elif data.ndim == 4:
-                    num_planes = data.shape[1]
-                elif data.ndim == 5:
-                    num_planes = data.shape[2]
-            n_selected = len(getattr(self, "_selected_planes", {1}))
-        except Exception:
-            pass
-
-        if num_planes > 1 and n_selected > 1:
-            _, self._parallel_processing = imgui.checkbox("Parallel plane processing", self._parallel_processing)
-            set_tooltip("Process multiple planes simultaneously (uses more memory)")
-
-            if self._parallel_processing:
-                imgui.set_next_item_width(INPUT_WIDTH)
-                _, self._max_parallel_jobs = imgui.input_int("Max parallel jobs", self._max_parallel_jobs, step=1)
-                self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, n_selected))
-
-        imgui.spacing()
-        imgui.spacing()
-        if imgui.button("Close", imgui.ImVec2(80, 0)):
-            imgui.close_current_popup()
-
-        imgui.end_popup()
-
-
 def _draw_data_options_content(self):
     """Draw data options content showing settings that affect Suite2p processing."""
     from mbo_utilities.gui._availability import HAS_SUITE3D
@@ -920,8 +814,93 @@ def _draw_section_suite2p_content(self):
     # === PIPELINE SETTINGS ===
     imgui.separator_text("Pipeline Settings")
 
-    # draw the main settings popup (triggered from table below)
-    _draw_s2p_settings_popup(self)
+    # --- Main settings (closure, drawn inside the popup block below
+    # alongside Registration / ROI Detection / etc., so it follows the
+    # same begin_popup_modal lifecycle as every other settings panel) ---
+    def draw_main_settings():
+        # Tau / denoise
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
+        set_tooltip(
+            "Calcium indicator decay timescale in seconds.\n"
+            "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
+        )
+        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
+        set_tooltip("Denoise binned movie before cell detection.")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # processing control options
+        _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
+        set_tooltip("Keep data_raw.bin after processing (uses disk space)")
+        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
+        set_tooltip("Keep data.bin after processing (useful for QC)")
+        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
+        set_tooltip("Force re-registration even if already processed")
+        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
+        set_tooltip("Force ROI detection even if stat.npy exists")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # dF/F settings
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "\u0394F/F")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_window_size = imgui.input_int("Window", self.s2p.dff_window_size)
+        set_tooltip("Frames for rolling percentile baseline (default: 300)")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_percentile = imgui.input_int("Percentile", self.s2p.dff_percentile)
+        set_tooltip("Percentile for baseline F\u2080 estimation (default: 20)")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.dff_smooth_window = imgui.input_int("Smooth", self.s2p.dff_smooth_window)
+        set_tooltip("Smooth \u0394F/F trace with rolling window (0 = disabled)")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # processing options
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Processing")
+        if not hasattr(self, "_s2p_background"):
+            self._s2p_background = True
+        _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
+        set_tooltip("Run as separate process that continues after closing GUI")
+
+        if not hasattr(self, "_parallel_processing"):
+            self._parallel_processing = False
+        if not hasattr(self, "_max_parallel_jobs"):
+            self._max_parallel_jobs = 2
+
+        # get num_planes from data
+        num_planes_main = 1
+        n_selected_main = 1
+        try:
+            if hasattr(self, "image_widget") and self.image_widget.data:
+                data = self.image_widget.data[0]
+                if hasattr(data, "num_planes"):
+                    num_planes_main = data.num_planes
+                elif data.ndim == 4:
+                    num_planes_main = data.shape[1]
+                elif data.ndim == 5:
+                    num_planes_main = data.shape[2]
+            n_selected_main = len(getattr(self, "_selected_planes", {1}))
+        except Exception:
+            pass
+
+        if num_planes_main > 1 and n_selected_main > 1:
+            _, self._parallel_processing = imgui.checkbox(
+                "Parallel plane processing", self._parallel_processing
+            )
+            set_tooltip("Process multiple planes simultaneously (uses more memory)")
+            if self._parallel_processing:
+                imgui.set_next_item_width(INPUT_WIDTH)
+                _, self._max_parallel_jobs = imgui.input_int(
+                    "Max parallel jobs", self._max_parallel_jobs, step=1
+                )
+                self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, n_selected_main))
 
     # --- Registration ---
     def draw_registration_settings():
@@ -1337,7 +1316,8 @@ def _draw_section_suite2p_content(self):
         imgui.text("Main")
         imgui.table_next_column()
         if imgui.button("Settings##main"):
-            self._s2p_settings_open = True
+            _popup_states["main_settings"] = True
+            imgui.open_popup("Main##main_settings")
         set_tooltip("Main Suite2p parameters (Tau, denoise, dF/F, etc.)")
 
         # --- Data Options row (no checkbox) - shows available data-specific widgets ---
@@ -1428,6 +1408,31 @@ def _draw_section_suite2p_content(self):
         set_tooltip("Configure output options")
 
         # --- Draw all popups (inside table context) ---
+
+        # Main settings popup — same modal lifecycle as the rest of the
+        # rows below. Previously this was a free-floating non-modal popup
+        # owned by `_draw_s2p_settings_popup`, which rendered as a
+        # separate window outside the table context.
+        imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
+        opened, visible = imgui.begin_popup_modal(
+            "Main##main_settings",
+            p_open=True,
+            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+        )
+        if opened:
+            try:
+                if not visible:
+                    _popup_states["main_settings"] = False
+                    imgui.close_current_popup()
+                else:
+                    draw_main_settings()
+                    imgui.spacing()
+                    imgui.separator()
+                    if imgui.button("Close##main", imgui.ImVec2(80, 0)):
+                        _popup_states["main_settings"] = False
+                        imgui.close_current_popup()
+            finally:
+                imgui.end_popup()
 
         # Registration popup
         imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)

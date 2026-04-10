@@ -197,9 +197,14 @@ def register_zplanes_s3d(
         "lbm": metadata.get("lbm", True),
         "fuse_strips": metadata.get("fuse_planes", False),
         "subtract_crosstalk": metadata.get("subtract_crosstalk", False),
-        "init_n_frames": metadata.get("init_n_frames", 500),
+        # init_n_frames lowered from 500 -> 200 to keep the shared-memory
+        # block within windows commit limits. the block size is
+        # init_n_frames * n_ch_tif * page_h * page_w * 2, and each mp
+        # worker attachment doubles the commit. with 14-plane LBM tiles
+        # at 1116×224, 500 frames = 3.5 GB per mapping; 200 = 1.4 GB.
+        "init_n_frames": metadata.get("init_n_frames", 200),
         "n_init_files": metadata.get("n_init_files", 1),
-        "n_proc_corr": metadata.get("n_proc_corr", 4),
+        "n_proc_corr": metadata.get("n_proc_corr", 2),
         "max_rigid_shift_pix": metadata.get("max_rigid_shift_pix", 150),
         "3d_reg": metadata.get("3d_reg", True),
         "gpu_reg": metadata.get("gpu_reg", True),
@@ -219,19 +224,64 @@ def register_zplanes_s3d(
         logger.warning("Suite3D Job class not available.")
         return None
 
-    job = Job(
-        str(job_path),
-        job_id,
-        create=True,
-        overwrite=True,
-        verbosity=-1,
-        tifs=filenames,
-        params=params,
-        progress_callback=progress_callback,
-    )
-    job._report(0.01, "Launching Suite3D job...")
-    logger.debug("Running Suite3D job...")
-    job.run_init_pass()
+    def _run_job(p):
+        j = Job(
+            str(job_path),
+            job_id,
+            create=True,
+            overwrite=True,
+            verbosity=-1,
+            tifs=filenames,
+            params=p,
+            progress_callback=progress_callback,
+        )
+        j._report(0.01, "Launching Suite3D job...")
+        j.run_init_pass()
+        return j
+
+    def _is_commit_limit_error(exc: Exception) -> bool:
+        """Detect Windows WinError 1455 (paging file too small).
+
+        The error may surface as an OSError with winerror=1455 directly,
+        or as a re-raised exception from a multiprocessing worker where
+        the winerror attribute didn't survive pickling. Fall back to
+        substring matching on the message in that case.
+        """
+        if getattr(exc, "winerror", None) == 1455:
+            return True
+        return "1455" in str(exc) and "paging file" in str(exc).lower()
+
+    # retry with reduced resource knobs on windows commit-limit blowup.
+    # each mp worker mmaps a tile-sized shared-memory block; on windows
+    # that always counts against the pagefile commit ceiling regardless
+    # of free ram. back off n_proc_corr to 1 AND halve init_n_frames
+    # so both the block size and the attachment count shrink.
+    try:
+        job = _run_job(params)
+    except OSError as e:
+        if _is_commit_limit_error(e):
+            fallback_frames = max(50, params.get("init_n_frames", 200) // 2)
+            logger.warning(
+                f"WinError 1455 (paging file too small) with "
+                f"n_proc_corr={params['n_proc_corr']}, "
+                f"init_n_frames={params['init_n_frames']}. "
+                f"Retrying with n_proc_corr=1, init_n_frames={fallback_frames}..."
+            )
+            params["n_proc_corr"] = 1
+            params["init_n_frames"] = fallback_frames
+            try:
+                job = _run_job(params)
+            except OSError as e2:
+                if _is_commit_limit_error(e2):
+                    logger.error(
+                        f"WinError 1455 persists even at n_proc_corr=1, "
+                        f"init_n_frames={fallback_frames}. The windows "
+                        f"pagefile commit limit is too low for this dataset. "
+                        f"Increase the pagefile or reduce the data size."
+                    )
+                raise
+        else:
+            raise
     out_dir = job_path / f"s3d-{job_id}"
     metadata["s3d-job"] = str(out_dir)
     metadata["s3d-params"] = params

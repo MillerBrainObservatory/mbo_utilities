@@ -1186,11 +1186,17 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                 "num_frames": self.num_frames,
                 "use_fft": self.use_fft,
                 "mean_subtraction": self.mean_subtraction,
-                # stitched image dimensions (accounts for multi-ROI layout)
-                "Ly": self.shape[-2],
-                "Lx": self.shape[-1],
             }
         )
+        # spatial dims (Ly/Lx) are NOT auto-filled here. they used to be
+        # `self.shape[-2:]`, but that turned the getter into a third
+        # clobber path: any caller (e.g. lsp.run_plane) that pre-set
+        # padded Ly/Lx via the setter would have those values silently
+        # overwritten on the very next `arr.metadata` read, before the
+        # writer could see them. callers that need spatial dims should
+        # use `arr.shape` / `arr.shape5d` directly; downstream metadata
+        # consumers (OutputMetadata.to_dict) fill them in via setdefault
+        # when missing, so removing the auto-fill costs nothing.
         return self._metadata
 
     @metadata.setter

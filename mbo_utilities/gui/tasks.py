@@ -271,16 +271,23 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
             metadata["s3d-job"] = str(s3d_job_dir)
             monitor.update(0.1, "Z-registration ready.")
         else:
-            # the user explicitly asked for z-registration; do not silently fall
-            # through to an unregistered write. fail loudly so the gui surfaces
-            # the error and the user knows their setting was not honored.
-            if reg_error is None:
-                reg_error = RuntimeError(
-                    "Suite3D registration failed validation. Check the log for "
-                    "details, or uncheck Z-registration to proceed without it."
+            # registration failed — warn and proceed without shift rather
+            # than aborting the entire save. the user asked for register_z
+            # but a transient failure (e.g. WinError 1455 commit limit,
+            # missing CuPy, bad metadata) shouldn't destroy a long save
+            # operation. the warning surfaces in the GUI log and the
+            # worker output so the user knows their setting was not honored.
+            if reg_error is not None:
+                logger.warning(
+                    f"Z-registration failed: {reg_error}. "
+                    f"Proceeding without axial shift."
                 )
-            logger.error(f"Z-registration aborted: {reg_error}")
-            raise reg_error
+            else:
+                logger.warning(
+                    "Suite3D registration failed validation. "
+                    "Proceeding without axial shift."
+                )
+            metadata["apply_shift"] = False
 
     monitor.update(0.1, f"Saving to {output_path.name}...")
 
