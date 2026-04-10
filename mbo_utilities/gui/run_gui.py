@@ -673,10 +673,6 @@ def _run_gui_impl(
             return _launch_standard_viewer(data_in, roi, widget, metadata_only)
         if mode == "Napari":
             return _launch_napari(data_in, roi)
-        if mode == "Cellpose":
-            return _launch_cellpose(data_in)
-        if mode == "Suite2p":
-            return _launch_suite2p()
         return _launch_standard_viewer(data_in, roi, widget, metadata_only)
 
     finally:
