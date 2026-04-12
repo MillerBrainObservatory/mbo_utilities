@@ -547,7 +547,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     # If a valid job already exists (the user's typical workflow — they ran
     # save_as register_z first), we just consume it; otherwise we kick off
     # a fresh suite3d run, mirroring task_save_as.
-    register_z = args.get("register_z", True)
+    register_z = args.get("register_z", False)
     if register_z:
         from mbo_utilities.arrays._registration import (
             register_zplanes_s3d,
