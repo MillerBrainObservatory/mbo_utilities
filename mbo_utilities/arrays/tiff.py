@@ -24,7 +24,7 @@ from mbo_utilities.metadata.scanimage import (
     get_frames_per_slice,
     get_log_average_factor,
 )
-from mbo_utilities.analysis.phasecorr import bidir_phasecorr
+from mbo_utilities.analysis.phasecorr import bidir_phasecorr, _apply_offset
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.util import listify_index, index_length
 from mbo_utilities.arrays.features import (
@@ -1305,7 +1305,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                 shift = self.phase_correction.effective_shift
 
                 if shift is not None:
-                    from mbo_utilities.analysis.phasecorr import _apply_offset
                     # Use _apply_offset directly or feature.apply
                     # Note: feature.apply returns 2D, but we have 3D (Z/T) chunk (N, Y, X)
                     # Bidirectional phase correction applies to rows (X axis)
