@@ -1991,7 +1991,7 @@ requires-dist = [
     { name = "h5py" },
     { name = "icecream", specifier = ">=2.1.4" },
     { name = "imageio", extras = ["ffmpeg"] },
-    { name = "imgui-bundle", specifier = ">=1.92.5" },
+    { name = "imgui-bundle", specifier = "==1.92.5" },
     { name = "ipykernel" },
     { name = "ipykernel", marker = "extra == 'docs'" },
     { name = "ipywidgets", specifier = ">=8.0.0,<9" },

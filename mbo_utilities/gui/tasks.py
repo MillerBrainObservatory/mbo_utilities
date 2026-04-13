@@ -406,7 +406,14 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     input_path = args["input_path"]
     output_dir = Path(args["output_dir"])
     planes = args.get("planes")
+    # the GUI's target_timepoints defaults to -1 (meaning "all frames").
+    # normalize to None so downstream code (lsp's pipeline, writer_kwargs)
+    # doesn't propagate -1 as a literal num_frames — that makes
+    # generate_plane_dirname produce "zplane01" (no tp suffix) and can
+    # confuse frame-count arithmetic in the or-chain.
     num_timepoints = args.get("num_timepoints")
+    if num_timepoints is not None and num_timepoints <= 0:
+        num_timepoints = None
     ops = args.get("ops", {})
     s2p_settings = args.get("s2p_settings", {})
 
@@ -547,7 +554,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     # If a valid job already exists (the user's typical workflow — they ran
     # save_as register_z first), we just consume it; otherwise we kick off
     # a fresh suite3d run, mirroring task_save_as.
-    register_z = args.get("register_z", True)
+    register_z = args.get("register_z", False)
     if register_z:
         from mbo_utilities.arrays._registration import (
             register_zplanes_s3d,
@@ -632,9 +639,13 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
                     f"(apply_shift=True, s3d-job={s3d_dir})"
                 )
 
-    # handle num_timepoints limit
+    # seed nframes into ops so lsp's generate_plane_dirname always has a
+    # frame count for the directory name. explicit num_timepoints wins;
+    # otherwise fall back to the source array's T dimension.
     if num_timepoints is not None and num_timepoints > 0:
         ops["nframes"] = num_timepoints
+    elif src_shape is not None:
+        ops["nframes"] = int(src_shape[0])
 
     # per-channel extraction: wrap data as 4D TZYX so pipeline sees single channel
     channel = args.get("channel")

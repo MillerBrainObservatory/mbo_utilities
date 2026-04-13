@@ -643,6 +643,16 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
         if nframes is None:
             raise ValueError("Metadata must contain 'nframes' or 'num_frames'.")
 
+        # stamp the ACTUAL chunk dims into metadata so write_ops records
+        # what's really on disk. shape5d and the metadata["shape"] from
+        # _imwrite_base can differ from the chunk — e.g. ScanImage's
+        # shape5d uses ROI metadata (550) but process_rois returns the
+        # real stitched height (542). when axial shifts are applied, the
+        # chunk already has padded dims, so this is correct for both cases.
+        metadata["Ly"] = Ly
+        metadata["Lx"] = Lx
+        metadata["shape"] = (nframes, Ly, Lx)
+
         _write_bin._writers[key] = BinArray(
             filename=key,
             shape=(nframes, Ly, Lx),
@@ -1124,6 +1134,9 @@ def _write_volumetric_tiff(
     if apply_shift and plane_shifts is not None:
         md["padded_shape"] = (Ly_out, Lx_out)
         md["original_shape"] = (Ly, Lx)
+    # shifts baked into pixels — mark consumed (same as zarr/h5 writers)
+    md["apply_shift"] = False
+    md.pop("s3d-job", None)
 
     # build imagej metadata with adjusted dz and finterval
     ij_meta, resolution = out_meta.to_imagej(target_shape)
@@ -1417,6 +1430,9 @@ def _write_volumetric_h5(
     if apply_shift and plane_shifts is not None:
         md["padded_shape"] = (Ly_out, Lx_out)
         md["original_shape"] = (Ly, Lx)
+    # shifts baked into pixels — mark consumed (same as zarr/tiff writers)
+    md["apply_shift"] = False
+    md.pop("s3d-job", None)
 
     if debug:
         logger.info(f"Writing volumetric h5: {filename}")
@@ -1724,6 +1740,13 @@ def _write_volumetric_zarr(
     if apply_shift and plane_shifts is not None:
         md["padded_shape"] = (Ly_out, Lx_out)
         md["original_shape"] = (Ly, Lx)
+    # shifts are baked into the pixel data during the chunk write below.
+    # mark them as consumed so downstream readers (e.g. suite2p binary
+    # writer) don't try to re-apply them to already-aligned data — that
+    # caused double-padding, wrong frame counts, and the "boolean index
+    # did not match" crash when loading saved zarrs on a different machine.
+    md["apply_shift"] = False
+    md.pop("s3d-job", None)
 
     if debug:
         logger.info(f"Writing volumetric zarr: {filename}")

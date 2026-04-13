@@ -385,37 +385,20 @@ def _imwrite_base(
 
     md = _sanitize_metadata(md)
 
-    # Use the 5D-aware accessors so natural-rank arrays (e.g. TiffArray
-    # exposing 4D TZYX with C=1 dropped) don't pick up Y or X by accident.
-    # arr.shape[2] is Z under the 5D contract, but it's Y on a natural 4D
-    # TZYX array — that's the bug behind the volumetric .bin write crash.
     num_planes = arr.shape5d[2]
-    if planes is not None:
-        if isinstance(planes, int):
-            planes_list = [planes]
-        else:
-            planes_list = list(planes)
-    else:
-        planes_list = None  # all planes
-
-    # normalize frame selection to 1-based list
-    if frames is not None:
-        if isinstance(frames, int):
-            frames_list = [frames]
-        else:
-            frames_list = list(frames)
-    else:
-        frames_list = None  # all frames
-
-    # normalize channel selection to 1-based list
     num_channels = getattr(arr, "num_color_channels", 1)
-    if channels is not None:
-        if isinstance(channels, int):
-            channels_list = [channels]
-        else:
-            channels_list = list(channels)
-    else:
-        channels_list = None  # all channels
+
+    def _norm_sel(val):
+        """normalize a selection kwarg to list[int] or None (=all)."""
+        if val is None:
+            return None
+        if isinstance(val, (int, np.integer)):
+            return [int(val)]
+        return [int(v) for v in val if v is not None]
+
+    planes_list = _norm_sel(planes)
+    frames_list = _norm_sel(frames)
+    channels_list = _norm_sel(channels)
 
     # tiff: use volumetric writer
     if ext_clean in ("tiff", "tif"):
@@ -496,9 +479,14 @@ def _imwrite_base(
     # other formats: use per-plane streaming writer (bin, npy)
     # always 5D TCZYX. Use shape5d so natural-rank arrays still report the
     # correct T/Z sizes (arr.shape[0] is T for 4D, but Y for 2D natural).
-    channel_index = None
-    if channels_list is not None and len(channels_list) == 1:
-        channel_index = channels_list[0] - 1  # 0-based
+    # build 0-based channel indices to iterate. if the user selected
+    # specific channels, iterate those; otherwise iterate all channels
+    # the array actually has. the old code only wrote channel 0 when
+    # channels_list was None, silently dropping every other channel.
+    if channels_list is not None:
+        channels_0idx = [c - 1 for c in channels_list]
+    else:
+        channels_0idx = list(range(num_channels))
 
     nframes = arr.shape5d[0]  # T
     Ly, Lx = arr.shape5d[3], arr.shape5d[4]
@@ -575,42 +563,43 @@ def _imwrite_base(
     # extract output_name if provided (e.g., "data_raw.bin" for suite2p)
     output_name = kwargs.pop("output_name", None)
 
-    for plane_idx in planes_0idx:
-        # use explicit output_name if provided, otherwise generate from tags
-        if output_name:
-            filename = output_name
-        else:
-            from mbo_utilities.arrays.features import OutputFilename, TAG_REGISTRY, DimensionTag
+    for c_idx in channels_0idx:
+        for plane_idx in planes_0idx:
+            # use explicit output_name if provided, otherwise generate from tags
+            if output_name:
+                filename = output_name
+            else:
+                from mbo_utilities.arrays.features import OutputFilename, TAG_REGISTRY, DimensionTag
 
-            # build filename with dimension tags
-            z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
-            t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes, frames_list)
-            tags = [t_tag, z_tag] if nframes > 1 else [z_tag]
-            filename = OutputFilename(tags, suffix="stack").build(f".{ext_clean}")
-        target = outpath / filename
+                # build filename with dimension tags
+                z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
+                t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes, frames_list)
+                tags = [t_tag, z_tag] if nframes > 1 else [z_tag]
+                filename = OutputFilename(tags, suffix="stack").build(f".{ext_clean}")
+            target = outpath / filename
 
-        if target.exists() and not overwrite:
-            logger.warning(f"File {target} already exists. Skipping write.")
-            continue
+            if target.exists() and not overwrite:
+                logger.warning(f"File {target} already exists. Skipping write.")
+                continue
 
-        # build plane-specific metadata
-        plane_md = md.copy()
-        plane_md["plane"] = plane_idx + 1
+            # build plane-specific metadata
+            plane_md = md.copy()
+            plane_md["plane"] = plane_idx + 1
 
-        _write_plane(
-            arr,
-            target,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            metadata=plane_md,
-            progress_callback=progress_callback,
-            debug=debug,
-            show_progress=show_progress,
-            dshape=(nframes, Ly, Lx),
-            plane_index=plane_idx,
-            channel_index=channel_index,
-            **kwargs,
-        )
+            _write_plane(
+                arr,
+                target,
+                overwrite=overwrite,
+                target_chunk_mb=target_chunk_mb,
+                metadata=plane_md,
+                progress_callback=progress_callback,
+                debug=debug,
+                show_progress=show_progress,
+                dshape=(nframes, Ly, Lx),
+                plane_index=plane_idx,
+                channel_index=c_idx,
+                **kwargs,
+            )
 
     # signal completion
     if progress_callback:
