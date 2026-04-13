@@ -302,15 +302,23 @@ class ProcessManager:
             args["_uuid"] = task_uuid
             args["_log_file"] = str(log_file) # worker will pick this up
 
-            # serialize args to json string
-            args_json = json.dumps(args)
+            # write args to a temp file instead of passing on the command
+            # line. large frame selections (e.g. 11453 frames) produce
+            # a JSON blob that exceeds windows' 32768-char command-line
+            # limit (WinError 206). the file is named by the task UUID
+            # so concurrent workers never collide, and the worker deletes
+            # it after loading.
+            args_dir = log_dir  # reuse ~/.mbo/logs (already exists)
+            args_file = args_dir / f"args_{task_uuid}.json"
+            with open(args_file, "w", encoding="utf-8") as af:
+                json.dump(args, af)
 
-            # construct command AFTER args_json is defined
+            # construct command — pass the file path, not the JSON blob
             cmd = [
                 python_exe,
                 "-m", "mbo_utilities.gui._worker",
                 task_type,
-                args_json,
+                str(args_file),
             ]
 
             # spawn detached process

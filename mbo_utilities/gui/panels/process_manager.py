@@ -213,13 +213,17 @@ class ProcessManager:
             args["_uuid"] = task_uuid
             args["_log_file"] = str(log_file)
 
-            args_json = json.dumps(args)
+            # write args to a temp file to avoid windows command-line
+            # length limits (WinError 206 with large frame selections)
+            args_file = log_dir / f"args_{task_uuid}.json"
+            with open(args_file, "w", encoding="utf-8") as af:
+                json.dump(args, af)
 
             cmd = [
                 python_exe,
                 "-m", "mbo_utilities.gui._worker",
                 task_type,
-                args_json,
+                str(args_file),
             ]
 
             f_out = open(log_file, "a")

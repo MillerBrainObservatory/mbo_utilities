@@ -160,13 +160,32 @@ def main():
         sys.exit(1)
 
     task_type = sys.argv[1]
-    args_json = sys.argv[2]
+    args_source = sys.argv[2]
 
+    # args can arrive as a file path (new: avoids windows command-line
+    # length limit) or as inline JSON (legacy / small payloads). detect
+    # by checking if the string points to an existing file.
+    args_file = None
     try:
-        args = json.loads(args_json)
-    except json.JSONDecodeError as e:
-        print(f"Invalid JSON args: {e}", file=sys.stderr)
+        candidate = Path(args_source)
+        if candidate.is_file() and candidate.suffix == ".json":
+            args_file = candidate
+            with open(args_file, "r", encoding="utf-8") as f:
+                args = json.load(f)
+        else:
+            args = json.loads(args_source)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Failed to load args: {e}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        # clean up the args file immediately after loading so it
+        # doesn't linger. the file is unique per task (UUID-named)
+        # and no other process reads it.
+        if args_file is not None:
+            try:
+                args_file.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     # setup logging
     log_file = args.get("_log_file")
