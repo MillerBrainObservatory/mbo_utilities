@@ -1717,6 +1717,8 @@ def run_process(self):
                     # FULL list of selected planes (0-based) — for
                     # reactive dz scaling via OutputMetadata.
                     "selected_planes_0based": [p - 1 for p in sorted(selected_planes)],
+                    # axial z-registration via suite3d
+                    "register_z": getattr(self, "_register_z", False),
                     "s2p_settings": {
                         "keep_raw": self.s2p.keep_raw,
                         "keep_reg": self.s2p.keep_reg,
