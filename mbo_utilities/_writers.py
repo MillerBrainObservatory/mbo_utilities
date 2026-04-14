@@ -1134,6 +1134,19 @@ def _write_volumetric_tiff(
     if apply_shift and plane_shifts is not None:
         md["padded_shape"] = (Ly_out, Lx_out)
         md["original_shape"] = (Ly, Lx)
+        # valid region — same calc as _write_plane. lsp.run_plane reads
+        # these as ops["_pad_yrange"/"_pad_xrange"] and clips cellpose to
+        # the area where every plane has real data. without them cellpose
+        # finds spurious masks in the zero-padded borders.
+        _ps = np.asarray(plane_shifts, dtype=int)
+        md["_pad_yrange"] = [
+            int((pt + _ps[:, 0]).max()),
+            int((pt + _ps[:, 0] + Ly).min()),
+        ]
+        md["_pad_xrange"] = [
+            int((pl + _ps[:, 1]).max()),
+            int((pl + _ps[:, 1] + Lx).min()),
+        ]
     # shifts baked into pixels — mark consumed (same as zarr/h5 writers)
     md["apply_shift"] = False
     md.pop("s3d-job", None)
@@ -1740,6 +1753,18 @@ def _write_volumetric_zarr(
     if apply_shift and plane_shifts is not None:
         md["padded_shape"] = (Ly_out, Lx_out)
         md["original_shape"] = (Ly, Lx)
+        # valid region — same calc as _write_plane. lsp.run_plane reads
+        # these as ops["_pad_yrange"/"_pad_xrange"] and clips cellpose to
+        # the area where every plane has real data.
+        _ps = np.asarray(plane_shifts, dtype=int)
+        md["_pad_yrange"] = [
+            int((pt + _ps[:, 0]).max()),
+            int((pt + _ps[:, 0] + Ly).min()),
+        ]
+        md["_pad_xrange"] = [
+            int((pl + _ps[:, 1]).max()),
+            int((pl + _ps[:, 1] + Lx).min()),
+        ]
     # shifts are baked into the pixel data during the chunk write below.
     # mark them as consumed so downstream readers (e.g. suite2p binary
     # writer) don't try to re-apply them to already-aligned data — that

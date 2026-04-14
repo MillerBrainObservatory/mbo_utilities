@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.7.3"
+version = "2.7.4"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -62,13 +62,13 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 # Suite2p alone will not include torch
 suite2p = [
     "numba>=0.60.0",
-    "lbm_suite2p_python>=2.5.4",
+    "lbm_suite2p_python>=2.5.7",
     "suite2p_mbo>=2.0.1",
     "setuptools",
 ]
 # Suite3D - requires CuPy (installed separately by installer based on CUDA version)
 suite3d = [
-    "mbo-suite3d>=0.0.7",
+    "mbo-suite3d>=0.0.9",
 ]
 # Rastermap for activity sorting
 rastermap = [
