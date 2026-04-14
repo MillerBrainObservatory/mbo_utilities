@@ -554,7 +554,28 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     # If a valid job already exists (the user's typical workflow — they ran
     # save_as register_z first), we just consume it; otherwise we kick off
     # a fresh suite3d run, mirroring task_save_as.
+    #
+    # Branch A: if the source file was saved with axial shifts already
+    # baked in, it carries `_pad_yrange`/`_pad_xrange` in its metadata.
+    # Propagate them into ops so lsp's cellpose clip uses the valid
+    # region, and disable register_z so we don't re-run suite3d on
+    # already-aligned pixels (double-shift).
     register_z = args.get("register_z", False)
+    if "_pad_yrange" in src_meta and "_pad_xrange" in src_meta:
+        ops["_pad_yrange"] = list(src_meta["_pad_yrange"])
+        ops["_pad_xrange"] = list(src_meta["_pad_xrange"])
+        if register_z:
+            logger.info(
+                "task_suite2p: source has baked-in axial shifts; "
+                "skipping register_z to avoid double-application."
+            )
+            register_z = False
+        else:
+            logger.info(
+                "task_suite2p: detected baked-in axial shifts from source "
+                f"metadata (_pad_yrange={ops['_pad_yrange']}, "
+                f"_pad_xrange={ops['_pad_xrange']})."
+            )
     if register_z:
         from mbo_utilities.arrays._registration import (
             register_zplanes_s3d,
