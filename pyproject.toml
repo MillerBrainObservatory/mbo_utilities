@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.7.4"
+version = "2.7.5"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -69,6 +69,7 @@ suite2p = [
 # Suite3D - requires CuPy (installed separately by installer based on CUDA version)
 suite3d = [
     "mbo-suite3d>=0.0.9",
+    "cupy-cuda12x>=13,<14",
 ]
 # Rastermap for activity sorting
 rastermap = [
