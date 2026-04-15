@@ -440,7 +440,6 @@ class PreviewDataWidget(EdgeWindow):
         viewer_cls = get_viewer_class(self.image_widget.data[0])
         self._viewer = viewer_cls(self.image_widget, self.fpath, parent=self)
         self.logger.info(f"Viewer: {self._viewer.name}")
-        self._main_widget = self._viewer._main_widget
         self.set_context_info()
         # ensure window functions are set so slider dims are properly reduced
         self._update_window_funcs()

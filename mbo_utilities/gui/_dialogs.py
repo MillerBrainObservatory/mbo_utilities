@@ -197,9 +197,6 @@ def load_new_data(parent: Any, path: str):
         parent._viewer.on_data_loaded()
         parent.logger.info(f"Viewer switched to: {parent._viewer.name}")
 
-        # Keep _main_widget reference for backwards compatibility
-        parent._main_widget = parent._viewer._main_widget
-
         # Automatically recompute z-stats for new data (only for time series)
         if isinstance(parent._viewer, TimeSeriesViewer):
             parent.refresh_zstats()
