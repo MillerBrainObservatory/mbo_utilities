@@ -626,10 +626,20 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
                     if filenames:
                         combined_meta = dict(getattr(_src_arr_for_s3d, "metadata", {}) or {})
                         combined_meta.update(custom_metadata)
+                        # suite3d resource knobs from the run tab checkbox's
+                        # sub-controls, same shape task_save_as uses. only
+                        # forwards keys the user actually set.
+                        s3d_params: dict = {}
+                        for key in ("n_proc_corr", "init_n_frames",
+                                    "n_init_files", "max_rigid_shift_pix"):
+                            val = args.get(f"s3d_{key}")
+                            if val is not None:
+                                s3d_params[key] = val
                         new_dir = register_zplanes_s3d(
                             filenames=filenames,
                             metadata=combined_meta,
                             outpath=output_dir,
+                            s3d_params=s3d_params or None,
                         )
                         if new_dir is not None and validate_s3d_registration(
                             new_dir, num_planes_s3d
