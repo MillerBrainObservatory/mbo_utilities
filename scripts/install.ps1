@@ -14,7 +14,8 @@ $ErrorActionPreference = "Stop"
 $GITHUB_REPO = "MillerBrainObservatory/mbo_utilities"
 $DEFAULT_ENV_PATH = Join-Path $env:USERPROFILE "mbo\envs\mbo_utilities"
 
-# System dependency URLs
+# System dependency URLs (informational only — all three are optional
+# on Windows: wheels cover nearly every Python dep mbo uses)
 $MSVC_BUILD_TOOLS_URL = "https://visualstudio.microsoft.com/visual-cpp-build-tools/"
 $FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/"
 
@@ -27,7 +28,12 @@ function Test-MsvcBuildTools {
     <#
     .SYNOPSIS
     Check if Microsoft Visual C++ Build Tools are installed.
-    Required for compiling Python packages with C extensions.
+    Used only when pip has to compile a C extension from source because
+    no pre-built wheel exists for the target Python/platform. The GUI
+    and most dependencies (numpy, scipy, pyqt, fastplotlib, torch, cupy)
+    ship wheels and don't need this. Only specific extras without wheels
+    (occasionally: pyklb for isoview, source-install of cellpose) trigger
+    a source build.
     #>
 
     # Check via vswhere (most reliable)
@@ -119,21 +125,19 @@ function Show-SystemDependencyCheck {
     Write-Host "System Dependencies" -ForegroundColor White
     Write-Host ""
 
-    $hasMissing = $false
-
-    # MSVC Build Tools (required)
+    # MSVC Build Tools (optional — only needed for source builds of
+    # extras that ship no Windows wheel, e.g. pyklb for isoview)
     if ($Deps.Msvc.Installed) {
         Write-Host "  [" -NoNewline
         Write-Host "OK" -ForegroundColor Green -NoNewline
         Write-Host "] Microsoft C++ Build Tools" -NoNewline
-        Write-Host " (required)" -ForegroundColor Gray
+        Write-Host " (optional, for source builds)" -ForegroundColor Gray
     }
     else {
         Write-Host "  [" -NoNewline
-        Write-Host "MISSING" -ForegroundColor Red -NoNewline
+        Write-Host "  " -NoNewline
         Write-Host "] Microsoft C++ Build Tools" -NoNewline
-        Write-Host " (required)" -ForegroundColor Gray
-        $hasMissing = $true
+        Write-Host " (optional, for source builds)" -ForegroundColor Gray
     }
 
     # ffmpeg (optional)
@@ -151,51 +155,6 @@ function Show-SystemDependencyCheck {
     }
 
     Write-Host ""
-
-    if ($hasMissing) {
-        Write-Host ""
-        Write-Err "Required system dependencies are missing."
-        Write-Host ""
-        Write-Host "  Microsoft C++ Build Tools is required to compile Python packages." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  Install from:" -ForegroundColor White
-        Write-Host "    $MSVC_BUILD_TOOLS_URL" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "  During installation, select:" -ForegroundColor White
-        Write-Host "    'Desktop development with C++'" -ForegroundColor Cyan
-        Write-Host "  or at minimum:" -ForegroundColor White
-        Write-Host "    'MSVC v143 - VS 2022 C++ x64/x86 build tools'" -ForegroundColor Cyan
-        Write-Host "    'Windows 10/11 SDK'" -ForegroundColor Cyan
-        Write-Host ""
-
-        Write-Host "  [1] Open download page and exit" -ForegroundColor Cyan
-        Write-Host "  [2] Continue anyway (may fail)" -ForegroundColor Cyan
-        Write-Host "  [3] Exit" -ForegroundColor Cyan
-        Write-Host ""
-
-        do {
-            $choice = Read-Host "Select option (1-3)"
-            $valid = $choice -match '^[123]$'
-            if (-not $valid) { Write-Warn "Invalid selection." }
-        } while (-not $valid)
-
-        switch ($choice) {
-            "1" {
-                Start-Process $MSVC_BUILD_TOOLS_URL
-                Write-Host ""
-                Write-Info "After installing Build Tools, restart your terminal and run this script again."
-                return $false
-            }
-            "2" {
-                Write-Host ""
-                Write-Warn "Continuing without Build Tools. Installation may fail for some packages."
-                return $true
-            }
-            "3" {
-                return $false
-            }
-        }
-    }
 
     return $true
 }
@@ -552,11 +511,17 @@ function Install-MboTool {
         $fullSpec = $Spec
     }
 
-    # add cupy as --with if suite3d is selected and CUDA is available
+    # add cupy + NVRTC helpers as --with if suite3d is selected. the
+    # nvrtc/runtime wheels isolate cupy from the user's system CUDA
+    # toolkit so a driver > toolkit version skew can't break kernel
+    # compilation (fixes the "__nv_fp8_e8m0 incomplete type" class of
+    # bug). mirrors the dev-env install so both paths behave the same.
     $withArgs = @()
     if ($CupyPackage) {
-        $withArgs += @("--with", $CupyPackage)
-        Write-Info "  CuPy: $CupyPackage (via --with)"
+        $withArgs += @("--with", $CupyPackage,
+                       "--with", "nvidia-cuda-nvrtc-cu12",
+                       "--with", "nvidia-cuda-runtime-cu12")
+        Write-Info "  CuPy: $CupyPackage + bundled NVRTC (via --with)"
     }
 
     Write-Info "  Spec: $fullSpec"
@@ -963,23 +928,35 @@ function Install-DevEnvironment {
     $ErrorActionPreference = "Continue"
 
     try {
-        # --reinstall-package ensures the latest commit on the branch is
-        # fetched even when uv has a cached copy with the same branch name.
-        uv pip install --python $pythonPath --reinstall-package mbo-utilities $fullSpec 2>&1 | ForEach-Object { Write-Host $_ }
+        # --reinstall (not --reinstall-package) rewrites files for ALL
+        # packages in the resolution, not just mbo-utilities. this
+        # clobbers any stale transitive-dep files left over from prior
+        # installs — the mbo-fpl → mbo-fastplotlib rename pattern where
+        # two packages owned overlapping module directories, or the
+        # napari/app-model/vispy version-skew where the lockfile version
+        # differs from what's already on disk. for a "refresh" flow we
+        # want every file rewritten to match the current resolution.
+        uv pip install --python $pythonPath --reinstall $fullSpec 2>&1 | ForEach-Object { Write-Host $_ }
 
         if ($LASTEXITCODE -ne 0) {
             throw "uv pip install failed"
         }
 
-        # install cupy separately if suite3d was selected and CUDA is available
+        # install cupy separately if suite3d was selected and CUDA is
+        # available. --reinstall here too so an existing cupy-cuda12x
+        # install doesn't mask the version we want. also pull in the
+        # NVRTC/runtime wheels so cupy uses pip-managed CUDA headers
+        # instead of whatever system toolkit is on PATH — this is what
+        # fixes the "cuda_fp8.h missing __nv_fp8_e8m0" class of bug on
+        # machines where driver > toolkit.
         if ($CupyPackage) {
-            Write-Info "Installing $CupyPackage for Suite3D..."
-            uv pip install --python $pythonPath $CupyPackage 2>&1 | ForEach-Object { Write-Host $_ }
+            Write-Info "Installing $CupyPackage + bundled NVRTC for Suite3D..."
+            uv pip install --python $pythonPath --reinstall $CupyPackage nvidia-cuda-nvrtc-cu12 nvidia-cuda-runtime-cu12 2>&1 | ForEach-Object { Write-Host $_ }
             if ($LASTEXITCODE -ne 0) {
-                Write-Warn "CuPy installation failed. Suite3D may not work with GPU acceleration."
+                Write-Warn "CuPy installation failed. Suite3D will not have GPU acceleration."
             }
             else {
-                Write-Success "CuPy installed: $CupyPackage"
+                Write-Success "CuPy + NVRTC installed: $CupyPackage"
             }
         }
 
