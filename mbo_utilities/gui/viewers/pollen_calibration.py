@@ -19,7 +19,6 @@ from scipy.ndimage import uniform_filter1d
 from imgui_bundle import imgui, implot, portable_file_dialogs as pfd
 
 from . import BaseViewer
-from mbo_utilities.gui.panels import DebugPanel, ProcessPanel, MetadataPanel
 from mbo_utilities.gui._imgui_helpers import set_tooltip
 from mbo_utilities.metadata import get_param
 from mbo_utilities.metadata.scanimage import (
@@ -101,10 +100,6 @@ class PollenCalibrationViewer(BaseViewer):
     ):
         super().__init__(image_widget, fpath, parent=parent, **kwargs)
 
-        # Pollen calibration has its own specialized UI
-        # so we don't use the generic feature system
-        self._features = []
-
         # Pollen-specific state
         self._z_step_um = 1.0
         self._pixel_size_um = 1.0
@@ -153,13 +148,6 @@ class PollenCalibrationViewer(BaseViewer):
         self._pointer_down_pos = None  # (x, y) on pointer_down
         self._drag_threshold = 5.0     # pixels moved to consider it a drag
 
-        # Only initialize panels when not using legacy delegation
-        if parent is None:
-            self._panels["debug"] = DebugPanel(self)
-            self._panels["processes"] = ProcessPanel(self)
-            self._panels["metadata"] = MetadataPanel(self)
-            self._setup_logging()
-
     @property
     def data(self):
         """Access the loaded data arrays."""
@@ -181,16 +169,6 @@ class PollenCalibrationViewer(BaseViewer):
             return self.parent.logger
         import logging
         return logging.getLogger("mbo_utilities")
-
-    def _setup_logging(self) -> None:
-        """Set up log handler to route to debug panel."""
-        try:
-            import logging
-            from mbo_utilities.gui.panels.debug_log import GuiLogHandler
-            handler = GuiLogHandler(self._panels["debug"])
-            logging.getLogger("mbo_utilities").addHandler(handler)
-        except Exception:
-            pass
 
     def _init_from_data(self):
         """Initialize calibration parameters from loaded data."""
@@ -283,17 +261,7 @@ class PollenCalibrationViewer(BaseViewer):
 
     def draw(self) -> None:
         """Draw the pollen calibration UI."""
-        if self.parent is not None:
-            # Legacy mode: full calibration UI in sidebar
-            self._draw_calibration_ui()
-        else:
-            # New mode: panel-based with menu bar
-            self.draw_menu_bar()
-            self._draw_calibration_ui()
-            for panel in self._panels.values():
-                panel.draw()
-
-        # Always draw popup (works in both modes)
+        self._draw_calibration_ui()
         if self._show_figures_popup:
             self._draw_figures_popup()
 
@@ -1366,29 +1334,6 @@ class PollenCalibrationViewer(BaseViewer):
                         self._open_output_folder_path(str(h5_path.parent))
 
         imgui.end()
-
-    def draw_menu_bar(self) -> None:
-        """Render the menu bar."""
-        if imgui.begin_menu_bar():
-            if imgui.begin_menu("File"):
-                if imgui.menu_item("Open File", "Ctrl+O")[0]:
-                    pass
-                imgui.end_menu()
-
-            if imgui.begin_menu("View"):
-                if imgui.menu_item("Metadata", "M")[0]:
-                    self._panels["metadata"].toggle()
-                if imgui.menu_item("Debug Log")[0]:
-                    self._panels["debug"].toggle()
-                imgui.end_menu()
-
-            if imgui.begin_menu("Help"):
-                if imgui.menu_item("Documentation")[0]:
-                    import webbrowser
-                    webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/")
-                imgui.end_menu()
-
-            imgui.end_menu_bar()
 
     def on_data_loaded(self) -> None:
         """Reinitialize when new data is loaded."""
