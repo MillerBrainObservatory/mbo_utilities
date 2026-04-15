@@ -698,6 +698,57 @@ def _draw_data_options_content(self):
             )
             if reg_changed:
                 self._register_z = reg_value
+
+            # suite3d resource knobs — only relevant when z-registration is on.
+            # mirrors the sub-controls in the save-as dialog so the run tab
+            # exposes the same tuning. n_proc_corr is the big one on windows:
+            # each worker mmaps a tile-sized block that counts against the
+            # pagefile commit limit, so lower it to avoid WinError 1455.
+            if self._register_z:
+                if not hasattr(self, "_s3d_n_proc_corr"):
+                    self._s3d_n_proc_corr = 4
+                if not hasattr(self, "_s3d_init_n_frames"):
+                    self._s3d_init_n_frames = 500
+                if not hasattr(self, "_s3d_n_init_files"):
+                    self._s3d_n_init_files = 1
+
+                imgui.indent(16)
+                imgui.text_colored(
+                    imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Suite3D resources"
+                )
+                imgui.set_next_item_width(80)
+                _changed, _val = imgui.input_int(
+                    "Workers (n_proc_corr)", self._s3d_n_proc_corr, 1, 4
+                )
+                if _changed:
+                    self._s3d_n_proc_corr = max(1, _val)
+                set_tooltip(
+                    "Multiprocessing workers for the TIFF load+stitch pass.\n"
+                    "Each worker reserves a tile-sized shared-memory block.\n"
+                    "Lower this if you hit WinError 1455 (commitment limit) "
+                    "or run out of RAM. Default 4."
+                )
+
+                imgui.set_next_item_width(80)
+                _changed, _val = imgui.input_int(
+                    "Init frames", self._s3d_init_n_frames, 50, 500
+                )
+                if _changed:
+                    self._s3d_init_n_frames = max(50, _val)
+                set_tooltip(
+                    "Frames pulled into the Suite3D init pass. Lower = less RAM."
+                )
+
+                imgui.set_next_item_width(80)
+                _changed, _val = imgui.input_int(
+                    "Init files", self._s3d_n_init_files, 1, 1
+                )
+                if _changed:
+                    self._s3d_n_init_files = max(1, _val)
+                set_tooltip(
+                    "Number of TIFFs read in parallel during init. Default 1."
+                )
+                imgui.unindent(16)
         else:
             # show disabled option with install hint
             imgui.begin_disabled()
@@ -1719,6 +1770,10 @@ def run_process(self):
                     "selected_planes_0based": [p - 1 for p in sorted(selected_planes)],
                     # axial z-registration via suite3d
                     "register_z": getattr(self, "_register_z", False),
+                    # suite3d resource knobs (mirror of save-as dialog)
+                    "s3d_n_proc_corr": getattr(self, "_s3d_n_proc_corr", 4),
+                    "s3d_init_n_frames": getattr(self, "_s3d_init_n_frames", 500),
+                    "s3d_n_init_files": getattr(self, "_s3d_n_init_files", 1),
                     "s2p_settings": {
                         "keep_raw": self.s2p.keep_raw,
                         "keep_reg": self.s2p.keep_reg,
