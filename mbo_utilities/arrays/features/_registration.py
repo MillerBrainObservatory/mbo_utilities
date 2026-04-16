@@ -6,8 +6,6 @@ import numpy as np
 import zarr
 from tqdm import tqdm
 from mbo_utilities import log
-from mbo_utilities.util import get_dtype
-
 logger = log.get("arrays.features.registration")
 
 
@@ -137,6 +135,7 @@ class Suite2pRegistrationMixin:
 
         z_grp = z_out_root
 
+        from mbo_utilities.arrays._base import get_dtype
         dtype = get_dtype(self.dtype)
         out_shape = list(self.shape)
 

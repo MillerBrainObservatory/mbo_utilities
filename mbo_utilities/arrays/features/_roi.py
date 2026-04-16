@@ -14,10 +14,44 @@ RoiFeatureMixin
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
-from mbo_utilities.metadata.base import RoiMode
+
+
+class RoiMode(str, Enum):
+    """Mode for handling multi-ROI (mROI) data from ScanImage.
+
+    Attributes
+    ----------
+    concat_y : str
+        Concatenate ROIs along Y axis into a single FOV (default).
+    separate : str
+        Write each ROI to separate files.
+    """
+
+    concat_y = "concat_y"
+    separate = "separate"
+
+    @classmethod
+    def from_string(cls, value: str) -> RoiMode:
+        """Case-insensitive lookup of RoiMode from string."""
+        value_lower = value.lower().strip()
+        for member in cls:
+            if member.value.lower() == value_lower:
+                return member
+        valid = [m.value for m in cls]
+        raise ValueError(f"Unknown RoiMode: {value!r}. Valid modes: {valid}")
+
+    @property
+    def description(self) -> str:
+        """Human-readable description of the mode."""
+        descriptions = {
+            RoiMode.concat_y: "horizontally concatenate ROIs",
+            RoiMode.separate: "separate ROI files",
+        }
+        return descriptions.get(self, self.value)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
