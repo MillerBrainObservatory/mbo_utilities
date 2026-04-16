@@ -222,11 +222,6 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
             return None
 
     @property
-    def _is_ome(self) -> bool:
-        """check if this is an OME-Zarr store."""
-        return self._groups and self._groups[0] is not None
-
-    @property
     def metadata(self) -> dict:
         """Return metadata as dict. Always returns dict, never None."""
         if not self._metadata:
