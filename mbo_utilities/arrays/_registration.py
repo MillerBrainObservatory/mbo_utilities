@@ -14,7 +14,7 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.metadata import get_param
-from mbo_utilities.util import load_npy
+from mbo_utilities.file_io import load_npy
 
 logger = log.get("arrays._registration")
 

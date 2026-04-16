@@ -15,7 +15,7 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin, Shape5DMixin
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
-from mbo_utilities.util import load_npy
+from mbo_utilities.file_io import load_npy
 from mbo_utilities._writers import _convert_paths_to_strings
 
 logger = log.get("arrays.bin")

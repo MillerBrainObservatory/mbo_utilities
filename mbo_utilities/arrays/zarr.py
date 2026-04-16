@@ -340,7 +340,7 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
 
     @property
     def dtype(self):
-        from mbo_utilities.util import get_dtype
+        from mbo_utilities.arrays._base import get_dtype
         return self._target_dtype if self._target_dtype is not None else get_dtype(self.zs[0].dtype)
 
     def astype(self, dtype, copy=True):

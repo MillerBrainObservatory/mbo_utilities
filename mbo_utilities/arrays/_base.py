@@ -22,6 +22,16 @@ logger = log.get("arrays._base")
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
 
+
+def get_dtype(dtype):
+    """Ensure input is a valid numpy.dtype object."""
+    if isinstance(dtype, np.dtype):
+        return dtype
+    try:
+        return np.dtype(dtype)
+    except TypeError:
+        return np.dtype(str(dtype))
+
 # canonical 5D dimension order (OME-NGFF 0.5)
 DIMS = ("T", "C", "Z", "Y", "X")
 

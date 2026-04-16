@@ -6,6 +6,9 @@ Array classes are lazy-loaded on first access to improve startup time.
 
 from __future__ import annotations
 
+import re
+from collections import defaultdict
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 # base module is lightweight, import eagerly
@@ -24,6 +27,61 @@ from mbo_utilities.arrays._base import (
     normalize_roi,
     supports_roi,
 )
+
+def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
+    """Lazily build a Dask array or list of arrays depending on filename tags.
+
+    - "plane", "z", or "chan" -> stacked along Z (TZYX)
+    - "roi" -> list of 3D (T,Y,X) arrays, one per ROI
+    - otherwise -> concatenate all files in time (T)
+    """
+    import dask.array as da
+    import numpy as np
+    from tifffile import tifffile
+
+    files = [Path(f) for f in files]
+    if not files:
+        raise ValueError("No input files provided.")
+
+    has_plane = any(re.search(r"(plane|z|chan)[_-]?\d+", f.stem, re.IGNORECASE) for f in files)
+    has_roi = any(re.search(r"roi[_-]?\d+", f.stem, re.IGNORECASE) for f in files)
+
+    def load_lazy(f):
+        if f.suffix == ".npy":
+            arr = np.load(f, mmap_mode="r")
+        elif f.suffix in (".tif", ".tiff"):
+            arr = tifffile.memmap(f, mode="r")
+        else:
+            raise ValueError(f"Unsupported file type: {f}")
+        chunks = (min(chunk_t, arr.shape[0]), *arr.shape[1:])
+        return da.from_array(arr, chunks=chunks)
+
+    if has_roi:
+        roi_groups = defaultdict(list)
+        for f in files:
+            m = re.search(r"roi[_-]?(\d+)", f.stem, re.IGNORECASE)
+            roi_groups[int(m.group(1)) if m else 0].append(f)
+        roi_arrays = []
+        for _idx, group in sorted(roi_groups.items()):
+            darr = da.concatenate([load_lazy(f) for f in sorted(group)], axis=0)
+            roi_arrays.append(darr.astype(astype) if astype else darr)
+        return roi_arrays
+
+    if has_plane:
+        plane_groups = defaultdict(list)
+        for f in files:
+            m = re.search(r"(plane|z|chan)[_-]?(\d+)", f.stem, re.IGNORECASE)
+            plane_groups[int(m.group(2)) if m else 0].append(f)
+        plane_stacks = [
+            da.concatenate([load_lazy(f) for f in sorted(group)], axis=0)
+            for _z, group in sorted(plane_groups.items())
+        ]
+        full = da.stack(plane_stacks, axis=1)
+        return full.astype(astype) if astype else full
+
+    full = da.concatenate([load_lazy(f) for f in sorted(files)], axis=0)
+    return full.astype(astype) if astype else full
+
 
 if TYPE_CHECKING:
     from mbo_utilities.arrays._registration import (

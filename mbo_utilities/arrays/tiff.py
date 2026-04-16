@@ -26,7 +26,7 @@ from mbo_utilities.metadata.scanimage import (
 )
 from mbo_utilities.analysis.phasecorr import bidir_phasecorr, _apply_offset
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
-from mbo_utilities.util import listify_index, index_length
+from mbo_utilities.arrays.features._slicing import listify_index, index_length
 from mbo_utilities.arrays.features import (
     DimensionSpecMixin,
     PhaseCorrectionFeature,
@@ -189,7 +189,7 @@ class _InterleavedTiffReader:
 
     @property
     def dtype(self):
-        from mbo_utilities.util import get_dtype
+        from mbo_utilities.arrays._base import get_dtype
         return get_dtype(self._dtype)
 
     def read_tzyx(self, t_indices: list[int], z_indices: list[int], c_indices: list[int] | None = None) -> np.ndarray:
@@ -293,7 +293,7 @@ class _SingleTiffPlaneReader:
 
     @property
     def dtype(self):
-        from mbo_utilities.util import get_dtype
+        from mbo_utilities.arrays._base import get_dtype
 
         return get_dtype(self._dtype)
 
@@ -741,7 +741,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
 
     @property
     def dtype(self):
-        from mbo_utilities.util import get_dtype
+        from mbo_utilities.arrays._base import get_dtype
 
         return (
             self._target_dtype

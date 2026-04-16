@@ -21,7 +21,7 @@ from mbo_utilities.arrays.features import DimLabels
 
 from mbo_utilities.metadata import get_param
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
-from mbo_utilities.util import load_npy
+from mbo_utilities.file_io import load_npy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -372,7 +372,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
 
     @property
     def dtype(self):
-        from mbo_utilities.util import get_dtype
+        from mbo_utilities.arrays._base import get_dtype
         return self._target_dtype if hasattr(self, "_target_dtype") and self._target_dtype else get_dtype(self._dtype)
 
     @property
