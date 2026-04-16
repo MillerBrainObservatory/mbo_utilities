@@ -683,11 +683,6 @@ def list_formats():
     click.echo("  .npy         - NumPy array")
 
 
-# register db subcommand group
-from mbo_utilities.db.cli import db_cli
-main.add_command(db_cli)
-
-
 @main.command("scanphase")
 @click.argument("input_path", required=False, type=click.Path())
 @click.option(
