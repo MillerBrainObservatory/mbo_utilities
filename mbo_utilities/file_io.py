@@ -10,9 +10,6 @@ from tifffile import tifffile
 
 from . import log
 
-# Tags used to identify plane/roi outputs in filenames
-PIPELINE_TAGS = ("plane", "roi", "z", "plane_", "roi_", "z_")
-
 try:
     from zarr import open as zarr_open
     from zarr.storage import FsspecStore
@@ -286,51 +283,6 @@ def get_files(
     return files
 
 
-def derive_tag_from_filename(path):
-    """
-    Derive a folder tag from a filename based on “planeN”, “roiN”, or "tagN" patterns.
-
-    Parameters
-    ----------
-    path : str or pathlib.Path
-        File path or name whose stem will be parsed.
-
-    Returns
-    -------
-    str
-        If the stem starts with “plane”, “roi”, or “res” followed by an integer,
-        returns that tag plus the integer (e.g. “plane3”, “roi7”, “res2”).
-        Otherwise returns the original stem unchanged.
-
-    Examples
-    --------
-    >>> derive_tag_from_filename("plane_01.tif")
-    'plane1'
-    >>> derive_tag_from_filename("plane2.bin")
-    'plane2'
-    >>> derive_tag_from_filename("roi5.raw")
-    'roi5'
-    >>> derive_tag_from_filename("ROI_10.dat")
-    'roi10'
-    >>> derive_tag_from_filename("res-3.h5")
-    'res3'
-    >>> derive_tag_from_filename("assembled_data_1.tiff")
-    'assembled_data_1'
-    >>> derive_tag_from_filename("file_12.tif")
-    'file_12'
-    """
-    name = Path(path).stem
-    for tag in PIPELINE_TAGS:
-        low = name.lower()
-        if low.startswith(tag):
-            suffix = name[len(tag) :]
-            if suffix and (suffix[0] in ("_", "-")):
-                suffix = suffix[1:]
-            if suffix.isdigit():
-                return f"{tag}{int(suffix)}"
-    return name
-
-
 def _get_mbo_project_root() -> Path:
     """Return the root path of the mbo_utilities package (where assets folder lives)."""
     return Path(__file__).resolve().parent
@@ -396,50 +348,3 @@ def get_last_savedir_path() -> Path:
     return Path.home().joinpath(".mbo", "settings", "last_savedir.json")
 
 
-def load_last_savedir(default=None) -> Path:
-    """Load last saved directory path if it exists.
-
-    .. deprecated::
-        Use :func:`mbo_utilities.preferences.get_last_save_dir` instead.
-    """
-    import warnings
-    warnings.warn(
-        "load_last_savedir() is deprecated. Use mbo_utilities.preferences.get_last_save_dir() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from mbo_utilities.preferences import get_last_save_dir
-    result = get_last_save_dir()
-    if result:
-        return result
-    return Path(default or Path().cwd())
-
-
-def save_last_savedir(path: Path):
-    """Persist the most recent save directory path.
-
-    .. deprecated::
-        Use :func:`mbo_utilities.preferences.set_last_save_dir` instead.
-    """
-    import warnings
-    warnings.warn(
-        "save_last_savedir() is deprecated. Use mbo_utilities.preferences.set_last_save_dir() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from mbo_utilities.preferences import set_last_save_dir
-    set_last_save_dir(path)
-
-
-def print_tree(path, max_depth=1, prefix=""):
-    path = Path(path)
-    if not path.is_dir():
-        return
-
-    entries = sorted([p for p in path.iterdir() if p.is_dir()])
-    for i, entry in enumerate(entries):
-        "└── " if i == len(entries) - 1 else "├── "
-
-        if max_depth > 1:
-            extension = "    " if i == len(entries) - 1 else "│   "
-            print_tree(entry, max_depth=max_depth - 1, prefix=prefix + extension)
