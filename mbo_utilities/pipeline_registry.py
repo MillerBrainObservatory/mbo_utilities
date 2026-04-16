@@ -81,30 +81,6 @@ def get_all_marker_files() -> dict[str, list[str]]:
     return {name: info.marker_files for name, info in _PIPELINES.items()}
 
 
-def get_pipelines_by_category(category: str) -> dict[str, PipelineInfo]:
-    """Get all pipelines in a category."""
-    return {
-        name: info for name, info in _PIPELINES.items()
-        if info.category == category
-    }
-
-
-def get_readable_extensions() -> set[str]:
-    """Get all file extensions that can be read by any pipeline."""
-    extensions = set()
-    for info in _PIPELINES.values():
-        extensions.update(info.input_extensions)
-    return extensions
-
-
-def get_writable_extensions() -> set[str]:
-    """Get all file extensions that can be written by any pipeline."""
-    extensions = set()
-    for info in _PIPELINES.values():
-        extensions.update(info.output_extensions)
-    return extensions
-
-
 # convenience decorator for registering pipelines
 def pipeline(
     name: str,
