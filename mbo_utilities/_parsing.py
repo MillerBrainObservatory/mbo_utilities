@@ -1,7 +1,4 @@
-import json
-import subprocess
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -83,27 +80,3 @@ def _convert_paths_to_strings(obj, filter_disabled: bool = True):
     return obj
 
 
-def _get_git_commit() -> str:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
-    except Exception:
-        return "unknown"
-
-
-def _load_existing(save_path: Path) -> list[dict[str, Any]]:
-    if not save_path.exists():
-        return []
-    try:
-        return json.loads(save_path.read_text())
-    except Exception:
-        return []
-
-
-def _increment_label(existing: list[dict[str, Any]], base_label: str) -> str:
-    count = 1
-    labels = {e["label"] for e in existing if "label" in e}
-    if base_label not in labels:
-        return base_label
-    while f"{base_label} [{count + 1}]" in labels:
-        count += 1
-    return f"{base_label} [{count + 1}]"
