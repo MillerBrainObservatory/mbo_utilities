@@ -396,7 +396,7 @@ class PollenCalibrationViewer(BaseViewer):
 
     def _load_h5_file(self, path: str):
         """Load calibration data from an H5 file."""
-        from mbo_utilities.gui._pollen_analysis import extract_calibration_summary
+        from pollen._pollen_analysis import extract_calibration_summary
 
         summary = extract_calibration_summary(path)
         if summary:
@@ -778,7 +778,7 @@ class PollenCalibrationViewer(BaseViewer):
 
             nz, nc, ny, nx = vol.shape
 
-            from mbo_utilities.gui._pollen_analysis import (
+            from pollen._pollen_analysis import (
                 correct_scan_phase,
                 analyze_power_vs_z,
                 analyze_z_positions,
@@ -883,7 +883,7 @@ class PollenCalibrationViewer(BaseViewer):
             self._status = "Running calibration..."
             self._progress = 0.4
 
-            from mbo_utilities.gui._pollen_analysis import (
+            from pollen._pollen_analysis import (
                 correct_scan_phase,
                 analyze_power_vs_z,
                 analyze_z_positions,
@@ -1151,7 +1151,7 @@ class PollenCalibrationViewer(BaseViewer):
 
     def _load_calibration_data(self, mode: str):
         """Load calibration data from H5 file for plotting."""
-        from mbo_utilities.gui._pollen_analysis import extract_calibration_summary
+        from pollen._pollen_analysis import extract_calibration_summary
 
         # Check cache first
         if mode == "auto" and self._calibration_data_auto is not None:

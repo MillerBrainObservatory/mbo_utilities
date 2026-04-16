@@ -42,7 +42,7 @@ from scipy.ndimage import gaussian_filter
 
 from imgui_bundle import imgui, hello_imgui, imgui_ctx, implot
 
-from mbo_utilities.file_io import get_mbo_dirs
+from mbo_utilities.preferences import get_mbo_dirs
 from mbo_utilities.reader import MBO_SUPPORTED_FTYPES
 from mbo_utilities.arrays.features import PhaseCorrectionFeature
 from mbo_utilities.preferences import get_last_dir

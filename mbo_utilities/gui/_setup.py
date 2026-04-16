@@ -14,14 +14,22 @@ from pathlib import Path
 _initialized = False
 
 
+def get_package_assets_path() -> Path:
+    """Return path to the bundled assets folder in the installed package."""
+    try:
+        from importlib import resources
+        return Path(str(resources.files("mbo_utilities").joinpath("assets")))
+    except (ImportError, TypeError):
+        return Path(__file__).resolve().parent.parent / "assets"
+
+
 def _copy_assets():
     """Copy package assets to user config directory."""
     import imgui_bundle
-    from mbo_utilities.file_io import get_package_assets_path
-    import mbo_utilities as mbo
+    from mbo_utilities.preferences import get_mbo_dirs
 
     package_assets = get_package_assets_path()
-    user_assets = Path(mbo.get_mbo_dirs()["base"]) / "imgui" / "assets"
+    user_assets = Path(get_mbo_dirs()["base"]) / "imgui" / "assets"
 
     user_assets.mkdir(parents=True, exist_ok=True)
     if package_assets.is_dir():
@@ -87,9 +95,9 @@ def get_default_ini_path(name: str = "imgui_settings") -> str:
     str
         full path to the ini file in ~/mbo/imgui/assets/app_settings/
     """
-    import mbo_utilities as mbo
+    from mbo_utilities.preferences import get_mbo_dirs
 
-    settings_dir = Path(mbo.get_mbo_dirs()["base"]) / "imgui" / "assets" / "app_settings"
+    settings_dir = Path(get_mbo_dirs()["base"]) / "imgui" / "assets" / "app_settings"
     settings_dir.mkdir(parents=True, exist_ok=True)
     return str(settings_dir / f"{name}.ini")
 

@@ -32,8 +32,8 @@ def _set_qt_icon():
     try:
         from PyQt6.QtWidgets import QApplication
         from PyQt6.QtGui import QIcon
-        from mbo_utilities.file_io import get_package_assets_path
-        from mbo_utilities import get_mbo_dirs
+        from mbo_utilities.gui._setup import get_package_assets_path
+        from mbo_utilities.preferences import get_mbo_dirs
 
         app = QApplication.instance()
         if app is None:

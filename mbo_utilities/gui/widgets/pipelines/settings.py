@@ -1830,7 +1830,8 @@ def run_process(self):
             use_fft = getattr(self, "_s2p_use_fft", False)
 
             if not s2p_path:
-                from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
+                from mbo_utilities.preferences import get_mbo_dirs
+                from mbo_utilities.file_io import get_last_savedir_path
                 last_savedir = get_last_savedir_path()
                 s2p_path = str(Path(last_savedir) if last_savedir else get_mbo_dirs()["data"])
 
