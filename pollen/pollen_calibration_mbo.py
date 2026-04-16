@@ -185,7 +185,7 @@ def _icon_button(icon: str, label: str, size: imgui.ImVec2, tooltip: str = "") -
 
 class PollenDialog:
     def __init__(self):
-        from mbo_utilities.file_io import get_mbo_dirs
+        from mbo_utilities.preferences import get_mbo_dirs
         from mbo_utilities.preferences import get_default_open_dir
 
         self.selected_path = None
