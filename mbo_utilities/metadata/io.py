@@ -15,7 +15,6 @@ import numpy as np
 import tifffile
 from mbo_utilities import log
 from mbo_utilities.file_io import get_files
-from mbo_utilities._parsing import _make_json_serializable
 from mbo_utilities.util import load_npy
 
 # import from sibling modules
@@ -347,6 +346,8 @@ def get_metadata_single(file: Path):
                         logger.warning(f"Failed ops.npy fallback for {file}: {e}")
             return {"source": "no_metadata"}
 
+        from mbo_utilities._writers import _make_json_serializable as _serialize
+
         si = meta.get("FrameData", {})
         if not si:
             logger.warning(f"No FrameData found in {file}.")
@@ -437,8 +438,8 @@ def get_metadata_single(file: Path):
             "uniform_sampling": uniform_sampling,
             "num_fly_to_lines": num_fly_to_lines,
             "roi_heights": [px[1] for px in num_pixel_xys],
-            "roi_groups": _make_json_serializable(roi_group),
-            "si": _make_json_serializable(si),
+            "roi_groups": _serialize(roi_group),
+            "si": _serialize(si),
         }
         return clean_scanimage_metadata(metadata)
 

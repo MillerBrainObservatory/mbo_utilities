@@ -11,7 +11,7 @@ from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_i
 from mbo_utilities.gui._imgui_helpers import set_tooltip, settings_row_with_popup, _popup_states
 from mbo_utilities.gui._selection_ui import draw_selection_table
 from mbo_utilities.preferences import get_last_dir, set_last_dir
-from mbo_utilities._parsing import _convert_paths_to_strings
+from mbo_utilities._writers import _convert_paths_to_strings
 
 # lazy availability check - avoid heavy import at module load
 _HAS_LSP: bool | None = None
