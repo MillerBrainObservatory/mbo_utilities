@@ -19,7 +19,7 @@ from typing import Any
 from imgui_bundle import imgui
 
 from mbo_utilities.gui.widgets._base import Widget
-from mbo_utilities.gui.widgets.menu_bar import draw_menu_bar, draw_process_status_indicator
+from mbo_utilities.gui.widgets.menu_bar import draw_menu_bar
 
 # registry of all discovered widget classes
 _WIDGET_CLASSES: list[type[Widget]] = []
@@ -117,6 +117,5 @@ __all__ = [
     "cleanup_all_widgets",
     "draw_all_widgets",
     "draw_menu_bar",
-    "draw_process_status_indicator",
     "get_supported_widgets",
 ]
