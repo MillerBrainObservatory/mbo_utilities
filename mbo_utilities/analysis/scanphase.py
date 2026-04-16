@@ -1999,11 +1999,3 @@ def run_scanphase_analysis(
     return results
 
 
-def analyze_scanphase(data, output_dir=None, **kwargs):
-    """Run scan-phase analysis on array data."""
-    analyzer = ScanPhaseAnalyzer(data)
-    results = analyzer.run(**kwargs)
-    if output_dir:
-        analyzer.generate_figures(output_dir=output_dir)
-        analyzer.save_results(Path(output_dir) / "scanphase_results.npz")
-    return results
