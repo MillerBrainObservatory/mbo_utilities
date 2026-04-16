@@ -517,30 +517,3 @@ IMAGING_METADATA_KEYS: tuple[str, ...] = (
 )
 
 
-def get_imaging_metadata_info() -> list[dict]:
-    """
-    Get display info for core imaging metadata parameters.
-
-    Returns a list of dicts with keys: canonical, label, unit, aliases, dtype.
-    Used by GUI widgets to display/edit imaging metadata.
-
-    Returns
-    -------
-    list[dict]
-        List of metadata info dicts for each imaging parameter.
-    """
-    result = []
-    for key in IMAGING_METADATA_KEYS:
-        param = METADATA_PARAMS.get(key)
-        if param:
-            # format aliases as comma-separated string
-            all_aliases = [param.canonical] + list(param.aliases[:3])  # limit to 3 aliases
-            aliases_str = ", ".join(all_aliases)
-            result.append({
-                "canonical": param.canonical,
-                "label": param.label or param.canonical,
-                "unit": param.unit or "",
-                "aliases": aliases_str,
-                "dtype": param.dtype,
-            })
-    return result
