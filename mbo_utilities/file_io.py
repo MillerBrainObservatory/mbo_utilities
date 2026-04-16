@@ -27,71 +27,6 @@ CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 logger = log.get("file_io")
 
 
-def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
-    """
-    Lazily build a Dask array or list of arrays depending on filename tags.
-
-    - "plane", "z", or "chan" → stacked along Z (TZYX)
-    - "roi" → list of 3D (T,Y,X) arrays, one per ROI
-    - otherwise → concatenate all files in time (T)
-    """
-    files = [Path(f) for f in files]
-    if not files:
-        raise ValueError("No input files provided.")
-
-    has_plane = any(re.search(r"(plane|z|chan)[_-]?\d+", f.stem, re.IGNORECASE) for f in files)
-    has_roi = any(re.search(r"roi[_-]?\d+", f.stem, re.IGNORECASE) for f in files)
-
-    # lazy-load utility inline
-    def load_lazy(f):
-        if f.suffix == ".npy":
-            arr = np.load(f, mmap_mode="r")
-        elif f.suffix in (".tif", ".tiff"):
-            arr = tifffile.memmap(f, mode="r")
-        else:
-            raise ValueError(f"Unsupported file type: {f}")
-        chunks = (min(chunk_t, arr.shape[0]), *arr.shape[1:])
-        return da.from_array(arr, chunks=chunks)
-
-    if has_roi:
-        roi_groups = defaultdict(list)
-        for f in files:
-            m = re.search(r"roi[_-]?(\d+)", f.stem, re.IGNORECASE)
-            roi_idx = int(m.group(1)) if m else 0
-            roi_groups[roi_idx].append(f)
-
-        roi_arrays = []
-        for roi_idx, group in sorted(roi_groups.items()):
-            arrays = [load_lazy(f) for f in sorted(group)]
-            darr = da.concatenate(arrays, axis=0)  # concat in time
-            if astype:
-                darr = darr.astype(astype)
-            roi_arrays.append(darr)
-        return roi_arrays
-
-    # Plane or Z grouping case
-    if has_plane:
-        plane_groups = defaultdict(list)
-        for f in files:
-            m = re.search(r"(plane|z|chan)[_-]?(\d+)", f.stem, re.IGNORECASE)
-            plane_idx = int(m.group(2)) if m else 0
-            plane_groups[plane_idx].append(f)
-
-        plane_stacks = []
-        for _z, group in sorted(plane_groups.items()):
-            arrays = [load_lazy(f) for f in sorted(group)]
-            plane = da.concatenate(arrays, axis=0)
-            plane_stacks.append(plane)
-
-        full = da.stack(plane_stacks, axis=1)  # (T,Z,Y,X)
-        return full.astype(astype) if astype else full
-
-    # Default: concatenate along time
-    arrays = [load_lazy(f) for f in sorted(files)]
-    full = da.concatenate(arrays, axis=0)  # (T,Y,X)
-    return full.astype(astype) if astype else full
-
-
 def expand_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
     r"""
     Expand a path, list of paths, or wildcard pattern into a sorted list of actual files.
@@ -283,54 +218,49 @@ def get_files(
     return files
 
 
-def _get_mbo_project_root() -> Path:
-    """Return the root path of the mbo_utilities package (where assets folder lives)."""
-    return Path(__file__).resolve().parent
+def load_npy(path):
+    """Load .npy file with cross-platform Path object handling.
 
-
-def get_package_assets_path() -> Path:
-    """Return path to the bundled assets folder in the installed package.
-
-    uses importlib.resources for robust installed package support.
+    Handles pickled PosixPath/WindowsPath objects that fail to load
+    across operating systems.
     """
+    import pathlib
+    import sys
+    import pickle
+
+    class CrossPlatformUnpickler(pickle.Unpickler):
+        def find_class(self, module, name):
+            if module == "pathlib":
+                if name in ("PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath"):
+                    return pathlib.Path
+            return super().find_class(module, name)
+
     try:
-        from importlib import resources
-        # for python 3.9+, use files() API
-        return Path(str(resources.files("mbo_utilities").joinpath("assets")))
-    except (ImportError, TypeError):
-        # fallback for older python or edge cases
-        return _get_mbo_project_root() / "assets"
+        with open(path, "rb") as f:
+            version = np.lib.format.read_magic(f)
+            _shape, _fortran_order, dtype = np.lib.format._read_array_header(f, version)
 
-
-def get_mbo_dirs() -> dict:
-    """
-    Ensure ~/mbo and its subdirectories exist.
-
-    Returns a dict with paths to the root, settings, and cache directories.
-    """
-    base = Path.home().joinpath(".mbo")
-    imgui = base.joinpath("imgui")
-    cache = base.joinpath("cache")
-    logs = base.joinpath("logs")
-    tests = base.joinpath("tests")
-    data = base.joinpath("data")
-
-    assets = imgui.joinpath("assets")
-    settings = assets.joinpath("app_settings")
-
-    for d in (base, imgui, cache, logs, assets, data, tests):
-        d.mkdir(exist_ok=True)
-
-    return {
-        "base": base,
-        "imgui": imgui,
-        "cache": cache,
-        "logs": logs,
-        "assets": assets,
-        "settings": settings,
-        "data": data,
-        "tests": tests,
-    }
+            if dtype.hasobject:
+                f.seek(0)
+                np.lib.format.read_magic(f)
+                np.lib.format._read_array_header(f, version)
+                return CrossPlatformUnpickler(f).load()
+            f.seek(0)
+            return np.load(f, allow_pickle=True)
+    except Exception:
+        _original_posix = getattr(pathlib, "PosixPath", None)
+        _original_windows = getattr(pathlib, "WindowsPath", None)
+        try:
+            if sys.platform == "win32":
+                pathlib.PosixPath = pathlib.WindowsPath
+            else:
+                pathlib.WindowsPath = pathlib.PosixPath
+            return np.load(path, allow_pickle=True)
+        finally:
+            if _original_posix is not None:
+                pathlib.PosixPath = _original_posix
+            if _original_windows is not None:
+                pathlib.WindowsPath = _original_windows
 
 
 def get_last_savedir_path() -> Path:

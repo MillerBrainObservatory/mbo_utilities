@@ -23,6 +23,36 @@ logger = log.get("preferences")
 MAX_RECENT_FILES = 20
 
 
+def get_mbo_dirs() -> dict:
+    """Ensure ~/.mbo and its subdirectories exist.
+
+    Returns a dict with paths to the root, settings, and cache directories.
+    """
+    base = Path.home().joinpath(".mbo")
+    imgui = base.joinpath("imgui")
+    cache = base.joinpath("cache")
+    logs = base.joinpath("logs")
+    tests = base.joinpath("tests")
+    data = base.joinpath("data")
+
+    assets = imgui.joinpath("assets")
+    settings = assets.joinpath("app_settings")
+
+    for d in (base, imgui, cache, logs, assets, data, tests):
+        d.mkdir(exist_ok=True)
+
+    return {
+        "base": base,
+        "imgui": imgui,
+        "cache": cache,
+        "logs": logs,
+        "assets": assets,
+        "settings": settings,
+        "data": data,
+        "tests": tests,
+    }
+
+
 def _get_settings_dir() -> Path:
     """Get the settings directory, creating it if needed."""
     settings_dir = Path.home() / ".mbo" / "settings"
