@@ -12,7 +12,7 @@ from tifffile import TiffWriter, imwrite as tiff_imwrite
 import h5py
 
 from . import log
-from .util import load_npy
+from .file_io import load_npy
 from .metadata.io import _build_ome_metadata
 
 from tqdm.auto import tqdm

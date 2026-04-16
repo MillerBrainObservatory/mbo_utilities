@@ -15,7 +15,7 @@ import numpy as np
 import tifffile
 from mbo_utilities import log
 from mbo_utilities.file_io import get_files
-from mbo_utilities.util import load_npy
+from mbo_utilities.file_io import load_npy
 
 # import from sibling modules
 from .params import normalize_resolution, get_param

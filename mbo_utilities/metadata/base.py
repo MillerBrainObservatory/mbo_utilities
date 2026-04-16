@@ -4,85 +4,13 @@ base types and data structures for metadata handling.
 this module contains the core types used across the metadata system:
 - MetadataParameter: standardized parameter definition
 - VoxelSize: named tuple for voxel dimensions
-- RoiMode: enum for multi-ROI handling modes
 - METADATA_PARAMS: central registry of known parameters
 - alias lookup utilities
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import NamedTuple, Any
-
-
-class RoiMode(str, Enum):
-    """
-    Mode for handling multi-ROI (mROI) data from ScanImage.
-
-    ScanImage can acquire multiple ROIs in a single scan. This enum controls
-    how those ROIs are processed during read/write operations.
-
-    Attributes
-    ----------
-    concat_y : str
-        Horizontally concatenate ROIs along the Y axis into a single FOV.
-        This is the default mode - all ROIs are stitched together.
-    separate : str
-        Keep ROIs as separate files/arrays. Each ROI is written to its
-        own file with "_roiN" suffix.
-
-    Examples
-    --------
-    >>> from mbo_utilities.metadata import RoiMode
-    >>> mode = RoiMode.concat_y
-    >>> mode.value
-    'concat_y'
-    >>> RoiMode.from_string("CONCAT_Y")  # case-insensitive
-    <RoiMode.concat_y: 'concat_y'>
-    """
-
-    concat_y = "concat_y"
-    separate = "separate"
-
-    # future modes:
-    # concat_y_blend = "concat_y_blend"  # blend at seams
-    # concat_y_reg = "concat_y_reg"      # register at seams
-
-    @classmethod
-    def from_string(cls, value: str) -> RoiMode:
-        """
-        Case-insensitive lookup of RoiMode from string.
-
-        Parameters
-        ----------
-        value : str
-            String representation of the mode (e.g., "concat_y", "SEPARATE").
-
-        Returns
-        -------
-        RoiMode
-            The matching enum member.
-
-        Raises
-        ------
-        ValueError
-            If no matching mode is found.
-        """
-        value_lower = value.lower().strip()
-        for member in cls:
-            if member.value.lower() == value_lower:
-                return member
-        valid = [m.value for m in cls]
-        raise ValueError(f"Unknown RoiMode: {value!r}. Valid modes: {valid}")
-
-    @property
-    def description(self) -> str:
-        """Human-readable description of the mode."""
-        descriptions = {
-            RoiMode.concat_y: "horizontally concatenate ROIs",
-            RoiMode.separate: "separate ROI files",
-        }
-        return descriptions.get(self, self.value)
 
 
 @dataclass

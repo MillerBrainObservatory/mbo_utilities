@@ -49,22 +49,17 @@ __all__ = [
     # Core I/O
     "imread",
     "imwrite",
-    "is_imgui_installed",
     # Metadata
     "is_raw_scanimage",
-    "is_running_jupyter",
+    "load_npy",
     "load_ops",
     "merge_zarr_zplanes",
-    # Utilities
-    "norm_minmax",
     "normalize_resolution",
     "select_files",
     # File/folder selection (GUI)
     "select_folder",
     "set_last_open_dir",
     "set_last_save_dir",
-    "smooth_data",
-    "subsample_array",
     # Visualization
     "to_video",
     "write_ops",
@@ -84,10 +79,16 @@ def __getattr__(name):
         from .reader import MBO_SUPPORTED_FTYPES
         return MBO_SUPPORTED_FTYPES
 
-    # File utilities (file_io -> dask, tifffile, zarr)
+    if name == "get_mbo_dirs":
+        from .preferences import get_mbo_dirs
+        return get_mbo_dirs
+
+    if name == "files_to_dask":
+        from .arrays import files_to_dask
+        return files_to_dask
+
+    # File utilities (file_io -> tifffile, zarr)
     if name in (
-        "get_mbo_dirs",
-        "files_to_dask",
         "get_files",
         "expand_paths",
         "merge_zarr_zplanes",
@@ -120,16 +121,9 @@ def __getattr__(name):
         from . import preferences
         return getattr(preferences, name)
 
-    # Utilities (util -> potentially torch, pandas)
-    if name in (
-        "norm_minmax",
-        "smooth_data",
-        "is_running_jupyter",
-        "is_imgui_installed",
-        "subsample_array",
-    ):
-        from . import util
-        return getattr(util, name)
+    if name == "load_npy":
+        from .file_io import load_npy
+        return load_npy
 
     # Video export (_writers -> imageio)
     if name == "to_video":

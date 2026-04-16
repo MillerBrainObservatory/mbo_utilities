@@ -20,7 +20,7 @@ from mbo_utilities.arrays import (
     validate_s3d_registration,
 )
 from mbo_utilities.metadata import RoiMode, get_param
-from mbo_utilities.util import load_npy
+from mbo_utilities.file_io import load_npy
 from typing import TYPE_CHECKING
 import contextlib
 

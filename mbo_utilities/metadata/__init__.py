@@ -11,12 +11,12 @@ this package provides:
 from .base import (
     MetadataParameter,
     VoxelSize,
-    RoiMode,
     METADATA_PARAMS,
     ALIAS_MAP,
     get_canonical_name,
     IMAGING_METADATA_KEYS,
 )
+from mbo_utilities.arrays.features._roi import RoiMode
 
 from .params import (
     get_param,
