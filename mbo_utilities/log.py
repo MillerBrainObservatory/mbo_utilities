@@ -1,12 +1,6 @@
 import os
 import logging
 
-try:
-    from icecream import ic
-except ImportError:
-    def ic(*a):
-        return None if not a else (a[0] if len(a) == 1 else a)
-
 _level_override: int | None = None
 
 
@@ -51,16 +45,6 @@ def attach(handler: logging.Handler):
     for name, logger in logging.Logger.manager.loggerDict.items():
         if isinstance(logger, logging.Logger) and name.startswith("mbo."):
             logger.addHandler(handler)
-
-
-def enable(*subs):
-    for s in subs:
-        get(s).disabled = False
-
-
-def disable(*subs):
-    for s in subs:
-        get(s).disabled = True
 
 
 def get_package_loggers():
