@@ -625,7 +625,8 @@ def _draw_data_options_content(self):
     if arrays and hasattr(arrays[0], "metadata"):
         already_registered = arrays[0].metadata.get("apply_shift", False)
 
-    has_z_reg = HAS_SUITE3D and nz > 1 and not already_registered
+    is_raw = getattr(self, "is_mbo_scan", False)
+    has_z_reg = HAS_SUITE3D and nz > 1 and is_raw and not already_registered
 
     has_any_options = has_phase_support or has_z_reg
 
@@ -679,8 +680,8 @@ def _draw_data_options_content(self):
         for i, ofs in enumerate(self.current_offset):
             imgui.text(f"  Array {i + 1}: {ofs:.3f} px")
 
-    # z-registration section (suite3d) - only show if not already registered
-    if nz > 1 and not already_registered:
+    # z-registration section (suite3d) - only for raw scanimage data
+    if nz > 1 and is_raw and not already_registered:
         if has_phase_support:
             imgui.spacing()
             imgui.separator()

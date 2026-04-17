@@ -63,8 +63,8 @@ def _get_array_features(widget: Any) -> dict[str, bool]:
     return {
         # Phase correction: presence of phase_correction attribute
         "phase_correction": hasattr(data, "phase_correction"),
-        # Z-registration: requires suite3d and multi-plane data
-        "z_registration": HAS_SUITE3D and nz > 1,
+        # Z-registration: requires suite3d, multi-plane raw scanimage data
+        "z_registration": HAS_SUITE3D and nz > 1 and getattr(widget, "is_mbo_scan", False),
         # Multi-ROI: data has multiple ROIs
         "multi_roi": getattr(data, "num_rois", 1) > 1,
         # Frame averaging: piezo arrays with multiple frames per slice
