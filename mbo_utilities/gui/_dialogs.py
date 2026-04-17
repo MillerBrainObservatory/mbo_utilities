@@ -188,6 +188,9 @@ def load_new_data(parent: Any, path: str):
         # refresh widgets based on new data capabilities
         parent._refresh_widgets()
 
+        # clear stale metadata overrides from previous file
+        parent._custom_metadata = {}
+
         # Reinitialize viewer based on new data type (new architecture)
         from mbo_utilities.gui.viewers import get_viewer_class, TimeSeriesViewer
         if hasattr(parent, "_viewer") and parent._viewer:
