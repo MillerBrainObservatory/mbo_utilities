@@ -1,7 +1,5 @@
 """
 Array types for mbo_utilities.
-
-Array classes are lazy-loaded on first access to improve startup time.
 """
 
 from __future__ import annotations
@@ -11,7 +9,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-# base module is lightweight, import eagerly
 from mbo_utilities.arrays._base import (
     CHUNKS_3D,
     CHUNKS_4D,
@@ -21,7 +18,6 @@ from mbo_utilities.arrays._base import (
     _build_output_path,
     _imwrite_base,
     _normalize_planes,
-    _safe_get_metadata,
     _sanitize_suffix,
     iter_rois,
     normalize_roi,
@@ -212,7 +208,6 @@ __all__ = [
     "_extract_tiff_plane_number",
     "_imwrite_base",
     "_normalize_planes",
-    "_safe_get_metadata",
     "_sanitize_suffix",
     # Features subpackage
     "features",

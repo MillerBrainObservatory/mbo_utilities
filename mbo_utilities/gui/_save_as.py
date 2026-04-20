@@ -1023,20 +1023,9 @@ def _draw_save_button(parent: Any):
                 if parent._saveas_background:
                     # spawn as detached subprocess via process manager
                     pm = get_process_manager()
-                    # single-file: pass the file path directly so the worker
-                    # loads only that file (not the whole directory).
-                    # multi-file: pass the parent directory — the files are
-                    # part of the same session and imread(dir) loads them all.
-                    if isinstance(parent.fpath, (list, tuple)):
-                        if len(parent.fpath) == 1:
-                            input_path = str(parent.fpath[0])
-                            fname = Path(parent.fpath[0]).name
-                        else:
-                            input_path = str(Path(parent.fpath[0]).parent)
-                            fname = Path(parent.fpath[0]).parent.name
-                    else:
-                        input_path = str(parent.fpath) if parent.fpath else ""
-                        fname = Path(parent.fpath).name if parent.fpath else "data"
+                    src = Path(parent.fpath) if parent.fpath else None
+                    input_path = str(src) if src else ""
+                    fname = (src.name or "data") if src else "data"
                     worker_args = {
                         "input_path": input_path,
                         "output_path": str(parent._saveas_outdir),

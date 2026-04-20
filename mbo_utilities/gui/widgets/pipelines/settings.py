@@ -1707,11 +1707,9 @@ def run_process(self):
 
             pm = get_process_manager()
 
-            # get input path (full list or single path)
-            if isinstance(self.fpath, (list, tuple)):
-                input_path = [str(f) for f in self.fpath]
-            else:
-                input_path = str(self.fpath) if self.fpath else ""
+            # self.fpath is the array's canonical source_path — a single
+            # Path that imread can use to reconstruct the full volume.
+            input_path = str(self.fpath) if self.fpath else ""
 
             # get output path
             s2p_path = getattr(self, "_s2p_outdir", "") or getattr(
@@ -1836,11 +1834,7 @@ def run_process(self):
                 last_savedir = get_last_savedir_path()
                 s2p_path = str(Path(last_savedir) if last_savedir else get_mbo_dirs()["data"])
 
-            # Handle list of paths
-            if isinstance(self.fpath, (list, tuple)):
-                fpath_str = [str(f) for f in self.fpath]
-            else:
-                fpath_str = str(self.fpath) if self.fpath else ""
+            fpath_str = str(self.fpath) if self.fpath else ""
 
             # Check if parallel processing is enabled
             use_parallel = getattr(self, "_parallel_processing", False)

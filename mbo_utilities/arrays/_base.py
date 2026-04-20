@@ -4,6 +4,7 @@ Common helpers and base utilities for array types.
 
 from __future__ import annotations
 
+from os.path import commonpath
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -80,6 +81,34 @@ class Shape5DMixin:
     def nx(self) -> int:
         """spatial width."""
         return self._shape5d()[4]
+
+    @property
+    def source_path(self) -> Path | None:
+        """canonical path `imread()` uses to reconstruct this array.
+
+        default implementation derives it from `self.filenames` (list or
+        single path) or falls back to `self.path`. subclasses whose files
+        span per-plane subdirectories (e.g. volumetric Suite2p) must
+        override — a file path like `.../plane01/data.bin` is not
+        equivalent to its parent directory once passed through imread.
+        """
+        filenames = getattr(self, "filenames", None)
+        if filenames is None:
+            # fallback for arrays that use a different attribute name
+            # (NumpyArray → `.path`, IsoView* → `.base_path`).
+            path = getattr(self, "path", None) or getattr(self, "base_path", None)
+            return Path(path) if path else None
+        if isinstance(filenames, (str, Path)):
+            return Path(filenames)
+        paths = [str(p) for p in filenames]
+        if not paths:
+            return None
+        if len(paths) == 1:
+            return Path(paths[0])
+        try:
+            return Path(commonpath(paths))
+        except ValueError:
+            return Path(paths[0]).parent
 
 
 def _normalize_key(key, ndim):
@@ -223,7 +252,6 @@ def _sanitize_suffix(suffix: str) -> str:
 
     # Strip trailing underscores
     return suffix.rstrip("_")
-
 
 
 def _build_output_path(
@@ -627,16 +655,6 @@ def _axes_or_guess(arr_ndim: int) -> str:
     if arr_ndim == 4:
         return "TZYX"
     return "Unknown"
-
-
-def _safe_get_metadata(path: Path) -> dict:
-    """Safely get metadata from a file path."""
-    try:
-        from mbo_utilities.metadata import get_metadata
-
-        return get_metadata(path)
-    except Exception:
-        return {}
 
 
 class TiffReaderMixin:

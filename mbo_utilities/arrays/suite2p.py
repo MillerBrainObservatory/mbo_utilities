@@ -269,7 +269,14 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         """Dimension labels."""
         return self._dim_labels.value
 
-
+    @property
+    def source_path(self) -> Path:
+        # volume: parent of the plane subdirs (suite2p root).
+        # single plane: the plane's directory (containing ops.npy).
+        # must be a directory — imread treats a bare `.bin` path as
+        # raw BinArray, not Suite2pArray.
+        ops_parent = self._planes[0].ops_path.parent
+        return ops_parent.parent if self._is_volumetric else ops_parent
 
     def _init_single_plane(self, ops_path: Path, use_raw: bool):
         """Initialize as single-plane array."""

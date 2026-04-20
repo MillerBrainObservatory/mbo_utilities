@@ -609,7 +609,7 @@ def _create_image_widget(data_array, widget: bool = True):
 
         gui = PreviewDataWidget(
             iw=iw,
-            fpath=data_array.filenames,
+            fpath=data_array.source_path,
             size=300,
         )
         iw.figure.add_gui(gui)
