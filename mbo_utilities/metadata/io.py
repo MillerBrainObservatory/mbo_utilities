@@ -15,8 +15,7 @@ import numpy as np
 import tifffile
 from mbo_utilities import log
 from mbo_utilities.file_io import get_files
-from mbo_utilities._parsing import _make_json_serializable
-from mbo_utilities.util import load_npy
+from mbo_utilities.file_io import load_npy
 
 # import from sibling modules
 from .params import normalize_resolution, get_param
@@ -347,6 +346,8 @@ def get_metadata_single(file: Path):
                         logger.warning(f"Failed ops.npy fallback for {file}: {e}")
             return {"source": "no_metadata"}
 
+        from mbo_utilities._writers import _make_json_serializable as _serialize
+
         si = meta.get("FrameData", {})
         if not si:
             logger.warning(f"No FrameData found in {file}.")
@@ -437,8 +438,8 @@ def get_metadata_single(file: Path):
             "uniform_sampling": uniform_sampling,
             "num_fly_to_lines": num_fly_to_lines,
             "roi_heights": [px[1] for px in num_pixel_xys],
-            "roi_groups": _make_json_serializable(roi_group),
-            "si": _make_json_serializable(si),
+            "roi_groups": _serialize(roi_group),
+            "si": _serialize(si),
         }
         return clean_scanimage_metadata(metadata)
 
@@ -866,124 +867,6 @@ def default_ops():
         "sig_baseline": 10.0,  # smoothing constant for gaussian filter
         "prctile_baseline": 8.0,  # optional (whether to use a percentile baseline)
         "neucoeff": 0.7,  # neuropil coefficient
-    }
-
-
-def _params_from_metadata_caiman(metadata):
-    """
-    Generate parameters for CNMF from metadata.
-
-    Based on the pixel resolution and frame rate, the parameters are set to reasonable values.
-
-    Parameters
-    ----------
-    metadata : dict
-        Metadata dictionary resulting from `lcp.get_metadata()`.
-
-    Returns
-    -------
-    dict
-        Dictionary of parameters for lbm_mc.
-
-    """
-    params = _default_params_caiman()
-
-    if metadata is None:
-        logger.info("No metadata found. Using default parameters.")
-        return params
-
-    params["main"]["fr"] = metadata["frame_rate"]
-    params["main"]["dxy"] = metadata["pixel_resolution"]
-
-    # typical neuron ~16 microns
-    gSig = round(16 / metadata["pixel_resolution"][0]) / 2
-    params["main"]["gSig"] = (int(gSig), int(gSig))
-
-    gSiz = (4 * gSig + 1, 4 * gSig + 1)
-    params["main"]["gSiz"] = gSiz
-
-    max_shifts = [round(10 / px) for px in metadata["pixel_resolution"]]
-    params["main"]["max_shifts"] = max_shifts
-
-    strides = [round(64 / px) for px in metadata["pixel_resolution"]]
-    params["main"]["strides"] = strides
-
-    # overlap should be ~neuron diameter
-    overlaps = [round(gSig / px) for px in metadata["pixel_resolution"]]
-    if overlaps[0] < gSig:
-        logger.info("Overlaps too small. Increasing to neuron diameter.")
-        overlaps = [int(gSig)] * 2
-    params["main"]["overlaps"] = overlaps
-
-    rf_0 = (strides[0] + overlaps[0]) // 2
-    rf_1 = (strides[1] + overlaps[1]) // 2
-    rf = int(np.mean([rf_0, rf_1]))
-
-    stride = int(np.mean([overlaps[0], overlaps[1]]))
-
-    params["main"]["rf"] = rf
-    params["main"]["stride"] = stride
-
-    return params
-
-
-def _default_params_caiman():
-    """
-    Default parameters for both registration and CNMF.
-    The exception is gSiz being set relative to gSig.
-
-    Returns
-    -------
-    dict
-        Dictionary of default parameter values for registration and segmentation.
-
-    Notes
-    -----
-    This will likely change as CaImAn is updated.
-    """
-    gSig = 6
-    gSiz = (4 * gSig + 1, 4 * gSig + 1)
-    return {
-        "main": {
-            # Motion correction parameters
-            "pw_rigid": True,
-            "max_shifts": [6, 6],
-            "strides": [64, 64],
-            "overlaps": [8, 8],
-            "min_mov": None,
-            "gSig_filt": [0, 0],
-            "max_deviation_rigid": 3,
-            "border_nan": "copy",
-            "splits_els": 14,
-            "upsample_factor_grid": 4,
-            "use_cuda": False,
-            "num_frames_split": 50,
-            "niter_rig": 1,
-            "is3D": False,
-            "splits_rig": 14,
-            "num_splits_to_process_rig": None,
-            # CNMF parameters
-            "fr": 10,
-            "dxy": (1.0, 1.0),
-            "decay_time": 0.4,
-            "p": 2,
-            "nb": 3,
-            "K": 20,
-            "rf": 64,
-            "stride": [8, 8],
-            "gSig": gSig,
-            "gSiz": gSiz,
-            "method_init": "greedy_roi",
-            "rolling_sum": True,
-            "use_cnn": False,
-            "ssub": 1,
-            "tsub": 1,
-            "merge_thr": 0.7,
-            "bas_nonneg": True,
-            "min_SNR": 1.4,
-            "rval_thr": 0.8,
-        },
-        "refit": True,
     }
 
 

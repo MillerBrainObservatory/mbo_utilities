@@ -23,6 +23,36 @@ logger = log.get("preferences")
 MAX_RECENT_FILES = 20
 
 
+def get_mbo_dirs() -> dict:
+    """Ensure ~/.mbo and its subdirectories exist.
+
+    Returns a dict with paths to the root, settings, and cache directories.
+    """
+    base = Path.home().joinpath(".mbo")
+    imgui = base.joinpath("imgui")
+    cache = base.joinpath("cache")
+    logs = base.joinpath("logs")
+    tests = base.joinpath("tests")
+    data = base.joinpath("data")
+
+    assets = imgui.joinpath("assets")
+    settings = assets.joinpath("app_settings")
+
+    for d in (base, imgui, cache, logs, assets, data, tests):
+        d.mkdir(exist_ok=True)
+
+    return {
+        "base": base,
+        "imgui": imgui,
+        "cache": cache,
+        "logs": logs,
+        "assets": assets,
+        "settings": settings,
+        "data": data,
+        "tests": tests,
+    }
+
+
 def _get_settings_dir() -> Path:
     """Get the settings directory, creating it if needed."""
     settings_dir = Path.home() / ".mbo" / "settings"
@@ -122,21 +152,6 @@ def add_recent_file(path: str | Path, file_type: str = "auto") -> None:
     prefs["recent_files"] = recent
     _save_preferences(prefs)
 
-
-def clear_recent_files() -> None:
-    """Clear the recent files list."""
-    prefs = _load_preferences()
-    prefs["recent_files"] = []
-    _save_preferences(prefs)
-
-
-def remove_recent_file(path: str | Path) -> None:
-    """Remove a specific file from the recent files list."""
-    path = str(Path(path).resolve())
-    prefs = _load_preferences()
-    recent = prefs.get("recent_files", [])
-    prefs["recent_files"] = [r for r in recent if r.get("path") != path]
-    _save_preferences(prefs)
 
 
 # keys for different dialog contexts - each dialog type has its own cached path
@@ -371,141 +386,3 @@ def get_default_open_dir() -> Path:
 
     # Fall back to home
     return Path.home()
-
-
-def get_gui_preference(key: str, default: Any = None) -> Any:
-    """
-    Get a GUI preference value.
-
-    Parameters
-    ----------
-    key : str
-        Preference key (e.g., 'widget_enabled', 'split_rois').
-    default : Any, optional
-        Default value if preference is not set.
-
-    Returns
-    -------
-    Any
-        The preference value or default.
-    """
-    prefs = _load_preferences()
-    gui_prefs = prefs.get("gui", {})
-    return gui_prefs.get(key, default)
-
-
-def set_gui_preference(key: str, value: Any) -> None:
-    """
-    Set a GUI preference value.
-
-    Parameters
-    ----------
-    key : str
-        Preference key.
-    value : Any
-        Value to store (must be JSON-serializable).
-    """
-    prefs = _load_preferences()
-    if "gui" not in prefs:
-        prefs["gui"] = {}
-    prefs["gui"][key] = value
-    _save_preferences(prefs)
-
-
-def get_gui_preferences() -> dict:
-    """Get all GUI preferences as a dictionary."""
-    prefs = _load_preferences()
-    return prefs.get("gui", {})
-
-
-def set_gui_preferences(gui_prefs: dict) -> None:
-    """Set multiple GUI preferences at once."""
-    prefs = _load_preferences()
-    if "gui" not in prefs:
-        prefs["gui"] = {}
-    prefs["gui"].update(gui_prefs)
-    _save_preferences(prefs)
-
-
-def get_pipeline_defaults() -> dict:
-    """
-    Get default pipeline settings (Suite2p parameters, etc.).
-
-    Returns
-    -------
-    dict
-        Dictionary of pipeline default settings.
-    """
-    prefs = _load_preferences()
-    return prefs.get("pipeline_defaults", {})
-
-
-def set_pipeline_defaults(defaults: dict) -> None:
-    """
-    Set default pipeline settings.
-
-    Parameters
-    ----------
-    defaults : dict
-        Dictionary of pipeline settings to save as defaults.
-    """
-    prefs = _load_preferences()
-    if "pipeline_defaults" not in prefs:
-        prefs["pipeline_defaults"] = {}
-    prefs["pipeline_defaults"].update(defaults)
-    _save_preferences(prefs)
-
-
-def get_pipeline_default(key: str, default: Any = None) -> Any:
-    """Get a single pipeline default value."""
-    defaults = get_pipeline_defaults()
-    return defaults.get(key, default)
-
-
-def set_pipeline_default(key: str, value: Any) -> None:
-    """Set a single pipeline default value."""
-    prefs = _load_preferences()
-    if "pipeline_defaults" not in prefs:
-        prefs["pipeline_defaults"] = {}
-    prefs["pipeline_defaults"][key] = value
-    _save_preferences(prefs)
-
-
-def reset_preferences() -> None:
-    """Reset all preferences to defaults (clears the preferences file)."""
-    path = _get_preferences_path()
-    if path.exists():
-        path.unlink()
-    logger.info("Preferences reset to defaults")
-
-
-def export_preferences(export_path: str | Path) -> None:
-    """Export preferences to a file for backup or sharing."""
-    prefs = _load_preferences()
-    Path(export_path).write_text(json.dumps(prefs, indent=2, default=str))
-
-
-def import_preferences(import_path: str | Path, merge: bool = True) -> None:
-    """
-    Import preferences from a file.
-
-    Parameters
-    ----------
-    import_path : str or Path
-        Path to preferences JSON file.
-    merge : bool, optional
-        If True, merge with existing preferences. If False, replace entirely.
-        Default is True.
-    """
-    import_prefs = json.loads(Path(import_path).read_text())
-    if merge:
-        prefs = _load_preferences()
-        # Deep merge for nested dicts
-        for key, value in import_prefs.items():
-            if isinstance(value, dict) and isinstance(prefs.get(key), dict):
-                prefs[key].update(value)
-            else:
-                prefs[key] = value
-        _save_preferences(prefs)
-    else:
-        _save_preferences(import_prefs)

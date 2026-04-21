@@ -11,18 +11,10 @@ Architecture
 The GUI is organized into these components:
 
 - **Viewers**: Standalone application windows (TimeSeriesViewer, etc.)
-- **Panels**: Reusable UI sections (DebugPanel, MetadataPanel, etc.)
 - **Widgets**: Capability-based UI components (widgets/)
-
-See docs/gui_refactor_plan.md for the full architecture documentation.
 """
 
 __all__ = [
-    # Panels
-    "BasePanel",
-    "DebugPanel",
-    "MetadataPanel",
-    "ProcessPanel",
     # Viewer architecture (auto-selected based on data type)
     "BaseViewer",
     "TimeSeriesViewer",
@@ -73,20 +65,5 @@ def __getattr__(name):
     if name == "TimeSeriesViewer":
         from .viewers import TimeSeriesViewer
         return TimeSeriesViewer
-
-    # === Panels ===
-
-    if name == "BasePanel":
-        from .panels import BasePanel
-        return BasePanel
-    if name == "DebugPanel":
-        from .panels import DebugPanel
-        return DebugPanel
-    if name == "ProcessPanel":
-        from .panels import ProcessPanel
-        return ProcessPanel
-    if name == "MetadataPanel":
-        from .panels import MetadataPanel
-        return MetadataPanel
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -13,13 +13,11 @@ from imgui_bundle import imgui, hello_imgui, implot, ImVec4, ImVec2
 __all__ = [
     "begin_popup_size",
     "checkbox_with_tooltip",
-    "compact_header",
     "draw_checkbox_grid",
     "fmt_multivalue",
     "fmt_value",
     "set_tooltip",
     "settings_row_with_popup",
-    "style_seaborn",
     "style_seaborn_dark",
 ]
 
@@ -49,54 +47,6 @@ def begin_popup_size():
 # =============================================================================
 # ImPlot styling
 # =============================================================================
-
-
-def style_seaborn():
-    """Apply seaborn light theme to ImPlot."""
-    style = implot.get_style()
-    style.set_color_(implot.Col_.line.value, implot.AUTO_COL)
-    style.set_color_(implot.Col_.fill.value, implot.AUTO_COL)
-    style.set_color_(implot.Col_.marker_outline.value, implot.AUTO_COL)
-    style.set_color_(implot.Col_.marker_fill.value, implot.AUTO_COL)
-
-    style.set_color_(implot.Col_.error_bar.value, ImVec4(0.00, 0.00, 0.00, 1.00))
-    style.set_color_(implot.Col_.frame_bg.value, ImVec4(1.00, 1.00, 1.00, 1.00))
-    style.set_color_(implot.Col_.plot_bg.value, ImVec4(0.92, 0.92, 0.95, 1.00))
-    style.set_color_(implot.Col_.plot_border.value, ImVec4(0.00, 0.00, 0.00, 0.00))
-    style.set_color_(implot.Col_.legend_bg.value, ImVec4(0.92, 0.92, 0.95, 1.00))
-    style.set_color_(implot.Col_.legend_border.value, ImVec4(0.80, 0.81, 0.85, 1.00))
-    style.set_color_(implot.Col_.legend_text.value, ImVec4(0.00, 0.00, 0.00, 1.00))
-    style.set_color_(implot.Col_.title_text.value, ImVec4(0.00, 0.00, 0.00, 1.00))
-    style.set_color_(implot.Col_.inlay_text.value, ImVec4(0.00, 0.00, 0.00, 1.00))
-    style.set_color_(implot.Col_.axis_text.value, ImVec4(0.00, 0.00, 0.00, 1.00))
-    style.set_color_(implot.Col_.axis_grid.value, ImVec4(1.00, 1.00, 1.00, 1.00))
-    style.set_color_(implot.Col_.axis_bg_hovered.value, ImVec4(0.92, 0.92, 0.95, 1.00))
-    style.set_color_(implot.Col_.axis_bg_active.value, ImVec4(0.92, 0.92, 0.95, 0.75))
-    style.set_color_(implot.Col_.selection.value, ImVec4(1.00, 0.65, 0.00, 1.00))
-    style.set_color_(implot.Col_.crosshairs.value, ImVec4(0.23, 0.10, 0.64, 0.50))
-
-    style.line_weight = 1.5
-    style.marker = implot.Marker_.none.value
-    style.marker_size = 4
-    style.marker_weight = 1
-    style.fill_alpha = 1.0
-    style.error_bar_size = 5
-    style.error_bar_weight = 1.5
-    style.digital_bit_height = 8
-    style.digital_bit_gap = 4
-    style.plot_border_size = 0
-    style.minor_alpha = 1.0
-    style.major_tick_len = ImVec2(0, 0)
-    style.minor_tick_len = ImVec2(0, 0)
-    style.major_tick_size = ImVec2(0, 0)
-    style.minor_tick_size = ImVec2(0, 0)
-    style.major_grid_size = ImVec2(1.2, 1.2)
-    style.minor_grid_size = ImVec2(1.2, 1.2)
-    style.plot_padding = ImVec2(12, 12)
-    style.label_padding = ImVec2(5, 5)
-    style.legend_padding = ImVec2(5, 5)
-    style.mouse_pos_padding = ImVec2(5, 5)
-    style.plot_min_size = ImVec2(300, 225)
 
 
 def style_seaborn_dark():
@@ -243,24 +193,6 @@ def draw_checkbox_grid(
                 on_change(i, new_checked)
 
         imgui.end_table()
-
-
-def compact_header(label: str, default_open: bool = False) -> bool:
-    """
-    Draw a compact collapsing header with reduced padding.
-
-    Returns True if the header is open, False if collapsed.
-    """
-    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 2))
-    imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 2))
-
-    flags = imgui.TreeNodeFlags_.default_open if default_open else 0
-    is_open = imgui.collapsing_header(label, flags)
-    if isinstance(is_open, tuple):
-        is_open = is_open[0]
-
-    imgui.pop_style_var(2)
-    return is_open
 
 
 # Track popup states globally by popup_id

@@ -63,8 +63,8 @@ def _get_array_features(widget: Any) -> dict[str, bool]:
     return {
         # Phase correction: presence of phase_correction attribute
         "phase_correction": hasattr(data, "phase_correction"),
-        # Z-registration: requires suite3d and multi-plane data
-        "z_registration": HAS_SUITE3D and nz > 1,
+        # Z-registration: requires suite3d, multi-plane raw scanimage data
+        "z_registration": HAS_SUITE3D and nz > 1 and getattr(widget, "is_mbo_scan", False),
         # Multi-ROI: data has multiple ROIs
         "multi_roi": getattr(data, "num_rois", 1) > 1,
         # Frame averaging: piezo arrays with multiple frames per slice
@@ -1023,20 +1023,9 @@ def _draw_save_button(parent: Any):
                 if parent._saveas_background:
                     # spawn as detached subprocess via process manager
                     pm = get_process_manager()
-                    # single-file: pass the file path directly so the worker
-                    # loads only that file (not the whole directory).
-                    # multi-file: pass the parent directory — the files are
-                    # part of the same session and imread(dir) loads them all.
-                    if isinstance(parent.fpath, (list, tuple)):
-                        if len(parent.fpath) == 1:
-                            input_path = str(parent.fpath[0])
-                            fname = Path(parent.fpath[0]).name
-                        else:
-                            input_path = str(Path(parent.fpath[0]).parent)
-                            fname = Path(parent.fpath[0]).parent.name
-                    else:
-                        input_path = str(parent.fpath) if parent.fpath else ""
-                        fname = Path(parent.fpath).name if parent.fpath else "data"
+                    src = Path(parent.fpath) if parent.fpath else None
+                    input_path = str(src) if src else ""
+                    fname = (src.name or "data") if src else "data"
                     worker_args = {
                         "input_path": input_path,
                         "output_path": str(parent._saveas_outdir),

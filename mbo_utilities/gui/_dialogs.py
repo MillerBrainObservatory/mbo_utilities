@@ -188,6 +188,9 @@ def load_new_data(parent: Any, path: str):
         # refresh widgets based on new data capabilities
         parent._refresh_widgets()
 
+        # clear stale metadata overrides from previous file
+        parent._custom_metadata = {}
+
         # Reinitialize viewer based on new data type (new architecture)
         from mbo_utilities.gui.viewers import get_viewer_class, TimeSeriesViewer
         if hasattr(parent, "_viewer") and parent._viewer:
@@ -196,9 +199,6 @@ def load_new_data(parent: Any, path: str):
         parent._viewer = viewer_cls(parent.image_widget, parent.fpath, parent=parent)
         parent._viewer.on_data_loaded()
         parent.logger.info(f"Viewer switched to: {parent._viewer.name}")
-
-        # Keep _main_widget reference for backwards compatibility
-        parent._main_widget = parent._viewer._main_widget
 
         # Automatically recompute z-stats for new data (only for time series)
         if isinstance(parent._viewer, TimeSeriesViewer):

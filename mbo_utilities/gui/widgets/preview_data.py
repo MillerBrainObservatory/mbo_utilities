@@ -42,7 +42,7 @@ from scipy.ndimage import gaussian_filter
 
 from imgui_bundle import imgui, hello_imgui, imgui_ctx, implot
 
-from mbo_utilities.file_io import get_mbo_dirs
+from mbo_utilities.preferences import get_mbo_dirs
 from mbo_utilities.reader import MBO_SUPPORTED_FTYPES
 from mbo_utilities.arrays.features import PhaseCorrectionFeature
 from mbo_utilities.preferences import get_last_dir
@@ -440,7 +440,6 @@ class PreviewDataWidget(EdgeWindow):
         viewer_cls = get_viewer_class(self.image_widget.data[0])
         self._viewer = viewer_cls(self.image_widget, self.fpath, parent=self)
         self.logger.info(f"Viewer: {self._viewer.name}")
-        self._main_widget = self._viewer._main_widget
         self.set_context_info()
         # ensure window functions are set so slider dims are properly reduced
         self._update_window_funcs()

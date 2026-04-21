@@ -222,11 +222,6 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
             return None
 
     @property
-    def _is_ome(self) -> bool:
-        """check if this is an OME-Zarr store."""
-        return self._groups and self._groups[0] is not None
-
-    @property
     def metadata(self) -> dict:
         """Return metadata as dict. Always returns dict, never None."""
         if not self._metadata:
@@ -345,7 +340,7 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
 
     @property
     def dtype(self):
-        from mbo_utilities.util import get_dtype
+        from mbo_utilities.arrays._base import get_dtype
         return self._target_dtype if self._target_dtype is not None else get_dtype(self.zs[0].dtype)
 
     def astype(self, dtype, copy=True):

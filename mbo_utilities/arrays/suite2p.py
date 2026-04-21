@@ -21,7 +21,7 @@ from mbo_utilities.arrays.features import DimLabels
 
 from mbo_utilities.metadata import get_param
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
-from mbo_utilities.util import load_npy
+from mbo_utilities.file_io import load_npy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -269,7 +269,14 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         """Dimension labels."""
         return self._dim_labels.value
 
-
+    @property
+    def source_path(self) -> Path:
+        # volume: parent of the plane subdirs (suite2p root).
+        # single plane: the plane's directory (containing ops.npy).
+        # must be a directory — imread treats a bare `.bin` path as
+        # raw BinArray, not Suite2pArray.
+        ops_parent = self._planes[0].ops_path.parent
+        return ops_parent.parent if self._is_volumetric else ops_parent
 
     def _init_single_plane(self, ops_path: Path, use_raw: bool):
         """Initialize as single-plane array."""
@@ -372,7 +379,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
 
     @property
     def dtype(self):
-        from mbo_utilities.util import get_dtype
+        from mbo_utilities.arrays._base import get_dtype
         return self._target_dtype if hasattr(self, "_target_dtype") and self._target_dtype else get_dtype(self._dtype)
 
     @property

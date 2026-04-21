@@ -12,13 +12,69 @@ from tifffile import TiffWriter, imwrite as tiff_imwrite
 import h5py
 
 from . import log
-from ._parsing import _make_json_serializable, _convert_paths_to_strings
-from .util import load_npy
+from .file_io import load_npy
 from .metadata.io import _build_ome_metadata
 
 from tqdm.auto import tqdm
 
 logger = log.get("writers")
+
+
+# metadata serialization helpers (moved from _parsing.py)
+
+def _is_disabled_si_module(value) -> bool:
+    """Check if a scanimage module dict has enable=false."""
+    if not isinstance(value, dict):
+        return False
+    enable_val = value.get("enable")
+    if enable_val is False:
+        return True
+    return bool(isinstance(enable_val, str) and enable_val.lower() in ("false", "0"))
+
+
+def _filter_disabled_modules(metadata: dict, recursive: bool = True) -> dict:
+    """Filter out disabled scanimage modules (hXxx with enable=false) from metadata."""
+    if not isinstance(metadata, dict):
+        return metadata
+    result = {}
+    for k, v in metadata.items():
+        if k.startswith("h") and _is_disabled_si_module(v):
+            continue
+        if recursive and isinstance(v, dict):
+            v = _filter_disabled_modules(v, recursive=True)
+        result[k] = v
+    return result
+
+
+def _make_json_serializable(obj, filter_disabled: bool = True):
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, dict):
+        if filter_disabled:
+            obj = _filter_disabled_modules(obj, recursive=True)
+        return {k: _make_json_serializable(v, filter_disabled=False) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(v, filter_disabled=False) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.integer, np.floating, np.bool_)):
+        return obj.item()
+    return obj
+
+
+def _convert_paths_to_strings(obj, filter_disabled: bool = True):
+    """Recursively convert pathlib.Path objects to strings in a nested structure."""
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, dict):
+        if filter_disabled:
+            obj = _filter_disabled_modules(obj, recursive=True)
+        return {k: _convert_paths_to_strings(v, filter_disabled=False) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_convert_paths_to_strings(v, filter_disabled=False) for v in obj)
+    if isinstance(obj, np.ndarray):
+        return obj
+    return obj
 
 warnings.filterwarnings("ignore")
 

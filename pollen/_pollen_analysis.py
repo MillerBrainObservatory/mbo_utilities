@@ -42,9 +42,6 @@ def _upsample_traces(Iz, DZ):
     return Iz_fine, DZ_eff, nz_fine
 
 
-def line_profile(img: np.ndarray):
-    pass
-
 
 
 def get_pollen_h5_path(filepath):

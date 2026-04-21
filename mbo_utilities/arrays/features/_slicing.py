@@ -18,6 +18,32 @@ import numpy as np
 
 from mbo_utilities.arrays.features._dim_tags import DIM_ALIASES
 
+
+def listify_index(index, dim_size):
+    """Convert an index (int, slice, list) to a list of positive integers."""
+    if np.issubdtype(type(index), np.signedinteger):
+        return [index] if index >= 0 else [dim_size + index]
+    if isinstance(index, (list, tuple, np.ndarray)):
+        return [x if x >= 0 else (dim_size + x) for x in index]
+    if isinstance(index, slice):
+        start, stop, step = index.indices(dim_size)
+        return list(range(start, stop, step))
+    raise TypeError(f"index {index} is not integer, slice or array/list/tuple of integers")
+
+
+def index_length(index, dim_size):
+    """Compute length of index without creating full list."""
+    if np.issubdtype(type(index), np.signedinteger):
+        return 1
+    if isinstance(index, (list, tuple, np.ndarray)):
+        return len(index)
+    if isinstance(index, slice):
+        start, stop, step = index.indices(dim_size)
+        if step > 0:
+            return max(0, (stop - start + step - 1) // step)
+        return max(0, (start - stop - step - 1) // (-step))
+    raise TypeError(f"index {index} is not integer, slice or array")
+
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from typing import Any

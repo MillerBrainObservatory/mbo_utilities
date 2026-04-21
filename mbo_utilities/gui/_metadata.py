@@ -116,12 +116,8 @@ def _get_key_color(key: str, imaging_keys: set, acquisition_keys: set, alias_map
 
 def _is_disabled_si_module(value) -> bool:
     """Check if a scanimage module dict has enable=false."""
-    if not isinstance(value, Mapping):
-        return False
-    enable_val = value.get("enable")
-    if enable_val is False:
-        return True
-    return bool(isinstance(enable_val, str) and enable_val.lower() in ("false", "0"))
+    from mbo_utilities._writers import _is_disabled_si_module as _check
+    return _check(value)
 
 
 def _render_item(name, val, prefix="", depth=0, filter_text="", name_color=None, is_disabled=False):

@@ -4,6 +4,7 @@ Common helpers and base utilities for array types.
 
 from __future__ import annotations
 
+from os.path import commonpath
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,16 @@ logger = log.get("arrays._base")
 
 CHUNKS_4D = {0: 1, 1: "auto", 2: -1, 3: -1}
 CHUNKS_3D = {0: 1, 1: -1, 2: -1}
+
+
+def get_dtype(dtype):
+    """Ensure input is a valid numpy.dtype object."""
+    if isinstance(dtype, np.dtype):
+        return dtype
+    try:
+        return np.dtype(dtype)
+    except TypeError:
+        return np.dtype(str(dtype))
 
 # canonical 5D dimension order (OME-NGFF 0.5)
 DIMS = ("T", "C", "Z", "Y", "X")
@@ -70,6 +81,34 @@ class Shape5DMixin:
     def nx(self) -> int:
         """spatial width."""
         return self._shape5d()[4]
+
+    @property
+    def source_path(self) -> Path | None:
+        """canonical path `imread()` uses to reconstruct this array.
+
+        default implementation derives it from `self.filenames` (list or
+        single path) or falls back to `self.path`. subclasses whose files
+        span per-plane subdirectories (e.g. volumetric Suite2p) must
+        override — a file path like `.../plane01/data.bin` is not
+        equivalent to its parent directory once passed through imread.
+        """
+        filenames = getattr(self, "filenames", None)
+        if filenames is None:
+            # fallback for arrays that use a different attribute name
+            # (NumpyArray → `.path`, IsoView* → `.base_path`).
+            path = getattr(self, "path", None) or getattr(self, "base_path", None)
+            return Path(path) if path else None
+        if isinstance(filenames, (str, Path)):
+            return Path(filenames)
+        paths = [str(p) for p in filenames]
+        if not paths:
+            return None
+        if len(paths) == 1:
+            return Path(paths[0])
+        try:
+            return Path(commonpath(paths))
+        except ValueError:
+            return Path(paths[0]).parent
 
 
 def _normalize_key(key, ndim):
@@ -213,7 +252,6 @@ def _sanitize_suffix(suffix: str) -> str:
 
     # Strip trailing underscores
     return suffix.rstrip("_")
-
 
 
 def _build_output_path(
@@ -565,18 +603,35 @@ def _imwrite_base(
 
     for c_idx in channels_0idx:
         for plane_idx in planes_0idx:
-            # use explicit output_name if provided, otherwise generate from tags
-            if output_name:
-                filename = output_name
-            else:
-                from mbo_utilities.arrays.features import OutputFilename, TAG_REGISTRY, DimensionTag
+            from mbo_utilities.arrays.features import OutputFilename, TAG_REGISTRY, DimensionTag
 
-                # build filename with dimension tags
-                z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
-                t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes, frames_list)
+            # build per-plane Z + T tags once — used for both the
+            # Suite2p-layout plane dir name (.bin) and the generic
+            # `tp...zplaneNN_stack.ext` filename (.npy etc.).
+            z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
+            t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes, frames_list)
+
+            if output_name:
+                # caller supplied an explicit filename (e.g. LSP writes
+                # "data_raw.bin" into a plane dir it already chose).
+                target = outpath / output_name
+            elif ext_clean == "bin":
+                # .bin output is only meaningful as a Suite2p input/output:
+                # per-plane subdir named like `zplane01_tp00001-01574` (same
+                # DimensionTag primitives every other writer uses, in
+                # `zplane_tp` order to match lbm_suite2p_python's layout).
+                # inside: `data_raw.bin` (+ optional `data_chan2.bin` for
+                # channel 2) and a matching `ops.npy` written by
+                # `write_ops`. no tp prefix on the filenames themselves —
+                # suite2p reads `data.bin` / `data_raw.bin` by exact name.
+                plane_dir = outpath / f"{z_tag.to_string()}_{t_tag.to_string()}"
+                plane_dir.mkdir(parents=True, exist_ok=True)
+                bin_name = "data_chan2.bin" if c_idx > 0 else "data_raw.bin"
+                target = plane_dir / bin_name
+            else:
                 tags = [t_tag, z_tag] if nframes > 1 else [z_tag]
                 filename = OutputFilename(tags, suffix="stack").build(f".{ext_clean}")
-            target = outpath / filename
+                target = outpath / filename
 
             if target.exists() and not overwrite:
                 logger.warning(f"File {target} already exists. Skipping write.")
@@ -617,16 +672,6 @@ def _axes_or_guess(arr_ndim: int) -> str:
     if arr_ndim == 4:
         return "TZYX"
     return "Unknown"
-
-
-def _safe_get_metadata(path: Path) -> dict:
-    """Safely get metadata from a file path."""
-    try:
-        from mbo_utilities.metadata import get_metadata
-
-        return get_metadata(path)
-    except Exception:
-        return {}
 
 
 class TiffReaderMixin:

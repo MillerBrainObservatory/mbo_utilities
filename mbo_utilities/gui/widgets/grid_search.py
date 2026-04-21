@@ -8,7 +8,7 @@ from pathlib import Path
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from mbo_utilities.preferences import get_last_dir, set_last_dir
-from mbo_utilities.util import load_npy
+from mbo_utilities.file_io import load_npy
 import contextlib
 
 

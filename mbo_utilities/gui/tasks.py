@@ -432,6 +432,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     # repeated "ops.npy fs=10 even though my source is 14Hz" reports.
     from mbo_utilities.metadata import OutputMetadata, get_param
 
+    _src_arr = None
     try:
         _src_arr = imread(input_path)
         src_meta = dict(getattr(_src_arr, "metadata", {}) or {})
@@ -582,23 +583,35 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             validate_s3d_registration,
         )
 
-        try:
-            _src_arr_for_s3d = imread(
-                input_path[0] if isinstance(input_path, list) else input_path
-            )
-            num_planes_s3d = int(_src_arr_for_s3d.shape5d[2])
-        except Exception as e:
-            logger.warning(
-                f"task_suite2p: cannot probe num_planes for suite3d: {e}. "
-                f"Skipping axial registration."
-            )
+        # reuse the array we already loaded at the top of the task
+        # instead of re-opening; saves a second imread pass and keeps
+        # input_path interpretation consistent.
+        _src_arr_for_s3d = _src_arr
+        if _src_arr_for_s3d is None:
+            try:
+                _src_arr_for_s3d = imread(input_path)
+            except Exception as e:
+                logger.warning(
+                    f"task_suite2p: cannot open source for suite3d: {e}. "
+                    f"Skipping axial registration."
+                )
+                _src_arr_for_s3d = None
+
+        if _src_arr_for_s3d is not None:
+            try:
+                num_planes_s3d = int(_src_arr_for_s3d.shape5d[2])
+            except Exception as e:
+                logger.warning(
+                    f"task_suite2p: cannot probe num_planes for suite3d: {e}. "
+                    f"Skipping axial registration."
+                )
+                num_planes_s3d = None
+        else:
             num_planes_s3d = None
 
         if num_planes_s3d is not None and num_planes_s3d > 1:
             # candidate locations for an existing s3d job, in priority order
-            input_root = Path(
-                input_path[0] if isinstance(input_path, list) else input_path
-            )
+            input_root = Path(input_path)
             input_parent = input_root.parent if input_root.is_file() else input_root
             candidates = [
                 output_dir / "s3d-preprocessed",

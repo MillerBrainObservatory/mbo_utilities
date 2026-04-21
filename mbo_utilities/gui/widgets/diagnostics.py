@@ -93,7 +93,7 @@ class DiagnosticsWidget:
 
     def load_results(self, plane_dir: Path):
         """Load suite2p results from a plane directory."""
-        from mbo_utilities.util import load_npy
+        from mbo_utilities.file_io import load_npy
 
         plane_dir = Path(plane_dir)
 
@@ -284,7 +284,7 @@ class DiagnosticsWidget:
         if not hasattr(self, "_save_path"):
             return
 
-        from mbo_utilities.util import load_npy
+        from mbo_utilities.file_io import load_npy
 
         iscell_path = self._save_path / "iscell.npy"
         if not iscell_path.exists():

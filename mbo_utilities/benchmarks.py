@@ -25,9 +25,39 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
 from mbo_utilities import log
-from mbo_utilities.util import TimingStats, time_func as _time_func
 
 logger = log.get("benchmarks")
+
+
+def _time_func(func, *args, **kwargs):
+    """Time a function call, return (result, elapsed_ms)."""
+    t0 = time.perf_counter()
+    result = func(*args, **kwargs)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    return result, elapsed_ms
+
+
+@dataclass
+class TimingStats:
+    """Statistics for a set of timing measurements."""
+
+    times_ms: list[float] = field(default_factory=list)
+    mean_ms: float = 0.0
+    std_ms: float = 0.0
+    min_ms: float = 0.0
+    max_ms: float = 0.0
+
+    @classmethod
+    def from_times(cls, times_ms: list[float]) -> TimingStats:
+        """Compute stats from raw timing list."""
+        arr = np.array(times_ms)
+        return cls(
+            times_ms=times_ms,
+            mean_ms=float(np.mean(arr)),
+            std_ms=float(np.std(arr)),
+            min_ms=float(np.min(arr)),
+            max_ms=float(np.max(arr)),
+        )
 
 
 @dataclass

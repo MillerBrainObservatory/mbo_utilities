@@ -32,8 +32,8 @@ def _set_qt_icon():
     try:
         from PyQt6.QtWidgets import QApplication
         from PyQt6.QtGui import QIcon
-        from mbo_utilities.file_io import get_package_assets_path
-        from mbo_utilities import get_mbo_dirs
+        from mbo_utilities.gui._setup import get_package_assets_path
+        from mbo_utilities.preferences import get_mbo_dirs
 
         app = QApplication.instance()
         if app is None:
@@ -609,7 +609,7 @@ def _create_image_widget(data_array, widget: bool = True):
 
         gui = PreviewDataWidget(
             iw=iw,
-            fpath=data_array.filenames,
+            fpath=data_array.source_path,
             size=300,
         )
         iw.figure.add_gui(gui)
@@ -1038,30 +1038,6 @@ def _launch_napari(data_in, roi=None):
     except Exception as e:
         logger.error(f"Error launching napari: {e}")
 
-
-
-def _launch_cellpose(data_in):
-    """Launch Cellpose GUI via subprocess."""
-    import subprocess
-    import sys
-
-    cmd = [sys.executable, "-m", "cellpose"]
-
-    path_str = str(data_in)
-    if path_str.endswith((".tif", ".tiff", ".png", ".jpg")):
-        cmd.extend(["--image_path", path_str])
-    elif path_str.endswith(".zarr"):
-        pass
-
-    subprocess.run(cmd, check=False)
-
-
-def _launch_suite2p():
-    import subprocess
-    import sys
-    # Suite2p main GUI
-    cmd = [sys.executable, "-m", "suite2p"]
-    subprocess.run(cmd, check=False)
 
 
 def run_gui(

@@ -11,7 +11,7 @@ from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_i
 from mbo_utilities.gui._imgui_helpers import set_tooltip, settings_row_with_popup, _popup_states
 from mbo_utilities.gui._selection_ui import draw_selection_table
 from mbo_utilities.preferences import get_last_dir, set_last_dir
-from mbo_utilities._parsing import _convert_paths_to_strings
+from mbo_utilities._writers import _convert_paths_to_strings
 
 # lazy availability check - avoid heavy import at module load
 _HAS_LSP: bool | None = None
@@ -625,7 +625,8 @@ def _draw_data_options_content(self):
     if arrays and hasattr(arrays[0], "metadata"):
         already_registered = arrays[0].metadata.get("apply_shift", False)
 
-    has_z_reg = HAS_SUITE3D and nz > 1 and not already_registered
+    is_raw = getattr(self, "is_mbo_scan", False)
+    has_z_reg = HAS_SUITE3D and nz > 1 and is_raw and not already_registered
 
     has_any_options = has_phase_support or has_z_reg
 
@@ -679,8 +680,8 @@ def _draw_data_options_content(self):
         for i, ofs in enumerate(self.current_offset):
             imgui.text(f"  Array {i + 1}: {ofs:.3f} px")
 
-    # z-registration section (suite3d) - only show if not already registered
-    if nz > 1 and not already_registered:
+    # z-registration section (suite3d) - only for raw scanimage data
+    if nz > 1 and is_raw and not already_registered:
         if has_phase_support:
             imgui.spacing()
             imgui.separator()
@@ -1706,11 +1707,9 @@ def run_process(self):
 
             pm = get_process_manager()
 
-            # get input path (full list or single path)
-            if isinstance(self.fpath, (list, tuple)):
-                input_path = [str(f) for f in self.fpath]
-            else:
-                input_path = str(self.fpath) if self.fpath else ""
+            # self.fpath is the array's canonical source_path — a single
+            # Path that imread can use to reconstruct the full volume.
+            input_path = str(self.fpath) if self.fpath else ""
 
             # get output path
             s2p_path = getattr(self, "_s2p_outdir", "") or getattr(
@@ -1830,15 +1829,12 @@ def run_process(self):
             use_fft = getattr(self, "_s2p_use_fft", False)
 
             if not s2p_path:
-                from mbo_utilities.file_io import get_mbo_dirs, get_last_savedir_path
+                from mbo_utilities.preferences import get_mbo_dirs
+                from mbo_utilities.file_io import get_last_savedir_path
                 last_savedir = get_last_savedir_path()
                 s2p_path = str(Path(last_savedir) if last_savedir else get_mbo_dirs()["data"])
 
-            # Handle list of paths
-            if isinstance(self.fpath, (list, tuple)):
-                fpath_str = [str(f) for f in self.fpath]
-            else:
-                fpath_str = str(self.fpath) if self.fpath else ""
+            fpath_str = str(self.fpath) if self.fpath else ""
 
             # Check if parallel processing is enabled
             use_parallel = getattr(self, "_parallel_processing", False)
