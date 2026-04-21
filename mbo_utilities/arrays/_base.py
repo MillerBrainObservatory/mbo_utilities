@@ -603,18 +603,35 @@ def _imwrite_base(
 
     for c_idx in channels_0idx:
         for plane_idx in planes_0idx:
-            # use explicit output_name if provided, otherwise generate from tags
-            if output_name:
-                filename = output_name
-            else:
-                from mbo_utilities.arrays.features import OutputFilename, TAG_REGISTRY, DimensionTag
+            from mbo_utilities.arrays.features import OutputFilename, TAG_REGISTRY, DimensionTag
 
-                # build filename with dimension tags
-                z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
-                t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes, frames_list)
+            # build per-plane Z + T tags once — used for both the
+            # Suite2p-layout plane dir name (.bin) and the generic
+            # `tp...zplaneNN_stack.ext` filename (.npy etc.).
+            z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
+            t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes, frames_list)
+
+            if output_name:
+                # caller supplied an explicit filename (e.g. LSP writes
+                # "data_raw.bin" into a plane dir it already chose).
+                target = outpath / output_name
+            elif ext_clean == "bin":
+                # .bin output is only meaningful as a Suite2p input/output:
+                # per-plane subdir named like `zplane01_tp00001-01574` (same
+                # DimensionTag primitives every other writer uses, in
+                # `zplane_tp` order to match lbm_suite2p_python's layout).
+                # inside: `data_raw.bin` (+ optional `data_chan2.bin` for
+                # channel 2) and a matching `ops.npy` written by
+                # `write_ops`. no tp prefix on the filenames themselves —
+                # suite2p reads `data.bin` / `data_raw.bin` by exact name.
+                plane_dir = outpath / f"{z_tag.to_string()}_{t_tag.to_string()}"
+                plane_dir.mkdir(parents=True, exist_ok=True)
+                bin_name = "data_chan2.bin" if c_idx > 0 else "data_raw.bin"
+                target = plane_dir / bin_name
+            else:
                 tags = [t_tag, z_tag] if nframes > 1 else [z_tag]
                 filename = OutputFilename(tags, suffix="stack").build(f".{ext_clean}")
-            target = outpath / filename
+                target = outpath / filename
 
             if target.exists() and not overwrite:
                 logger.warning(f"File {target} already exists. Skipping write.")

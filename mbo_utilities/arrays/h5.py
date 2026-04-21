@@ -73,8 +73,11 @@ class H5Array(ReductionMixin, Shape5DMixin):
     """
 
     def __init__(self, filenames: Path | str, dataset: str | None = None):
-        self.filenames = Path(filenames)
-        self._f = h5py.File(self.filenames, "r")
+        # stored as a list for consistency with every other array class;
+        # consumers (incl. lbm_suite2p_python.run_plane) assume filenames[0].
+        self.filenames = [Path(filenames)]
+        path = self.filenames[0]
+        self._f = h5py.File(path, "r")
 
         # Auto-detect dataset if not specified
         if dataset is None:
@@ -84,14 +87,14 @@ class H5Array(ReductionMixin, Shape5DMixin):
                 dataset = "data"
             elif "scan_corrections" in self._f:
                 dataset = "scan_corrections"
-                logger.info(f"Detected pollen calibration file: {self.filenames.name}")
+                logger.info(f"Detected pollen calibration file: {path.name}")
             else:
                 available = list(self._f.keys())
                 if not available:
-                    raise ValueError(f"No datasets found in {self.filenames}")
+                    raise ValueError(f"No datasets found in {path}")
                 dataset = available[0]
                 logger.warning(
-                    f"Using first available dataset '{dataset}' in {self.filenames.name}. "
+                    f"Using first available dataset '{dataset}' in {path.name}. "
                     f"Available: {available}"
                 )
 
@@ -100,7 +103,7 @@ class H5Array(ReductionMixin, Shape5DMixin):
         except KeyError:
             available = list(self._f.keys())
             raise KeyError(
-                f"Dataset '{dataset}' not found in {self.filenames}. "
+                f"Dataset '{dataset}' not found in {path}. "
                 f"Available datasets: {available}"
             ) from None
 
