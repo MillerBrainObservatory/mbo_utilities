@@ -36,24 +36,19 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 ## Installation
 
-We recommend [uv](https://docs.astral.sh/uv/) for managing environments. For help setting up, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
+We recommend [uv](https://docs.astral.sh/uv/) for managing environments.
+
+For help setting up, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ```bash
 uv venv --python 3.12
-source .venv/bin/activate  # linux/mac
-# .venv\Scripts\activate   # windows
+# .venv\Scripts\activate   # optional 
 ```
 
-### Core (I/O, metadata, plotting)
+### Base (I/O, metadata, GUI)
 
 ```bash
 uv pip install mbo_utilities
-```
-
-### With GUI (interactive viewer)
-
-```bash
-uv pip install "mbo_utilities[gui]"
 ```
 
 ### With processing pipelines
@@ -65,7 +60,7 @@ uv pip install "mbo_utilities[suite2p]"
 # suite3d volumetric pipeline
 uv pip install "mbo_utilities[suite3d]"
 
-# everything (gui + notebook + all pipelines)
+# suite2p and suite3d
 uv pip install "mbo_utilities[all]"
 ```
 
@@ -73,12 +68,16 @@ uv pip install "mbo_utilities[all]"
 
 PyTorch and CuPy require CUDA-specific wheels that must be installed separately.
 
+Suite2p requires pytorch. Installation depends on your cuda version. See the pytorch [Get Started](https://pytorch.org/get-started/locally/) page for the correct install command for your OS/Cuda version.
+
 ```bash
-# pytorch with CUDA 12.6 (required for suite2p GPU)
+# pytorch with CUDA 12.N (required for suite2p GPU)
+# make sure you uninstall any previous versions of pytorch
+uv pip uninstall torch torchvision  
 uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 
 # cupy (required for suite3d GPU)
-nvcc --version  # check your cuda version first
+nvidia-smi # check your cuda version first
 uv pip install cupy-cuda12x  # for CUDA 12.x
 uv pip install cupy-cuda11x  # for CUDA 11.x
 ```
