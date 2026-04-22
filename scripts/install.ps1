@@ -391,6 +391,64 @@ function Get-CupyPackage {
     return $null
 }
 
+function Get-PytorchIndexUrl {
+    <#
+    .SYNOPSIS
+    Returns the pytorch wheel index URL matching the detected CUDA toolkit.
+    Pytorch doesn't publish GPU wheels to PyPI — they live on its own
+    index. Without `--index-url` pointing there, the main install pulls
+    the CPU `torch` package and cellpose/suite2p run on CPU regardless
+    of whether cuda + cupy are available. Returns $null if no suitable
+    mapping (no GPU, no toolkit, or CUDA version outside the supported
+    set).
+    #>
+    param([hashtable]$GpuInfo)
+
+    if (-not $GpuInfo.ToolkitInstalled -or -not $GpuInfo.CudaVersion) {
+        return $null
+    }
+
+    if ($GpuInfo.CudaVersion -match '^(\d+)\.(\d+)') {
+        $major = [int]$matches[1]
+        $minor = [int]$matches[2]
+        # pick the highest pytorch-published cu12X that's <= installed
+        # toolkit. wheels are driver-backward-compatible within a major,
+        # so a cu126 wheel works fine on a 12.8 toolkit machine.
+        if ($major -eq 12) {
+            if ($minor -ge 6)     { return "https://download.pytorch.org/whl/cu126" }
+            elseif ($minor -ge 4) { return "https://download.pytorch.org/whl/cu124" }
+            elseif ($minor -ge 1) { return "https://download.pytorch.org/whl/cu121" }
+            else                  { return "https://download.pytorch.org/whl/cu118" }
+        }
+        if ($major -eq 11) { return "https://download.pytorch.org/whl/cu118" }
+    }
+    return $null
+}
+
+function Get-UvToolPythonPath {
+    <#
+    .SYNOPSIS
+    Returns the path to the python interpreter inside a given uv tool's
+    environment. Returns $null if the tool isn't installed or the path
+    can't be located.
+    #>
+    param([string]$ToolName)
+
+    try {
+        $toolDir = uv tool dir 2>$null
+        if ($toolDir) {
+            $toolDir = $toolDir.Trim()
+            # uv normalizes package names — try both underscore and hyphen forms
+            foreach ($name in @($ToolName, $ToolName.Replace("_", "-"), $ToolName.Replace("-", "_"))) {
+                $candidate = Join-Path $toolDir "$name\Scripts\python.exe"
+                if (Test-Path $candidate) { return $candidate }
+            }
+        }
+    }
+    catch {}
+    return $null
+}
+
 function Show-OptionalDependencies {
     param([hashtable]$GpuInfo)
 
@@ -487,7 +545,8 @@ function Install-MboTool {
     param(
         [string]$Spec,
         [string[]]$Extras = @(),
-        [string]$CupyPackage = $null
+        [string]$CupyPackage = $null,
+        [string]$PytorchIndexUrl = $null
     )
 
     Write-Host ""
@@ -581,6 +640,27 @@ function Install-MboTool {
             throw "uv tool install failed with exit code $LASTEXITCODE"
         }
 
+        # replace the CPU torch that came from PyPI with the GPU build
+        # from pytorch's own index. uv tool install can't express
+        # "use alt index for one package only", so we do this as a
+        # post-install reinstall into the tool's own venv.
+        if ($PytorchIndexUrl) {
+            $toolPy = Get-UvToolPythonPath -ToolName "mbo_utilities"
+            if ($toolPy) {
+                Write-Info "Replacing CPU torch with CUDA build ($PytorchIndexUrl)..."
+                uv pip install --python $toolPy --reinstall torch torchvision --index-url $PytorchIndexUrl 2>&1 | ForEach-Object { Write-Host $_ }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warn "GPU torch install failed. Tool will use CPU torch."
+                }
+                else {
+                    Write-Success "GPU torch installed in tool env"
+                }
+            }
+            else {
+                Write-Warn "Could not locate tool's python; GPU torch not installed."
+            }
+        }
+
         Write-Success "mbo CLI tool installed successfully"
         return $true
     }
@@ -596,6 +676,12 @@ function Install-MboTool {
 function Show-InstallTypePrompt {
     Write-Host ""
     Write-Host "Installation Type" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  CLI             - global 'mbo' command on your PATH, just runs the GUI." -ForegroundColor DarkGray
+    Write-Host "                    Self-contained; no activation, no imports, no notebooks." -ForegroundColor DarkGray
+    Write-Host "  Local env       - project-local venv you 'cd' into and run 'uv run ...' or" -ForegroundColor DarkGray
+    Write-Host "                    import from. Use this for scripts, notebooks, development." -ForegroundColor DarkGray
+    Write-Host "  Both            - pick this if you want the GUI anywhere AND a local env to code in." -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [1] Environment + CLI - Create Python venv with mbo_utilities + global CLI (Recommended)" -ForegroundColor Cyan
     Write-Host "  [2] Environment       - Create Python venv only (for library use)" -ForegroundColor Cyan
@@ -706,7 +792,8 @@ function Install-DevEnvironment {
         [string]$Spec,
         [string[]]$Extras = @(),
         [hashtable]$GpuInfo = @{},
-        [string]$CupyPackage = $null
+        [string]$CupyPackage = $null,
+        [string]$PytorchIndexUrl = $null
     )
 
     Write-Host ""
@@ -960,6 +1047,21 @@ function Install-DevEnvironment {
             }
         }
 
+        # replace the CPU torch that came from PyPI with the GPU build
+        # from pytorch's own index. pytorch only publishes GPU wheels to
+        # its dedicated index, so without this step cellpose / suite2p
+        # run on CPU despite cuda + cupy being present.
+        if ($PytorchIndexUrl) {
+            Write-Info "Replacing CPU torch with CUDA build ($PytorchIndexUrl)..."
+            uv pip install --python $pythonPath --reinstall torch torchvision --index-url $PytorchIndexUrl 2>&1 | ForEach-Object { Write-Host $_ }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "GPU torch install failed. Environment will use CPU torch."
+            }
+            else {
+                Write-Success "GPU torch installed from $PytorchIndexUrl"
+            }
+        }
+
         Write-Success "Development environment created successfully"
         return $EnvPath
     }
@@ -994,129 +1096,6 @@ function Get-UvToolBinDir {
     }
 
     return $null
-}
-
-function Test-ConflictingMboInstalls {
-    <#
-    .SYNOPSIS
-    Check for mbo installations that could conflict with the uv tool installation.
-    Returns list of paths that are NOT the uv tool bin directory.
-    #>
-    $uvBinDir = Get-UvToolBinDir
-    $conflicts = @()
-
-    # Check PATH for any mbo executables
-    try {
-        $mboLocations = where.exe mbo 2>$null
-        if ($mboLocations) {
-            foreach ($loc in $mboLocations) {
-                $locDir = Split-Path $loc -Parent
-                # Skip if this is the uv tool directory
-                if ($uvBinDir -and $locDir -eq $uvBinDir) { continue }
-                $conflicts += $loc
-            }
-        }
-    }
-    catch {}
-
-    # Also check User PATH for env Scripts directories
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ($userPath) {
-        $pathDirs = $userPath -split ';'
-        foreach ($dir in $pathDirs) {
-            if ($dir -match 'envs.*Scripts|\.venv.*Scripts|venv.*Scripts') {
-                $mboExe = Join-Path $dir "mbo.exe"
-                if (Test-Path $mboExe) {
-                    if ($conflicts -notcontains $mboExe) {
-                        $conflicts += $mboExe
-                    }
-                }
-            }
-        }
-    }
-
-    return $conflicts
-}
-
-function Remove-ConflictingPathEntries {
-    <#
-    .SYNOPSIS
-    Remove environment Scripts directories from User PATH.
-    #>
-    param([string[]]$ConflictPaths)
-
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if (-not $userPath) { return }
-
-    $dirsToRemove = $ConflictPaths | ForEach-Object { Split-Path $_ -Parent }
-    $pathDirs = $userPath -split ';'
-    $newPathDirs = $pathDirs | Where-Object {
-        $dir = $_
-        $shouldRemove = $false
-        foreach ($removeDir in $dirsToRemove) {
-            if ($dir -eq $removeDir) {
-                $shouldRemove = $true
-                Write-Info "Removing from PATH: $dir"
-                break
-            }
-        }
-        -not $shouldRemove
-    }
-
-    $newPath = ($newPathDirs | Where-Object { $_ }) -join ';'
-    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-    # Update current session
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + $newPath
-    Write-Success "PATH cleaned up"
-}
-
-function Show-ConflictingInstallsCheck {
-    <#
-    .SYNOPSIS
-    Check for and handle conflicting mbo installations.
-    Returns $true if installation should proceed, $false to abort.
-    #>
-    $conflicts = Test-ConflictingMboInstalls
-
-    if ($conflicts.Count -eq 0) {
-        return $true
-    }
-
-    Write-Host ""
-    Write-Warn "Found existing mbo installation(s) that may conflict:"
-    Write-Host ""
-    foreach ($conflict in $conflicts) {
-        Write-Host "    $conflict" -ForegroundColor Yellow
-    }
-    Write-Host ""
-    Write-Host "  These will take precedence over the uv tool installation." -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  [1] Clean up  - Remove conflicting entries from PATH (Recommended)" -ForegroundColor Cyan
-    Write-Host "  [2] Continue  - Keep existing (may cause version conflicts)" -ForegroundColor Cyan
-    Write-Host "  [3] Cancel    - Exit installation" -ForegroundColor Cyan
-    Write-Host ""
-
-    do {
-        $choice = Read-Host "Select option (1-3)"
-        $valid = $choice -match '^[123]$'
-        if (-not $valid) { Write-Warn "Invalid selection." }
-    } while (-not $valid)
-
-    switch ($choice) {
-        "1" {
-            Remove-ConflictingPathEntries -ConflictPaths $conflicts
-            return $true
-        }
-        "2" {
-            Write-Warn "Proceeding with existing installations. You may experience version conflicts."
-            return $true
-        }
-        "3" {
-            return $false
-        }
-    }
-
-    return $true
 }
 
 function New-DesktopShortcut {
@@ -1211,31 +1190,52 @@ function Show-UsageInstructions {
     Write-Host "Installation Complete" -ForegroundColor White
     Write-Host ""
 
+    # two distinct usage modes depending on what was installed. the CLI
+    # tool is available from any directory; the environment is a
+    # project-local venv that needs a `cd` (or activation) first. label
+    # them clearly so users running both don't conflate the two.
+    $sectionNum = 0
+    $showBoth = $CliInstalled -and $EnvPath
+
     if ($CliInstalled) {
+        $sectionNum++
         $binDir = Get-UvToolBinDir
-        Write-Host "  CLI Location:" -ForegroundColor Gray
-        Write-Host "    $binDir\mbo.exe" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "  Usage:" -ForegroundColor Gray
-        Write-Host "    mbo                    # Open GUI" -ForegroundColor White
-        Write-Host "    mbo /path/to/data      # Open specific file" -ForegroundColor White
-        Write-Host "    mbo --help             # Show all commands" -ForegroundColor White
+        $header = if ($showBoth) { "(${sectionNum}) CLI - available system-wide" } else { "CLI - available system-wide" }
+        Write-Host "  $header" -ForegroundColor Gray
+        Write-Host "    mbo                    # open GUI" -ForegroundColor White
+        Write-Host "    mbo /path/to/data      # open specific file" -ForegroundColor White
+        Write-Host "    mbo --help             # show all commands" -ForegroundColor White
+        Write-Host "    Location: $binDir\mbo.exe" -ForegroundColor DarkGray
         Write-Host ""
     }
 
     if ($EnvPath) {
-        Write-Host "  Development Environment:" -ForegroundColor Gray
-        Write-Host "    $EnvPath" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "  Activate:" -ForegroundColor Gray
-        Write-Host "    $EnvPath\Scripts\activate" -ForegroundColor White
+        $sectionNum++
+        # $EnvPath points at the actual venv dir (ends in \.venv when the
+        # user pointed at a project root). `uv run` wants the project dir,
+        # not the venv dir — strip the trailing .venv so `cd` lands on the
+        # project, and all the other `uv ...` commands below Just Work.
+        $cdPath = $EnvPath
+        if ($cdPath -match '[\\/]\.venv[\\/]?$') {
+            $cdPath = Split-Path $cdPath -Parent
+        }
+
+        $header = if ($showBoth) {
+            "(${sectionNum}) Local environment - use from the env directory"
+        } else {
+            "Local environment - use from the env directory"
+        }
+        Write-Host "  $header" -ForegroundColor Gray
+        Write-Host "    cd $cdPath" -ForegroundColor White
+        Write-Host "    uv run mbo             # open GUI (uses this env)" -ForegroundColor White
+        Write-Host "    uv run mbo --help      # show all commands" -ForegroundColor White
+        Write-Host "    uv run python          # interactive session with this env" -ForegroundColor White
+        Write-Host "    uv pip install <pkg>   # add a package to this env" -ForegroundColor White
+        Write-Host "    uv pip list            # show installed packages + versions" -ForegroundColor White
         Write-Host ""
         Write-Host "  Use in VSCode:" -ForegroundColor Gray
         Write-Host "    Ctrl+Shift+P -> 'Python: Select Interpreter'" -ForegroundColor White
         Write-Host "    Choose: $EnvPath\Scripts\python.exe" -ForegroundColor White
-        Write-Host ""
-        Write-Host "  Add packages:" -ForegroundColor Gray
-        Write-Host "    uv pip install --python `"$EnvPath\Scripts\python.exe`" <package>" -ForegroundColor White
         Write-Host ""
     }
 }
@@ -1253,12 +1253,6 @@ function Main {
     # check/install uv
     if (-not (Test-UvInstalled)) {
         Install-Uv
-    }
-
-    # step 0.5: check for conflicting mbo installations
-    $shouldContinue = Show-ConflictingInstallsCheck
-    if (-not $shouldContinue) {
-        exit 0
     }
 
     # step 1: choose installation type (env, CLI, or both)
@@ -1280,6 +1274,19 @@ function Main {
         $cupyPackage = Get-CupyPackage -GpuInfo $gpuInfo
     }
 
+    # step 4.6: determine pytorch wheel index based on CUDA version.
+    # torch is pulled in by suite2p/all, and PyPI only ships the CPU
+    # build — GPU wheels live on pytorch's own index. fire this whenever
+    # an extras value brings torch along AND we've got a CUDA toolkit.
+    $needsTorch = ($extras | Where-Object { @("suite2p", "all", "processing") -contains $_ }).Count -gt 0
+    $pytorchIndexUrl = $null
+    if ($needsTorch) {
+        $pytorchIndexUrl = Get-PytorchIndexUrl -GpuInfo $gpuInfo
+        if ($pytorchIndexUrl) {
+            Write-Info "GPU torch will be installed from $pytorchIndexUrl"
+        }
+    }
+
     # step 5: get environment location if needed
     $envPath = $null
     $envLocation = $null
@@ -1289,7 +1296,7 @@ function Main {
 
     # step 6: install CLI tool if requested
     if ($installType.InstallCli) {
-        $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras -CupyPackage $cupyPackage
+        $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras -CupyPackage $cupyPackage -PytorchIndexUrl $pytorchIndexUrl
         if (-not $toolInstalled) {
             Write-Err "CLI installation failed."
             exit 1
@@ -1298,7 +1305,7 @@ function Main {
 
     # step 7: create dev environment if requested
     if ($installType.InstallEnv -and $envLocation) {
-        $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -CupyPackage $cupyPackage
+        $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -CupyPackage $cupyPackage -PytorchIndexUrl $pytorchIndexUrl
     }
 
     # step 8: create desktop shortcut (only if CLI was installed)

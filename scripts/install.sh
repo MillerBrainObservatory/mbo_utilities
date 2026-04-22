@@ -196,10 +196,6 @@ install_uv() {
     fi
 }
 
-# =============================================================================
-# Conflict Detection
-# =============================================================================
-
 get_uv_tool_bin_dir() {
     local bin_dir=$(uv tool dir 2>/dev/null || echo "")
     if [[ -n "$bin_dir" ]]; then
@@ -209,88 +205,6 @@ get_uv_tool_bin_dir() {
     fi
 }
 
-check_conflicting_installs() {
-    local uv_bin_dir=$(get_uv_tool_bin_dir)
-    local conflicts=()
-
-    # Find all mbo executables in PATH
-    local mbo_locations=$(which -a mbo 2>/dev/null || true)
-
-    while IFS= read -r loc; do
-        if [[ -n "$loc" ]]; then
-            local loc_dir=$(dirname "$loc")
-            # Skip if this is the uv tool directory
-            if [[ "$loc_dir" != "$uv_bin_dir" ]]; then
-                conflicts+=("$loc")
-            fi
-        fi
-    done <<< "$mbo_locations"
-
-    # Also check for env Scripts directories in PATH
-    IFS=':' read -ra path_dirs <<< "$PATH"
-    for dir in "${path_dirs[@]}"; do
-        if [[ "$dir" =~ envs.*bin|\.venv.*bin|venv.*bin ]]; then
-            if [[ -x "$dir/mbo" ]]; then
-                local already_found=false
-                for c in "${conflicts[@]}"; do
-                    if [[ "$c" == "$dir/mbo" ]]; then
-                        already_found=true
-                        break
-                    fi
-                done
-                if [[ "$already_found" == "false" ]]; then
-                    conflicts+=("$dir/mbo")
-                fi
-            fi
-        fi
-    done
-
-    echo "${conflicts[@]}"
-}
-
-show_conflicting_installs_check() {
-    local conflicts_str=$(check_conflicting_installs)
-
-    if [[ -z "$conflicts_str" ]]; then
-        return 0
-    fi
-
-    read -ra conflicts <<< "$conflicts_str"
-
-    if [[ ${#conflicts[@]} -eq 0 ]]; then
-        return 0
-    fi
-
-    echo ""
-    warn "Found existing mbo installation(s) that may conflict:"
-    echo ""
-    for conflict in "${conflicts[@]}"; do
-        echo -e "    ${YELLOW}$conflict${NC}"
-    done
-    echo ""
-    echo -e "  ${GRAY}These will take precedence over the uv tool installation.${NC}"
-    echo ""
-    echo -e "  ${CYAN}[1] Continue  - Proceed with installation${NC}"
-    echo -e "  ${CYAN}[2] Cancel    - Exit installation${NC}"
-    echo ""
-
-    while true; do
-        read -p "Select option (1-2): " choice
-        case $choice in
-            1)
-                warn "Proceeding. You may need to remove conflicting installations manually."
-                return 0
-                ;;
-            2)
-                return 1
-                ;;
-            *)
-                warn "Invalid selection."
-                ;;
-        esac
-    done
-}
-
 # =============================================================================
 # Installation Type Selection
 # =============================================================================
@@ -298,6 +212,12 @@ show_conflicting_installs_check() {
 show_install_type_prompt() {
     echo ""
     echo -e "${WHITE}Installation Type${NC}"
+    echo ""
+    echo -e "  ${GRAY}CLI             - global 'mbo' command on your PATH, just runs the GUI.${NC}"
+    echo -e "  ${GRAY}                  Self-contained; no activation, no imports, no notebooks.${NC}"
+    echo -e "  ${GRAY}Local env       - project-local venv you 'cd' into and run 'uv run ...' or${NC}"
+    echo -e "  ${GRAY}                  import from. Use this for scripts, notebooks, development.${NC}"
+    echo -e "  ${GRAY}Both            - pick this if you want the GUI anywhere AND a local env to code in.${NC}"
     echo ""
     echo -e "  ${CYAN}[1] Environment + CLI${NC} - Create Python venv with mbo_utilities + global CLI (Recommended)"
     echo -e "  ${CYAN}[2] Environment${NC}       - Create Python venv only (for library use)"
@@ -1047,31 +967,54 @@ show_usage_instructions() {
     echo -e "${WHITE}Installation Complete${NC}"
     echo ""
 
+    # two distinct usage modes depending on what was installed. CLI works
+    # from any directory; environment is project-local and needs a `cd`
+    # (or activation) first. label them so users running both don't
+    # conflate the two.
+    local show_both=false
+    if [[ "$INSTALL_CLI" == "true" && "$INSTALL_ENV" == "true" && -n "$MBO_ENV_PATH" && -d "$MBO_ENV_PATH" ]]; then
+        show_both=true
+    fi
+
+    local section=0
     if [[ "$INSTALL_CLI" == "true" ]]; then
+        section=$((section + 1))
         local bin_dir=$(get_uv_tool_bin_dir)
-        echo -e "  ${GRAY}CLI Location:${NC}"
-        echo -e "    ${CYAN}$bin_dir/mbo${NC}"
-        echo ""
-        echo -e "  ${GRAY}Usage:${NC}"
-        echo -e "    ${WHITE}mbo${NC}                    # Open GUI"
-        echo -e "    ${WHITE}mbo /path/to/data${NC}      # Open specific file"
-        echo -e "    ${WHITE}mbo --help${NC}             # Show all commands"
+        local header="CLI - available system-wide"
+        if $show_both; then header="(${section}) $header"; fi
+        echo -e "  ${GRAY}${header}${NC}"
+        echo -e "    ${WHITE}mbo${NC}                    # open GUI"
+        echo -e "    ${WHITE}mbo /path/to/data${NC}      # open specific file"
+        echo -e "    ${WHITE}mbo --help${NC}             # show all commands"
+        echo -e "    ${GRAY}Location: $bin_dir/mbo${NC}"
         echo ""
     fi
 
     if [[ "$INSTALL_ENV" == "true" && -n "$MBO_ENV_PATH" && -d "$MBO_ENV_PATH" ]]; then
-        echo -e "  ${GRAY}Development Environment:${NC}"
-        echo -e "    ${CYAN}$MBO_ENV_PATH${NC}"
-        echo ""
-        echo -e "  ${GRAY}Activate:${NC}"
-        echo -e "    ${WHITE}source $MBO_ENV_PATH/bin/activate${NC}"
+        section=$((section + 1))
+        # $MBO_ENV_PATH points at the actual venv dir (ends in /.venv when
+        # the user pointed at a project root). `uv run` wants the project
+        # dir, not the venv dir — strip the trailing .venv so `cd` lands
+        # on the project and all the other `uv ...` commands Just Work.
+        local cd_path="$MBO_ENV_PATH"
+        if [[ "$cd_path" =~ /\.venv/?$ ]]; then
+            cd_path="${cd_path%/.venv}"
+            cd_path="${cd_path%/.venv/}"
+        fi
+
+        local header="Local environment - use from the env directory"
+        if $show_both; then header="(${section}) $header"; fi
+        echo -e "  ${GRAY}${header}${NC}"
+        echo -e "    ${WHITE}cd $cd_path${NC}"
+        echo -e "    ${WHITE}uv run mbo${NC}             # open GUI (uses this env)"
+        echo -e "    ${WHITE}uv run mbo --help${NC}      # show all commands"
+        echo -e "    ${WHITE}uv run python${NC}          # interactive session with this env"
+        echo -e "    ${WHITE}uv pip install <pkg>${NC}   # add a package to this env"
+        echo -e "    ${WHITE}uv pip list${NC}            # show installed packages + versions"
         echo ""
         echo -e "  ${GRAY}Use in VSCode:${NC}"
         echo -e "    ${WHITE}Ctrl+Shift+P -> 'Python: Select Interpreter'${NC}"
         echo -e "    ${WHITE}Choose: $MBO_ENV_PATH/bin/python${NC}"
-        echo ""
-        echo -e "  ${GRAY}Add packages:${NC}"
-        echo -e "    ${WHITE}uv pip install --python \"$MBO_ENV_PATH/bin/python\" <package>${NC}"
         echo ""
     fi
 }
@@ -1090,11 +1033,6 @@ main() {
     # Check/install uv
     if ! check_uv_installed; then
         install_uv
-    fi
-
-    # Step 0.5: Check for conflicting mbo installations
-    if ! show_conflicting_installs_check; then
-        exit 0
     fi
 
     # Step 1: Choose installation type
