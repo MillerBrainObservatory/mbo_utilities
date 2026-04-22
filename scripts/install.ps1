@@ -640,6 +640,25 @@ function Install-MboTool {
             throw "uv tool install failed with exit code $LASTEXITCODE"
         }
 
+        # ensure the tool bin dir is on User PATH. uv's own install-time
+        # PATH wiring doesn't always fire (fresh windows machines, locked-
+        # down execution policies, certain shell configs), which leaves
+        # `mbo` unreachable from a new terminal even though the tool
+        # itself installed fine. `uv tool update-shell` is idempotent —
+        # safe to run even when PATH is already correct.
+        $updateOut = uv tool update-shell 2>&1 | Out-String
+        if ($updateOut.Trim()) { Write-Host $updateOut.Trim() }
+
+        # make `mbo` reachable in THIS shell too, so the user doesn't
+        # need to restart their terminal to try it. update-shell modifies
+        # the User PATH in the registry, but the current session inherits
+        # its PATH from when it was launched — we need to refresh it
+        # explicitly. merge Machine PATH + updated User PATH.
+        $binDir = Get-UvToolBinDir
+        if ($binDir -and $env:Path -notlike "*$binDir*") {
+            $env:Path = "$binDir;$env:Path"
+        }
+
         # replace the CPU torch that came from PyPI with the GPU build
         # from pytorch's own index. uv tool install can't express
         # "use alt index for one package only", so we do this as a
@@ -1075,9 +1094,12 @@ function Install-DevEnvironment {
 }
 
 function Get-UvToolBinDir {
+    # `uv tool dir --bin` is the canonical query. `uv tool bin-dir`
+    # was a typo — not a real subcommand, always fell through to the
+    # fallback below (which works on Windows default but masked the bug).
     try {
-        $binDir = uv tool bin-dir 2>$null
-        if ($binDir) {
+        $binDir = uv tool dir --bin 2>$null
+        if ($binDir -and $LASTEXITCODE -eq 0) {
             return $binDir.Trim()
         }
     }

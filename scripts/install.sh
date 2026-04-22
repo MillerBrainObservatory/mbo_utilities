@@ -197,9 +197,12 @@ install_uv() {
 }
 
 get_uv_tool_bin_dir() {
-    local bin_dir=$(uv tool dir 2>/dev/null || echo "")
+    # `uv tool dir --bin` is the canonical query. appending /bin to
+    # `uv tool dir` (without --bin) would point at the tool *install*
+    # directory, not the executable directory — different paths.
+    local bin_dir=$(uv tool dir --bin 2>/dev/null || echo "")
     if [[ -n "$bin_dir" ]]; then
-        echo "$bin_dir/bin"
+        echo "$bin_dir"
     else
         echo "$HOME/.local/bin"
     fi
@@ -605,6 +608,18 @@ install_mbo_tool() {
 
     # Install tool
     if uv tool install "$full_spec" --python 3.12; then
+        # ensure the tool bin dir is on the user's shell PATH. uv's own
+        # install-time PATH wiring doesn't always fire (locked-down
+        # configs, unusual shells). idempotent — safe to run every time.
+        uv tool update-shell 2>&1 || true
+
+        # make `mbo` reachable in THIS shell too so the user doesn't
+        # need to open a new terminal just to try it.
+        local bin_dir=$(get_uv_tool_bin_dir)
+        if [[ -n "$bin_dir" && ":$PATH:" != *":$bin_dir:"* ]]; then
+            export PATH="$bin_dir:$PATH"
+        fi
+
         success "mbo CLI tool installed successfully"
         return 0
     else
