@@ -61,34 +61,20 @@ def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False):
     a = pre[row_start:row_end, col_start:col_end]
     b_ = post[row_start:row_end, col_start:col_end]
 
-    if use_fft:
-        _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=upsample)
-        dx = float(_shift[1])
-        logger.debug(f"2D FFT phase correlation shift: {dx:.2f}")
-    else:
-        a_mean = a.mean(axis=0) - np.mean(a)
-        b_mean = b_.mean(axis=0) - np.mean(b_)
-
-        offsets = np.arange(-4, 4, 1)
-        scores = np.empty_like(offsets, dtype=float)
-
-        for i, k in enumerate(offsets):
-            if k > 0:
-                aa = a_mean[:-k]
-                bb = b_mean[k:]
-            elif k < 0:
-                aa = a_mean[-k:]
-                bb = b_mean[:k]
-            else:
-                aa = a_mean
-                bb = b_mean
-            num = np.dot(aa, bb)
-            denom = np.linalg.norm(aa) * np.linalg.norm(bb)
-            scores[i] = num / denom if denom else 0.0
-
-        k_best = offsets[np.argmax(scores)]
-        dx = -float(k_best)
-        logger.debug(f"Integer phase correlation shift: {dx:.2f}")
+    # both paths use 2D FFT cross-correlation; `use_fft` only controls
+    # whether subpixel refinement is applied. the old integer path
+    # projected rows to a 1D signal and picked argmax of a normalized
+    # correlation, which suffered from overlap-size bias and peak
+    # spreading — true shifts of ~1 px would routinely report ±2 or ±3.
+    # integer precision via `upsample_factor=1` is as accurate as the
+    # subpixel path rounded to nearest pixel, and only ~3× slower than
+    # the old 1D method.
+    _upsample = int(upsample) if use_fft else 1
+    _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=_upsample)
+    dx = float(_shift[1])
+    logger.debug(
+        f"phase correlation shift (upsample={_upsample}): {dx:.2f}"
+    )
 
     if max_offset:
         dx = np.sign(dx) * min(abs(dx), max_offset)

@@ -416,14 +416,16 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         if isinstance(t_key, slice):
             start, stop, step = t_key.indices(self._nframes)
             t_key = slice(start, stop, step)
-        elif isinstance(t_key, int):
+        elif isinstance(t_key, (int, np.integer)):
+            t_key = int(t_key)
             if t_key < 0:
                 t_key = self._nframes + t_key
             if t_key >= self._nframes:
                 raise IndexError(f"Time index {t_key} out of bounds for {self._nframes} frames")
 
         # handle z indexing
-        if isinstance(z_key, int):
+        if isinstance(z_key, (int, np.integer)):
+            z_key = int(z_key)
             if z_key < 0:
                 z_key = self._nz + z_key
             if z_key < 0 or z_key >= self._nz:
@@ -450,7 +452,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
             # single t + single z -> (Y, X)
             out = out[np.newaxis, np.newaxis, np.newaxis, :, :]
         elif out.ndim == 3:
-            if isinstance(z_key, int):
+            if isinstance(z_key, (int, np.integer)):
                 # (T, Y, X) - z was squeezed by int index
                 out = out[:, np.newaxis, np.newaxis, :, :]
             else:
@@ -460,13 +462,13 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
             # (T, Z, Y, X) - insert C=1
             out = out[:, np.newaxis, :, :, :]
 
-        # squeeze integer-indexed dimensions
+        # squeeze integer-indexed dimensions (accept numpy integer scalars)
         squeeze_axes = []
-        if isinstance(key[0], int):
+        if isinstance(key[0], (int, np.integer)):
             squeeze_axes.append(0)
-        if isinstance(key[1], int):
+        if isinstance(key[1], (int, np.integer)):
             squeeze_axes.append(1)
-        if isinstance(key[2], int):
+        if isinstance(key[2], (int, np.integer)):
             squeeze_axes.append(2)
         for ax in sorted(squeeze_axes, reverse=True):
             out = np.squeeze(out, axis=ax)

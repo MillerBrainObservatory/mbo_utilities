@@ -316,7 +316,7 @@ class _SingleTiffPlaneReader:
         if y_key != slice(None) or x_key != slice(None):
             out = out[:, y_key, x_key]
 
-        if isinstance(t_key, int):
+        if isinstance(t_key, (int, np.integer)):
             out = out[0]
 
         return out
@@ -807,7 +807,8 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
         # normalize t_key to list of indices
         if isinstance(t_key, slice):
             t_indices = list(range(self._nframes)[t_key])
-        elif isinstance(t_key, int):
+        elif isinstance(t_key, (int, np.integer)):
+            t_key = int(t_key)
             if t_key < 0:
                 t_key = self._nframes + t_key
             if t_key < 0 or t_key >= self._nframes:
@@ -823,7 +824,8 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
         # normalize c_key to list of indices
         c_indices = None
         if self._nc > 1:
-            if isinstance(c_key, int):
+            if isinstance(c_key, (int, np.integer)):
+                c_key = int(c_key)
                 if c_key < 0:
                     c_key = self._nc + c_key
                 if c_key < 0 or c_key >= self._nc:
@@ -837,7 +839,8 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
                 c_indices = list(range(self._nc))
 
         # normalize z_key to list of indices
-        if isinstance(z_key, int):
+        if isinstance(z_key, (int, np.integer)):
+            z_key = int(z_key)
             if z_key < 0:
                 z_key = self._nz + z_key
             if z_key < 0 or z_key >= self._nz:
@@ -869,13 +872,15 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
             out = np.stack(arrs, axis=1)  # (T, Z, Y, X)
             out = out[:, np.newaxis, :, :, :]  # (T, 1, Z, Y, X) — insert C=1
 
-        # squeeze integer-indexed dimensions (standard numpy behavior)
+        # squeeze integer-indexed dimensions (standard numpy behavior).
+        # accept numpy integer scalars too — bare `int` check left np.int64
+        # (returned by np.linspace(dtype=int)) with a leftover size-1 axis.
         squeeze_axes = []
-        if isinstance(key[0], int):
+        if isinstance(key[0], (int, np.integer)):
             squeeze_axes.append(0)
-        if isinstance(key[1], int):
+        if isinstance(key[1], (int, np.integer)):
             squeeze_axes.append(1)
-        if isinstance(key[2], int):
+        if isinstance(key[2], (int, np.integer)):
             squeeze_axes.append(2)
         for ax in sorted(squeeze_axes, reverse=True):
             out = np.squeeze(out, axis=ax)
@@ -1391,13 +1396,15 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
             else:
                 out = out.reshape(len(frames), nc, nz, out.shape[-2], out.shape[-1])
 
-        # squeeze integer-indexed dimensions
+        # squeeze integer-indexed dimensions. accept numpy integer scalars
+        # too — bare `int` check left np.int64 (returned by
+        # np.linspace(dtype=int)) with a leftover size-1 axis.
         squeeze = []
-        if isinstance(key[0], int):
+        if isinstance(key[0], (int, np.integer)):
             squeeze.append(0)
-        if isinstance(key[1], int):
+        if isinstance(key[1], (int, np.integer)):
             squeeze.append(1)
-        if isinstance(key[2], int):
+        if isinstance(key[2], (int, np.integer)):
             squeeze.append(2)
         if squeeze:
             if isinstance(out, tuple):
@@ -1938,13 +1945,13 @@ class PiezoArray(ScanImageArray):
         out = np.stack(results, axis=0)  # (T, Z, Y, X)
         out = out[:, np.newaxis, :, :, :]  # (T, 1, Z, Y, X)
 
-        # squeeze integer-indexed dimensions
+        # squeeze integer-indexed dimensions (accept numpy integer scalars)
         squeeze = []
-        if isinstance(vol_key, int):
+        if isinstance(vol_key, (int, np.integer)):
             squeeze.append(0)
-        if isinstance(c_key, int):
+        if isinstance(c_key, (int, np.integer)):
             squeeze.append(1)
-        if isinstance(frame_key, int):
+        if isinstance(frame_key, (int, np.integer)):
             squeeze.append(2)
         for ax in sorted(squeeze, reverse=True):
             out = np.squeeze(out, axis=ax)

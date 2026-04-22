@@ -419,7 +419,7 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
             out = self.zs[0][t_read, z_read, y_read, x_read]
         elif len(self.zs) == 1:
             # 3D zarr with implicit Z=1
-            if isinstance(z_key, int) and z_key != 0:
+            if isinstance(z_key, (int, np.integer)) and int(z_key) != 0:
                 raise IndexError("Z dimension has size 1, only index 0 is valid")
             data = self.zs[0][t_read, y_read, x_read]
             # data is (T, Y, X); insert Z at position 1 to match TZYX layout
