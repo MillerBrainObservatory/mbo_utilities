@@ -169,7 +169,7 @@ class FileDialog:
         self._show_deps_popup = False
 
         # GUI Modes (pollen calibration auto-detected, not user-selectable)
-        self.gui_modes = ["Standard Viewer", "Napari"]
+        self.gui_modes = ["Fastplotlib viewer (default)", "Napari viewer"]
         self.selected_mode_index = 0
 
         # start dependency check immediately in background

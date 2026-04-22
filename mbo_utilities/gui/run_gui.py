@@ -364,9 +364,11 @@ def _select_file(runner_params: Any | None = None) -> tuple[Any, Any, Any, bool,
 
     dlg = FileDialog()
 
+    from mbo_utilities import __version__
+
     if runner_params is None:
         params = hello_imgui.RunnerParams()
-        params.app_window_params.window_title = "Miller Brain Suite – Data Selection"
+        params.app_window_params.window_title = f"Miller Brain Studio v{__version__} – Data Selection"
         params.app_window_params.window_geometry.size = (340, 720)
         params.app_window_params.window_geometry.size_auto = False
         params.app_window_params.resizable = True
@@ -399,11 +401,12 @@ def _select_file(runner_params: Any | None = None) -> tuple[Any, Any, Any, bool,
 def _show_metadata_viewer(metadata: dict) -> None:
     """Show metadata in an ImGui window."""
     from imgui_bundle import immapp, hello_imgui
+    from mbo_utilities import __version__
     from mbo_utilities.gui._metadata import draw_metadata_inspector
     from mbo_utilities.gui._setup import get_default_ini_path
 
     params = hello_imgui.RunnerParams()
-    params.app_window_params.window_title = "Miller Brain Suite – Metadata"
+    params.app_window_params.window_title = f"Miller Brain Studio v{__version__} – Metadata"
     params.app_window_params.window_geometry.size = (800, 800)
     params.ini_filename = get_default_ini_path("metadata_viewer")
     params.callbacks.show_gui = lambda: draw_metadata_inspector(metadata)
@@ -598,9 +601,10 @@ def _create_image_widget(data_array, widget: bool = True):
     iw.show()
 
     # set qt window title and icon after canvas is created
+    from mbo_utilities import __version__
     canvas = iw.figure.canvas
     if hasattr(canvas, "set_title"):
-        canvas.set_title("Miller Brain Suite")
+        canvas.set_title(f"Miller Brain Studio v{__version__}")
     _set_qt_icon()
 
     # Add PreviewDataWidget if requested
@@ -636,7 +640,7 @@ def _run_gui_impl(
     select_only: bool = False,
     show_splash: bool = False,
     runner_params: Any | None = None,
-    mode: str = "Standard Viewer",
+    mode: str = "Fastplotlib viewer (default)",
 ):
     """Internal implementation of run_gui with all heavy imports."""
     # show splash screen while loading (only for desktop shortcut launches)
@@ -668,10 +672,10 @@ def _run_gui_impl(
 
 
         # Dispatch based on Mode
-        # Note: pollen calibration is auto-detected in Standard Viewer via get_viewer_class()
-        if mode == "Standard Viewer":
+        # pollen calibration is auto-detected in the fastplotlib viewer via get_viewer_class()
+        if mode == "Fastplotlib viewer (default)":
             return _launch_standard_viewer(data_in, roi, widget, metadata_only)
-        if mode == "Napari":
+        if mode == "Napari viewer":
             return _launch_napari(data_in, roi)
         return _launch_standard_viewer(data_in, roi, widget, metadata_only)
 

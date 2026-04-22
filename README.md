@@ -41,7 +41,7 @@ We recommend [uv](https://docs.astral.sh/uv/) for managing environments.
 For help setting up, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
 
 ```bash
-uv venv --python 3.12
+uv venv --python 3.12.9
 # .venv\Scripts\activate   # optional 
 ```
 

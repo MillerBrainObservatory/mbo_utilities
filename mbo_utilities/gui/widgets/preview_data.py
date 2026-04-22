@@ -449,8 +449,9 @@ class PreviewDataWidget(EdgeWindow):
         try:
             if self.fpath is None:
                 return
+            from mbo_utilities import __version__
             name = Path(self.fpath[0]).parent.name if isinstance(self.fpath, list) else Path(self.fpath).name
-            hello_imgui.get_runner_params().app_shallow_settings.window_title = f"Miller Brain Suite - {name}"
+            hello_imgui.get_runner_params().app_shallow_settings.window_title = f"Miller Brain Studio v{__version__} - {name}"
         except (RuntimeError, TypeError):
             pass
 
