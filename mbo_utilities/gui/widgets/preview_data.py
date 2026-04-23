@@ -57,7 +57,7 @@ from mbo_utilities import log
 from mbo_utilities.gui.widgets.menu_bar import draw_menu_bar, draw_keybinds_popup
 from mbo_utilities.gui._popups import draw_tools_popups, draw_process_console_popup
 from mbo_utilities.gui._save_as import draw_saveas_popup
-from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts
+from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts, rebind_space_to_playback
 from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
 from mbo_utilities.gui._help_viewer import draw_help_popup
@@ -446,6 +446,7 @@ class PreviewDataWidget(EdgeWindow):
         self.logger.info(f"Viewer: {self._viewer.name}")
         self.set_context_info()
         self._update_window_funcs()
+        rebind_space_to_playback(self)
 
     def set_context_info(self):
         """Update app title with dataset name."""

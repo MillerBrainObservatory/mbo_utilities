@@ -68,9 +68,9 @@ def handle_keyboard_shortcuts(parent: Any):
     ):
         toggle_side_panel(parent)
 
-    # space: toggle play/pause on the T dim of fpl's built-in sliders widget
-    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.space, False):
-        toggle_playback(parent)
+    # space is handled via the renderer-level handler installed by
+    # rebind_space_to_playback; fpl's ImguiFigure registers its own
+    # space=collapse handler which our imgui-layer shortcut can't intercept.
 
     # v: reset vmin/vmax (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.v, False):
@@ -79,11 +79,25 @@ def handle_keyboard_shortcuts(parent: Any):
             with contextlib.suppress(Exception):
                 parent.image_widget.reset_vmin_vmax_frame()
 
-    # c: toggle auto-contrast on z-change (no modifiers)
+    # c: toggle fix-phase (scan-phase correction) when data supports it
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.c, False):
+        if hasattr(parent, "fix_phase"):
+            parent.fix_phase = not parent.fix_phase
+            state = "ON" if parent.fix_phase else "OFF"
+            parent.logger.info(f"Shortcut: 'c' (Fix Phase: {state})")
+
+    # Shift+C: toggle sub-pixel (FFT) scan-phase correction
+    if not io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.c, False):
+        if hasattr(parent, "use_fft") and getattr(parent, "fix_phase", False):
+            parent.use_fft = not parent.use_fft
+            state = "ON" if parent.use_fft else "OFF"
+            parent.logger.info(f"Shortcut: 'Shift+C' (Sub-Pixel: {state})")
+
+    # Shift+V: toggle auto-contrast on z-change
+    if not io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.v, False):
         parent.auto_contrast_on_z = not parent.auto_contrast_on_z
         state = "ON" if parent.auto_contrast_on_z else "OFF"
-        parent.logger.info(f"Shortcut: 'c' (Auto-contrast on Z: {state})")
+        parent.logger.info(f"Shortcut: 'Shift+V' (Auto-contrast on Z: {state})")
 
     # k: toggle keybinds popup open/close (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.k, False):
@@ -139,7 +153,40 @@ def toggle_side_panel(parent: Any) -> None:
     """Toggle collapse state of the side panel."""
     with contextlib.suppress(Exception):
         parent.collapsed = not parent.collapsed
-        parent.logger.info("Shortcut: 'Enter' (Toggle Side Panel)")
+        parent.logger.info("Shortcut: collapse toggled")
+
+
+def rebind_space_to_playback(parent: Any) -> None:
+    """Remove fpl's built-in space=collapse-right-gui handler and install our
+    own space=play/pause handler on the renderer. Idempotent."""
+    if getattr(parent, "_space_rebound", False):
+        return
+    try:
+        figure = parent.image_widget.figure
+        renderer = figure.renderer
+    except Exception:
+        return
+
+    # remove fpl's bound method handler that toggles right-gui collapse on space
+    with contextlib.suppress(Exception):
+        renderer.remove_event_handler(figure._toggle_right_gui_collapse, "key_down")
+
+    # debounce to suppress OS key-repeat and any duplicate dispatch
+    parent._last_space_time = 0.0
+
+    def _on_space(event):
+        if getattr(event, "key", None) != " ":
+            return
+        import time
+        now = time.monotonic()
+        if now - parent._last_space_time < 0.15:
+            return
+        parent._last_space_time = now
+        toggle_playback(parent)
+
+    with contextlib.suppress(Exception):
+        renderer.add_event_handler(_on_space, "key_down")
+        parent._space_rebound = True
 
 
 def handle_arrow_keys(parent: Any):
