@@ -233,6 +233,10 @@ class PreviewDataWidget(EdgeWindow):
         """Initialize ImGui fonts."""
         io = imgui.get_io()
 
+        # disable keyboard nav so Space/Enter don't activate whatever button
+        # currently holds nav focus (e.g. the EdgeWindow collapse caret)
+        io.config_flags &= ~imgui.ConfigFlags_.nav_enable_keyboard
+
         fd_settings_dir = (
             Path(get_mbo_dirs()["imgui"])
             .joinpath("assets", "app_settings", "preview_settings.ini")
@@ -441,7 +445,6 @@ class PreviewDataWidget(EdgeWindow):
         self._viewer = viewer_cls(self.image_widget, self.fpath, parent=self)
         self.logger.info(f"Viewer: {self._viewer.name}")
         self.set_context_info()
-        # ensure window functions are set so slider dims are properly reduced
         self._update_window_funcs()
 
     def set_context_info(self):

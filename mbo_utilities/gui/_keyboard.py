@@ -61,10 +61,16 @@ def handle_keyboard_shortcuts(parent: Any):
         parent.logger.info("Shortcut: 'm' (Metadata Viewer)")
         parent.show_metadata_viewer = not parent.show_metadata_viewer
 
-    # p: toggle side panel collapse (no modifiers)
-    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.p, False):
-        parent.logger.info("Shortcut: 'p' (Toggle Side Panel)")
-        parent.collapsed = not parent.collapsed
+    # enter or p: toggle side panel collapse (no modifiers)
+    if not io.key_ctrl and not io.key_shift and (
+        imgui.is_key_pressed(imgui.Key.enter, False)
+        or imgui.is_key_pressed(imgui.Key.p, False)
+    ):
+        toggle_side_panel(parent)
+
+    # space: toggle play/pause on the T dim of fpl's built-in sliders widget
+    if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.space, False):
+        toggle_playback(parent)
 
     # v: reset vmin/vmax (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.v, False):
@@ -79,10 +85,12 @@ def handle_keyboard_shortcuts(parent: Any):
         state = "ON" if parent.auto_contrast_on_z else "OFF"
         parent.logger.info(f"Shortcut: 'c' (Auto-contrast on Z: {state})")
 
-    # k: toggle keybinds popup (no modifiers)
+    # k: toggle keybinds popup open/close (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.k, False):
-        parent.logger.info("Shortcut: 'k' (Keybinds)")
         parent._show_keybinds_popup = not getattr(parent, "_show_keybinds_popup", False)
+        parent.logger.info(
+            f"Shortcut: 'k' (Keybinds {'OPEN' if parent._show_keybinds_popup else 'CLOSE'})"
+        )
 
     # h: show help popup (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.h, False):
@@ -94,6 +102,44 @@ def handle_keyboard_shortcuts(parent: Any):
         handle_arrow_keys(parent)
     except Exception:
         pass  # ignore errors during data transitions
+
+
+def _get_sliders_ui(parent: Any):
+    """Return fpl's ImageWidgetSliders instance, or None."""
+    iw = getattr(parent, "image_widget", None)
+    if iw is None:
+        return None
+    sliders = getattr(iw, "_sliders_ui", None)
+    if sliders is not None:
+        return sliders
+    figure = getattr(iw, "figure", None)
+    guis = getattr(figure, "guis", None) or {}
+    for gui in (guis.values() if hasattr(guis, "values") else guis):
+        if gui is not None and gui.__class__.__name__ == "ImageWidgetSliders":
+            return gui
+    return None
+
+
+def toggle_playback(parent: Any, dim_index: int = 0) -> None:
+    """Toggle play/pause on the given slider dim (default T=0) via fpl's sliders widget."""
+    sliders = _get_sliders_ui(parent)
+    if sliders is None or not hasattr(sliders, "_playing"):
+        return
+    playing = sliders._playing
+    if dim_index >= len(playing):
+        return
+    playing[dim_index] = not playing[dim_index]
+    if hasattr(sliders, "_last_frame_time") and dim_index < len(sliders._last_frame_time):
+        sliders._last_frame_time[dim_index] = 0
+    state = "PLAY" if playing[dim_index] else "PAUSE"
+    parent.logger.info(f"Shortcut: 'Space' ({state})")
+
+
+def toggle_side_panel(parent: Any) -> None:
+    """Toggle collapse state of the side panel."""
+    with contextlib.suppress(Exception):
+        parent.collapsed = not parent.collapsed
+        parent.logger.info("Shortcut: 'Enter' (Toggle Side Panel)")
 
 
 def handle_arrow_keys(parent: Any):

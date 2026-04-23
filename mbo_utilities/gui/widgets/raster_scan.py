@@ -56,11 +56,11 @@ class RasterScanWidget(Widget):
 
         # display current offsets
         current_offsets = parent.current_offset
-        for i, ofs in enumerate(current_offsets):
+        for _i, ofs in enumerate(current_offsets):
             max_abs_offset = abs(ofs)
-            display_text = f"{ofs:.3f}"
+            display_text = f"{ofs:.3f}px"
 
-            imgui.text(f"graphic {i + 1}: ")
+            imgui.text("Applied correction: ")
             imgui.same_line()
 
             if max_abs_offset > parent.max_offset:

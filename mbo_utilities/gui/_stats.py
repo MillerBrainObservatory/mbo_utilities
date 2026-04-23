@@ -387,24 +387,26 @@ def draw_stats_section(parent: Any):
     if parent._selected_array >= len(array_labels):
         parent._selected_array = 0
 
-    avail = imgui.get_content_region_avail().x
-    xpos = 0
+    # only draw the selector when there are multiple graphics to choose between
+    if len(array_labels) > 1:
+        avail = imgui.get_content_region_avail().x
+        xpos = 0
 
-    for i, label in enumerate(array_labels):
-        if imgui.radio_button(label, parent._selected_array == i):
-            parent._selected_array = i
-        button_width = (
-            imgui.calc_text_size(label).x + imgui.get_style().frame_padding.x * 4
-        )
-        xpos += button_width + imgui.get_style().item_spacing.x
+        for i, label in enumerate(array_labels):
+            if imgui.radio_button(label, parent._selected_array == i):
+                parent._selected_array = i
+            button_width = (
+                imgui.calc_text_size(label).x + imgui.get_style().frame_padding.x * 4
+            )
+            xpos += button_width + imgui.get_style().item_spacing.x
 
-        if xpos >= avail:
-            xpos = button_width
-            imgui.new_line()
-        else:
-            imgui.same_line()
+            if xpos >= avail:
+                xpos = button_width
+                imgui.new_line()
+            else:
+                imgui.same_line()
 
-    imgui.separator()
+        imgui.separator()
 
     # Check if "Combined" view is selected (only valid if there are multiple arrays)
     has_combined = len(array_labels) > 1 and array_labels[-1] == "Combined"
@@ -437,7 +439,6 @@ def _draw_array_stats(
         stats = stats_list[array_idx]
         if not stats or "mean" not in stats:
             return
-        imgui.text(f"Stats for graphic {array_idx + 1}")
         mean_vals = np.array(stats["mean"])
         std_vals = np.array(stats["std"])
         snr_vals = np.array(stats["snr"])
