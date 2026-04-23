@@ -456,16 +456,8 @@ def _write_plane(
         apply_shift = True
         if plane_index is not None:
             iy, ix = map(int, shift_vector)
-            # CRITICAL: padding must be global across every plane in the
-            # volume, not computed from the single plane's shift. Using
-            # only `[shift_vector]` gives each plane a different H_out /
-            # W_out, which means each .bin has a different row stride.
-            # Suite2p then reads later planes at the wrong byte offsets
-            # (the classic "angled rows" artifact). lsp.run_plane passes
-            # the full shifts table via `all_plane_shifts` for exactly
-            # this reason — consume it here if present, and only fall
-            # back to the single-plane list when the caller genuinely
-            # has nothing else (single-plane writes).
+            # Padding must be global across every plane in the
+            # volume, not computed from the single plane's shift.
             all_plane_shifts = kwargs.get("all_plane_shifts")
             if all_plane_shifts is not None:
                 pt, pb, pl, pr = compute_pad_from_shifts(all_plane_shifts)
@@ -478,12 +470,6 @@ def _write_plane(
             out_shape = (ntime, H_out, W_out)
             shift_applied = True
             metadata[f"plane{plane_index}_shift"] = (iy, ix)
-            # valid region: intersection of every plane's shifted footprint
-            # within the padded canvas. lsp.run_plane reads these as
-            # `_pad_yrange`/`_pad_xrange` and uses them to clip cellpose
-            # detection to the area where ALL planes have real data —
-            # without them, cellpose segments spurious "cells" in the
-            # zero-padding regions above/below the valid image.
             if all_plane_shifts is not None:
                 _ps = np.asarray(all_plane_shifts, dtype=int)
                 metadata["_pad_yrange"] = [
@@ -565,9 +551,6 @@ def _write_plane(
         out_shape = (ntime, H_out, W_out)
         shift_applied = True
         metadata[f"plane{plane_index}_shift"] = (iy, ix)
-        # valid region — same calc as the shift_vector branch above. lsp
-        # consumes _pad_yrange/_pad_xrange to keep cellpose off the
-        # zero-padded borders.
         metadata["_pad_yrange"] = [
             int((pt + plane_shifts[:, 0]).max()),
             int((pt + plane_shifts[:, 0] + H0).min()),
