@@ -1,5 +1,5 @@
 """
-Suite3D z-plane registration utilities.
+Registration utilities.
 
 This module provides functions for registering z-planes using Suite3D,
 which computes rigid shifts to align planes spatially.
