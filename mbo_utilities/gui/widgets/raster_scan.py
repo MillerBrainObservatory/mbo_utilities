@@ -45,7 +45,10 @@ class RasterScanWidget(Widget):
         if phase_changed:
             parent.fix_phase = phase_value
 
-        # fft subpixel checkbox
+        # fft subpixel checkbox (disabled when fix_phase is off)
+        fix_phase_on = parent.fix_phase
+        if not fix_phase_on:
+            imgui.begin_disabled()
         imgui.set_next_item_width(hello_imgui.em_size(10))
         fft_changed, fft_value = imgui.checkbox("Sub-Pixel (slower)", parent.use_fft)
         set_tooltip(
@@ -53,6 +56,8 @@ class RasterScanWidget(Widget):
         )
         if fft_changed:
             parent.use_fft = fft_value
+        if not fix_phase_on:
+            imgui.end_disabled()
 
         # display current offsets
         current_offsets = parent.current_offset
